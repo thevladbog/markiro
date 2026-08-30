@@ -321,6 +321,14 @@ describe("simple inventory work screen", () => {
 
   it("persists a changed date and applies it to the next accepted scan", async () => {
     const { db, exec } = await fixture();
+    // The snapshot's own known date for this code must match the date the
+    // operator is about to apply: otherwise the terminal's first-ever scan
+    // silently adopts the code's own date instead (see the source production
+    // date guard), which would mask the manual date change under test here.
+    db.prepare(
+      `UPDATE inventory_snapshot_codes_mirror SET source_production_date = '2026-08-20'
+        WHERE snapshot_id = ? AND code_hash = ?`,
+    ).run(SNAPSHOT_ID, kmHash(canonicalizeKm(raw("EXPECTED"))));
     const scan = scanner();
     render(
       <InventoryWorkScreen

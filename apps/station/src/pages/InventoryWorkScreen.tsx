@@ -9,6 +9,7 @@ import {
   reconcilePendingInventoryEvents,
   recordInventoryScan,
   type InventoryProgress,
+  type InventoryScanDateMismatch,
   type RecentInventoryOperation,
   type RecordInventoryScanResult,
 } from "../lib/inventory-journal.js";
@@ -116,6 +117,10 @@ const EMPTY_PROGRESS: InventoryProgress = {
   acceptedItems: 0,
 };
 
+type HeldInventoryScan = InventoryScanDateMismatch & { raw: string };
+
+type CheckScanOutcome = ({ outcome: "recorded" } & RecordInventoryScanResult) | HeldInventoryScan;
+
 const defaultEventId = () => crypto.randomUUID();
 const defaultNow = () => new Date().toISOString();
 
@@ -194,6 +199,10 @@ function CheckInventoryWorkScreen({
   const [leaving, setLeaving] = useState(false);
   const [leaveFailed, setLeaveFailed] = useState(gallery?.leaveFailed ?? false);
   const mounted = useRef(true);
+  const [heldScan, setHeldScan] = useState<HeldInventoryScan | null>(null);
+  const heldRef = useRef(false);
+  const bypassRef = useRef<string | null>(null);
+  const queueRef = useRef<ScanQueue | null>(null);
   const refresh = useCallback(async () => {
     const [nextProgress, nextRecent] = await Promise.all([
       readInventoryProgress(exec, inventory.inventoryId, inventory.snapshotId, deviceId),
@@ -278,9 +287,12 @@ function CheckInventoryWorkScreen({
 
   const queue = useMemo(
     () =>
-      createScanQueue<RecordInventoryScanResult>({
-        process: (raw) =>
-          recordInventoryScan(exec, {
+      createScanQueue<CheckScanOutcome>({
+        shouldProcess: () => !heldRef.current,
+        process: async (raw) => {
+          const bypass = bypassRef.current === raw;
+          if (bypass) bypassRef.current = null;
+          const outcome = await recordInventoryScan(exec, {
             inventoryId: inventory.inventoryId,
             snapshotId: inventory.snapshotId,
             deviceId,
@@ -289,10 +301,19 @@ function CheckInventoryWorkScreen({
             raw,
             eventId: createEventId(),
             scannedAt: now(),
-          }),
+            ...(bypass ? { acceptSourceDateMismatch: true } : {}),
+          });
+          return outcome.outcome === "recorded" ? outcome : { ...outcome, raw };
+        },
         onOutcome: (outcome) => {
           if (!mounted.current) return;
           setWriteFailed(false);
+          if (outcome.outcome === "date-mismatch") {
+            heldRef.current = true;
+            queueRef.current?.discardBufferedScans();
+            setHeldScan(outcome);
+            return;
+          }
           setResult(outcome);
           nudgeInventorySync();
           void refresh().catch((error: unknown) => {
@@ -317,6 +338,7 @@ function CheckInventoryWorkScreen({
       nudgeInventorySync,
     ],
   );
+  queueRef.current = queue;
 
   useEffect(() => {
     if (gallery || productionDate === null) return undefined;
@@ -329,9 +351,9 @@ function CheckInventoryWorkScreen({
   }, [gallery, onScanQueueRegister, productionDate, queue]);
 
   useEffect(() => {
-    if (gallery || productionDate === null || dateDialog) return undefined;
+    if (gallery || productionDate === null || dateDialog || heldScan) return undefined;
     return source.start((raw) => queue.enqueue(raw));
-  }, [dateDialog, gallery, productionDate, queue, source]);
+  }, [dateDialog, gallery, heldScan, productionDate, queue, source]);
 
   const applyDate = async () => {
     if (dateDraft < inventory.productionDateFrom || dateDraft > inventory.productionDateTo) return;

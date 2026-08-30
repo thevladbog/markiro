@@ -96,6 +96,7 @@ interface SnapshotRow {
   serial: string;
   source_status: InventoryScanSnapshotRow["sourceStatus"];
   source_state: string | null;
+  source_production_date: string | null;
   expected: number;
   protected: number;
   parent_sscc: string | null;
@@ -353,7 +354,7 @@ async function snapshotFacts(
 ): Promise<{ row: InventoryScanSnapshotRow | null; duplicate: boolean; reattachAllowed: boolean }> {
   const rows = await exec.all<SnapshotRow>(
     `SELECT code_hash, canonical_raw, gtin14, serial, source_status, source_state,
-            expected, protected, parent_sscc
+            source_production_date, expected, protected, parent_sscc
        FROM inventory_snapshot_codes_mirror
       WHERE snapshot_id = ? AND code_hash = ?`,
     [input.snapshotId, codeHash],
@@ -373,6 +374,7 @@ async function snapshotFacts(
           serial: row.serial,
           sourceStatus: row.source_status,
           sourceState: row.source_state,
+          sourceProductionDate: row.source_production_date,
           expected: row.expected === 1,
           protected: row.protected === 1,
           parentSscc: row.parent_sscc,

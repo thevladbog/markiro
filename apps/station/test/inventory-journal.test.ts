@@ -9,6 +9,8 @@ import {
   readInventoryProgress,
   reconcilePendingInventoryEvents,
   recordInventoryScan,
+  type RecordInventoryScanOutcome,
+  type RecordInventoryScanResult,
 } from "../src/lib/inventory-journal.js";
 import {
   loadInventoryProductionDate,
@@ -37,6 +39,7 @@ function seedCode(
     expected?: number;
     protected?: number;
     parentSscc?: string | null;
+    productionDate?: string;
   } = {},
 ) {
   const km = canonicalizeKm(raw(serial));
@@ -54,7 +57,7 @@ function seedCode(
     km.serial,
     values.status ?? "INTRODUCED",
     values.state ?? null,
-    "2026-08-20",
+    values.productionDate ?? "2026-08-20",
     values.parentSscc ?? null,
     values.expected ?? 1,
     values.protected ?? 0,
@@ -73,6 +76,14 @@ function input(scannerRaw: string, eventId: string, scannedAt = "2026-08-25T10:0
     eventId,
     scannedAt,
   };
+}
+
+/** Narrows a scan outcome to its recorded shape; fails loudly on a held (date-mismatch) scan. */
+function expectRecorded(outcome: RecordInventoryScanOutcome): RecordInventoryScanResult {
+  if (outcome.outcome !== "recorded") {
+    throw new Error(`expected a recorded scan outcome, got ${outcome.outcome}`);
+  }
+  return outcome;
 }
 
 async function setup() {
@@ -731,7 +742,7 @@ describe("inventory journal", () => {
   it("persists the active date across restart and applies a later change only to future observations", async () => {
     const { db, exec } = await setup();
     const first = seedCode(db, "DATE-A");
-    const second = seedCode(db, "DATE-B");
+    const second = seedCode(db, "DATE-B", { productionDate: "2026-08-21" });
 
     await recordInventoryScan(exec, input(first.km.raw, "event-date-a"));
     await setInventoryProductionDate(exec, {
@@ -1206,7 +1217,10 @@ describe("inventory journal", () => {
     suspended.release();
 
     const results = await Promise.all([first, second]);
-    expect(results.map((result) => result.verdict).sort()).toEqual(["duplicate", "expected"]);
+    expect(results.map((result) => expectRecorded(result).verdict).sort()).toEqual([
+      "duplicate",
+      "expected",
+    ]);
     expect(await readInventoryProgress(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID)).toMatchObject({
       verified: 1,
       acceptedItems: 1,
@@ -1238,7 +1252,10 @@ describe("inventory journal", () => {
     suspended.release();
 
     const results = await Promise.all([first, second]);
-    expect(results.map((result) => result.verdict).sort()).toEqual(["duplicate", "expected"]);
+    expect(results.map((result) => expectRecorded(result).verdict).sort()).toEqual([
+      "duplicate",
+      "expected",
+    ]);
     expect(await readInventoryProgress(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID)).toMatchObject({
       verified: 2,
       acceptedBoxes: 1,
@@ -1365,12 +1382,9 @@ describe("inventory journal", () => {
       recordInventoryScan(exec, input(SSCC, "event-clock-box-2", "2026-08-25T09:59:00.000Z")),
     ]);
 
-    expect([firstKm.verdict, laterKm.verdict, firstBox.verdict, laterBox.verdict]).toEqual([
-      "unknown",
-      "duplicate",
-      "unknown",
-      "duplicate",
-    ]);
+    expect(
+      [firstKm, laterKm, firstBox, laterBox].map((outcome) => expectRecorded(outcome).verdict),
+    ).toEqual(["unknown", "duplicate", "unknown", "duplicate"]);
     expect(
       db
         .prepare(
@@ -1769,5 +1783,147 @@ describe("inventory journal", () => {
       ssccSuffix: null,
     });
     expect(JSON.stringify(recent)).not.toContain("cret");
+  });
+});
+
+describe("inventory scan source production date guard", () => {
+  it("adopts the code's date silently on the terminal's first scan", async () => {
+    const { db, exec } = await setup();
+    seedCode(db, "FIRST", { productionDate: "2026-08-22" });
+
+    const outcome = await recordInventoryScan(
+      exec,
+      input(raw("FIRST"), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+    );
+
+    expect(outcome).toMatchObject({ outcome: "recorded", verdict: "expected" });
+    expect(
+      await loadInventoryProductionDate(exec, {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        deviceId: DEVICE_ID,
+      }),
+    ).toBe("2026-08-22");
+    const events = db
+      .prepare("SELECT active_production_date FROM inventory_scan_events_mirror")
+      .all() as { active_production_date: string }[];
+    expect(events).toEqual([{ active_production_date: "2026-08-22" }]);
+  });
+
+  it("holds a later mismatching scan without writing anything", async () => {
+    const { db, exec } = await setup();
+    seedCode(db, "SAME", { productionDate: "2026-08-20" });
+    seedCode(db, "OTHER", { productionDate: "2026-08-23" });
+    await recordInventoryScan(exec, input(raw("SAME"), "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"));
+
+    const outcome = await recordInventoryScan(
+      exec,
+      input(raw("OTHER"), "cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+    );
+
+    expect(outcome).toEqual({
+      outcome: "date-mismatch",
+      scanKind: "item",
+      activeDate: "2026-08-20",
+      codeDate: "2026-08-23",
+      mixed: false,
+    });
+    const held = db
+      .prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror WHERE event_id = ?")
+      .get("cccccccc-cccc-4ccc-8ccc-cccccccccccc") as { count: number };
+    const outbox = db
+      .prepare("SELECT COUNT(*) AS count FROM inventory_outbox WHERE event_id = ?")
+      .get("cccccccc-cccc-4ccc-8ccc-cccccccccccc") as { count: number };
+    const results = db
+      .prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror")
+      .get() as { count: number };
+    expect(held.count).toBe(0);
+    expect(outbox.count).toBe(0);
+    expect(results.count).toBe(1);
+  });
+
+  it("records the held scan once the active date matches", async () => {
+    const { db, exec } = await setup();
+    seedCode(db, "SAME", { productionDate: "2026-08-20" });
+    seedCode(db, "OTHER", { productionDate: "2026-08-23" });
+    await recordInventoryScan(exec, input(raw("SAME"), "dddddddd-dddd-4ddd-8ddd-dddddddddddd"));
+    await recordInventoryScan(exec, input(raw("OTHER"), "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"));
+    await setInventoryProductionDate(exec, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      deviceId: DEVICE_ID,
+      operatorId: OPERATOR_ID,
+      productionDate: "2026-08-23",
+      updatedAt: "2026-08-25T10:05:00.000Z",
+    });
+
+    const outcome = await recordInventoryScan(
+      exec,
+      input(raw("OTHER"), "ffffffff-ffff-4fff-8fff-ffffffffffff"),
+    );
+
+    expect(outcome).toMatchObject({ outcome: "recorded", verdict: "expected" });
+  });
+
+  it("bypasses the guard when the operator accepts the mismatch", async () => {
+    const { db, exec } = await setup();
+    seedCode(db, "SAME", { productionDate: "2026-08-20" });
+    seedCode(db, "OTHER", { productionDate: "2026-08-23" });
+    await recordInventoryScan(exec, input(raw("SAME"), "1a1a1a1a-1a1a-41a1-81a1-1a1a1a1a1a1a"));
+
+    const outcome = await recordInventoryScan(exec, {
+      ...input(raw("OTHER"), "2b2b2b2b-2b2b-42b2-82b2-2b2b2b2b2b2b"),
+      acceptSourceDateMismatch: true,
+    });
+
+    expect(outcome).toMatchObject({ outcome: "recorded", verdict: "expected" });
+    const stored = db
+      .prepare("SELECT observed_production_date FROM inventory_code_results_mirror ORDER BY code_hash")
+      .all() as { observed_production_date: string }[];
+    expect(stored).toContainEqual({ observed_production_date: "2026-08-20" });
+  });
+
+  it("reports a box whose children disagree as mixed", async () => {
+    const { db, exec } = await setup();
+    seedCode(db, "SAME", { productionDate: "2026-08-20" });
+    seedCode(db, "CHILD-A", { parentSscc: SSCC, productionDate: "2026-08-21" });
+    seedCode(db, "CHILD-B", { parentSscc: SSCC, productionDate: "2026-08-22" });
+    await recordInventoryScan(exec, input(raw("SAME"), "3c3c3c3c-3c3c-43c3-83c3-3c3c3c3c3c3c"));
+
+    const outcome = await recordInventoryScan(
+      exec,
+      input(SSCC, "4d4d4d4d-4d4d-44d4-84d4-4d4d4d4d4d4d"),
+    );
+
+    expect(outcome).toEqual({
+      outcome: "date-mismatch",
+      scanKind: "known_box",
+      activeDate: "2026-08-20",
+      codeDate: null,
+      mixed: true,
+    });
+  });
+
+  it("leaves protected, ineligible and unknown scans alone", async () => {
+    const { db, exec } = await setup();
+    seedCode(db, "SAME", { productionDate: "2026-08-20" });
+    seedCode(db, "GUARDED", {
+      state: "MOVING_BY_UD",
+      expected: 0,
+      protected: 1,
+      productionDate: "2026-08-23",
+    });
+    seedCode(db, "STALE", { status: "APPLIED", expected: 0, productionDate: "2026-08-23" });
+    await recordInventoryScan(exec, input(raw("SAME"), "5e5e5e5e-5e5e-45e5-85e5-5e5e5e5e5e5e"));
+
+    await expect(
+      recordInventoryScan(exec, input(raw("GUARDED"), "6f6f6f6f-6f6f-46f6-86f6-6f6f6f6f6f6f")),
+    ).resolves.toMatchObject({ outcome: "recorded", verdict: "protected" });
+    await expect(
+      recordInventoryScan(exec, input(raw("STALE"), "7a7a7a7a-7a7a-47a7-87a7-7a7a7a7a7a7a")),
+    ).resolves.toMatchObject({ outcome: "recorded", verdict: "known-ineligible" });
+    await expect(
+      recordInventoryScan(exec, input(raw("MISSING"), "8b8b8b8b-8b8b-48b8-88b8-8b8b8b8b8b8b")),
+    ).resolves.toMatchObject({ outcome: "recorded", verdict: "unknown" });
   });
 });
