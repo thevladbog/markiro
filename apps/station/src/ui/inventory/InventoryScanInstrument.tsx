@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Alert, Badge } from "@markiro/ui";
 
 import type { RecordInventoryScanResult } from "../../lib/inventory-journal.js";
@@ -34,6 +35,7 @@ export function InventoryScanInstrument({
   currentDeviceId,
   labels,
 }: InventoryScanInstrumentProps) {
+  const { i18n } = useTranslation();
   let title: string | null = null;
   let detail: string | null = null;
   let badge: string | null = null;
@@ -65,9 +67,10 @@ export function InventoryScanInstrument({
           ? labels.duplicateHere
           : labels.duplicateOther;
       detail = result.firstWinning
-        ? `${result.firstWinning.deviceId} · ${new Intl.DateTimeFormat(undefined, {
-            timeStyle: "medium",
-          }).format(new Date(result.firstWinning.scannedAt))}`
+        ? `${result.firstWinning.deviceId} · ${new Intl.DateTimeFormat(
+            i18n.language === "ru" ? "ru-RU" : "en-US",
+            { timeStyle: "medium" },
+          ).format(new Date(result.firstWinning.scannedAt))}`
         : null;
       badge = labels.duplicateBadge;
       tone = "info";

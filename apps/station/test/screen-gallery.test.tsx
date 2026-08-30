@@ -121,6 +121,70 @@ describe("development screen gallery", () => {
     }
   });
 
+  it("restores the production header controls on the real warehouse task selector", async () => {
+    // TaskSelection's warehouse category is the exact same App.tsx mount as
+    // plain shift selection, which unconditionally receives
+    // operatorControl/windowControl/update once authenticated -- this state
+    // used to render without them (Task 1 audit finding).
+    render(<StationScreenGallery request={{ state: "inventory-task-selection", locale: "ru" }} />);
+
+    const header = screen.getByRole("banner", { name: "Состояние станции" });
+    expect(
+      within(header).getByRole("button", {
+        name: "! Доступно критическое обновление 0.1.0-beta.123",
+      }),
+    ).toBeDefined();
+    expect(within(header).getByRole("button", { name: "Сменить оператора" })).toBeDefined();
+    expect(
+      await within(header).findByRole("button", { name: "Выйти из полноэкранного режима" }),
+    ).toBeDefined();
+    // App.tsx:216 derives `shift` only from `activeFloorTask?.kind ===
+    // "production"`, and TaskSelection only ever renders while
+    // `activeFloorTask` is null -- so production never has a shift label (or
+    // a collapsible bar) here either, in both the shift and warehouse
+    // categories alike (second review finding).
+    expect(header.getAttribute("data-collapsed")).toBe("false");
+    expect(within(header).queryByTestId("shift-status")).toBeNull();
+    expect(within(header).queryByRole("button", { name: /Развернуть|Свернуть/ })).toBeNull();
+  });
+
+  it.each([
+    "inventory-simple-box-accepted",
+    "inventory-not-in-snapshot",
+    "inventory-repack-scanning",
+    "inventory-print-recovery",
+  ] as const)(
+    "renders %s with the real header controls, expanded and without a shift label",
+    async (state) => {
+      // App.tsx:216 ties `shift` -- and therefore both the collapsible status
+      // bar and the shift label (App.tsx:1390-1398, 1414) -- exclusively to
+      // `activeFloorTask.kind === "production"`. An inventory floor task is
+      // never that kind, so InventoryWorkScreen can NEVER render a collapsed
+      // bar or a "Смена" label in production; StationScreenGallery.tsx used
+      // to fabricate exactly that impossible combination (second review
+      // finding). This is a positive+negative assertion, not a smoke check:
+      // the real controls must still be present (positive) while the
+      // collapse affordance and shift label must be absent (negative).
+      render(<StationScreenGallery request={{ state, locale: "ru" }} />);
+
+      const header = screen.getByRole("banner", { name: "Состояние станции" });
+
+      expect(
+        within(header).getByRole("button", {
+          name: "! Доступно критическое обновление 0.1.0-beta.123",
+        }),
+      ).toBeDefined();
+      expect(within(header).getByRole("button", { name: "Сменить оператора" })).toBeDefined();
+      expect(
+        await within(header).findByRole("button", { name: "Выйти из полноэкранного режима" }),
+      ).toBeDefined();
+
+      expect(header.getAttribute("data-collapsed")).toBe("false");
+      expect(within(header).queryByTestId("shift-status")).toBeNull();
+      expect(within(header).queryByRole("button", { name: /Развернуть|Свернуть/ })).toBeNull();
+    },
+  );
+
   it("renders approved inventory verdicts through production inventory instruments", async () => {
     const cases = [
       ["inventory-simple-box-accepted", "Короб принят: 20 кодов", "inventory-scan-instrument"],
