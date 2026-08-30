@@ -53,6 +53,25 @@ describe("renderInventoryTaskFormHtml", () => {
     expect(html).not.toContain("background: #fafaf8");
   });
 
+  it("integrates the scan target into the task passport instead of a full-width barcode panel", () => {
+    const html = renderInventoryTaskFormHtml(fixture());
+
+    expect(html).toMatch(
+      /<section class="task-passport">.*<section class="hero">.*<section class="scan-zone"/s,
+    );
+    expect(html).toMatch(
+      /\.task-passport\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+48mm/s,
+    );
+  });
+
+  it("uses the remaining page area for handwritten operator comments on a dot grid", () => {
+    const html = renderInventoryTaskFormHtml(fixture());
+
+    expect(html).toContain('<section class="comments" aria-label="Комментарии оператора">');
+    expect(html).toContain("Комментарии оператора");
+    expect(html).toMatch(/\.comments\s*\{[^}]*background-image:\s*radial-gradient/s);
+  });
+
   it("renders the fixed snapshot parameters and repack instructions without raw code material", () => {
     const html = renderInventoryTaskFormHtml(
       Object.assign(fixture(), { rawKms: [RAW_KM] }) as InventoryTaskFormData,

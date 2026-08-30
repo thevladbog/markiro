@@ -78,7 +78,7 @@ function countNoun(value: number, one: string, few: string, many: string): strin
 function logo(): string {
   return `<svg class="brand-logo" data-brand-logo="markiro" viewBox="0 0 280 64" preserveAspectRatio="xMinYMid meet" role="img" aria-label="Маркиро" xmlns="http://www.w3.org/2000/svg">
     <rect x="4" y="4" width="56" height="56" fill="#17161A"/>
-    <g fill="#FAFAF8">
+    <g fill="#FFFFFF">
       <rect x="14" y="14" width="8" height="8"/><rect x="14" y="26" width="8" height="8"/><rect x="14" y="38" width="8" height="8"/>
       <rect x="26" y="22" width="8" height="8"/><rect x="38" y="14" width="8" height="8"/><rect x="38" y="26" width="8" height="8"/>
       <rect x="38" y="38" width="8" height="8"/><rect x="26" y="42" width="8" height="8" fill="#3DDC7A"/>
@@ -158,45 +158,58 @@ export function renderInventoryTaskFormHtml(data: InventoryTaskFormData): string
     .task-id { text-align: right; }
     .eyebrow { display: block; color: #706d67; font-size: 8pt; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
     .task-id strong { display: block; margin-top: 1.5mm; font: 700 14pt/1.1 ui-monospace, SFMono-Regular, Consolas, monospace; }
-    .hero { display: grid; grid-template-columns: 1fr auto; gap: 8mm; align-items: end; padding: 8mm 0 7mm; }
+    .task-passport { display: grid; grid-template-columns: minmax(0, 1fr) 48mm; gap: 8mm; align-items: center; padding: 8mm 0 7mm; border-bottom: .35mm solid #17161a; }
+    .hero { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
     h1 { margin: 0; font-size: 23pt; line-height: 1.08; letter-spacing: -.02em; }
     .subtitle { margin: 2.5mm 0 0; color: #4f4c47; font-size: 11pt; }
     .status { min-width: 36mm; padding: 4mm 5mm; border: .25mm solid #b7dfc8; border-radius: 3mm; background: #e7f6ed; color: #126b39; font-size: 9pt; font-weight: 800; text-align: center; text-transform: uppercase; }
-    .scan-zone { height: 50mm; border: .35mm solid #cbc7bf; border-radius: 4mm; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #fff; }
+    .scan-zone { min-height: 44mm; border-left: .25mm solid #cbc7bf; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #fff; }
     .barcode { width: 32mm; height: 32mm; display: flex; align-items: center; justify-content: center; overflow: hidden; }
     .barcode svg { display: block; max-width: 100%; width: 100%; height: 100%; }
     .barcode-caption { margin-top: 1mm; font: 700 12pt/1.1 ui-monospace, SFMono-Regular, Consolas, monospace; }
-    .scan-hint { margin-top: 1mm; color: #77736d; font-size: 8pt; }
+    .scan-hint { max-width: 42mm; margin-top: 1mm; color: #77736d; font-size: 8pt; text-align: center; }
     h2 { margin: 4.5mm 0 2mm; font-size: 12pt; line-height: 1.2; }
-    dl { margin: 0; }
-    .parameter { min-height: 8mm; display: grid; grid-template-columns: 1fr minmax(62mm, auto); align-items: center; gap: 6mm; border-bottom: .2mm solid #d8d5cf; }
+    dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border-top: .2mm solid #cbc7bf; }
+    .parameter { min-height: 10mm; padding: 2mm 4mm 1.5mm 0; border-bottom: .2mm solid #d8d5cf; }
+    .parameter:nth-child(odd) { border-right: .2mm solid #d8d5cf; }
+    .parameter:nth-child(even) { padding-left: 4mm; }
     dt { color: #706d67; font-size: 8pt; }
-    dd { margin: 0; max-width: 110mm; text-align: right; font-size: 10pt; font-weight: 700; overflow-wrap: anywhere; }
+    dd { margin: 1mm 0 0; text-align: left; font-size: 10pt; font-weight: 700; overflow-wrap: anywhere; }
     .steps { margin-top: 4mm; padding-top: 1mm; border-top: .2mm solid #d8d5cf; }
-    .steps ol { display: grid; gap: 2mm; margin: 0; padding: 0; list-style: none; }
+    .steps ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2.5mm 7mm; margin: 0; padding: 0; list-style: none; }
     .steps li { display: grid; grid-template-columns: 7mm 1fr; gap: 3mm; align-items: start; color: #4f4c47; font-size: 8.5pt; line-height: 1.28; }
     .step-number { width: 6mm; height: 6mm; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: #17161a; color: #fff; font-size: 7pt; font-weight: 800; }
-    .rules { margin-top: 5mm; padding: 4mm 5mm; border: .25mm solid #c6daf5; border-radius: 3.5mm; background: #e6f0fd; color: #1756a6; }
-    .rules h2 { margin: 0 0 2mm; color: #1756a6; }
-    .rules ul { margin: 0; padding-left: 5mm; display: grid; gap: 1.2mm; font-size: 8pt; line-height: 1.25; }
+    .rules { margin-top: 5mm; padding: 3mm 4mm; border: .3mm solid #17161a; background: #fff; color: #17161a; }
+    .rules h2 { margin: 0 0 2mm; color: #17161a; }
+    .rules ul { margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2mm 6mm; list-style: none; font-size: 7.5pt; line-height: 1.25; }
+    .rules li { padding-left: 3mm; border-left: .7mm solid #17161a; }
+    .rules li:first-child { grid-column: 1 / -1; }
+    .comments { flex: 1; min-height: 34mm; margin-top: 5mm; border-top: .25mm solid #9f9b95; background-image: radial-gradient(circle, #aaa69f .25mm, transparent .3mm); background-size: 4mm 4mm; background-position: 0 11mm; }
+    .comments-header { display: flex; align-items: baseline; justify-content: space-between; gap: 6mm; padding: 2.5mm 0 2mm; background: #fff; }
+    .comments h2 { margin: 0; }
+    .comments span { color: #77736d; font-size: 7.5pt; }
     .footer { margin-top: auto; padding-top: 3.5mm; border-top: .2mm solid #d8d5cf; display: flex; justify-content: space-between; color: #77736d; font-size: 7.5pt; }
     .compact { padding: 12mm 14mm; }
     .compact .top { padding-bottom: 4mm; }
-    .compact .hero { padding: 4mm 0; }
+    .compact .task-passport { grid-template-columns: minmax(0, 1fr) 42mm; gap: 6mm; padding: 4mm 0; }
     .compact h1 { font-size: 19pt; }
     .compact .subtitle { margin-top: 1mm; max-width: 126mm; font-size: 8.5pt; line-height: 1.15; overflow-wrap: anywhere; }
     .compact .status { padding: 3mm 4mm; }
-    .compact .scan-zone { height: 44mm; }
+    .compact .scan-zone { min-height: 38mm; }
     .compact .barcode { width: 28mm; height: 28mm; }
     .compact h2 { margin: 2.5mm 0 1.2mm; font-size: 10.5pt; }
-    .compact .parameter { min-height: 6mm; padding: .5mm 0; }
+    .compact .parameter { min-height: 7mm; padding: 1mm 3mm 1mm 0; }
+    .compact .parameter:nth-child(even) { padding-left: 3mm; }
     .compact dt { font-size: 7pt; }
     .compact dd { font-size: 8.5pt; line-height: 1.08; }
     .compact .steps { margin-top: 2mm; padding-top: 0; }
-    .compact .steps ol { gap: 1mm; }
+    .compact .steps ol { gap: 1.5mm 5mm; }
     .compact .steps li { font-size: 7.5pt; line-height: 1.2; }
-    .compact .rules { margin-top: 3mm; padding: 3mm 4mm; }
-    .compact .rules ul { gap: .7mm; font-size: 7pt; line-height: 1.18; }
+    .compact .rules { margin-top: 3mm; padding: 2.5mm 3mm; }
+    .compact .rules ul { gap: 1mm 4mm; font-size: 6.5pt; line-height: 1.18; }
+    .compact .comments { min-height: 20mm; margin-top: 3mm; background-position: 0 9mm; }
+    .compact .comments-header { padding: 1.5mm 0; }
+    .compact .comments span { display: none; }
     .compact .footer { padding-top: 2mm; font-size: 7pt; }
     @media screen { .page { box-shadow: 0 2mm 8mm rgba(23, 22, 26, .12); } }
     @media print { html, body { background: #fff; } .page { margin: 0; box-shadow: none; } }
@@ -205,11 +218,11 @@ export function renderInventoryTaskFormHtml(data: InventoryTaskFormData): string
 <body>
   <main class="page${compact ? " compact" : ""}" data-layout="${compact ? "compact" : "standard"}">
     <header class="top">${logo()}<div class="task-id"><span class="eyebrow">Форма-задание</span><strong>${number}</strong></div></header>
-    <section class="hero"><div><h1>Задание на инвентаризацию</h1><p class="subtitle">${mode} · ${organization}</p></div><div class="status">${STATUS_LABEL[data.status]}</div></section>
-    <section class="scan-zone" aria-label="Штрихкод задания"><div class="barcode" data-barcode-symbology="datamatrix" data-task-token="${escapeHtml(token)}">${barcode}</div><div class="barcode-caption">${number}</div><div class="scan-hint">Отсканируйте на терминале, чтобы открыть задание</div></section>
-    <section><h2>Параметры задания</h2><dl>${parameters}</dl></section>
+    <section class="task-passport"><section class="hero"><div><h1>Задание на инвентаризацию</h1><p class="subtitle">${mode} · ${organization}</p></div><div class="status">${STATUS_LABEL[data.status]}</div></section><section class="scan-zone" aria-label="Штрихкод задания"><div class="barcode" data-barcode-symbology="datamatrix" data-task-token="${escapeHtml(token)}">${barcode}</div><div class="barcode-caption">${number}</div><div class="scan-hint">Отсканируйте на терминале, чтобы открыть задание</div></section></section>
+    <section class="parameters"><h2>Параметры задания</h2><dl>${parameters}</dl></section>
     <section class="steps"><h2>Как начать работу</h2><ol>${step(1, "Откройте терминал на выбранной линии и войдите оператором.")}${step(2, "Отсканируйте штрихкод задания. На своей линии оно также будет видно в списке.")}${step(3, "Если терминал относится к другой линии, подтвердите предупреждение перед входом.")}${step(4, finalStep)}</ol></section>
     <aside class="rules"><h2>Важные правила</h2><ul><li><strong>MOVING_BY_UD:</strong> код в отгрузке. Его нельзя учитывать, списывать или включать в документы.</li>${repackRule}<li>Дата производства действует на терминале до следующего изменения; в одном новом коробе одна дата.</li><li>Чтобы поставить работу на паузу, выйдите из задания. Закрыть инвентаризацию можно только в админке.</li><li>На время инвентаризации движения продукции по складу остановлены.</li></ul></aside>
+    <section class="comments" aria-label="Комментарии оператора"><div class="comments-header"><h2>Комментарии оператора</h2><span>Расхождения · номера коробов · замечания</span></div></section>
     <footer class="footer"><span>Сформировано: ${formatGeneratedAt(data.generatedAt)} · Маркиро</span><span>${number} · 1 / 1</span></footer>
   </main>
 </body>
