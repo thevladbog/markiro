@@ -25,7 +25,7 @@ export type {
   StationInventoryBundleManifest,
   StationInventoryBundlePage,
 } from "./station-bundle.js";
-export { classifyInventoryScan } from "./scan.js";
+export { classifyInventoryScan, resolveInventoryScanSourceDate } from "./scan.js";
 export type {
   InventoryBoxChildClassification,
   InventoryLocalClaim,
@@ -33,6 +33,7 @@ export type {
   InventoryScanClassification,
   InventoryScanClassifierContext,
   InventoryScanSnapshotRow,
+  InventoryScanSourceDate,
 } from "./scan.js";
 export {
   INVENTORY_EVENT_BATCH_SIZE,
