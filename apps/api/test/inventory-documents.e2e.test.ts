@@ -1989,7 +1989,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       type EmptyFormatId = Parameters<typeof expectedEmpty.get>[0];
       const expectedArtifacts = [...expectedEmpty].map(([formatId, expected]) => ({
         formatId,
-        formatVersion: 1,
+        formatVersion: formatId === "inventory_csv_current_stock" ? 2 : 1,
         partNumber: 1,
         filename: `inventory-${owner.inventoryNumber}-${expected.suffix}`,
         mimeType: expected.mimeType,
@@ -2021,14 +2021,14 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         .select()
         .from(schema.inventoryDocumentArtifacts)
         .where(eq(schema.inventoryDocumentArtifacts.runId, created.body.id));
-      expect(emptyStored).toHaveLength(6);
+      expect(emptyStored).toHaveLength(7);
       for (const artifact of emptyStored) {
         const expected = expectedEmpty.get(artifact.formatId as EmptyFormatId);
         if (!expected) throw new Error(`Unexpected empty format ${artifact.formatId}`);
         expect(objects.get(artifact.objectKey)).toEqual(expected.body);
         expect(artifact).toMatchObject({
           formatId: artifact.formatId,
-          formatVersion: 1,
+          formatVersion: artifact.formatId === "inventory_csv_current_stock" ? 2 : 1,
           partNumber: 1,
           filename: `inventory-${owner.inventoryNumber}-${expected.suffix}`,
           mimeType: expected.mimeType,
@@ -2526,7 +2526,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         inventoryId: owner.inventoryId,
         status: "running",
         resultRevision: regeneratedRevision,
-        invalidatedArtifactCount: 8,
+        invalidatedArtifactCount: 10,
       });
       for (const artifact of firstVerified.storedArtifacts) {
         await owner.agent
