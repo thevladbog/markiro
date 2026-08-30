@@ -12,6 +12,7 @@
     "test:kiosk": "playwright test --config kiosk.playwright.config.ts",
     "test:station-inventory": "playwright test --config station-inventory.playwright.config.ts",
     "test:inventory": "playwright test --config inventory.playwright.config.ts",
+    "test:production": "playwright test --config production.playwright.config.ts",
     "test:landing": "playwright test --config landing.playwright.config.ts",
     "test:landing:lighthouse": "node scripts/lighthouse-landing.mjs",
     "test:lighthouse-parser": "node --test test/lighthouse-landing.test.mjs",

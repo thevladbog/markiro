@@ -304,7 +304,10 @@ function artifactEntry(
           ? "2026-08-21"
           : code === "MKR-INS-03" || code === "MKR-INS-04"
             ? "2026-08-22"
-            : code === "MKR-INS-05" || code === "MKR-INS-06" || code === "MKR-INS-07"
+            : code === "MKR-INS-05" ||
+                code === "MKR-INS-06" ||
+                code === "MKR-INS-07" ||
+                code === "MKR-INS-08"
               ? "2026-08-30"
               : "2026-08-15",
       locale,
@@ -342,6 +345,7 @@ function validArtifacts(): {
   artifacts.push(artifactEntry("MKR-INS-05", "ru", "pdfa-2b"));
   artifacts.push(artifactEntry("MKR-INS-06", "ru", "pdfa-2b"));
   artifacts.push(artifactEntry("MKR-INS-07", "ru", "pdfa-2b"));
+  artifacts.push(artifactEntry("MKR-INS-08", "ru", "pdfa-2b"));
   return {
     entries: artifacts.map(({ entry }) => entry),
     bytesByFile: new Map(artifacts.map(({ entry, bytes }) => [entry.fileName, bytes])),
@@ -1177,9 +1181,9 @@ describe("legal artifact release generation", () => {
     );
 
     expect(beforePublishCalls).toBe(1);
-    expect(entries).toHaveLength(19);
-    expect(dependencies.converted).toHaveLength(15);
-    expect(dependencies.requests).toHaveLength(19);
+    expect(entries).toHaveLength(20);
+    expect(dependencies.converted).toHaveLength(16);
+    expect(dependencies.requests).toHaveLength(20);
     expect(
       dependencies.requests.map(
         ({ code, locale, kind, verificationUrl }) => `${code}|${locale}|${kind}|${verificationUrl}`,
@@ -1204,15 +1208,16 @@ describe("legal artifact release generation", () => {
       "MKR-INS-05|ru|legal-pdf|https://markiro.app/d/MKR-INS-05/2026.08/01/30.08.2026",
       "MKR-INS-06|ru|legal-pdf|https://markiro.app/d/MKR-INS-06/2026.08/01/30.08.2026",
       "MKR-INS-07|ru|legal-pdf|https://markiro.app/d/MKR-INS-07/2026.08/01/30.08.2026",
+      "MKR-INS-08|ru|legal-pdf|https://markiro.app/d/MKR-INS-08/2026.08/01/30.08.2026",
     ]);
     expect(new Set(entries.map(({ revision }) => revision))).toEqual(new Set(["2026.08/01"]));
     expect(new Set(entries.map(({ effectiveDate }) => effectiveDate))).toEqual(
       new Set(["2026-08-15", "2026-08-21", "2026-08-22", "2026-08-30"]),
     );
-    expect(entries.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(15);
+    expect(entries.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(16);
     expect(await readdir(path.dirname(outDir))).toEqual(["legal"]);
     expect(await readdir(outDir)).toEqual(["artifacts.json", "files"]);
-    expect(await readdir(path.join(outDir, "files"))).toHaveLength(19);
+    expect(await readdir(path.join(outDir, "files"))).toHaveLength(20);
     expect(await readFile(path.join(outDir, "artifacts.json"), "utf8")).toBe(
       canonicalArtifactManifest(entries),
     );
@@ -1328,7 +1333,7 @@ describe("legal artifact release generation", () => {
     );
     await expect(
       generateLegalArtifacts({ ...generation, check: true }, fakeGenerationDependencies()),
-    ).resolves.toHaveLength(19);
+    ).resolves.toHaveLength(20);
 
     const changed = path.join(outDir, "files", "markiro_mkr-pd-01_2026.08-01_ru.pdf");
     await writeFile(changed, "%PDF-1.7\nchanged\n%%EOF\n");

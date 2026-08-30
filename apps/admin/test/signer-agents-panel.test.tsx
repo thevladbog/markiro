@@ -163,6 +163,9 @@ describe("SignerAgentsPanel", () => {
     expect(await screen.findByText("BUH-PC")).toBeDefined();
     expect(screen.queryByRole("button", { name: /код привязки/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /отозвать/i })).toBeNull();
+    const download = screen.getByRole("link", { name: /скачать.*подписант.*windows/i });
+    expect(download.getAttribute("href")).toBe("https://releases.markiro.app/signer/download");
+    expect(download.getAttribute("data-analytics")).toBe("signer_download_click");
     expect(fetchMock).not.toHaveBeenCalledWith(
       expect.stringContaining("pairing-code"),
       expect.anything(),
