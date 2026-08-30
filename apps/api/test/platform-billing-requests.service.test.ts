@@ -354,13 +354,12 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
 
     const list = await requests.list(actor, { tenantId: tenantA, status: "under_review" });
     expect(list.truncated).toBe(false);
-    expect(list.items.find((item) => item.id === request.id)?.allowedTransitions).toEqual([
-      "clarification_required",
-      "offer_prepared",
-      "in_progress",
-      "cancelled",
-    ]);
+    expect(list.items.find((item) => item.id === request.id)).toMatchObject({
+      tenantName: `Subscription fixture ${tenantA}`,
+      allowedTransitions: ["clarification_required", "offer_prepared", "in_progress", "cancelled"],
+    });
     await expect(requests.detail(actor, request.id)).resolves.toMatchObject({
+      tenantName: `Subscription fixture ${tenantA}`,
       allowedTransitions: ["clarification_required", "offer_prepared", "in_progress", "cancelled"],
     });
   });
@@ -921,6 +920,10 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
       requestId: request.id,
       type: "offer",
       targetId: offer!.id,
+      targetLabel: offer!.number,
+    });
+    await expect(requests.detail(actor, request.id)).resolves.toMatchObject({
+      links: [expect.objectContaining({ targetId: offer!.id, targetLabel: offer!.number })],
     });
     const linkedEvents = await connection.db
       .select()

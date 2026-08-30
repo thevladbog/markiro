@@ -830,14 +830,20 @@ export const platformBillingRequestLinkResponseSchema = z
     requestId: platformUuidSchema,
     type: z.enum(["offer", "invoice", "payment", "act", "ordered_service"]),
     targetId: platformUuidSchema,
+    targetLabel: z.string().trim().min(1).max(1_000).nullable().default(null),
     createdAt: responseTimestampSchema,
   })
+  .strict();
+
+const platformBillingRequestResolvedLinkSchema = platformBillingRequestLinkResponseSchema
+  .extend({ targetLabel: z.string().trim().min(1).max(1_000).nullable() })
   .strict();
 
 export const platformBillingRequestSchema = z
   .object({
     id: platformUuidSchema,
     tenantId: platformTenantIdSchema,
+    tenantName: tenantDisplayNameSchema,
     number: z.string().min(1),
     type: billingRequestTypeSchema,
     status: platformBillingRequestStatusSchema,
@@ -872,7 +878,7 @@ export const platformBillingRequestDetailSchema = platformBillingRequestSchema
     allowedTransitions: z.array(platformBillingRequestTargetStatusSchema),
     offerAction: platformBillingRequestOfferActionSchema.nullable(),
     events: z.array(platformBillingRequestEventSchema),
-    links: z.array(platformBillingRequestLinkResponseSchema),
+    links: z.array(platformBillingRequestResolvedLinkSchema),
   })
   .strict();
 export const platformBillingRequestListQuerySchema = z

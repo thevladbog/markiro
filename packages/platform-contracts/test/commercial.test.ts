@@ -1400,6 +1400,7 @@ describe("platform commercial contracts", () => {
     const parsed = platformCommercialContracts.billingRequests.detail.response.parse({
       id: requestId,
       tenantId: TENANT_ID,
+      tenantName: "ООО Северная линия",
       number: "BR-2026-001",
       type: "renewal",
       status: "under_review",
@@ -1418,7 +1419,17 @@ describe("platform commercial contracts", () => {
         canCreateInvoice: false,
       },
       events: [],
-      links: [],
+      links: [
+        {
+          id: "84111111-1111-4111-8111-111111111120",
+          tenantId: TENANT_ID,
+          requestId,
+          type: "invoice",
+          targetId: INVOICE_ID,
+          targetLabel: "INV-000042",
+          createdAt: CREATED_AT,
+        },
+      ],
     });
 
     expect(parsed.allowedTransitions).toEqual([
@@ -1428,6 +1439,20 @@ describe("platform commercial contracts", () => {
       "cancelled",
     ]);
     expect(parsed.offerAction).toMatchObject({ canRevise: true, canCreateInvoice: false });
+    expect(parsed.tenantName).toBe("ООО Северная линия");
+    expect(parsed.links[0]?.targetLabel).toBe("INV-000042");
+    expect(
+      platformCommercialContracts.billingRequests.detail.response.safeParse({
+        ...parsed,
+        tenantName: undefined,
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.billingRequests.detail.response.safeParse({
+        ...parsed,
+        links: parsed.links.map(({ targetLabel: _targetLabel, ...link }) => link),
+      }).success,
+    ).toBe(false);
     expect(
       platformCommercialContracts.billingRequests.status.body.safeParse({
         status: "completed",
@@ -1441,6 +1466,7 @@ describe("platform commercial contracts", () => {
     const item = {
       id: "82111111-1111-4111-8111-111111111120",
       tenantId: TENANT_ID,
+      tenantName: "ООО Северная линия",
       number: "BR-2026-001",
       type: "renewal",
       status: "under_review",

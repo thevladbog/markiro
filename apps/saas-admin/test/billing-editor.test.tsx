@@ -581,6 +581,7 @@ function requestDetail(offerAction: Record<string, unknown> | null) {
   return {
     id: REQUEST_ID,
     tenantId: TENANT_ID,
+    tenantName: "Первый завод",
     number: "BR-42",
     type: "renewal",
     status: "offer_prepared",

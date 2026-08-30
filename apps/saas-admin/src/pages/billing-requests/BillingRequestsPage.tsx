@@ -141,7 +141,13 @@ function RequestList() {
                 <Link to={`/billing-requests/${request.id}`}>{request.number}</Link>
               ),
             },
-            { key: "tenantId", title: t("billingRequests.fields.tenant") },
+            {
+              key: "tenantName",
+              title: t("billingRequests.fields.tenant"),
+              render: (request: BillingRequestListItem) => (
+                <Link to={`/tenants/${request.tenantId}`}>{request.tenantName}</Link>
+              ),
+            },
             {
               key: "type",
               title: t("billingRequests.fields.type"),
@@ -333,7 +339,9 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
       <dl className="billing-request-facts">
         <div>
           <dt>{t("billingRequests.fields.tenant")}</dt>
-          <dd>{request.tenantId}</dd>
+          <dd>
+            <Link to={`/tenants/${request.tenantId}`}>{request.tenantName}</Link>
+          </dd>
         </div>
         <div>
           <dt>{t("billingRequests.fields.type")}</dt>
@@ -355,7 +363,8 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
         <ul>
           {request.links.map((item) => (
             <li key={item.id}>
-              {t(`billingRequests.links.${item.type}`)} · {item.targetId}
+              {t(`billingRequests.links.${item.type}`)} ·{" "}
+              <strong>{item.targetLabel ?? t("billingRequests.links.unnamed")}</strong>
             </li>
           ))}
         </ul>
@@ -439,30 +448,36 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
               </Button>
             ))}
           </div>
-          <Input
-            label={t("billingRequests.comment")}
-            value={comment}
-            disabled={retainedAction !== null}
-            onChange={(event) => {
-              setComment(event.target.value);
-              setCommentAttempt(null);
-              commentMutation.reset();
-            }}
-          />
-          <Button
-            disabled={
-              !comment.trim() ||
-              actionPending ||
-              (retainedAction !== null && retainedAction !== "comment") ||
-              (commentMutation.isError && !retryable(commentMutation.error))
-            }
-            loading={commentMutation.isPending}
-            onClick={submitComment}
+          <div
+            className="billing-request-comment-form"
+            role="group"
+            aria-label={t("billingRequests.comment")}
           >
-            {commentMutation.isError && retryable(commentMutation.error)
-              ? t("billingRequests.retry")
-              : t("billingRequests.addComment")}
-          </Button>
+            <Input
+              label={t("billingRequests.comment")}
+              value={comment}
+              disabled={retainedAction !== null}
+              onChange={(event) => {
+                setComment(event.target.value);
+                setCommentAttempt(null);
+                commentMutation.reset();
+              }}
+            />
+            <Button
+              disabled={
+                !comment.trim() ||
+                actionPending ||
+                (retainedAction !== null && retainedAction !== "comment") ||
+                (commentMutation.isError && !retryable(commentMutation.error))
+              }
+              loading={commentMutation.isPending}
+              onClick={submitComment}
+            >
+              {commentMutation.isError && retryable(commentMutation.error)
+                ? t("billingRequests.retry")
+                : t("billingRequests.addComment")}
+            </Button>
+          </div>
           <div className="billing-request-link-form">
             <label>
               <span>{t("billingRequests.links.type")}</span>

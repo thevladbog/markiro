@@ -852,16 +852,27 @@ textarea {
 }
 
 .commerce-detail-panel > p,
-.commerce-detail-panel > .mk-button,
+.commerce-detail-panel > .mk-btn,
 .commerce-detail-panel > div {
   margin: 0;
   padding: 16px 20px;
 }
 
-.commerce-detail-panel > .mk-button {
+.commerce-detail-panel > .mk-btn {
   width: max-content;
   margin: 16px 20px;
   padding: 0 18px;
+}
+
+.billing-request-comment-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.billing-request-comment-form > .mk-btn {
+  white-space: nowrap;
 }
 
 .offer-detail-actions {
@@ -3310,8 +3321,13 @@ textarea {
 
   .billing-request-filters,
   .billing-request-facts,
-  .billing-act-form {
+  .billing-act-form,
+  .billing-request-comment-form {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .billing-request-comment-form > .mk-btn {
+    width: 100%;
   }
 }
 

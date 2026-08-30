@@ -486,6 +486,7 @@
       "type": "Link type",
       "target": "Object ID",
       "add": "Add link",
+      "unnamed": "Unnamed",
       "offer": "Offer",
       "invoice": "Invoice",
       "payment": "Payment",

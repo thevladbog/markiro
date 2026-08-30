@@ -15,6 +15,8 @@ export interface FileDropZoneProps {
   /** Вторая строка — допустимые форматы/ограничения. Не рендерится в compact. */
   hint?: string;
   accept: string;
+  /** Разрешает выбрать или перетащить несколько файлов за один раз. */
+  multiple?: boolean;
   disabled?: boolean;
   /** Показывает busyLabel (или label) и блокирует клик/drop, как disabled. */
   busy?: boolean;
@@ -71,6 +73,7 @@ export function FileDropZone({
   label,
   hint,
   accept,
+  multiple = false,
   disabled = false,
   busy = false,
   busyLabel,
@@ -115,17 +118,22 @@ export function FileDropZone({
     event.preventDefault();
     setDragOver(false);
     if (isDisabled) return;
-    const file = event.dataTransfer.files?.[0];
-    if (file) (fileMatchesAccept(file, accept) ? onFile : onRejected)?.(file);
+    handleFiles(event.dataTransfer.files);
   };
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.currentTarget.files?.[0];
     // The native dialog filters by `accept`, but "All files" bypasses it —
     // apply the same guard as the drop path.
-    if (file) (fileMatchesAccept(file, accept) ? onFile : onRejected)?.(file);
+    handleFiles(event.currentTarget.files);
     // Reset so picking the same file again still fires a change event.
     event.currentTarget.value = "";
+  };
+
+  const handleFiles = (files: FileList | null) => {
+    const selected = Array.from(files ?? []);
+    for (const file of multiple ? selected : selected.slice(0, 1)) {
+      (fileMatchesAccept(file, accept) ? onFile : onRejected)?.(file);
+    }
   };
 
   return (
@@ -208,6 +216,7 @@ export function FileDropZone({
         ref={inputRef}
         type="file"
         accept={accept}
+        multiple={multiple}
         aria-hidden="true"
         tabIndex={-1}
         disabled={isDisabled}
