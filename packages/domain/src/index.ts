@@ -224,7 +224,7 @@ export type {
   InventorySnapshotClassification,
   InventorySnapshotSourceRow,
 } from "./inventory/index.js";
-export { classifyInventoryScan } from "./inventory/index.js";
+export { classifyInventoryScan, resolveInventoryScanSourceDate } from "./inventory/index.js";
 export { createInventoryRepackingState, reduceInventoryRepacking } from "./inventory/index.js";
 export type {
   InventoryRepackBoxState,
@@ -244,6 +244,7 @@ export type {
   InventoryScanClassification,
   InventoryScanClassifierContext,
   InventoryScanSnapshotRow,
+  InventoryScanSourceDate,
 } from "./inventory/index.js";
 export {
   CABINET_CAPABILITY,

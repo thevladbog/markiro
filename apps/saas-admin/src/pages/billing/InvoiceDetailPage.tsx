@@ -19,6 +19,7 @@ import {
 } from "./api.js";
 import { InvoiceFlowSteps, type FlowState } from "./InvoiceFlowSteps.js";
 import { invoiceStatusTone } from "./invoice-status.js";
+import { sellerTaxId } from "./seller-snapshot.js";
 
 const DOCUMENT_PENDING_TIMEOUT_MS = 5 * 60 * 1000;
 const DOCUMENT_REFRESH_INTERVAL_MS = 2_000;
@@ -42,11 +43,6 @@ function date(value: string | null): string {
   return value
     ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium" }).format(new Date(value))
     : "—";
-}
-
-function sellerTaxId(snapshot: unknown): string | null {
-  if (!snapshot || typeof snapshot !== "object" || !("taxId" in snapshot)) return null;
-  return typeof snapshot.taxId === "string" ? snapshot.taxId : null;
 }
 
 export function InvoiceDetailPage() {

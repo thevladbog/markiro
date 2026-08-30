@@ -11,6 +11,7 @@ import {
 } from "@markiro/domain";
 
 import type { SqlExecutor } from "./mirror.js";
+import { setInventoryProductionDate } from "./inventory-date.js";
 import { burnSerial } from "./sscc-pool.js";
 
 const BOX_EXTENSION_DIGIT = 0;
@@ -28,6 +29,8 @@ export interface RecordInventoryRepackScanInput {
   scannedAt: string;
   createBoxId?: () => string;
   createItemId?: () => string;
+  /** Оператор осознанно зачёл код с текущей датой короба. */
+  acceptSourceDateMismatch?: boolean;
 }
 
 export interface InventoryRepackBoxView {
@@ -60,12 +63,15 @@ export interface InventoryRepackScanResult {
     | "duplicate"
     | "invalid"
     | "date-mismatch"
+    | "source-date-mismatch"
     | "capacity-closed";
   boxId: string | null;
   newSscc: string | null;
   itemCount: number;
   printState: InventoryRepackBoxView["printState"] | null;
   sourceParentMismatch: boolean;
+  /** Дата из снапшота для спорного кода; null во всех остальных вердиктах. */
+  sourceProductionDate: string | null;
 }
 
 interface TerminalRow {
@@ -96,6 +102,7 @@ interface SnapshotRow {
   serial: string;
   source_status: InventoryScanSnapshotRow["sourceStatus"];
   source_state: string | null;
+  source_production_date: string | null;
   expected: number;
   protected: number;
   parent_sscc: string | null;
@@ -343,6 +350,7 @@ async function replayResult(
     itemCount: box?.itemCount ?? 0,
     printState: box?.printState ?? null,
     sourceParentMismatch: false,
+    sourceProductionDate: null,
   };
 }
 
@@ -353,7 +361,7 @@ async function snapshotFacts(
 ): Promise<{ row: InventoryScanSnapshotRow | null; duplicate: boolean; reattachAllowed: boolean }> {
   const rows = await exec.all<SnapshotRow>(
     `SELECT code_hash, canonical_raw, gtin14, serial, source_status, source_state,
-            expected, protected, parent_sscc
+            source_production_date, expected, protected, parent_sscc
        FROM inventory_snapshot_codes_mirror
       WHERE snapshot_id = ? AND code_hash = ?`,
     [input.snapshotId, codeHash],
@@ -373,6 +381,7 @@ async function snapshotFacts(
           serial: row.serial,
           sourceStatus: row.source_status,
           sourceState: row.source_state,
+          sourceProductionDate: row.source_production_date,
           expected: row.expected === 1,
           protected: row.protected === 1,
           parentSscc: row.parent_sscc,
@@ -391,6 +400,38 @@ async function snapshotFacts(
         )
       )[0]?.count === 0,
   };
+}
+
+/**
+ * Единственная непустая дата среди пригодного (expected, не protected)
+ * содержимого старого короба. Строки без даты (`source_production_date IS
+ * NULL`) не попадают в выборку и не мешают: короб с одной датированной
+ * бутылкой и девятнадцатью без даты всё равно даст эту одну дату. Возвращает
+ * null, если пригодных датированных строк нет или встречается больше одной
+ * разной даты.
+ *
+ * В отличие от `resolveInventoryScanSourceDate` в
+ * `packages/domain/src/inventory/scan.ts`, здесь не исключаются уже зачтённые
+ * дети — эта функция читает содержимое **старого** короба целиком, а не то,
+ * что ещё предстоит зачесть в новый. На частично переложенном старом коробе
+ * (перенесённые бутылки одной датой X, остаток другой Y) это даёт null и
+ * открывает новый короб с устаревшей активной датой терминала вместо X —
+ * первая же бутылка тогда вызывает диалог расхождения. Осознанный компромисс,
+ * поведение не меняется.
+ */
+async function oldBoxSourceDate(
+  exec: SqlExecutor,
+  input: RecordInventoryRepackScanInput,
+  oldSscc: string,
+): Promise<string | null> {
+  const rows = await exec.all<{ source_production_date: string }>(
+    `SELECT DISTINCT source_production_date
+       FROM inventory_snapshot_codes_mirror
+      WHERE snapshot_id = ? AND parent_sscc = ? AND expected = 1 AND protected = 0
+        AND source_production_date IS NOT NULL`,
+    [input.snapshotId, oldSscc],
+  );
+  return rows.length === 1 ? (rows[0]?.source_production_date ?? null) : null;
 }
 
 async function recordInternal(
@@ -421,7 +462,34 @@ async function recordInternal(
         itemCount: 0,
         printState: null,
         sourceParentMismatch: false,
+        sourceProductionDate: null,
       };
+    }
+    const seeded = await oldBoxSourceDate(exec, input, oldSscc);
+    const boxDate = seeded ?? terminalState.active_production_date!;
+    if (seeded !== null && seeded !== terminalState.active_production_date) {
+      // Not range-checked against [productionDateFrom, productionDateTo]
+      // here: `seeded` only ever comes from `expected = 1` rows, and
+      // inventory-mirror.ts's bundle validation (classifyInventorySnapshotRow
+      // against the manifest's range) already guarantees those are in range.
+      // SqlExecutor exposes only run/all — no transactions — so this UPDATE to
+      // inventory_terminal_state commits independently of the open-box journal
+      // INSERT a few lines below. If burnSerial then returns null (SSCC pool
+      // exhausted) or the journal write fails, the terminal's active date has
+      // already moved with no box and no event to show for it; a later
+      // old-box scan with mixed contents would fall back to this now-stranded
+      // date. Seeding first is still the lesser evil: seeding *after* the
+      // journal write would leave the box's own date briefly disagreeing with
+      // the terminal's, and every item scan in that window silently degrades
+      // to observe-only (see `dateMatches` below) instead of failing loudly.
+      await setInventoryProductionDate(exec, {
+        inventoryId: input.inventoryId,
+        snapshotId: input.snapshotId,
+        deviceId: input.deviceId,
+        operatorId: input.operatorId,
+        productionDate: seeded,
+        updatedAt: input.scannedAt,
+      });
     }
     const serial = await burnSerial(exec, input.issuerPrefix, BOX_EXTENSION_DIGIT);
     if (serial === null) throw new Error("inventory repack SSCC pool is exhausted");
@@ -439,7 +507,7 @@ async function recordInternal(
       oldSscc,
       newSscc,
       capacity: input.capacity,
-      productionDate: terminalState.active_production_date!,
+      productionDate: boxDate,
     };
     const event = inventoryEventSchema.parse({
       eventId: input.eventId,
@@ -450,7 +518,7 @@ async function recordInternal(
       normalizedIdentity: `old_box:${oldSscc}`,
       codeHash: null,
       canonicalRaw: oldSscc,
-      activeProductionDate: terminalState.active_production_date,
+      activeProductionDate: boxDate,
       localVerdict: "unknown",
       repack,
     });
@@ -464,7 +532,7 @@ async function recordInternal(
       oldSscc,
       newSscc,
       capacity: input.capacity,
-      productionDate: terminalState.active_production_date,
+      productionDate: boxDate,
     });
     return replayResult(exec, input, { payload_json: JSON.stringify(event) });
   }
@@ -484,6 +552,7 @@ async function recordInternal(
       itemCount: box.itemCount,
       printState: box.printState,
       sourceParentMismatch: false,
+      sourceProductionDate: null,
     };
   }
   const codeHash = kmHash(canonical);
@@ -505,6 +574,31 @@ async function recordInternal(
       itemCount: box.itemCount,
       printState: box.printState,
       sourceParentMismatch: false,
+      sourceProductionDate: null,
+    };
+  }
+  const sourceDate = facts.row?.sourceProductionDate ?? null;
+  // Computed once and reused for both the date guard below and the add-item
+  // eligibility further down, so the two always agree. A code re-scanned
+  // after remove-last/clear-box classifies as "duplicate" with
+  // reattachAllowed === true, not "expected" — gating the guard on
+  // `classification.kind === "expected"` alone let that re-attach path add
+  // the item straight into a box with a different printed date, no dialog.
+  const eligible = classification.kind === "expected" || facts.reattachAllowed;
+  if (
+    !input.acceptSourceDateMismatch &&
+    eligible &&
+    sourceDate !== null &&
+    sourceDate !== box.productionDate
+  ) {
+    return {
+      verdict: "source-date-mismatch",
+      boxId: box.boxId,
+      newSscc: box.newSscc,
+      itemCount: box.itemCount,
+      printState: box.printState,
+      sourceParentMismatch: false,
+      sourceProductionDate: sourceDate,
     };
   }
   const sequence = await allocateSequence(
@@ -513,7 +607,6 @@ async function recordInternal(
     input.snapshotId,
     input.deviceId,
   );
-  const eligible = classification.kind === "expected" || facts.reattachAllowed;
   const dateMatches = terminalState.active_production_date === box.productionDate;
   const sourceParentMismatch = facts.row?.parentSscc !== box.oldSsccContext;
   const position = box.itemCount + 1;
@@ -567,6 +660,7 @@ async function recordInternal(
     itemCount: after.box?.itemCount ?? box.itemCount,
     printState: after.box?.printState ?? box.printState,
     sourceParentMismatch,
+    sourceProductionDate: null,
   };
 }
 
