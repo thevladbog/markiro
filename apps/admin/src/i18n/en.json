@@ -315,7 +315,8 @@
         "repack": "With repacking"
       },
       "list": {
-        "number": "Number / status",
+        "number": "Number",
+        "status": "Status",
         "productDates": "Product / dates",
         "lineMode": "Line / mode",
         "updated": "Updated"
