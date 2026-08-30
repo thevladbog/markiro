@@ -240,6 +240,17 @@ async function installApi(page: Page, scenario: Scenario) {
     if (scenario === "terminals" && path === `/api/inventories/${INVENTORY_ID}`) {
       return json(route, {
         ...inventoryRow,
+        // Fixing a snapshot moves the inventory to "ready" in the same
+        // transaction that sets `activeSnapshotId`
+        // (apps/api/src/modules/inventories/inventory-snapshot.service.ts:
+        // 279-290 -- `.set({ status: "ready", activeSnapshotId: snapshotId,
+        // ... })`), so a mock with a fixed snapshot can never keep
+        // "preparing": that combination doesn't exist in production. This
+        // scenario backs both the `terminals` and `launch` screenshots, and
+        // matches the "ready" status the task-form harness
+        // (apps/admin/test/browser/task-form-harness.ts) already uses for
+        // the same example inventory.
+        status: "ready",
         activeSnapshotId: SNAPSHOT_ID,
         blockers: EMPTY_BLOCKERS,
         imports: readyImports,
