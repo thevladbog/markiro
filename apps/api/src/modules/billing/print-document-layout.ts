@@ -1,4 +1,28 @@
+import { SIGNED_PRINT_SELLER_TAX_ID, type PrintDocumentVariant } from "@markiro/platform-contracts";
 import type { BillingProfileSnapshot, PrintDocumentModel } from "./print-document-model";
+
+export interface PrintRenderOptions {
+  printVariant?: PrintDocumentVariant;
+}
+
+export function storedPrintVariant(value: string): PrintDocumentVariant {
+  if (value === "clean" || value === "signed") return value;
+  throw new Error("stored_print_variant_invalid");
+}
+
+export function resolvePrintVariant(
+  model: PrintDocumentModel,
+  options: PrintRenderOptions = {},
+): PrintDocumentVariant {
+  const printVariant = options.printVariant ?? "clean";
+  if (printVariant === "signed" && model.seller.taxId !== SIGNED_PRINT_SELLER_TAX_ID) {
+    throw new Error("signed_print_seller_not_authorized");
+  }
+  if (printVariant === "signed" && model.kind === "offer") {
+    throw new Error("signed_print_document_kind_not_supported");
+  }
+  return printVariant;
+}
 
 export function formatPrintDate(value: Date | null): string {
   return value
@@ -35,17 +59,20 @@ export function formatMoney(value: string): string {
 }
 
 export function documentKindLabel(model: PrintDocumentModel): string {
-  return model.kind === "invoice" ? "СЧЁТ НА ОПЛАТУ" : "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ";
+  if (model.kind === "invoice") return "СЧЁТ НА ОПЛАТУ";
+  if (model.kind === "act") return "АКТ ОКАЗАННЫХ УСЛУГ";
+  return "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ";
 }
 
 export function documentBarcodeValue(model: PrintDocumentModel): string {
   const number = /^[\x20-\x7e]+$/.test(model.number)
     ? model.number
     : Buffer.from(model.number, "utf8").toString("base64url");
-  return `${model.kind === "invoice" ? "INV" : "OFR"}-${number}`;
+  return model.kind === "offer" ? `OFR-${number}` : number;
 }
 
 export function documentSubject(model: PrintDocumentModel): string {
+  if (model.kind === "act") return "Акт оказанных услуг";
   if (model.lines.length === 0) return "Услуги платформы Markiro";
   return "Лицензия и услуги платформы Markiro";
 }

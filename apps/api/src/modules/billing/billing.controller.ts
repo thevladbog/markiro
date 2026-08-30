@@ -15,9 +15,11 @@ import { BillingApplicationService } from "./billing-application.service";
 import {
   applyInvoiceSchema,
   createInvoiceSchema,
+  invoicePrintGenerationSchema,
   invoiceIdSchema,
   type ApplyInvoiceDto,
   type CreateInvoiceDto,
+  type InvoicePrintGenerationDto,
 } from "./dto";
 
 const invoiceDocumentDownloadParamsPipe = new ZodValidationPipe(
@@ -75,14 +77,18 @@ export class BillingController {
 
   @Post(":id/issue")
   @ApiOperation({ summary: "Issue an invoice" })
-  @PlatformApiProtectedCreated({ response: platformCommercialContracts.invoices.issue.response })
+  @PlatformApiProtectedCreated({
+    body: platformCommercialContracts.invoices.issue.body,
+    response: platformCommercialContracts.invoices.issue.response,
+  })
   @RequirePlatformCapabilities("billing.write")
   async issue(
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string,
+    @Body(new ZodValidationPipe(invoicePrintGenerationSchema)) body: InvoicePrintGenerationDto,
   ) {
     const invoice = await this.billing.issue(req.platformPrincipal!, id);
-    const documents = await this.documents.renderInvoice(id);
+    const documents = await this.documents.renderInvoice(id, undefined, body.printVariant);
     return parsePlatformResponse(platformCommercialContracts.invoices.issue.response, {
       ...invoice,
       documents,
@@ -92,13 +98,17 @@ export class BillingController {
   @Post(":id/document")
   @ApiOperation({ summary: "Render and store the invoice document" })
   @PlatformApiProtectedCreated({
+    body: platformCommercialContracts.invoices.document.body,
     response: platformCommercialContracts.invoices.document.response,
   })
   @RequirePlatformCapabilities("billing.write")
-  async document(@Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
+  async document(
+    @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string,
+    @Body(new ZodValidationPipe(invoicePrintGenerationSchema)) body: InvoicePrintGenerationDto,
+  ) {
     return parsePlatformResponse(
       platformCommercialContracts.invoices.document.response,
-      await this.documents.renderAndStore(id),
+      await this.documents.renderAndStore(id, body.printVariant),
     );
   }
 
@@ -118,13 +128,17 @@ export class BillingController {
   @Post(":id/documents")
   @ApiOperation({ summary: "Render invoice documents" })
   @PlatformApiProtectedCreated({
+    body: platformCommercialContracts.invoices.documents.render.body,
     response: platformCommercialContracts.invoices.documents.render.response,
   })
   @RequirePlatformCapabilities("billing.write")
-  async documentsRender(@Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
+  async documentsRender(
+    @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string,
+    @Body(new ZodValidationPipe(invoicePrintGenerationSchema)) body: InvoicePrintGenerationDto,
+  ) {
     return parsePlatformResponse(
       platformCommercialContracts.invoices.documents.render.response,
-      await this.documents.renderInvoice(id),
+      await this.documents.renderInvoice(id, undefined, body.printVariant),
     );
   }
 

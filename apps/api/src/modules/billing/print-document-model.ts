@@ -1,4 +1,4 @@
-export type PrintDocumentKind = "invoice" | "offer";
+export type PrintDocumentKind = "invoice" | "offer" | "act";
 
 export interface BillingProfileSnapshot {
   legalName?: string | null;
@@ -31,9 +31,12 @@ export interface PrintLine {
 export interface PrintDocumentModel {
   kind: PrintDocumentKind;
   number: string;
+  sourceNumber?: string | null;
   status: string;
   issuedOrPublishedAt: Date;
   dueOrExpiresAt: Date | null;
+  periodStart?: string | null;
+  periodEnd?: string | null;
   seller: BillingProfileSnapshot;
   buyer: BillingProfileSnapshot;
   lines: PrintLine[];
@@ -107,9 +110,12 @@ export function toInvoicePrintModel(invoice: InvoiceLike): PrintDocumentModel {
   return {
     kind: "invoice",
     number: invoice.number,
+    sourceNumber: null,
     status: invoice.status,
     issuedOrPublishedAt: invoice.issueDate ?? new Date(0),
     dueOrExpiresAt: invoice.dueDate,
+    periodStart: null,
+    periodEnd: null,
     seller: party(invoice.sellerSnapshot, invoice.sellerBankAccountSnapshot),
     buyer: party(invoice.buyerSnapshot, invoice.buyerBankAccountSnapshot),
     lines: invoice.lines.map((line) => ({
@@ -127,6 +133,29 @@ export function toInvoicePrintModel(invoice: InvoiceLike): PrintDocumentModel {
     vatTotal: invoice.vatTotal,
     total: invoice.total,
     termsHtml: null,
+  };
+}
+
+export function toBillingActPrintModel(
+  act: {
+    number: string;
+    createdAt: Date;
+    periodStart: string;
+    periodEnd: string;
+  },
+  invoice: InvoiceLike,
+): PrintDocumentModel {
+  const invoiceModel = toInvoicePrintModel(invoice);
+  return {
+    ...invoiceModel,
+    kind: "act",
+    number: act.number,
+    sourceNumber: invoice.number,
+    status: "issued",
+    issuedOrPublishedAt: act.createdAt,
+    dueOrExpiresAt: null,
+    periodStart: act.periodStart,
+    periodEnd: act.periodEnd,
   };
 }
 
@@ -149,9 +178,12 @@ export function toOfferPrintModel(snapshot: {
   return {
     kind: "offer",
     number: snapshot.number,
+    sourceNumber: null,
     status: snapshot.status,
     issuedOrPublishedAt: snapshot.publishedAt,
     dueOrExpiresAt: snapshot.expiresAt,
+    periodStart: null,
+    periodEnd: null,
     seller: party(snapshot.sellerSnapshot, snapshot.sellerBankAccountSnapshot),
     buyer: party(snapshot.buyerSnapshot, snapshot.buyerBankAccountSnapshot),
     lines: lines.map((line, index) => {

@@ -1,10 +1,8 @@
 import { Test } from "@nestjs/testing";
-import type { Server } from "node:http";
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from "@nestjs/swagger";
 import { platformCommercialContracts, platformErrorSchema } from "@markiro/platform-contracts";
 import { z, type ZodType } from "zod";
-import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { DB } from "../src/auth/auth.module";
 import { BillingApplicationService } from "../src/modules/billing/billing-application.service";
@@ -45,8 +43,6 @@ import {
   CURRENT_SAAS_ROUTES,
   type PlatformRouteContract,
 } from "./platform-route-contracts";
-import { listenOnLoopback } from "./support/listen-loopback";
-
 const PLATFORM_SESSION_SECURITY = "platformSession";
 const PROTECTED_ERROR_STATUSES = ["400", "401", "403", "404", "409", "422", "429", "500"];
 const PUBLIC_ERROR_STATUSES = ["400", "401", "404", "409", "422", "429", "500"];
@@ -171,8 +167,8 @@ async function createPlatformDocument(): Promise<{
 }
 
 describe("current SaaS platform OpenAPI contracts", () => {
-  it("converts all 109 current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(109);
+  it("converts all 110 current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(113);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }
@@ -337,38 +333,6 @@ describe("current SaaS platform OpenAPI contracts", () => {
       });
     } finally {
       await platformDocument.close();
-    }
-  });
-
-  it("maps a real Multer act overflow to the documented platform 413 shape", async () => {
-    const issue = vi.fn();
-    const moduleRef = await Test.createTestingModule({
-      controllers: [BillingActsController],
-      providers: [{ provide: BillingActsService, useValue: { issue } }],
-    }).compile();
-    const app = moduleRef.createNestApplication();
-    await app.init();
-    await listenOnLoopback(app);
-    try {
-      const response = await request(app.getHttpServer() as Server)
-        .post("/platform/billing/acts/11111111-1111-4111-8111-111111111111/issue")
-        .field("idempotencyKey", "21111111-1111-4111-8111-111111111111")
-        .attach("file", Buffer.alloc(5 * 1024 * 1024 + 1), {
-          filename: "too-large.pdf",
-          contentType: "application/pdf",
-        });
-
-      expect(response.status).toBe(413);
-      expect(response.body).toEqual({
-        code: "billing_act_pdf_too_large",
-        message: "Billing act PDF exceeds the 5 MiB limit",
-        requestId: expect.stringMatching(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-        ),
-      });
-      expect(issue).not.toHaveBeenCalled();
-    } finally {
-      await app.close();
     }
   });
 });

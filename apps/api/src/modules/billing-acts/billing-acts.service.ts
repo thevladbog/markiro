@@ -14,7 +14,8 @@ import {
   type BillingAct,
   type BillingActCancelDto,
   type BillingActCreateDto,
-  type BillingActIssueDto,
+  type BillingActIssueInput,
+  type PrintDocumentVariant,
 } from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
@@ -35,6 +36,9 @@ import {
 import { ObjectStorageService } from "../storage/object-storage.service";
 import type { BillingActListQueryDto } from "./dto";
 import { TenantBillingNotificationsService } from "../tenant-billing/tenant-billing-notifications.service";
+import { toBillingActPrintModel } from "../billing/print-document-model";
+import { renderPrintPdf } from "../billing/print-document-pdf";
+import { storedPrintVariant } from "../billing/print-document-layout";
 
 const MAX_ACT_PDF_BYTES = 5 * 1024 * 1024;
 const BUSINESS_TIME_ZONE = "Europe/Moscow";
@@ -56,6 +60,7 @@ interface PreparedActIssue {
   objectKey: string;
   byteSize: number;
   sha256: string;
+  printVariant: PrintDocumentVariant;
   needsReconciliation: boolean;
 }
 
@@ -235,7 +240,7 @@ export class BillingActsService {
   async issue(
     actor: PlatformPrincipal,
     actId: string,
-    input: BillingActIssueDto,
+    input: BillingActIssueInput,
     file: BillingActPdfUpload,
   ): Promise<BillingAct> {
     validateBillingActPdf(file);
@@ -247,12 +252,18 @@ export class BillingActsService {
       .limit(1);
     if (!located) actNotFound();
     const sha256 = createHash("sha256").update(file.buffer).digest("hex");
+    const printVariant = input.printVariant ?? "clean";
     const spec: PlatformBillingMutationSpec = {
       tenantId: located.tenantId,
       idempotencyKey: input.idempotencyKey,
       operation: "billing.act.issue",
       targetId: canonicalActId,
-      payload: { contentType: "application/pdf", byteSize: file.buffer.byteLength, sha256 },
+      payload: {
+        contentType: "application/pdf",
+        byteSize: file.buffer.byteLength,
+        sha256,
+        printVariant,
+      },
       actorPlatformUserId: actor.userId,
     };
     const prepared = await this.prepareIssue(
@@ -261,6 +272,7 @@ export class BillingActsService {
       spec,
       file.buffer.byteLength,
       sha256,
+      printVariant,
     );
     if (prepared.kind === "committed") return prepared.result;
 
@@ -332,6 +344,57 @@ export class BillingActsService {
       }
       throw error;
     }
+  }
+
+  async issueGenerated(
+    actor: PlatformPrincipal,
+    actId: string,
+    input: BillingActIssueInput,
+  ): Promise<BillingAct> {
+    const canonicalActId = canonicalBillingUuid(actId);
+    const [act] = await this.db
+      .select()
+      .from(schema.billingActs)
+      .where(eq(schema.billingActs.id, canonicalActId))
+      .limit(1);
+    if (!act) actNotFound();
+    if (!act.invoiceId) {
+      throw new BadRequestException({ code: "billing_act_invoice_required" });
+    }
+    const [invoice] = await this.db
+      .select()
+      .from(schema.invoices)
+      .where(and(eq(schema.invoices.id, act.invoiceId), eq(schema.invoices.tenantId, act.tenantId)))
+      .limit(1);
+    if (
+      !invoice ||
+      invoice.status === "draft" ||
+      invoice.status === "cancelled" ||
+      invoice.issueDate === null ||
+      invoice.sellerSnapshot === null ||
+      invoice.buyerSnapshot === null
+    ) {
+      throw new ConflictException({ code: "billing_act_invoice_not_issued" });
+    }
+    const lines = await this.db
+      .select()
+      .from(schema.invoiceLines)
+      .where(
+        and(
+          eq(schema.invoiceLines.invoiceId, invoice.id),
+          eq(schema.invoiceLines.tenantId, invoice.tenantId),
+        ),
+      )
+      .orderBy(schema.invoiceLines.position);
+    const buffer = await renderPrintPdf(toBillingActPrintModel(act, { ...invoice, lines }), {
+      printVariant: input.printVariant ?? "clean",
+    });
+    return this.issue(actor, canonicalActId, input, {
+      originalname: `${act.number}.pdf`,
+      mimetype: "application/pdf",
+      size: buffer.byteLength,
+      buffer,
+    });
   }
 
   async cancel(
@@ -428,6 +491,7 @@ export class BillingActsService {
     spec: PlatformBillingMutationSpec,
     byteSize: number,
     sha256: string,
+    printVariant: PrintDocumentVariant,
   ): Promise<PreparedActIssue | CommittedActIssue> {
     return this.db.transaction(async (tx) => {
       const mutation = await beginPlatformBillingMutation(tx, spec);
@@ -468,7 +532,8 @@ export class BillingActsService {
         if (
           currentDocument.sha256 !== sha256 ||
           currentDocument.byteSize !== byteSize ||
-          currentDocument.contentType !== "application/pdf"
+          currentDocument.contentType !== "application/pdf" ||
+          currentDocument.printVariant !== printVariant
         ) {
           throw new ConflictException({ code: "idempotency_key_reused" });
         }
@@ -489,6 +554,7 @@ export class BillingActsService {
           objectKey: currentDocument.objectKey,
           byteSize,
           sha256,
+          printVariant,
           needsReconciliation: currentDocument.state === "cleanup_required",
         };
       }
@@ -506,6 +572,7 @@ export class BillingActsService {
           revision: 1,
           objectKey,
           contentType: "application/pdf",
+          printVariant,
           sha256,
           byteSize,
           state: "pending",
@@ -521,6 +588,7 @@ export class BillingActsService {
         objectKey,
         byteSize,
         sha256,
+        printVariant,
         needsReconciliation: false,
       };
     });
@@ -672,6 +740,7 @@ export class BillingActsService {
           status: "issued",
           number: issued.number,
           documentId: readyDocument.id,
+          printVariant: readyDocument.printVariant,
           sha256: readyDocument.sha256,
           byteSize: readyDocument.byteSize,
         },
@@ -962,6 +1031,7 @@ function actDocumentSource(
   const common = {
     id: document.id,
     revision: document.revision,
+    printVariant: storedPrintVariant(document.printVariant),
     contentType: "application/pdf" as const,
     byteSize: document.byteSize,
     sha256: document.sha256,

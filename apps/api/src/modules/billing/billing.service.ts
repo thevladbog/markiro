@@ -37,6 +37,7 @@ import {
   beginPlatformBillingMutation,
   commitPlatformBillingMutation,
 } from "../platform-billing-idempotency";
+import { storedPrintVariant } from "./print-document-layout";
 
 const cents = (value: string): bigint => {
   const [whole, fraction = "00"] = value.split(".");
@@ -122,13 +123,16 @@ export class BillingService {
         );
       }
       const normalizedInvoiceSuffix = sql<string>`coalesce(
-        nullif(ltrim(substring(${schema.invoices.number} from 5), '0'), ''),
+        nullif(
+          ltrim(regexp_replace(${schema.invoices.number}, '^(MRK-)?INV-', ''), '0'),
+          ''
+        ),
         '0'
       )`;
       const [last] = await tx
         .select({ number: schema.invoices.number })
         .from(schema.invoices)
-        .where(sql`${schema.invoices.number} ~ '^INV-[0-9]+$'`)
+        .where(sql`${schema.invoices.number} ~ '^(MRK-)?INV-[0-9]+$'`)
         .orderBy(
           desc(sql`length(${normalizedInvoiceSuffix})`),
           desc(sql`${normalizedInvoiceSuffix} collate "C"`),
@@ -340,6 +344,7 @@ export class BillingService {
             id: schema.invoiceDocuments.id,
             revision: schema.invoiceDocuments.revision,
             format: schema.invoiceDocuments.format,
+            printVariant: schema.invoiceDocuments.printVariant,
             status: schema.invoiceDocuments.status,
             contentType: schema.invoiceDocuments.contentType,
             byteSize: schema.invoiceDocuments.byteSize,
@@ -397,7 +402,10 @@ export class BillingService {
         return {
           ...invoice,
           lines,
-          documents,
+          documents: documents.map((document) => ({
+            ...document,
+            printVariant: storedPrintVariant(document.printVariant),
+          })),
           payments,
           paymentSummary:
             invoice.status === "draft" || invoice.status === "cancelled"
@@ -871,7 +879,7 @@ function invoicePaymentSummary(
 }
 
 function nextInvoiceNumber(last: string | undefined): string {
-  const suffix = last?.match(/^INV-([0-9]+)$/)?.[1] ?? "0";
+  const suffix = last?.match(/^(?:MRK-)?INV-([0-9]+)$/)?.[1] ?? "0";
   const digits = (suffix.replace(/^0+/, "") || "0").split("");
   let carry = 1;
   for (let index = digits.length - 1; index >= 0 && carry === 1; index -= 1) {
@@ -884,5 +892,5 @@ function nextInvoiceNumber(last: string | undefined): string {
     }
   }
   if (carry === 1) digits.unshift("1");
-  return `INV-${digits.join("").padStart(6, "0")}`;
+  return `MRK-INV-${digits.join("").padStart(6, "0")}`;
 }

@@ -2,6 +2,7 @@ import {
   platformCommercialContracts,
   type PlatformBillingRequestCommentDto,
   type PlatformBillingRequestLinkDto,
+  type PlatformBillingRequestLinkTargetQueryDto,
   type PlatformBillingRequestListQueryDto,
   type PlatformBillingRequestOfferCreateDto,
   type PlatformBillingRequestStatusMutationDto,
@@ -19,10 +20,13 @@ export const platformBillingRequestStatusSchema =
   platformCommercialContracts.billingRequests.status.body;
 export const platformBillingRequestLinkSchema =
   platformCommercialContracts.billingRequests.link.body;
+export const platformBillingRequestLinkTargetQuerySchema =
+  platformCommercialContracts.billingRequests.linkTargets.query;
 
 export type {
   PlatformBillingRequestCommentDto,
   PlatformBillingRequestLinkDto,
+  PlatformBillingRequestLinkTargetQueryDto,
   PlatformBillingRequestListQueryDto,
   PlatformBillingRequestOfferCreateDto,
   PlatformBillingRequestStatusMutationDto,
