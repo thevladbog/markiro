@@ -27,7 +27,7 @@ function screenshotPath(name: string): string {
 /**
  * MKR-INS-07 (printed inventory-closing instruction) screenshot targets --
  * the post-launch half of the lifecycle, same "Марка Ко" organisation and
- * line as MKR-INS-06, but its own ИНВ-000043 inventory rather than
+ * line as MKR-INS-06, but its own INVENTORY-26-0043 inventory rather than
  * MKR-INS-06's ИНВ-000042. It has to be a *repack* inventory, not a
  * reuse of MKR-INS-06's check-mode one: this document's corrections and
  * closing screens depict repack-box actions (invalidate, reprint) and an
@@ -303,9 +303,17 @@ const ARTIFACT_SECOND_WRITE_OFF_ID = "e0000000-0000-4000-8000-000000000003";
 const INVENTORY_ID_07 = "51000000-0000-4000-8000-000000000001";
 const SNAPSHOT_ID_07 = "61000000-0000-4000-8000-000000000001";
 
+/**
+ * `formatInventoryNumber` (apps/api/src/modules/inventories/inventory-number.ts)
+ * is the only producer of `inventories.number`, and it emits
+ * `INVENTORY-YY-NNNN`: the two-digit UTC year of creation plus the zero-padded
+ * per-tenant sequence. This inventory is created 2026-08-28 (`createdAt`
+ * below) as the tenant's 43rd, so `INVENTORY-26-0043` is literally what the
+ * API would have written for it.
+ */
 const inventoryRow07 = {
   id: INVENTORY_ID_07,
-  number: "ИНВ-000043",
+  number: "INVENTORY-26-0043",
   status: "preparing",
   mode: "repack",
   productId: PRODUCT_ID,
@@ -876,7 +884,7 @@ const CURRENT_STOCK_ARTIFACT = {
   formatId: "inventory_csv_current_stock",
   formatVersion: 1,
   partNumber: 1,
-  filename: "inventory-ИНВ-000043-current-stock.csv",
+  filename: "inventory-INVENTORY-26-0043-current-stock.csv",
   mimeType: "text/csv; charset=utf-8",
   rowCount: 24,
   codeCount: 23,
@@ -889,7 +897,7 @@ const WRITE_OFF_ARTIFACT = {
   formatId: "inventory_txt_write_off",
   formatVersion: 1,
   partNumber: 1,
-  filename: "inventory-ИНВ-000043-write-off.txt",
+  filename: "inventory-INVENTORY-26-0043-write-off.txt",
   mimeType: "text/plain; charset=utf-8",
   rowCount: 1,
   codeCount: 1,
@@ -1322,7 +1330,7 @@ test("renders the live progress of a running inventory", async ({ page }) => {
   const unexpected = await installApi(page, "live");
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}`);
-  await expect(page.getByRole("heading", { level: 1, name: "ИНВ-000043" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "INVENTORY-26-0043" })).toBeVisible();
   await expect(page.getByText("Ожидается", { exact: true })).toBeVisible();
   await expect(page.getByText("Проверено", { exact: true })).toBeVisible();
   await expect(page.getByText("Не найдено", { exact: true })).toBeVisible();
@@ -1343,7 +1351,7 @@ test("renders the corrections list with its filters", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}/corrections`);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Исправления · ИНВ-000043" }),
+    page.getByRole("heading", { level: 1, name: "Исправления · INVENTORY-26-0043" }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "События и коды" })).toBeVisible();
   await expect(page.getByLabel("Тип события")).toBeVisible();
@@ -1512,10 +1520,13 @@ test("renders the reopen confirmation dialog", async ({ page }) => {
   await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}`);
   await page.getByRole("button", { name: "Возобновить" }).click();
   await expect(page.getByText("Возобновить инвентаризацию?")).toBeVisible();
+  // `pages.inventory.close.reopenExplanation` verbatim (ru.json) -- section 7
+  // of MKR-INS-07 restates all four consequences this alert lists, so the
+  // frame has to actually carry them rather than an older paraphrase.
   await expect(
-    page.getByText("Ревизия результата увеличится, закрывающие поля будут очищены,", {
-      exact: false,
-    }),
+    page.getByText(
+      "Ревизия результата увеличится, отметки о закрытии будут сняты, уже сформированные итоговые документы аннулируются и станут недоступны для скачивания — после повторного закрытия их придётся сформировать заново, а ожидающие поздние события снова можно будет обработать.",
+    ),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Подтвердить возобновление" })).toBeVisible();
   expect(unexpected).toEqual([]);
