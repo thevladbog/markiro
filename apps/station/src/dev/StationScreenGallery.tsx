@@ -309,7 +309,7 @@ const GALLERY_INVENTORY_TASK = {
   productPrintName: "Вода 0,5 л",
   mode: "check" as const,
   lineId: "22222222-2222-4222-8222-222222222222",
-  lineName: "Линия розлива 2 / Filling line 2",
+  lineName: "Тестовая линия А",
   productionDateFrom: GALLERY_INVENTORY_DATE,
   productionDateTo: "2026-09-19",
 };
@@ -417,7 +417,7 @@ function InventoryTaskSelectionFixture() {
         exec={galleryInventoryExecutor}
         source={galleryInventoryScanSource}
         operatorId="gallery-operator"
-        currentLineName="Линия розлива 1 / Filling line 1"
+        currentLineName="Тестовая линия А"
         onShiftSelected={() => undefined}
         onInventorySelected={() => undefined}
         onNew={() => undefined}
@@ -500,7 +500,7 @@ function galleryInventoryScanResult(variant: string): RecordInventoryScanResult 
         firstWinning: {
           codeHash: "gallery-safe-code-hash",
           eventId: "gallery-winning-event",
-          deviceId: "gallery-terminal-b",
+          deviceId: "ТЕРМИНАЛ-02",
           scannedAt: "2026-08-19T10:00:00.000Z",
         },
       };
