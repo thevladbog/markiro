@@ -640,6 +640,7 @@ function CheckInventoryWorkScreen({
             : t("inventory.work.sourceDate.title")
         }
         backLabel={t("inventory.work.sourceDate.skip")}
+        backPlacement="footer"
         onClose={releaseHeldScan}
         footer={
           heldScan?.mixed ? (
