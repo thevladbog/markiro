@@ -1,7 +1,15 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -17,6 +25,8 @@ import {
   type SessionData,
 } from "../src/auth/client.js";
 import i18n from "../src/i18n/index.js";
+import { useCreateInventoryCorrectionBatch } from "../src/pages/inventory/api.js";
+import type { InventoryEvidenceResponse } from "../src/pages/inventory/schemas.js";
 
 const INVENTORY_ID = "11111111-1111-4111-8111-111111111111";
 const EVENT_ID = "44444444-4444-4444-8444-444444444444";
@@ -85,8 +95,11 @@ const progress = {
   openBoxCount: 0,
   boxTotal: 0,
   boxesTruncated: false,
+  verifiedBoxTotal: 0,
+  verifiedBoxesTruncated: false,
   participants: [],
   boxes: [],
+  verifiedBoxes: [],
   recentEvents: [
     {
       eventId: EVENT_ID,
@@ -103,20 +116,48 @@ const progress = {
   ],
 };
 
-const evidence = {
+const evidence: InventoryEvidenceResponse = {
   page: 1,
   pageSize: 50,
   total: 2,
   hasMore: false,
+  allMatchingActions: ["void_scan", "change_date"],
+  allMatchingAffectedCodeCount: 1,
   items: [
-    { ...progress.recentEvents[0], actions: ["void_scan", "change_date"] },
     {
-      ...progress.recentEvents[0],
+      eventId: EVENT_ID,
+      codeResultId: RESULT_ID,
+      kind: "item",
+      displayIdentity: "(01)04680089900383 (21)SERIAL-42",
+      authoritativeVerdict: "applied",
+      terminalId: "77777777-7777-4777-8777-777777777777",
+      terminalName: "СТ-А-02",
+      scannedAt: "2026-08-26T09:10:00.000Z",
+      classification: "unknown",
+      observedProductionDate: "2025-09-19",
+      copyIdentity: "010468008990038321SERIAL-42",
+      affectedCodeCount: 1,
+      discrepancyCodeCount: 1,
+      classifications: ["unknown"],
+      discrepancyCategories: ["unknown"],
+      actions: ["void_scan", "change_date"],
+    },
+    {
       eventId: "99999999-9999-4999-8999-999999999999",
       codeResultId: null,
+      kind: "item",
       authoritativeVerdict: "duplicate",
       displayIdentity: "duplicate evidence",
+      terminalId: "77777777-7777-4777-8777-777777777777",
+      terminalName: "СТ-А-02",
+      scannedAt: "2026-08-26T09:10:01.000Z",
+      classification: null,
       observedProductionDate: null,
+      copyIdentity: null,
+      affectedCodeCount: 0,
+      discrepancyCodeCount: 0,
+      classifications: [],
+      discrepancyCategories: [],
       actions: [],
     },
   ],
@@ -145,8 +186,17 @@ function authClient(): AuthClientLike {
   };
 }
 
-function renderCorrections(access: AccessDocument = WRITE_ACCESS) {
+interface RenderCorrectionsOptions {
+  entry?: string;
+  batchResponses?: Array<Response | Error>;
+}
+
+function renderCorrections(
+  access: AccessDocument = WRITE_ACCESS,
+  options: RenderCorrectionsOptions = {},
+) {
   const writes: unknown[] = [];
+  const batchResponses = [...(options.batchResponses ?? [])];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -164,6 +214,23 @@ function renderCorrections(access: AccessDocument = WRITE_ACCESS) {
       if (url === `/api/inventories/${INVENTORY_ID}`) return response(detail);
       if (url === `/api/inventories/${INVENTORY_ID}/progress`) return response(progress);
       if (url.startsWith(`/api/inventories/${INVENTORY_ID}/evidence`)) return response(evidence);
+      if (url === `/api/inventories/${INVENTORY_ID}/corrections/batch` && init?.method === "POST") {
+        writes.push(JSON.parse(String(init.body)));
+        const next = batchResponses.shift();
+        if (next instanceof Error) throw next;
+        if (next) return next;
+        return response(
+          {
+            id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            action: "void_scan",
+            selectedEventCount: 1,
+            affectedCodeCount: 1,
+            resultRevision: 9,
+            createdAt: "2026-08-26T09:11:00.000Z",
+          },
+          201,
+        );
+      }
       if (url === `/api/inventories/${INVENTORY_ID}/corrections` && init?.method === "POST") {
         writes.push(JSON.parse(String(init.body)));
         return response(
@@ -187,7 +254,7 @@ function renderCorrections(access: AccessDocument = WRITE_ACCESS) {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   const router = createMemoryRouter(appRoutes, {
-    initialEntries: [`/inventory/${INVENTORY_ID}/corrections`],
+    initialEntries: [options.entry ?? `/inventory/${INVENTORY_ID}/corrections`],
   });
   render(
     <QueryClientProvider client={queryClient}>
@@ -198,13 +265,231 @@ function renderCorrections(access: AccessDocument = WRITE_ACCESS) {
       </ThemeProvider>
     </QueryClientProvider>,
   );
-  return { writes };
+  return { writes, router };
 }
 
 afterEach(async () => {
   cleanup();
   vi.unstubAllGlobals();
   await i18n.changeLanguage("ru");
+});
+
+it("posts a strict batch correction with the exact filter snapshot and exclusions", async () => {
+  const writes: unknown[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      writes.push(JSON.parse(String(init?.body)));
+      return response(
+        {
+          id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          action: "change_date",
+          selectedEventCount: 8,
+          affectedCodeCount: 27,
+          resultRevision: 9,
+          createdAt: "2026-08-26T09:11:00.000Z",
+        },
+        201,
+      );
+    }),
+  );
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  const { result } = renderHook(() => useCreateInventoryCorrectionBatch(), { wrapper });
+
+  await act(async () => {
+    await result.current.mutateAsync({
+      inventoryId: INVENTORY_ID,
+      correction: {
+        action: "change_date",
+        selection: {
+          mode: "all_matching",
+          filter: {
+            scope: "discrepancies",
+            search: "0468",
+            discrepancyCategory: "unknown",
+          },
+          excludedEventIds: [EVENT_ID],
+        },
+        observedProductionDate: "2025-09-20",
+        reason: "Исправление даты партии",
+        expectedResultRevision: 8,
+        idempotencyKey: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      },
+    });
+  });
+
+  expect(writes).toEqual([
+    {
+      action: "change_date",
+      selection: {
+        mode: "all_matching",
+        filter: {
+          scope: "discrepancies",
+          search: "0468",
+          discrepancyCategory: "unknown",
+        },
+        excludedEventIds: [EVENT_ID],
+      },
+      observedProductionDate: "2025-09-20",
+      reason: "Исправление даты партии",
+      expectedResultRevision: 8,
+      idempotencyKey: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    },
+  ]);
+});
+
+it("opens the discrepancy view and copies only the canonical identity", async () => {
+  const writeText = vi.fn(async () => undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  renderCorrections(WRITE_ACCESS, {
+    entry: `/inventory/${INVENTORY_ID}/corrections?view=discrepancies`,
+  });
+
+  expect(await screen.findByRole("tab", { name: "Расхождения", selected: true })).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "Копировать код" }));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith("010468008990038321SERIAL-42"));
+  expect(screen.getByText("Код для копирования недоступен")).toBeDefined();
+});
+
+it("selects all filtered events, keeps exclusions, and submits one batch", async () => {
+  const original = {
+    items: evidence.items,
+    total: evidence.total,
+    actions: evidence.allMatchingActions,
+    affected: evidence.allMatchingAffectedCodeCount,
+  };
+  const first = evidence.items[0];
+  if (!first) throw new Error("Expected actionable evidence fixture");
+  const excludedEventId = "88888888-8888-4888-8888-888888888888";
+  evidence.items = [
+    first,
+    {
+      ...first,
+      eventId: excludedEventId,
+      codeResultId: "77777777-7777-4777-8777-777777777778",
+      displayIdentity: "(01)04680089900383 (21)SERIAL-43",
+      copyIdentity: "010468008990038321SERIAL-43",
+    },
+  ];
+  evidence.total = 2582;
+  evidence.allMatchingActions = ["void_scan", "change_date"];
+  evidence.allMatchingAffectedCodeCount = 2600;
+  try {
+    const { writes } = renderCorrections(WRITE_ACCESS, {
+      entry: `/inventory/${INVENTORY_ID}/corrections?view=discrepancies`,
+    });
+    await screen.findByRole("tab", { name: "Расхождения", selected: true });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Выбрать страницу" }));
+    expect(screen.getByText("Выбрано на странице: 2")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Выбрать все 2 582 по текущему фильтру" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Выбрать событие (01)04680089900383 (21)SERIAL-43",
+      }),
+    );
+    expect(screen.getByText("Выбрано событий: 2 581 · кодов: 2 599")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Отменить выбранные сканы" }));
+    expect(screen.getByRole("dialog", { name: "Отмена выбранных сканов" })).toBeDefined();
+    fireEvent.change(screen.getByLabelText("Причина исправления"), {
+      target: { value: "Проверено по журналу" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить отмену" }));
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toMatchObject({
+      action: "void_scan",
+      selection: {
+        mode: "all_matching",
+        filter: { scope: "discrepancies" },
+        excludedEventIds: [excludedEventId],
+      },
+      reason: "Проверено по журналу",
+      expectedResultRevision: 8,
+    });
+    expect((writes[0] as { idempotencyKey: string }).idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await screen.findByText("Исправлено событий: 1 · кодов: 1")).toBeDefined();
+  } finally {
+    evidence.items = original.items;
+    evidence.total = original.total;
+    evidence.allMatchingActions = original.actions;
+    evidence.allMatchingAffectedCodeCount = original.affected;
+  }
+});
+
+it("clears the bulk selection when the evidence filter changes", async () => {
+  const first = evidence.items[0];
+  if (!first) throw new Error("Expected actionable evidence fixture");
+  renderCorrections(WRITE_ACCESS, {
+    entry: `/inventory/${INVENTORY_ID}/corrections?view=discrepancies`,
+  });
+
+  await screen.findByText(first.displayIdentity);
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: `Выбрать событие ${first.displayIdentity}` }),
+  );
+  expect(screen.getByText("Выбрано событий: 1 · кодов: 1")).toBeDefined();
+
+  fireEvent.change(screen.getByLabelText("Поиск по событиям"), {
+    target: { value: "SERIAL-42" },
+  });
+
+  await waitFor(() => expect(screen.queryByText(/Выбрано событий:/)).toBeNull());
+});
+
+it("reuses the batch key after a network failure and resets stale selections", async () => {
+  const first = evidence.items[0];
+  if (!first) throw new Error("Expected actionable evidence fixture");
+  const network = renderCorrections(WRITE_ACCESS, {
+    batchResponses: [new Error("offline")],
+  });
+  await screen.findByText(first.displayIdentity);
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: `Выбрать событие ${first.displayIdentity}` }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Отменить выбранные сканы" }));
+  fireEvent.change(screen.getByLabelText("Причина исправления"), {
+    target: { value: "Сверено" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Подтвердить отмену" }));
+  expect(await screen.findByText("Связь прервалась. Повторите с тем же запросом.")).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "Подтвердить отмену" }));
+  await waitFor(() => expect(network.writes).toHaveLength(2));
+  expect(
+    network.writes.map((write) => (write as { idempotencyKey: string }).idempotencyKey),
+  ).toEqual([
+    (network.writes[0] as { idempotencyKey: string }).idempotencyKey,
+    (network.writes[0] as { idempotencyKey: string }).idempotencyKey,
+  ]);
+  cleanup();
+  network.router.dispose();
+
+  const stale = renderCorrections(WRITE_ACCESS, {
+    batchResponses: [
+      response({ code: "INVENTORY_CORRECTION_STALE_REVISION", resultRevision: 9 }, 409),
+    ],
+  });
+  await screen.findByText(first.displayIdentity);
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: `Выбрать событие ${first.displayIdentity}` }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Отменить выбранные сканы" }));
+  fireEvent.change(screen.getByLabelText("Причина исправления"), {
+    target: { value: "Сверено" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Подтвердить отмену" }));
+  expect(
+    await screen.findByText("Данные изменились. Выберите события заново и повторите действие."),
+  ).toBeDefined();
+  expect(screen.queryByText(/Выбрано событий:/)).toBeNull();
+  stale.router.dispose();
 });
 
 it("requires a reason and posts the selected scan with revision and a bounded idempotency key", async () => {
@@ -278,7 +563,9 @@ it("uses paginated evidence actions and never offers controls for duplicate nonw
 it("does not render a date correction when evidence permits only voiding an active membership", async () => {
   const originalItems = evidence.items;
   const originalTotal = evidence.total;
-  evidence.items = [{ ...progress.recentEvents[0], actions: ["void_scan"] }];
+  const sourceEvent = originalItems[0];
+  if (!sourceEvent) throw new Error("Expected correction evidence fixture");
+  evidence.items = [{ ...sourceEvent, actions: ["void_scan"] }];
   evidence.total = 1;
   try {
     renderCorrections();

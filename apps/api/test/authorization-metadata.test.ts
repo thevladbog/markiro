@@ -174,6 +174,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
       reopen: writePolicy,
       complete: writePolicy,
       correct: writePolicy,
+      correctBatch: writePolicy,
       create: writePolicy,
       taskForm: readPolicy,
       get: readPolicy,
