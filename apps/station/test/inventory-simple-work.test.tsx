@@ -435,7 +435,11 @@ describe("simple inventory work screen", () => {
     await waitFor(() =>
       expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
     );
-    expect(scan.isListening()).toBe(false);
+    // Waited for, not asserted outright: the dialog text commits with the
+    // `heldScan` render set from this scan's async `onOutcome`, while the
+    // listener's teardown rides the passive effect that reacts to `heldScan`
+    // — a later flush that can still be pending on a loaded machine.
+    await waitFor(() => expect(scan.isListening()).toBe(false));
     expect(
       (
         db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get() as {
@@ -647,7 +651,11 @@ describe("simple inventory work screen", () => {
 
     scan.emit(SSCC);
     await waitFor(() => expect(screen.getByText("В коробе несколько дат розлива")).toBeTruthy());
-    expect(scan.isListening()).toBe(false);
+    // Waited for, not asserted outright: the dialog text commits with the
+    // `heldScan` render set from this scan's async `onOutcome`, while the
+    // listener's teardown rides the passive effect that reacts to `heldScan`
+    // — a later flush that can still be pending on a loaded machine.
+    await waitFor(() => expect(scan.isListening()).toBe(false));
     expect(screen.getByText(/Подставить одну дату нельзя/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Установить/ })).toBeNull();
 
