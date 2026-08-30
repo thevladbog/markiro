@@ -2031,6 +2031,12 @@ body,
   width: min(880px, 100%);
 }
 
+/* The hint sits under a centred comparison, so it centres with it rather than
+   ranging left against the block's edge. */
+.inventory-date-dialog--compare p {
+  text-align: center;
+}
+
 .inventory-date-compare {
   display: grid;
   gap: var(--sp-4);

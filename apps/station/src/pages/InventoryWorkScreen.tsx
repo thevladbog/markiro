@@ -770,11 +770,7 @@ function CheckInventoryWorkScreen({
                   <strong>{heldScan ? formatCivilDate(heldScan.activeDate, locale) : "—"}</strong>
                 </div>
               </div>
-              <p>
-                {t("inventory.work.sourceDate.mixedBody", {
-                  active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
-                })}
-              </p>
+              <p>{t("inventory.work.sourceDate.mixedBody")}</p>
             </>
           ) : (
             <>
