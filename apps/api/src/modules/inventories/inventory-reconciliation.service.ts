@@ -19,6 +19,7 @@ import type {
   ListInventoryEvidenceQueryDto,
   ListInventoryEvidenceResponseDto,
 } from "./dto";
+import { formatInventoryEventIdentity, type InventoryEventKind } from "./inventory-event-display";
 
 interface ProgressCountRow {
   expectedCount: number;
@@ -76,8 +77,9 @@ interface LiveBoxRow {
 interface RecentEventRow {
   eventId: string;
   codeResultId: string | null;
-  kind: "item" | "known_box" | "old_box";
-  displayIdentity: string;
+  kind: InventoryEventKind;
+  normalizedIdentity: string;
+  rawPayload: string | null;
   authoritativeVerdict: string;
   terminalId: string;
   terminalName: string;
@@ -241,7 +243,8 @@ export class InventoryReconciliationService {
           e.event_id as "eventId",
           r.id as "codeResultId",
           e.kind::text as kind,
-          e.normalized_identity as "displayIdentity",
+          e.normalized_identity as "normalizedIdentity",
+          e.raw_payload as "rawPayload",
           e.authoritative_verdict as "authoritativeVerdict",
           e.device_id as "terminalId",
           d.name as "terminalName",
@@ -297,7 +300,11 @@ export class InventoryReconciliationService {
   ): Promise<ListInventoryEvidenceResponseDto> {
     await this.getInventoryProjection(tx, tenantId, inventoryId);
     const searchFilter = query.search
-      ? sql`and (e.normalized_identity ilike ${`%${query.search}%`} or d.name ilike ${`%${query.search}%`})`
+      ? sql`and (
+          e.normalized_identity ilike ${`%${query.search}%`}
+          or coalesce(e.raw_payload, '') ilike ${`%${query.search}%`}
+          or d.name ilike ${`%${query.search}%`}
+        )`
       : sql``;
     const kindFilter = query.kind ? sql`and e.kind = ${query.kind}` : sql``;
     const classificationFilter = query.classification
@@ -335,7 +342,8 @@ export class InventoryReconciliationService {
         e.event_id as "eventId",
         r.id as "codeResultId",
         e.kind::text as kind,
-        e.normalized_identity as "displayIdentity",
+        e.normalized_identity as "normalizedIdentity",
+        e.raw_payload as "rawPayload",
         e.authoritative_verdict as "authoritativeVerdict",
         e.device_id as "terminalId",
         d.name as "terminalName",
@@ -740,7 +748,11 @@ function parseRecentEventRow(value: unknown): InventoryRecentEventDto {
     eventId: readString(record, "eventId"),
     codeResultId: readNullableString(record, "codeResultId"),
     kind,
-    displayIdentity: readString(record, "displayIdentity"),
+    displayIdentity: formatInventoryEventIdentity(
+      kind,
+      readNullableString(record, "rawPayload"),
+      readString(record, "normalizedIdentity"),
+    ),
     authoritativeVerdict: readString(record, "authoritativeVerdict"),
     terminalId: readString(record, "terminalId"),
     terminalName: readString(record, "terminalName"),

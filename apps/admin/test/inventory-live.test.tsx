@@ -133,7 +133,7 @@ const progress = {
       eventId: EVENT_ID,
       codeResultId: RESULT_ID,
       kind: "item",
-      displayIdentity: "…00000042 / …4831",
+      displayIdentity: "(01)04680089900383 (21)SERIAL-42",
       authoritativeVerdict: "applied",
       terminalId: "77777777-7777-4777-8777-777777777777",
       terminalName: "Станция упаковки № 1",
@@ -234,8 +234,13 @@ it("renders approved live evidence with stale participants and local pending wor
   expect(screen.getByText("Вышел")).toBeDefined();
   expect(screen.getByText(/3 события на терминалах/)).toBeDefined();
   expect(screen.getByText("146000000000000012")).toBeDefined();
-  expect(screen.getByText("…00000042 / …4831")).toBeDefined();
+  expect(screen.getByText("(01)04680089900383 (21)SERIAL-42")).toBeDefined();
   expect(screen.getByRole("link", { name: "Исправления" })).toBeDefined();
+  expect(
+    screen.getByText(
+      "Формирование станет доступно после закрытия инвентаризации и фиксации результата.",
+    ),
+  ).toBeDefined();
 });
 
 it("polls at the bounded interval while running and stops after the server reports closed", async () => {

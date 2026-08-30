@@ -92,7 +92,7 @@ const progress = {
       eventId: EVENT_ID,
       codeResultId: RESULT_ID,
       kind: "item",
-      displayIdentity: "…00000042 / …4831",
+      displayIdentity: "(01)04680089900383 (21)SERIAL-42",
       authoritativeVerdict: "applied",
       terminalId: "77777777-7777-4777-8777-777777777777",
       terminalName: "СТ-А-02",
@@ -116,6 +116,7 @@ const evidence = {
       codeResultId: null,
       authoritativeVerdict: "duplicate",
       displayIdentity: "duplicate evidence",
+      observedProductionDate: null,
       actions: [],
     },
   ],
@@ -209,7 +210,7 @@ afterEach(async () => {
 it("requires a reason and posts the selected scan with revision and a bounded idempotency key", async () => {
   const { writes } = renderCorrections();
   expect(await screen.findByRole("heading", { name: "Исправления · IVN-26-0042" })).toBeDefined();
-  fireEvent.click(screen.getByRole("button", { name: "Выбрать …00000042 / …4831" }));
+  fireEvent.click(screen.getByRole("button", { name: "Выбрать (01)04680089900383 (21)SERIAL-42" }));
   const submit = screen.getByRole("button", { name: "Отменить скан" });
   expect((submit as HTMLButtonElement).disabled).toBe(true);
   fireEvent.change(screen.getByLabelText("Причина исправления"), {
@@ -230,7 +231,7 @@ it("requires a reason and posts the selected scan with revision and a bounded id
 it("denies the corrections route to operations.read users before loading inventory evidence", async () => {
   renderCorrections(READ_ACCESS);
   expect(await screen.findByTestId("forbidden-page")).toBeDefined();
-  expect(screen.queryByText("…00000042 / …4831")).toBeNull();
+  expect(screen.queryByText("(01)04680089900383 (21)SERIAL-42")).toBeNull();
 });
 
 it("does not expose mutation controls after the inventory is no longer running", async () => {
@@ -249,14 +250,18 @@ it("derives immutability from the latest progress status and hides all controls 
   expect(
     await screen.findByText("Исправления доступны только пока инвентаризация идёт"),
   ).toBeDefined();
-  expect(screen.queryByRole("button", { name: "Выбрать …00000042 / …4831" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Выбрать (01)04680089900383 (21)SERIAL-42" }),
+  ).toBeNull();
   progress.status = "running";
 });
 
 it("uses paginated evidence actions and never offers controls for duplicate nonwinning events", async () => {
   renderCorrections();
   expect(await screen.findByText("duplicate evidence")).toBeDefined();
-  expect(screen.getByRole("button", { name: "Выбрать …00000042 / …4831" })).toBeDefined();
+  expect(
+    screen.getByRole("button", { name: "Выбрать (01)04680089900383 (21)SERIAL-42" }),
+  ).toBeDefined();
   expect(screen.queryByRole("button", { name: "Выбрать duplicate evidence" })).toBeNull();
   fireEvent.change(screen.getByLabelText("Поиск по событиям"), {
     target: { value: "00000042" },
@@ -277,7 +282,11 @@ it("does not render a date correction when evidence permits only voiding an acti
   evidence.total = 1;
   try {
     renderCorrections();
-    fireEvent.click(await screen.findByRole("button", { name: "Выбрать …00000042 / …4831" }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Выбрать (01)04680089900383 (21)SERIAL-42",
+      }),
+    );
     expect(screen.getByRole("button", { name: "Отменить скан" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Изменить дату" })).toBeNull();
   } finally {
@@ -286,10 +295,36 @@ it("does not render a date correction when evidence permits only voiding an acti
   }
 });
 
+it("shows the recorded production date, preloads date correction, and hides repack boxes in check mode", async () => {
+  renderCorrections();
+
+  expect(await screen.findByText("Дата производства: 19.09.2025")).toBeDefined();
+  expect(screen.queryByRole("heading", { name: "Новые короба" })).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Изменить дату" }));
+  expect((screen.getByLabelText("Новая дата производства") as HTMLInputElement).value).toBe(
+    "2025-09-19",
+  );
+});
+
 it("offers reprint only for a closed printed box and never for open, invalidated, or pending boxes", async () => {
+  const mutableDetail = detail as unknown as {
+    mode: "check" | "repack";
+    boxLabelTemplateId: string | null;
+    boxLabelTemplate: { id: string; name: string } | null;
+  };
+  const originalMode = mutableDetail.mode;
+  const originalTemplateId = mutableDetail.boxLabelTemplateId;
+  const originalTemplate = mutableDetail.boxLabelTemplate;
   const mutableProgress = progress as unknown as {
     boxTotal: number;
     boxes: ReturnType<typeof box>[];
+  };
+  mutableDetail.mode = "repack";
+  mutableDetail.boxLabelTemplateId = "abababab-abab-4bab-8bab-abababababab";
+  mutableDetail.boxLabelTemplate = {
+    id: "abababab-abab-4bab-8bab-abababababab",
+    name: "Короб 20",
   };
   mutableProgress.boxTotal = 4;
   mutableProgress.boxes = [
@@ -298,12 +333,19 @@ it("offers reprint only for a closed printed box and never for open, invalidated
     box("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3", "346000000000000016", "invalidated", "printed"),
     box("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4", "446000000000000013", "closed", "pending"),
   ];
-  renderCorrections();
-  expect(
-    await screen.findAllByRole("button", { name: "Поставить перепечать в очередь" }),
-  ).toHaveLength(1);
-  mutableProgress.boxes = [];
-  mutableProgress.boxTotal = 0;
+  try {
+    renderCorrections();
+    expect(await screen.findByRole("heading", { name: "Новые короба" })).toBeDefined();
+    expect(screen.getAllByRole("button", { name: "Поставить перепечать в очередь" })).toHaveLength(
+      1,
+    );
+  } finally {
+    mutableDetail.mode = originalMode;
+    mutableDetail.boxLabelTemplateId = originalTemplateId;
+    mutableDetail.boxLabelTemplate = originalTemplate;
+    mutableProgress.boxes = [];
+    mutableProgress.boxTotal = 0;
+  }
 });
 
 function box(id: string, sscc: string, state: string, printState: string) {

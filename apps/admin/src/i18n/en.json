@@ -535,6 +535,7 @@
       "documents": {
         "title": "Final documents",
         "completedReadOnly": "The inventory is completed — documents are available for viewing and download only",
+        "availableAfterClose": "Generation will become available after the inventory is closed and its result is frozen.",
         "catalogEmptyTitle": "Document formats have not been approved yet",
         "catalogEmptyHint": "Generation will become available after formats and control fixtures are approved. The system does not create files from unverified rules.",
         "selectionTitle": "Documents to generate",
@@ -556,8 +557,21 @@
         "invalidated": "Document invalidated after reopening",
         "downloaded": "Downloaded",
         "unavailable": "Unavailable",
-        "downloadArtifact": "Download {{filename}}",
+        "download": "Download",
+        "downloadArtifact": "Download: {{type}}",
         "downloadZip": "Download ZIP",
+        "format": {
+          "inventory_pdf_act": "[PDF] Inventory act",
+          "inventory_xml_gismt_aggregation": "[XML][GIS MT] Package aggregation",
+          "inventory_xml_gismt_disaggregation": "[XML][GIS MT] Package disaggregation",
+          "inventory_txt_write_off": "[TXT] Codes to write off",
+          "inventory_csv_write_off": "[CSV] Codes to write off",
+          "inventory_csv_current_stock": "[CSV] Codes for current stock",
+          "inventory_txt_current_stock": "[TXT] Codes for current stock",
+          "inventory_csv_final_box_contents": "[CSV] Final box contents",
+          "inventory_txt_final_boxes": "[TXT] Final box numbers",
+          "inventory_csv_balances_by_production_date": "[CSV] Balances by production date"
+        },
         "completionTitle": "Completion",
         "downloadFirst": "Download every document for the current result first",
         "errors": {
@@ -574,7 +588,7 @@
           "lateEvents": "Resolve every late inventory event first.",
           "verifiedProductionDateMissing": "Verified codes do not have a production date. Resume the inventory, correct the dates, and generate the documents again.",
           "invalidOrganizationInn": "The organization INN is missing or invalid. Fill it in Settings and retry the generation.",
-          "organizationInnRequired": "GIS MT XML documents require the organization INN. Fill it in Settings."
+          "organizationInnRequired": "The selected documents require the organization INN. Fill it in Settings."
         }
       },
       "late": {
@@ -613,8 +627,9 @@
         "runningOnly": "Corrections are available only while the inventory is running",
         "auditHint": "Every action requires a reason and is retained as immutable audit evidence.",
         "back": "Back to inventory progress",
-        "events": "Events and codes",
-        "boxes": "Boxes",
+        "events": "Scan events",
+        "newBoxes": "New boxes",
+        "newBoxesEmpty": "New boxes will appear here after repacking begins.",
         "search": "Search events",
         "kind": "Event type",
         "classification": "Classification",
@@ -629,7 +644,8 @@
         "formTitle": "Correction · {{identity}}",
         "reason": "Correction reason",
         "reasonTooLong": "The reason must not exceed 1024 UTF-8 bytes",
-        "observedDate": "Observed production date",
+        "productionDate": "Production date: {{date}}",
+        "observedDate": "New production date",
         "saved": "Correction saved to the audit trail",
         "saveError": "Could not save the correction. Refresh the data and try again.",
         "action": {

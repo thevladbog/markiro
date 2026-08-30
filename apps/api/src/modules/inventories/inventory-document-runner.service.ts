@@ -10,6 +10,8 @@ import {
   generateInventoryAggregationXmlV2,
   generateInventoryBalancesByProductionDateCsv,
   generateInventoryCurrentStockCsv,
+  generateInventoryCurrentStockCsvV1,
+  generateInventoryCurrentStockTxt,
   generateInventoryDisaggregationXml,
   generateInventoryFinalBoxContentsCsv,
   generateInventoryFinalBoxesTxt,
@@ -31,6 +33,7 @@ import {
   InventoryResultSourceService,
   type InventoryResultSource,
 } from "./inventory-result-source.service";
+import { generateInventoryActPdf } from "./inventory-act-pdf";
 
 export interface InventoryDocumentZipArtifact {
   filename: string;
@@ -124,6 +127,10 @@ const generatorKey = (id: string, version: number): string => `${id}@${version}`
 
 export const productionInventoryDocumentGeneratorRegistry = new InventoryDocumentGeneratorRegistry([
   {
+    descriptor: getRegisteredInventoryDocumentFormat("inventory_pdf_act", 1),
+    generate: generateInventoryActPdf,
+  },
+  {
     descriptor: getRegisteredInventoryDocumentFormat("inventory_xml_gismt_aggregation", 1),
     allowsZeroByteArtifact: true,
     generate: generateInventoryAggregationXml,
@@ -149,7 +156,16 @@ export const productionInventoryDocumentGeneratorRegistry = new InventoryDocumen
   },
   {
     descriptor: getRegisteredInventoryDocumentFormat("inventory_csv_current_stock", 1),
+    generate: generateInventoryCurrentStockCsvV1,
+  },
+  {
+    descriptor: getRegisteredInventoryDocumentFormat("inventory_csv_current_stock", 2),
     generate: generateInventoryCurrentStockCsv,
+  },
+  {
+    descriptor: getRegisteredInventoryDocumentFormat("inventory_txt_current_stock", 1),
+    allowsZeroByteArtifact: true,
+    generate: generateInventoryCurrentStockTxt,
   },
   {
     descriptor: getRegisteredInventoryDocumentFormat("inventory_csv_final_box_contents", 1),

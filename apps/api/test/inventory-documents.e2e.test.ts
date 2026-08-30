@@ -408,11 +408,13 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
 
   const productionBody = (idempotencyKey = randomUUID()) => ({
     selectedFormats: [
+      { id: "inventory_pdf_act", version: 1 },
       { id: "inventory_xml_gismt_aggregation", version: 2 },
       { id: "inventory_xml_gismt_disaggregation", version: 1 },
       { id: "inventory_txt_write_off", version: 1 },
       { id: "inventory_csv_write_off", version: 1 },
-      { id: "inventory_csv_current_stock", version: 1 },
+      { id: "inventory_csv_current_stock", version: 2 },
+      { id: "inventory_txt_current_stock", version: 1 },
       { id: "inventory_csv_final_box_contents", version: 1 },
       { id: "inventory_txt_final_boxes", version: 1 },
       { id: "inventory_csv_balances_by_production_date", version: 1 },
@@ -1219,7 +1221,11 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       ["inventory_csv_write_off", csvBytes(`code\r\n${EXPECTED_LOOSE_RAW}\r\n`)],
       [
         "inventory_csv_current_stock",
-        csvBytes(`code\r\n${CLEAN_ELIGIBLE_RAW}\r\n${SHARED_ELIGIBLE_RAW}\r\n`),
+        csvBytes(`${CLEAN_ELIGIBLE_RAW}\r\n${SHARED_ELIGIBLE_RAW}\r\n`),
+      ],
+      [
+        "inventory_txt_current_stock",
+        Buffer.from(`${CLEAN_ELIGIBLE_RAW}\n${SHARED_ELIGIBLE_RAW}\n`),
       ],
       [
         "inventory_csv_final_box_contents",
@@ -1242,6 +1248,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       inventory_txt_write_off: "write-off.txt",
       inventory_csv_write_off: "write-off.csv",
       inventory_csv_current_stock: "current-stock.csv",
+      inventory_txt_current_stock: "current-stock.txt",
       inventory_csv_final_box_contents: "final-box-contents.csv",
       inventory_txt_final_boxes: "final-boxes.txt",
       inventory_csv_balances_by_production_date: "balances-by-production-date.csv",
@@ -1251,7 +1258,8 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       inventory_xml_gismt_disaggregation: { rowCount: 9, codeCount: 0, boxCount: 1 },
       inventory_txt_write_off: { rowCount: 1, codeCount: 1, boxCount: 0 },
       inventory_csv_write_off: { rowCount: 2, codeCount: 1, boxCount: 0 },
-      inventory_csv_current_stock: { rowCount: 3, codeCount: 2, boxCount: 0 },
+      inventory_csv_current_stock: { rowCount: 2, codeCount: 2, boxCount: 0 },
+      inventory_txt_current_stock: { rowCount: 2, codeCount: 2, boxCount: 0 },
       inventory_csv_final_box_contents: { rowCount: 3, codeCount: 2, boxCount: 2 },
       inventory_txt_final_boxes: { rowCount: 2, codeCount: 0, boxCount: 2 },
       inventory_csv_balances_by_production_date: { rowCount: 3, codeCount: 2, boxCount: 2 },
@@ -1262,13 +1270,17 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       inventory_txt_write_off: "text/plain; charset=utf-8",
       inventory_csv_write_off: "text/csv; charset=utf-8",
       inventory_csv_current_stock: "text/csv; charset=utf-8",
+      inventory_txt_current_stock: "text/plain; charset=utf-8",
       inventory_csv_final_box_contents: "text/csv; charset=utf-8",
       inventory_txt_final_boxes: "text/plain; charset=utf-8",
       inventory_csv_balances_by_production_date: "text/csv; charset=utf-8",
     } as const;
     const expectedArtifacts = [...expectedBytes].map(([formatId, body]) => ({
       formatId,
-      formatVersion: formatId === "inventory_xml_gismt_aggregation" ? 2 : 1,
+      formatVersion:
+        formatId === "inventory_xml_gismt_aggregation" || formatId === "inventory_csv_current_stock"
+          ? 2
+          : 1,
       partNumber: 1,
       filename: `inventory-${owner.inventoryNumber}-${suffixes[formatId as keyof typeof suffixes]}`,
       mimeType: mimeTypes[formatId as keyof typeof mimeTypes],
@@ -1278,19 +1290,28 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     }));
     expect(run).toMatchObject({ resultRevision, status: "ready" });
     expect(
-      artifacts.map((artifact) => ({
-        formatId: artifact.formatId,
-        formatVersion: artifact.formatVersion,
-        partNumber: artifact.partNumber,
-        filename: artifact.filename,
-        mimeType: artifact.mimeType,
-        rowCount: artifact.rowCount,
-        codeCount: artifact.codeCount,
-        boxCount: artifact.boxCount,
-        byteSize: artifact.byteSize,
-        sha256: artifact.sha256,
-      })),
+      artifacts
+        .filter((artifact) => artifact.formatId !== "inventory_pdf_act")
+        .map((artifact) => ({
+          formatId: artifact.formatId,
+          formatVersion: artifact.formatVersion,
+          partNumber: artifact.partNumber,
+          filename: artifact.filename,
+          mimeType: artifact.mimeType,
+          rowCount: artifact.rowCount,
+          codeCount: artifact.codeCount,
+          boxCount: artifact.boxCount,
+          byteSize: artifact.byteSize,
+          sha256: artifact.sha256,
+        })),
     ).toEqual(expectedArtifacts.sort((left, right) => left.formatId.localeCompare(right.formatId)));
+    expect(artifacts.find((artifact) => artifact.formatId === "inventory_pdf_act")).toMatchObject({
+      formatVersion: 1,
+      partNumber: 1,
+      filename: `inventory-${owner.inventoryNumber}-act.pdf`,
+      mimeType: "application/pdf",
+      rowCount: 1,
+    });
     const storedArtifacts = await db
       .select({
         id: schema.inventoryDocumentArtifacts.id,
@@ -1307,11 +1328,15 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       })
       .from(schema.inventoryDocumentArtifacts)
       .where(eq(schema.inventoryDocumentArtifacts.runId, runId));
-    expect(storedArtifacts).toHaveLength(8);
+    expect(storedArtifacts).toHaveLength(10);
 
     const verifyBody = (formatId: string, body: Buffer, sha256: string) => {
       expect(createHash("sha256").update(body).digest("hex")).toBe(sha256);
-      expect(body).toEqual(expectedBytes.get(formatId));
+      if (formatId === "inventory_pdf_act") {
+        expect(body.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+      } else {
+        expect(body).toEqual(expectedBytes.get(formatId));
+      }
       expect(body.toString("utf8")).not.toContain(PROTECTED_RAW);
       expect(body.toString("utf8")).not.toContain(PROTECTED_SERIAL);
     };
@@ -1849,14 +1874,15 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     });
   });
 
-  it("publishes a ready six-format empty tabular package and a zero-byte XML package for an empty source", async () => {
+  it("publishes a ready seven-format empty tabular package and a zero-byte XML package for an empty source", async () => {
     registry = productionInventoryDocumentGeneratorRegistry;
     try {
       const owner = await seedInventory();
       const selectedFormats = [
         { id: "inventory_txt_write_off", version: 1 },
         { id: "inventory_csv_write_off", version: 1 },
-        { id: "inventory_csv_current_stock", version: 1 },
+        { id: "inventory_csv_current_stock", version: 2 },
+        { id: "inventory_txt_current_stock", version: 1 },
         { id: "inventory_csv_final_box_contents", version: 1 },
         { id: "inventory_txt_final_boxes", version: 1 },
         { id: "inventory_csv_balances_by_production_date", version: 1 },
@@ -1891,7 +1917,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         | undefined;
       if (!readyRun) throw new Error("Expected empty tabular run");
       expect(readyRun.status).toBe("ready");
-      expect(readyRun.artifacts).toHaveLength(6);
+      expect(readyRun.artifacts).toHaveLength(7);
       const expectedEmpty = new Map([
         [
           "inventory_txt_write_off",
@@ -1916,8 +1942,17 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
           {
             suffix: "current-stock.csv",
             mimeType: "text/csv; charset=utf-8",
-            rowCount: 1,
-            body: Buffer.concat([UTF8_BOM, Buffer.from("code\r\n")]),
+            rowCount: 0,
+            body: UTF8_BOM,
+          },
+        ],
+        [
+          "inventory_txt_current_stock",
+          {
+            suffix: "current-stock.txt",
+            mimeType: "text/plain; charset=utf-8",
+            rowCount: 0,
+            body: Buffer.alloc(0),
           },
         ],
         [
@@ -2068,7 +2103,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         .send({
           selectedFormats: [
             { id: "inventory_xml_gismt_aggregation", version: 2 },
-            { id: "inventory_csv_current_stock", version: 1 },
+            { id: "inventory_csv_current_stock", version: 2 },
           ],
           idempotencyKey: randomUUID(),
         })
@@ -2102,10 +2137,8 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
           formatId: "inventory_csv_current_stock",
           filename: `inventory-${owner.inventoryNumber}-current-stock.csv`,
           mimeType: "text/csv; charset=utf-8",
-          byteSize: UTF8_BOM.byteLength + Buffer.from("code\r\n").byteLength,
-          sha256: createHash("sha256")
-            .update(Buffer.concat([UTF8_BOM, Buffer.from("code\r\n")]))
-            .digest("hex"),
+          byteSize: UTF8_BOM.byteLength,
+          sha256: createHash("sha256").update(UTF8_BOM).digest("hex"),
         },
         {
           formatId: "inventory_xml_gismt_aggregation",
@@ -2139,7 +2172,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         .send({
           selectedFormats: [
             { id: "inventory_xml_gismt_aggregation", version: 2 },
-            { id: "inventory_csv_current_stock", version: 1 },
+            { id: "inventory_csv_current_stock", version: 2 },
           ],
           idempotencyKey: randomUUID(),
         })
@@ -2153,7 +2186,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       const tabularOnly = await owner.agent
         .post(`/inventories/${owner.inventoryId}/document-runs`)
         .send({
-          selectedFormats: [{ id: "inventory_csv_current_stock", version: 1 }],
+          selectedFormats: [{ id: "inventory_csv_current_stock", version: 2 }],
           idempotencyKey: randomUUID(),
         })
         .expect(201);
@@ -2177,7 +2210,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         .send({
           selectedFormats: [
             { id: "inventory_xml_gismt_aggregation", version: 2 },
-            { id: "inventory_csv_current_stock", version: 1 },
+            { id: "inventory_csv_current_stock", version: 2 },
           ],
           idempotencyKey: randomUUID(),
         })
@@ -2191,7 +2224,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       const tabularOnly = await owner.agent
         .post(`/inventories/${owner.inventoryId}/document-runs`)
         .send({
-          selectedFormats: [{ id: "inventory_csv_current_stock", version: 1 }],
+          selectedFormats: [{ id: "inventory_csv_current_stock", version: 2 }],
           idempotencyKey: randomUUID(),
         })
         .expect(201);
