@@ -545,9 +545,7 @@ describe("repack inventory work screen", () => {
     );
     await waitFor(() => expect(scan.active()).toBe(true));
     scan.emit(OLD_SSCC);
-    await waitFor(() =>
-      expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20"),
-    );
+    await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20"));
 
     scan.emit(canonicalizeKm(`01${GTIN}21REPACK-MIX-A`).raw);
 
@@ -558,9 +556,7 @@ describe("repack inventory work screen", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Установить/ }));
 
-    await waitFor(() =>
-      expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"),
-    );
+    await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"));
     const box = db
       .prepare("SELECT production_date FROM inventory_repack_boxes_mirror LIMIT 1")
       .get() as { production_date: string };
@@ -622,9 +618,7 @@ describe("repack inventory work screen", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Установить/ }));
 
-    await waitFor(() =>
-      expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"),
-    );
+    await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"));
     const box = db
       .prepare("SELECT production_date FROM inventory_repack_boxes_mirror LIMIT 1")
       .get() as { production_date: string };
@@ -702,9 +696,7 @@ describe("repack inventory work screen", () => {
     );
     await waitFor(() => expect(scan.active()).toBe(true));
     scan.emit(OLD_SSCC);
-    await waitFor(() =>
-      expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20"),
-    );
+    await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20"));
 
     scan.emit(canonicalizeKm(`01${GTIN}21REPACK-GATE-A`).raw);
     await waitFor(() =>
@@ -742,9 +734,7 @@ describe("repack inventory work screen", () => {
     // uncontested one would: the held bottle is counted under the adopted
     // date and the scanner resumes.
     await waitFor(() => expect(scan.active()).toBe(true));
-    await waitFor(() =>
-      expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"),
-    );
+    await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"));
     const box = db
       .prepare("SELECT production_date FROM inventory_repack_boxes_mirror LIMIT 1")
       .get() as { production_date: string };
@@ -795,9 +785,7 @@ describe("repack inventory work screen", () => {
     await waitFor(() => expect(scan.active()).toBe(true));
     scan.emit(OLD_SSCC);
     scan.emit(canonicalizeKm(`01${GTIN}21REPACK-KEEP`).raw);
-    await waitFor(() =>
-      expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"),
-    );
+    await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"));
 
     scan.emit(canonicalizeKm(`01${GTIN}21REPACK-OTHER`).raw);
 
@@ -876,9 +864,7 @@ describe("repack inventory work screen", () => {
     );
     await waitFor(() => expect(scan.active()).toBe(true));
     scan.emit(OLD_SSCC);
-    await waitFor(() =>
-      expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20"),
-    );
+    await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20"));
 
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
     fireEvent.change(screen.getByLabelText("Дата производства"), {
@@ -900,9 +886,7 @@ describe("repack inventory work screen", () => {
     // date must actually be added — not silently degrade to observe-only
     // because the terminal is still lagging behind the box.
     scan.emit(km.raw);
-    await waitFor(() =>
-      expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"),
-    );
+    await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"));
   });
 
   it("holds only the first of two back-to-back mismatching scans and drops the second from the queue", async () => {
@@ -950,9 +934,7 @@ describe("repack inventory work screen", () => {
     );
     await waitFor(() => expect(scan.active()).toBe(true));
     scan.emit(OLD_SSCC);
-    await waitFor(() =>
-      expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20"),
-    );
+    await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20"));
 
     // Back to back, with no `await` in between: both scans land in the scan
     // queue's buffer before React commits `heldScan` and tears the listener
@@ -977,8 +959,6 @@ describe("repack inventory work screen", () => {
 
     // MATCH can still be scanned normally afterward.
     scan.emit(match.raw);
-    await waitFor(() =>
-      expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"),
-    );
+    await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"));
   });
 });

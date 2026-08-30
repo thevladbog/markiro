@@ -639,9 +639,9 @@ describe("durable inventory repacking", () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM inventory_repack_journal").get()).toEqual(
       journalCountBefore,
     );
-    expect(
-      db.prepare("SELECT COUNT(*) AS n FROM inventory_repack_items_mirror").get(),
-    ).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM inventory_repack_items_mirror").get()).toEqual({
+      n: 0,
+    });
   });
 
   it("adds a mismatched bottle once the operator explicitly accepts the source date", async () => {
@@ -661,9 +661,7 @@ describe("durable inventory repacking", () => {
     expect(result).toMatchObject({ verdict: "expected", itemCount: 1 });
     expect(
       db
-        .prepare(
-          "SELECT code_hash FROM inventory_repack_items_mirror WHERE removed_at IS NULL",
-        )
+        .prepare("SELECT code_hash FROM inventory_repack_items_mirror WHERE removed_at IS NULL")
         .get(),
     ).toEqual({ code_hash: mismatched.hash });
   });

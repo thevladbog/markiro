@@ -276,7 +276,11 @@ describe("inventory scan classification", () => {
 });
 
 describe("inventory scan source production date", () => {
-  function resolve(scannerRaw: string, rows: InventoryScanSnapshotRow[], claims: InventoryLocalClaim[] = []) {
+  function resolve(
+    scannerRaw: string,
+    rows: InventoryScanSnapshotRow[],
+    claims: InventoryLocalClaim[] = [],
+  ) {
     const rowsByHash = new Map(rows.map((item) => [item.codeHash, item]));
     return resolveInventoryScanSourceDate(classify(scannerRaw, rows, claims), {
       findSnapshotCode: (codeHash) => rowsByHash.get(codeHash) ?? null,

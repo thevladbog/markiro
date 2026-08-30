@@ -1887,7 +1887,9 @@ describe("inventory scan source production date guard", () => {
     // active date ("2026-08-20"), not its own snapshot date ("2026-08-23").
     // A query over both rows would pass vacuously via SAME's row alone.
     const stored = db
-      .prepare("SELECT observed_production_date FROM inventory_code_results_mirror WHERE code_hash = ?")
+      .prepare(
+        "SELECT observed_production_date FROM inventory_code_results_mirror WHERE code_hash = ?",
+      )
       .get(other.codeHash) as { observed_production_date: string };
     expect(stored).toEqual({ observed_production_date: "2026-08-20" });
   });

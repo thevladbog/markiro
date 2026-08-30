@@ -52,8 +52,7 @@ export interface InventoryScanDateMismatch {
 }
 
 export type RecordInventoryScanOutcome =
-  | ({ outcome: "recorded" } & RecordInventoryScanResult)
-  | InventoryScanDateMismatch;
+  ({ outcome: "recorded" } & RecordInventoryScanResult) | InventoryScanDateMismatch;
 
 export interface RecentInventoryOperation extends InventoryScanPresentation {
   eventId: string;
@@ -1527,7 +1526,10 @@ async function recordInventoryScanInternal(
     throw new Error("inventory outbox reservation mismatch");
   }
   await finalizePendingEvent(exec, input.inventoryId, input.snapshotId, input.eventId);
-  return { outcome: "recorded", ...resultFrom(classification, verdict, summary.total, firstWinning) };
+  return {
+    outcome: "recorded",
+    ...resultFrom(classification, verdict, summary.total, firstWinning),
+  };
 }
 
 /**

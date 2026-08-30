@@ -443,9 +443,9 @@ describe("simple inventory work screen", () => {
     expect(scan.isListening()).toBe(false);
     expect(
       (
-        db
-          .prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror")
-          .get() as { count: number }
+        db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get() as {
+          count: number;
+        }
       ).count,
     ).toBe(1);
 
@@ -454,16 +454,14 @@ describe("simple inventory work screen", () => {
     await waitFor(() =>
       expect(
         (
-          db
-            .prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror")
-            .get() as { count: number }
+          db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get() as {
+            count: number;
+          }
         ).count,
       ).toBe(2),
     );
     const stored = db
-      .prepare(
-        "SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?",
-      )
+      .prepare("SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?")
       .get(DEVICE_ID) as { active_production_date: string };
     expect(stored.active_production_date).toBe("2026-08-20");
   });
@@ -499,15 +497,13 @@ describe("simple inventory work screen", () => {
     await waitFor(() => expect(scan.isListening()).toBe(true));
     expect(
       (
-        db
-          .prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror")
-          .get() as { count: number }
+        db.prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror").get() as {
+          count: number;
+        }
       ).count,
     ).toBe(1);
     const stored = db
-      .prepare(
-        "SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?",
-      )
+      .prepare("SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?")
       .get(DEVICE_ID) as { active_production_date: string };
     expect(stored.active_production_date).toBe("2026-08-19");
   });
@@ -597,9 +593,9 @@ describe("simple inventory work screen", () => {
     await waitFor(() =>
       expect(
         (
-          db
-            .prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror")
-            .get() as { count: number }
+          db.prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror").get() as {
+            count: number;
+          }
         ).count,
       ).toBe(2),
     );
@@ -611,9 +607,7 @@ describe("simple inventory work screen", () => {
       .get(nextDayHash) as { observed_production_date: string };
     expect(nextDayResult.observed_production_date).toBe("2026-08-20");
     const stored = db
-      .prepare(
-        "SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?",
-      )
+      .prepare("SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?")
       .get(DEVICE_ID) as { active_production_date: string };
     expect(stored.active_production_date).toBe("2026-08-20");
   });
@@ -657,9 +651,7 @@ describe("simple inventory work screen", () => {
     await waitFor(() => expect(screen.getByText("Код принят")).toBeTruthy());
 
     scan.emit(SSCC);
-    await waitFor(() =>
-      expect(screen.getByText("В коробе несколько дат розлива")).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText("В коробе несколько дат розлива")).toBeTruthy());
     expect(scan.isListening()).toBe(false);
     expect(screen.getByText(/Подставить одну дату нельзя/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Установить/ })).toBeNull();
@@ -681,9 +673,7 @@ describe("simple inventory work screen", () => {
       expect(row.observed_production_date).toBe("2026-08-19");
     }
     const terminalDate = db
-      .prepare(
-        "SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?",
-      )
+      .prepare("SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?")
       .get(DEVICE_ID) as { active_production_date: string };
     expect(terminalDate.active_production_date).toBe("2026-08-19");
   });
@@ -767,9 +757,9 @@ describe("simple inventory work screen", () => {
     // the dialog for NEXTDAY is open.
     expect(
       (
-        db
-          .prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror")
-          .get() as { count: number }
+        db.prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror").get() as {
+          count: number;
+        }
       ).count,
     ).toBe(1);
 
@@ -782,9 +772,9 @@ describe("simple inventory work screen", () => {
     expect(screen.queryByText("Дата в коде отличается от активной")).toBeNull();
     expect(
       (
-        db
-          .prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror")
-          .get() as { count: number }
+        db.prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror").get() as {
+          count: number;
+        }
       ).count,
     ).toBe(1);
 

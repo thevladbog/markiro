@@ -24,11 +24,13 @@
 ### Task 1: Политика «дата из кода» в домене
 
 **Files:**
+
 - Modify: `packages/domain/src/inventory/scan.ts`
 - Modify: `packages/domain/src/inventory/index.ts:28-36`
 - Test: `packages/domain/test/inventory-scan.test.ts`
 
 **Interfaces:**
+
 - Consumes: ничего из предыдущих задач.
 - Produces:
   - `InventoryScanSnapshotRow.sourceProductionDate: string | null` — новое обязательное поле интерфейса.
@@ -96,7 +98,11 @@ import {
 
 ```ts
 describe("inventory scan source production date", () => {
-  function resolve(scannerRaw: string, rows: InventoryScanSnapshotRow[], claims: InventoryLocalClaim[] = []) {
+  function resolve(
+    scannerRaw: string,
+    rows: InventoryScanSnapshotRow[],
+    claims: InventoryLocalClaim[] = [],
+  ) {
     const rowsByHash = new Map(rows.map((item) => [item.codeHash, item]));
     return resolveInventoryScanSourceDate(classify(scannerRaw, rows, claims), {
       findSnapshotCode: (codeHash) => rowsByHash.get(codeHash) ?? null,
@@ -282,11 +288,13 @@ git commit -m "feat(domain): дата производства, следующа
 ### Task 2: Проверка даты в журнале станции
 
 **Files:**
+
 - Modify: `apps/station/src/lib/inventory-journal.ts`
 - Modify: `apps/station/src/pages/InventoryWorkScreen.tsx:279-334` (минимальная адаптация вызывающей стороны)
 - Test: `apps/station/test/inventory-journal.test.ts`
 
 **Interfaces:**
+
 - Consumes: `resolveInventoryScanSourceDate`, `InventoryScanSourceDate`, `InventoryScanSnapshotRow.sourceProductionDate` из Task 1.
 - Produces:
   - ```ts
@@ -300,8 +308,7 @@ git commit -m "feat(domain): дата производства, следующа
     }
 
     type RecordInventoryScanOutcome =
-      | ({ outcome: "recorded" } & RecordInventoryScanResult)
-      | InventoryScanDateMismatch;
+      ({ outcome: "recorded" } & RecordInventoryScanResult) | InventoryScanDateMismatch;
 
     function recordInventoryScan(
       exec: SqlExecutor,
@@ -409,7 +416,9 @@ describe("inventory scan source production date guard", () => {
 
     expect(outcome).toMatchObject({ outcome: "recorded", verdict: "expected" });
     const stored = db
-      .prepare("SELECT observed_production_date FROM inventory_code_results_mirror ORDER BY code_hash")
+      .prepare(
+        "SELECT observed_production_date FROM inventory_code_results_mirror ORDER BY code_hash",
+      )
       .all() as { observed_production_date: string }[];
     expect(stored).toContainEqual({ observed_production_date: "2026-08-20" });
   });
@@ -472,7 +481,7 @@ Expected: FAIL — существующие вызовы возвращают о
 в интерфейс `SnapshotDbRow` (строка 63) добавить поле после `source_state`:
 
 ```ts
-  source_production_date: string | null;
+source_production_date: string | null;
 ```
 
 в функции `snapshotRow` в возвращаемый объект после `sourceState: row.source_state,` добавить:
@@ -516,8 +525,7 @@ export interface InventoryScanDateMismatch {
 }
 
 export type RecordInventoryScanOutcome =
-  | ({ outcome: "recorded" } & RecordInventoryScanResult)
-  | InventoryScanDateMismatch;
+  ({ outcome: "recorded" } & RecordInventoryScanResult) | InventoryScanDateMismatch;
 ```
 
 - [ ] **Step 5: Реализовать проверку**
@@ -613,16 +621,16 @@ async function recordInventoryScanInternal(
 Ветка уже закоммиченного события:
 
 ```ts
-      return { outcome: "recorded", ...resultFrom(classification, verdict, summary.total, winner) };
+return { outcome: "recorded", ...resultFrom(classification, verdict, summary.total, winner) };
 ```
 
 Повторная проверка после реконсиляции:
 
 ```ts
-  classification = classifyFromFacts(input, await loadClassifierFacts(exec, input));
-  if (classification.kind === "invalid") {
-    return { outcome: "recorded", ...resultFrom(classification, "invalid", 0, null) };
-  }
+classification = classifyFromFacts(input, await loadClassifierFacts(exec, input));
+if (classification.kind === "invalid") {
+  return { outcome: "recorded", ...resultFrom(classification, "invalid", 0, null) };
+}
 ```
 
 Проверку даты здесь повторять не нужно — она уже пройдена на актуальных фактах.
@@ -630,7 +638,7 @@ async function recordInventoryScanInternal(
 Финальный возврат в конце функции:
 
 ```ts
-  return { outcome: "recorded", ...resultFrom(classification, verdict, summary.total, firstWinning) };
+return { outcome: "recorded", ...resultFrom(classification, verdict, summary.total, firstWinning) };
 ```
 
 Изменить экспорт:
@@ -656,10 +664,10 @@ Expected: PASS. Если падают старые тесты с `toEqual({ verd
 В `CheckInventoryWorkScreen` перед `const refresh` добавить тип и состояние:
 
 ```ts
-  const [heldScan, setHeldScan] = useState<HeldInventoryScan | null>(null);
-  const heldRef = useRef(false);
-  const bypassRef = useRef<string | null>(null);
-  const queueRef = useRef<ScanQueue | null>(null);
+const [heldScan, setHeldScan] = useState<HeldInventoryScan | null>(null);
+const heldRef = useRef(false);
+const bypassRef = useRef<string | null>(null);
+const queueRef = useRef<ScanQueue | null>(null);
 ```
 
 а перед объявлением компонента (рядом с `EMPTY_PROGRESS`) добавить типы:
@@ -673,69 +681,69 @@ type CheckScanOutcome = ({ outcome: "recorded" } & RecordInventoryScanResult) | 
 Переписать `useMemo` очереди (строка 279):
 
 ```ts
-  const queue = useMemo(
-    () =>
-      createScanQueue<CheckScanOutcome>({
-        shouldProcess: () => !heldRef.current,
-        process: async (raw) => {
-          const bypass = bypassRef.current === raw;
-          if (bypass) bypassRef.current = null;
-          const outcome = await recordInventoryScan(exec, {
-            inventoryId: inventory.inventoryId,
-            snapshotId: inventory.snapshotId,
-            deviceId,
-            operatorId,
-            taskGtin14: inventory.gtin14,
-            raw,
-            eventId: createEventId(),
-            scannedAt: now(),
-            ...(bypass ? { acceptSourceDateMismatch: true } : {}),
-          });
-          return outcome.outcome === "recorded" ? outcome : { ...outcome, raw };
-        },
-        onOutcome: (outcome) => {
-          if (!mounted.current) return;
-          setWriteFailed(false);
-          if (outcome.outcome === "date-mismatch") {
-            heldRef.current = true;
-            queueRef.current?.discardBufferedScans();
-            setHeldScan(outcome);
-            return;
-          }
-          setResult(outcome);
-          nudgeInventorySync();
-          void refresh().catch((error: unknown) => {
-            console.error("station: inventory progress refresh failed", error);
-          });
-        },
-        onError: (_raw, error) => {
-          console.error("station: inventory scan write failed", error);
-          if (mounted.current) setWriteFailed(true);
-        },
-      }),
-    [
-      createEventId,
-      deviceId,
-      exec,
-      inventory.gtin14,
-      inventory.inventoryId,
-      inventory.snapshotId,
-      now,
-      operatorId,
-      refresh,
-      nudgeInventorySync,
-    ],
-  );
-  queueRef.current = queue;
+const queue = useMemo(
+  () =>
+    createScanQueue<CheckScanOutcome>({
+      shouldProcess: () => !heldRef.current,
+      process: async (raw) => {
+        const bypass = bypassRef.current === raw;
+        if (bypass) bypassRef.current = null;
+        const outcome = await recordInventoryScan(exec, {
+          inventoryId: inventory.inventoryId,
+          snapshotId: inventory.snapshotId,
+          deviceId,
+          operatorId,
+          taskGtin14: inventory.gtin14,
+          raw,
+          eventId: createEventId(),
+          scannedAt: now(),
+          ...(bypass ? { acceptSourceDateMismatch: true } : {}),
+        });
+        return outcome.outcome === "recorded" ? outcome : { ...outcome, raw };
+      },
+      onOutcome: (outcome) => {
+        if (!mounted.current) return;
+        setWriteFailed(false);
+        if (outcome.outcome === "date-mismatch") {
+          heldRef.current = true;
+          queueRef.current?.discardBufferedScans();
+          setHeldScan(outcome);
+          return;
+        }
+        setResult(outcome);
+        nudgeInventorySync();
+        void refresh().catch((error: unknown) => {
+          console.error("station: inventory progress refresh failed", error);
+        });
+      },
+      onError: (_raw, error) => {
+        console.error("station: inventory scan write failed", error);
+        if (mounted.current) setWriteFailed(true);
+      },
+    }),
+  [
+    createEventId,
+    deviceId,
+    exec,
+    inventory.gtin14,
+    inventory.inventoryId,
+    inventory.snapshotId,
+    now,
+    operatorId,
+    refresh,
+    nudgeInventorySync,
+  ],
+);
+queueRef.current = queue;
 ```
 
 В импорт `../lib/scan-queue.js` добавить `type ScanQueue`. В эффекте запуска сканера (строка 331) добавить `heldScan` в условие и в зависимости:
 
 ```ts
-  useEffect(() => {
-    if (gallery || productionDate === null || dateDialog || heldScan) return undefined;
-    return source.start((raw) => queue.enqueue(raw));
-  }, [dateDialog, gallery, heldScan, productionDate, queue, source]);
+useEffect(() => {
+  if (gallery || productionDate === null || dateDialog || heldScan) return undefined;
+  return source.start((raw) => queue.enqueue(raw));
+}, [dateDialog, gallery, heldScan, productionDate, queue, source]);
 ```
 
 `setResult(outcome)` теперь получает объект с лишним полем `outcome: "recorded"` — это структурно совместимо с `RecordInventoryScanResult`, менять `setResult` не нужно.
@@ -757,6 +765,7 @@ git commit -m "feat(station): удержание скана при расхож�
 ### Task 3: Диалог расхождения в простой инвентаризации
 
 **Files:**
+
 - Modify: `apps/station/src/pages/InventoryWorkScreen.tsx` (компонент `CheckInventoryWorkScreen`)
 - Modify: `apps/station/src/i18n/ru.json`, `apps/station/src/i18n/en.json`
 - Modify: `apps/station/src/dev/StationScreenGallery.tsx:370-455`
@@ -764,6 +773,7 @@ git commit -m "feat(station): удержание скана при расхож�
 - Test: `apps/station/test/inventory-simple-work.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `HeldInventoryScan`, `heldRef`, `bypassRef`, `queueRef` из Task 2.
 - Produces: `InventoryWorkGalleryState` (ветка `mode: "check"`) получает поле `heldScan?: HeldInventoryScan | null`.
 
@@ -772,31 +782,31 @@ git commit -m "feat(station): удержание скана при расхож�
 В `apps/station/test/inventory-simple-work.test.tsx` в фикстуре `fixture()` заменить жёстко заданную дату `'2026-08-19'` в INSERT на параметр строки. Список кортежей и INSERT становятся такими:
 
 ```ts
-  for (const [serial, sourceStatus, sourceState, expected, protectedFlag, productionDate] of [
-    ["EXPECTED", "INTRODUCED", null, 1, 0, "2026-08-19"],
-    ["PROTECTED", "INTRODUCED", "MOVING_BY_UD", 0, 1, "2026-08-19"],
-    ["INELIGIBLE", "APPLIED", null, 0, 0, "2026-08-19"],
-    ["NEXTDAY", "INTRODUCED", null, 1, 0, "2026-08-20"],
-  ] as const) {
-    const km = canonicalizeKm(raw(serial));
-    db.prepare(
-      `INSERT INTO inventory_snapshot_codes_mirror
+for (const [serial, sourceStatus, sourceState, expected, protectedFlag, productionDate] of [
+  ["EXPECTED", "INTRODUCED", null, 1, 0, "2026-08-19"],
+  ["PROTECTED", "INTRODUCED", "MOVING_BY_UD", 0, 1, "2026-08-19"],
+  ["INELIGIBLE", "APPLIED", null, 0, 0, "2026-08-19"],
+  ["NEXTDAY", "INTRODUCED", null, 1, 0, "2026-08-20"],
+] as const) {
+  const km = canonicalizeKm(raw(serial));
+  db.prepare(
+    `INSERT INTO inventory_snapshot_codes_mirror
        (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status, source_state,
         source_production_date, parent_sscc, expected, protected)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
-    ).run(
-      SNAPSHOT_ID,
-      kmHash(km),
-      km.raw,
-      km.gtin14,
-      km.serial,
-      sourceStatus,
-      sourceState,
-      productionDate,
-      expected,
-      protectedFlag,
-    );
-  }
+  ).run(
+    SNAPSHOT_ID,
+    kmHash(km),
+    km.raw,
+    km.gtin14,
+    km.serial,
+    sourceStatus,
+    sourceState,
+    productionDate,
+    expected,
+    protectedFlag,
+  );
+}
 ```
 
 Добавить тест в конец describe-блока:
@@ -944,112 +954,112 @@ Expected: FAIL — `Unable to find an element with the text: Дата в код�
 В `CheckInventoryWorkScreen` после функции `applyDate` добавить:
 
 ```ts
-  const codeDateInRange =
-    heldScan?.codeDate !== null &&
-    heldScan !== null &&
-    heldScan.codeDate >= inventory.productionDateFrom &&
-    heldScan.codeDate <= inventory.productionDateTo;
+const codeDateInRange =
+  heldScan?.codeDate !== null &&
+  heldScan !== null &&
+  heldScan.codeDate >= inventory.productionDateFrom &&
+  heldScan.codeDate <= inventory.productionDateTo;
 
-  const releaseHeldScan = () => {
-    heldRef.current = false;
-    setHeldScan(null);
-  };
+const releaseHeldScan = () => {
+  heldRef.current = false;
+  setHeldScan(null);
+};
 
-  const adoptHeldDate = async () => {
-    const held = heldScan;
-    if (!held || held.codeDate === null) return;
-    const codeDate = held.codeDate;
-    await new Promise<void>((resolve, reject) => {
-      const accepted = queue.enqueueJob(async () => {
-        try {
-          await setInventoryProductionDate(exec, {
-            inventoryId: inventory.inventoryId,
-            snapshotId: inventory.snapshotId,
-            deviceId,
-            operatorId,
-            productionDate: codeDate,
-            updatedAt: now(),
-          });
-          resolve();
-        } catch (error) {
-          reject(error instanceof Error ? error : new Error("inventory date update failed"));
-          throw error;
-        }
-      });
-      if (!accepted) reject(new Error("inventory scan queue is closed"));
+const adoptHeldDate = async () => {
+  const held = heldScan;
+  if (!held || held.codeDate === null) return;
+  const codeDate = held.codeDate;
+  await new Promise<void>((resolve, reject) => {
+    const accepted = queue.enqueueJob(async () => {
+      try {
+        await setInventoryProductionDate(exec, {
+          inventoryId: inventory.inventoryId,
+          snapshotId: inventory.snapshotId,
+          deviceId,
+          operatorId,
+          productionDate: codeDate,
+          updatedAt: now(),
+        });
+        resolve();
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error("inventory date update failed"));
+        throw error;
+      }
     });
-    if (!mounted.current) return;
-    setProductionDate(codeDate);
-    setDateDraft(codeDate);
-    releaseHeldScan();
-    queue.enqueue(held.raw);
-  };
+    if (!accepted) reject(new Error("inventory scan queue is closed"));
+  });
+  if (!mounted.current) return;
+  setProductionDate(codeDate);
+  setDateDraft(codeDate);
+  releaseHeldScan();
+  queue.enqueue(held.raw);
+};
 
-  const acceptHeldScan = () => {
-    const held = heldScan;
-    if (!held) return;
-    bypassRef.current = held.raw;
-    releaseHeldScan();
-    queue.enqueue(held.raw);
-  };
+const acceptHeldScan = () => {
+  const held = heldScan;
+  if (!held) return;
+  bypassRef.current = held.raw;
+  releaseHeldScan();
+  queue.enqueue(held.raw);
+};
 ```
 
 Перед закрывающим `</StationScreen>`, рядом с существующим `FullScreenDialog` даты, добавить второй диалог:
 
 ```tsx
-      <FullScreenDialog
-        open={heldScan !== null}
-        title={
-          heldScan?.mixed
-            ? t("inventory.work.sourceDate.mixedTitle")
-            : t("inventory.work.sourceDate.title")
-        }
-        backLabel={t("inventory.work.sourceDate.skip")}
-        onClose={releaseHeldScan}
-        footer={
-          heldScan?.mixed ? (
-            <Button size="floor" onClick={acceptHeldScan}>
-              {t("inventory.work.sourceDate.accept")}
-            </Button>
-          ) : codeDateInRange ? (
-            <Button
-              size="floor"
-              onClick={() =>
-                void adoptHeldDate().catch((error: unknown) => {
-                  console.error("station: inventory date adoption failed", error);
-                  if (mounted.current) {
-                    setWriteFailed(true);
-                    releaseHeldScan();
-                  }
-                })
-              }
-            >
-              {t("inventory.work.sourceDate.apply", {
-                date: heldScan?.codeDate ? formatCivilDate(heldScan.codeDate, locale) : "",
-              })}
-            </Button>
-          ) : null
+<FullScreenDialog
+  open={heldScan !== null}
+  title={
+    heldScan?.mixed
+      ? t("inventory.work.sourceDate.mixedTitle")
+      : t("inventory.work.sourceDate.title")
+  }
+  backLabel={t("inventory.work.sourceDate.skip")}
+  onClose={releaseHeldScan}
+  footer={
+    heldScan?.mixed ? (
+      <Button size="floor" onClick={acceptHeldScan}>
+        {t("inventory.work.sourceDate.accept")}
+      </Button>
+    ) : codeDateInRange ? (
+      <Button
+        size="floor"
+        onClick={() =>
+          void adoptHeldDate().catch((error: unknown) => {
+            console.error("station: inventory date adoption failed", error);
+            if (mounted.current) {
+              setWriteFailed(true);
+              releaseHeldScan();
+            }
+          })
         }
       >
-        <div className="inventory-date-dialog">
-          <p>
-            {heldScan?.mixed
-              ? t("inventory.work.sourceDate.mixedBody", {
-                  active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
-                })
-              : t("inventory.work.sourceDate.body", {
-                  code: heldScan?.codeDate ? formatCivilDate(heldScan.codeDate, locale) : "",
-                  active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
-                })}
-          </p>
-          {!heldScan?.mixed && !codeDateInRange ? (
-            <p>{t("inventory.work.sourceDate.outOfRange")}</p>
-          ) : null}
-          <Button variant="secondary" size="floor" onClick={releaseHeldScan}>
-            {t("inventory.work.sourceDate.skip")}
-          </Button>
-        </div>
-      </FullScreenDialog>
+        {t("inventory.work.sourceDate.apply", {
+          date: heldScan?.codeDate ? formatCivilDate(heldScan.codeDate, locale) : "",
+        })}
+      </Button>
+    ) : null
+  }
+>
+  <div className="inventory-date-dialog">
+    <p>
+      {heldScan?.mixed
+        ? t("inventory.work.sourceDate.mixedBody", {
+            active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
+          })
+        : t("inventory.work.sourceDate.body", {
+            code: heldScan?.codeDate ? formatCivilDate(heldScan.codeDate, locale) : "",
+            active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
+          })}
+    </p>
+    {!heldScan?.mixed && !codeDateInRange ? (
+      <p>{t("inventory.work.sourceDate.outOfRange")}</p>
+    ) : null}
+    <Button variant="secondary" size="floor" onClick={releaseHeldScan}>
+      {t("inventory.work.sourceDate.skip")}
+    </Button>
+  </div>
+</FullScreenDialog>
 ```
 
 - [ ] **Step 5: Прогнать тесты экрана**
@@ -1068,7 +1078,7 @@ Expected: PASS.
 и в `CheckInventoryWorkScreen` изменить инициализацию состояния:
 
 ```ts
-  const [heldScan, setHeldScan] = useState<HeldInventoryScan | null>(gallery?.heldScan ?? null);
+const [heldScan, setHeldScan] = useState<HeldInventoryScan | null>(gallery?.heldScan ?? null);
 ```
 
 В `apps/station/src/dev/StationScreenGallery.tsx` в `InventoryFixture` (строка 371) добавить ветку перед `case "production-date-change":`:
@@ -1116,10 +1126,12 @@ git commit -m "feat(station): диалог расхождения даты пр�
 ### Task 4: Дата короба в перекладке
 
 **Files:**
+
 - Modify: `apps/station/src/lib/inventory-repacking.ts`
 - Test: `apps/station/test/inventory-repacking-work.test.tsx` (фикстуры) и новые кейсы там же
 
 **Interfaces:**
+
 - Consumes: `InventoryScanSnapshotRow.sourceProductionDate` из Task 1.
 - Produces:
   - `InventoryRepackScanResult.verdict` получает значение `"source-date-mismatch"`.
@@ -1192,7 +1204,7 @@ Expected: FAIL — `expected '2026-08-19' to be '2026-08-21'`: короб отк
 в интерфейс `SnapshotRow` (строка ~88) добавить после `source_state`:
 
 ```ts
-  source_production_date: string | null;
+source_production_date: string | null;
 ```
 
 в `snapshotFacts` в SELECT (строка 355) добавить колонку:
@@ -1273,18 +1285,18 @@ async function oldBoxSourceDate(
 В ветке `state.phase === "awaiting-old-box"` в `recordInternal` после получения `oldSscc` и до `burnSerial` вставить:
 
 ```ts
-    const seeded = await oldBoxSourceDate(exec, input, oldSscc);
-    const boxDate = seeded ?? terminalState.active_production_date!;
-    if (seeded !== null && seeded !== terminalState.active_production_date) {
-      await setInventoryProductionDate(exec, {
-        inventoryId: input.inventoryId,
-        snapshotId: input.snapshotId,
-        deviceId: input.deviceId,
-        operatorId: input.operatorId,
-        productionDate: seeded,
-        updatedAt: input.scannedAt,
-      });
-    }
+const seeded = await oldBoxSourceDate(exec, input, oldSscc);
+const boxDate = seeded ?? terminalState.active_production_date!;
+if (seeded !== null && seeded !== terminalState.active_production_date) {
+  await setInventoryProductionDate(exec, {
+    inventoryId: input.inventoryId,
+    snapshotId: input.snapshotId,
+    deviceId: input.deviceId,
+    operatorId: input.operatorId,
+    productionDate: seeded,
+    updatedAt: input.scannedAt,
+  });
+}
 ```
 
 и в этой же ветке заменить три использования даты: в `repack` — `productionDate: boxDate`, в `inventoryEventSchema.parse` — `activeProductionDate: boxDate`, в `writeJournal` — `productionDate: boxDate`.
@@ -1294,23 +1306,23 @@ async function oldBoxSourceDate(
 В `recordInternal` сразу после early-return `if (classification.kind === "invalid" || classification.scanKind !== "item")` вставить:
 
 ```ts
-  const sourceDate = facts.row?.sourceProductionDate ?? null;
-  if (
-    !input.acceptSourceDateMismatch &&
-    classification.kind === "expected" &&
-    sourceDate !== null &&
-    sourceDate !== box.productionDate
-  ) {
-    return {
-      verdict: "source-date-mismatch",
-      boxId: box.boxId,
-      newSscc: box.newSscc,
-      itemCount: box.itemCount,
-      printState: box.printState,
-      sourceParentMismatch: false,
-      sourceProductionDate: sourceDate,
-    };
-  }
+const sourceDate = facts.row?.sourceProductionDate ?? null;
+if (
+  !input.acceptSourceDateMismatch &&
+  classification.kind === "expected" &&
+  sourceDate !== null &&
+  sourceDate !== box.productionDate
+) {
+  return {
+    verdict: "source-date-mismatch",
+    boxId: box.boxId,
+    newSscc: box.newSscc,
+    itemCount: box.itemCount,
+    printState: box.printState,
+    sourceParentMismatch: false,
+    sourceProductionDate: sourceDate,
+  };
+}
 ```
 
 - [ ] **Step 6: Прогнать тесты перекладки**
@@ -1330,12 +1342,14 @@ git commit -m "feat(station): дата нового короба из содер
 ### Task 5: Диалог расхождения в перекладке
 
 **Files:**
+
 - Modify: `apps/station/src/pages/InventoryWorkScreen.tsx` (компонент `RepackInventoryWorkScreen`)
 - Modify: `apps/station/src/ui/inventory/RepackBoxInstrument.tsx:11-26,47-55`
 - Modify: `apps/station/src/i18n/ru.json`, `apps/station/src/i18n/en.json`
 - Test: `apps/station/test/inventory-repacking-work.test.tsx`
 
 **Interfaces:**
+
 - Consumes: вердикт `"source-date-mismatch"` и поле `sourceProductionDate` из Task 4; ключи `inventory.work.sourceDate.*` из Task 3.
 - Produces: ничего для последующих задач.
 
@@ -1492,23 +1506,23 @@ Expected: FAIL — `Unable to find an element with the text: Дата в код�
 В `apps/station/src/ui/inventory/RepackBoxInstrument.tsx` в `labels` добавить поле после `discrepancy`:
 
 ```ts
-    sourceDateMismatch: string;
+sourceDateMismatch: string;
 ```
 
 и изменить вычисление `verdict` (строка 47):
 
 ```ts
-  const verdict = writeFailed
-    ? labels.writeFailed
-    : result?.verdict === "old-box-selected"
-      ? labels.oldSelected
-      : result?.verdict === "expected" || result?.verdict === "capacity-closed"
-        ? labels.accepted
-        : result?.verdict === "source-date-mismatch"
-          ? labels.sourceDateMismatch
-          : result
-            ? labels.discrepancy
-            : null;
+const verdict = writeFailed
+  ? labels.writeFailed
+  : result?.verdict === "old-box-selected"
+    ? labels.oldSelected
+    : result?.verdict === "expected" || result?.verdict === "capacity-closed"
+      ? labels.accepted
+      : result?.verdict === "source-date-mismatch"
+        ? labels.sourceDateMismatch
+        : result
+          ? labels.discrepancy
+          : null;
 ```
 
 В `RepackInventoryWorkScreen` в объект `labels` для `RepackBoxInstrument` добавить:
@@ -1522,11 +1536,11 @@ Expected: FAIL — `Unable to find an element with the text: Дата в код�
 В `RepackInventoryWorkScreen` добавить рядом с прочими состояниями:
 
 ```ts
-  const [heldScan, setHeldScan] = useState<HeldRepackScan | null>(gallery?.heldScan ?? null);
-  const heldRef = useRef(false);
-  const bypassRef = useRef<string | null>(null);
-  const queueRef = useRef<ScanQueue | null>(null);
-  const boxDateRef = useRef("");
+const [heldScan, setHeldScan] = useState<HeldRepackScan | null>(gallery?.heldScan ?? null);
+const heldRef = useRef(false);
+const bypassRef = useRef<string | null>(null);
+const queueRef = useRef<ScanQueue | null>(null);
+const boxDateRef = useRef("");
 ```
 
 а рядом с `EMPTY_REPACK_STATE` — тип:
@@ -1538,7 +1552,7 @@ type HeldRepackScan = { raw: string; activeDate: string; codeDate: string };
 Дату открытого короба читать через ref, а не через захваченное состояние: `state` меняется на каждом `refresh()`, и если положить его в зависимости `useMemo`, очередь сканов будет пересоздаваться на каждом скане, а эффект `queue.open()` / `queue.close()` — дёргаться вместе с ней. Сразу после объявления `refresh` добавить:
 
 ```ts
-  boxDateRef.current = state.box?.productionDate ?? "";
+boxDateRef.current = state.box?.productionDate ?? "";
 ```
 
 В `useMemo` очереди перекладки добавить `shouldProcess`, обход и перехват:
@@ -1594,111 +1608,109 @@ type HeldRepackScan = { raw: string; activeDate: string; codeDate: string };
 Добавить обработчики после `applyDate`:
 
 ```ts
-  const releaseHeldScan = () => {
-    heldRef.current = false;
-    setHeldScan(null);
-  };
+const releaseHeldScan = () => {
+  heldRef.current = false;
+  setHeldScan(null);
+};
 
-  const adoptHeldDate = async () => {
-    const held = heldScan;
-    if (!held || !state.box || state.box.itemCount > 0) return;
-    await new Promise<void>((resolve, reject) => {
-      if (
-        !queue.enqueueJob(async () => {
-          try {
-            await changeOpenInventoryRepackDate(exec, {
-              inventoryId: inventory.inventoryId,
-              snapshotId: inventory.snapshotId,
-              deviceId,
-              operatorId,
-              eventId: createEventId(),
-              changedAt: now(),
-              productionDate: held.codeDate,
-            });
-            await setInventoryProductionDate(exec, {
-              inventoryId: inventory.inventoryId,
-              snapshotId: inventory.snapshotId,
-              deviceId,
-              operatorId,
-              productionDate: held.codeDate,
-              updatedAt: now(),
-            });
-            resolve();
-          } catch (error) {
-            reject(error instanceof Error ? error : new Error("repack date adoption failed"));
-            throw error;
-          }
-        })
-      ) {
-        reject(new Error("inventory scan queue is closed"));
-      }
-    });
-    nudge();
-    await refresh();
-    if (!mounted.current) return;
-    setProductionDate(held.codeDate);
-    setDateDraft(held.codeDate);
-    releaseHeldScan();
-    queue.enqueue(held.raw);
-  };
+const adoptHeldDate = async () => {
+  const held = heldScan;
+  if (!held || !state.box || state.box.itemCount > 0) return;
+  await new Promise<void>((resolve, reject) => {
+    if (
+      !queue.enqueueJob(async () => {
+        try {
+          await changeOpenInventoryRepackDate(exec, {
+            inventoryId: inventory.inventoryId,
+            snapshotId: inventory.snapshotId,
+            deviceId,
+            operatorId,
+            eventId: createEventId(),
+            changedAt: now(),
+            productionDate: held.codeDate,
+          });
+          await setInventoryProductionDate(exec, {
+            inventoryId: inventory.inventoryId,
+            snapshotId: inventory.snapshotId,
+            deviceId,
+            operatorId,
+            productionDate: held.codeDate,
+            updatedAt: now(),
+          });
+          resolve();
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error("repack date adoption failed"));
+          throw error;
+        }
+      })
+    ) {
+      reject(new Error("inventory scan queue is closed"));
+    }
+  });
+  nudge();
+  await refresh();
+  if (!mounted.current) return;
+  setProductionDate(held.codeDate);
+  setDateDraft(held.codeDate);
+  releaseHeldScan();
+  queue.enqueue(held.raw);
+};
 ```
 
 И диалог перед закрывающим `</StationScreen>`:
 
 ```tsx
-      <FullScreenDialog
-        open={heldScan !== null}
-        title={t("inventory.work.sourceDate.title")}
-        backLabel={t("inventory.work.sourceDate.skip")}
-        onClose={releaseHeldScan}
-        footer={
-          state.box && state.box.itemCount === 0 ? (
-            <Button
-              size="floor"
-              onClick={() =>
-                void adoptHeldDate().catch((error: unknown) => {
-                  console.error("station: repack date adoption failed", error);
-                  if (mounted.current) {
-                    setWriteFailed(true);
-                    releaseHeldScan();
-                  }
-                })
-              }
-            >
-              {t("inventory.work.sourceDate.apply", {
-                date: heldScan ? formatCivilDate(heldScan.codeDate, locale) : "",
-              })}
-            </Button>
-          ) : null
+<FullScreenDialog
+  open={heldScan !== null}
+  title={t("inventory.work.sourceDate.title")}
+  backLabel={t("inventory.work.sourceDate.skip")}
+  onClose={releaseHeldScan}
+  footer={
+    state.box && state.box.itemCount === 0 ? (
+      <Button
+        size="floor"
+        onClick={() =>
+          void adoptHeldDate().catch((error: unknown) => {
+            console.error("station: repack date adoption failed", error);
+            if (mounted.current) {
+              setWriteFailed(true);
+              releaseHeldScan();
+            }
+          })
         }
       >
-        <div className="inventory-date-dialog">
-          <p>
-            {t("inventory.work.sourceDate.body", {
-              code: heldScan ? formatCivilDate(heldScan.codeDate, locale) : "",
-              active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
-            })}
-          </p>
-          {state.box && state.box.itemCount > 0 ? (
-            <p>{t("inventory.repack.sourceDateBlocked")}</p>
-          ) : null}
-          <Button variant="secondary" size="floor" onClick={releaseHeldScan}>
-            {t("inventory.work.sourceDate.skip")}
-          </Button>
-          {state.box && state.box.itemCount > 0 ? (
-            <Button
-              variant="secondary"
-              size="floor"
-              onClick={() => {
-                releaseHeldScan();
-                setCorrectionsDialog(true);
-              }}
-            >
-              {t("inventory.repack.corrections")}
-            </Button>
-          ) : null}
-        </div>
-      </FullScreenDialog>
+        {t("inventory.work.sourceDate.apply", {
+          date: heldScan ? formatCivilDate(heldScan.codeDate, locale) : "",
+        })}
+      </Button>
+    ) : null
+  }
+>
+  <div className="inventory-date-dialog">
+    <p>
+      {t("inventory.work.sourceDate.body", {
+        code: heldScan ? formatCivilDate(heldScan.codeDate, locale) : "",
+        active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
+      })}
+    </p>
+    {state.box && state.box.itemCount > 0 ? <p>{t("inventory.repack.sourceDateBlocked")}</p> : null}
+    <Button variant="secondary" size="floor" onClick={releaseHeldScan}>
+      {t("inventory.work.sourceDate.skip")}
+    </Button>
+    {state.box && state.box.itemCount > 0 ? (
+      <Button
+        variant="secondary"
+        size="floor"
+        onClick={() => {
+          releaseHeldScan();
+          setCorrectionsDialog(true);
+        }}
+      >
+        {t("inventory.repack.corrections")}
+      </Button>
+    ) : null}
+  </div>
+</FullScreenDialog>
 ```
 
 В ветку `mode: "repack"` типа `InventoryWorkGalleryState` добавить `heldScan?: HeldRepackScan | null;`. В импорт из `../lib/inventory-date.js` добавить `setInventoryProductionDate`, если его там ещё нет.
