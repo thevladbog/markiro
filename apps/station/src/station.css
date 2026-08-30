@@ -2023,6 +2023,63 @@ body,
   font: var(--floor-body);
 }
 
+/* Source-date mismatch dialogs (check + repack): the operator's entire task
+   is comparing two dates, so this variant widens the shared dialog column to
+   fit two floor-counter-sm blocks side by side instead of the single-line
+   date-input form the base `.inventory-date-dialog` was built for. */
+.inventory-date-dialog--compare {
+  width: min(880px, 100%);
+}
+
+.inventory-date-compare {
+  display: grid;
+  gap: var(--sp-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.inventory-date-compare--single {
+  max-width: 420px;
+  margin: 0 auto;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.inventory-date-compare__block {
+  display: grid;
+  min-width: 0;
+  padding: var(--sp-4) var(--sp-3);
+  gap: var(--sp-2);
+  border-radius: var(--r-2);
+  /* `--surface-raised` (the token `.repack-box-facts` nominally uses for this
+     same idiom) is never defined anywhere in tokens.css, so it silently
+     resolves to transparent there. `--surface-panel` is the token that is
+     actually defined and used for raised-panel surfaces throughout this
+     file, so the neutral block uses it directly to render a visible card. */
+  background: var(--surface-panel);
+  text-align: center;
+}
+
+.inventory-date-compare__block span {
+  color: var(--fg-2);
+  font: var(--floor-body-strong);
+}
+
+.inventory-date-compare__block strong {
+  overflow: hidden;
+  font: var(--floor-counter-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inventory-date-compare__block--warn {
+  border: 1px solid var(--warn-border);
+  background: var(--warn-bg);
+}
+
+.inventory-date-compare__block--warn span,
+.inventory-date-compare__block--warn strong {
+  color: var(--warn-fg);
+}
+
 .shift-selection__slot,
 .shift-selection__grid {
   min-width: 0;
