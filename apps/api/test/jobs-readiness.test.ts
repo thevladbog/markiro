@@ -15,6 +15,8 @@ import type { InventoryDocumentRunnerService } from "../src/modules/inventories/
 import type { SignerScheduler } from "../src/modules/signer-agents/signer-scheduler.service";
 import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
 import type { ChzExportRunnerService } from "../src/modules/chz-exports/chz-export-runner.service";
+import type { ChzCodeStatusIngestService } from "../src/modules/chz-code-statuses/chz-code-status-ingest.service";
+import type { ChzCodeStatusRefreshService } from "../src/modules/chz-code-statuses/chz-code-status-refresh.service";
 
 const pgBossMock = vi.hoisted(() => ({
   instances: [] as unknown[],
@@ -36,7 +38,7 @@ vi.mock("@markiro/db", async (importOriginal) => {
   };
 });
 
-const WORKER_IDS = Array.from({ length: 14 }, (_, index) => `worker-${index + 1}`);
+const WORKER_IDS = Array.from({ length: 15 }, (_, index) => `worker-${index + 1}`);
 
 function wip(id: string, state: WorkerState = "active"): WipData {
   return {
@@ -138,6 +140,12 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
   const chzExportRunner = {
     run: vi.fn(async () => ({ finished: true })),
   } as unknown as ChzExportRunnerService;
+  const chzCodeStatusIngest = {
+    run: vi.fn(async () => ({ inserted: 0, watermark: null, caughtUp: true })),
+  } as unknown as ChzCodeStatusIngestService;
+  const chzCodeStatusRefresh = {
+    run: vi.fn(async () => ({ batches: 0, updated: 0, caughtUp: true })),
+  } as unknown as ChzCodeStatusRefreshService;
   return {
     service: new PgBossService(
       db,
@@ -151,6 +159,8 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
       inventoryDocumentRunner,
       signerScheduler,
       chzExportRunner,
+      chzCodeStatusIngest,
+      chzCodeStatusRefresh,
     ),
     subscriptionStatus,
     signerScheduler,
@@ -162,14 +172,14 @@ describe("PgBossService readiness", () => {
     pgBossMock.instances.length = 0;
   });
 
-  it("accepts the exact fourteen successfully registered active workers including document jobs", async () => {
+  it("accepts the exact fifteen successfully registered active workers including document jobs", async () => {
     const boss = fakeBoss();
     const { service, subscriptionStatus, signerScheduler } = serviceWith(boss);
 
     await service.onModuleInit();
 
     await expect(service.checkReady()).resolves.toBeUndefined();
-    expect(boss.work).toHaveBeenCalledTimes(14);
+    expect(boss.work).toHaveBeenCalledTimes(15);
     expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(BUILD_SHIFT_EXPORT_QUEUE);
     expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(BUILD_INVENTORY_DOCUMENT_QUEUE);
     expect(subscriptionStatus.run).toHaveBeenCalledTimes(1);

@@ -14,6 +14,8 @@ import type { ShiftExportRunnerService } from "../src/modules/shift-exports/shif
 import type { InventoryDocumentRunnerService } from "../src/modules/inventories/inventory-document-runner.service";
 import type { SignerScheduler } from "../src/modules/signer-agents/signer-scheduler.service";
 import type { ChzExportRunnerService } from "../src/modules/chz-exports/chz-export-runner.service";
+import type { ChzCodeStatusIngestService } from "../src/modules/chz-code-statuses/chz-code-status-ingest.service";
+import type { ChzCodeStatusRefreshService } from "../src/modules/chz-code-statuses/chz-code-status-refresh.service";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -57,6 +59,8 @@ describe.skipIf(!ready)("PgBossService: prune exchange_attempts", () => {
       {} as InventoryDocumentRunnerService,
       { run: async () => undefined } satisfies SignerScheduler,
       {} as ChzExportRunnerService,
+      {} as ChzCodeStatusIngestService,
+      {} as ChzCodeStatusRefreshService,
     );
   });
 

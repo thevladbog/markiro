@@ -40,6 +40,8 @@ import { InventorySnapshotService } from "../modules/inventories/inventory-snaps
 import { ChzExportRunnerService } from "../modules/chz-exports/chz-export-runner.service";
 import { ChzTokenService } from "../modules/chz-exports/chz-token.service";
 import { TrueApiClient } from "../modules/chz-exports/true-api.client";
+import { ChzCodeStatusIngestService } from "../modules/chz-code-statuses/chz-code-status-ingest.service";
+import { ChzCodeStatusRefreshService } from "../modules/chz-code-statuses/chz-code-status-refresh.service";
 import { currentMonthUTC, nextMonthUTC } from "./months";
 import {
   MATERIALIZE_SUBSCRIPTION_STATUSES_CRON,
@@ -229,9 +231,18 @@ const PRUNE_EMAIL_DELIVERIES_QUEUE_CRON = "30 2 * * *";
 const CHZ_SIGNER_SCHEDULER_QUEUE_NAME = "chz-signer-token-scheduler";
 const CHZ_SIGNER_SCHEDULER_QUEUE_CRON = "*/15 * * * *";
 
+export const REFRESH_CHZ_CODE_STATUSES_QUEUE = "refresh-chz-code-statuses";
+/**
+ * Ten minutes, not one: `cises/info` answers about 1000 codes per request, so
+ * even a large population is minutes of traffic, and the data it reports
+ * changes on the order of hours. The pass is bounded per tenant, so a backlog
+ * drains over several ticks rather than in one long hold on the worker.
+ */
+const REFRESH_CHZ_CODE_STATUSES_CRON = "*/10 * * * *";
+
 /**
  * Boots a dedicated pg-boss instance (its own `pgboss` schema, same
- * database as the app), four request-driven workers, and ten schedules on it:
+ * database as the app), four request-driven workers, and eleven schedules on it:
  *  - keeps the `codes`/`scan_events` monthly partitions ahead of traffic:
  *    ensures the current + next month exist once at startup, then again
  *    every day at 04:00 UTC.
@@ -263,6 +274,17 @@ const CHZ_SIGNER_SCHEDULER_QUEUE_CRON = "*/15 * * * *";
  *  - orders and imports the six Chestny ZNAK code-status exports for an
  *    inventory on demand, one pass per invocation, re-enqueuing itself with a
  *    delay until every run is terminal or `MAX_EXPORT_PASSES` is reached.
+ *  - for every tenant with an active Chestny ZNAK signer agent (same
+ *    tenant-selection query as `SignerSchedulerService.enqueueRefreshTasks`),
+ *    ingests newly-known marking codes into `chz_code_statuses`
+ *    (`ChzCodeStatusIngestService`, Task 3) and then asks ЧЗ what it
+ *    currently says about codes due for a check (`ChzCodeStatusRefreshService`,
+ *    Task 4), every ten minutes. Ingest runs before refresh in the same pass
+ *    so a code discovered this tick is asked about this tick rather than the
+ *    next one. Both phases already bound themselves per tenant per pass, so
+ *    this job does not loop to exhaustion either -- a backlog drains over
+ *    several ticks. One tenant's failure (either phase) is caught and logged
+ *    without stopping the rest of the tenants.
  *
  * pg-boss v12 requires a queue to be created (`createQueue`) before it can
  * be scheduled or worked -- scheduling against a queue that doesn't exist
@@ -290,6 +312,8 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     private readonly inventoryDocumentRunner: InventoryDocumentRunnerService,
     @Inject(SignerSchedulerService) private readonly signerScheduler: SignerScheduler,
     private readonly chzExportRunner: ChzExportRunnerService,
+    private readonly chzCodeStatusIngest: ChzCodeStatusIngestService,
+    private readonly chzCodeStatusRefresh: ChzCodeStatusRefreshService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -459,6 +483,14 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       this.workerIds.push(
         await boss.work(CHZ_SIGNER_SCHEDULER_QUEUE_NAME, async () => {
           await this.signerScheduler.run();
+        }),
+      );
+
+      await boss.createQueue(REFRESH_CHZ_CODE_STATUSES_QUEUE);
+      await boss.schedule(REFRESH_CHZ_CODE_STATUSES_QUEUE, REFRESH_CHZ_CODE_STATUSES_CRON);
+      this.workerIds.push(
+        await boss.work(REFRESH_CHZ_CODE_STATUSES_QUEUE, async () => {
+          await this.runRefreshChzCodeStatuses();
         }),
       );
 
@@ -739,7 +771,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       throw new Error("pg-boss database probe failed");
     }
     if (
-      this.workerIds.length !== 14 ||
+      this.workerIds.length !== 15 ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {
@@ -819,6 +851,42 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     this.logger.log("Pruned integrations journal");
   }
 
+  /**
+   * One pass per tenant per tick, not a loop to exhaustion: both
+   * `ChzCodeStatusIngestService.run` and `ChzCodeStatusRefreshService.run`
+   * already bound themselves per call (see their own docs), so a backlog
+   * drains over several ten-minute ticks instead of holding this worker for
+   * as long as the backlog takes.
+   *
+   * Tenant selection copies `SignerSchedulerService.enqueueRefreshTasks`'s
+   * query rather than inventing a new one: a tenant with no active Chestny
+   * ZNAK signer agent has no way to obtain a True API token, so there is
+   * nothing for either phase to usefully do for it.
+   *
+   * Ingest runs before refresh for the same tenant so a code discovered by
+   * this tick's ingest is asked about by this same tick's refresh, rather
+   * than waiting for the next one. Each tenant's pair of calls is wrapped in
+   * its own try/catch: one tenant's failure (in either phase) must not stop
+   * the rest of the tenants from being processed this tick.
+   */
+  private async runRefreshChzCodeStatuses(): Promise<void> {
+    const tenants = await this.db
+      .selectDistinct({ tenantId: schema.chzSignerAgents.tenantId })
+      .from(schema.chzSignerAgents)
+      .where(eq(schema.chzSignerAgents.status, "active"));
+    for (const { tenantId } of tenants) {
+      try {
+        await this.chzCodeStatusIngest.run(tenantId);
+        await this.chzCodeStatusRefresh.run(tenantId);
+      } catch (error) {
+        this.logger.error(
+          `ChZ code status refresh failed for tenant ${tenantId}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+    }
+  }
+
   private mailQueue(boss: PgBoss): MailQueue {
     return {
       send: (name, data, options) => boss.send(name, data, options),
@@ -875,6 +943,12 @@ export class JobsModule {
         { provide: TrueApiClient, useFactory: () => new TrueApiClient() },
         ChzTokenService,
         ChzExportRunnerService,
+        // `ChzCodeStatusIngestService`/`ChzCodeStatusRefreshService` (this
+        // module's `refresh-chz-code-statuses` cron) reuse the `ChzTokenService`
+        // and `TrueApiClient` provided above for `ChzExportRunnerService`
+        // rather than duplicating them again.
+        ChzCodeStatusIngestService,
+        ChzCodeStatusRefreshService,
       ],
       exports: [PgBossService, INVENTORY_DOCUMENT_GENERATOR_REGISTRY],
     };

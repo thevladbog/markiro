@@ -15,6 +15,8 @@ import type { InventoryDocumentRunnerService } from "../src/modules/inventories/
 import type { SignerScheduler } from "../src/modules/signer-agents/signer-scheduler.service";
 import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
 import type { ChzExportRunnerService } from "../src/modules/chz-exports/chz-export-runner.service";
+import type { ChzCodeStatusIngestService } from "../src/modules/chz-code-statuses/chz-code-status-ingest.service";
+import type { ChzCodeStatusRefreshService } from "../src/modules/chz-code-statuses/chz-code-status-refresh.service";
 
 interface ShiftExportJobData {
   exportId: string;
@@ -149,6 +151,12 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
   const chzExportRunner = {
     run: vi.fn(async () => ({ finished: true })),
   } as unknown as ChzExportRunnerService;
+  const chzCodeStatusIngest = {
+    run: vi.fn(async () => ({ inserted: 0, watermark: null, caughtUp: true })),
+  } as unknown as ChzCodeStatusIngestService;
+  const chzCodeStatusRefresh = {
+    run: vi.fn(async () => ({ batches: 0, updated: 0, caughtUp: true })),
+  } as unknown as ChzCodeStatusRefreshService;
   return {
     runner,
     service: new PgBossService(
@@ -167,6 +175,8 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
       inventoryRunner,
       { run: vi.fn(async () => undefined) } satisfies SignerScheduler,
       chzExportRunner,
+      chzCodeStatusIngest,
+      chzCodeStatusRefresh,
     ),
     inventoryRunner,
   };

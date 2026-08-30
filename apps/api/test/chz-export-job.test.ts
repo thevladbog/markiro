@@ -23,6 +23,8 @@ import { TrueApiClient } from "../src/modules/chz-exports/true-api.client";
 import { ChzCryptoService } from "../src/modules/signer-agents/chz-crypto.service";
 import { JournalService } from "../src/modules/integrations/journal.service";
 import type { InventoriesService } from "../src/modules/inventories/inventories.service";
+import type { ChzCodeStatusIngestService } from "../src/modules/chz-code-statuses/chz-code-status-ingest.service";
+import type { ChzCodeStatusRefreshService } from "../src/modules/chz-code-statuses/chz-code-status-refresh.service";
 import { createOrganization } from "./support/subscription-fixtures";
 
 const ready = Boolean(process.env.DATABASE_URL);
@@ -186,6 +188,8 @@ function serviceWith(
     { run: vi.fn(async () => undefined) } as unknown as InventoryDocumentRunnerService,
     { run: vi.fn(async () => undefined) } satisfies SignerScheduler,
     chzExportRunner,
+    { run: vi.fn(async () => ({ inserted: 0, watermark: null, caughtUp: true })) } as unknown as ChzCodeStatusIngestService,
+    { run: vi.fn(async () => ({ batches: 0, updated: 0, caughtUp: true })) } as unknown as ChzCodeStatusRefreshService,
   );
 }
 
