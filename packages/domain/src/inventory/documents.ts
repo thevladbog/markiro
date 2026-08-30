@@ -146,7 +146,39 @@ const legacyAggregationV1 = Object.freeze({
   requiresOrganizationInn: true,
 } as const satisfies InventoryDocumentFormatDescriptor);
 
+const legacyCurrentStockCsvV1 = Object.freeze({
+  id: "inventory_csv_current_stock",
+  version: 1,
+  label: "[CSV] Коды на учёт",
+  extension: "csv",
+  mimeType: "text/csv; charset=utf-8",
+  requiredSourceCategories: Object.freeze(["verified", "protected"] as const),
+  supportsParts: false,
+  availability: "unavailable",
+} as const satisfies InventoryDocumentFormatDescriptor);
+
 export const INVENTORY_DOCUMENT_FORMATS = Object.freeze([
+  Object.freeze({
+    id: "inventory_pdf_act",
+    version: 1,
+    label: "[PDF] Акт об инвентаризации",
+    extension: "pdf",
+    mimeType: "application/pdf",
+    requiredSourceCategories: Object.freeze([
+      "expected",
+      "verified",
+      "writeOffCandidates",
+      "protected",
+      "ineligible",
+      "unknown",
+      "oldBoxes",
+      "newBoxes",
+      "observedDateGroups",
+    ] as const),
+    supportsParts: false,
+    availability: "available",
+    requiresOrganizationInn: true,
+  }),
   Object.freeze({
     id: "inventory_xml_gismt_aggregation",
     version: 2,
@@ -191,10 +223,20 @@ export const INVENTORY_DOCUMENT_FORMATS = Object.freeze([
   }),
   Object.freeze({
     id: "inventory_csv_current_stock",
-    version: 1,
+    version: 2,
     label: "[CSV] Коды на учёт",
     extension: "csv",
     mimeType: "text/csv; charset=utf-8",
+    requiredSourceCategories: Object.freeze(["verified", "protected"] as const),
+    supportsParts: false,
+    availability: "available",
+  }),
+  Object.freeze({
+    id: "inventory_txt_current_stock",
+    version: 1,
+    label: "[TXT] Коды на учёт",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
     requiredSourceCategories: Object.freeze(["verified", "protected"] as const),
     supportsParts: false,
     availability: "available",
@@ -233,6 +275,7 @@ export const INVENTORY_DOCUMENT_FORMATS = Object.freeze([
 
 export const inventoryDocumentRegistry = createInventoryDocumentRegistry([
   legacyAggregationV1,
+  legacyCurrentStockCsvV1,
   ...INVENTORY_DOCUMENT_FORMATS,
 ]);
 

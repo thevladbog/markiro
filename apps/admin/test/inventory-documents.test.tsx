@@ -17,11 +17,34 @@ const ARTIFACT_ID = "33333333-3333-4333-8333-333333333333";
 
 const format = {
   id: "inventory_csv_current_stock",
-  version: 1,
+  version: 2,
   label: "[CSV] Коды на учёт",
   extension: "csv",
   mimeType: "text/csv; charset=utf-8",
   requiredSourceCategories: ["verified"],
+  supportsParts: false,
+  availability: "available",
+} as const;
+
+const actFormat = {
+  id: "inventory_pdf_act",
+  version: 1,
+  label: "[PDF] Inventory act",
+  extension: "pdf",
+  mimeType: "application/pdf",
+  requiredSourceCategories: ["expected", "verified"],
+  supportsParts: false,
+  requiresOrganizationInn: true,
+  availability: "available",
+} as const;
+
+const currentStockTxtFormat = {
+  id: "inventory_txt_current_stock",
+  version: 1,
+  label: "[TXT] Current stock codes",
+  extension: "txt",
+  mimeType: "text/plain; charset=utf-8",
+  requiredSourceCategories: ["verified", "protected"],
   supportsParts: false,
   availability: "available",
 } as const;
@@ -179,7 +202,7 @@ it("submits arbitrary catalog selections in server order with exact versions and
     idempotencyKey: string;
   };
   expect(body.selectedFormats).toEqual([
-    { id: "inventory_csv_current_stock", version: 1 },
+    { id: "inventory_csv_current_stock", version: 2 },
     { id: "inventory_csv_balances_by_production_date", version: 1 },
   ]);
   expect(body.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
@@ -190,6 +213,30 @@ it("submits arbitrary catalog selections in server order with exact versions and
   const countAfterReady = listCount;
   await act(async () => vi.advanceTimersByTimeAsync(4_000));
   expect(listCount).toBe(countAfterReady);
+});
+
+it("shows the inventory act and TXT current-stock format in the interface language", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/inventory-document-formats") {
+        return response({ items: [actFormat, currentStockTxtFormat] });
+      }
+      if (url === `/api/inventories/${INVENTORY_ID}/document-runs`) {
+        return response({ items: [] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+
+  renderDocuments();
+
+  expect(
+    await screen.findByRole("checkbox", { name: /\[PDF\] Акт об инвентаризации/ }),
+  ).toBeDefined();
+  expect(screen.getByRole("checkbox", { name: /\[TXT\] Коды на учёт/ })).toBeDefined();
+  expect(screen.queryByText("[PDF] Inventory act")).toBeNull();
 });
 
 it("accepts zero-byte artifact metadata but rejects negative byte sizes", () => {
@@ -362,7 +409,7 @@ it("explains a 409 organization INN requirement when creating a run", async () =
 
   expect(
     await screen.findByText(
-      "Для XML-документов ГИС МТ нужен ИНН организации. Заполните его в разделе «Настройки».",
+      "Для выбранных документов нужен ИНН организации. Заполните его в разделе «Настройки».",
     ),
   ).toBeDefined();
 });
@@ -389,6 +436,9 @@ it("explains a missing verified production date in actionable English", async ()
 
   renderDocuments("closed");
 
+  expect(
+    await screen.findByRole("checkbox", { name: "[CSV] Codes for current stock · CSV · v2" }),
+  ).toBeDefined();
   expect(
     await screen.findByText(
       "Verified codes do not have a production date. Resume the inventory, correct the dates, and generate the documents again.",
@@ -468,8 +518,13 @@ it("downloads an artifact or ZIP through the tenant-scoped API response", async 
   );
   renderDocuments();
 
+  expect(await screen.findByText("[TXT] Коды к списанию")).toBeDefined();
+  expect(screen.getByText("write-off.txt")).toBeDefined();
   expect(await screen.findByText("кодов: 0 · коробов: 0 · 0 байт")).toBeDefined();
-  const artifactDownload = screen.getByRole("button", { name: "Скачать write-off.txt" });
+  const artifactDownload = screen.getByRole("button", {
+    name: "Скачать: [TXT] Коды к списанию",
+  });
+  expect(artifactDownload.textContent).toBe("Скачать");
   const zipDownload = screen.getByRole("button", { name: "Скачать ZIP" });
   expect(artifactDownload.hasAttribute("disabled")).toBe(false);
   expect(zipDownload.hasAttribute("disabled")).toBe(false);

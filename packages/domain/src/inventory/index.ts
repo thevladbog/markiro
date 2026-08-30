@@ -89,6 +89,8 @@ export type { EligibleInventoryFinalBox } from "./document-selection.js";
 export {
   generateInventoryBalancesByProductionDateCsv,
   generateInventoryCurrentStockCsv,
+  generateInventoryCurrentStockCsvV1,
+  generateInventoryCurrentStockTxt,
   generateInventoryFinalBoxContentsCsv,
   generateInventoryFinalBoxesTxt,
   generateInventoryWriteOffCsv,

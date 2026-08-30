@@ -54,11 +54,27 @@ export interface InventoryObservedDateGroup {
   codeHashes: string[];
 }
 
+export interface InventoryResultOperation {
+  gtin14: string;
+  productName: string;
+  lineName: string;
+  mode: "check" | "repack";
+  productionDateFrom: string;
+  productionDateTo: string;
+  startedAt: string;
+  closedAt: string;
+  emergencyCloseReason: string | null;
+  snapshotRevision: number;
+  snapshotFixedAt: string;
+  statusCounts: Record<InventoryChzStatus, number>;
+}
+
 export interface InventoryResultSource {
   inventoryId: string;
   snapshotId: string;
   resultRevision: number;
   sourceSnapshotStartedAt: string;
+  operation: InventoryResultOperation;
   expected: InventoryResultCode[];
   verified: InventoryResultCode[];
   writeOffCandidates: InventoryResultCode[];
@@ -126,6 +142,13 @@ export class InventoryResultSourceService {
         status: schema.inventories.status,
         snapshotId: schema.inventories.activeSnapshotId,
         resultRevision: schema.inventories.resultRevision,
+        gtin14: schema.inventories.gtin14Snapshot,
+        mode: schema.inventories.mode,
+        productionDateFrom: schema.inventories.productionDateFrom,
+        productionDateTo: schema.inventories.productionDateTo,
+        startedAt: schema.inventories.startedAt,
+        closedAt: schema.inventories.closedAt,
+        emergencyCloseReason: schema.inventories.emergencyCloseReason,
       })
       .from(schema.inventories)
       .where(and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)))
@@ -133,6 +156,29 @@ export class InventoryResultSourceService {
     if (inventory?.status !== "closed" || inventory.snapshotId === null) {
       throw new InventoryResultSourceError("INVENTORY_RESULT_NOT_CLOSED");
     }
+    const [snapshot] = await tx
+      .select({
+        revision: schema.inventorySnapshots.revision,
+        productName: schema.inventorySnapshots.productName,
+        lineName: schema.inventorySnapshots.lineName,
+        fixedAt: schema.inventorySnapshots.fixedAt,
+        emittedCount: schema.inventorySnapshots.emittedCount,
+        introducedCount: schema.inventorySnapshots.introducedCount,
+        appliedCount: schema.inventorySnapshots.appliedCount,
+        retiredCount: schema.inventorySnapshots.retiredCount,
+        writtenOffCount: schema.inventorySnapshots.writtenOffCount,
+        disaggregationCount: schema.inventorySnapshots.disaggregationCount,
+      })
+      .from(schema.inventorySnapshots)
+      .where(
+        and(
+          eq(schema.inventorySnapshots.tenantId, tenantId),
+          eq(schema.inventorySnapshots.id, inventory.snapshotId),
+          eq(schema.inventorySnapshots.inventoryId, inventoryId),
+        ),
+      )
+      .limit(1);
+    if (!snapshot) throw new Error("Inventory result snapshot metadata is unavailable");
 
     const snapshotRows: SnapshotCodeRow[] = await tx
       .select({
@@ -229,6 +275,33 @@ export class InventoryResultSourceService {
       snapshotId: inventory.snapshotId,
       resultRevision: inventory.resultRevision,
       sourceSnapshotStartedAt,
+      operation: {
+        gtin14: inventory.gtin14,
+        productName: snapshot.productName,
+        lineName: snapshot.lineName,
+        mode: inventory.mode,
+        productionDateFrom: inventory.productionDateFrom,
+        productionDateTo: inventory.productionDateTo,
+        startedAt: asIsoTimestamp(
+          inventory.startedAt,
+          "Inventory result start timestamp is unavailable",
+        ),
+        closedAt: asIsoTimestamp(
+          inventory.closedAt,
+          "Inventory result close timestamp is unavailable",
+        ),
+        emergencyCloseReason: inventory.emergencyCloseReason,
+        snapshotRevision: snapshot.revision,
+        snapshotFixedAt: snapshot.fixedAt.toISOString(),
+        statusCounts: {
+          EMITTED: snapshot.emittedCount,
+          INTRODUCED: snapshot.introducedCount,
+          APPLIED: snapshot.appliedCount,
+          RETIRED: snapshot.retiredCount,
+          WRITTEN_OFF: snapshot.writtenOffCount,
+          DISAGGREGATION: snapshot.disaggregationCount,
+        },
+      },
       expected,
       verified,
       writeOffCandidates,

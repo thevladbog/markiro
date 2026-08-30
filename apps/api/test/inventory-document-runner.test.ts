@@ -393,6 +393,27 @@ function inventorySource(revision = 7): InventoryResultSourceService {
       snapshotId: "80000000-0000-4000-8000-000000000001",
       resultRevision: revision,
       sourceSnapshotStartedAt: "2026-08-26T10:00:00.000Z",
+      operation: {
+        gtin14: "04680089900060",
+        productName: "Тестовый продукт",
+        lineName: "Склад",
+        mode: "check",
+        productionDateFrom: "2026-08-01",
+        productionDateTo: "2026-08-31",
+        startedAt: "2026-08-26T08:00:00.000Z",
+        closedAt: "2026-08-26T18:00:00.000Z",
+        emergencyCloseReason: null,
+        snapshotRevision: 1,
+        snapshotFixedAt: "2026-08-26T07:55:00.000Z",
+        statusCounts: {
+          EMITTED: 0,
+          INTRODUCED: 0,
+          APPLIED: 0,
+          RETIRED: 0,
+          WRITTEN_OFF: 0,
+          DISAGGREGATION: 0,
+        },
+      },
       expected: [],
       verified: [],
       writeOffCandidates: [],
@@ -425,7 +446,7 @@ function syntheticRegistry(
 }
 
 describe("production inventory document generators", () => {
-  it("advertises the eight current domain formats in catalog order and executes legacy v1", () => {
+  it("advertises the current domain formats in catalog order and executes legacy versions", () => {
     expect(productionInventoryDocumentGeneratorRegistry.listAvailable()).toEqual(
       INVENTORY_DOCUMENT_FORMATS,
     );
@@ -444,6 +465,18 @@ describe("production inventory document generators", () => {
     expect(
       productionInventoryDocumentGeneratorRegistry.resolveForExecution(
         "inventory_xml_gismt_aggregation",
+        1,
+      ),
+    ).toBeDefined();
+    expect(() =>
+      productionInventoryDocumentGeneratorRegistry.resolveForSelection(
+        "inventory_csv_current_stock",
+        1,
+      ),
+    ).toThrowError(expect.objectContaining({ code: "FORMAT_SUPERSEDED" }));
+    expect(
+      productionInventoryDocumentGeneratorRegistry.resolveForExecution(
+        "inventory_csv_current_stock",
         1,
       ),
     ).toBeDefined();
@@ -469,6 +502,7 @@ describe("production inventory document generators", () => {
       "inventory_xml_gismt_aggregation",
       "inventory_xml_gismt_disaggregation",
       "inventory_txt_write_off",
+      "inventory_txt_current_stock",
       "inventory_txt_final_boxes",
     ]);
     expect(
@@ -561,7 +595,7 @@ describe("inventory document runner", () => {
     });
   });
 
-  it("renders all eight production formats as succeeded artifacts for a closed inventory with zero scans", async () => {
+  it("renders all ten production formats as succeeded artifacts for a closed inventory with zero scans", async () => {
     const fake = runnerDb(
       runRow({
         selectedFormats: INVENTORY_DOCUMENT_FORMATS.map(({ id, version }) => ({ id, version })),
