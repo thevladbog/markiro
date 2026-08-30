@@ -10,6 +10,7 @@ describe("inventory status chips", () => {
 
   it("separates closed from ready and keeps running green", () => {
     expect(INVENTORY_STATUS_CHIP.ready.status).toBe("info");
+    expect(INVENTORY_STATUS_CHIP.cancelled.status).toBe("error");
     expect(INVENTORY_STATUS_CHIP.closed.status).not.toBe(INVENTORY_STATUS_CHIP.ready.status);
     expect(INVENTORY_STATUS_CHIP.running.status).toBe("ok");
   });

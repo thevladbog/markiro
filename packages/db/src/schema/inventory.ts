@@ -38,6 +38,7 @@ export const INVENTORY_LIFECYCLE_STATUSES = [
   "draft",
   "preparing",
   "ready",
+  "cancelled",
   "running",
   "closed",
   "completed",
@@ -209,6 +210,8 @@ export const inventories = pgTable(
     createdByUserId: text("created_by_user_id")
       .notNull()
       .references(() => user.id),
+    cancelledByUserId: text("cancelled_by_user_id").references(() => user.id),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     startedByUserId: text("started_by_user_id").references(() => user.id),
     startedAt: timestamp("started_at", { withTimezone: true }),
     closedByUserId: text("closed_by_user_id").references(() => user.id),
@@ -271,12 +274,27 @@ export const inventories = pgTable(
       check(
         "inventories_active_snapshot_lifecycle_check",
         sql`(${table.status} in ('draft', 'preparing') and ${table.activeSnapshotId} is null)
+        or (${table.status} = 'cancelled')
         or (${table.status} in ('ready', 'running', 'closed', 'completed') and ${table.activeSnapshotId} is not null)`,
       ),
       check(
         "inventories_station_manifest_lifecycle_check",
-        sql`(${table.status} in ('draft', 'preparing', 'ready') and ${table.stationManifest} is null)
+        sql`(${table.status} in ('draft', 'preparing', 'ready', 'cancelled') and ${table.stationManifest} is null)
         or (${table.status} in ('running', 'closed', 'completed') and ${table.stationManifest} is not null)`,
+      ),
+      check(
+        "inventories_cancelled_fields_check",
+        sql`(${table.cancelledByUserId} is null and ${table.cancelledAt} is null)
+          or (${table.cancelledByUserId} is not null and ${table.cancelledAt} is not null)`,
+      ),
+      check(
+        "inventories_cancelled_lifecycle_check",
+        sql`(${table.status} = 'cancelled'
+            and ${table.cancelledByUserId} is not null
+            and ${table.cancelledAt} is not null)
+          or (${table.status} <> 'cancelled'
+            and ${table.cancelledByUserId} is null
+            and ${table.cancelledAt} is null)`,
       ),
       check(
         "inventories_emergency_close_fields_check",
