@@ -68,6 +68,17 @@ test("writes the mirror before creating the GitHub Release", () => {
   assert.ok(mirror < release, "the mirror publish must precede the GitHub Release");
 });
 
+test("looks for the bundle where this crate layout actually puts it", async () => {
+  // The Station's src-tauri is a standalone crate, so its bundle lands under
+  // src-tauri/target. The signer's is a workspace member, so cargo shares one
+  // target dir at the workspace root. Copying the Station's path here builds
+  // the installer successfully and then fails to find it.
+  const cargo = await readFile("apps/signer/Cargo.toml", "utf8");
+  assert.match(cargo, /^\[workspace\]/m, "apps/signer is expected to be a cargo workspace");
+  assert.match(workflow, /bundle_dir="apps\/signer\/target\/release\/bundle\/nsis"/);
+  assert.doesNotMatch(workflow, /apps\/signer\/src-tauri\/target/);
+});
+
 test("runs the tooling contract before it builds anything", () => {
   const contract = workflow.indexOf("pnpm test:signer-release:contract");
   const build = workflow.indexOf("tauri build");
