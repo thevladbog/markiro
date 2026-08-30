@@ -198,6 +198,18 @@ describe.skipIf(!ready)("unified devices read model e2e", () => {
     expectNoSensitiveFields(response.body);
   });
 
+  it("excludes a revoked station from the line's active presence count", async () => {
+    const response = await cabinet.get("/lines/presence").expect(200);
+
+    expect(response.body.items).toContainEqual({
+      lineId: expect.any(String),
+      lineName: "Assembly line",
+      assignedStations: 3,
+      onlineStations: 1,
+      lastSeenAt: expect.any(String),
+    });
+  });
+
   it("pages the combined lifecycle order without duplicate ids", async () => {
     const [first, second, final, beyond] = await Promise.all([
       cabinet.get("/devices").query({ page: 1, pageSize: 3 }).expect(200),
