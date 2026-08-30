@@ -398,6 +398,7 @@ function InventoryFixture({ variant }: { variant: string }) {
     case "known-ineligible":
     case "protected-moving-by-ud":
     case "not-in-snapshot":
+    case "source-date-mismatch":
     case "production-date-change":
       return <SimpleInventoryFixture variant={variant} />;
     default:
@@ -468,6 +469,17 @@ function SimpleInventoryFixture({ variant }: { variant: string }) {
         recent: [],
         result,
         dateDialog: variant === "production-date-change",
+        heldScan:
+          variant === "source-date-mismatch"
+            ? {
+                outcome: "date-mismatch",
+                scanKind: "item",
+                activeDate: GALLERY_INVENTORY_DATE,
+                codeDate: "2026-08-18",
+                mixed: false,
+                raw: "gallery-held-scan",
+              }
+            : null,
       }}
     />
   );

@@ -86,6 +86,7 @@ export type InventoryWorkGalleryState =
       writeFailed?: boolean;
       leaveFailed?: boolean;
       dateDialog?: boolean;
+      heldScan?: HeldInventoryScan | null;
     }
   | {
       mode: "repack";
@@ -199,7 +200,7 @@ function CheckInventoryWorkScreen({
   const [leaving, setLeaving] = useState(false);
   const [leaveFailed, setLeaveFailed] = useState(gallery?.leaveFailed ?? false);
   const mounted = useRef(true);
-  const [heldScan, setHeldScan] = useState<HeldInventoryScan | null>(null);
+  const [heldScan, setHeldScan] = useState<HeldInventoryScan | null>(gallery?.heldScan ?? null);
   const heldRef = useRef(false);
   const bypassRef = useRef<string | null>(null);
   const queueRef = useRef<ScanQueue | null>(null);
@@ -383,6 +384,55 @@ function CheckInventoryWorkScreen({
       setProductionDate(dateDraft);
       setDateDialog(false);
     }
+  };
+
+  const codeDateInRange =
+    heldScan?.codeDate !== null &&
+    heldScan !== null &&
+    heldScan.codeDate >= inventory.productionDateFrom &&
+    heldScan.codeDate <= inventory.productionDateTo;
+
+  const releaseHeldScan = () => {
+    heldRef.current = false;
+    setHeldScan(null);
+  };
+
+  const adoptHeldDate = async () => {
+    const held = heldScan;
+    if (!held || held.codeDate === null) return;
+    const codeDate = held.codeDate;
+    await new Promise<void>((resolve, reject) => {
+      const accepted = queue.enqueueJob(async () => {
+        try {
+          await setInventoryProductionDate(exec, {
+            inventoryId: inventory.inventoryId,
+            snapshotId: inventory.snapshotId,
+            deviceId,
+            operatorId,
+            productionDate: codeDate,
+            updatedAt: now(),
+          });
+          resolve();
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error("inventory date update failed"));
+          throw error;
+        }
+      });
+      if (!accepted) reject(new Error("inventory scan queue is closed"));
+    });
+    if (!mounted.current) return;
+    setProductionDate(codeDate);
+    setDateDraft(codeDate);
+    releaseHeldScan();
+    queue.enqueue(held.raw);
+  };
+
+  const acceptHeldScan = () => {
+    const held = heldScan;
+    if (!held) return;
+    bypassRef.current = held.raw;
+    releaseHeldScan();
+    queue.enqueue(held.raw);
   };
 
   const locale = i18n.language === "ru" ? "ru-RU" : "en-US";
@@ -580,6 +630,56 @@ function CheckInventoryWorkScreen({
             onChange={(event) => setDateDraft(event.currentTarget.value)}
           />
           <p>{t("inventory.work.futureOnly")}</p>
+        </div>
+      </FullScreenDialog>
+      <FullScreenDialog
+        open={heldScan !== null}
+        title={
+          heldScan?.mixed
+            ? t("inventory.work.sourceDate.mixedTitle")
+            : t("inventory.work.sourceDate.title")
+        }
+        backLabel={t("inventory.work.sourceDate.skip")}
+        onClose={releaseHeldScan}
+        footer={
+          heldScan?.mixed ? (
+            <Button size="floor" onClick={acceptHeldScan}>
+              {t("inventory.work.sourceDate.accept")}
+            </Button>
+          ) : codeDateInRange ? (
+            <Button
+              size="floor"
+              onClick={() =>
+                void adoptHeldDate().catch((error: unknown) => {
+                  console.error("station: inventory date adoption failed", error);
+                  if (mounted.current) {
+                    setWriteFailed(true);
+                    releaseHeldScan();
+                  }
+                })
+              }
+            >
+              {t("inventory.work.sourceDate.apply", {
+                date: heldScan?.codeDate ? formatCivilDate(heldScan.codeDate, locale) : "",
+              })}
+            </Button>
+          ) : null
+        }
+      >
+        <div className="inventory-date-dialog">
+          <p>
+            {heldScan?.mixed
+              ? t("inventory.work.sourceDate.mixedBody", {
+                  active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
+                })
+              : t("inventory.work.sourceDate.body", {
+                  code: heldScan?.codeDate ? formatCivilDate(heldScan.codeDate, locale) : "",
+                  active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
+                })}
+          </p>
+          {!heldScan?.mixed && !codeDateInRange ? (
+            <p>{t("inventory.work.sourceDate.outOfRange")}</p>
+          ) : null}
         </div>
       </FullScreenDialog>
     </StationScreen>

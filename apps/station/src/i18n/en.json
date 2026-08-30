@@ -274,6 +274,16 @@
       "dateDialogTitle": "Change production date",
       "cancel": "Cancel",
       "applyDate": "Apply date",
+      "sourceDate": {
+        "title": "The code's date differs from the active one",
+        "body": "The code was produced on {{code}}; the active date is {{active}}.",
+        "mixedTitle": "The box holds several production dates",
+        "mixedBody": "The active date is {{active}}. No single date can be adopted.",
+        "apply": "Set {{date}} and count",
+        "accept": "Count as is",
+        "skip": "Skip the code",
+        "outOfRange": "The code's date is outside the task range."
+      },
       "verdict": {
         "expected": "Code accepted",
         "boxAccepted": "Box accepted: {{count}} codes",

@@ -20,6 +20,7 @@ export const INVENTORY_GALLERY_STATE_IDS = [
   "inventory-known-ineligible",
   "inventory-protected-moving-by-ud",
   "inventory-not-in-snapshot",
+  "inventory-source-date-mismatch",
   "inventory-repack-awaiting-old-box",
   "inventory-repack-scanning",
   "inventory-repack-capacity-20",

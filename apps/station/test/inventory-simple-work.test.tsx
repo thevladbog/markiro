@@ -97,17 +97,18 @@ async function fixture() {
   db.prepare(
     "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0042', ?)",
   ).run(INVENTORY_ID, SNAPSHOT_ID);
-  for (const [serial, sourceStatus, sourceState, expected, protectedFlag] of [
-    ["EXPECTED", "INTRODUCED", null, 1, 0],
-    ["PROTECTED", "INTRODUCED", "MOVING_BY_UD", 0, 1],
-    ["INELIGIBLE", "APPLIED", null, 0, 0],
+  for (const [serial, sourceStatus, sourceState, expected, protectedFlag, productionDate] of [
+    ["EXPECTED", "INTRODUCED", null, 1, 0, "2026-08-19"],
+    ["PROTECTED", "INTRODUCED", "MOVING_BY_UD", 0, 1, "2026-08-19"],
+    ["INELIGIBLE", "APPLIED", null, 0, 0, "2026-08-19"],
+    ["NEXTDAY", "INTRODUCED", null, 1, 0, "2026-08-20"],
   ] as const) {
     const km = canonicalizeKm(raw(serial));
     db.prepare(
       `INSERT INTO inventory_snapshot_codes_mirror
        (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status, source_state,
         source_production_date, parent_sscc, expected, protected)
-       VALUES (?, ?, ?, ?, ?, ?, ?, '2026-08-19', NULL, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
     ).run(
       SNAPSHOT_ID,
       kmHash(km),
@@ -116,6 +117,7 @@ async function fixture() {
       km.serial,
       sourceStatus,
       sourceState,
+      productionDate,
       expected,
       protectedFlag,
     );
@@ -409,5 +411,104 @@ describe("simple inventory work screen", () => {
       { observed_production_date: "2026-08-19" },
       { observed_production_date: "2026-08-20" },
     ]);
+  });
+
+  it("holds a mismatching scan, then counts it after the operator adopts the code's date", async () => {
+    const { db, exec } = await fixture();
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, '2026-08-19', 1, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+
+    scan.emit(raw("EXPECTED"));
+    await waitFor(() => expect(screen.getByText("Код принят")).toBeTruthy());
+
+    scan.emit(raw("NEXTDAY"));
+    await waitFor(() =>
+      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+    );
+    expect(scan.isListening()).toBe(false);
+    expect(
+      (
+        db
+          .prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror")
+          .get() as { count: number }
+      ).count,
+    ).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /Установить/ }));
+
+    await waitFor(() =>
+      expect(
+        (
+          db
+            .prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror")
+            .get() as { count: number }
+        ).count,
+      ).toBe(2),
+    );
+    const stored = db
+      .prepare(
+        "SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?",
+      )
+      .get(DEVICE_ID) as { active_production_date: string };
+    expect(stored.active_production_date).toBe("2026-08-20");
+  });
+
+  it("leaves nothing behind when the operator skips a mismatching code", async () => {
+    const { db, exec } = await fixture();
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, '2026-08-19', 1, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+    scan.emit(raw("EXPECTED"));
+    await waitFor(() => expect(screen.getByText("Код принят")).toBeTruthy());
+    scan.emit(raw("NEXTDAY"));
+    await waitFor(() =>
+      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить код" }));
+
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+    expect(
+      (
+        db
+          .prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror")
+          .get() as { count: number }
+      ).count,
+    ).toBe(1);
+    const stored = db
+      .prepare(
+        "SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?",
+      )
+      .get(DEVICE_ID) as { active_production_date: string };
+    expect(stored.active_production_date).toBe("2026-08-19");
   });
 });
