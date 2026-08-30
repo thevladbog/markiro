@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildInventoryActViewModel,
+  inventoryActResultRevisionLabel,
   generateInventoryActPdf,
 } from "../src/modules/inventories/inventory-act-pdf";
 import type {
@@ -89,6 +90,11 @@ const source: InventoryResultSource = {
 };
 
 describe("inventory act PDF", () => {
+  it("names revision zero as the initial result", () => {
+    expect(inventoryActResultRevisionLabel(0)).toBe("исходный результат");
+    expect(inventoryActResultRevisionLabel(10)).toBe("ревизия результата 10");
+  });
+
   it("builds auditable result, status, and signature data from one frozen revision", async () => {
     const view = buildInventoryActViewModel(source, metadata);
     expect(view).toMatchObject({

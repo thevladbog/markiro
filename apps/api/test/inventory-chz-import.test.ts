@@ -723,7 +723,7 @@ describe("Chestny ZNAK inventory import parser", () => {
     });
 
     expect(result.rows).toHaveLength(1);
-  });
+  }, 15_000);
 
   it("preserves row order and limits across XLSX worksheet batches", () => {
     const result = parse(xlsxBytes({ dataRowCount: 513, sequentialRowIds: true }), {

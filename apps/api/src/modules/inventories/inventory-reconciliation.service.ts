@@ -2,24 +2,33 @@ import { ConflictException, Inject, Injectable, NotFoundException } from "@nestj
 import { and, eq, sql } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
-import { INVENTORY_CHZ_STATUSES, type InventoryChzStatus } from "@markiro/domain";
+import { INVENTORY_CHZ_STATUSES, parseScannedSscc, type InventoryChzStatus } from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
 import type {
   InventoryDiscrepancyCategory,
   InventoryDiscrepancyDto,
   InventoryDiscrepancyWinnerDto,
-  InventoryEvidenceEventDto,
   InventoryLiveBoxDto,
   InventoryParticipantDto,
   InventoryProgressDto,
   InventoryRecentEventDto,
+  InventoryVerifiedBoxDto,
   ListInventoryDiscrepanciesQueryDto,
   ListInventoryDiscrepanciesResponseDto,
   ListInventoryEvidenceQueryDto,
   ListInventoryEvidenceResponseDto,
 } from "./dto";
-import { formatInventoryEventIdentity, type InventoryEventKind } from "./inventory-event-display";
+import {
+  buildInventoryEvidenceRowsSql,
+  resolveInventoryEvidenceEvents,
+  type InventoryEvidenceAction,
+} from "./inventory-evidence-query";
+import {
+  formatInventoryEventCopyIdentity,
+  formatInventoryEventIdentity,
+  type InventoryEventKind,
+} from "./inventory-event-display";
 
 interface ProgressCountRow {
   expectedCount: number;
@@ -88,8 +97,23 @@ interface RecentEventRow {
   observedProductionDate: string | null;
 }
 
-interface EvidenceEventRow extends RecentEventRow {
-  activeBoxState: "open" | "closed" | "invalidated" | null;
+interface VerifiedBoxRow {
+  eventId: string;
+  rawSscc: string;
+  terminalId: string;
+  terminalName: string;
+  scannedAt: Date | string;
+  affectedCodeCount: number;
+  total: number;
+}
+
+interface EvidenceAggregateRow {
+  total: number;
+  affectedCodeCount: number;
+  allCanVoid: boolean;
+  allCanRestore: boolean;
+  allCanChangeDate: boolean;
+  allCanRemoveItem: boolean;
 }
 
 type ReconciliationTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -238,6 +262,46 @@ export class InventoryReconciliationService {
           b.id
         limit 101
       `);
+    const verifiedBoxResult = await tx.execute(sql<VerifiedBoxRow>`
+        with ranked_boxes as (
+          select
+            e.event_id as "eventId",
+            substring(e.normalized_identity from length('known_box:') + 1) as "rawSscc",
+            e.device_id as "terminalId",
+            d.name as "terminalName",
+            e.scanned_at as "scannedAt",
+            count(r.id)::int as "affectedCodeCount",
+            row_number() over (
+              partition by e.normalized_identity
+              order by e.scanned_at desc, e.event_id desc
+            ) as identity_rank
+          from inventory_scan_events e
+          join station_devices d
+            on d.tenant_id = e.tenant_id
+           and d.id = e.device_id
+          left join inventory_code_results r
+            on r.tenant_id = e.tenant_id
+           and r.inventory_id = e.inventory_id
+           and r.first_accepted_event_id = e.event_id
+          where e.tenant_id = ${tenantId}
+            and e.inventory_id = ${inventoryId}
+            and e.kind = 'known_box'
+            and e.authoritative_verdict = 'applied'
+          group by e.event_id, d.name
+        )
+        select
+          "eventId",
+          "rawSscc",
+          "terminalId",
+          "terminalName",
+          "scannedAt",
+          "affectedCodeCount",
+          count(*) over()::int as total
+        from ranked_boxes
+        where identity_rank = 1
+        order by "scannedAt" desc, "eventId" desc
+        limit 101
+      `);
     const recentEventResult = await tx.execute(sql<RecentEventRow>`
         select
           e.event_id as "eventId",
@@ -275,8 +339,12 @@ export class InventoryReconciliationService {
       openBoxCount: participants.reduce((sum, row) => sum + row.openBoxCount, 0),
       boxTotal: counts.newBoxCount,
       boxesTruncated: boxResult.rows.length > 100,
+      verifiedBoxTotal:
+        verifiedBoxResult.rows.length === 0 ? 0 : readInteger(verifiedBoxResult.rows[0], "total"),
+      verifiedBoxesTruncated: verifiedBoxResult.rows.length > 100,
       participants,
       boxes: boxResult.rows.slice(0, 100).map(parseLiveBoxRow),
+      verifiedBoxes: verifiedBoxResult.rows.slice(0, 100).map(parseVerifiedBoxRow),
       recentEvents: recentEventResult.rows.map(parseRecentEventRow),
     };
   }
@@ -299,69 +367,65 @@ export class InventoryReconciliationService {
     query: ListInventoryEvidenceQueryDto,
   ): Promise<ListInventoryEvidenceResponseDto> {
     await this.getInventoryProjection(tx, tenantId, inventoryId);
-    const searchFilter = query.search
-      ? sql`and (
-          e.normalized_identity ilike ${`%${query.search}%`}
-          or coalesce(e.raw_payload, '') ilike ${`%${query.search}%`}
-          or d.name ilike ${`%${query.search}%`}
-        )`
-      : sql``;
-    const kindFilter = query.kind ? sql`and e.kind = ${query.kind}` : sql``;
-    const classificationFilter = query.classification
-      ? sql`and r.classification = ${query.classification}`
-      : sql``;
-    const base = sql`
-      from inventory_scan_events e
-      join station_devices d on d.tenant_id = e.tenant_id and d.id = e.device_id
-      left join inventory_code_results r
-        on r.tenant_id = e.tenant_id
-       and r.inventory_id = e.inventory_id
-       and r.first_accepted_event_id = e.event_id
-      left join inventory_repack_items i
-        on i.tenant_id = r.tenant_id
-       and i.inventory_id = r.inventory_id
-       and i.result_id = r.id
-       and i.removed_at is null
-      left join inventory_repack_boxes b
-        on b.tenant_id = i.tenant_id
-       and b.inventory_id = i.inventory_id
-       and b.id = i.box_id
-      where e.tenant_id = ${tenantId}
-        and e.inventory_id = ${inventoryId}
-        ${searchFilter}
-        ${kindFilter}
-        ${classificationFilter}
-    `;
-    const countResult = await tx.execute(
-      sql<{ total: number }>`select count(*)::int as total ${base}`,
-    );
-    const total = readInteger(countResult.rows[0], "total");
-    const offset = (query.page - 1) * query.pageSize;
-    const pageResult = await tx.execute(sql<EvidenceEventRow>`
+    const filter = {
+      scope: query.scope,
+      ...(query.search === undefined ? {} : { search: query.search }),
+      ...(query.kind === undefined ? {} : { kind: query.kind }),
+      ...(query.classification === undefined ? {} : { classification: query.classification }),
+      ...(query.discrepancyCategory === undefined
+        ? {}
+        : { discrepancyCategory: query.discrepancyCategory }),
+    };
+    const evidenceRows = buildInventoryEvidenceRowsSql({ tenantId, inventoryId, filter });
+    const aggregateResult = await tx.execute(sql<EvidenceAggregateRow>`
       select
-        e.event_id as "eventId",
-        r.id as "codeResultId",
-        e.kind::text as kind,
-        e.normalized_identity as "normalizedIdentity",
-        e.raw_payload as "rawPayload",
-        e.authoritative_verdict as "authoritativeVerdict",
-        e.device_id as "terminalId",
-        d.name as "terminalName",
-        e.scanned_at as "scannedAt",
-        r.classification::text as classification,
-        r.observed_production_date as "observedProductionDate",
-        b.state::text as "activeBoxState"
-      ${base}
-      order by e.scanned_at desc, e.event_id desc
-      limit ${query.pageSize}
-      offset ${offset}
+        count(*)::int as total,
+        coalesce(sum(matching."affectedCodeCount"), 0)::int as "affectedCodeCount",
+        coalesce(bool_and(matching."canVoid"), false) as "allCanVoid",
+        coalesce(bool_and(matching."canRestore"), false) as "allCanRestore",
+        coalesce(bool_and(matching."canChangeDate"), false) as "allCanChangeDate",
+        coalesce(bool_and(matching."canRemoveItem"), false) as "allCanRemoveItem"
+      from (${evidenceRows}) matching
     `);
+    const aggregate = parseEvidenceAggregateRow(aggregateResult.rows[0]);
+    const offset = (query.page - 1) * query.pageSize;
+    const pageRows = await resolveInventoryEvidenceEvents(tx, {
+      tenantId,
+      inventoryId,
+      filter,
+      order: "newest",
+      limit: query.pageSize,
+      offset,
+    });
     return {
       page: query.page,
       pageSize: query.pageSize,
-      total,
-      hasMore: offset + pageResult.rows.length < total,
-      items: pageResult.rows.map(parseEvidenceEventRow),
+      total: aggregate.total,
+      hasMore: offset + pageRows.length < aggregate.total,
+      allMatchingActions: evidenceAggregateActions(aggregate),
+      allMatchingAffectedCodeCount: aggregate.affectedCodeCount,
+      items: pageRows.map((event) => ({
+        eventId: event.eventId,
+        codeResultId: event.codeResultId,
+        kind: event.kind,
+        displayIdentity: formatInventoryEventIdentity(
+          event.kind,
+          event.rawPayload,
+          event.normalizedIdentity,
+        ),
+        copyIdentity: formatInventoryEventCopyIdentity(event.kind, event.rawPayload),
+        authoritativeVerdict: event.authoritativeVerdict,
+        terminalId: event.terminalId,
+        terminalName: event.terminalName,
+        scannedAt: event.scannedAt.toISOString(),
+        classification: event.classification,
+        observedProductionDate: event.observedProductionDate,
+        affectedCodeCount: event.affectedCodeCount,
+        discrepancyCodeCount: event.discrepancyCodeCount,
+        classifications: event.classifications,
+        discrepancyCategories: event.discrepancyCategories,
+        actions: event.actions,
+      })),
     };
   }
 
@@ -727,6 +791,23 @@ function parseLiveBoxRow(value: unknown): InventoryLiveBoxDto {
   };
 }
 
+function parseVerifiedBoxRow(value: unknown): InventoryVerifiedBoxDto {
+  const record = asRecord(value, "Inventory verified box row is unavailable");
+  const rawSscc = readString(record, "rawSscc");
+  const sscc = parseScannedSscc(rawSscc);
+  if (sscc === null || sscc !== rawSscc) {
+    throw new Error("Inventory verified box SSCC is invalid");
+  }
+  return {
+    eventId: readString(record, "eventId"),
+    sscc,
+    terminalId: readString(record, "terminalId"),
+    terminalName: readString(record, "terminalName"),
+    scannedAt: readDate(record, "scannedAt").toISOString(),
+    affectedCodeCount: readInteger(record, "affectedCodeCount"),
+  };
+}
+
 function parseRecentEventRow(value: unknown): InventoryRecentEventDto {
   const record = asRecord(value, "Inventory recent event row is unavailable");
   const kind = readString(record, "kind");
@@ -762,33 +843,26 @@ function parseRecentEventRow(value: unknown): InventoryRecentEventDto {
   };
 }
 
-function parseEvidenceEventRow(value: unknown): InventoryEvidenceEventDto {
-  const event = parseRecentEventRow(value);
-  const record = asRecord(value, "Inventory evidence event row is unavailable");
-  const activeBoxState = readNullableString(record, "activeBoxState");
-  if (
-    activeBoxState !== null &&
-    activeBoxState !== "open" &&
-    activeBoxState !== "closed" &&
-    activeBoxState !== "invalidated"
-  ) {
-    throw new Error("Inventory evidence box state is invalid");
-  }
-  if (event.codeResultId === null || event.classification === null) {
-    return { ...event, actions: [] };
-  }
-  if (event.classification === "voided") {
-    return { ...event, actions: ["restore_scan"] };
-  }
+function parseEvidenceAggregateRow(value: unknown): EvidenceAggregateRow {
+  const record = asRecord(value, "Inventory evidence aggregate is unavailable");
   return {
-    ...event,
-    actions:
-      activeBoxState === "open"
-        ? ["void_scan", "remove_item"]
-        : activeBoxState === null
-          ? ["void_scan", "change_date"]
-          : ["void_scan"],
+    total: readInteger(record, "total"),
+    affectedCodeCount: readInteger(record, "affectedCodeCount"),
+    allCanVoid: readBoolean(record, "allCanVoid"),
+    allCanRestore: readBoolean(record, "allCanRestore"),
+    allCanChangeDate: readBoolean(record, "allCanChangeDate"),
+    allCanRemoveItem: readBoolean(record, "allCanRemoveItem"),
   };
+}
+
+function evidenceAggregateActions(row: EvidenceAggregateRow): InventoryEvidenceAction[] {
+  if (row.total === 0) return [];
+  const actions: InventoryEvidenceAction[] = [];
+  if (row.allCanVoid) actions.push("void_scan");
+  if (row.allCanRestore) actions.push("restore_scan");
+  if (row.allCanChangeDate) actions.push("change_date");
+  if (row.allCanRemoveItem) actions.push("remove_item");
+  return actions;
 }
 
 function parseDiscrepancyRow(value: unknown): DiscrepancyRow {

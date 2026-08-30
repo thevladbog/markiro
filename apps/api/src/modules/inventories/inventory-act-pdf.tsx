@@ -23,7 +23,9 @@ import sharp from "sharp";
 import type { InventoryResultSource } from "./inventory-result-source.service";
 
 const assetsPath = join(__dirname, "../billing/assets");
-const logoSvg = readFileSync(join(assetsPath, "markiro-logo-on-light.svg"), "utf8");
+const logoDataUri = `data:image/png;base64,${readFileSync(
+  join(assetsPath, "markiro-logo-on-light.png"),
+).toString("base64")}`;
 
 Font.register({
   family: "IBM Plex Sans",
@@ -183,10 +185,10 @@ export async function generateInventoryActPdf(
   metadata: InventoryDocumentGenerationMetadata,
 ): Promise<InventoryDocumentGeneratedPart[]> {
   const model = buildInventoryActViewModel(source, metadata);
-  const [logo, barcode] = await Promise.all([
-    svgDataUri(logoSvg, 1120),
-    svgDataUri(renderCode128Svg(model.barcodeValue, { includeText: false }), 900),
-  ]);
+  const barcode = await svgDataUri(
+    renderCode128Svg(model.barcodeValue, { includeText: false }),
+    900,
+  );
   const timestamp = new Date(metadata.fileDateTime);
   const pdf = await renderToBuffer(
     <Document
@@ -196,7 +198,7 @@ export async function generateInventoryActPdf(
     >
       <Page size="A4" style={styles.page} wrap={false}>
         <View style={styles.headerRule} />
-        <Image style={styles.logo} src={logo} cache={false} />
+        <Image style={styles.logo} src={logoDataUri} cache={false} />
         <Text style={styles.documentKind}>АКТ ОБ ИНВЕНТАРИЗАЦИИ</Text>
         <Text style={styles.documentMeta}>
           № {model.inventoryNumber} · {model.documentDate}
@@ -267,7 +269,9 @@ export async function generateInventoryActPdf(
             <Text style={styles.barcodeCaption}>{model.barcodeValue}</Text>
           </View>
           <View style={styles.footerMeta}>
-            <Text>Сформировано в Markiro · ревизия результата {source.resultRevision}</Text>
+            <Text>
+              Сформировано в Markiro · {inventoryActResultRevisionLabel(source.resultRevision)}
+            </Text>
             <Text>Страница 1 из 1</Text>
           </View>
         </View>
@@ -370,7 +374,7 @@ const styles = StyleSheet.create({
     borderColor: colors.strong,
     paddingVertical: 7,
   },
-  metric: { flex: 1, borderRightWidth: 0.5, borderRightColor: colors.rule, paddingLeft: 0 },
+  metric: { flex: 1, borderRightWidth: 0.5, borderRightColor: colors.rule, paddingLeft: 7 },
   metricLast: { borderRightWidth: 0 },
   metricValue: { fontSize: 18, fontWeight: 600, lineHeight: 1 },
   metricAccent: { color: colors.green },
@@ -405,15 +409,17 @@ const styles = StyleSheet.create({
   conclusion: { lineHeight: 1.3, maxWidth: 390 },
   signatures: { marginTop: 8, flexDirection: "row", alignItems: "flex-start" },
   signatureList: { width: 365 },
-  signatureRow: { height: 28, flexDirection: "row", alignItems: "center" },
-  signatureLabel: { width: 128, color: colors.muted, fontSize: 6.6 },
-  signatureLine: { width: 65, borderBottomWidth: 0.5, borderBottomColor: colors.rule },
-  signatureNameLine: {
-    width: 140,
-    marginLeft: 12,
+  signatureRow: { height: 28, flexDirection: "row", alignItems: "flex-start", paddingTop: 4 },
+  signatureLabel: { width: 128, paddingTop: 2, color: colors.muted, fontSize: 6.6 },
+  signatureField: { width: 65, alignItems: "center" },
+  signatureNameField: { width: 140, marginLeft: 12 },
+  signatureLine: {
+    width: "100%",
+    height: 8,
     borderBottomWidth: 0.5,
     borderBottomColor: colors.rule,
   },
+  signatureHint: { marginTop: 2, color: colors.muted, fontSize: 5.4 },
   stamp: {
     width: 72,
     height: 72,
@@ -558,10 +564,20 @@ function SignatureRow({ label }: { label: string }) {
   return (
     <View style={styles.signatureRow}>
       <Text style={styles.signatureLabel}>{label}</Text>
-      <View style={styles.signatureLine} />
-      <View style={styles.signatureNameLine} />
+      <View style={styles.signatureField}>
+        <View style={styles.signatureLine} />
+        <Text style={styles.signatureHint}>Подпись</Text>
+      </View>
+      <View style={[styles.signatureField, styles.signatureNameField]}>
+        <View style={styles.signatureLine} />
+        <Text style={styles.signatureHint}>Расшифровка</Text>
+      </View>
     </View>
   );
+}
+
+export function inventoryActResultRevisionLabel(revision: number): string {
+  return revision === 0 ? "исходный результат" : `ревизия результата ${revision}`;
 }
 
 async function svgDataUri(svg: string, width: number): Promise<string> {
