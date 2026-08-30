@@ -1567,7 +1567,7 @@ describe("platform commercial contracts", () => {
     );
   });
 
-  it("strictly validates act dates, upload metadata, and idempotency bodies", () => {
+  it("strictly validates act dates and idempotency bodies", () => {
     const idempotencyKey = "83111111-1111-4111-8111-111111111119";
     const requestId = "84111111-1111-4111-8111-111111111119";
     const act = platformCommercialContracts.billingActs.create.body.parse({
@@ -1589,18 +1589,6 @@ describe("platform commercial contracts", () => {
       platformCommercialContracts.billingActs.create.body.safeParse({
         ...act,
         periodEnd: "2026-02-30",
-      }).success,
-    ).toBe(false);
-    expect(
-      platformCommercialContracts.billingActs.uploadMetadata.safeParse({
-        contentType: "application/pdf",
-        byteSize: 5 * 1024 * 1024,
-      }).success,
-    ).toBe(true);
-    expect(
-      platformCommercialContracts.billingActs.uploadMetadata.safeParse({
-        contentType: "text/plain",
-        byteSize: 10,
       }).success,
     ).toBe(false);
     expect(

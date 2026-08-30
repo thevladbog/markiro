@@ -35,17 +35,21 @@ export function formatMoney(value: string): string {
 }
 
 export function documentKindLabel(model: PrintDocumentModel): string {
-  return model.kind === "invoice" ? "СЧЁТ НА ОПЛАТУ" : "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ";
+  if (model.kind === "invoice") return "СЧЁТ НА ОПЛАТУ";
+  if (model.kind === "act") return "АКТ ОКАЗАННЫХ УСЛУГ";
+  return "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ";
 }
 
 export function documentBarcodeValue(model: PrintDocumentModel): string {
   const number = /^[\x20-\x7e]+$/.test(model.number)
     ? model.number
     : Buffer.from(model.number, "utf8").toString("base64url");
-  return `${model.kind === "invoice" ? "INV" : "OFR"}-${number}`;
+  const prefix = model.kind === "invoice" ? "INV" : model.kind === "act" ? "ACT" : "OFR";
+  return `${prefix}-${number}`;
 }
 
 export function documentSubject(model: PrintDocumentModel): string {
+  if (model.kind === "act") return "Акт оказанных услуг";
   if (model.lines.length === 0) return "Услуги платформы Markiro";
   return "Лицензия и услуги платформы Markiro";
 }

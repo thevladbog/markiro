@@ -4,6 +4,8 @@ import { Link, useParams } from "react-router";
 import { Alert, SectionHeader, Spinner, StatusChip } from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
+import { getBillingRequest } from "../billing-requests/api.js";
+import { getInvoice } from "../billing/api.js";
 import { getBillingAct } from "./api.js";
 
 export function BillingActDetailPage() {
@@ -14,6 +16,16 @@ export function BillingActDetailPage() {
     queryKey: ["platform", "billing", "acts", actId],
     queryFn: () => getBillingAct(actId!),
     enabled: Boolean(actId) && principal.capabilities.includes("billing.read"),
+  });
+  const invoice = useQuery({
+    queryKey: ["platform", "invoices", detail.data?.invoiceId],
+    queryFn: () => getInvoice(detail.data!.invoiceId!),
+    enabled: Boolean(detail.data?.invoiceId),
+  });
+  const request = useQuery({
+    queryKey: ["platform", "billing", "requests", detail.data?.requestId],
+    queryFn: () => getBillingRequest(detail.data!.requestId!),
+    enabled: Boolean(detail.data?.requestId),
   });
 
   if (!principal.capabilities.includes("billing.read")) {
@@ -45,10 +57,10 @@ export function BillingActDetailPage() {
         actions={
           act.requestId ? (
             <Link to={`/billing-requests/${act.requestId}`}>
-              {t("billingActs.detail.openRequest")}
+              {request.data?.number ?? t("billingActs.detail.openRequest")}
             </Link>
           ) : (
-            <Link to="/billing-requests">{t("billingRequests.back")}</Link>
+            <Link to="/billing-acts">{t("billingActs.backToRegistry")}</Link>
           )
         }
       />
@@ -73,13 +85,17 @@ export function BillingActDetailPage() {
         <div>
           <dt>{t("billingActs.fields.tenant")}</dt>
           <dd>
-            <Link to={`/tenants/${act.tenantId}`}>{t("billingActs.detail.openTenant")}</Link>
+            <Link to={`/tenants/${act.tenantId}`}>
+              {invoice.data?.tenantName ?? t("billingActs.detail.openTenant")}
+            </Link>
           </dd>
         </div>
       </dl>
       {act.invoiceId ? (
         <div className="billing-request-actions">
-          <Link to={`/invoices/${act.invoiceId}`}>{t("billingActs.detail.openInvoice")}</Link>
+          <Link to={`/invoices/${act.invoiceId}`}>
+            {invoice.data?.number ?? t("billingActs.detail.openInvoice")}
+          </Link>
         </div>
       ) : null}
     </section>

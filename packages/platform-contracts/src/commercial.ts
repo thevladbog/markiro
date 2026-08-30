@@ -942,23 +942,6 @@ export const billingActCreateSchema = z
   });
 export const billingActIssueSchema = billingActIdempotencySchema;
 export const billingActCancelSchema = billingActIdempotencySchema;
-export const billingActUploadMetadataSchema = z
-  .object({
-    contentType: z.literal("application/pdf"),
-    byteSize: z
-      .number()
-      .int()
-      .positive()
-      .max(5 * 1024 * 1024),
-  })
-  .strict();
-export const billingActUploadTooLargeErrorSchema = z
-  .object({
-    code: z.literal("billing_act_pdf_too_large"),
-    message: z.literal("Billing act PDF exceeds the 5 MiB limit"),
-    requestId: platformUuidSchema,
-  })
-  .strict();
 export const billingActDocumentSchema = z.discriminatedUnion("state", [
   z
     .object({
@@ -1881,7 +1864,6 @@ export const platformCommercialContracts = {
       response: billingActSchema,
     },
     document: billingActDocumentSchema,
-    uploadMetadata: billingActUploadMetadataSchema,
   },
   payments: {
     list: { response: z.object({ items: z.array(billingPaymentSchema) }).strict() },

@@ -375,18 +375,36 @@ function Closing({ model }: { model: PrintDocumentModel }) {
           <Text style={styles.sectionLabel}>НАЗНАЧЕНИЕ ПЛАТЕЖА</Text>
           <Text style={styles.noteText}>{paymentPurpose(model)}</Text>
         </View>
-      ) : (
+      ) : model.kind === "offer" ? (
         <Text style={styles.offerNotice}>Не является счётом на оплату</Text>
+      ) : (
+        <View style={styles.noteSection}>
+          <Text style={styles.sectionLabel}>РЕЗУЛЬТАТ ОКАЗАНИЯ УСЛУГ</Text>
+          <Text style={styles.noteText}>
+            Услуги оказаны в полном объёме и в согласованные сроки. Заказчик претензий по объёму,
+            качеству и срокам оказания услуг не имеет.
+          </Text>
+        </View>
       )}
       <View style={styles.signing} wrap={false}>
         <View style={styles.signature}>
-          <Text style={styles.sectionLabel}>ПОСТАВЩИК</Text>
+          <Text style={styles.sectionLabel}>
+            {model.kind === "act" ? "ИСПОЛНИТЕЛЬ" : "ПОСТАВЩИК"}
+          </Text>
           <Text style={styles.signatureLine}>________________ / ____________________</Text>
           <Text style={styles.signatureHint}>подпись / расшифровка</Text>
         </View>
-        <View style={styles.stamp}>
-          <Text style={styles.stampText}>МЕСТО ДЛЯ ПЕЧАТИ</Text>
-        </View>
+        {model.kind === "act" ? (
+          <View style={styles.signature}>
+            <Text style={styles.sectionLabel}>ЗАКАЗЧИК</Text>
+            <Text style={styles.signatureLine}>________________ / ____________________</Text>
+            <Text style={styles.signatureHint}>подпись / расшифровка</Text>
+          </View>
+        ) : (
+          <View style={styles.stamp}>
+            <Text style={styles.stampText}>МЕСТО ДЛЯ ПЕЧАТИ</Text>
+          </View>
+        )}
       </View>
     </>
   );
@@ -403,24 +421,42 @@ export async function renderPrintPdf(model: PrintDocumentModel): Promise<Buffer>
     900,
   );
   const pdf = await renderToBuffer(
-    <Document title={`${documentKindLabel(model)} № ${model.number}`}>
+    <Document
+      title={`${documentKindLabel(model)} № ${model.number}`}
+      creationDate={model.issuedOrPublishedAt}
+      modificationDate={model.issuedOrPublishedAt}
+    >
       <Page size="A4" style={styles.page} wrap>
         <Header model={model} logo={logo} />
         <View style={styles.body}>
           <Text style={styles.subject}>{documentSubject(model)}</Text>
           <Text style={styles.meta}>
-            от {formatPrintDate(model.issuedOrPublishedAt)} ·{" "}
-            {model.kind === "invoice" ? "оплатить до" : "действительно до"}{" "}
-            {formatPrintDate(model.dueOrExpiresAt)}
+            {model.kind === "act" ? (
+              <>
+                от {formatPrintDate(model.issuedOrPublishedAt)} · период{" "}
+                {formatCivilDate(model.periodStart)} — {formatCivilDate(model.periodEnd)} ·
+                основание: счёт № {model.sourceNumber}
+              </>
+            ) : (
+              <>
+                от {formatPrintDate(model.issuedOrPublishedAt)} ·{" "}
+                {model.kind === "invoice" ? "оплатить до" : "действительно до"}{" "}
+                {formatPrintDate(model.dueOrExpiresAt)}
+              </>
+            )}
           </Text>
-          <Bank model={model} qr={qr} />
+          {model.kind === "act" ? null : <Bank model={model} qr={qr} />}
           <View style={styles.parties} wrap={false}>
-            <Party label="ПОСТАВЩИК" profile={model.seller} />
-            <Party label="ПОКУПАТЕЛЬ" profile={model.buyer} />
+            <Party
+              label={model.kind === "act" ? "ИСПОЛНИТЕЛЬ" : "ПОСТАВЩИК"}
+              profile={model.seller}
+            />
+            <Party label={model.kind === "act" ? "ЗАКАЗЧИК" : "ПОКУПАТЕЛЬ"} profile={model.buyer} />
           </View>
           <View style={styles.itemsHeading}>
             <Text style={styles.sectionLabel}>
-              СОСТАВ {model.kind === "invoice" ? "СЧЁТА" : "ПРЕДЛОЖЕНИЯ"}
+              СОСТАВ{" "}
+              {model.kind === "invoice" ? "СЧЁТА" : model.kind === "act" ? "АКТА" : "ПРЕДЛОЖЕНИЯ"}
             </Text>
             <Text style={[styles.mono, styles.muted]}>{model.lines.length} поз.</Text>
           </View>
@@ -433,4 +469,10 @@ export async function renderPrintPdf(model: PrintDocumentModel): Promise<Buffer>
   );
   if (pdf.byteLength > 10 * 1024 * 1024) throw new Error("print_document_too_large");
   return pdf;
+}
+
+function formatCivilDate(value: string | null | undefined): string {
+  if (!value) return "—";
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : value;
 }

@@ -125,8 +125,6 @@ export {
   billingActDocumentSchema,
   billingActIssueSchema,
   billingActSchema,
-  billingActUploadMetadataSchema,
-  billingActUploadTooLargeErrorSchema,
   billingActualAddressInputSchema,
   billingContactSchema,
   billingPostalAddressInputSchema,

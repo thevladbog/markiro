@@ -501,12 +501,12 @@
   },
   "billingActs": {
     "title": "Issue act",
-    "description": "Create act metadata and upload one final PDF.",
+    "description": "Choose an invoice and service period. Details, lines, and totals are copied automatically.",
     "actions": "Navigation",
     "back": "Back to request",
+    "backToRegistry": "Back to acts",
     "forbiddenTitle": "Act issue unavailable",
     "forbiddenBody": "Billing write permission is required to issue an act.",
-    "forbiddenDraft": "Saved draft ID remains available read-only:",
     "recovery": {
       "title": "Saved act recovery state",
       "status": "State",
@@ -532,31 +532,57 @@
       "forbiddenTitle": "Act unavailable",
       "forbiddenBody": "Billing read permission is required to view the act."
     },
+    "registry": {
+      "title": "Acts",
+      "description": "Closing documents for delivered services.",
+      "ledger": "Acts register",
+      "create": "Issue act",
+      "period": "Period",
+      "loading": "Loading acts…",
+      "empty": "No acts yet",
+      "loadError": "Could not load the acts register",
+      "withoutInvoice": "Without invoice",
+      "unresolvedTenant": "Tenant unavailable"
+    },
+    "source": {
+      "title": "Act source",
+      "hint": "Details and lines come from the invoice",
+      "placeholder": "Choose an issued invoice",
+      "searchPlaceholder": "Search by number or tenant",
+      "empty": "No eligible invoices",
+      "loading": "Loading invoices…",
+      "loadingDetail": "Loading invoice lines",
+      "loadError": "Could not load invoices"
+    },
+    "preview": {
+      "title": "Act contents",
+      "total": "Total"
+    },
+    "period": {
+      "title": "Service period",
+      "hint": "The period must end in the past"
+    },
     "fields": {
       "number": "Act number",
-      "actId": "Draft ID:",
       "periodStart": "Period start",
       "periodEnd": "Period end",
       "tenant": "Tenant",
       "request": "Request",
       "invoice": "Invoice",
-      "service": "Service",
-      "pdf": "Act PDF",
-      "pdfHint": "One PDF, up to 5 MiB"
+      "invoiceSource": "Source invoice",
+      "service": "Service"
     },
     "errors": {
-      "pdfOnly": "Only PDF files are allowed",
-      "pdfSize": "The PDF must be non-empty and no larger than 5 MiB",
-      "pdfRequired": "Choose the act PDF",
-      "form": "Check the number, period, tenant, and linked objects",
+      "invoiceRequired": "Choose a source invoice",
+      "form": "Check the selected invoice and service period",
       "retryable": "The network or server is unavailable. Retry uses the same operation without duplication.",
       "authoritative": "The server rejected the operation. Check current links and document state."
     },
     "progress": {
       "creating": "Creating act…",
-      "uploading": "Uploading and issuing PDF…",
+      "generating": "Generating and issuing PDF…",
       "draftSaved": "Act draft saved",
-      "issued": "Act issued"
+      "issued": "Act issued and PDF generated"
     }
   },
   "payments": {
@@ -716,6 +742,7 @@
     "catalog": "Catalog",
     "offers": "Offers",
     "invoices": "Invoices",
+    "acts": "Acts",
     "payments": "Payments",
     "billingRequests": "Requests",
     "monitoring": "Monitoring",

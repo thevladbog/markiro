@@ -389,6 +389,57 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
     ).rejects.toMatchObject({ response: { code: "billing_act_already_issued" }, status: 409 });
   });
 
+  it("generates the issued PDF from the selected invoice instead of accepting an operator file", async () => {
+    const [invoice] = await connection.db
+      .insert(schema.invoices)
+      .values({
+        tenantId: tenantA,
+        number: `INV-ACT-${randomUUID()}`,
+        status: "issued",
+        issueDate: fixedNow,
+        sellerSnapshot: { legalName: "ООО Маркиро", taxId: "9700000000" },
+        buyerSnapshot: { legalName: "ООО Фабрика", taxId: "7700000000" },
+        subtotal: "100.00",
+        vatTotal: "0.00",
+        total: "100.00",
+        createdByPlatformUserId: actorId,
+        issuedByPlatformUserId: actorId,
+        issuedAt: fixedNow,
+      })
+      .returning();
+    await connection.db.insert(schema.invoiceLines).values({
+      tenantId: tenantA,
+      invoiceId: invoice!.id,
+      position: 1,
+      kind: "custom",
+      nameRu: "Настройка интеграции",
+      nameEn: "Integration setup",
+      quantity: 1,
+      unit: "услуга",
+      agreedUnitPrice: "100.00",
+      vatRate: null,
+      vatIncluded: false,
+      lineSubtotal: "100.00",
+      lineVat: "0.00",
+      lineTotal: "100.00",
+    });
+    const act = await acts.create(actor, {
+      tenantId: tenantA,
+      invoiceId: invoice!.id,
+      number: `ACT-GENERATED-${randomUUID()}`,
+      periodStart: "2026-07-01",
+      periodEnd: "2026-07-31",
+      idempotencyKey: randomUUID(),
+    });
+
+    const issued = await acts.issueGenerated(actor, act.id, { idempotencyKey: randomUUID() });
+
+    expect(issued).toMatchObject({ status: "issued", invoiceId: invoice!.id });
+    const [, body, contentType] = storage.putVerified.mock.calls.at(-1)!;
+    expect(contentType).toBe("application/pdf");
+    expect(body.subarray(0, 5).toString()).toBe("%PDF-");
+  });
+
   it("rolls final act state and event back when its mandatory notification cannot enqueue", async () => {
     const failedAct = await acts.create(actor, {
       tenantId: tenantA,

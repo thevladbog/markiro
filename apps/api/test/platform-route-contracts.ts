@@ -1,5 +1,4 @@
 import {
-  billingActUploadTooLargeErrorSchema,
   platformAuditContracts,
   platformAuthContracts,
   platformCatalogContracts,
@@ -349,8 +348,6 @@ export const CURRENT_SAAS_ROUTES = [
     platformCommercialContracts.billingActs.issue.response,
     {
       body: platformCommercialContracts.billingActs.issue.body,
-      multipart: true,
-      errors: [{ status: "413", schema: billingActUploadTooLargeErrorSchema }],
     },
   ),
   route(
