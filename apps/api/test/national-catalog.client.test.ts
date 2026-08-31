@@ -330,6 +330,25 @@ describe("NationalCatalogClient", () => {
     });
   });
 
+  it("rejects an empty dependent attribute object", async () => {
+    const client = new NationalCatalogClient(
+      dependencies(
+        async () =>
+          new Response(
+            JSON.stringify({
+              ...attributePayload,
+              result: [{ ...attributePayload.result[0], dependent_attributes: [{}] }],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    await expect(client.getAttributes(auth)).resolves.toEqual({
+      status: "invalid_response",
+    });
+  });
+
   it("uses only the fixed feed-product path and semicolon-delimited digit GTINs", async () => {
     const calls: string[] = [];
     const client = new NationalCatalogClient(

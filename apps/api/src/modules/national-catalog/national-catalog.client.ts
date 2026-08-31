@@ -498,6 +498,7 @@ function parseOptionalDependentAttributes(
   for (const row of rows) {
     const record = asRecord(row);
     if (!record) return null;
+    if (!Object.hasOwn(record, "value") && !Object.hasOwn(record, "atters")) return null;
     const dependencyValue = optionalNullableString(record.value);
     const attributes = parseOptionalDependentAttributeRules(record.atters);
     if (dependencyValue === undefined || attributes === null) return null;
