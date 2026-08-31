@@ -74,6 +74,24 @@ const stationOriginSchema = z.url().transform((value, ctx) => {
 const explicitBooleanSchema = z.enum(["true", "false"]).transform((value) => value === "true");
 const chzTrueApiTokenFormatSchema = z.enum(["jwt", "uuid"]).default("jwt");
 
+const optionalHttpsUrlSchema = z
+  .string()
+  .trim()
+  .url()
+  .transform((value, ctx) => {
+    const url = new URL(value);
+    if (url.protocol !== "https:") {
+      ctx.addIssue({ code: "custom", message: "must be an HTTPS URL" });
+      return z.NEVER;
+    }
+    if (url.username || url.password) {
+      ctx.addIssue({ code: "custom", message: "must not include userinfo" });
+      return z.NEVER;
+    }
+    return value;
+  })
+  .optional();
+
 const encryptionKeySchema = z
   .string()
   .refine((value) => {
@@ -193,6 +211,11 @@ const EnvSchema = z
     // The announced UUID-token exchange is opt-in until it is confirmed in
     // the provider sandbox and production. Existing deployments stay on JWT.
     CHZ_TRUE_API_TOKEN_FORMAT: chzTrueApiTokenFormatSchema,
+    // National Catalog stays disabled until a deployment explicitly selects a
+    // validated endpoint and a tenant authorized to read its schema.
+    NATIONAL_CATALOG_BASE_URL: optionalHttpsUrlSchema,
+    NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID: z.string().trim().min(1).optional(),
+    NATIONAL_CATALOG_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1).default(15_000),
   })
   .superRefine((env, ctx) => {
     if (env.PLATFORM_AUTH_SECRET === env.BETTER_AUTH_SECRET) {
@@ -294,6 +317,9 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     "DADATA_SECRET",
     "CHZ_TOKEN_ENCRYPTION_KEY",
     "CHZ_TRUE_API_TOKEN_FORMAT",
+    "NATIONAL_CATALOG_BASE_URL",
+    "NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID",
+    "NATIONAL_CATALOG_REQUEST_TIMEOUT_MS",
   ]) {
     if (normalizedSource[name]?.trim() === "") delete normalizedSource[name];
   }
