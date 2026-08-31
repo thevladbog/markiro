@@ -153,6 +153,33 @@ describe("generated billing acts", () => {
     expect(screen.queryByText(INVOICE_ID)).toBeNull();
   });
 
+  it("restores the issued act content when its detail is opened directly", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (url.endsWith(`/api/platform/billing/acts/${ACT_ID}`)) {
+          return jsonResponse(200, { ...act("issued"), requestId: null });
+        }
+        if (url.endsWith(`/api/platform/invoices/${INVOICE_ID}`)) {
+          return jsonResponse(200, invoiceDetail);
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    renderSaasApp({ initialEntry: `/billing-acts/${ACT_ID}` });
+
+    expect(await screen.findByRole("heading", { name: "Состав акта" })).toBeDefined();
+    expect(screen.getByText("Настройка интеграции")).toBeDefined();
+    expect(screen.getByText("1 услуга")).toBeDefined();
+    expect(screen.getAllByText("15 000,00 ₽")).toHaveLength(2);
+    expect(screen.getByRole("heading", { name: "Печатная форма" })).toBeDefined();
+    expect(screen.getByText("Чистый бланк")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Скачать PDF" })).toBeDefined();
+  });
+
   it("downloads the ready act PDF from its detail page", async () => {
     const documentUrl = "https://objects.example.test/acts/MRK-ACT-000021.pdf";
     const target = { opener: {}, location: { replace: vi.fn() }, close: vi.fn() };
