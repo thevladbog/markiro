@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import { load } from "js-yaml";
@@ -42,6 +45,39 @@ test("classifier uses the exact pull-request diff and exposes every policy outpu
   for (const output of ["full", ...heavyJobs.map(([, name]) => name)]) {
     assert.equal(classifier.outputs[output], `\${{ steps.affected.outputs.${output} }}`, output);
   }
+});
+
+test("classifier falls back to a full run when pull-request diff generation fails", (t) => {
+  const classifier = workflow.jobs["classify-changes"];
+  const classifyStep = classifier.steps.find((step) => step.id === "affected");
+  const directory = mkdtempSync(join(tmpdir(), "markiro-ci-workflow-"));
+  const binaryDirectory = join(directory, "bin");
+  const outputPath = join(directory, "github-output.txt");
+  const gitPath = join(binaryDirectory, "git");
+
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+  mkdirSync(binaryDirectory);
+  writeFileSync(gitPath, "#!/usr/bin/env bash\nexit 1\n", { mode: 0o755 });
+  chmodSync(gitPath, 0o755);
+
+  const child = spawnSync("bash", ["-c", classifyStep.run], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      BASE_SHA: "base-sha",
+      EVENT_NAME: "pull_request",
+      GITHUB_OUTPUT: outputPath,
+      HEAD_SHA: "head-sha",
+      PATH: `${binaryDirectory}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(
+    readFileSync(outputPath, "utf8"),
+    ["full=true", ...heavyJobs.map(([, name]) => `${name}=true`), ""].join("\n"),
+  );
 });
 
 test("every heavy job keeps its id and is gated by its classifier output", () => {

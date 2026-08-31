@@ -277,7 +277,7 @@ git commit -m "feat(ci): enforce selected job results"
 **Interfaces:**
 
 - Consumes: `node tools/ci/affected.mjs --full --github-output <path>`.
-- Consumes: NUL-delimited `git diff --name-only --no-renames -z <base> <head>` piped to `affected.mjs --stdin-zero`.
+- Consumes: a successfully generated temporary file containing the NUL-delimited `git diff --name-only --no-renames -z <base> <head>` output; a failed diff invokes `affected.mjs --full`.
 - Consumes: `node tools/ci/required-results.mjs --needs-env CI_NEEDS_JSON`.
 - Produces: GitHub jobs `classify-changes` and `ci-required`; all existing heavy job ids remain unchanged.
 
@@ -286,7 +286,8 @@ git commit -m "feat(ci): enforce selected job results"
 Parse `.github/workflows/ci.yml` with `js-yaml`. Assert:
 
 - `classify-changes` checks out with `fetch-depth: 0` and exposes every classifier output;
-- the pull-request path uses `github.event.pull_request.base.sha`, `github.event.pull_request.head.sha`, `git diff --name-only --no-renames -z`, and `--stdin-zero`;
+- the pull-request path uses `github.event.pull_request.base.sha`, `github.event.pull_request.head.sha`, `git diff --name-only --no-renames -z`, a temporary diff file, and `--stdin-zero`;
+- a failed pull-request diff invokes `--full` and completes successfully;
 - non-pull-request events invoke `--full`;
 - every heavy job needs `classify-changes` and uses its matching boolean output in a job-level `if`;
 - `signer-windows-build` runs `pnpm test:signer-release:contract`;
@@ -302,7 +303,7 @@ Expected: FAIL because `classify-changes` does not exist.
 
 - [ ] **Step 3: Add `classify-changes` to the workflow**
 
-Add checkout with `fetch-depth: 0`, then a Bash step with `set -euo pipefail`. Put `github.event_name`, base SHA, and head SHA in environment variables. For pull requests, pipe the exact no-renames NUL diff into the classifier; otherwise invoke `--full`. Expose all ten outputs (`full` plus nine job flags) from the step.
+Add checkout with `fetch-depth: 0`, then a Bash step with `set -euo pipefail`. Put `github.event_name`, base SHA, and head SHA in environment variables. For pull requests, capture the exact no-renames NUL diff in a temporary file and pass that file to the classifier only when diff generation succeeds; if it fails, invoke `--full`. Keep the non-pull-request `--full` path. Expose all ten outputs (`full` plus nine job flags) from the step.
 
 - [ ] **Step 4: Gate every heavy job without renaming it**
 

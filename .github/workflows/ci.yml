@@ -49,8 +49,13 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            git diff --name-only --no-renames -z "$BASE_SHA" "$HEAD_SHA" \
-              | node tools/ci/affected.mjs --stdin-zero --github-output "$GITHUB_OUTPUT"
+            diff_file="$(mktemp)"
+            trap 'rm -f "$diff_file"' EXIT
+            if git diff --name-only --no-renames -z "$BASE_SHA" "$HEAD_SHA" > "$diff_file"; then
+              node tools/ci/affected.mjs --stdin-zero --github-output "$GITHUB_OUTPUT" < "$diff_file"
+            else
+              node tools/ci/affected.mjs --full --github-output "$GITHUB_OUTPUT"
+            fi
           else
             node tools/ci/affected.mjs --full --github-output "$GITHUB_OUTPUT"
           fi
