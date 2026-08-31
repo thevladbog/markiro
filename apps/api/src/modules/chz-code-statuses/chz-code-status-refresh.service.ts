@@ -165,6 +165,10 @@ export class ChzCodeStatusRefreshService {
       if (outcome.rejected) rejectedGroups += 1;
     }
 
+    if (stopReason === "unauthorized") {
+      await this.tokens.invalidateAndRequestRefresh(tenantId, token.obtainedAt);
+    }
+
     // Only when the pass actually did something: a cron tick over a tenant
     // with nothing due is not an event, and journalling it would bury the
     // ones that are. A pass that stopped early is always something, even if

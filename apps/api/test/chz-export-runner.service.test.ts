@@ -137,9 +137,13 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
   let productId: string;
   let inventoryId: string;
 
-  let tokens: { getActiveToken: ReturnType<typeof vi.fn> };
+  let tokens: {
+    getActiveToken: ReturnType<typeof vi.fn>;
+    invalidateAndRequestRefresh: ReturnType<typeof vi.fn>;
+  };
   let journal: { append: ReturnType<typeof vi.fn> };
   let importEvidence: ReturnType<typeof vi.fn>;
+  const tokenObtainedAt = new Date("2026-08-31T12:00:00.000Z");
 
   beforeAll(async () => {
     await maintenance.pool.query(`CREATE DATABASE "${databaseName}"`);
@@ -195,7 +199,9 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
       getActiveToken: vi.fn().mockResolvedValue({
         status: "ok",
         auth: { baseUrl: "https://true-api.invalid", token: TEST_TOKEN },
+        obtainedAt: tokenObtainedAt,
       }),
+      invalidateAndRequestRefresh: vi.fn().mockResolvedValue(undefined),
     };
     journal = { append: vi.fn().mockResolvedValue(undefined) };
     // The real import writes an `inventory_imports` row, and `chz_export_runs`
@@ -349,6 +355,50 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
     expect(outcome).toEqual({ finished: false });
     expect((await runsFor(inventoryId)).every((row) => row.state === "ordered")).toBe(true);
     warn.mockRestore();
+  });
+
+  it("waits until ЧЗ marks a completed result archive as available", async () => {
+    await seedRuns({ state: "ordered", taskIdFor: (status) => `task-${status}` });
+    const { client, calls } = fakeClient({
+      results: [
+        {
+          taskId: "task-EMITTED",
+          resultId: "r1",
+          status: "SUCCESS",
+          available: "NOT_AVAILABLE",
+          archiveSize: 4,
+          fileDeleteDate: null,
+        },
+      ],
+    });
+
+    await runnerWith(client).run(tenantId, inventoryId, { retryCount: 0, retryLimit: 5 });
+
+    const [emitted] = await runsFor(inventoryId, "EMITTED");
+    expect(emitted).toMatchObject({ state: "ordered", resultId: null });
+    expect(calls.some((call) => call.op === "download")).toBe(false);
+  });
+
+  it("fails a result whose declared archive is larger than the importer limit", async () => {
+    await seedRuns({ state: "ordered", taskIdFor: (status) => `task-${status}` });
+    const { client, calls } = fakeClient({
+      results: [
+        {
+          taskId: "task-EMITTED",
+          resultId: "r1",
+          status: "SUCCESS",
+          available: "AVAILABLE",
+          archiveSize: 64 * 1024 * 1024 + 1,
+          fileDeleteDate: null,
+        },
+      ],
+    });
+
+    await runnerWith(client).run(tenantId, inventoryId, { retryCount: 0, retryLimit: 5 });
+
+    const [emitted] = await runsFor(inventoryId, "EMITTED");
+    expect(emitted).toMatchObject({ state: "failed", errorCode: "CHZ_DOWNLOAD_REJECTED" });
+    expect(calls.some((call) => call.op === "download")).toBe(false);
   });
 
   it("fails an order whose orderedAt is older than the deadline with CHZ_TASK_TIMED_OUT", async () => {
@@ -727,6 +777,8 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
     // A 401/403 anywhere in the pass is the same condition as a token that
     // failed to load: the job retries rather than failing runs outright.
     expect(outcome).toEqual({ finished: false });
+    expect(tokens.invalidateAndRequestRefresh).toHaveBeenCalledOnce();
+    expect(tokens.invalidateAndRequestRefresh).toHaveBeenCalledWith(tenantId, tokenObtainedAt);
     const [emitted] = await runsFor(inventoryId, "EMITTED");
     expect(emitted).toMatchObject({ state: "queued", errorCode: null });
     warn.mockRestore();

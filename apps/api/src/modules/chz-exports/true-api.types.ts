@@ -45,6 +45,9 @@ export interface DispenserResult {
   resultId: string | null;
   status: string;
   errorMessage?: string | null;
+  archiveSize?: number | null;
+  available?: string | null;
+  fileDeleteDate?: string | null;
 }
 
 export interface CisInfo {

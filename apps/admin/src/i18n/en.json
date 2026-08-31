@@ -405,6 +405,8 @@
         "blocked": {
           "INN_MISSING": "Enter the organization's INN in company details",
           "PRODUCT_GROUP_MISSING": "Set the Chestny ZNAK product group on the product card",
+          "PRODUCT_GROUP_EXPORT_UNSUPPORTED": "Chestny ZNAK does not provide the status export for this product group. Upload files manually",
+          "PRODUCT_GROUP_STATUS_PROFILE_UNSUPPORTED": "Tobacco groups use a different Chestny ZNAK status set. Automatic ordering is not available yet; upload files manually",
           "AGENT_NOT_PAIRED": "Pair a signer agent under Integrations",
           "TOKEN_UNAVAILABLE": "Refresh the True API token under Integrations"
         },

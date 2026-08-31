@@ -133,6 +133,10 @@ export class TrueApiClient {
               typeof record.errorMessage === "string" && record.errorMessage.length > 0
                 ? record.errorMessage
                 : null,
+            archiveSize: nonnegativeNumberOrNull(record.archiveSize),
+            available: typeof record.available === "string" ? record.available : null,
+            fileDeleteDate:
+              typeof record.fileDeleteDate === "string" ? record.fileDeleteDate : null,
           };
         });
       },
@@ -143,14 +147,21 @@ export class TrueApiClient {
     auth: TrueApiAuth,
     resultId: string,
     productGroupCode: number,
+    maxBytes: number,
   ): Promise<TrueApiResult<Uint8Array>> {
     const query = new URLSearchParams({ pg: String(productGroupCode) });
     return this.request(
       auth,
       `/dispenser/results/${encodeURIComponent(resultId)}/file?${query.toString()}`,
       DOWNLOAD_TIMEOUT_MS,
-      {},
-      async (response) => new Uint8Array(await response.arrayBuffer()),
+      { headers: { Accept: "*/*" } },
+      async (response) => {
+        const bytes = await readBoundedBytes(response, maxBytes);
+        if (!isZipArchive(bytes)) {
+          throw new TrueApiResponseRejection("CHZ_DOWNLOAD_INVALID_ARCHIVE");
+        }
+        return bytes;
+      },
     );
   }
 
@@ -226,13 +237,15 @@ export class TrueApiClient {
     const controller = new AbortController();
     const cancelAbort = this.dependencies.scheduleAbort(controller, timeoutMs);
     try {
+      const headers = new Headers(init.headers);
+      if (!headers.has("Accept")) headers.set("Accept", "application/json");
+      if (init.body && !headers.has("Content-Type")) {
+        headers.set("Content-Type", "application/json");
+      }
+      headers.set("Authorization", `Bearer ${auth.token}`);
       const response = await this.dependencies.fetch(`${auth.baseUrl}${path}`, {
         ...init,
-        headers: {
-          Accept: "application/json",
-          ...(init.body ? { "Content-Type": "application/json" } : {}),
-          Authorization: `Bearer ${auth.token}`,
-        },
+        headers,
         signal: controller.signal,
       });
       // 401 alone means the bearer is bad: that is the token path, and the
@@ -258,7 +271,10 @@ export class TrueApiClient {
       if (!response.ok) return { status: "unavailable" };
       const value = await parse(response);
       return value === null ? { status: "unavailable" } : { status: "ok", value };
-    } catch {
+    } catch (error) {
+      if (error instanceof TrueApiResponseRejection) {
+        return { status: "rejected", code: error.code, message: "" };
+      }
       return { status: "unavailable" };
     } finally {
       cancelAbort();
@@ -276,6 +292,62 @@ export class TrueApiClient {
   }
 }
 
+class TrueApiResponseRejection extends Error {
+  constructor(readonly code: string) {
+    super(code);
+  }
+}
+
+async function readBoundedBytes(response: Response, maxBytes: number): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new RangeError("Invalid byte limit");
+
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new TrueApiResponseRejection("CHZ_DOWNLOAD_TOO_LARGE");
+  }
+
+  if (response.body === null) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > maxBytes) {
+      throw new TrueApiResponseRejection("CHZ_DOWNLOAD_TOO_LARGE");
+    }
+    return bytes;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new TrueApiResponseRejection("CHZ_DOWNLOAD_TOO_LARGE");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+function isZipArchive(bytes: Uint8Array): boolean {
+  if (bytes.byteLength < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return false;
+  const signature = `${bytes[2]}:${bytes[3]}`;
+  return signature === "3:4" || signature === "5:6" || signature === "7:8";
+}
+
 function listFromEnvelope(payload: unknown): unknown[] | null {
   if (payload === null || typeof payload !== "object") return null;
   const list = (payload as Record<string, unknown>).list;
@@ -284,4 +356,10 @@ function listFromEnvelope(payload: unknown): unknown[] | null {
 
 function stringOrEmpty(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function nonnegativeNumberOrNull(value: unknown): number | null {
+  const number =
+    typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
 }

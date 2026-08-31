@@ -5,6 +5,7 @@ import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import { describeErrorForLog } from "../../lib/error-log";
 import { JournalService } from "../integrations/journal.service";
+import { CHZ_MAX_INPUT_BYTES } from "../inventories/chz-tabular-reader";
 import type { InventoryImportDto } from "../inventories/dto";
 import { InventoriesService } from "../inventories/inventories.service";
 import { CHZ_CHANNEL_TYPE } from "../signer-agents/chz-constants";
@@ -152,6 +153,10 @@ export class ChzExportRunnerService {
       if (!(error instanceof ChzUnauthorizedError)) throw error;
       // A 401 mid-pass is the same condition as a token we could not load:
       // the tenant's agent has to sign in again before anything else can move.
+      // Invalidate the rejected bearer immediately and create one idempotent
+      // signer task instead of waiting for the next fifteen-minute scheduler
+      // tick to notice an apparently unexpired database row.
+      await this.tokens.invalidateAndRequestRefresh(tenantId, token.obtainedAt);
       // A 403 never reaches here: the client maps it to `rejected`, not
       // `unauthorized`, since it is a terminal contract refusal, not a bad
       // bearer.
@@ -413,6 +418,21 @@ export class ChzExportRunnerService {
         result.resultId.length > 0 &&
         COMPLETED_TASK_STATUSES.has(status)
       ) {
+        if (
+          result.available !== null &&
+          result.available !== undefined &&
+          result.available.toUpperCase() !== "AVAILABLE"
+        ) {
+          continue;
+        }
+        if (
+          result.archiveSize !== null &&
+          result.archiveSize !== undefined &&
+          result.archiveSize > CHZ_MAX_INPUT_BYTES
+        ) {
+          await this.failRun(run, "CHZ_DOWNLOAD_REJECTED", null);
+          continue;
+        }
         await this.markReady(run, result.resultId);
       } else if (FAILED_TASK_STATUSES.has(status)) {
         await this.failRun(run, "CHZ_TASK_FAILED", result.errorMessage ?? null);
@@ -435,6 +455,7 @@ export class ChzExportRunnerService {
         auth,
         resultId,
         productGroupCode,
+        CHZ_MAX_INPUT_BYTES,
       );
       switch (downloaded.status) {
         case "unauthorized":

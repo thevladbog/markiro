@@ -167,7 +167,17 @@ describe("TrueApiClient", () => {
 
     await expect(client.listDispenserResults(auth, 8, ["a", "b"])).resolves.toEqual({
       status: "ok",
-      value: [{ taskId: "a", resultId: "r1", status: "SUCCESS", errorMessage: null }],
+      value: [
+        {
+          taskId: "a",
+          resultId: "r1",
+          status: "SUCCESS",
+          errorMessage: null,
+          archiveSize: 4,
+          available: "AVAILABLE",
+          fileDeleteDate: "2026-09-30T00:00:00.000Z",
+        },
+      ],
     });
     expect(urls[0]).toContain("page=0");
     expect(urls[0]).toContain("size=2");
@@ -175,7 +185,7 @@ describe("TrueApiClient", () => {
     expect(urls[0]).toContain("task_ids=a");
     expect(urls[0]).toContain("task_ids=b");
 
-    const file = await client.downloadDispenserResult(auth, "r1", 8);
+    const file = await client.downloadDispenserResult(auth, "r1", 8, 64 * 1024 * 1024);
     expect(urls[1]).toBe(`${auth.baseUrl}/dispenser/results/r1/file?pg=8`);
     expect(file).toMatchObject({ status: "ok" });
     // ZIP magic -- the bytes must arrive unmodified, because they go straight
@@ -183,6 +193,46 @@ describe("TrueApiClient", () => {
     expect(Array.from((file as { value: Uint8Array }).value.slice(0, 4))).toEqual([
       0x50, 0x4b, 0x03, 0x04,
     ]);
+  });
+
+  it("requests binary content and rejects a download that exceeds the input limit", async () => {
+    let headers = new Headers();
+    const client = new TrueApiClient(
+      deps(async (_url, init) => {
+        headers = new Headers((init as RequestInit).headers);
+        return new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]));
+      }),
+    );
+
+    await expect(client.downloadDispenserResult(auth, "r1", 8, 3)).resolves.toEqual({
+      status: "rejected",
+      code: "CHZ_DOWNLOAD_TOO_LARGE",
+      message: "",
+    });
+    expect(headers.get("Accept")).toBe("*/*");
+  });
+
+  it("rejects a successful response that is not a ZIP archive", async () => {
+    const client = new TrueApiClient(
+      deps(async () => new Response(new TextEncoder().encode("Error"), { status: 200 })),
+    );
+
+    await expect(client.downloadDispenserResult(auth, "r1", 8, 1024)).resolves.toEqual({
+      status: "rejected",
+      code: "CHZ_DOWNLOAD_INVALID_ARCHIVE",
+      message: "",
+    });
+  });
+
+  it("accepts an empty ZIP because a zero-row export is a successful result", async () => {
+    const emptyZip = new Uint8Array([
+      0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+    const client = new TrueApiClient(deps(async () => new Response(emptyZip, { status: 200 })));
+
+    await expect(client.downloadDispenserResult(auth, "r1", 8, 1024)).resolves.toMatchObject({
+      status: "ok",
+    });
   });
 
   it("reads dispenser tasks from the documented paged response", async () => {

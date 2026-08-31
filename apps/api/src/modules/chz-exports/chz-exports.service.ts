@@ -7,7 +7,11 @@ import {
 } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
 import { and, eq, isNotNull, lt } from "drizzle-orm";
-import { INVENTORY_CHZ_STATUSES, type InventoryChzStatus } from "@markiro/domain";
+import {
+  chzFilteredCisReportPolicy,
+  INVENTORY_CHZ_STATUSES,
+  type InventoryChzStatus,
+} from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
 import { PgBossService } from "../../jobs/jobs.module";
@@ -39,7 +43,7 @@ export class ChzExportsService {
   }
 
   /**
-   * All four conditions are reported together rather than one at a time so the
+   * All conditions are reported together rather than one at a time so the
    * operator fixes everything in one pass instead of discovering the next
    * problem after each fix.
    */
@@ -69,7 +73,18 @@ export class ChzExportsService {
         and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
       );
     if (!product) throw new NotFoundException();
-    if (product.code === null) blocked.push("PRODUCT_GROUP_MISSING");
+    if (product.code === null) {
+      blocked.push("PRODUCT_GROUP_MISSING");
+    } else {
+      const policy = chzFilteredCisReportPolicy(product.code);
+      if (!policy.supported) {
+        blocked.push(
+          policy.reason === "report_unavailable"
+            ? "PRODUCT_GROUP_EXPORT_UNSUPPORTED"
+            : "PRODUCT_GROUP_STATUS_PROFILE_UNSUPPORTED",
+        );
+      }
+    }
 
     const [agent] = await this.db
       .select({ id: schema.chzSignerAgents.id })
