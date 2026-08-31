@@ -343,9 +343,60 @@ async function readBoundedBytes(response: Response, maxBytes: number): Promise<U
 }
 
 function isZipArchive(bytes: Uint8Array): boolean {
-  if (bytes.byteLength < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return false;
-  const signature = `${bytes[2]}:${bytes[3]}`;
-  return signature === "3:4" || signature === "5:6" || signature === "7:8";
+  const minEndRecordBytes = 22;
+  if (bytes.byteLength < minEndRecordBytes) return false;
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const leadingSignature = view.getUint32(0, true);
+  const localFileHeader = 0x04034b50;
+  const centralDirectoryHeader = 0x02014b50;
+  const endRecord = 0x06054b50;
+  const splitArchiveMarker = 0x08074b50;
+  if (![localFileHeader, endRecord, splitArchiveMarker].includes(leadingSignature)) return false;
+
+  // EOCD is the final ZIP record apart from its bounded variable-length
+  // comment. Scanning backwards avoids treating the same byte sequence inside
+  // a comment as the archive terminator.
+  const earliestEndRecord = Math.max(0, bytes.byteLength - minEndRecordBytes - 0xffff);
+  for (let offset = bytes.byteLength - minEndRecordBytes; offset >= earliestEndRecord; offset--) {
+    if (view.getUint32(offset, true) !== endRecord) continue;
+
+    const commentBytes = view.getUint16(offset + 20, true);
+    if (offset + minEndRecordBytes + commentBytes !== bytes.byteLength) continue;
+
+    const diskNumber = view.getUint16(offset + 4, true);
+    const centralDirectoryDisk = view.getUint16(offset + 6, true);
+    const entriesOnDisk = view.getUint16(offset + 8, true);
+    const totalEntries = view.getUint16(offset + 10, true);
+    const centralDirectoryBytes = view.getUint32(offset + 12, true);
+    const centralDirectoryOffset = view.getUint32(offset + 16, true);
+    if (diskNumber !== 0 || centralDirectoryDisk !== 0 || entriesOnDisk !== totalEntries) continue;
+
+    if (totalEntries === 0) {
+      return (
+        leadingSignature === endRecord &&
+        offset === 0 &&
+        centralDirectoryBytes === 0 &&
+        centralDirectoryOffset === 0
+      );
+    }
+
+    const candidateOffsets =
+      leadingSignature === splitArchiveMarker
+        ? [centralDirectoryOffset, centralDirectoryOffset + 4]
+        : [centralDirectoryOffset];
+    for (const directoryOffset of candidateOffsets) {
+      if (
+        centralDirectoryBytes >= 46 &&
+        directoryOffset + centralDirectoryBytes === offset &&
+        directoryOffset + 4 <= offset &&
+        view.getUint32(directoryOffset, true) === centralDirectoryHeader
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function listFromEnvelope(payload: unknown): unknown[] | null {

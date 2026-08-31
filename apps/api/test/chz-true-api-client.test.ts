@@ -6,6 +6,15 @@ import {
 } from "../src/modules/chz-exports/true-api.client";
 
 const auth = { baseUrl: "https://markirovka.sandbox.crptech.ru/api/v3/true-api", token: "t0ken" };
+const emptyZip = new Uint8Array([
+  0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+]);
+const singleEmptyFileZip = new Uint8Array(
+  Buffer.from(
+    "UEsDBAoAAAAAABivH10AAAAAAAAAAAAAAAABAAAAYVBLAQIeAwoAAAAAABivH10AAAAAAAAAAAAAAAABAAAAAAAAAAAAAACkgQAAAABhUEsFBgAAAAABAAEALwAAAB8AAAAAAA==",
+    "base64",
+  ),
+);
 
 function deps(fetchImpl: TrueApiClientDependencies["fetch"]): TrueApiClientDependencies {
   return { fetch: fetchImpl, scheduleAbort: () => () => {} };
@@ -134,7 +143,7 @@ describe("TrueApiClient", () => {
       deps(async (url) => {
         urls.push(String(url));
         return String(url).includes("/file?")
-          ? new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), { status: 200 })
+          ? new Response(singleEmptyFileZip, { status: 200 })
           : new Response(
               JSON.stringify({
                 list: [
@@ -224,11 +233,42 @@ describe("TrueApiClient", () => {
     });
   });
 
-  it("accepts an empty ZIP because a zero-row export is a successful result", async () => {
-    const emptyZip = new Uint8Array([
-      0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  it("rejects a truncated ZIP signature and an incomplete end record", async () => {
+    const truncated = new TrueApiClient(
+      deps(async () => new Response(new Uint8Array([0x50, 0x4b, 0x05, 0x06]), { status: 200 })),
+    );
+    await expect(truncated.downloadDispenserResult(auth, "r1", 8, 1024)).resolves.toEqual({
+      status: "rejected",
+      code: "CHZ_DOWNLOAD_INVALID_ARCHIVE",
+      message: "",
+    });
+
+    const incompleteEnd = new Uint8Array([
+      0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0,
     ]);
+    const malformed = new TrueApiClient(
+      deps(async () => new Response(incompleteEnd, { status: 200 })),
+    );
+    await expect(malformed.downloadDispenserResult(auth, "r1", 8, 1024)).resolves.toEqual({
+      status: "rejected",
+      code: "CHZ_DOWNLOAD_INVALID_ARCHIVE",
+      message: "",
+    });
+  });
+
+  it("accepts an empty ZIP because a zero-row export is a successful result", async () => {
     const client = new TrueApiClient(deps(async () => new Response(emptyZip, { status: 200 })));
+
+    await expect(client.downloadDispenserResult(auth, "r1", 8, 1024)).resolves.toMatchObject({
+      status: "ok",
+    });
+  });
+
+  it("preserves recognition of a complete ZIP carrying a split-archive marker", async () => {
+    const markedZip = new Uint8Array(singleEmptyFileZip.byteLength + 4);
+    markedZip.set([0x50, 0x4b, 0x07, 0x08]);
+    markedZip.set(singleEmptyFileZip, 4);
+    const client = new TrueApiClient(deps(async () => new Response(markedZip, { status: 200 })));
 
     await expect(client.downloadDispenserResult(auth, "r1", 8, 1024)).resolves.toMatchObject({
       status: "ok",
