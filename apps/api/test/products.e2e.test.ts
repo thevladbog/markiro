@@ -741,7 +741,7 @@ describe.skipIf(!ready)("products e2e", () => {
         gtin: EAN13_CANONICAL,
         name: "Product with Price",
         unitPrice: "52.00",
-        egaisCode: "0123456789",
+        egaisCode: "0123456789012345678",
         externalRef: "ext-ref-001",
       })
       .expect(201);
@@ -750,7 +750,7 @@ describe.skipIf(!ready)("products e2e", () => {
       gtin14: GTIN14_CANONICAL,
       name: "Product with Price",
       unitPrice: "52.00",
-      egaisCode: "0123456789",
+      egaisCode: "0123456789012345678",
       externalRef: "ext-ref-001",
     });
 
@@ -760,7 +760,7 @@ describe.skipIf(!ready)("products e2e", () => {
     const getRes = await agent.get(`/products/${id}`).expect(200);
     expect(getRes.body).toMatchObject({
       unitPrice: "52.00",
-      egaisCode: "0123456789",
+      egaisCode: "0123456789012345678",
       externalRef: "ext-ref-001",
     });
 
@@ -768,7 +768,7 @@ describe.skipIf(!ready)("products e2e", () => {
     const patchRes = await agent.patch(`/products/${id}`).send({ unitPrice: null }).expect(200);
     expect(patchRes.body).toMatchObject({
       unitPrice: null,
-      egaisCode: "0123456789", // should remain unchanged
+      egaisCode: "0123456789012345678", // should remain unchanged
       externalRef: "ext-ref-001", // should remain unchanged
     });
 
@@ -776,7 +776,7 @@ describe.skipIf(!ready)("products e2e", () => {
     const verifyRes = await agent.get(`/products/${id}`).expect(200);
     expect(verifyRes.body).toMatchObject({
       unitPrice: null,
-      egaisCode: "0123456789",
+      egaisCode: "0123456789012345678",
       externalRef: "ext-ref-001",
     });
   });

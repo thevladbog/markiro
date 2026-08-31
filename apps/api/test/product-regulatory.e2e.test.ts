@@ -198,4 +198,94 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
       after: [{ attributeId: "hasSweetener", value: { type: "boolean", value: false } }],
     });
   });
+
+  it("previews and applies an exact category transfer, then stores multiple EGAIS codes", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const tenant = await signUpAndActivate(owner);
+    const seeded = await seedProfile(tenant.tenantId, tenant.actorUserId);
+    await owner
+      .patch(`/products/${seeded.productId}/regulatory-attributes`)
+      .send({
+        baseRevision: 1,
+        values: [{ attributeId: "hasSweetener", value: { type: "boolean", value: false } }],
+      })
+      .expect(200);
+
+    const targetSchemaVersionId = randomUUID();
+    const targetScope = `category:softdrinks-v2|tnved:${randomUUID()}`;
+    await db.insert(schema.nationalCatalogSchemaVersions).values({
+      id: targetSchemaVersionId,
+      scopeKey: targetScope,
+      categoryId: "softdrinks-v2",
+      categoryName: "Напитки v2",
+      selectors: {},
+      contentHash: createHash("sha256").update(targetScope).digest("hex"),
+      definition: {
+        categoryId: "softdrinks-v2",
+        scopeKey: targetScope,
+        attributes: [
+          {
+            id: "hasSweetener",
+            label: "Содержит подсластитель",
+            valueType: "boolean",
+            multiplicity: "one",
+            requiredLayers: ["circulation"],
+            requiredWhen: [],
+            presets: [],
+          },
+        ],
+      },
+      status: "active",
+      fetchedAt: new Date(),
+      validatedAt: new Date(),
+      activatedAt: new Date(),
+    });
+    await db.insert(schema.nationalCatalogCategoryGroupMappings).values({
+      chzProductGroupCode: 23,
+      schemaVersionId: targetSchemaVersionId,
+      categoryId: "softdrinks-v2",
+      state: "exact",
+    });
+
+    const preview = await owner
+      .post(`/products/${seeded.productId}/category-change-previews`)
+      .send({
+        baseRevision: 2,
+        targetSchemaVersionId,
+        tnVedCode: "2202991900",
+        okpd2Code: null,
+      })
+      .expect(201);
+    expect(preview.body.diff.values).toEqual([
+      expect.objectContaining({ attributeId: "hasSweetener", disposition: "transferable" }),
+    ]);
+
+    const applied = await owner
+      .post(`/products/${seeded.productId}/regulatory-proposals/${preview.body.proposalId}/apply`)
+      .send({ acceptedEntryIds: [preview.body.diff.values[0].entryId] })
+      .expect(200);
+    expect(applied.body).toMatchObject({
+      binding: { revision: 3, schemaVersionId: targetSchemaVersionId },
+      values: [{ attributeId: "hasSweetener", source: "manual" }],
+    });
+
+    const primaryCode = "1234567890123456789";
+    const secondaryCode = "9876543210987654321";
+    const egais = await owner
+      .put(`/products/${seeded.productId}/egais-codes`)
+      .send({ baseRevision: 3, codes: [primaryCode, secondaryCode], primaryCode })
+      .expect(200);
+    expect(egais.body).toMatchObject({
+      binding: { revision: 4 },
+      egaisCodes: expect.arrayContaining([
+        expect.objectContaining({ code: primaryCode, isPrimary: true }),
+        expect.objectContaining({ code: secondaryCode, isPrimary: false }),
+      ]),
+    });
+    const [product] = await db
+      .select({ egaisCode: schema.products.egaisCode })
+      .from(schema.products)
+      .where(eq(schema.products.id, seeded.productId));
+    expect(product?.egaisCode).toBe(primaryCode);
+  });
 });

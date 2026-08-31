@@ -1,5 +1,22 @@
-import { Body, Controller, Get, Param, Patch, Req, UseGuards } from "@nestjs/common";
-import { ApiOkResponse, ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Req,
+  UseGuards,
+} from "@nestjs/common";
+import {
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiTags,
+} from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import { RequirePermissions } from "../../authorization/access-policy";
@@ -18,10 +35,16 @@ import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
+  applyRegulatoryProposalSchema,
+  categoryChangePreviewSchema,
+  egaisCodesBodySchema,
   productReadinessOpenApiSchema,
   regulatoryCategoryOptionsOpenApiSchema,
   regulatoryProfileOpenApiSchema,
   updateRegulatoryAttributesSchema,
+  type ApplyRegulatoryProposalDto,
+  type CategoryChangePreviewDto,
+  type EgaisCodesBodyDto,
   type UpdateRegulatoryAttributesDto,
 } from "./dto";
 import { ProductReadinessService } from "./readiness.service";
@@ -84,5 +107,58 @@ export class ProductRegulatoryController {
     body: UpdateRegulatoryAttributesDto,
   ) {
     return this.regulatory.updateAttributes(req.tenantId!, req.userId!, id, body);
+  }
+
+  @Post("category-change-previews")
+  @RequireSubscriptionWrite()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Preview and persist a product category change" })
+  @ApiZodBody(categoryChangePreviewSchema)
+  @ApiCreatedResponse({ schema: { type: "object", additionalProperties: true } })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409)
+  @ApiCabinetAuth()
+  previewCategoryChange(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(categoryChangePreviewSchema)) body: CategoryChangePreviewDto,
+  ) {
+    return this.regulatory.previewCategoryChange(req.tenantId!, req.userId!, id, body);
+  }
+
+  @Post("regulatory-proposals/:proposalId/apply")
+  @HttpCode(200)
+  @RequireSubscriptionWrite()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Apply a persisted product regulatory proposal" })
+  @ApiZodBody(applyRegulatoryProposalSchema)
+  @ApiOkResponse({ schema: regulatoryProfileOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409)
+  @ApiCabinetAuth()
+  applyProposal(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Param("proposalId") proposalId: string,
+    @Body(new ZodValidationPipe(applyRegulatoryProposalSchema)) body: ApplyRegulatoryProposalDto,
+  ) {
+    return this.regulatory.applyProposal(req.tenantId!, req.userId!, id, proposalId, body);
+  }
+
+  @Put("egais-codes")
+  @RequireSubscriptionWrite()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Replace the product EGAIS AP code collection" })
+  @ApiZodBody(egaisCodesBodySchema)
+  @ApiOkResponse({ schema: regulatoryProfileOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409)
+  @ApiCabinetAuth()
+  replaceEgaisCodes(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(egaisCodesBodySchema)) body: EgaisCodesBodyDto,
+  ) {
+    return this.regulatory.replaceEgaisCodes(req.tenantId!, req.userId!, id, body);
   }
 }

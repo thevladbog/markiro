@@ -15,6 +15,19 @@ const product = (id: string, gtin14: string, externalRef: string | null, archive
 const known = [product("p-1", "00000000000017", "guid-1")];
 
 describe("decideApplication", () => {
+  it("keeps CommerceML output outside the regulatory proposal/value boundary", () => {
+    const plan = decideApplication({
+      products: known,
+      items: [],
+      offers: [],
+      configuredPriceType: undefined,
+    });
+
+    expect(plan).not.toHaveProperty("regulatoryValues");
+    expect(plan).not.toHaveProperty("regulatoryProposals");
+    expect(plan).not.toHaveProperty("egaisCodes");
+  });
+
   it("применяет цену сопоставленному товару", () => {
     const plan = decideApplication({
       products: known,

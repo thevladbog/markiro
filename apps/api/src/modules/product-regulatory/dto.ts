@@ -20,6 +20,57 @@ export const updateRegulatoryAttributesSchema = z
 
 export type UpdateRegulatoryAttributesDto = z.infer<typeof updateRegulatoryAttributesSchema>;
 
+export const categoryChangePreviewSchema = z
+  .object({
+    baseRevision: z.number().int().positive(),
+    targetSchemaVersionId: z.string().uuid(),
+    tnVedCode: z.string().trim().min(1).nullable(),
+    okpd2Code: z.string().trim().min(1).nullable(),
+    mappingConfirmed: z.boolean().default(false),
+  })
+  .strict();
+export type CategoryChangePreviewDto = z.infer<typeof categoryChangePreviewSchema>;
+
+export const applyRegulatoryProposalSchema = z
+  .object({ acceptedEntryIds: z.array(z.string().uuid()).max(200) })
+  .strict();
+export type ApplyRegulatoryProposalDto = z.infer<typeof applyRegulatoryProposalSchema>;
+
+export const egaisCodesBodySchema = z
+  .object({
+    baseRevision: z.number().int().positive(),
+    codes: z
+      .array(z.string().regex(/^\d{19}$/))
+      .max(20)
+      .superRefine((codes, context) => {
+        if (new Set(codes).size !== codes.length) {
+          context.addIssue({ code: "custom", message: "Duplicate EGAIS code" });
+        }
+      }),
+    primaryCode: z
+      .string()
+      .regex(/^\d{19}$/)
+      .nullable(),
+  })
+  .strict()
+  .superRefine((body, context) => {
+    if (body.codes.length > 0 && (!body.primaryCode || !body.codes.includes(body.primaryCode))) {
+      context.addIssue({
+        code: "custom",
+        path: ["primaryCode"],
+        message: "Primary EGAIS code must be selected",
+      });
+    }
+    if (body.codes.length === 0 && body.primaryCode !== null) {
+      context.addIssue({
+        code: "custom",
+        path: ["primaryCode"],
+        message: "Primary EGAIS code requires a code",
+      });
+    }
+  });
+export type EgaisCodesBodyDto = z.infer<typeof egaisCodesBodySchema>;
+
 const readinessReasonOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -137,8 +188,9 @@ export const regulatoryProfileOpenApiSchema: SchemaObject = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["attributeId", "value", "source", "observedAt", "appliedAt"],
+        required: ["entryId", "attributeId", "value", "source", "observedAt", "appliedAt"],
         properties: {
+          entryId: { type: "string", format: "uuid" },
           attributeId: { type: "string" },
           value: productAttributeValueOpenApiSchema,
           source: { type: "string", enum: ["manual", "1c", "national_catalog", "migration"] },
