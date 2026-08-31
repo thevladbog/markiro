@@ -1314,6 +1314,25 @@ textarea {
   box-shadow: inset 5px 0 var(--ok-border);
 }
 
+.billing-act-detail .invoice-hero[data-state="issued"] {
+  box-shadow: inset 5px 0 var(--ok-border);
+}
+
+.billing-act-detail .invoice-hero[data-state="draft"] {
+  box-shadow: inset 5px 0 var(--warn-border);
+}
+
+.billing-act-detail .invoice-hero[data-state="cancelled"] {
+  box-shadow: inset 5px 0 var(--err-border);
+}
+
+.billing-act-detail .invoice-panel > header p {
+  max-width: 68ch;
+  margin: 8px 0 0;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
 .invoice-kicker {
   color: var(--fg-3);
   font: var(--text-meta);
