@@ -43,19 +43,33 @@ jobs:
         id: affected
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            diff_file="$(mktemp)"
-            trap 'rm -f "$diff_file"' EXIT
-            if git diff --name-only --no-renames -z "$BASE_SHA" "$HEAD_SHA" > "$diff_file"; then
-              node tools/ci/affected.mjs --stdin-zero --github-output "$GITHUB_OUTPUT" < "$diff_file"
-            else
-              node tools/ci/affected.mjs --full --github-output "$GITHUB_OUTPUT"
-            fi
+            diff_base="$PR_BASE_SHA"
+            diff_head="$PR_HEAD_SHA"
+          elif [[ "$EVENT_NAME" == "push" && ! "$PUSH_BEFORE_SHA" =~ ^0{40}$ ]]; then
+            diff_base="$PUSH_BEFORE_SHA"
+            diff_head="$PUSH_HEAD_SHA"
+          else
+            node tools/ci/affected.mjs --full --github-output "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ ! "$diff_base" =~ ^[0-9a-f]{40}$ || ! "$diff_head" =~ ^[0-9a-f]{40}$ ]]; then
+            node tools/ci/affected.mjs --full --github-output "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          diff_file="$(mktemp)"
+          trap 'rm -f "$diff_file"' EXIT
+          if git diff --name-only --no-renames -z "$diff_base" "$diff_head" > "$diff_file"; then
+            node tools/ci/affected.mjs --stdin-zero --github-output "$GITHUB_OUTPUT" < "$diff_file"
           else
             node tools/ci/affected.mjs --full --github-output "$GITHUB_OUTPUT"
           fi
