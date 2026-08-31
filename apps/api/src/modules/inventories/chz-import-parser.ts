@@ -57,6 +57,44 @@ const CHZ_HEADER = [
   "Разрешительные документы",
 ] as const;
 
+const DISPENSER_HEADER = [
+  "requestedCis",
+  "gtin",
+  "tnVedEaes",
+  "tnVedEaesGroup",
+  "maxRetailPrice",
+  "parent",
+  "producerInn",
+  "ownerInn",
+  "prVetDocument",
+  "productName",
+  "brand",
+  "ownerName",
+  "producerName",
+  "introducedDate",
+  "receiptDate",
+  "status",
+  "statusEx",
+  "emissionType",
+  "withdrawReason",
+  "packageType",
+  "productGroup",
+  "applicationDate",
+  "emissionDate",
+  "expirationDate",
+  "child",
+  "setGtin",
+  "setDescription",
+  "productionDate",
+  "aggregationType",
+  "orderId",
+  "turnoverType",
+  "kpp",
+  "fiasId",
+  "declarationRegistrationNumbers",
+  "permitDocs",
+] as const;
+
 const APPROVED_EMPTY_RESULT_MARKERS = new Set([
   "5: Коды маркировки не найдены",
   "5: Коды маркировки по критериям отбора не найдены",
@@ -109,7 +147,9 @@ function assertHeader(record: ChzTabularRecord | undefined): void {
   if (record === undefined || record.rowNumber !== 2 || record.cells.length !== CHZ_HEADER.length) {
     throw new ChzImportError("CHZ_HEADER_MISMATCH", record?.rowNumber ?? 2);
   }
-  if (record.cells.some((cell, index) => cell !== CHZ_HEADER[index])) {
+  const matchesCabinet = record.cells.every((cell, index) => cell === CHZ_HEADER[index]);
+  const matchesDispenser = record.cells.every((cell, index) => cell === DISPENSER_HEADER[index]);
+  if (!matchesCabinet && !matchesDispenser) {
     throw new ChzImportError("CHZ_HEADER_MISMATCH", 2);
   }
 }

@@ -245,6 +245,48 @@ describe.skipIf(!ready)("ChzExportsService", () => {
     });
   });
 
+  it("reuses an existing result after the dispenser format parser is fixed", async () => {
+    await satisfyPreflight();
+    await service.order(tenantId, actorUserId, inventoryId);
+    await db
+      .update(schema.chzExportRuns)
+      .set({
+        state: "failed",
+        dispenserTaskId: "task-existing",
+        resultId: "result-existing",
+        errorCode: "CHZ_FILTER_INVALID",
+        attempts: 1,
+        completedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(schema.chzExportRuns.inventoryId, inventoryId),
+          eq(schema.chzExportRuns.status, "APPLIED"),
+        ),
+      );
+
+    await service.retry(tenantId, actorUserId, inventoryId, "APPLIED");
+
+    const [row] = await db
+      .select()
+      .from(schema.chzExportRuns)
+      .where(
+        and(
+          eq(schema.chzExportRuns.inventoryId, inventoryId),
+          eq(schema.chzExportRuns.status, "APPLIED"),
+        ),
+      );
+    expect(row).toMatchObject({
+      state: "ready",
+      dispenserTaskId: "task-existing",
+      resultId: "result-existing",
+      errorCode: null,
+      errorMessage: null,
+      completedAt: null,
+      attempts: 1,
+    });
+  });
+
   it("refuses to retry a run that has not failed", async () => {
     await satisfyPreflight();
     await service.order(tenantId, actorUserId, inventoryId);
