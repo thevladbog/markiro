@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-01
 
-**Status:** Draft; awaiting written-spec review
+**Status:** Approved on 2026-09-01
 
 **Scope:** Reduce pull-request wait time by running only the CI jobs affected by
 the changed files, while retaining a complete CI run after every push to `main`.
