@@ -393,10 +393,11 @@
         "order": "Order from Chestny ZNAK",
         "ordering": "Ordering exports…",
         "retry": "Retry",
+        "orderedAt": "Ordered: {{date}}",
         "errorCodeFallback": "Error code: {{code}}",
         "state": {
           "queued": "Queued",
-          "ordered": "Ordered",
+          "ordered": "Chestny ZNAK is preparing the file",
           "ready": "File ready",
           "imported": "Imported",
           "failed": "Failed"

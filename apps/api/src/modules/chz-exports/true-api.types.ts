@@ -44,6 +44,7 @@ export interface DispenserResult {
   taskId: string;
   resultId: string | null;
   status: string;
+  errorMessage?: string | null;
 }
 
 export interface CisInfo {

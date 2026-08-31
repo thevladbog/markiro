@@ -219,13 +219,14 @@ it("disables ordering and names every blocker", async () => {
   expect(screen.getByText(/токен/i)).toBeDefined();
 });
 
-it("orders once and shows per-status progress", async () => {
+it("orders once and shows when Chestny ZNAK started preparing the export", async () => {
   const user = userEvent.setup();
   stubChzExports({ available: true, blockedBy: [], runs: [] });
   renderPreparation();
   await user.click(await screen.findByRole("button", { name: "Заказать из Честного Знака" }));
   await waitFor(() => expect(orderCalls).toHaveLength(1));
-  expect(await screen.findByText("Заказано")).toBeDefined();
+  expect(await screen.findByText("Формируется в Честном Знаке")).toBeDefined();
+  expect(screen.getByText(/Заказано:.*26\.08\.2026/)).toBeDefined();
 });
 
 it("retries only the failed status", async () => {
@@ -378,7 +379,7 @@ it("invalidates the inventory detail query once a poll reports a new imported ru
     </QueryClientProvider>,
   );
 
-  expect(await screen.findByText("Заказано")).toBeDefined();
+  expect(await screen.findByText("Формируется в Честном Знаке")).toBeDefined();
   await waitFor(() => expect(detailFetchCount).toBe(1));
 
   // The worker's own cadence is 30s (CHZ_EXPORT_POLL_INTERVAL_SECONDS in
