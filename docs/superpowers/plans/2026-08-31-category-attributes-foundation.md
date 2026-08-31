@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Current next migration on this branch is `0103`; generate it with Drizzle and do not hand-edit snapshots.
+- Current next migration on the rebased branch is `0107`; generate it with Drizzle and do not hand-edit snapshots.
 - Global schema/mapping tables contain no tenant values; every product value/proposal/snapshot table has `tenant_id` and composite tenant foreign keys.
 - `products.status`, `products.egais_code`, and `products.shelf_life_days` remain present for rolling compatibility.
 - Only exact reviewed mappings can write stable operational fields.
@@ -34,7 +34,7 @@
 | `packages/domain/src/product-attributes/index.ts`                          | Product-attribute public exports                                 |
 | `packages/domain/test/product-attributes.test.ts`                          | Pure condition/readiness coverage                                |
 | `packages/db/src/schema/product-regulatory.ts`                             | Global schemas/mappings and tenant product regulatory tables     |
-| `packages/db/migrations/0103_product_regulatory_foundation.sql`            | New tables, constraints, and valid legacy EGAIS backfill         |
+| `packages/db/migrations/0107_product_regulatory_foundation.sql`            | New tables, constraints, and valid legacy EGAIS backfill         |
 | `packages/db/test/product-regulatory-schema.test.ts`                       | Constraint and tenant-FK assertions                              |
 | `apps/api/src/modules/product-regulatory/dto.ts`                           | Strict request/response schemas and OpenAPI objects              |
 | `apps/api/src/modules/product-regulatory/product-regulatory.service.ts`    | Profile reads, manual values, proposals, category changes, audit |
@@ -267,9 +267,9 @@ git commit -m "feat(domain): model product category readiness"
 - Create: `packages/db/src/schema/product-regulatory.ts`
 - Modify: `packages/db/src/schema.ts`
 - Modify: `packages/db/drizzle.config.ts`
-- Create (generated): `packages/db/migrations/0103_product_regulatory_foundation.sql`
+- Create (generated): `packages/db/migrations/0107_product_regulatory_foundation.sql`
 - Modify (generated): `packages/db/migrations/meta/_journal.json`
-- Create (generated): `packages/db/migrations/meta/0103_snapshot.json`
+- Create (generated): `packages/db/migrations/meta/0107_snapshot.json`
 - Test: `packages/db/test/product-regulatory-schema.test.ts`
 
 **Interfaces:**
@@ -332,7 +332,7 @@ EGAIS codes use `(tenant_id, product_id, code)` as the primary key, `char(19)`, 
 
 Snapshots store tenant/product, GTIN-14, card ID/status, ETag/hash, `payload jsonb`, and `fetched_at`; unique on `(tenant_id, product_id, content_hash)`. Proposals store tenant/product, nullable snapshot, source/sourceRef, base revision, immutable `diff jsonb`, lifecycle, creator/applier, and timestamps.
 
-- [ ] **Step 4: Generate and review migration 0103**
+- [ ] **Step 4: Generate and review migration 0107**
 
 ```bash
 set -a
@@ -341,7 +341,7 @@ set +a
 pnpm --filter @markiro/db db:generate
 ```
 
-Rename the generated SQL/tag to `0103_product_regulatory_foundation`, preserving generated snapshot metadata. Append the valid legacy backfill after table creation:
+Rename the generated SQL/tag to `0107_product_regulatory_foundation`, preserving generated snapshot metadata. Append the valid legacy backfill after table creation:
 
 ```sql
 INSERT INTO "product_egais_codes" ("tenant_id", "product_id", "code", "is_primary", "source")
