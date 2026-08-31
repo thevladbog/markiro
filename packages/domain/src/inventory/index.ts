@@ -1,5 +1,6 @@
-export { canDisposeChzCode, INVENTORY_CHZ_STATUSES } from "./status.js";
+export { canDisposeChzCode, chzFilteredCisReportPolicy, INVENTORY_CHZ_STATUSES } from "./status.js";
 export type {
+  ChzFilteredCisReportPolicy,
   InventoryChzCodeDispositionInput,
   InventoryChzStatus,
   InventoryCodeState,

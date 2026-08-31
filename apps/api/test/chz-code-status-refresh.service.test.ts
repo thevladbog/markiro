@@ -126,7 +126,10 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
   let snapshotId: string;
 
   let client: FakeClient;
-  let tokens: { getActiveToken: ReturnType<typeof vi.fn> };
+  let tokens: {
+    getActiveToken: ReturnType<typeof vi.fn>;
+    invalidateAndRequestRefresh: ReturnType<typeof vi.fn>;
+  };
   let journal: { append: ReturnType<typeof vi.fn> };
 
   beforeAll(async () => {
@@ -220,7 +223,9 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
       getActiveToken: vi.fn().mockResolvedValue({
         status: "ok",
         auth: { baseUrl: "https://true-api.invalid", token: TEST_TOKEN },
+        obtainedAt: BASE_SCANNED_AT,
       }),
+      invalidateAndRequestRefresh: vi.fn().mockResolvedValue(undefined),
     };
     journal = { append: vi.fn().mockResolvedValue(undefined) };
     service = new ChzCodeStatusRefreshService(
@@ -537,6 +542,7 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
 
     expect(client.calls).toHaveLength(1);
     expect(result.caughtUp).toBe(false);
+    expect(tokens.invalidateAndRequestRefresh).toHaveBeenCalledWith(tenantId, BASE_SCANNED_AT);
     const [row] = await rowsFor(tenantId);
     expect(row).toMatchObject({ status: "INTRODUCED", checkedAt: null, unknownAttempts: 0 });
     expect(row!.nextRefreshAt.getTime()).toBeLessThanOrEqual(Date.now());

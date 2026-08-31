@@ -92,11 +92,11 @@ describe.skipIf(!ready)("ChzExportsService", () => {
     service = new ChzExportsService(db, tokens, jobs);
   });
 
-  async function satisfyPreflight(): Promise<void> {
+  async function satisfyPreflight(productGroupCode = 1): Promise<void> {
     await db.insert(schema.orgProfiles).values({ tenantId, inn: "7707083893" });
     await db
       .update(schema.products)
-      .set({ chzProductGroupCode: 1 })
+      .set({ chzProductGroupCode: productGroupCode })
       .where(eq(schema.products.id, productId));
     await db.insert(schema.chzSignerAgents).values({
       tenantId,
@@ -122,6 +122,24 @@ describe.skipIf(!ready)("ChzExportsService", () => {
       "PRODUCT_GROUP_MISSING",
       "TOKEN_UNAVAILABLE",
     ]);
+  });
+
+  it("blocks product groups where FILTERED_CIS_REPORT is unavailable", async () => {
+    await satisfyPreflight(25);
+
+    const state = await service.getState(tenantId, inventoryId);
+
+    expect(state.available).toBe(false);
+    expect(state.blockedBy).toEqual(["PRODUCT_GROUP_EXPORT_UNSUPPORTED"]);
+  });
+
+  it("blocks tobacco groups until their distinct status profile is supported end-to-end", async () => {
+    await satisfyPreflight(3);
+
+    const state = await service.getState(tenantId, inventoryId);
+
+    expect(state.available).toBe(false);
+    expect(state.blockedBy).toEqual(["PRODUCT_GROUP_STATUS_PROFILE_UNSUPPORTED"]);
   });
 
   it("refuses to order while a pre-flight condition is unmet", async () => {

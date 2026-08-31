@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createDb, schema, type Db } from "@markiro/db";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChzCryptoService } from "../src/modules/signer-agents/chz-crypto.service";
@@ -46,11 +47,12 @@ describe.skipIf(!ready)("ChzTokenService", () => {
   });
 
   it("returns the decrypted token and the environment's base URL", async () => {
+    const obtainedAt = new Date();
     const encrypted = crypto.encrypt(tenantId, "the-bearer-token");
     await db.insert(schema.chzApiTokens).values({
       tenantId,
       ...encrypted,
-      obtainedAt: new Date(),
+      obtainedAt,
       expiresAt: new Date(Date.now() + 3_600_000),
     });
     await db
@@ -63,6 +65,7 @@ describe.skipIf(!ready)("ChzTokenService", () => {
         baseUrl: "https://markirovka.sandbox.crptech.ru/api/v3/true-api",
         token: "the-bearer-token",
       },
+      obtainedAt,
     });
   });
 
@@ -185,5 +188,49 @@ describe.skipIf(!ready)("ChzTokenService", () => {
     });
 
     await expect(serviceWithDifferentKey.hasUsableToken(tenantId)).resolves.toBe(true);
+  });
+
+  it("invalidates a rejected bearer and enqueues exactly one immediate refresh task", async () => {
+    const obtainedAt = new Date();
+    const encrypted = crypto.encrypt(tenantId, "rejected-bearer-token");
+    await db.insert(schema.chzApiTokens).values({
+      tenantId,
+      ...encrypted,
+      obtainedAt,
+      expiresAt: new Date(Date.now() + 3_600_000),
+    });
+    await db.insert(schema.chzSignerAgents).values({
+      tenantId,
+      name: "Token refresh fixture",
+      secretHash: `hash-${randomUUID()}`,
+    });
+    await db.insert(schema.integrationChannels).values({
+      tenantId,
+      type: "chestny_znak",
+      settings: { environment: "sandbox", mchdInn: "7707083893" },
+    });
+
+    await service.invalidateAndRequestRefresh(tenantId, obtainedAt);
+    await service.invalidateAndRequestRefresh(tenantId, obtainedAt);
+
+    const tokens = await db
+      .select({ tenantId: schema.chzApiTokens.tenantId })
+      .from(schema.chzApiTokens)
+      .where(eq(schema.chzApiTokens.tenantId, tenantId));
+    expect(tokens).toEqual([]);
+
+    const tasks = await db
+      .select({ payload: schema.chzSignerTasks.payload, status: schema.chzSignerTasks.status })
+      .from(schema.chzSignerTasks)
+      .where(eq(schema.chzSignerTasks.tenantId, tenantId));
+    expect(tasks).toEqual([
+      {
+        status: "pending",
+        payload: {
+          trueApiBaseUrl: "https://markirovka.sandbox.crptech.ru/api/v3/true-api",
+          inn: "7707083893",
+        },
+      },
+    ]);
   });
 });

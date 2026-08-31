@@ -249,6 +249,8 @@ export const listInventoriesSchema = z.strictObject({ items: z.array(inventorySc
 export const CHZ_EXPORT_PREFLIGHT_CODES = [
   "INN_MISSING",
   "PRODUCT_GROUP_MISSING",
+  "PRODUCT_GROUP_EXPORT_UNSUPPORTED",
+  "PRODUCT_GROUP_STATUS_PROFILE_UNSUPPORTED",
   "AGENT_NOT_PAIRED",
   "TOKEN_UNAVAILABLE",
 ] as const;

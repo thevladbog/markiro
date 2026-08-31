@@ -7,6 +7,7 @@
 
 use std::time::{Duration, SystemTime};
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::Deserialize;
 
 use crate::signer::Signer;
@@ -33,6 +34,11 @@ struct AuthKeyResponse {
 #[derive(Deserialize)]
 struct SignInResponse {
     token: String,
+}
+
+#[derive(Deserialize)]
+struct JwtClaims {
+    exp: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -87,9 +93,15 @@ pub async fn obtain_token(
         .await
         .map_err(|e| SignerError::Protocol(e.to_string()))?;
 
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let expires_at = format_rfc3339(token_expiry_unix(&issued.token, now));
+
     Ok(TrueApiToken {
         token: issued.token,
-        expires_at: rfc3339_from_now(TOKEN_LIFETIME - TOKEN_SAFETY_MARGIN),
+        expires_at,
     })
 }
 
@@ -110,13 +122,22 @@ async fn describe(response: reqwest::Response) -> String {
 /// RFC3339 in UTC with a `Z` offset — the cloud's zod schema requires an
 /// offset, and a naive timestamp is a 400. Computed without a date library:
 /// the crate has no other need for one.
-fn rfc3339_from_now(ahead: Duration) -> String {
-    let seconds = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        + ahead.as_secs();
-    format_rfc3339(seconds)
+fn token_expiry_unix(token: &str, now: u64) -> u64 {
+    let fallback = now + (TOKEN_LIFETIME - TOKEN_SAFETY_MARGIN).as_secs();
+    let Some(payload) = token.split('.').nth(1) else {
+        return fallback;
+    };
+    let Some(exp) = URL_SAFE_NO_PAD
+        .decode(payload)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<JwtClaims>(&bytes).ok())
+        .map(|claims| claims.exp)
+    else {
+        return fallback;
+    };
+
+    let safe_exp = exp.saturating_sub(TOKEN_SAFETY_MARGIN.as_secs()).max(now);
+    safe_exp.min(fallback)
 }
 
 /// Shared with the Windows signer, which must render certificate validity in
@@ -268,5 +289,28 @@ mod tests {
     fn formats_a_known_instant_as_rfc3339_with_offset() {
         // 2026-08-28T12:00:00Z
         assert_eq!(format_rfc3339(1_787_918_400), "2026-08-28T12:00:00.000Z");
+    }
+
+    #[test]
+    fn derives_expiry_from_the_jwt_exp_claim_with_a_safety_margin() {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+
+        let payload = URL_SAFE_NO_PAD.encode(r#"{"exp":1787950800}"#);
+        let token = format!("e30.{payload}.signature");
+
+        assert_eq!(token_expiry_unix(&token, 1_787_918_400), 1_787_950_500);
+    }
+
+    #[test]
+    fn caps_an_implausibly_long_jwt_and_falls_back_for_an_opaque_token() {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+
+        let now = 1_787_918_400;
+        let payload = URL_SAFE_NO_PAD.encode(r#"{"exp":1999999999}"#);
+        let jwt = format!("e30.{payload}.signature");
+        let fallback = now + (TOKEN_LIFETIME - TOKEN_SAFETY_MARGIN).as_secs();
+
+        assert_eq!(token_expiry_unix(&jwt, now), fallback);
+        assert_eq!(token_expiry_unix("opaque-future-token", now), fallback);
     }
 }

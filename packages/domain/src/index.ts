@@ -126,6 +126,7 @@ export type { ShiftCloseReasonCode } from "./shift-close.js";
 export { formatShiftNumber, shiftMonthKey } from "./shift-number.js";
 export {
   canDisposeChzCode,
+  chzFilteredCisReportPolicy,
   classifyInventorySnapshotRow,
   INVENTORY_CHZ_STATUSES,
 } from "./inventory/index.js";

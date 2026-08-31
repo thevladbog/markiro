@@ -9,7 +9,7 @@ import { ChzCryptoService } from "../signer-agents/chz-crypto.service";
 import type { TrueApiAuth } from "./true-api.types";
 
 export type ChzTokenResult =
-  | { status: "ok"; auth: TrueApiAuth }
+  | { status: "ok"; auth: TrueApiAuth; obtainedAt: Date }
   | { status: "unconfigured" }
   | { status: "missing" }
   | { status: "expired" }
@@ -38,6 +38,7 @@ export class ChzTokenService {
         encryptedToken: schema.chzApiTokens.encryptedToken,
         tokenNonce: schema.chzApiTokens.tokenNonce,
         tokenTag: schema.chzApiTokens.tokenTag,
+        obtainedAt: schema.chzApiTokens.obtainedAt,
         expiresAt: schema.chzApiTokens.expiresAt,
       })
       .from(schema.chzApiTokens)
@@ -78,7 +79,63 @@ export class ChzTokenService {
         baseUrl: CHZ_TRUE_API_BASE_URLS[environment],
         token,
       },
+      obtainedAt: row.obtainedAt,
     };
+  }
+
+  /**
+   * Removes only the bearer that actually received a 401 and immediately asks
+   * the active signer to replace it. Matching `obtainedAt` avoids deleting a
+   * fresher token that the agent may have reported while the failed request
+   * was in flight. The open-task unique index makes repeated 401s idempotent.
+   */
+  async invalidateAndRequestRefresh(tenantId: string, obtainedAt: Date): Promise<void> {
+    const [deleted] = await this.db
+      .delete(schema.chzApiTokens)
+      .where(
+        and(
+          eq(schema.chzApiTokens.tenantId, tenantId),
+          eq(schema.chzApiTokens.obtainedAt, obtainedAt),
+        ),
+      )
+      .returning({ tenantId: schema.chzApiTokens.tenantId });
+    if (!deleted || !this.crypto.isConfigured()) return;
+
+    const [agent] = await this.db
+      .select({ id: schema.chzSignerAgents.id })
+      .from(schema.chzSignerAgents)
+      .where(
+        and(
+          eq(schema.chzSignerAgents.tenantId, tenantId),
+          eq(schema.chzSignerAgents.status, "active"),
+        ),
+      )
+      .limit(1);
+    if (!agent) return;
+
+    const [channel] = await this.db
+      .select({ settings: schema.integrationChannels.settings })
+      .from(schema.integrationChannels)
+      .where(
+        and(
+          eq(schema.integrationChannels.tenantId, tenantId),
+          eq(schema.integrationChannels.type, CHZ_CHANNEL_TYPE),
+        ),
+      );
+    const parsed = chzSignerSettingsSchema.safeParse(channel?.settings ?? {});
+    const settings = parsed.success ? parsed.data : { environment: "production" as const };
+
+    await this.db
+      .insert(schema.chzSignerTasks)
+      .values({
+        tenantId,
+        type: "true_api_auth",
+        payload: {
+          trueApiBaseUrl: CHZ_TRUE_API_BASE_URLS[settings.environment],
+          ...(settings.mchdInn ? { inn: settings.mchdInn } : {}),
+        },
+      })
+      .onConflictDoNothing();
   }
 
   /**

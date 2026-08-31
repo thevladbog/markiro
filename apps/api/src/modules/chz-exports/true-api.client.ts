@@ -133,6 +133,10 @@ export class TrueApiClient {
               typeof record.errorMessage === "string" && record.errorMessage.length > 0
                 ? record.errorMessage
                 : null,
+            archiveSize: nonnegativeNumberOrNull(record.archiveSize),
+            available: typeof record.available === "string" ? record.available : null,
+            fileDeleteDate:
+              typeof record.fileDeleteDate === "string" ? record.fileDeleteDate : null,
           };
         });
       },
@@ -143,14 +147,21 @@ export class TrueApiClient {
     auth: TrueApiAuth,
     resultId: string,
     productGroupCode: number,
+    maxBytes: number,
   ): Promise<TrueApiResult<Uint8Array>> {
     const query = new URLSearchParams({ pg: String(productGroupCode) });
     return this.request(
       auth,
       `/dispenser/results/${encodeURIComponent(resultId)}/file?${query.toString()}`,
       DOWNLOAD_TIMEOUT_MS,
-      {},
-      async (response) => new Uint8Array(await response.arrayBuffer()),
+      { headers: { Accept: "*/*" } },
+      async (response) => {
+        const bytes = await readBoundedBytes(response, maxBytes);
+        if (!isZipArchive(bytes)) {
+          throw new TrueApiResponseRejection("CHZ_DOWNLOAD_INVALID_ARCHIVE");
+        }
+        return bytes;
+      },
     );
   }
 
@@ -226,13 +237,15 @@ export class TrueApiClient {
     const controller = new AbortController();
     const cancelAbort = this.dependencies.scheduleAbort(controller, timeoutMs);
     try {
+      const headers = new Headers(init.headers);
+      if (!headers.has("Accept")) headers.set("Accept", "application/json");
+      if (init.body && !headers.has("Content-Type")) {
+        headers.set("Content-Type", "application/json");
+      }
+      headers.set("Authorization", `Bearer ${auth.token}`);
       const response = await this.dependencies.fetch(`${auth.baseUrl}${path}`, {
         ...init,
-        headers: {
-          Accept: "application/json",
-          ...(init.body ? { "Content-Type": "application/json" } : {}),
-          Authorization: `Bearer ${auth.token}`,
-        },
+        headers,
         signal: controller.signal,
       });
       // 401 alone means the bearer is bad: that is the token path, and the
@@ -258,7 +271,10 @@ export class TrueApiClient {
       if (!response.ok) return { status: "unavailable" };
       const value = await parse(response);
       return value === null ? { status: "unavailable" } : { status: "ok", value };
-    } catch {
+    } catch (error) {
+      if (error instanceof TrueApiResponseRejection) {
+        return { status: "rejected", code: error.code, message: "" };
+      }
       return { status: "unavailable" };
     } finally {
       cancelAbort();
@@ -276,6 +292,113 @@ export class TrueApiClient {
   }
 }
 
+class TrueApiResponseRejection extends Error {
+  constructor(readonly code: string) {
+    super(code);
+  }
+}
+
+async function readBoundedBytes(response: Response, maxBytes: number): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new RangeError("Invalid byte limit");
+
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new TrueApiResponseRejection("CHZ_DOWNLOAD_TOO_LARGE");
+  }
+
+  if (response.body === null) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > maxBytes) {
+      throw new TrueApiResponseRejection("CHZ_DOWNLOAD_TOO_LARGE");
+    }
+    return bytes;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new TrueApiResponseRejection("CHZ_DOWNLOAD_TOO_LARGE");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+function isZipArchive(bytes: Uint8Array): boolean {
+  const minEndRecordBytes = 22;
+  if (bytes.byteLength < minEndRecordBytes) return false;
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const leadingSignature = view.getUint32(0, true);
+  const localFileHeader = 0x04034b50;
+  const centralDirectoryHeader = 0x02014b50;
+  const endRecord = 0x06054b50;
+  const splitArchiveMarker = 0x08074b50;
+  if (![localFileHeader, endRecord, splitArchiveMarker].includes(leadingSignature)) return false;
+
+  // EOCD is the final ZIP record apart from its bounded variable-length
+  // comment. Scanning backwards avoids treating the same byte sequence inside
+  // a comment as the archive terminator.
+  const earliestEndRecord = Math.max(0, bytes.byteLength - minEndRecordBytes - 0xffff);
+  for (let offset = bytes.byteLength - minEndRecordBytes; offset >= earliestEndRecord; offset--) {
+    if (view.getUint32(offset, true) !== endRecord) continue;
+
+    const commentBytes = view.getUint16(offset + 20, true);
+    if (offset + minEndRecordBytes + commentBytes !== bytes.byteLength) continue;
+
+    const diskNumber = view.getUint16(offset + 4, true);
+    const centralDirectoryDisk = view.getUint16(offset + 6, true);
+    const entriesOnDisk = view.getUint16(offset + 8, true);
+    const totalEntries = view.getUint16(offset + 10, true);
+    const centralDirectoryBytes = view.getUint32(offset + 12, true);
+    const centralDirectoryOffset = view.getUint32(offset + 16, true);
+    if (diskNumber !== 0 || centralDirectoryDisk !== 0 || entriesOnDisk !== totalEntries) continue;
+
+    if (totalEntries === 0) {
+      return (
+        leadingSignature === endRecord &&
+        offset === 0 &&
+        centralDirectoryBytes === 0 &&
+        centralDirectoryOffset === 0
+      );
+    }
+
+    const candidateOffsets =
+      leadingSignature === splitArchiveMarker
+        ? [centralDirectoryOffset, centralDirectoryOffset + 4]
+        : [centralDirectoryOffset];
+    for (const directoryOffset of candidateOffsets) {
+      if (
+        centralDirectoryBytes >= 46 &&
+        directoryOffset + centralDirectoryBytes === offset &&
+        directoryOffset + 4 <= offset &&
+        view.getUint32(directoryOffset, true) === centralDirectoryHeader
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function listFromEnvelope(payload: unknown): unknown[] | null {
   if (payload === null || typeof payload !== "object") return null;
   const list = (payload as Record<string, unknown>).list;
@@ -284,4 +407,10 @@ function listFromEnvelope(payload: unknown): unknown[] | null {
 
 function stringOrEmpty(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function nonnegativeNumberOrNull(value: unknown): number | null {
+  const number =
+    typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
 }
