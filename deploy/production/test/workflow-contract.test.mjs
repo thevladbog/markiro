@@ -123,6 +123,12 @@ test("release publication is main-only, digest-bound and writes the immutable ma
     read(".github/workflows/release-images.yml"),
   ]);
   assert.deepEqual(workflow.on.push.branches, ["main"]);
+  assert.ok(workflow.on.push.paths.includes("apps/api/**"));
+  assert.ok(workflow.on.push.paths.includes("apps/landing/**"));
+  assert.ok(workflow.on.push.paths.includes("deploy/production/**"));
+  assert.equal(workflow.on.push.paths.includes("apps/station/**"), false);
+  assert.equal(workflow.on.push.paths.includes("apps/signer/**"), false);
+  assert.equal(workflow.on.push.paths.includes("infra/yandex/**"), false);
   assert.equal(workflow.jobs["production-bundle"].permissions.contents, "read");
   assert.match(source, /markiro-api/);
   assert.match(source, /markiro-edge/);

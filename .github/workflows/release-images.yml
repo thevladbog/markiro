@@ -3,6 +3,31 @@ name: Publish production images
 on:
   push:
     branches: [main]
+    paths:
+      - .github/workflows/release-images.yml
+      - .dockerignore
+      - .npmrc
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - turbo.json
+      - tsconfig.base.json
+      - patches/**
+      - apps/api/**
+      - apps/admin/**
+      - apps/kiosk/**
+      - apps/landing/**
+      - apps/saas-admin/**
+      - packages/db/**
+      - packages/domain/**
+      - packages/email/**
+      - packages/legal-documents/**
+      - packages/platform-contracts/**
+      - packages/ui/**
+      - compose.production.yml
+      - deploy/production/**
+      - deploy/yandex/**
+      - tools/production-browser/**
 
 permissions:
   contents: read

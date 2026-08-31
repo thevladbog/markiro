@@ -25,7 +25,7 @@ function stepByName(job, name) {
   return job.steps.find((step) => step.name === name);
 }
 
-test("classifier uses the exact pull-request diff and exposes every policy output", () => {
+test("classifier uses exact pull-request and main-push diffs and exposes every policy output", () => {
   const classifier = workflow.jobs["classify-changes"];
   assert.ok(classifier, "workflow must define classify-changes");
 
@@ -36,9 +36,20 @@ test("classifier uses the exact pull-request diff and exposes every policy outpu
   const classifyStep = classifier.steps.find((step) => step.id === "affected");
   assert.ok(classifyStep, "classifier must expose the affected step");
   assert.equal(classifyStep.env.EVENT_NAME, "${{ github.event_name }}");
-  assert.equal(classifyStep.env.BASE_SHA, "${{ github.event.pull_request.base.sha }}");
-  assert.equal(classifyStep.env.HEAD_SHA, "${{ github.event.pull_request.head.sha }}");
-  assert.match(classifyStep.run, /git diff --name-only --no-renames -z "\$BASE_SHA" "\$HEAD_SHA"/);
+  assert.equal(classifyStep.env.PR_BASE_SHA, "${{ github.event.pull_request.base.sha }}");
+  assert.equal(classifyStep.env.PR_HEAD_SHA, "${{ github.event.pull_request.head.sha }}");
+  assert.equal(classifyStep.env.PUSH_BEFORE_SHA, "${{ github.event.before }}");
+  assert.equal(classifyStep.env.PUSH_HEAD_SHA, "${{ github.sha }}");
+  assert.match(classifyStep.run, /EVENT_NAME" == "pull_request"/);
+  assert.match(classifyStep.run, /EVENT_NAME" == "push"/);
+  assert.match(classifyStep.run, /diff_base="\$PR_BASE_SHA"/);
+  assert.match(classifyStep.run, /diff_head="\$PR_HEAD_SHA"/);
+  assert.match(classifyStep.run, /diff_base="\$PUSH_BEFORE_SHA"/);
+  assert.match(classifyStep.run, /diff_head="\$PUSH_HEAD_SHA"/);
+  assert.match(
+    classifyStep.run,
+    /git diff --name-only --no-renames -z "\$diff_base" "\$diff_head"/,
+  );
   assert.match(classifyStep.run, /affected\.mjs --stdin-zero/);
   assert.match(classifyStep.run, /affected\.mjs --full/);
 
@@ -65,11 +76,78 @@ test("classifier falls back to a full run when pull-request diff generation fail
     encoding: "utf8",
     env: {
       ...process.env,
-      BASE_SHA: "base-sha",
       EVENT_NAME: "pull_request",
       GITHUB_OUTPUT: outputPath,
-      HEAD_SHA: "head-sha",
+      PR_BASE_SHA: "a".repeat(40),
+      PR_HEAD_SHA: "b".repeat(40),
+      PUSH_BEFORE_SHA: "",
+      PUSH_HEAD_SHA: "",
       PATH: `${binaryDirectory}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(
+    readFileSync(outputPath, "utf8"),
+    ["full=true", ...heavyJobs.map(([, name]) => `${name}=true`), ""].join("\n"),
+  );
+});
+
+test("classifier applies the changed-file policy to an existing main push", (t) => {
+  const classifier = workflow.jobs["classify-changes"];
+  const classifyStep = classifier.steps.find((step) => step.id === "affected");
+  const directory = mkdtempSync(join(tmpdir(), "markiro-ci-push-workflow-"));
+  const binaryDirectory = join(directory, "bin");
+  const outputPath = join(directory, "github-output.txt");
+  const gitPath = join(binaryDirectory, "git");
+
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+  mkdirSync(binaryDirectory);
+  writeFileSync(gitPath, "#!/usr/bin/env bash\nprintf 'docs/architecture.md\\0'\n", {
+    mode: 0o755,
+  });
+  chmodSync(gitPath, 0o755);
+
+  const child = spawnSync("bash", ["-c", classifyStep.run], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      EVENT_NAME: "push",
+      GITHUB_OUTPUT: outputPath,
+      PR_BASE_SHA: "",
+      PR_HEAD_SHA: "",
+      PUSH_BEFORE_SHA: "c".repeat(40),
+      PUSH_HEAD_SHA: "d".repeat(40),
+      PATH: `${binaryDirectory}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(
+    readFileSync(outputPath, "utf8"),
+    ["full=false", ...heavyJobs.map(([, name]) => `${name}=false`), ""].join("\n"),
+  );
+});
+
+test("classifier fails closed for a push without a usable previous commit", (t) => {
+  const classifier = workflow.jobs["classify-changes"];
+  const classifyStep = classifier.steps.find((step) => step.id === "affected");
+  const directory = mkdtempSync(join(tmpdir(), "markiro-ci-new-push-workflow-"));
+  const outputPath = join(directory, "github-output.txt");
+
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+  const child = spawnSync("bash", ["-c", classifyStep.run], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      EVENT_NAME: "push",
+      GITHUB_OUTPUT: outputPath,
+      PR_BASE_SHA: "",
+      PR_HEAD_SHA: "",
+      PUSH_BEFORE_SHA: "0".repeat(40),
+      PUSH_HEAD_SHA: "e".repeat(40),
     },
   });
 

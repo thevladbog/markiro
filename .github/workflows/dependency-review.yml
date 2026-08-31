@@ -1,7 +1,28 @@
 name: Dependency review
-on: [pull_request]
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/*.yml
+      - .github/workflows/*.yaml
+      - .npmrc
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - patches/**
+      - apps/*/package.json
+      - packages/*/package.json
+      - tools/production-browser/package.json
+      - tools/production-browser/pnpm-lock.yaml
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
 permissions:
   contents: read
+
+concurrency:
+  group: dependency-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   dependency-review:
     runs-on: ubuntu-latest
