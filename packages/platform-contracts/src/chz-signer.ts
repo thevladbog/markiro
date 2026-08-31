@@ -22,6 +22,7 @@ export const chzTrueApiAuthPayloadSchema = z
   .object({
     trueApiBaseUrl: z.url(),
     inn: innSchema.optional(),
+    tokenFormat: z.enum(["jwt", "uuid"]).optional(),
   })
   .strict();
 
@@ -35,7 +36,7 @@ export const chzSignerTaskSchema = z
 
 export const chzSignerTaskCompleteSchema = z
   .object({
-    // True API still issues JWTs and does not publish a maximum token length.
+    // True API tokens do not have a published maximum length.
     // Keep a bounded value below Express's default JSON-body limit, but leave
     // enough room for certificate-heavy JWT claims returned in production.
     token: z

@@ -2,19 +2,20 @@
 //!
 //! `GET /auth/key` hands out a random challenge, the agent signs it locally
 //! with an attached GOST signature, and `POST /auth/simpleSignIn` exchanges it
-//! for a JWT that lives at most ten hours. The challenge never leaves this
-//! machine, so it cannot expire in transit.
+//! for either the current JWT or the announced UUID token. The challenge never
+//! leaves this machine, so it cannot expire in transit.
 
 use std::time::{Duration, SystemTime};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::Deserialize;
 
+use crate::contracts::TokenFormat;
 use crate::signer::Signer;
 use crate::SignerError;
 
-/// The cloud refreshes 90 minutes before expiry; reporting a slightly early
-/// expiry costs nothing and protects against clock skew between us and ГИС МТ.
+/// JWT fallback lifetime. The cloud refreshes 90 minutes before expiry;
+/// reporting a slightly early expiry protects against clock skew with ГИС МТ.
 const TOKEN_LIFETIME: Duration = Duration::from_secs(10 * 3600);
 const TOKEN_SAFETY_MARGIN: Duration = Duration::from_secs(5 * 60);
 const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -32,8 +33,14 @@ struct AuthKeyResponse {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SignInResponse {
-    token: String,
+    #[serde(default)]
+    token: Option<String>,
+    #[serde(default)]
+    uuid_token: Option<String>,
+    #[serde(default)]
+    expire_date: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -47,12 +54,15 @@ struct SignInRequest<'a> {
     data: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     inn: Option<&'a str>,
+    #[serde(rename = "unitedToken", skip_serializing_if = "Option::is_none")]
+    united_token: Option<bool>,
 }
 
 pub async fn obtain_token(
     http: &reqwest::Client,
     base_url: &str,
     inn: Option<&str>,
+    token_format: TokenFormat,
     thumbprint: &str,
     signer: &dyn Signer,
 ) -> Result<TrueApiToken, SignerError> {
@@ -81,6 +91,7 @@ pub async fn obtain_token(
             uuid: &challenge.uuid,
             data: &signature,
             inn,
+            united_token: (token_format == TokenFormat::Uuid).then_some(true),
         })
         .send()
         .await
@@ -93,16 +104,32 @@ pub async fn obtain_token(
         .await
         .map_err(|e| SignerError::Protocol(e.to_string()))?;
 
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let expires_at = format_rfc3339(token_expiry_unix(&issued.token, now));
+    let (token, expires_at) = match token_format {
+        TokenFormat::Jwt => {
+            let token = required_field(issued.token, "token")?;
+            let now = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let expires_at = format_rfc3339(token_expiry_unix(&token, now));
+            (token, expires_at)
+        }
+        TokenFormat::Uuid => (
+            required_field(issued.uuid_token, "uuidToken")?,
+            required_field(issued.expire_date, "expireDate")?,
+        ),
+    };
 
-    Ok(TrueApiToken {
-        token: issued.token,
-        expires_at,
-    })
+    Ok(TrueApiToken { token, expires_at })
+}
+
+fn required_field(value: Option<String>, name: &str) -> Result<String, SignerError> {
+    match value.map(|value| value.trim().to_string()) {
+        Some(value) if !value.is_empty() => Ok(value),
+        _ => Err(SignerError::Protocol(format!(
+            "True API response is missing {name}"
+        ))),
+    }
 }
 
 /// True API error bodies are passed through verbatim so the admin sees the real
@@ -172,6 +199,7 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::contracts::TokenFormat;
     use crate::signer::{CertificateSummary, Signer};
     use wiremock::matchers::{body_json_string, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -201,6 +229,10 @@ mod tests {
     }
 
     async fn mount_auth(server: &MockServer, expected_body: &str) {
+        mount_auth_response(server, expected_body, r#"{"token":"jwt-token"}"#).await;
+    }
+
+    async fn mount_auth_response(server: &MockServer, expected_body: &str, response_body: &str) {
         Mock::given(method("GET"))
             .and(path("/auth/key"))
             .respond_with(ResponseTemplate::new(200).set_body_string(
@@ -211,9 +243,7 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/auth/simpleSignIn"))
             .and(body_json_string(expected_body))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_string(r#"{"token":"jwt-token"}"#),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_body.to_string()))
             .mount(server)
             .await;
     }
@@ -224,7 +254,7 @@ mod tests {
         mount_auth(&server, r#"{"uuid":"u-1","data":"signed-blob"}"#).await;
         let http = reqwest::Client::new();
         let signer = FakeSigner { signature: "signed-blob" };
-        let token = obtain_token(&http, &server.uri(), None, "AB12", &signer)
+        let token = obtain_token(&http, &server.uri(), None, TokenFormat::Jwt, "AB12", &signer)
             .await
             .unwrap();
         assert_eq!(token.token, "jwt-token");
@@ -243,9 +273,16 @@ mod tests {
         .await;
         let http = reqwest::Client::new();
         let signer = FakeSigner { signature: "signed-blob" };
-        assert!(obtain_token(&http, &server.uri(), Some("7712345678"), "AB12", &signer)
-            .await
-            .is_ok());
+        assert!(obtain_token(
+            &http,
+            &server.uri(),
+            Some("7712345678"),
+            TokenFormat::Jwt,
+            "AB12",
+            &signer,
+        )
+        .await
+        .is_ok());
     }
 
     #[tokio::test]
@@ -260,7 +297,7 @@ mod tests {
             .await;
         let http = reqwest::Client::new();
         let signer = FakeSigner { signature: "x" };
-        match obtain_token(&http, &server.uri(), None, "AB12", &signer).await {
+        match obtain_token(&http, &server.uri(), None, TokenFormat::Jwt, "AB12", &signer).await {
             Err(SignerError::TrueApi(message)) => {
                 assert!(message.contains("договор"), "got {message}");
             }
@@ -279,9 +316,65 @@ mod tests {
             .mount(&server)
             .await;
         let http = reqwest::Client::new();
-        match obtain_token(&http, &server.uri(), None, "AB12", &FailingSigner).await {
+        match obtain_token(&http, &server.uri(), None, TokenFormat::Jwt, "AB12", &FailingSigner)
+            .await
+        {
             Err(SignerError::PinRequired) => {}
             other => panic!("expected PinRequired, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn requests_and_returns_a_uuid_token_with_the_provider_expiry() {
+        let server = MockServer::start().await;
+        mount_auth_response(
+            &server,
+            r#"{"uuid":"u-1","data":"signed-blob","inn":"7712345678","unitedToken":true}"#,
+            r#"{"uuidToken":"uuid-token","expireDate":"2026-10-10T12:00:00.000Z"}"#,
+        )
+        .await;
+
+        let token = obtain_token(
+            &reqwest::Client::new(),
+            &server.uri(),
+            Some("7712345678"),
+            TokenFormat::Uuid,
+            "AB12",
+            &FakeSigner {
+                signature: "signed-blob",
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(token.token, "uuid-token");
+        assert_eq!(token.expires_at, "2026-10-10T12:00:00.000Z");
+    }
+
+    #[tokio::test]
+    async fn rejects_a_uuid_token_without_the_provider_expiry() {
+        let server = MockServer::start().await;
+        mount_auth_response(
+            &server,
+            r#"{"uuid":"u-1","data":"signed-blob","unitedToken":true}"#,
+            r#"{"uuidToken":"uuid-token"}"#,
+        )
+        .await;
+
+        match obtain_token(
+            &reqwest::Client::new(),
+            &server.uri(),
+            None,
+            TokenFormat::Uuid,
+            "AB12",
+            &FakeSigner {
+                signature: "signed-blob",
+            },
+        )
+        .await
+        {
+            Err(SignerError::Protocol(message)) => assert!(message.contains("expireDate")),
+            other => panic!("expected Protocol, got {other:?}"),
         }
     }
 
