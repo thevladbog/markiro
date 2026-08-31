@@ -530,9 +530,37 @@
     },
     "detail": {
       "title": "Act",
-      "description": "Status and links for the closing document.",
+      "description": "Closing-document contents, service period, and print form.",
       "status": "Status",
       "printVariant": "Print form",
+      "issuedAt": "Issued",
+      "invoiceLoadError": "Could not load the source invoice contents.",
+      "linesTitle": "Act contents",
+      "linesDescription": "Items and amounts are carried over from the source invoice.",
+      "documentTitle": "Print form",
+      "documentDescription": "The immutable PDF of the issued act.",
+      "documentUnavailable": "The print form has not been generated yet.",
+      "revision": "Version {{revision}}",
+      "state": {
+        "draft": {
+          "title": "Act saved as a draft",
+          "body": "Review the service period and source before issuing the closing document."
+        },
+        "issued": {
+          "title": "Act issued",
+          "body": "The contents and period are fixed; the print form is available below."
+        },
+        "cancelled": {
+          "title": "Act withdrawn",
+          "body": "The document remains in history but is no longer active."
+        }
+      },
+      "documentState": {
+        "pending": "Generating",
+        "ready": "Ready to download",
+        "failed": "Not generated",
+        "cleanup_required": "Cleanup required"
+      },
       "openRequest": "Open request",
       "openTenant": "Open tenant",
       "openInvoice": "Open invoice",
