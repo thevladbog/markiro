@@ -108,7 +108,12 @@ export const products = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex("products_tenant_gtin_uq").on(t.tenantId, t.gtin14),
+    // A retired card keeps its GTIN for history, but no longer reserves it:
+    // only one card that is still in use may own a tenant's GTIN. The
+    // partial index also makes a conflicting restore fail atomically.
+    uniqueIndex("products_tenant_gtin_unarchived_uq")
+      .on(t.tenantId, t.gtin14)
+      .where(sql`${t.archived} = false`),
     unique("products_tenant_id_uq").on(t.tenantId, t.id),
     // Composite FK: default_counterparty_id must belong to the same
     // tenant as the product referencing it.

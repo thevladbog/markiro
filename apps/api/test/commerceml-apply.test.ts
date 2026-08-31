@@ -5,10 +5,11 @@ import { decideApplication } from "../src/modules/exchange/commerceml/apply";
 // already linked to a 1С <Ид>. The GTIN value itself does not matter to any
 // of these tests (none of them exercise GTIN matching), but it must still be
 // a real, checksum-valid GTIN-14 -- `CatalogProduct.gtin14` is not optional.
-const product = (id: string, gtin14: string, externalRef: string | null) => ({
+const product = (id: string, gtin14: string, externalRef: string | null, archived = false) => ({
   id,
   gtin14,
   externalRef,
+  archived,
 });
 
 const known = [product("p-1", "00000000000017", "guid-1")];
@@ -451,6 +452,39 @@ describe("автосвязь по GTIN", () => {
     expect(plan.links).toEqual([{ productId: "p1", externalRef: "ref-1", gtin: "04680089900253" }]);
     expect(plan.priceUpdates).toEqual([{ productId: "p1", unitPrice: "9200.00" }]);
     expect(plan.candidates).toEqual([]);
+  });
+
+  it("игнорирует архивную карточку при автосвязи и выбирает используемую замену", () => {
+    const plan = decideApplication({
+      products: [
+        product("current", "04680089900253", null),
+        product("retired", "04680089900253", "old-ref", true),
+      ],
+      items: [item("new-ref", "4680089900253")],
+      offers: [],
+    });
+
+    expect(plan.links).toEqual([
+      { productId: "current", externalRef: "new-ref", gtin: "04680089900253" },
+    ]);
+    expect(plan.gtinConflicts).toEqual([]);
+    expect(plan.candidates).toEqual([]);
+  });
+
+  it("продолжает применять цену к архивной карточке по её сохранённой связи", () => {
+    const plan = decideApplication({
+      products: [product("retired", "04680089900253", "old-ref", true)],
+      items: [],
+      offers: [
+        {
+          externalRef: "old-ref",
+          barcode: null,
+          prices: [{ type: "Базовая", value: "120.00", currency: "руб" }],
+        },
+      ],
+    });
+
+    expect(plan.priceUpdates).toEqual([{ productId: "retired", unitPrice: "120.00" }]);
   });
 
   it("карточка связана с другим Ид — конфликт, позиция в кандидаты с GTIN", () => {

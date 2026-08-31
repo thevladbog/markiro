@@ -274,14 +274,14 @@ export class CodeSearchService {
           eq(schema.codes.scannedAt, schema.codeRegistry.scannedAt),
         ),
       )
+      .leftJoin(schema.shifts, shiftsJoinCondition)
       .leftJoin(
         schema.products,
         and(
-          eq(schema.products.tenantId, schema.codeRegistry.tenantId),
-          eq(schema.products.gtin14, schema.codes.gtin14),
+          eq(schema.products.tenantId, schema.shifts.tenantId),
+          eq(schema.products.id, schema.shifts.productId),
         ),
       )
-      .leftJoin(schema.shifts, shiftsJoinCondition)
       .where(where);
 
     // The count only needs `codes` (status derives from it) -- `products`
@@ -303,19 +303,20 @@ export class CodeSearchService {
         ),
       )
       .$dynamic();
+    // Product identity belongs to the owning shift, not to whichever current
+    // catalog card happens to reuse the code's GTIN. A product filter needs
+    // that same shift join; production-date filters already needed it too.
+    if (query.productId || query.productionFrom || query.productionTo) {
+      countQuery = countQuery.leftJoin(schema.shifts, shiftsJoinCondition);
+    }
     if (query.productId) {
       countQuery = countQuery.leftJoin(
         schema.products,
         and(
-          eq(schema.products.tenantId, schema.codeRegistry.tenantId),
-          eq(schema.products.gtin14, schema.codes.gtin14),
+          eq(schema.products.tenantId, schema.shifts.tenantId),
+          eq(schema.products.id, schema.shifts.productId),
         ),
       );
-    }
-    // Likewise `shifts` is only needed by the count when a production-date
-    // bound actually references it in the shared `where`.
-    if (query.productionFrom || query.productionTo) {
-      countQuery = countQuery.leftJoin(schema.shifts, shiftsJoinCondition);
     }
 
     const [rows, countRows] = await Promise.all([
@@ -367,17 +368,17 @@ export class CodeSearchService {
         ),
       )
       .leftJoin(
-        schema.products,
-        and(
-          eq(schema.products.tenantId, schema.codeRegistry.tenantId),
-          eq(schema.products.gtin14, schema.codes.gtin14),
-        ),
-      )
-      .leftJoin(
         schema.shifts,
         and(
           eq(schema.shifts.tenantId, schema.codeRegistry.tenantId),
           eq(schema.shifts.id, schema.codeRegistry.shiftId),
+        ),
+      )
+      .leftJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.shifts.tenantId),
+          eq(schema.products.id, schema.shifts.productId),
         ),
       )
       .where(
@@ -402,17 +403,17 @@ export class CodeSearchService {
           })
           .from(schema.codes)
           .leftJoin(
-            schema.products,
-            and(
-              eq(schema.products.tenantId, schema.codes.tenantId),
-              eq(schema.products.gtin14, schema.codes.gtin14),
-            ),
-          )
-          .leftJoin(
             schema.shifts,
             and(
               eq(schema.shifts.tenantId, schema.codes.tenantId),
               eq(schema.shifts.id, schema.codes.shiftId),
+            ),
+          )
+          .leftJoin(
+            schema.products,
+            and(
+              eq(schema.products.tenantId, schema.shifts.tenantId),
+              eq(schema.products.id, schema.shifts.productId),
             ),
           )
           .where(and(eq(schema.codes.tenantId, tenantId), eq(schema.codes.codeHash, codeHash)))

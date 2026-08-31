@@ -180,6 +180,41 @@ describe.skipIf(!ready)("code-search e2e", () => {
     ).not.toContain(codeHashFor("aa"));
   });
 
+  it("keeps historical codes attached to their shift product after the GTIN is reused", async () => {
+    await agent.patch(`/products/${productId}`).send({ archived: true }).expect(200);
+    let replacementId: string | null = null;
+    try {
+      const replacement = await agent
+        .post("/products")
+        .send({
+          name: "Cola New Recipe",
+          gtin: VALID_GTIN14,
+          chzProductGroupCode: 8,
+          boxCapacity: 10,
+          palletCapacity: 5,
+        })
+        .expect(201);
+      replacementId = (replacement.body as { id: string }).id;
+
+      const list = await agent.get(`/code-search/codes`).expect(200);
+      const item = (
+        list.body as {
+          items: { codeHash: string; productId: string | null; productName: string | null }[];
+        }
+      ).items.find((candidate) => candidate.codeHash === codeHashFor("aa"));
+      expect(item).toMatchObject({ productId, productName: "Cola" });
+
+      const card = await agent.get(`/code-search/codes/${codeHashFor("aa")}`).expect(200);
+      expect(card.body).toMatchObject({ productId, productName: "Cola" });
+      expect(replacement.body).toMatchObject({ name: "Cola New Recipe", gtin14: VALID_GTIN14 });
+    } finally {
+      if (replacementId !== null) {
+        await agent.patch(`/products/${replacementId}`).send({ archived: true }).expect(200);
+      }
+      await agent.patch(`/products/${productId}`).send({ archived: false }).expect(200);
+    }
+  });
+
   it("code card: derived status, current box, ordered history", async () => {
     const res = await agent.get(`/code-search/codes/${codeHashFor("aa")}`).expect(200);
     const card = res.body as {

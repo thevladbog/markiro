@@ -810,6 +810,7 @@ export class ExchangeController {
         id: schema.products.id,
         gtin14: schema.products.gtin14,
         externalRef: schema.products.externalRef,
+        archived: schema.products.archived,
       })
       .from(schema.products)
       .where(eq(schema.products.tenantId, session.tenantId));

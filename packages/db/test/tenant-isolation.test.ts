@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "../src/client.js";
 import { organization } from "../src/schema/auth.js";
@@ -131,7 +131,7 @@ describe.skipIf(!url)("tenant isolation (composite FKs + tenant-scoped uniquenes
     ).rejects.toMatchObject({ cause: { code: FOREIGN_KEY_VIOLATION } });
   });
 
-  it("rejects a duplicate GTIN for the same tenant (products_tenant_gtin_uq)", async () => {
+  it("rejects a duplicate GTIN across two used products of the same tenant", async () => {
     const gtin = "04012345678904";
     const [first] = await db
       .insert(products)
@@ -141,6 +141,41 @@ describe.skipIf(!url)("tenant isolation (composite FKs + tenant-scoped uniquenes
 
     await expect(
       db.insert(products).values({ tenantId: orgA.id, gtin14: gtin, name: "Widget dup 2" }),
+    ).rejects.toMatchObject({ cause: { code: UNIQUE_VIOLATION } });
+  });
+
+  it("allows a used product to reuse an archived product's GTIN", async () => {
+    const gtin = "04012345678914";
+    const [archivedProduct] = await db
+      .insert(products)
+      .values({ tenantId: orgA.id, gtin14: gtin, name: "Retired Widget", archived: true })
+      .returning();
+    productIds.push(archivedProduct!.id);
+
+    const [replacement] = await db
+      .insert(products)
+      .values({ tenantId: orgA.id, gtin14: gtin, name: "Replacement Widget" })
+      .returning();
+    productIds.push(replacement!.id);
+
+    expect(replacement).toMatchObject({ tenantId: orgA.id, gtin14: gtin, archived: false });
+  });
+
+  it("rejects restoring an archived product when its GTIN has an active replacement", async () => {
+    const gtin = "04012345678915";
+    const [archivedProduct] = await db
+      .insert(products)
+      .values({ tenantId: orgA.id, gtin14: gtin, name: "Archived Widget", archived: true })
+      .returning();
+    productIds.push(archivedProduct!.id);
+    const [replacement] = await db
+      .insert(products)
+      .values({ tenantId: orgA.id, gtin14: gtin, name: "Current Widget" })
+      .returning();
+    productIds.push(replacement!.id);
+
+    await expect(
+      db.update(products).set({ archived: false }).where(eq(products.id, archivedProduct!.id)),
     ).rejects.toMatchObject({ cause: { code: UNIQUE_VIOLATION } });
   });
 

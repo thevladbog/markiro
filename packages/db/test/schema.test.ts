@@ -63,9 +63,16 @@ describe("platform schema", () => {
     expect(getTableName(lines)).toBe("lines");
     expect(getTableName(shifts)).toBe("shifts");
   });
-  it("products enforce tenant-scoped GTIN uniqueness (by declared index name)", () => {
-    // structural smoke: the unique index is declared in the table config
-    expect(Object.keys(products)).toContain("gtin14");
+  it("products enforce GTIN uniqueness only while a card is in use", () => {
+    const index = getTableConfig(products).indexes.find(
+      (candidate) => candidate.config.name === "products_tenant_gtin_unarchived_uq",
+    );
+
+    expect(index?.config.unique).toBe(true);
+    expect(
+      index?.config.columns.map((column) => (is(column, IndexedColumn) ? column.name : undefined)),
+    ).toEqual(["tenant_id", "gtin14"]);
+    expect(index?.config.where).toBeDefined();
   });
 
   it("lets a product be archived without being deleted", () => {
