@@ -3,11 +3,14 @@ import { Injectable } from "@nestjs/common";
 import {
   productionNationalCatalogClientDependencies,
   type NationalCatalogAttributeDefinition,
+  type NationalCatalogAttributesRequest,
   type NationalCatalogAttributesResponse,
   type NationalCatalogAuth,
   type NationalCatalogCategoriesResponse,
   type NationalCatalogCategory,
   type NationalCatalogClientDependencies,
+  type NationalCatalogDependentAttribute,
+  type NationalCatalogDependentAttributeRule,
   type NationalCatalogProduct,
   type NationalCatalogProductAttribute,
   type NationalCatalogProductCategory,
@@ -25,6 +28,7 @@ const FEED_PRODUCT_PATH = "/v3/feed-product";
 const PRODUCT_PATH = "/v3/product";
 export const NATIONAL_CATALOG_PRODUCT_BATCH_LIMIT = 25;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+const ATTRIBUTE_TYPES = ["a", "b", "m", "r", "o"] as const;
 
 @Injectable()
 export class NationalCatalogClient {
@@ -42,9 +46,9 @@ export class NationalCatalogClient {
 
   async getAttributes(
     auth: NationalCatalogAuth,
-    options: NationalCatalogRequestOptions = {},
+    options: NationalCatalogAttributesRequest = {},
   ): Promise<NationalCatalogResult<NationalCatalogAttributesResponse>> {
-    return this.request(auth, ATTRIBUTES_PATH, options, parseAttributes);
+    return this.request(auth, attributesPath(options), options, parseAttributes);
   }
 
   async getFeedProducts(
@@ -116,6 +120,36 @@ export class NationalCatalogClient {
   }
 }
 
+function attributesPath(options: NationalCatalogAttributesRequest): string {
+  const { catId, tnved, isSet, attrType } = options;
+  if (catId !== undefined && tnved !== undefined) {
+    throw new TypeError("National Catalog attribute selectors cannot combine catId and tnved");
+  }
+  if (catId !== undefined && (!Number.isSafeInteger(catId) || catId < 1)) {
+    throw new TypeError("National Catalog catId must be a positive integer");
+  }
+  if (tnved !== undefined && !/^\d{4,10}$/.test(tnved)) {
+    throw new TypeError("National Catalog tnved must contain four to 10 digits");
+  }
+  if (isSet !== undefined && typeof isSet !== "boolean") {
+    throw new TypeError("National Catalog isSet must be a boolean");
+  }
+  if (attrType !== undefined && !ATTRIBUTE_TYPES.includes(attrType)) {
+    throw new TypeError("National Catalog attrType is invalid");
+  }
+  if (attrType !== undefined && catId === undefined && tnved === undefined && isSet === undefined) {
+    throw new TypeError("National Catalog attrType requires catId, tnved, or isSet");
+  }
+
+  const query = new URLSearchParams();
+  if (catId !== undefined) query.set("cat_id", String(catId));
+  if (tnved !== undefined) query.set("tnved", tnved);
+  if (isSet !== undefined) query.set("is_set", isSet ? "1" : "0");
+  if (attrType !== undefined) query.set("attr_type", attrType);
+  const serialized = query.toString();
+  return serialized.length > 0 ? `${ATTRIBUTES_PATH}?${serialized}` : ATTRIBUTES_PATH;
+}
+
 function productPath(
   path: typeof FEED_PRODUCT_PATH | typeof PRODUCT_PATH,
   gtins: string[],
@@ -169,7 +203,7 @@ function parseCategories(payload: unknown): NationalCatalogCategoriesResponse | 
     const parentId = nullableNumber(record.cat_parent_id);
     const level = number(record.cat_level);
     const active = boolean(record.category_active);
-    const gismtCodes = numberArray(record.gismt_codes);
+    const gismtCodes = optionalNumberArray(record.gismt_codes);
     if (
       id === null ||
       name === null ||
@@ -199,13 +233,13 @@ function parseAttributes(payload: unknown): NationalCatalogAttributesResponse | 
     const presetOnly = boolean(record.attr_preset_only);
     const multiplicity = boolean(record.attr_multiplicity);
     const multiplicityType = enumOrNull(record.attr_multiplicity_type, ["regular", "unique"]);
-    const fieldType = enumOrNull(record.attr_field_type, ["number", "text", "date"]);
-    const valueTypes = stringArray(record.attr_value_type);
-    const dependentAttributes = array(record.dependent_attributes);
+    const fieldType = optionalEnumOrNull(record.attr_field_type, ["number", "text", "date"]);
+    const valueTypes = optionalStringArray(record.attr_value_type);
+    const dependentAttributes = parseOptionalDependentAttributes(record.dependent_attributes);
     const firstLayer = boolean(record.first_layer);
     const secondLayer = boolean(record.second_layer);
-    const type = nullableString(record.attr_type);
-    const preset = array(record.attr_preset);
+    const type = optionalNullableString(record.attr_type);
+    const preset = optionalStringArray(record.attr_preset);
     const presetUrl = optionalNullableString(record.preset_url);
     if (
       id === null ||
@@ -428,8 +462,16 @@ function numberArray(value: unknown): number[] | null {
     : null;
 }
 
+function optionalNumberArray(value: unknown): number[] | null {
+  return value === undefined ? [] : numberArray(value);
+}
+
 function stringArray(value: unknown): string[] | null {
   return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : null;
+}
+
+function optionalStringArray(value: unknown): string[] | null {
+  return value === undefined ? [] : stringArray(value);
 }
 
 function enumOrNull<T extends string>(value: unknown, values: readonly T[]): T | null | undefined {
@@ -437,4 +479,50 @@ function enumOrNull<T extends string>(value: unknown, values: readonly T[]): T |
   return typeof value === "string" && (values as readonly string[]).includes(value)
     ? (value as T)
     : undefined;
+}
+
+function optionalEnumOrNull<T extends string>(
+  value: unknown,
+  values: readonly T[],
+): T | null | undefined {
+  return value === undefined ? null : enumOrNull(value, values);
+}
+
+function parseOptionalDependentAttributes(
+  value: unknown,
+): NationalCatalogDependentAttribute[] | null {
+  if (value === undefined) return [];
+  const rows = array(value);
+  if (!rows) return null;
+  const dependencies: NationalCatalogDependentAttribute[] = [];
+  for (const row of rows) {
+    const record = asRecord(row);
+    if (!record) return null;
+    const dependencyValue = optionalNullableString(record.value);
+    const attributes = parseOptionalDependentAttributeRules(record.atters);
+    if (dependencyValue === undefined || attributes === null) return null;
+    dependencies.push({ value: dependencyValue, attributes });
+  }
+  return dependencies;
+}
+
+function parseOptionalDependentAttributeRules(
+  value: unknown,
+): NationalCatalogDependentAttributeRule[] | null {
+  if (value === undefined) return [];
+  const rows = array(value);
+  if (!rows) return null;
+  const attributes: NationalCatalogDependentAttributeRule[] = [];
+  for (const row of rows) {
+    const record = asRecord(row);
+    if (!record) return null;
+    const id = optionalNullableNumber(record.attr_id);
+    const firstLayer = boolean(record.first_layer);
+    const secondLayer = boolean(record.second_layer);
+    const type = optionalNullableString(record.attr_type);
+    if (id === undefined || firstLayer === null || secondLayer === null || type === undefined)
+      return null;
+    attributes.push({ id, firstLayer, secondLayer, type });
+  }
+  return attributes;
 }

@@ -21,6 +21,16 @@ export interface NationalCatalogRequestOptions {
   ifNoneMatch?: string;
 }
 
+export type NationalCatalogAttributeType = "a" | "b" | "m" | "r" | "o";
+
+/** Bounded documented selectors for `/v3/attributes`. */
+export interface NationalCatalogAttributesRequest extends NationalCatalogRequestOptions {
+  catId?: number;
+  tnved?: string;
+  isSet?: boolean;
+  attrType?: NationalCatalogAttributeType;
+}
+
 export interface NationalCatalogCategory {
   id: number;
   name: string;
@@ -40,12 +50,24 @@ export interface NationalCatalogAttributeDefinition {
   multiplicityType: "regular" | "unique" | null;
   fieldType: "number" | "text" | "date" | null;
   valueTypes: string[];
-  dependentAttributes: unknown[];
+  dependentAttributes: NationalCatalogDependentAttribute[];
   firstLayer: boolean;
   secondLayer: boolean;
   type: string | null;
-  preset: unknown[];
+  preset: string[];
   presetUrl: string | null;
+}
+
+export interface NationalCatalogDependentAttribute {
+  value: string | null;
+  attributes: NationalCatalogDependentAttributeRule[];
+}
+
+export interface NationalCatalogDependentAttributeRule {
+  id: number | null;
+  firstLayer: boolean;
+  secondLayer: boolean;
+  type: string | null;
 }
 
 export interface NationalCatalogProductIdentifier {

@@ -150,6 +150,186 @@ describe("NationalCatalogClient", () => {
     });
   });
 
+  it("serializes bounded category and TN VED selectors for the applicable attribute model", async () => {
+    const calls: string[] = [];
+    const client = new NationalCatalogClient(
+      dependencies(async (url) => {
+        calls.push(String(url));
+        return new Response(JSON.stringify(attributePayload), { status: 200 });
+      }),
+    );
+
+    await expect(
+      client.getAttributes(auth, { catId: 30933, attrType: "m", ifNoneMatch: '"schema-v1"' }),
+    ).resolves.toMatchObject({ status: "ok" });
+    await expect(
+      client.getAttributes(auth, { tnved: "3303", attrType: "r" }),
+    ).resolves.toMatchObject({
+      status: "ok",
+    });
+    expect(calls).toEqual([
+      "https://catalog.example.test/v3/attributes?cat_id=30933&attr_type=m",
+      "https://catalog.example.test/v3/attributes?tnved=3303&attr_type=r",
+    ]);
+
+    await expect(client.getAttributes(auth, { attrType: "m" })).rejects.toThrow(
+      "National Catalog attrType requires catId, tnved, or isSet",
+    );
+    await expect(client.getAttributes(auth, { catId: 30933, tnved: "3303" })).rejects.toThrow(
+      "National Catalog attribute selectors cannot combine catId and tnved",
+    );
+    await expect(client.getAttributes(auth, { catId: 0 })).rejects.toThrow(
+      "National Catalog catId must be a positive integer",
+    );
+    await expect(client.getAttributes(auth, { tnved: "abc" })).rejects.toThrow(
+      "National Catalog tnved must contain four to 10 digits",
+    );
+    expect(calls).toHaveLength(2);
+  });
+
+  it("normalizes omitted optional category and attribute fields to safe empty values", async () => {
+    const minimalCategories = {
+      apiversion: 3,
+      result: [
+        {
+          cat_id: 30064,
+          cat_name: "Продовольственные товары",
+          cat_parent_id: 30062,
+          cat_level: 2,
+          category_active: true,
+        },
+      ],
+    };
+    const minimalAttributes = {
+      apiversion: 3,
+      result: [
+        {
+          attr_group_id: 103,
+          attr_name: "Тип парфюмерии",
+          attr_preset_only: false,
+          attr_multiplicity: false,
+          attr_multiplicity_type: null,
+          attr_id: 1034,
+          attr_group_name: "Потребительские свойства",
+          first_layer: false,
+          second_layer: true,
+        },
+      ],
+    };
+    const client = new NationalCatalogClient(
+      dependencies(
+        async (url) =>
+          new Response(
+            JSON.stringify(
+              String(url).includes("categories") ? minimalCategories : minimalAttributes,
+            ),
+            {
+              status: 200,
+            },
+          ),
+      ),
+    );
+
+    await expect(client.listCategories(auth)).resolves.toMatchObject({
+      status: "ok",
+      value: { categories: [expect.objectContaining({ gismtCodes: [] })] },
+    });
+    await expect(client.getAttributes(auth)).resolves.toMatchObject({
+      status: "ok",
+      value: {
+        attributes: [
+          expect.objectContaining({
+            fieldType: null,
+            valueTypes: [],
+            dependentAttributes: [],
+            preset: [],
+          }),
+        ],
+      },
+    });
+  });
+
+  it("normalizes documented dependency rules and rejects malformed nested dependency or preset values", async () => {
+    const nestedAttributePayload = {
+      apiversion: 3,
+      result: [
+        {
+          ...attributePayload.result[0],
+          dependent_attributes: [
+            {
+              value: "ДА",
+              atters: [
+                {
+                  attr_id: 15654,
+                  first_layer: true,
+                  second_layer: false,
+                  attr_type: "m",
+                  provider_only: "kept out of the normalized rule",
+                },
+              ],
+              provider_only: "kept out of the normalized dependency",
+            },
+          ],
+          attr_preset: ["ДА", "НЕТ"],
+        },
+      ],
+    };
+    const valid = new NationalCatalogClient(
+      dependencies(
+        async () => new Response(JSON.stringify(nestedAttributePayload), { status: 200 }),
+      ),
+    );
+
+    await expect(valid.getAttributes(auth)).resolves.toMatchObject({
+      status: "ok",
+      value: {
+        attributes: [
+          expect.objectContaining({
+            dependentAttributes: [
+              {
+                value: "ДА",
+                attributes: [{ id: 15654, firstLayer: true, secondLayer: false, type: "m" }],
+              },
+            ],
+            preset: ["ДА", "НЕТ"],
+          }),
+        ],
+      },
+    });
+
+    const invalidDependency = new NationalCatalogClient(
+      dependencies(
+        async () =>
+          new Response(
+            JSON.stringify({
+              ...nestedAttributePayload,
+              result: [{ ...nestedAttributePayload.result[0], dependent_attributes: [null] }],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    await expect(invalidDependency.getAttributes(auth)).resolves.toEqual({
+      status: "invalid_response",
+    });
+
+    const invalidPreset = new NationalCatalogClient(
+      dependencies(
+        async () =>
+          new Response(
+            JSON.stringify({
+              ...nestedAttributePayload,
+              result: [{ ...nestedAttributePayload.result[0], attr_preset: [{}] }],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    await expect(invalidPreset.getAttributes(auth)).resolves.toEqual({
+      status: "invalid_response",
+    });
+  });
+
   it("uses only the fixed feed-product path and semicolon-delimited digit GTINs", async () => {
     const calls: string[] = [];
     const client = new NationalCatalogClient(
