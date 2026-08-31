@@ -387,6 +387,7 @@ test("production environment example is a blank loadEnv inventory", async () => 
     "SMTP_FROM_NAME",
     "SMTP_REPLY_TO",
     "MAIL_PAYLOAD_ENCRYPTION_KEY",
+    "CHZ_TOKEN_ENCRYPTION_KEY",
     "S3_ENDPOINT",
     "S3_REGION",
     "S3_BUCKET",
