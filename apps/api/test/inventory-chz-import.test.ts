@@ -59,6 +59,44 @@ const HEADER = [
   "Разрешительные документы",
 ] as const;
 
+const DISPENSER_HEADER = [
+  "requestedCis",
+  "gtin",
+  "tnVedEaes",
+  "tnVedEaesGroup",
+  "maxRetailPrice",
+  "parent",
+  "producerInn",
+  "ownerInn",
+  "prVetDocument",
+  "productName",
+  "brand",
+  "ownerName",
+  "producerName",
+  "introducedDate",
+  "receiptDate",
+  "status",
+  "statusEx",
+  "emissionType",
+  "withdrawReason",
+  "packageType",
+  "productGroup",
+  "applicationDate",
+  "emissionDate",
+  "expirationDate",
+  "child",
+  "setGtin",
+  "setDescription",
+  "productionDate",
+  "aggregationType",
+  "orderId",
+  "turnoverType",
+  "kpp",
+  "fiasId",
+  "declarationRegistrationNumbers",
+  "permitDocs",
+] as const;
+
 const fixture = (name: string) => readFileSync(join(__dirname, "fixtures/inventory", name));
 
 function csvCell(value: string): string {
@@ -116,6 +154,36 @@ function csvBytes(
     .map((row) => row.map(csvCell).join(","))
     .join(newline);
   return strToU8(`${options.bom ? "\ufeff" : ""}${text}`);
+}
+
+function dispenserFilter(status: InventoryChzStatus, gtin = GTIN): string {
+  return [
+    "Filter(participantInn=0000000000",
+    "productGroup=BEER",
+    "packageType=[UNIT]",
+    `status=${status}`,
+    "statusExt=[]",
+    `includeGtin=[${gtin}]`,
+    "excludeGtin=[]",
+    "appliedPeriod=null",
+    "emissionPeriod=null",
+    "emissionTypes=[]",
+    "productionPeriod=null",
+    "vsd=null",
+    "turnoverTypes=[]",
+    "producerInns=[]",
+    "eliminationReasons=[]",
+    "orderIds=[]",
+    "declarationRegistrationNumbers=[]",
+    "permitDocIndx=[])",
+  ].join(", ");
+}
+
+function dispenserCsvBytes(status: InventoryChzStatus, rows: string[][]): Uint8Array {
+  const text = [[dispenserFilter(status)], [...DISPENSER_HEADER], ...rows]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\r\n");
+  return strToU8(text);
 }
 
 function parse(
@@ -480,6 +548,54 @@ describe("Chestny ZNAK inventory import parser", () => {
       expect(result.emptyResult).toBe(true);
     },
   );
+
+  it("accepts a True API dispenser zero-row ZIP as a successful empty result", () => {
+    const csv = dispenserCsvBytes("APPLIED", [
+      ["errors"],
+      ["5: Коды маркировки по критериям отбора не найдены"],
+    ]);
+
+    const result = parse(zipSync({ "result.csv": csv }), {
+      filename: "result.zip",
+      mimeType: MIME_ZIP,
+      expectedStatus: "APPLIED",
+    });
+
+    expect(result.filter).toEqual({
+      status: "APPLIED",
+      packagingType: "UNIT",
+      includedGtin14: GTIN,
+    });
+    expect(result.rows).toEqual([]);
+    expect(result.emptyResult).toBe(true);
+  });
+
+  it("maps a True API dispenser data row through the existing import model", () => {
+    const csv = dispenserCsvBytes("INTRODUCED", [
+      dataRow("INTRODUCED", {
+        rawKm: `01${GTIN}21SYNTHETIC-DISPENSER`,
+        state: "MOVING_BY_UD",
+        productionDate: "2026-08-19T00:00:00Z",
+      }),
+    ]);
+
+    const result = parse(zipSync({ "result.csv": csv }), {
+      filename: "result.zip",
+      mimeType: MIME_ZIP,
+    });
+
+    expect(result.rows).toEqual([
+      expect.objectContaining({
+        canonicalKm: `01${GTIN}21SYNTHETIC-DISPENSER`,
+        gtin14: GTIN,
+        serial: "SYNTHETIC-DISPENSER",
+        sourceStatus: "INTRODUCED",
+        sourceState: "MOVING_BY_UD",
+        sourceProductionDate: "2026-08-19",
+      }),
+    ]);
+    expect(result.emptyResult).toBe(false);
+  });
 
   it("accepts the committed synthetic empty-result fixture", () => {
     const result = parse(fixture("chz-empty-applied.csv"), { expectedStatus: "APPLIED" });

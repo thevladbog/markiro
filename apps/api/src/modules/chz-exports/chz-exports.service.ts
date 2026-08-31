@@ -6,7 +6,7 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, isNotNull, lt } from "drizzle-orm";
 import { INVENTORY_CHZ_STATUSES, type InventoryChzStatus } from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
@@ -146,6 +146,38 @@ export class ChzExportsService {
     inventoryId: string,
     status: InventoryChzStatus,
   ): Promise<ChzExportStateDto> {
+    const now = new Date();
+    // These results failed only because the old parser rejected the dispenser CSV shape.
+    // Re-import the generated result instead of spending the tenant's export quota again.
+    const reused = await this.db
+      .update(schema.chzExportRuns)
+      .set({
+        state: "ready",
+        importId: null,
+        errorCode: null,
+        errorMessage: null,
+        orderedAt: now,
+        completedAt: null,
+        orderedByUserId: actorUserId,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(schema.chzExportRuns.tenantId, tenantId),
+          eq(schema.chzExportRuns.inventoryId, inventoryId),
+          eq(schema.chzExportRuns.status, status),
+          eq(schema.chzExportRuns.state, "failed"),
+          eq(schema.chzExportRuns.errorCode, "CHZ_FILTER_INVALID"),
+          isNotNull(schema.chzExportRuns.dispenserTaskId),
+          isNotNull(schema.chzExportRuns.resultId),
+        ),
+      )
+      .returning({ id: schema.chzExportRuns.id });
+    if (reused.length > 0) {
+      await this.jobs.enqueueChzExportOrder(tenantId, inventoryId);
+      return this.getState(tenantId, inventoryId);
+    }
+
     const updated = await this.db
       .update(schema.chzExportRuns)
       .set(this.resetToQueued(actorUserId))
