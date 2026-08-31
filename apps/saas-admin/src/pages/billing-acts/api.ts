@@ -23,6 +23,16 @@ export function getBillingAct(id: string) {
   });
 }
 
+export function getBillingActDocumentDownload(actId: string, documentId: string) {
+  const params = platformCommercialContracts.billingActs.documents.download.params.parse({
+    actId,
+    documentId,
+  });
+  return platformApiFetch(`/billing/acts/${params.actId}/documents/${params.documentId}/download`, {
+    responseSchema: platformCommercialContracts.billingActs.documents.download.response,
+  });
+}
+
 export function listBillingActs() {
   return platformApiFetch("/billing/acts", {
     responseSchema: platformCommercialContracts.billingActs.list.response,

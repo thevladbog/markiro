@@ -127,11 +127,13 @@ function installApi({
   failRender = false,
   deferDownloads = false,
   readyAfterDetailRequests,
+  sellerSnapshot = invoiceBase.sellerSnapshot,
 }: {
   initialDocuments?: readonly Record<string, unknown>[];
   failRender?: boolean;
   deferDownloads?: boolean;
   readyAfterDetailRequests?: number;
+  sellerSnapshot?: Record<string, unknown>;
 } = {}) {
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
   let paymentAttempts = 0;
@@ -166,6 +168,7 @@ function installApi({
           cancelled
             ? {
                 ...issuedDetail,
+                sellerSnapshot,
                 documents,
                 status: "cancelled",
                 cancelledAt: "2026-08-21T12:00:00.000Z",
@@ -176,6 +179,7 @@ function installApi({
             : paid
               ? {
                   ...issuedDetail,
+                  sellerSnapshot,
                   documents,
                   status: "paid",
                   paidAt: "2026-08-21T12:00:00.000Z",
@@ -222,7 +226,7 @@ function installApi({
                     attempts: [],
                   },
                 }
-              : { ...issuedDetail, documents },
+              : { ...issuedDetail, sellerSnapshot, documents },
         );
       }
       if (path.endsWith(`/api/platform/invoices/${INVOICE_ID}/cancel`) && method === "POST") {
@@ -767,5 +771,23 @@ describe("invoice commercial lifecycle", () => {
 
     await waitFor(() => expect(api.calls()).toHaveLength(1));
     expect(api.calls()[0]?.body).toEqual({ printVariant: "signed" });
+  });
+
+  it("allows choosing a signed invoice form without duplicating the server seller check", async () => {
+    installApi({
+      sellerSnapshot: {
+        ...invoiceBase.sellerSnapshot,
+        inn: "7700000000",
+      },
+    });
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: `/invoices/${INVOICE_ID}` });
+
+    const signedPrint = await screen.findByRole("checkbox", {
+      name: "Добавить подпись и печать",
+    });
+    expect(signedPrint.hasAttribute("disabled")).toBe(false);
+    await user.click(signedPrint);
+    expect(signedPrint.getAttribute("aria-checked")).toBe("true");
   });
 });

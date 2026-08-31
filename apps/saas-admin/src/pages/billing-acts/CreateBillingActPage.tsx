@@ -14,7 +14,6 @@ import {
   type ComboboxOption,
 } from "@markiro/ui";
 import {
-  SIGNED_PRINT_SELLER_TAX_ID,
   platformCommercialContracts,
   type BillingActCreateDto,
   type PrintDocumentVariant,
@@ -25,7 +24,6 @@ import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { useNavigationGuard } from "../../layout/NavigationGuard.js";
 import { getInvoice, listInvoices } from "../billing/api.js";
 import { invoiceStatusTone } from "../billing/invoice-status.js";
-import { sellerTaxId } from "../billing/seller-snapshot.js";
 import { createBillingAct, getBillingAct, issueBillingAct } from "./api.js";
 
 type Progress = "idle" | "creating" | "generating" | "draft" | "issued";
@@ -396,16 +394,8 @@ function BillingActForm({ writable }: { writable: boolean }) {
               setWithSignatureSeal(checked);
               resetAttempt();
             }}
-            disabled={
-              frozen ||
-              sellerTaxId(detail.data.sellerSnapshot) !== SIGNED_PRINT_SELLER_TAX_ID ||
-              issue.isPending
-            }
-            hint={t(
-              sellerTaxId(detail.data.sellerSnapshot) === SIGNED_PRINT_SELLER_TAX_ID
-                ? "billingActs.print.signedHint"
-                : "billingActs.print.signedUnavailable",
-            )}
+            disabled={frozen || issue.isPending}
+            hint={t("billingActs.print.signedHint")}
           />
         ) : null}
 

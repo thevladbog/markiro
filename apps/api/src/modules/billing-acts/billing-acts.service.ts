@@ -15,6 +15,7 @@ import {
   type BillingActCancelDto,
   type BillingActCreateDto,
   type BillingActIssueInput,
+  type CommercialDocumentDownloadSource,
   type PrintDocumentVariant,
 } from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
@@ -94,6 +95,53 @@ export class BillingActsService {
 
   async detail(_actor: PlatformPrincipal, actId: string): Promise<BillingAct> {
     return this.detailWith(this.db, actId);
+  }
+
+  async documentUrl(
+    _actor: PlatformPrincipal,
+    actId: string,
+    documentId: string,
+  ): Promise<CommercialDocumentDownloadSource> {
+    const canonicalActId = canonicalBillingUuid(actId);
+    const canonicalDocumentId = canonicalBillingUuid(documentId);
+    const [document] = await this.db
+      .select({
+        tenantId: schema.billingActDocuments.tenantId,
+        number: schema.billingActs.number,
+        objectKey: schema.billingActDocuments.objectKey,
+        state: schema.billingActDocuments.state,
+      })
+      .from(schema.billingActDocuments)
+      .innerJoin(
+        schema.billingActs,
+        and(
+          eq(schema.billingActs.tenantId, schema.billingActDocuments.tenantId),
+          eq(schema.billingActs.id, schema.billingActDocuments.actId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.billingActDocuments.actId, canonicalActId),
+          eq(schema.billingActDocuments.id, canonicalDocumentId),
+        ),
+      )
+      .limit(1);
+    const expectedObjectKey = document
+      ? tenantBillingActObjectKey(document.tenantId, canonicalActId, canonicalDocumentId)
+      : null;
+    if (
+      !document ||
+      document.state !== "ready" ||
+      document.objectKey !== expectedObjectKey ||
+      !expectedObjectKey
+    ) {
+      throw new NotFoundException({ code: "billing_act_document_not_ready" });
+    }
+    return {
+      url: await this.storage.presignRead(expectedObjectKey, 300, {
+        downloadFilename: `${document.number}.pdf`,
+      }),
+    };
   }
 
   async create(actor: PlatformPrincipal, input: BillingActCreateDto): Promise<BillingAct> {
