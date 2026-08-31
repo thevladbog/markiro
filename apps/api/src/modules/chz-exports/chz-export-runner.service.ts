@@ -49,11 +49,10 @@ const ERROR_MESSAGE_LIMIT = 500;
 const DIAGNOSTIC_CODE = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 /**
- * KNOWN UNKNOWN, the same class as `PACKAGE_TYPE` in the client: the exact
- * spelling of the dispenser's task states is not verifiable from here and is
- * settled against the sandbox by this plan's runbook step. Anything unknown is
- * read as "still working", which costs one more poll rather than a wrong
- * terminal state.
+ * The current dispenser contract names the terminal result states `SUCCESS`
+ * and `FAILED`. Keep the earlier aliases for compatibility with responses from
+ * older True API environments. Anything unknown is still treated as working,
+ * which costs one more poll rather than recording a wrong terminal state.
  */
 const COMPLETED_TASK_STATUSES = new Set(["COMPLETED", "SUCCESS", "DONE"]);
 const FAILED_TASK_STATUSES = new Set([
@@ -147,8 +146,8 @@ export class ChzExportRunnerService {
         return { finished: true };
       }
       await this.orderQueuedRuns(tenantId, inventoryId, token.auth, context);
-      await this.pollOrderedRuns(tenantId, inventoryId, token.auth);
-      await this.importReadyRuns(tenantId, inventoryId, token.auth);
+      await this.pollOrderedRuns(tenantId, inventoryId, token.auth, context.productGroupCode);
+      await this.importReadyRuns(tenantId, inventoryId, token.auth, context.productGroupCode);
     } catch (error) {
       if (!(error instanceof ChzUnauthorizedError)) throw error;
       // A 401 mid-pass is the same condition as a token we could not load:
@@ -376,6 +375,7 @@ export class ChzExportRunnerService {
     tenantId: string,
     inventoryId: string,
     auth: TrueApiAuth,
+    productGroupCode: number,
   ): Promise<void> {
     // A run past the timeout deadline was already failed by
     // `sweepExpiredOrders` earlier in this same pass, before the token gate,
@@ -388,7 +388,9 @@ export class ChzExportRunnerService {
     }
     if (byTaskId.size === 0) return;
 
-    const results = await this.client.listDispenserResults(auth, [...byTaskId.keys()]);
+    const results = await this.client.listDispenserResults(auth, productGroupCode, [
+      ...byTaskId.keys(),
+    ]);
     if (results.status === "unauthorized") throw new ChzUnauthorizedError();
     if (results.status !== "ok") {
       // Both `rejected` and `unavailable` leave the runs ordered: a batch poll
@@ -413,7 +415,7 @@ export class ChzExportRunnerService {
       ) {
         await this.markReady(run, result.resultId);
       } else if (FAILED_TASK_STATUSES.has(status)) {
-        await this.failRun(run, "CHZ_TASK_FAILED", null);
+        await this.failRun(run, "CHZ_TASK_FAILED", result.errorMessage ?? null);
       }
     }
   }
@@ -422,13 +424,18 @@ export class ChzExportRunnerService {
     tenantId: string,
     inventoryId: string,
     auth: TrueApiAuth,
+    productGroupCode: number,
   ): Promise<void> {
     for (const run of await this.loadRuns(tenantId, inventoryId)) {
       if (run.state !== "ready") continue;
       const { resultId, dispenserTaskId } = run;
       if (resultId === null || dispenserTaskId === null) continue;
 
-      const downloaded = await this.client.downloadDispenserResult(auth, resultId);
+      const downloaded = await this.client.downloadDispenserResult(
+        auth,
+        resultId,
+        productGroupCode,
+      );
       switch (downloaded.status) {
         case "unauthorized":
           throw new ChzUnauthorizedError();

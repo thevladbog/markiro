@@ -77,7 +77,11 @@ export class TrueApiClient {
     auth: TrueApiAuth,
     productGroupCode: number,
   ): Promise<TrueApiResult<DispenserTaskSummary[]>> {
-    const query = new URLSearchParams({ productGroupCode: String(productGroupCode) });
+    const query = new URLSearchParams({
+      page: "0",
+      size: "100",
+      pg: String(productGroupCode),
+    });
     return this.request(
       auth,
       `/dispenser/tasks?${query.toString()}`,
@@ -85,13 +89,14 @@ export class TrueApiClient {
       {},
       async (response) => {
         const payload: unknown = await response.json();
-        const rows = Array.isArray(payload) ? payload : [];
+        const rows = listFromEnvelope(payload);
+        if (rows === null) return null;
         return rows.map((row) => {
           const record = row as Record<string, unknown>;
           return {
-            taskId: typeof record.taskId === "string" ? record.taskId : stringOrEmpty(record.id),
-            status: stringOrEmpty(record.status),
-            createdAt: typeof record.createdAt === "string" ? record.createdAt : null,
+            taskId: stringOrEmpty(record.id),
+            status: stringOrEmpty(record.currentStatus),
+            createdAt: typeof record.createDate === "string" ? record.createDate : null,
           };
         });
       },
@@ -100,9 +105,14 @@ export class TrueApiClient {
 
   async listDispenserResults(
     auth: TrueApiAuth,
+    productGroupCode: number,
     taskIds: string[],
   ): Promise<TrueApiResult<DispenserResult[]>> {
-    const query = new URLSearchParams();
+    const query = new URLSearchParams({
+      page: "0",
+      size: String(Math.max(taskIds.length, 1)),
+      pg: String(productGroupCode),
+    });
     for (const taskId of taskIds) query.append("task_ids", taskId);
     return this.request(
       auth,
@@ -111,13 +121,18 @@ export class TrueApiClient {
       {},
       async (response) => {
         const payload: unknown = await response.json();
-        const rows = Array.isArray(payload) ? payload : [];
+        const rows = listFromEnvelope(payload);
+        if (rows === null) return null;
         return rows.map((row) => {
           const record = row as Record<string, unknown>;
           return {
             taskId: stringOrEmpty(record.taskId),
-            resultId: typeof record.resultId === "string" ? record.resultId : null,
-            status: stringOrEmpty(record.status),
+            resultId: typeof record.id === "string" ? record.id : null,
+            status: stringOrEmpty(record.downloadStatus),
+            errorMessage:
+              typeof record.errorMessage === "string" && record.errorMessage.length > 0
+                ? record.errorMessage
+                : null,
           };
         });
       },
@@ -127,10 +142,12 @@ export class TrueApiClient {
   async downloadDispenserResult(
     auth: TrueApiAuth,
     resultId: string,
+    productGroupCode: number,
   ): Promise<TrueApiResult<Uint8Array>> {
+    const query = new URLSearchParams({ pg: String(productGroupCode) });
     return this.request(
       auth,
-      `/dispenser/results/${encodeURIComponent(resultId)}/file`,
+      `/dispenser/results/${encodeURIComponent(resultId)}/file?${query.toString()}`,
       DOWNLOAD_TIMEOUT_MS,
       {},
       async (response) => new Uint8Array(await response.arrayBuffer()),
@@ -257,6 +274,12 @@ export class TrueApiClient {
       return "";
     }
   }
+}
+
+function listFromEnvelope(payload: unknown): unknown[] | null {
+  if (payload === null || typeof payload !== "object") return null;
+  const list = (payload as Record<string, unknown>).list;
+  return Array.isArray(list) ? list : null;
 }
 
 function stringOrEmpty(value: unknown): string {

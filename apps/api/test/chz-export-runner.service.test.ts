@@ -96,20 +96,28 @@ function fakeClient(config: FakeClientConfig = {}): FakeClient {
       calls.push({ op: "listDispenserTasks", productGroupCode });
       return { status: "ok" as const, value: config.existingTasks ?? [] };
     }),
-    listDispenserResults: vi.fn(async (_auth: unknown, taskIds: string[]) => {
-      calls.push({ op: "listDispenserResults", taskIds: [...taskIds] });
-      if (config.resultsStatus === "rejected") {
-        return { status: "rejected" as const, code: "400", message: "" };
-      }
-      if (config.resultsStatus === "unavailable") {
-        return { status: "unavailable" as const };
-      }
-      return { status: "ok" as const, value: config.results ?? [] };
-    }),
-    downloadDispenserResult: vi.fn(async (_auth: unknown, resultId: string) => {
-      calls.push({ op: "download", resultId });
-      return { status: "ok" as const, value: config.file ?? new Uint8Array([0x50, 0x4b]) };
-    }),
+    listDispenserResults: vi.fn(
+      async (_auth: unknown, productGroupCode: number, taskIds: string[]) => {
+        calls.push({
+          op: "listDispenserResults",
+          productGroupCode,
+          taskIds: [...taskIds],
+        });
+        if (config.resultsStatus === "rejected") {
+          return { status: "rejected" as const, code: "400", message: "" };
+        }
+        if (config.resultsStatus === "unavailable") {
+          return { status: "unavailable" as const };
+        }
+        return { status: "ok" as const, value: config.results ?? [] };
+      },
+    ),
+    downloadDispenserResult: vi.fn(
+      async (_auth: unknown, resultId: string, productGroupCode: number) => {
+        calls.push({ op: "download", resultId, productGroupCode });
+        return { status: "ok" as const, value: config.file ?? new Uint8Array([0x50, 0x4b]) };
+      },
+    ),
   };
   return { client: client as unknown as TrueApiClient, calls };
 }
@@ -325,6 +333,7 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
     expect([...(poll.taskIds ?? [])].sort()).toEqual(
       INVENTORY_CHZ_STATUSES.map((status) => `task-${status}`).sort(),
     );
+    expect(poll.productGroupCode).toBe(PRODUCT_GROUP_CODE);
   });
 
   it("leaves ordered runs untouched and the order unfinished on an unavailable batch poll", async () => {
@@ -427,7 +436,7 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
   it("hands the downloaded archive to importEvidence untouched and as a .zip", async () => {
     await seedRuns({ state: "ordered", taskIdFor: (status) => `task-${status}` });
     const archive = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x99]);
-    const { client } = fakeClient({
+    const { client, calls } = fakeClient({
       results: [{ taskId: "task-EMITTED", resultId: "r1", status: "COMPLETED" }],
       file: archive,
     });
@@ -443,6 +452,10 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
     // The parser already handles a one-CSV zip; re-packing or unpacking here
     // would be a second code path to the same invariant.
     expect(Array.from(file.bytes as Buffer)).toEqual(Array.from(archive));
+    expect(calls.find((call) => call.op === "download")).toMatchObject({
+      resultId: "r1",
+      productGroupCode: PRODUCT_GROUP_CODE,
+    });
 
     const [row] = await runsFor(inventoryId, "EMITTED");
     expect(row).toMatchObject({ state: "imported", completedAt: expect.any(Date) });

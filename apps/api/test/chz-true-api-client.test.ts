@@ -54,7 +54,7 @@ describe("TrueApiClient", () => {
 
   it("maps 401 to unauthorized so the caller can refuse instead of retrying", async () => {
     const client = new TrueApiClient(deps(async () => new Response("", { status: 401 })));
-    await expect(client.listDispenserResults(auth, ["task-1"])).resolves.toEqual({
+    await expect(client.listDispenserResults(auth, 8, ["task-1"])).resolves.toEqual({
       status: "unauthorized",
     });
   });
@@ -108,14 +108,14 @@ describe("TrueApiClient", () => {
 
   it("maps 429 to unavailable so the job retries with backoff", async () => {
     const client = new TrueApiClient(deps(async () => new Response("", { status: 429 })));
-    await expect(client.listDispenserResults(auth, ["task-1"])).resolves.toEqual({
+    await expect(client.listDispenserResults(auth, 8, ["task-1"])).resolves.toEqual({
       status: "unavailable",
     });
   });
 
   it("maps a 5xx and a thrown fetch to unavailable so the job retries", async () => {
     const server = new TrueApiClient(deps(async () => new Response("", { status: 503 })));
-    await expect(server.listDispenserResults(auth, ["t"])).resolves.toEqual({
+    await expect(server.listDispenserResults(auth, 8, ["t"])).resolves.toEqual({
       status: "unavailable",
     });
     const offline = new TrueApiClient(
@@ -123,7 +123,7 @@ describe("TrueApiClient", () => {
         throw new Error("ECONNRESET");
       }),
     );
-    await expect(offline.listDispenserResults(auth, ["t"])).resolves.toEqual({
+    await expect(offline.listDispenserResults(auth, 8, ["t"])).resolves.toEqual({
       status: "unavailable",
     });
   });
@@ -133,25 +133,97 @@ describe("TrueApiClient", () => {
     const client = new TrueApiClient(
       deps(async (url) => {
         urls.push(String(url));
-        return String(url).endsWith("/file")
+        return String(url).includes("/file?")
           ? new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), { status: 200 })
-          : new Response(JSON.stringify([{ taskId: "a", resultId: "r1", status: "COMPLETED" }]), {
-              status: 200,
-            });
+          : new Response(
+              JSON.stringify({
+                list: [
+                  {
+                    id: "r1",
+                    archiveSize: 4,
+                    available: "AVAILABLE",
+                    dataStartDate: null,
+                    dataEndDate: null,
+                    downloadStatus: "SUCCESS",
+                    downloadingTime: 12,
+                    downloadFormat: "CSV",
+                    errorMessage: null,
+                    fullErrorMessage: null,
+                    fileDeleteDate: "2026-09-30T00:00:00.000Z",
+                    generationStartDate: "2026-08-31T10:00:00.000Z",
+                    generationEndDate: "2026-08-31T10:00:12.000Z",
+                    notEditable: true,
+                    taskId: "a",
+                    fileFormat: "CSV",
+                    resultFilePartsSize: 0,
+                    resultFileParts: [],
+                  },
+                ],
+              }),
+              { status: 200 },
+            );
       }),
     );
 
-    await client.listDispenserResults(auth, ["a", "b"]);
+    await expect(client.listDispenserResults(auth, 8, ["a", "b"])).resolves.toEqual({
+      status: "ok",
+      value: [{ taskId: "a", resultId: "r1", status: "SUCCESS", errorMessage: null }],
+    });
+    expect(urls[0]).toContain("page=0");
+    expect(urls[0]).toContain("size=2");
+    expect(urls[0]).toContain("pg=8");
     expect(urls[0]).toContain("task_ids=a");
     expect(urls[0]).toContain("task_ids=b");
 
-    const file = await client.downloadDispenserResult(auth, "r1");
+    const file = await client.downloadDispenserResult(auth, "r1", 8);
+    expect(urls[1]).toBe(`${auth.baseUrl}/dispenser/results/r1/file?pg=8`);
     expect(file).toMatchObject({ status: "ok" });
     // ZIP magic -- the bytes must arrive unmodified, because they go straight
     // into the existing importer.
     expect(Array.from((file as { value: Uint8Array }).value.slice(0, 4))).toEqual([
       0x50, 0x4b, 0x03, 0x04,
     ]);
+  });
+
+  it("reads dispenser tasks from the documented paged response", async () => {
+    const urls: string[] = [];
+    const client = new TrueApiClient(
+      deps(async (url) => {
+        urls.push(String(url));
+        return new Response(
+          JSON.stringify({
+            list: [
+              {
+                id: "task-1",
+                name: "FILTERED_CIS_REPORT",
+                createDate: "2026-08-31T10:00:00.000",
+                currentStatus: "PREPARATION",
+                dataStartDate: null,
+                dataEndDate: null,
+                orgInn: "7700000000",
+                period: null,
+                periodicity: "SINGLE",
+                productGroups: [{ id: 8, name: "Пиво" }],
+                timeoutSecs: 3600,
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    await expect(client.listDispenserTasks(auth, 8)).resolves.toEqual({
+      status: "ok",
+      value: [
+        {
+          taskId: "task-1",
+          status: "PREPARATION",
+          createdAt: "2026-08-31T10:00:00.000",
+        },
+      ],
+    });
+    expect(urls).toEqual([`${auth.baseUrl}/dispenser/tasks?page=0&size=100&pg=8`]);
   });
 
   it("does not put the token anywhere but the Authorization header", async () => {

@@ -86,7 +86,7 @@ export function ChzExportRunStatus({
   status: InventoryChzStatus;
   canMutate: boolean;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const state = useChzExportState(inventoryId);
   const retry = useRetryChzExport();
   const run = state.data?.runs.find((item) => item.status === status);
@@ -97,6 +97,16 @@ export function ChzExportRunStatus({
       <Badge tone={RUN_BADGE_TONE[run.state]}>
         {t(`pages.inventory.chzExports.state.${run.state}`)}
       </Badge>
+      {run.orderedAt && (run.state === "ordered" || run.state === "ready") ? (
+        <small>
+          {t("pages.inventory.chzExports.orderedAt", {
+            date: new Intl.DateTimeFormat(i18n.language, {
+              dateStyle: "short",
+              timeStyle: "short",
+            }).format(new Date(run.orderedAt)),
+          })}
+        </small>
+      ) : null}
       {run.state === "failed" ? (
         <>
           {run.errorMessage ? (
