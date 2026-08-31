@@ -51,6 +51,7 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
     ),
     verifyObject: vi.fn(async (): Promise<"verified" | "missing" | "mismatch"> => "verified"),
     deleteConfirmed: vi.fn(async () => undefined),
+    presignRead: vi.fn(async () => "https://objects.example.test/acts/document.pdf"),
   };
   let tenantA = "";
   let tenantB = "";
@@ -446,6 +447,38 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
     const [, body, contentType] = storage.putVerified.mock.calls.at(-1)!;
     expect(contentType).toBe("application/pdf");
     expect(body.subarray(0, 5).toString()).toBe("%PDF-");
+  });
+
+  it("returns a private download URL only for the ready canonical act document", async () => {
+    const act = await acts.create(actor, {
+      tenantId: tenantA,
+      number: `ACT-DOWNLOAD-${randomUUID()}`,
+      periodStart: "2026-07-01",
+      periodEnd: "2026-07-31",
+      idempotencyKey: randomUUID(),
+    });
+    const issued = await acts.issue(actor, act.id, { idempotencyKey: randomUUID() }, pdfUpload());
+
+    await expect(acts.documentUrl(actor, act.id, issued.document!.id)).resolves.toEqual({
+      url: "https://objects.example.test/acts/document.pdf",
+    });
+    expect(storage.presignRead).toHaveBeenCalledWith(
+      tenantBillingActObjectKey(tenantA, act.id, issued.document!.id),
+      300,
+      { downloadFilename: `${act.number}.pdf` },
+    );
+    await connection.db
+      .update(schema.billingActDocuments)
+      .set({ objectKey: `tenant-billing/${tenantB}/acts/${act.id}/${issued.document!.id}.pdf` })
+      .where(eq(schema.billingActDocuments.id, issued.document!.id));
+    await expect(acts.documentUrl(actor, act.id, issued.document!.id)).rejects.toMatchObject({
+      response: { code: "billing_act_document_not_ready" },
+      status: 404,
+    });
+    await expect(acts.documentUrl(actor, act.id, randomUUID())).rejects.toMatchObject({
+      response: { code: "billing_act_document_not_ready" },
+      status: 404,
+    });
   });
 
   it("rolls final act state and event back when its mandatory notification cannot enqueue", async () => {

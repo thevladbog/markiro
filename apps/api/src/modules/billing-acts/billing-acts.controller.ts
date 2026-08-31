@@ -22,6 +22,10 @@ import {
 } from "./dto";
 import { BillingActsService } from "./billing-acts.service";
 
+const billingActDocumentDownloadParamsPipe = new ZodValidationPipe(
+  platformCommercialContracts.billingActs.documents.download.params,
+);
+
 @ApiTags("platform-billing-acts")
 @Controller("platform/billing/acts")
 export class BillingActsController {
@@ -55,6 +59,28 @@ export class BillingActsController {
     return parsePlatformResponse(
       platformCommercialContracts.billingActs.detail.response,
       await this.acts.detail(req.platformPrincipal!, id),
+    );
+  }
+
+  @Get(":id/documents/:documentId/download")
+  @ApiOperation({ summary: "Get a billing act document download URL" })
+  @PlatformApiProtectedOk({
+    response: platformCommercialContracts.billingActs.documents.download.response,
+  })
+  @RequirePlatformCapabilities("billing.read")
+  async documentDownload(
+    @Req() req: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(billingActIdSchema)) id: string,
+    @Param("documentId") documentId: string,
+  ) {
+    const params = {
+      actId: id,
+      documentId,
+    };
+    billingActDocumentDownloadParamsPipe.transform(params);
+    return parsePlatformResponse(
+      platformCommercialContracts.billingActs.documents.download.response,
+      await this.acts.documentUrl(req.platformPrincipal!, params.actId, params.documentId),
     );
   }
 
