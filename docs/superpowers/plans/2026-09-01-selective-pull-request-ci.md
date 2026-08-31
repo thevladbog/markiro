@@ -338,7 +338,7 @@ Expected: all tests PASS.
 Run:
 
 ```bash
-node --input-type=module -e 'import fs from "node:fs"; import yaml from "js-yaml"; yaml.load(fs.readFileSync(".github/workflows/ci.yml", "utf8"));'
+node --input-type=module -e 'import fs from "node:fs"; import { load } from "js-yaml"; load(fs.readFileSync(".github/workflows/ci.yml", "utf8"));'
 ```
 
 Expected: exit 0 with no YAML parse error.
