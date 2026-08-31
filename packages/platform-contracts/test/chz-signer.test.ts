@@ -6,6 +6,7 @@ import {
   chzSignerTaskCompleteSchema,
   chzSignerTaskFailSchema,
   chzSignerTaskSchema,
+  chzTrueApiAuthPayloadSchema,
 } from "../src/chz-signer.js";
 
 const fixture = (name: string): unknown =>
@@ -50,6 +51,26 @@ describe("chz-signer contracts", () => {
         id: "3f0e0f5e-8d1c-4d7a-9b1a-111111111111",
         type: "true_api_auth",
         payload: { trueApiBaseUrl: "https://markirovka.crpt.ru/api/v3/true-api", inn: "12345" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("defaults legacy auth tasks to JWT and accepts the explicit UUID format", () => {
+    const legacy = chzTrueApiAuthPayloadSchema.parse({
+      trueApiBaseUrl: "https://markirovka.crpt.ru/api/v3/true-api",
+    });
+    expect(legacy).not.toHaveProperty("tokenFormat");
+    expect(legacy.tokenFormat ?? "jwt").toBe("jwt");
+    expect(
+      chzTrueApiAuthPayloadSchema.parse({
+        trueApiBaseUrl: "https://markirovka.crpt.ru/api/v3/true-api",
+        tokenFormat: "uuid",
+      }).tokenFormat,
+    ).toBe("uuid");
+    expect(
+      chzTrueApiAuthPayloadSchema.safeParse({
+        trueApiBaseUrl: "https://markirovka.crpt.ru/api/v3/true-api",
+        tokenFormat: "opaque",
       }).success,
     ).toBe(false);
   });

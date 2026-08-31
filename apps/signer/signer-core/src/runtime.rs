@@ -381,6 +381,7 @@ impl Runtime {
             &self.http,
             &task.payload.true_api_base_url,
             task.payload.inn.as_deref(),
+            task.payload.token_format,
             &thumbprint,
             self.signer.as_ref(),
         )

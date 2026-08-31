@@ -24,12 +24,22 @@ pub struct PairResponse {
     pub tenant_name: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TokenFormat {
+    #[default]
+    Jwt,
+    Uuid,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TrueApiAuthPayload {
     pub true_api_base_url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inn: Option<String>,
+    #[serde(default)]
+    pub token_format: TokenFormat,
 }
 
 /// The `type` discriminant of a task. Mirrors `z.literal("true_api_auth")` on
@@ -151,10 +161,28 @@ mod tests {
         let task: SignerTask = serde_json::from_str(&fixture("task.json")).unwrap();
         assert_eq!(task.task_type, TaskType::TrueApiAuth);
         assert_eq!(task.payload.inn.as_deref(), Some("7712345678"));
+        assert_eq!(task.payload.token_format, TokenFormat::Jwt);
         let done: TaskComplete = serde_json::from_str(&fixture("task-complete.json")).unwrap();
         assert_eq!(done.cert_inn.as_deref(), Some("7712345678"));
         let failed: TaskFail = serde_json::from_str(&fixture("task-fail.json")).unwrap();
         assert_eq!(failed.error_code, SignerErrorCode::CryptoContainerUnavailable);
+    }
+
+    #[test]
+    fn accepts_uuid_token_tasks_but_defaults_legacy_tasks_to_jwt() {
+        let uuid_task: SignerTask = serde_json::from_str(
+            r#"{"id":"3f0e0f5e-8d1c-4d7a-9b1a-222222222222","type":"true_api_auth",
+                "payload":{"trueApiBaseUrl":"https://example.test","tokenFormat":"uuid"}}"#,
+        )
+        .unwrap();
+        assert_eq!(uuid_task.payload.token_format, TokenFormat::Uuid);
+
+        let legacy_task: SignerTask = serde_json::from_str(
+            r#"{"id":"3f0e0f5e-8d1c-4d7a-9b1a-222222222222","type":"true_api_auth",
+                "payload":{"trueApiBaseUrl":"https://example.test"}}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy_task.payload.token_format, TokenFormat::Jwt);
     }
 
     #[test]

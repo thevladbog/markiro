@@ -72,6 +72,7 @@ const stationOriginSchema = z.url().transform((value, ctx) => {
 });
 
 const explicitBooleanSchema = z.enum(["true", "false"]).transform((value) => value === "true");
+const chzTrueApiTokenFormatSchema = z.enum(["jwt", "uuid"]).default("jwt");
 
 const encryptionKeySchema = z
   .string()
@@ -189,6 +190,9 @@ const EnvSchema = z
     DADATA_TOKEN: z.string().trim().min(1).optional(),
     DADATA_SECRET: z.string().trim().min(1).optional(),
     CHZ_TOKEN_ENCRYPTION_KEY: encryptionKeySchema.optional(),
+    // The announced UUID-token exchange is opt-in until it is confirmed in
+    // the provider sandbox and production. Existing deployments stay on JWT.
+    CHZ_TRUE_API_TOKEN_FORMAT: chzTrueApiTokenFormatSchema,
   })
   .superRefine((env, ctx) => {
     if (env.PLATFORM_AUTH_SECRET === env.BETTER_AUTH_SECRET) {
@@ -289,6 +293,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     "DADATA_TOKEN",
     "DADATA_SECRET",
     "CHZ_TOKEN_ENCRYPTION_KEY",
+    "CHZ_TRUE_API_TOKEN_FORMAT",
   ]) {
     if (normalizedSource[name]?.trim() === "") delete normalizedSource[name];
   }
@@ -299,6 +304,11 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     KIOSK_ORIGIN: normalizedSource.KIOSK_ORIGIN || undefined,
     STATION_ORIGIN: normalizedSource.STATION_ORIGIN || undefined,
   });
+}
+
+export function loadChzTrueApiTokenFormat(source: NodeJS.ProcessEnv = process.env): "jwt" | "uuid" {
+  const value = source.CHZ_TRUE_API_TOKEN_FORMAT?.trim();
+  return chzTrueApiTokenFormatSchema.parse(value || undefined);
 }
 
 /**

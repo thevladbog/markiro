@@ -139,6 +139,22 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
     expect(chzTrueApiAuthPayloadSchema.parse(task.payload).trueApiBaseUrl).toBe(
       "https://markirovka.crpt.ru/api/v3/true-api",
     );
+    expect(chzTrueApiAuthPayloadSchema.parse(task.payload)).not.toHaveProperty("tokenFormat");
+  });
+
+  it("propagates the opt-in UUID token format into signer tasks", async () => {
+    const previous = process.env.CHZ_TRUE_API_TOKEN_FORMAT;
+    process.env.CHZ_TRUE_API_TOKEN_FORMAT = "uuid";
+    try {
+      const tenantId = await freshTenant();
+      await insertAgent(tenantId);
+      await svc.run(new Date());
+      const task = await singlePendingTask(tenantId);
+      expect(chzTrueApiAuthPayloadSchema.parse(task.payload).tokenFormat).toBe("uuid");
+    } finally {
+      if (previous === undefined) delete process.env.CHZ_TRUE_API_TOKEN_FORMAT;
+      else process.env.CHZ_TRUE_API_TOKEN_FORMAT = previous;
+    }
   });
 
   it("does not enqueue a duplicate while a task is open", async () => {
@@ -179,6 +195,7 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
     const payload = chzTrueApiAuthPayloadSchema.parse(task.payload);
     expect(payload.trueApiBaseUrl).toBe("https://markirovka.sandbox.crptech.ru/api/v3/true-api");
     expect(payload.inn).toBe("7712345678");
+    expect(payload).not.toHaveProperty("tokenFormat");
   });
 
   it("expires stale pending and claimed tasks", async () => {

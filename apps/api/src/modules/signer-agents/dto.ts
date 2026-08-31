@@ -109,6 +109,7 @@ const signerTaskOpenApiSchema: SchemaObject = {
       properties: {
         trueApiBaseUrl: { type: "string", format: "uri" },
         inn: { type: "string" },
+        tokenFormat: { type: "string", enum: ["jwt", "uuid"] },
       },
     },
   },

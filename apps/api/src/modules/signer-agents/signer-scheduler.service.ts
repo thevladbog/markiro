@@ -9,7 +9,7 @@ import {
   CHZ_CHANNEL_TYPE,
   CHZ_TASK_STALE_MS,
   CHZ_TOKEN_REFRESH_LEAD_MS,
-  CHZ_TRUE_API_BASE_URLS,
+  buildChzTrueApiAuthPayload,
 } from "./chz-constants";
 import { ChzCryptoService } from "./chz-crypto.service";
 
@@ -147,10 +147,7 @@ export class SignerSchedulerService implements SignerScheduler {
           .values({
             tenantId,
             type: "true_api_auth",
-            payload: {
-              trueApiBaseUrl: CHZ_TRUE_API_BASE_URLS[settings.environment],
-              ...(settings.mchdInn ? { inn: settings.mchdInn } : {}),
-            },
+            payload: buildChzTrueApiAuthPayload(settings),
           })
           .onConflictDoNothing()
           .returning({ id: schema.chzSignerTasks.id });

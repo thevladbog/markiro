@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
-import { loadEnv } from "../src/env";
+import { loadChzTrueApiTokenFormat, loadEnv } from "../src/env";
 import { PLATFORM_TEST_ENV } from "./support/platform-test-env";
 
 const productionEnv = {
@@ -27,6 +27,17 @@ const productionEnv = {
 } satisfies NodeJS.ProcessEnv;
 
 describe("CHZ environment", () => {
+  it("keeps JWT as the safe default and only accepts the announced UUID mode explicitly", () => {
+    expect(loadEnv(productionEnv).CHZ_TRUE_API_TOKEN_FORMAT).toBe("jwt");
+    expect(
+      loadEnv({ ...productionEnv, CHZ_TRUE_API_TOKEN_FORMAT: "uuid" }).CHZ_TRUE_API_TOKEN_FORMAT,
+    ).toBe("uuid");
+    expect(() => loadEnv({ ...productionEnv, CHZ_TRUE_API_TOKEN_FORMAT: "opaque" })).toThrow();
+    expect(loadChzTrueApiTokenFormat({})).toBe("jwt");
+    expect(loadChzTrueApiTokenFormat({ CHZ_TRUE_API_TOKEN_FORMAT: "" })).toBe("jwt");
+    expect(loadChzTrueApiTokenFormat({ CHZ_TRUE_API_TOKEN_FORMAT: "uuid" })).toBe("uuid");
+  });
+
   it("boots production without CHZ_TOKEN_ENCRYPTION_KEY and treats blank value as unconfigured", () => {
     const unconfigured = loadEnv(productionEnv);
     expect(unconfigured.CHZ_TOKEN_ENCRYPTION_KEY).toBeUndefined();

@@ -4,7 +4,11 @@ import { and, eq } from "drizzle-orm";
 
 import { DB } from "../../auth/auth.module";
 import { chzSignerSettingsSchema } from "../integrations/channel-registry";
-import { CHZ_CHANNEL_TYPE, CHZ_TRUE_API_BASE_URLS } from "../signer-agents/chz-constants";
+import {
+  buildChzTrueApiAuthPayload,
+  CHZ_CHANNEL_TYPE,
+  CHZ_TRUE_API_BASE_URLS,
+} from "../signer-agents/chz-constants";
 import { ChzCryptoService } from "../signer-agents/chz-crypto.service";
 import type { TrueApiAuth } from "./true-api.types";
 
@@ -130,10 +134,7 @@ export class ChzTokenService {
       .values({
         tenantId,
         type: "true_api_auth",
-        payload: {
-          trueApiBaseUrl: CHZ_TRUE_API_BASE_URLS[settings.environment],
-          ...(settings.mchdInn ? { inn: settings.mchdInn } : {}),
-        },
+        payload: buildChzTrueApiAuthPayload(settings),
       })
       .onConflictDoNothing();
   }

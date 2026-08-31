@@ -24,7 +24,7 @@ import { JournalService } from "../integrations/journal.service";
 import {
   CHZ_CHANNEL_TYPE,
   CHZ_TOKEN_REFRESH_LEAD_MS,
-  CHZ_TRUE_API_BASE_URLS,
+  buildChzTrueApiAuthPayload,
 } from "./chz-constants";
 import { ChzCryptoService } from "./chz-crypto.service";
 import type {
@@ -215,10 +215,7 @@ export class SignerAgentsService {
       .values({
         tenantId,
         type: "true_api_auth",
-        payload: {
-          trueApiBaseUrl: CHZ_TRUE_API_BASE_URLS[settings.environment],
-          ...(settings.mchdInn ? { inn: settings.mchdInn } : {}),
-        },
+        payload: buildChzTrueApiAuthPayload(settings),
       })
       .onConflictDoNothing()
       .returning({ id: schema.chzSignerTasks.id });
