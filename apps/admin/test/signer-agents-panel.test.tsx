@@ -152,6 +152,26 @@ describe("SignerAgentsPanel", () => {
     expect(copySpy).toHaveBeenCalledWith("01234567");
   });
 
+  it("clears a previous copy error when a new pairing code is issued", async () => {
+    const copySpy = vi.fn().mockRejectedValue(new Error("Clipboard unavailable"));
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: copySpy } });
+    renderPanel();
+
+    const issueButton = await screen.findByRole("button", {
+      name: /код привязки|pairing code/i,
+    });
+    await userEvent.click(issueButton);
+    await userEvent.click(screen.getByRole("button", { name: /скопировать|copy/i }));
+    expect(
+      await screen.findByText(/не удалось скопировать код|could not copy the code/i),
+    ).toBeDefined();
+
+    await userEvent.click(issueButton);
+    await waitFor(() =>
+      expect(screen.queryByText(/не удалось скопировать код|could not copy the code/i)).toBeNull(),
+    );
+  });
+
   it("lets an administrator request a True API token refresh", async () => {
     agentsFixture = [agentFixture()];
     renderPanel();
@@ -162,6 +182,16 @@ describe("SignerAgentsPanel", () => {
 
     await waitFor(() => expect(refreshTokenSpy).toHaveBeenCalledOnce());
     expect(await screen.findByText(/задача.*отправлена|task.*sent/i)).toBeDefined();
+    expect(
+      (
+        screen.getByRole("button", {
+          name: /обновить токен|refresh token/i,
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+
+    await userEvent.click(screen.getByRole("button", { name: /обновить токен|refresh token/i }));
+    expect(refreshTokenSpy).toHaveBeenCalledOnce();
   });
 
   it("пустое состояние объясняет, как подключить агента", async () => {

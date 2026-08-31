@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CertificatePicker } from "../src/components/CertificatePicker.js";
+import i18n from "../src/i18n/index.js";
 import type { CertificateSummary } from "../src/lib/bridge.js";
 
 const usable: CertificateSummary = {
@@ -60,5 +61,20 @@ describe("CertificatePicker", () => {
     expect(screen.getByText(/ИНН: 7712345678|INN: 7712345678/)).toBeDefined();
     expect(screen.getByText(/Действует до.*2030|Valid until.*2030/)).toBeDefined();
     expect(screen.getByText(/Отпечаток: AB12|Thumbprint: AB12/)).toBeDefined();
+  });
+
+  it("formats the expiry warning with the application locale", async () => {
+    const { bridge } = await import("../src/lib/bridge.js");
+    vi.mocked(bridge.listCertificates).mockResolvedValue([
+      { ...usable, notAfter: "2020-01-01T00:00:00Z" },
+    ]);
+    await i18n.changeLanguage("ru");
+    const localeDateSpy = vi.spyOn(Date.prototype, "toLocaleDateString");
+
+    render(<CertificatePicker selected="AB12" onSelected={vi.fn()} />);
+
+    await screen.findByRole("alert");
+    expect(localeDateSpy).toHaveBeenCalledWith("ru");
+    localeDateSpy.mockRestore();
   });
 });

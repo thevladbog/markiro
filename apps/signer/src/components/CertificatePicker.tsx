@@ -68,7 +68,7 @@ export function CertificatePicker({
       {warning ? (
         <Alert tone={warning === "expired" ? "error" : "warn"}>
           {t(`certificates.${warning}`, {
-            at: new Date(chosen?.notAfter ?? "").toLocaleDateString(),
+            at: new Date(chosen?.notAfter ?? "").toLocaleDateString(i18n.language),
           })}
         </Alert>
       ) : null}

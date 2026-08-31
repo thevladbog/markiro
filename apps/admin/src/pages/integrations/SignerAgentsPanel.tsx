@@ -105,6 +105,7 @@ export function SignerAgentsPanel() {
     setIssuing(true);
     try {
       const result = await issueSignerPairingCode();
+      setCopyError(false);
       setCode(result);
     } catch (error) {
       toast(
@@ -277,7 +278,7 @@ export function SignerAgentsPanel() {
             <Button
               type="button"
               variant="secondary"
-              loading={refreshing}
+              loading={refreshing || refreshRequest !== null}
               onClick={() => void handleRefreshToken()}
             >
               {t("pages.integrations.channel.signer.refreshToken")}
