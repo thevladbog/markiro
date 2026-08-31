@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-31
 
-**Status:** Approved in brainstorming; pending final spec review
+**Status:** Approved
 
 **Scope:** Replace the current flat product details model with centrally managed,
 versioned category schemas; add read-only import and freshness checks against the
