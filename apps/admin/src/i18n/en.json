@@ -1545,7 +1545,7 @@
         "imageError": "Could not change the photo. The current photo was preserved.",
         "draftBanner": "Draft — fill in the group and capacities to run shifts",
         "archivedLabel": "Do not use",
-        "archivedHint": "The product cannot be selected on kiosks, in shifts, or in integrations. It stays available for inventory and in history.",
+        "archivedHint": "The product cannot be selected on kiosks, in shifts, or in integrations. It stays available for inventory and in history, and its GTIN can be reused in a new card.",
         "gtinOwnerHint": "GTIN owner — {{name}}",
         "applyCounterparty": "Apply counterparty",
         "gtinOwnerUnknown": "GTIN owner could not be determined — double check the code before saving.",

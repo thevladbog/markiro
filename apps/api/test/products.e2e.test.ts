@@ -277,6 +277,62 @@ describe.skipIf(!ready)("products e2e", () => {
     expect(res.body.message).toEqual(expect.stringContaining("already exists"));
   });
 
+  it("POST /products reuses a GTIN after the previous card is marked not in use", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const retired = await agent
+      .post("/products")
+      .send({ gtin: EAN13_CANONICAL, name: "Old Recipe" })
+      .expect(201);
+    await agent
+      .patch(`/products/${retired.body.id as string}`)
+      .send({ archived: true })
+      .expect(200);
+
+    const replacement = await agent
+      .post("/products")
+      .send({ gtin: GTIN14_CANONICAL_PADDED, name: "New Recipe" })
+      .expect(201);
+
+    expect(replacement.body).toMatchObject({
+      gtin14: GTIN14_CANONICAL,
+      name: "New Recipe",
+      archived: false,
+    });
+    expect(
+      (await agent.get(`/products/${retired.body.id as string}`).expect(200)).body,
+    ).toMatchObject({
+      gtin14: GTIN14_CANONICAL,
+      name: "Old Recipe",
+      archived: true,
+    });
+  });
+
+  it("PATCH /products/:id rejects restoring a card whose GTIN has an active replacement", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const retired = await agent
+      .post("/products")
+      .send({ gtin: EAN13_CANONICAL, name: "Retired Product" })
+      .expect(201);
+    await agent
+      .patch(`/products/${retired.body.id as string}`)
+      .send({ archived: true })
+      .expect(200);
+    await agent
+      .post("/products")
+      .send({ gtin: GTIN14_CANONICAL_PADDED, name: "Current Product" })
+      .expect(201);
+
+    const conflict = await agent
+      .patch(`/products/${retired.body.id as string}`)
+      .send({ archived: false })
+      .expect(409);
+    expect(conflict.body.message).toEqual(expect.stringContaining("already exists"));
+  });
+
   it("activates a product once the group code and both capacities are set", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);

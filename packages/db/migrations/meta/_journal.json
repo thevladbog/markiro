@@ -743,6 +743,13 @@
       "when": 1788131610611,
       "tag": "0105_inventory_box_invalidation_source",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1788174917121,
+      "tag": "0106_product_active_gtin_unique",
+      "breakpoints": true
     }
   ]
 }

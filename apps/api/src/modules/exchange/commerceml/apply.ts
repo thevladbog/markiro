@@ -35,6 +35,8 @@ export interface CatalogProduct {
   id: string;
   gtin14: string;
   externalRef: string | null;
+  /** Archived cards keep established 1C links, but cannot win a new GTIN auto-link. */
+  archived: boolean;
 }
 
 /** A new `products.external_ref` link this round's GTIN match decided on. */
@@ -341,7 +343,9 @@ export function decideApplication(input: DecideApplicationInput): ApplicationPla
   for (const product of products) {
     if (product.externalRef !== null) knownByRef.set(product.externalRef, product);
   }
-  const productsByGtin = new Map(products.map((p) => [p.gtin14, p]));
+  const productsByGtin = new Map(
+    products.filter((product) => !product.archived).map((product) => [product.gtin14, product]),
+  );
 
   // Штрихкод предложения — запасной источник: некоторые конфигурации кладут
   // его только в offers-файл. Первый выигрывает — как и везде в этом файле.
