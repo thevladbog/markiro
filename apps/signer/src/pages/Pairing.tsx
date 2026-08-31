@@ -34,14 +34,13 @@ export function Pairing({ hostname, onPair, onPaired }: PairingProps): ReactElem
   }
 
   return (
-    <Card title={t("pairing.title")}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <p style={{ margin: 0, lineHeight: 1.45 }}>{t("pairing.hint", { hostname })}</p>
+    <Card title={t("pairing.title")} className="signer-pairing">
+      <div className="signer-pairing__content">
+        <p className="signer-pairing__hint">{t("pairing.hint", { hostname })}</p>
         <Input
           label={t("pairing.codeLabel")}
           value={code}
           inputMode="numeric"
-          maxLength={8}
           autoComplete="one-time-code"
           onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 8))}
         />

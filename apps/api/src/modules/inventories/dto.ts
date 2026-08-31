@@ -136,6 +136,14 @@ export const INVENTORY_REQUIRED_DISCREPANCY_CATEGORIES = [
 export type InventoryRequiredDiscrepancyCategory =
   (typeof INVENTORY_REQUIRED_DISCREPANCY_CATEGORIES)[number];
 
+/**
+ * Why a repack box is invalidated. `claim_lost` is the scan-conflict outcome the
+ * operator can still return to work from the terminal; `admin` is the irreversible
+ * `invalidate_box` correction made from the cabinet.
+ */
+export const INVENTORY_BOX_INVALIDATION_SOURCES = ["claim_lost", "admin"] as const;
+export type InventoryBoxInvalidationSource = (typeof INVENTORY_BOX_INVALIDATION_SOURCES)[number];
+
 export interface InventoryCloseBlockerDto {
   code: InventoryCloseBlockerCode;
   count: number;
@@ -143,6 +151,7 @@ export interface InventoryCloseBlockerDto {
   deviceId: string | null;
   boxId: string | null;
   discrepancyCategory: InventoryRequiredDiscrepancyCategory | null;
+  invalidationSource: InventoryBoxInvalidationSource | null;
 }
 
 export interface InventoryCloseDto {
@@ -441,8 +450,11 @@ export interface InventoryProgressDto {
   openBoxCount: number;
   boxTotal: number;
   boxesTruncated: boolean;
+  verifiedBoxTotal: number;
+  verifiedBoxesTruncated: boolean;
   participants: InventoryParticipantDto[];
   boxes: InventoryLiveBoxDto[];
+  verifiedBoxes: InventoryVerifiedBoxDto[];
   recentEvents: InventoryRecentEventDto[];
 }
 
@@ -467,8 +479,18 @@ export interface InventoryLiveBoxDto {
   terminalName: string;
   productionDate: string;
   state: "open" | "closed" | "invalidated";
+  invalidationSource: InventoryBoxInvalidationSource | null;
   printState: "not_ready" | "pending" | "printing" | "printed" | "failed";
   itemCount: number;
+}
+
+export interface InventoryVerifiedBoxDto {
+  eventId: string;
+  sscc: string;
+  terminalId: string;
+  terminalName: string;
+  scannedAt: string;
+  affectedCodeCount: number;
 }
 
 export interface InventoryRecentEventDto {
@@ -492,10 +514,17 @@ export const INVENTORY_EVIDENCE_CLASSIFICATIONS = [
   "voided",
 ] as const;
 export const INVENTORY_EVIDENCE_KINDS = ["item", "known_box", "old_box"] as const;
+export const INVENTORY_ACTIONABLE_DISCREPANCY_CATEGORIES = [
+  "ineligible",
+  "unknown",
+  "date_mismatch",
+] as const;
 export const listInventoryEvidenceQuerySchema = z.strictObject({
+  scope: z.enum(["all", "discrepancies"]).default("all"),
   search: z.string().trim().min(1).max(128).optional(),
   kind: z.enum(INVENTORY_EVIDENCE_KINDS).optional(),
   classification: z.enum(INVENTORY_EVIDENCE_CLASSIFICATIONS).optional(),
+  discrepancyCategory: z.enum(INVENTORY_ACTIONABLE_DISCREPANCY_CATEGORIES).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
 });
@@ -503,6 +532,11 @@ export type ListInventoryEvidenceQueryDto = z.infer<typeof listInventoryEvidence
 
 export type InventoryEvidenceAction = "void_scan" | "restore_scan" | "change_date" | "remove_item";
 export interface InventoryEvidenceEventDto extends InventoryRecentEventDto {
+  copyIdentity: string | null;
+  affectedCodeCount: number;
+  discrepancyCodeCount: number;
+  classifications: Array<"expected" | "protected" | "ineligible" | "unknown" | "voided">;
+  discrepancyCategories: Array<"ineligible" | "unknown" | "date_mismatch">;
   actions: InventoryEvidenceAction[];
 }
 
@@ -511,6 +545,8 @@ export interface ListInventoryEvidenceResponseDto {
   pageSize: number;
   total: number;
   hasMore: boolean;
+  allMatchingActions: InventoryEvidenceAction[];
+  allMatchingAffectedCodeCount: number;
   items: InventoryEvidenceEventDto[];
 }
 
@@ -614,6 +650,55 @@ export interface InventoryCorrectionDto {
   target: InventoryCorrectionTargetDto;
   beforeProjectionDigest: string;
   afterProjectionDigest: string;
+  resultRevision: number;
+  createdAt: string;
+}
+
+const uniqueUuidArray = z
+  .array(z.string().uuid())
+  .min(1)
+  .refine((ids) => new Set(ids).size === ids.length, "eventIds must be unique");
+const uniqueOptionalUuidArray = z
+  .array(z.string().uuid())
+  .refine((ids) => new Set(ids).size === ids.length, "excludedEventIds must be unique");
+const inventoryEvidenceBatchFilterSchema = z.strictObject({
+  scope: z.enum(["all", "discrepancies"]),
+  search: z.string().trim().min(1).max(128).optional(),
+  kind: z.enum(INVENTORY_EVIDENCE_KINDS).optional(),
+  classification: z.enum(INVENTORY_EVIDENCE_CLASSIFICATIONS).optional(),
+  discrepancyCategory: z.enum(INVENTORY_ACTIONABLE_DISCREPANCY_CATEGORIES).optional(),
+});
+const inventoryCorrectionBatchSelectionSchema = z.discriminatedUnion("mode", [
+  z.strictObject({ mode: z.literal("explicit"), eventIds: uniqueUuidArray }),
+  z.strictObject({
+    mode: z.literal("all_matching"),
+    filter: inventoryEvidenceBatchFilterSchema,
+    excludedEventIds: uniqueOptionalUuidArray,
+  }),
+]);
+const correctionBatchRequestShape = {
+  selection: inventoryCorrectionBatchSelectionSchema,
+  reason: correctionReasonSchema,
+  expectedResultRevision: z.number().int().nonnegative(),
+  idempotencyKey: z.string().trim().min(1).max(128),
+};
+export const createInventoryCorrectionBatchSchema = z.discriminatedUnion("action", [
+  z.strictObject({ action: z.literal("void_scan"), ...correctionBatchRequestShape }),
+  z.strictObject({
+    action: z.literal("change_date"),
+    observedProductionDate: inventoryCivilDateSchema("observedProductionDate"),
+    ...correctionBatchRequestShape,
+  }),
+]);
+export type CreateInventoryCorrectionBatchDto = z.infer<
+  typeof createInventoryCorrectionBatchSchema
+>;
+
+export interface InventoryCorrectionBatchDto {
+  id: string;
+  action: "void_scan" | "change_date";
+  selectedEventCount: number;
+  affectedCodeCount: number;
   resultRevision: number;
   createdAt: string;
 }
@@ -820,6 +905,105 @@ export const inventoryCorrectionOpenApiSchema: SchemaObject = {
   },
 };
 
+const inventoryCorrectionBatchSelectionOpenApiSchema: SchemaObject = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["mode", "eventIds"],
+      properties: {
+        mode: { type: "string", enum: ["explicit"] },
+        eventIds: { type: "array", minItems: 1, uniqueItems: true, items: uuidSchema },
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["mode", "filter", "excludedEventIds"],
+      properties: {
+        mode: { type: "string", enum: ["all_matching"] },
+        filter: {
+          type: "object",
+          additionalProperties: false,
+          required: ["scope"],
+          properties: {
+            scope: { type: "string", enum: ["all", "discrepancies"] },
+            search: { type: "string", minLength: 1, maxLength: 128 },
+            kind: { type: "string", enum: [...INVENTORY_EVIDENCE_KINDS] },
+            classification: {
+              type: "string",
+              enum: [...INVENTORY_EVIDENCE_CLASSIFICATIONS],
+            },
+            discrepancyCategory: {
+              type: "string",
+              enum: [...INVENTORY_ACTIONABLE_DISCREPANCY_CATEGORIES],
+            },
+          },
+        },
+        excludedEventIds: { type: "array", uniqueItems: true, items: uuidSchema },
+      },
+    },
+  ],
+  discriminator: { propertyName: "mode" },
+};
+
+function correctionBatchRequestOpenApiBranch(action: "void_scan" | "change_date"): SchemaObject {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "action",
+      "selection",
+      "reason",
+      "expectedResultRevision",
+      "idempotencyKey",
+      ...(action === "change_date" ? ["observedProductionDate"] : []),
+    ],
+    properties: {
+      action: { type: "string", enum: [action] },
+      selection: inventoryCorrectionBatchSelectionOpenApiSchema,
+      reason: {
+        type: "string",
+        minLength: 1,
+        maxLength: 1024,
+        "x-maxUtf8Bytes": 1024,
+      } as SchemaObject & { "x-maxUtf8Bytes": number },
+      expectedResultRevision: { type: "integer", minimum: 0 },
+      idempotencyKey: { type: "string", minLength: 1, maxLength: 128 },
+      ...(action === "change_date" ? { observedProductionDate: dateSchema } : {}),
+    },
+  };
+}
+
+export const createInventoryCorrectionBatchOpenApiSchema: SchemaObject = {
+  oneOf: [
+    correctionBatchRequestOpenApiBranch("void_scan"),
+    correctionBatchRequestOpenApiBranch("change_date"),
+  ],
+  discriminator: { propertyName: "action" },
+};
+
+export const inventoryCorrectionBatchOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "action",
+    "selectedEventCount",
+    "affectedCodeCount",
+    "resultRevision",
+    "createdAt",
+  ],
+  properties: {
+    id: uuidSchema,
+    action: { type: "string", enum: ["void_scan", "change_date"] },
+    selectedEventCount: { type: "integer", minimum: 1 },
+    affectedCodeCount: { type: "integer", minimum: 1 },
+    resultRevision: { type: "integer", minimum: 1 },
+    createdAt: dateTimeSchema,
+  },
+};
+
 const emptyMutationOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -853,7 +1037,15 @@ export const completeInventoryOpenApiSchema: SchemaObject = {
 const inventoryCloseBlockerOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["code", "count", "participantId", "deviceId", "boxId", "discrepancyCategory"],
+  required: [
+    "code",
+    "count",
+    "participantId",
+    "deviceId",
+    "boxId",
+    "discrepancyCategory",
+    "invalidationSource",
+  ],
   properties: {
     code: { type: "string", enum: [...INVENTORY_CLOSE_BLOCKER_CODES] },
     count: { type: "integer", minimum: 1 },
@@ -863,6 +1055,11 @@ const inventoryCloseBlockerOpenApiSchema: SchemaObject = {
     discrepancyCategory: {
       type: "string",
       enum: [...INVENTORY_REQUIRED_DISCREPANCY_CATEGORIES],
+      nullable: true,
+    },
+    invalidationSource: {
+      type: "string",
+      enum: [...INVENTORY_BOX_INVALIDATION_SOURCES],
       nullable: true,
     },
   },
@@ -1261,6 +1458,7 @@ const inventoryCountProperties = {
   pendingEventCount: { type: "integer", minimum: 0 },
   openBoxCount: { type: "integer", minimum: 0 },
   boxTotal: { type: "integer", minimum: 0 },
+  verifiedBoxTotal: { type: "integer", minimum: 0 },
 } satisfies Record<
   Exclude<
     keyof InventoryProgressDto,
@@ -1270,8 +1468,10 @@ const inventoryCountProperties = {
     | "resultRevision"
     | "participants"
     | "boxes"
+    | "verifiedBoxes"
     | "recentEvents"
     | "boxesTruncated"
+    | "verifiedBoxesTruncated"
   >,
   SchemaObject
 >;
@@ -1313,6 +1513,7 @@ const inventoryLiveBoxOpenApiSchema: SchemaObject = {
     "terminalName",
     "productionDate",
     "state",
+    "invalidationSource",
     "printState",
     "itemCount",
   ],
@@ -1323,11 +1524,30 @@ const inventoryLiveBoxOpenApiSchema: SchemaObject = {
     terminalName: { type: "string" },
     productionDate: dateSchema,
     state: { type: "string", enum: ["open", "closed", "invalidated"] },
+    invalidationSource: {
+      type: "string",
+      enum: [...INVENTORY_BOX_INVALIDATION_SOURCES],
+      nullable: true,
+    },
     printState: {
       type: "string",
       enum: ["not_ready", "pending", "printing", "printed", "failed"],
     },
     itemCount: { type: "integer", minimum: 0 },
+  },
+};
+
+const inventoryVerifiedBoxOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["eventId", "sscc", "terminalId", "terminalName", "scannedAt", "affectedCodeCount"],
+  properties: {
+    eventId: uuidSchema,
+    sscc: { type: "string", pattern: "^[0-9]{18}$" },
+    terminalId: uuidSchema,
+    terminalName: { type: "string" },
+    scannedAt: dateTimeSchema,
+    affectedCodeCount: { type: "integer", minimum: 0 },
   },
 };
 
@@ -1374,9 +1594,36 @@ const inventoryRecentEventOpenApiSchema: SchemaObject = {
 
 const inventoryEvidenceEventOpenApiSchema: SchemaObject = {
   ...inventoryRecentEventOpenApiSchema,
-  required: [...(inventoryRecentEventOpenApiSchema.required ?? []), "actions"],
+  required: [
+    ...(inventoryRecentEventOpenApiSchema.required ?? []),
+    "copyIdentity",
+    "affectedCodeCount",
+    "discrepancyCodeCount",
+    "classifications",
+    "discrepancyCategories",
+    "actions",
+  ],
   properties: {
     ...inventoryRecentEventOpenApiSchema.properties,
+    copyIdentity: { type: "string", nullable: true },
+    affectedCodeCount: { type: "integer", minimum: 0 },
+    discrepancyCodeCount: { type: "integer", minimum: 0 },
+    classifications: {
+      type: "array",
+      items: {
+        type: "string",
+        enum: ["expected", "protected", "ineligible", "unknown", "voided"],
+      },
+      uniqueItems: true,
+    },
+    discrepancyCategories: {
+      type: "array",
+      items: {
+        type: "string",
+        enum: ["ineligible", "unknown", "date_mismatch"],
+      },
+      uniqueItems: true,
+    },
     actions: {
       type: "array",
       items: {
@@ -1391,12 +1638,29 @@ const inventoryEvidenceEventOpenApiSchema: SchemaObject = {
 export const listInventoryEvidenceOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["page", "pageSize", "total", "hasMore", "items"],
+  required: [
+    "page",
+    "pageSize",
+    "total",
+    "hasMore",
+    "allMatchingActions",
+    "allMatchingAffectedCodeCount",
+    "items",
+  ],
   properties: {
     page: { type: "integer", minimum: 1 },
     pageSize: { type: "integer", minimum: 1, maximum: 100 },
     total: { type: "integer", minimum: 0 },
     hasMore: { type: "boolean" },
+    allMatchingActions: {
+      type: "array",
+      items: {
+        type: "string",
+        enum: ["void_scan", "restore_scan", "change_date", "remove_item"],
+      },
+      uniqueItems: true,
+    },
+    allMatchingAffectedCodeCount: { type: "integer", minimum: 0 },
     items: { type: "array", items: inventoryEvidenceEventOpenApiSchema },
   },
 };
@@ -1411,8 +1675,10 @@ export const inventoryProgressOpenApiSchema: SchemaObject = {
     "resultRevision",
     ...Object.keys(inventoryCountProperties),
     "boxesTruncated",
+    "verifiedBoxesTruncated",
     "participants",
     "boxes",
+    "verifiedBoxes",
     "recentEvents",
   ],
   properties: {
@@ -1422,8 +1688,10 @@ export const inventoryProgressOpenApiSchema: SchemaObject = {
     resultRevision: { type: "integer", minimum: 0 },
     ...inventoryCountProperties,
     boxesTruncated: { type: "boolean" },
+    verifiedBoxesTruncated: { type: "boolean" },
     participants: { type: "array", items: inventoryParticipantOpenApiSchema },
     boxes: { type: "array", items: inventoryLiveBoxOpenApiSchema },
+    verifiedBoxes: { type: "array", items: inventoryVerifiedBoxOpenApiSchema },
     recentEvents: { type: "array", items: inventoryRecentEventOpenApiSchema },
   },
 };

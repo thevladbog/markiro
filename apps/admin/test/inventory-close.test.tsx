@@ -34,8 +34,11 @@ const progress: InventoryProgress = {
   openBoxCount: 0,
   boxTotal: 0,
   boxesTruncated: false,
+  verifiedBoxTotal: 0,
+  verifiedBoxesTruncated: false,
   participants: [],
   boxes: [],
+  verifiedBoxes: [],
   recentEvents: [],
 };
 
@@ -129,6 +132,7 @@ it("requires a reason and explicit blocker acknowledgement for emergency close",
       deviceId: null,
       boxId: null,
       discrepancyCategory: null,
+      invalidationSource: null,
     },
     {
       code: "PENDING_OUTBOX",
@@ -137,6 +141,7 @@ it("requires a reason and explicit blocker acknowledgement for emergency close",
       deviceId: null,
       boxId: null,
       discrepancyCategory: null,
+      invalidationSource: null,
     },
   ];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
@@ -226,6 +231,7 @@ it("allows an authoritative close after preview failure and shows its 409 blocke
     deviceId: null,
     boxId: null,
     discrepancyCategory: "voided",
+    invalidationSource: null,
   };
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     if (String(input).endsWith("/close-preview")) {
@@ -250,4 +256,39 @@ it("allows an authoritative close after preview failure and shows its 409 blocke
   await userEvent.click(safeClose);
   expect(await screen.findByText("Обязательные расхождения без решения: 2")).toBeDefined();
   expect(screen.getByRole("button", { name: "Закрыть аварийно" })).toBeDefined();
+});
+
+it("separates cabinet-invalidated boxes from reversible scan-conflict ones", async () => {
+  const invalidatedBlocker = {
+    code: "INVALIDATED_REPACK_BOX",
+    count: 1,
+    participantId: null,
+    deviceId: null,
+    boxId: null,
+    discrepancyCategory: null,
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    if (!String(input).endsWith("/close-preview")) throw new Error("unexpected request");
+    return new Response(
+      JSON.stringify({
+        inventoryId: INVENTORY_ID,
+        status: "running",
+        resultRevision: 8,
+        blockers: [
+          { ...invalidatedBlocker, count: 2, invalidationSource: "claim_lost" },
+          { ...invalidatedBlocker, count: 1, invalidationSource: "admin" },
+        ],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderPanel("running");
+
+  await userEvent.click(screen.getByRole("button", { name: "Закрыть инвентаризацию" }));
+  expect(await screen.findByText("Короба, аннулированные при конфликте сканов: 2")).toBeDefined();
+  expect(screen.getByText(/Оператор может вернуть такой короб в работу с терминала/)).toBeDefined();
+  expect(screen.getByText("Короба, аннулированные из кабинета: 1")).toBeDefined();
+  expect(screen.getByText(/«Аннулировать короб» отменить нельзя/)).toBeDefined();
+  expect(screen.queryByText(/Аннулированные короба:/)).toBeNull();
 });

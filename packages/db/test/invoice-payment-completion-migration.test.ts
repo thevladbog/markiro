@@ -418,7 +418,13 @@ async function waitForBlockedMigration(
       [oldBackendPid, migrationBackendPid],
     );
     const row = result.rows[0];
-    if (row?.blocked_by_old_transaction) return row;
+    // Both halves of the sample have to agree before it is worth returning.
+    // `pg_blocking_pids()` reads the lock manager directly, while wait_event_type
+    // and wait_event come from the wait state the backend advertises in shared
+    // memory, and the two disagree for a moment as the backend enters the wait.
+    // Returning on `blocked_by_old_transaction` alone therefore hands back a row
+    // whose wait columns are still null, and the caller asserts on exactly those.
+    if (row?.blocked_by_old_transaction && row.wait_event_type !== null) return row;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error(

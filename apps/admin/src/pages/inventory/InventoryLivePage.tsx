@@ -1,44 +1,23 @@
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
-import { AdminPage, Alert, Card, Spinner, StatusChip, type StatusChipStatus } from "@markiro/ui";
+import { AdminPage, Alert, Card, Spinner, StatusChip } from "@markiro/ui";
 
 import { useInventoryProgress } from "./api.js";
 import { InventoryClosePanel } from "./InventoryClosePanel.js";
 import { InventoryDocuments } from "./InventoryDocuments.js";
-import type { InventoryDetail, InventoryRecentEvent } from "./schemas.js";
-import {
-  INVENTORY_EVENT_VERDICT_CHIP,
-  inventoryStatusChipProps,
-  isInventoryEventVerdict,
-} from "./status.js";
+import type { InventoryDetail } from "./schemas.js";
+import { inventoryStatusChipProps } from "./status.js";
 
 function formatCount(value: number, locale: string): string {
   return new Intl.NumberFormat(locale).format(value);
 }
 
-/**
- * Чип скана: классификация, если у события есть строка результата, иначе —
- * вердикт синхронизации. Неизвестный вердикт остаётся как есть: показать сырой
- * токен честнее, чем упасть на отсутствующем ключе перевода.
- */
-function recentEventChipProps(
-  event: InventoryRecentEvent,
-  t: (key: string) => string,
-): { status: StatusChipStatus; label: string } {
-  if (event.classification !== null) {
-    return {
-      status: event.classification === "expected" ? "ok" : "warn",
-      label: t(`pages.inventory.live.classification.${event.classification}`),
-    };
-  }
-  if (isInventoryEventVerdict(event.authoritativeVerdict)) {
-    return {
-      status: INVENTORY_EVENT_VERDICT_CHIP[event.authoritativeVerdict],
-      label: t(`pages.inventory.live.verdict.${event.authoritativeVerdict}`),
-    };
-  }
-  return { status: "neutral", label: event.authoritativeVerdict };
+function formatDateTime(value: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 export function InventoryLivePage({
@@ -116,6 +95,7 @@ export function InventoryLivePage({
             i18n.language,
           )}
           tone="error"
+          to={canWrite && data.status === "running" ? `corrections?view=discrepancies` : undefined}
         />
       </section>
 
@@ -174,39 +154,80 @@ export function InventoryLivePage({
           )}
         </Card>
 
-        <Card title={t("pages.inventory.live.boxes")} titleAs="h2">
-          {data.boxesTruncated ? (
-            <Alert tone="warn">
-              {t("pages.inventory.live.boxesTruncated", {
-                shown: data.boxes.length,
-                total: data.boxTotal,
-              })}
-            </Alert>
-          ) : null}
-          {data.boxes.length === 0 ? (
-            <p className="mk-inventory-section-description">{t("pages.inventory.live.none")}</p>
-          ) : (
-            <ul className="mk-inventory-evidence-list">
-              {data.boxes.map((box) => (
-                <li key={box.id}>
-                  <span>
-                    <strong className="mk-inventory-mono mk-inventory-mono--sscc">
-                      {box.sscc}
-                    </strong>
-                    <small>{box.terminalName}</small>
-                  </span>
-                  <span className="mk-inventory-evidence-list__state">
-                    <StatusChip
-                      status={box.state === "invalidated" ? "error" : "info"}
-                      label={t(`pages.inventory.live.boxState.${box.state}`)}
-                    />
-                    <small>{t("pages.inventory.live.items", { count: box.itemCount })}</small>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+        {inventory.mode === "check" ? (
+          <Card title={t("pages.inventory.live.verifiedBoxes")} titleAs="h2">
+            {data.verifiedBoxesTruncated ? (
+              <Alert tone="warn">
+                {t("pages.inventory.live.boxesTruncated", {
+                  shown: data.verifiedBoxes.length,
+                  total: data.verifiedBoxTotal,
+                })}
+              </Alert>
+            ) : null}
+            {data.verifiedBoxes.length === 0 ? (
+              <p className="mk-inventory-section-description">{t("pages.inventory.live.none")}</p>
+            ) : (
+              <ul className="mk-inventory-evidence-list">
+                {data.verifiedBoxes.map((box) => (
+                  <li key={box.eventId}>
+                    <span>
+                      <strong className="mk-inventory-mono mk-inventory-mono--sscc">
+                        {box.sscc}
+                      </strong>
+                      <small>
+                        {box.terminalName} · {formatDateTime(box.scannedAt, i18n.language)}
+                      </small>
+                    </span>
+                    <small>
+                      {t("pages.inventory.live.items", { count: box.affectedCodeCount })}
+                    </small>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        ) : (
+          <Card title={t("pages.inventory.live.newBoxes")} titleAs="h2">
+            {data.boxesTruncated ? (
+              <Alert tone="warn">
+                {t("pages.inventory.live.boxesTruncated", {
+                  shown: data.boxes.length,
+                  total: data.boxTotal,
+                })}
+              </Alert>
+            ) : null}
+            {data.boxes.length === 0 ? (
+              <p className="mk-inventory-section-description">{t("pages.inventory.live.none")}</p>
+            ) : (
+              <ul className="mk-inventory-evidence-list">
+                {data.boxes.map((box) => (
+                  <li key={box.id}>
+                    <span>
+                      <strong className="mk-inventory-mono mk-inventory-mono--sscc">
+                        {box.sscc}
+                      </strong>
+                      <small>{box.terminalName}</small>
+                    </span>
+                    <span className="mk-inventory-evidence-list__state">
+                      <StatusChip
+                        status={box.state === "invalidated" ? "error" : "info"}
+                        label={
+                          box.invalidationSource === null
+                            ? t(`pages.inventory.live.boxState.${box.state}`)
+                            : t(`pages.inventory.live.boxInvalidation.${box.invalidationSource}`)
+                        }
+                      />
+                      <small>
+                        {t(`pages.inventory.live.printState.${box.printState}`)} ·{" "}
+                        {t("pages.inventory.live.items", { count: box.itemCount })}
+                      </small>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        )}
       </div>
 
       <Card title={t("pages.inventory.live.recentEvents")} titleAs="h2">
@@ -220,7 +241,16 @@ export function InventoryLivePage({
                   <strong className="mk-inventory-mono">{event.displayIdentity}</strong>
                   <small>{event.terminalName}</small>
                 </span>
-                <StatusChip {...recentEventChipProps(event, t)} />
+                <StatusChip
+                  status={event.classification === "expected" ? "ok" : "warn"}
+                  label={
+                    event.classification
+                      ? t(`pages.inventory.live.classification.${event.classification}`)
+                      : t(`pages.inventory.live.verdict.${event.authoritativeVerdict}`, {
+                          defaultValue: event.authoritativeVerdict,
+                        })
+                  }
+                />
               </li>
             ))}
           </ul>
@@ -234,21 +264,31 @@ function LiveMetric({
   label,
   value,
   tone,
+  to,
 }: {
   label: string;
   value: string;
   tone?: "ok" | "warn" | "error";
+  to?: string | undefined;
 }) {
-  return (
-    <div
-      className={
-        tone
-          ? `mk-inventory-live-metric mk-inventory-live-metric--${tone}`
-          : "mk-inventory-live-metric"
-      }
-    >
+  const className = [
+    "mk-inventory-live-metric",
+    tone ? `mk-inventory-live-metric--${tone}` : "",
+    to ? "mk-inventory-live-metric--link" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const content = (
+    <>
       <span>{label}</span>
       <strong>{value}</strong>
-    </div>
+    </>
+  );
+  return to ? (
+    <Link aria-label={`${label} ${value}`} className={className} to={to}>
+      {content}
+    </Link>
+  ) : (
+    <div className={className}>{content}</div>
   );
 }

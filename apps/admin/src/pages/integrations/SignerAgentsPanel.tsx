@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -19,6 +19,7 @@ import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import {
   issueSignerPairingCode,
+  requestSignerTokenRefresh,
   useChzCodeStatusSummary,
   useRevokeSignerAgent,
   useSignerAgents,
@@ -26,6 +27,7 @@ import {
   type SignerAgentStatus,
   type SignerPairingCodeResult,
   type SignerTokenStatus,
+  type SignerTokenRefreshResult,
 } from "./api.js";
 import { SignerDownloadLink } from "./SignerDownloadLink.js";
 
@@ -40,11 +42,6 @@ const AGENT_CHIP_STATUS: Record<SignerAgentStatus, StatusChipStatus> = {
   active: "ok",
   revoked: "neutral",
 };
-
-/** Same "1234 5678" split `apps/admin/src/pages/devices/PairingCodePanel.tsx` and `PairingInstructions.tsx` both use for device pairing codes -- kept local (not shared) for the same reason those two don't share it either: it's a one-line formatter, not worth a cross-page import for. */
-function formatPairingCode(code: string): string {
-  return code.replace(/(\d{4})(\d{4})/, "$1 $2");
-}
 
 /**
  * The `chestny_znak` channel's own panel -- Task 8 (see the design brief
@@ -65,7 +62,7 @@ function formatPairingCode(code: string): string {
  */
 export function SignerAgentsPanel() {
   const { t, i18n } = useTranslation();
-  const { data, isPending, isError } = useSignerAgents();
+  const { data, isPending, isError, refetch } = useSignerAgents();
   const { data: codeStatuses, isError: isCodeStatusesError } = useChzCodeStatusSummary();
   const canWriteIntegrations = useCan(CABINET_CAPABILITY.INTEGRATIONS_WRITE);
   const canManageCredentials = useCan(CABINET_CAPABILITY.CREDENTIALS_MANAGE);
@@ -74,6 +71,12 @@ export function SignerAgentsPanel() {
 
   const [code, setCode] = useState<SignerPairingCodeResult | null>(null);
   const [issuing, setIssuing] = useState(false);
+  const [copyError, setCopyError] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshRequest, setRefreshRequest] = useState<{
+    result: SignerTokenRefreshResult["status"];
+    previousObtainedAt: string | null;
+  } | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<SignerAgent | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
 
@@ -82,10 +85,27 @@ export function SignerAgentsPanel() {
     [i18n.language],
   );
 
+  const hasActiveAgent = data?.agents.some((agent) => agent.status === "active") ?? false;
+
+  useEffect(() => {
+    if (!refreshRequest) return;
+    const timer = window.setInterval(() => {
+      void refetch().then((response) => {
+        const obtainedAt = response.data?.token.obtainedAt ?? null;
+        if (obtainedAt && obtainedAt !== refreshRequest.previousObtainedAt) {
+          setRefreshRequest(null);
+          toast("ok", t("pages.integrations.channel.signer.refreshComplete"));
+        }
+      });
+    }, 5_000);
+    return () => window.clearInterval(timer);
+  }, [refetch, refreshRequest, t]);
+
   const handleIssue = async () => {
     setIssuing(true);
     try {
       const result = await issueSignerPairingCode();
+      setCopyError(false);
       setCode(result);
     } catch (error) {
       toast(
@@ -96,6 +116,37 @@ export function SignerAgentsPanel() {
       );
     } finally {
       setIssuing(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!code) return;
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(code.code);
+      setCopyError(false);
+    } catch {
+      setCopyError(true);
+    }
+  };
+
+  const handleRefreshToken = async () => {
+    setRefreshing(true);
+    try {
+      const result = await requestSignerTokenRefresh();
+      setRefreshRequest({
+        result: result.status,
+        previousObtainedAt: data?.token.obtainedAt ?? null,
+      });
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.integrations.channel.signer.refreshError"),
+      );
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -193,24 +244,53 @@ export function SignerAgentsPanel() {
           </SignerDownloadLink>
         </div>
 
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-            {t("pages.integrations.channel.signer.tokenLabel")}
-          </span>
-          {data ? (
-            <StatusChip
-              status={TOKEN_CHIP_STATUS[data.token.status]}
-              label={t(`pages.integrations.channel.signer.token.${data.token.status}`)}
-            />
-          ) : null}
-          {data?.token.expiresAt ? (
-            <span style={{ font: "var(--text-body)", color: "var(--fg-3)" }}>
-              {t("pages.integrations.channel.signer.tokenExpires", {
-                at: dateFormatter.format(new Date(data.token.expiresAt)),
-              })}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "var(--sp-3)",
+            flexWrap: "wrap",
+            padding: "var(--sp-3)",
+            border: "1px solid var(--line)",
+            borderRadius: "var(--r-2)",
+          }}
+        >
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
+              {t("pages.integrations.channel.signer.tokenLabel")}
             </span>
+            {data ? (
+              <StatusChip
+                status={TOKEN_CHIP_STATUS[data.token.status]}
+                label={t(`pages.integrations.channel.signer.token.${data.token.status}`)}
+              />
+            ) : null}
+            {data?.token.expiresAt ? (
+              <span style={{ font: "var(--text-body)", color: "var(--fg-3)" }}>
+                {t("pages.integrations.channel.signer.tokenExpires", {
+                  at: dateFormatter.format(new Date(data.token.expiresAt)),
+                })}
+              </span>
+            ) : null}
+          </div>
+          {canManage && hasActiveAgent ? (
+            <Button
+              type="button"
+              variant="secondary"
+              loading={refreshing || refreshRequest !== null}
+              onClick={() => void handleRefreshToken()}
+            >
+              {t("pages.integrations.channel.signer.refreshToken")}
+            </Button>
           ) : null}
         </div>
+
+        {refreshRequest ? (
+          <Alert tone="info">
+            {t(`pages.integrations.channel.signer.refresh.${refreshRequest.result}`)}
+          </Alert>
+        ) : null}
 
         {canManage ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -220,18 +300,55 @@ export function SignerAgentsPanel() {
               </Button>
             </div>
             {code ? (
-              <Alert tone="warn">
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span style={{ font: "var(--text-code)" }} data-testid="signer-pairing-code">
-                    {formatPairingCode(code.code)}
-                  </span>
-                  <span>
-                    {t("pages.integrations.channel.signer.codeExpires", {
-                      at: dateFormatter.format(new Date(code.expiresAt)),
-                    })}
-                  </span>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "var(--sp-3)",
+                  padding: "var(--sp-4)",
+                  border: "1px solid var(--line-strong)",
+                  borderRadius: "var(--r-2)",
+                  background: "var(--surface-panel)",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "var(--sp-3)",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <span style={{ font: "var(--text-caption)", color: "var(--fg-3)" }}>
+                      {t("pages.integrations.channel.signer.codeLabel")}
+                    </span>
+                    <span
+                      style={{
+                        font: "var(--text-code)",
+                        fontSize: 22,
+                        letterSpacing: "0.12em",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                      data-testid="signer-pairing-code"
+                    >
+                      {code.code}
+                    </span>
+                  </div>
+                  <Button type="button" variant="secondary" onClick={() => void handleCopy()}>
+                    {t("pages.integrations.channel.signer.copyCode")}
+                  </Button>
                 </div>
-              </Alert>
+                <span style={{ font: "var(--text-body-sm)", color: "var(--fg-3)" }}>
+                  {t("pages.integrations.channel.signer.codeExpires", {
+                    at: dateFormatter.format(new Date(code.expiresAt)),
+                  })}
+                </span>
+                {copyError ? (
+                  <Alert tone="error">{t("pages.integrations.channel.signer.copyError")}</Alert>
+                ) : null}
+              </div>
             ) : null}
           </div>
         ) : null}

@@ -1,7 +1,5 @@
-import { createHash } from "node:crypto";
-
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
 
@@ -11,55 +9,26 @@ import type {
   InventoryCorrectionDto,
   InventoryCorrectionTargetDto,
 } from "./dto";
+import {
+  codeResultProjection,
+  inventoryCorrectionUuid,
+  inventoryProgressChangeRow,
+  inventoryProjectionDigest,
+  readCorrectionTimestamp,
+  type CorrectionTransaction,
+} from "./inventory-correction-common";
 
-type CorrectionTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type StoredCorrection = typeof schema.inventoryCorrections.$inferSelect;
 type CodeResult = typeof schema.inventoryCodeResults.$inferSelect;
 type RepackBox = typeof schema.inventoryRepackBoxes.$inferSelect;
 type RepackItem = typeof schema.inventoryRepackItems.$inferSelect;
-
-function digest(value: Record<string, unknown>): string {
-  return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
-}
-
-function correctionId(tenantId: string, inventoryId: string, idempotencyKey: string): string {
-  const bytes = createHash("sha256")
-    .update("markiro:inventory-correction:v1\0", "utf8")
-    .update(tenantId, "utf8")
-    .update("\0", "utf8")
-    .update(inventoryId, "utf8")
-    .update("\0", "utf8")
-    .update(idempotencyKey, "utf8")
-    .digest()
-    .subarray(0, 16);
-  const versionByte = bytes[6];
-  const variantByte = bytes[8];
-  if (versionByte === undefined || variantByte === undefined) {
-    throw new Error("Correction identity digest is shorter than a UUID");
-  }
-  bytes[6] = (versionByte & 0x0f) | 0x50;
-  bytes[8] = (variantByte & 0x3f) | 0x80;
-  const hex = bytes.toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
-function codeResultProjection(
-  result: Pick<CodeResult, "id" | "classification" | "observedProductionDate" | "updatedAt">,
-) {
-  return {
-    kind: "code_result",
-    id: result.id,
-    classification: result.classification,
-    observedProductionDate: result.observedProductionDate,
-    updatedAt: result.updatedAt.toISOString(),
-  };
-}
 
 function repackBoxProjection(
   box: Pick<
     RepackBox,
     | "id"
     | "state"
+    | "invalidationSource"
     | "printState"
     | "printAttemptCount"
     | "printErrorCode"
@@ -72,6 +41,7 @@ function repackBoxProjection(
     kind: "repack_box",
     id: box.id,
     state: box.state,
+    invalidationSource: box.invalidationSource,
     printState: box.printState,
     printAttemptCount: box.printAttemptCount,
     printErrorCode: box.printErrorCode,
@@ -98,7 +68,7 @@ function repackItemProjection(
 }
 
 function normalizedRequestDigest(input: CreateInventoryCorrectionDto): string {
-  return digest({
+  return inventoryProjectionDigest({
     action: input.action,
     target: input.target,
     reason: input.reason,
@@ -166,7 +136,7 @@ export class InventoryCorrectionsService {
       .for("update");
     if (!inventory) throw new NotFoundException({ code: "INVENTORY_NOT_FOUND" });
 
-    const id = correctionId(tenantId, inventoryId, input.idempotencyKey);
+    const id = inventoryCorrectionUuid("single", tenantId, inventoryId, input.idempotencyKey);
     const requestDigest = normalizedRequestDigest(input);
     const [existing] = await tx
       .select()
@@ -200,23 +170,7 @@ export class InventoryCorrectionsService {
     }
 
     const nextRevision = inventory.resultRevision + 1;
-    const timestampResult = await tx.execute(
-      sql<{ changedAt: Date | string }>`select clock_timestamp() as "changedAt"`,
-    );
-    const timestampRow = timestampResult.rows[0];
-    const rawChangedAt =
-      typeof timestampRow === "object" && timestampRow !== null
-        ? Reflect.get(timestampRow, "changedAt")
-        : undefined;
-    const changedAt =
-      rawChangedAt instanceof Date
-        ? rawChangedAt
-        : typeof rawChangedAt === "string"
-          ? new Date(rawChangedAt)
-          : new Date(Number.NaN);
-    if (Number.isNaN(changedAt.getTime())) {
-      throw new Error("Database did not return a correction timestamp");
-    }
+    const changedAt = await readCorrectionTimestamp(tx);
     const prepared = await this.prepareMutation(
       tx,
       tenantId,
@@ -299,8 +253,8 @@ export class InventoryCorrectionsService {
       const after = { ...result, classification, updatedAt: changedAt };
       return {
         target: { eventId, codeResultId: result.id, repackBoxId: null },
-        beforeProjectionDigest: digest(codeResultProjection(result)),
-        afterProjectionDigest: digest(codeResultProjection(after)),
+        beforeProjectionDigest: inventoryProjectionDigest(codeResultProjection(result)),
+        afterProjectionDigest: inventoryProjectionDigest(codeResultProjection(after)),
         effectAt: changedAt,
         apply: async () => {
           await tx
@@ -352,8 +306,8 @@ export class InventoryCorrectionsService {
       const after = { ...result, observedProductionDate, updatedAt: changedAt };
       return {
         target: { eventId: null, codeResultId: result.id, repackBoxId: null },
-        beforeProjectionDigest: digest(codeResultProjection(result)),
-        afterProjectionDigest: digest(codeResultProjection(after)),
+        beforeProjectionDigest: inventoryProjectionDigest(codeResultProjection(result)),
+        afterProjectionDigest: inventoryProjectionDigest(codeResultProjection(after)),
         effectAt: changedAt,
         apply: async () => {
           await tx
@@ -404,8 +358,8 @@ export class InventoryCorrectionsService {
       const after = { ...item, removedAt, activeObservedProductionDate: null };
       return {
         target: { eventId: null, codeResultId: resultId, repackBoxId: item.boxId },
-        beforeProjectionDigest: digest(repackItemProjection(item)),
-        afterProjectionDigest: digest(repackItemProjection(after)),
+        beforeProjectionDigest: inventoryProjectionDigest(repackItemProjection(item)),
+        afterProjectionDigest: inventoryProjectionDigest(repackItemProjection(after)),
         effectAt: removedAt,
         apply: async () => {
           await tx
@@ -432,18 +386,24 @@ export class InventoryCorrectionsService {
       const after = {
         ...box,
         state: "invalidated" as const,
+        invalidationSource: "admin" as const,
         invalidatedAt: changedAt,
         updatedAt: changedAt,
       };
       return {
         target: { eventId: null, codeResultId: null, repackBoxId: box.id },
-        beforeProjectionDigest: digest(repackBoxProjection(box)),
-        afterProjectionDigest: digest(repackBoxProjection(after)),
+        beforeProjectionDigest: inventoryProjectionDigest(repackBoxProjection(box)),
+        afterProjectionDigest: inventoryProjectionDigest(repackBoxProjection(after)),
         effectAt: changedAt,
         apply: async () => {
           await tx
             .update(schema.inventoryRepackBoxes)
-            .set({ state: "invalidated", invalidatedAt: changedAt, updatedAt: changedAt })
+            .set({
+              state: "invalidated",
+              invalidationSource: "admin",
+              invalidatedAt: changedAt,
+              updatedAt: changedAt,
+            })
             .where(
               and(
                 eq(schema.inventoryRepackBoxes.tenantId, tenantId),
@@ -460,8 +420,8 @@ export class InventoryCorrectionsService {
     }
     return {
       target: { eventId: null, codeResultId: null, repackBoxId: box.id },
-      beforeProjectionDigest: digest(repackBoxProjection(box)),
-      afterProjectionDigest: digest(repackBoxProjection(box)),
+      beforeProjectionDigest: inventoryProjectionDigest(repackBoxProjection(box)),
+      afterProjectionDigest: inventoryProjectionDigest(repackBoxProjection(box)),
       effectAt: changedAt,
       apply: () => Promise.resolve(),
     };
@@ -520,19 +480,15 @@ export class InventoryCorrectionsService {
     result: CodeResult,
     changedAt: Date,
   ): Promise<void> {
-    await tx.insert(schema.inventoryProgressChanges).values({
-      tenantId,
-      inventoryId,
-      snapshotId,
-      resultRevision,
-      kind: "correction",
-      codeHash: result.codeHash,
-      classification: result.classification,
-      observedProductionDate: result.observedProductionDate,
-      winningEventId: result.firstAcceptedEventId,
-      winningDeviceId: result.winningDeviceId,
-      winningScannedAt: result.winningScannedAt,
-      changedAt,
-    });
+    await tx.insert(schema.inventoryProgressChanges).values(
+      inventoryProgressChangeRow({
+        tenantId,
+        inventoryId,
+        snapshotId,
+        resultRevision,
+        result,
+        changedAt,
+      }),
+    );
   }
 }

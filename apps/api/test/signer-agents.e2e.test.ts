@@ -85,6 +85,35 @@ describe.skipIf(!ready)("signer agents pairing", () => {
     expect(revoked.status).toBe("revoked");
   });
 
+  it("queues one manual True API token refresh for the tenant's active agent", async () => {
+    const { body: issued } = await agent.post("/signer-agents/pairing-code").expect(201);
+    const pair = await request(app!.getHttpServer())
+      .post("/signer-agent/pair")
+      .send({ pairingCode: issued.code, hostname: "TOKEN-PC", appVersion: "0.1.0" })
+      .expect(201);
+
+    await agent.post("/signer-agents/token-refresh").expect(202).expect({ status: "queued" });
+    await agent
+      .post("/signer-agents/token-refresh")
+      .expect(202)
+      .expect({ status: "already_pending" });
+
+    const next = await request(app!.getHttpServer())
+      .get("/signer-agent/tasks/next?wait=0")
+      .set("x-signer-token", pair.body.agentSecret)
+      .expect(200);
+    expect(next.body.task.type).toBe("true_api_auth");
+    expect(next.body.task.payload.trueApiBaseUrl).toBe(
+      "https://markirovka.crpt.ru/api/v3/true-api",
+    );
+  });
+
+  it("does not queue a refresh for a tenant without an active agent", async () => {
+    const otherAgent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(otherAgent);
+    await otherAgent.post("/signer-agents/token-refresh").expect(409);
+  });
+
   it("does not let one tenant revoke another tenant's agent", async () => {
     const { body: issued } = await agent.post("/signer-agents/pairing-code").expect(201);
     const pair = await request(app!.getHttpServer())

@@ -308,6 +308,14 @@ const inventoryParticipantSchema = z.strictObject({
   openBoxCount: nonnegativeInteger,
 });
 
+/**
+ * `claim_lost` — the system invalidated the box on a scan conflict and the operator
+ * can still return it to work from the terminal. `admin` — an irreversible
+ * `invalidate_box` correction made from the cabinet.
+ */
+const inventoryBoxInvalidationSourceSchema = z.enum(["claim_lost", "admin"]);
+export type InventoryBoxInvalidationSource = z.infer<typeof inventoryBoxInvalidationSourceSchema>;
+
 const inventoryLiveBoxSchema = z.strictObject({
   id: uuid,
   sscc: z.string().regex(/^\d{18}$/),
@@ -315,8 +323,18 @@ const inventoryLiveBoxSchema = z.strictObject({
   terminalName: z.string().min(1),
   productionDate: civilDate,
   state: z.enum(["open", "closed", "invalidated"]),
+  invalidationSource: inventoryBoxInvalidationSourceSchema.nullable(),
   printState: z.enum(["not_ready", "pending", "printing", "printed", "failed"]),
   itemCount: nonnegativeInteger,
+});
+
+const inventoryVerifiedBoxSchema = z.strictObject({
+  eventId: uuid,
+  sscc: z.string().regex(/^\d{18}$/),
+  terminalId: uuid,
+  terminalName: z.string().min(1),
+  scannedAt: dateTime,
+  affectedCodeCount: nonnegativeInteger,
 });
 
 const inventoryRecentEventSchema = z.strictObject({
@@ -353,8 +371,11 @@ export const inventoryProgressSchema = z.strictObject({
   openBoxCount: nonnegativeInteger,
   boxTotal: nonnegativeInteger,
   boxesTruncated: z.boolean(),
+  verifiedBoxTotal: nonnegativeInteger,
+  verifiedBoxesTruncated: z.boolean(),
   participants: z.array(inventoryParticipantSchema),
   boxes: z.array(inventoryLiveBoxSchema),
+  verifiedBoxes: z.array(inventoryVerifiedBoxSchema),
   recentEvents: z.array(inventoryRecentEventSchema),
 });
 
@@ -374,6 +395,7 @@ export const inventoryCloseBlockerSchema = z.strictObject({
   deviceId: uuid.nullable(),
   boxId: uuid.nullable(),
   discrepancyCategory: z.enum(["unknown", "ineligible", "date_mismatch", "voided"]).nullable(),
+  invalidationSource: inventoryBoxInvalidationSourceSchema.nullable(),
 });
 
 export const inventoryCloseResponseSchema = z.strictObject({
@@ -556,6 +578,11 @@ export const INVENTORY_CORRECTION_ACTIONS = [
 ] as const;
 
 const inventoryEvidenceEventSchema = inventoryRecentEventSchema.extend({
+  copyIdentity: z.string().nullable(),
+  affectedCodeCount: nonnegativeInteger,
+  discrepancyCodeCount: nonnegativeInteger,
+  classifications: z.array(z.enum(["expected", "protected", "ineligible", "unknown", "voided"])),
+  discrepancyCategories: z.array(z.enum(["ineligible", "unknown", "date_mismatch"])),
   actions: z.array(z.enum(["void_scan", "restore_scan", "change_date", "remove_item"])),
 });
 
@@ -564,7 +591,17 @@ export const inventoryEvidenceResponseSchema = z.strictObject({
   pageSize: z.number().int().min(1).max(100),
   total: nonnegativeInteger,
   hasMore: z.boolean(),
+  allMatchingActions: z.array(z.enum(["void_scan", "restore_scan", "change_date", "remove_item"])),
+  allMatchingAffectedCodeCount: nonnegativeInteger,
   items: z.array(inventoryEvidenceEventSchema),
+});
+
+export const inventoryEvidenceFilterSchema = z.strictObject({
+  scope: z.enum(["all", "discrepancies"]),
+  search: z.string().trim().min(1).max(128).optional(),
+  kind: z.enum(["item", "known_box", "old_box"]).optional(),
+  classification: z.enum(["expected", "protected", "ineligible", "unknown", "voided"]).optional(),
+  discrepancyCategory: z.enum(["ineligible", "unknown", "date_mismatch"]).optional(),
 });
 
 const correctionReason = z
@@ -623,6 +660,43 @@ export const inventoryCorrectionSchema = z.strictObject({
   beforeProjectionDigest: digest,
   afterProjectionDigest: digest,
   resultRevision: nonnegativeInteger,
+  createdAt: dateTime,
+});
+
+const uniqueUuidArray = z
+  .array(uuid)
+  .min(1)
+  .refine((ids) => new Set(ids).size === ids.length);
+const uniqueOptionalUuidArray = z.array(uuid).refine((ids) => new Set(ids).size === ids.length);
+export const inventoryCorrectionBatchSelectionSchema = z.discriminatedUnion("mode", [
+  z.strictObject({ mode: z.literal("explicit"), eventIds: uniqueUuidArray }),
+  z.strictObject({
+    mode: z.literal("all_matching"),
+    filter: inventoryEvidenceFilterSchema,
+    excludedEventIds: uniqueOptionalUuidArray,
+  }),
+]);
+const correctionBatchRequest = {
+  selection: inventoryCorrectionBatchSelectionSchema,
+  reason: correctionReason,
+  expectedResultRevision: nonnegativeInteger,
+  idempotencyKey: uuid,
+};
+export const createInventoryCorrectionBatchInputSchema = z.discriminatedUnion("action", [
+  z.strictObject({ action: z.literal("void_scan"), ...correctionBatchRequest }),
+  z.strictObject({
+    action: z.literal("change_date"),
+    observedProductionDate: civilDate,
+    ...correctionBatchRequest,
+  }),
+]);
+
+export const inventoryCorrectionBatchSchema = z.strictObject({
+  id: uuid,
+  action: z.enum(["void_scan", "change_date"]),
+  selectedEventCount: z.number().int().positive(),
+  affectedCodeCount: z.number().int().positive(),
+  resultRevision: z.number().int().positive(),
   createdAt: dateTime,
 });
 
@@ -690,7 +764,15 @@ export type InventoryLiveBox = z.infer<typeof inventoryLiveBoxSchema>;
 export type InventoryRecentEvent = z.infer<typeof inventoryRecentEventSchema>;
 export type InventoryEvidenceEvent = z.infer<typeof inventoryEvidenceEventSchema>;
 export type InventoryEvidenceResponse = z.infer<typeof inventoryEvidenceResponseSchema>;
+export type InventoryEvidenceFilter = z.infer<typeof inventoryEvidenceFilterSchema>;
 export type CreateInventoryCorrectionInput = z.infer<typeof createInventoryCorrectionInputSchema>;
+export type InventoryCorrectionBatchSelection = z.infer<
+  typeof inventoryCorrectionBatchSelectionSchema
+>;
+export type CreateInventoryCorrectionBatchInput = z.infer<
+  typeof createInventoryCorrectionBatchInputSchema
+>;
+export type InventoryCorrectionBatch = z.infer<typeof inventoryCorrectionBatchSchema>;
 export type ChzExportRun = z.infer<typeof chzExportRunSchema>;
 export type ChzExportState = z.infer<typeof chzExportStateSchema>;
 export type InventoryCorrection = z.infer<typeof inventoryCorrectionSchema>;

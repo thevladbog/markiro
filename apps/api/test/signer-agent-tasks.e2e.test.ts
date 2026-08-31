@@ -95,10 +95,11 @@ describe.skipIf(!ready)("signer agent task queue", () => {
     expect(empty.body.task).toBeNull();
 
     const expiresAt = new Date(Date.now() + 10 * 3600_000).toISOString();
+    const token = `long-true-api-jwt.${"x".repeat(16_384)}`;
     await request(app!.getHttpServer())
       .post(`/signer-agent/tasks/${taskId}/complete`)
       .set("x-signer-token", secret)
-      .send({ token: "jwt-abc", expiresAt, certThumbprint: "AB12" })
+      .send({ token, expiresAt, certThumbprint: "AB12" })
       .expect(204);
 
     const [stored] = await db
@@ -106,7 +107,7 @@ describe.skipIf(!ready)("signer agent task queue", () => {
       .from(schema.chzApiTokens)
       .where(eq(schema.chzApiTokens.tenantId, tenantId));
     expect(stored).toBeTruthy();
-    expect(stored!.encryptedToken.toString("utf8")).not.toContain("jwt-abc"); // токен не в открытом виде
+    expect(stored!.encryptedToken.toString("utf8")).not.toContain("long-true-api-jwt");
     expect(stored!.agentId).toBe(agentId);
 
     const overview = await agent.get("/signer-agents").expect(200);

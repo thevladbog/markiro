@@ -462,7 +462,8 @@
         "pending_many": "{{count}} events on stations have not synced yet",
         "pending_other": "{{count}} events on stations have not synced yet",
         "participants": "Participants",
-        "boxes": "Boxes",
+        "verifiedBoxes": "Verified boxes",
+        "newBoxes": "New boxes",
         "boxesTruncated": "Showing the latest {{shown}} of {{total}} boxes",
         "recentEvents": "Recent events",
         "none": "No data yet",
@@ -484,18 +485,31 @@
           "closed": "Closed",
           "invalidated": "Invalidated"
         },
+        "boxInvalidation": {
+          "claim_lost": "Invalidated (scan conflict)",
+          "admin": "Invalidated (from the cabinet)"
+        },
+        "printState": {
+          "not_ready": "Not ready to print",
+          "pending": "Queued for printing",
+          "printing": "Printing",
+          "printed": "Printed",
+          "failed": "Print failed"
+        },
+        "verdict": {
+          "pending": "Pending",
+          "applied": "Applied",
+          "duplicate": "Repeated scan",
+          "replay": "Reprocessed",
+          "rejected": "Rejected",
+          "quarantined": "Needs review"
+        },
         "classification": {
           "expected": "Expected",
           "protected": "Protected",
           "ineligible": "Ineligible",
           "unknown": "Unknown",
           "voided": "Voided"
-        },
-        "verdict": {
-          "pending": "Pending",
-          "applied": "Applied",
-          "duplicate": "Duplicate",
-          "rejected": "Rejected"
         }
       },
       "close": {
@@ -534,8 +548,14 @@
           "participantBoxes": "Open boxes reported by stations: {{count}}",
           "openBoxes": "Open boxes: {{count}}",
           "invalidated": "Invalidated boxes: {{count}}",
+          "invalidated_claim_lost": "Boxes invalidated by a scan conflict: {{count}}",
+          "invalidated_admin": "Boxes invalidated from the cabinet: {{count}}",
           "unresolvedPrint": "Unfinished box printing: {{count}}",
           "discrepancies": "Required discrepancies without a decision: {{count}}"
+        },
+        "blockerHint": {
+          "invalidated_claim_lost": "The operator can return such a box to work from the terminal — the blocker clears once they do.",
+          "invalidated_admin": "«Invalidate box» cannot be undone: this blocker stays until an emergency close."
         }
       },
       "documents": {
@@ -549,6 +569,7 @@
         "generate": "Generate documents",
         "history": "Generation history",
         "historyEmpty": "No documents have been generated yet.",
+        "runInitialResult": "Initial result",
         "runRevision": "Result revision {{revision}}",
         "previousRevision": "These documents belong to a previous result revision.",
         "status": {
@@ -639,6 +660,7 @@
         "search": "Search events",
         "kind": "Event type",
         "classification": "Classification",
+        "discrepancyCategory": "Discrepancy type",
         "all": "All",
         "kindItem": "Code",
         "kindKnownBox": "Known box",
@@ -651,9 +673,51 @@
         "reason": "Correction reason",
         "reasonTooLong": "The reason must not exceed 1024 UTF-8 bytes",
         "productionDate": "Production date: {{date}}",
+        "mixedDates": "Production dates differ",
+        "dateUnavailable": "Production date is not recorded",
+        "copy": "Copy code",
+        "copied": "Copied",
+        "copyUnavailable": "Code is unavailable for copying",
+        "eventMeta": "codes: {{codes}} · discrepancies: {{discrepancies}} · {{terminal}} · {{date}}",
         "observedDate": "New production date",
         "saved": "Correction saved to the audit trail",
         "saveError": "Could not save the correction. Refresh the data and try again.",
+        "view": {
+          "label": "Event view",
+          "discrepancies": "Discrepancies",
+          "all": "All scans"
+        },
+        "category": {
+          "ineligible": "Ineligible",
+          "unknown": "Unknown code",
+          "date_mismatch": "Date mismatch"
+        },
+        "batch": {
+          "selectPage": "Select page",
+          "selectedPage": "Selected on this page: {{count}}",
+          "selectEvent": "Select event {{identity}}",
+          "selectAll": "Select all {{count}} matching events",
+          "selected": "Selected events: {{events}} · codes: {{codes}}",
+          "clear": "Clear selection",
+          "open": {
+            "void_scan": "Void selected scans",
+            "change_date": "Change date for selected"
+          },
+          "title": {
+            "void_scan": "Void selected scans",
+            "change_date": "Change date for selected codes"
+          },
+          "confirm": {
+            "void_scan": "Confirm void",
+            "change_date": "Confirm new date"
+          },
+          "summary": "Selected events: {{events}} · affected codes: {{codes}}",
+          "auditHint": "The reason and outcome will be recorded for every affected code.",
+          "networkError": "The connection was interrupted. Retry the same request.",
+          "saveError": "Could not apply the corrections. Try again.",
+          "selectionChanged": "The data changed. Select the events again and retry.",
+          "saved": "Corrected events: {{events}} · codes: {{codes}}"
+        },
         "action": {
           "void_scan": "Void scan",
           "restore_scan": "Restore scan",
@@ -2956,8 +3020,18 @@
             "expired": "expired"
           },
           "tokenExpires": "valid until {{at}}",
+          "refreshToken": "Refresh token",
+          "refreshError": "Could not request a token refresh",
+          "refreshComplete": "True API token refreshed",
+          "refresh": {
+            "queued": "The task was sent to the agent. Keep Markiro Signer running; the status will update automatically.",
+            "already_pending": "A task is already waiting for the agent. Keep Markiro Signer running; the status will update automatically."
+          },
           "issueCode": "Get pairing code",
           "issueError": "Could not get a pairing code",
+          "codeLabel": "Pairing code",
+          "copyCode": "Copy",
+          "copyError": "Could not copy the code. Select the eight digits manually.",
           "codeExpires": "valid until {{at}}",
           "emptyTitle": "No agents connected yet",
           "emptyHint": "Install the \"Markiro Signer\" app on the computer holding the qualified certificate and enter the pairing code.",

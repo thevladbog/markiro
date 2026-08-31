@@ -49,7 +49,8 @@ interface ParticipantBlockerRow {
 
 interface BoxBlockerRow {
   open: number;
-  invalidated: number;
+  invalidatedByConflict: number;
+  invalidatedByCabinet: number;
   unresolvedPrint: number;
 }
 
@@ -735,7 +736,12 @@ export class InventoryCloseService {
     const boxResult = await tx.execute(sql<BoxBlockerRow>`
       select
         count(*) filter (where state = 'open')::int as open,
-        count(*) filter (where state = 'invalidated')::int as invalidated,
+        count(*) filter (
+          where state = 'invalidated' and invalidation_source is distinct from 'admin'
+        )::int as "invalidatedByConflict",
+        count(*) filter (
+          where state = 'invalidated' and invalidation_source = 'admin'
+        )::int as "invalidatedByCabinet",
         count(*) filter (where state = 'closed' and print_state <> 'printed')::int
           as "unresolvedPrint"
       from inventory_repack_boxes
@@ -777,8 +783,15 @@ export class InventoryCloseService {
     }
     const boxes = parseBoxBlockerRow(boxResult.rows[0]);
     if (boxes.open > 0) blockers.push(blocker("OPEN_REPACK_BOX", { count: boxes.open }));
-    if (boxes.invalidated > 0) {
-      blockers.push(blocker("INVALIDATED_REPACK_BOX", { count: boxes.invalidated }));
+    // Split by source: a scan conflict is reversible from the terminal, a cabinet
+    // `invalidate_box` correction is not. Both still block a safe close.
+    for (const [invalidationSource, count] of [
+      ["claim_lost", boxes.invalidatedByConflict],
+      ["admin", boxes.invalidatedByCabinet],
+    ] as const) {
+      if (count > 0) {
+        blockers.push(blocker("INVALIDATED_REPACK_BOX", { count, invalidationSource }));
+      }
     }
     if (boxes.unresolvedPrint > 0) {
       blockers.push(blocker("UNRESOLVED_BOX_PRINT", { count: boxes.unresolvedPrint }));
@@ -789,7 +802,6 @@ export class InventoryCloseService {
         ["unknown", discrepancy.unknown],
         ["ineligible", discrepancy.ineligible],
         ["date_mismatch", discrepancy.dateMismatch],
-        ["voided", discrepancy.voided],
       ] as const) {
         if (count > 0) {
           blockers.push(
@@ -813,6 +825,7 @@ function blocker(
     deviceId: values.deviceId ?? null,
     boxId: values.boxId ?? null,
     discrepancyCategory: values.discrepancyCategory ?? null,
+    invalidationSource: values.invalidationSource ?? null,
   };
 }
 
@@ -842,10 +855,16 @@ function parseParticipantBlockerRow(value: unknown): ParticipantBlockerRow {
 }
 
 function parseBoxBlockerRow(value: unknown): BoxBlockerRow {
-  const row = parseAggregateCountRow(value, ["open", "invalidated", "unresolvedPrint"]);
+  const row = parseAggregateCountRow(value, [
+    "open",
+    "invalidatedByConflict",
+    "invalidatedByCabinet",
+    "unresolvedPrint",
+  ]);
   return {
     open: aggregateCount(row, "open"),
-    invalidated: aggregateCount(row, "invalidated"),
+    invalidatedByConflict: aggregateCount(row, "invalidatedByConflict"),
+    invalidatedByCabinet: aggregateCount(row, "invalidatedByCabinet"),
     unresolvedPrint: aggregateCount(row, "unresolvedPrint"),
   };
 }

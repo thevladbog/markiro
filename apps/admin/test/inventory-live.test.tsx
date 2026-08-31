@@ -30,6 +30,10 @@ const ACCESS: AccessDocument = {
   roles: ["manager"],
   capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
 };
+const READ_ACCESS: AccessDocument = {
+  roles: ["member"],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
 
 const detail = {
   id: INVENTORY_ID,
@@ -75,12 +79,14 @@ const progress = {
   dateMismatchCount: 1,
   voidedCount: 0,
   oldBoxCount: 4,
-  newBoxCount: 2,
-  invalidatedBoxCount: 0,
+  newBoxCount: 3,
+  invalidatedBoxCount: 2,
   pendingEventCount: 3,
   openBoxCount: 1,
-  boxTotal: 1,
+  boxTotal: 3,
   boxesTruncated: false,
+  verifiedBoxTotal: 1,
+  verifiedBoxesTruncated: false,
   participants: [
     {
       deviceId: "77777777-7777-4777-8777-777777777777",
@@ -124,8 +130,41 @@ const progress = {
       terminalName: "Станция упаковки № 1",
       productionDate: "2025-09-19",
       state: "open",
+      invalidationSource: null,
       printState: "not_ready",
       itemCount: 7,
+    },
+    {
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      sscc: "146000000000000029",
+      terminalId: "77777777-7777-4777-8777-777777777777",
+      terminalName: "Станция упаковки № 1",
+      productionDate: "2025-09-19",
+      state: "invalidated",
+      invalidationSource: "claim_lost",
+      printState: "not_ready",
+      itemCount: 0,
+    },
+    {
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      sscc: "146000000000000036",
+      terminalId: "77777777-7777-4777-8777-777777777777",
+      terminalName: "Станция упаковки № 1",
+      productionDate: "2025-09-19",
+      state: "invalidated",
+      invalidationSource: "admin",
+      printState: "not_ready",
+      itemCount: 3,
+    },
+  ],
+  verifiedBoxes: [
+    {
+      eventId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      sscc: "046800899000600163",
+      terminalId: "77777777-7777-4777-8777-777777777777",
+      terminalName: "Станция упаковки № 1",
+      scannedAt: "2026-08-26T09:08:00.000Z",
+      affectedCodeCount: 20,
     },
   ],
   recentEvents: [
@@ -167,7 +206,7 @@ function authClient(): AuthClientLike {
   };
 }
 
-function renderLive(progressResponses: unknown[] = [progress]) {
+function renderLive(progressResponses: unknown[] = [progress], access: AccessDocument = ACCESS) {
   let progressRequest = 0;
   vi.stubGlobal(
     "fetch",
@@ -181,7 +220,7 @@ function renderLive(progressResponses: unknown[] = [progress]) {
           hasAvatar: false,
         });
       }
-      if (url.endsWith("/api/access/me")) return response(ACCESS);
+      if (url.endsWith("/api/access/me")) return response(access);
       if (url.includes("/api/pickup-orders")) return response({ items: [] });
       if (url === `/api/inventories/${INVENTORY_ID}`) return response(detail);
       if (url === "/api/inventory-document-formats") return response({ items: [] });
@@ -233,9 +272,15 @@ it("renders approved live evidence with stale participants and local pending wor
   expect(screen.getByText("Нет связи")).toBeDefined();
   expect(screen.getByText("Вышел")).toBeDefined();
   expect(screen.getByText(/3 события на терминалах/)).toBeDefined();
-  expect(screen.getByText("146000000000000012")).toBeDefined();
+  expect(screen.getByRole("heading", { name: "Проверенные короба" })).toBeDefined();
+  expect(screen.queryByRole("heading", { name: "Новые короба" })).toBeNull();
+  expect(screen.getByText("046800899000600163")).toBeDefined();
+  expect(screen.getByText("20 кодов")).toBeDefined();
   expect(screen.getByText("(01)04680089900383 (21)SERIAL-42")).toBeDefined();
   expect(screen.getByRole("link", { name: "Исправления" })).toBeDefined();
+  expect(screen.getByRole("link", { name: "Расхождения 4" }).getAttribute("href")).toBe(
+    `/inventory/${INVENTORY_ID}/corrections?view=discrepancies`,
+  );
   expect(
     screen.getByText(
       "Формирование станет доступно после закрытия инвентаризации и фиксации результата.",
@@ -243,28 +288,62 @@ it("renders approved live evidence with stale participants and local pending wor
   ).toBeDefined();
 });
 
-it("labels a scan that has no code result with the localized verdict", async () => {
-  // An `old_box` scan never produces an `inventory_code_results` row, so the
-  // API sends `classification: null` and the chip has nothing but
-  // `authoritativeVerdict` to show -- which is a raw server token.
-  const boxScan = {
+it("shows new boxes only for repacking and translates duplicate verdicts", async () => {
+  const repackDetail = detail as unknown as {
+    mode: "check" | "repack";
+    boxLabelTemplateId: string | null;
+    boxLabelTemplate: { id: string; name: string } | null;
+  };
+  const previous = {
+    mode: repackDetail.mode,
+    boxLabelTemplateId: repackDetail.boxLabelTemplateId,
+    boxLabelTemplate: repackDetail.boxLabelTemplate,
+  };
+  repackDetail.mode = "repack";
+  repackDetail.boxLabelTemplateId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  repackDetail.boxLabelTemplate = {
+    id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    name: "Короб 20",
+  };
+  const repackProgress = {
     ...progress,
     recentEvents: [
       {
         ...progress.recentEvents[0],
-        codeResultId: null,
-        kind: "old_box",
-        displayIdentity: "(00)046012345600000016",
-        authoritativeVerdict: "applied",
         classification: null,
-        observedProductionDate: null,
+        authoritativeVerdict: "duplicate",
       },
     ],
   };
-  renderLive([boxScan]);
-  expect(await screen.findByRole("heading", { level: 1, name: "IVN-26-0042" })).toBeDefined();
-  expect(screen.getByText("Принят")).toBeDefined();
-  expect(screen.queryByText("applied")).toBeNull();
+  try {
+    renderLive([repackProgress]);
+    expect(await screen.findByRole("heading", { name: "Новые короба" })).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "Проверенные короба" })).toBeNull();
+    expect(screen.getByText("146000000000000012")).toBeDefined();
+    expect(screen.getAllByText(/Не готова к печати/)).toHaveLength(3);
+    expect(screen.getByText("Повторный скан")).toBeDefined();
+    // An invalidated box names the reason, because only the scan-conflict one can
+    // be returned to work from the terminal.
+    expect(screen.getByText("Аннулирован (конфликт сканов)")).toBeDefined();
+    expect(screen.getByText("Аннулирован (из кабинета)")).toBeDefined();
+    expect(screen.queryByText("Аннулирован")).toBeNull();
+  } finally {
+    repackDetail.mode = previous.mode;
+    repackDetail.boxLabelTemplateId = previous.boxLabelTemplateId;
+    repackDetail.boxLabelTemplate = previous.boxLabelTemplate;
+  }
+});
+
+it("does not link discrepancies for read-only or non-running inventory views", async () => {
+  const first = renderLive([progress], READ_ACCESS);
+  expect(await screen.findByText("Расхождения")).toBeDefined();
+  expect(screen.queryByRole("link", { name: "Расхождения 4" })).toBeNull();
+  cleanup();
+  first.router.dispose();
+
+  renderLive([{ ...progress, status: "closed" }]);
+  expect(await screen.findByText("Расхождения")).toBeDefined();
+  expect(screen.queryByRole("link", { name: "Расхождения 4" })).toBeNull();
 });
 
 it("polls at the bounded interval while running and stops after the server reports closed", async () => {

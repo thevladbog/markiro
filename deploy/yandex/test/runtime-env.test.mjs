@@ -372,6 +372,7 @@ test("uses every and only the production environment example keys", async () => 
     "SMTP_FROM_NAME",
     "SMTP_REPLY_TO",
     "MAIL_PAYLOAD_ENCRYPTION_KEY",
+    "CHZ_TOKEN_ENCRYPTION_KEY",
     "LANDING_DEMO_SUBMISSION_ENABLED",
     "LANDING_ORIGIN",
     "LANDING_DEMO_RECIPIENT",
@@ -389,7 +390,7 @@ test("uses every and only the production environment example keys", async () => 
     "DADATA_TOKEN",
     "DADATA_SECRET",
   ]);
-  assert.equal(inventory.length, 37);
+  assert.equal(inventory.length, 38);
   assert.deepEqual(
     runtimeInventoryKeyNames(
       inventory,

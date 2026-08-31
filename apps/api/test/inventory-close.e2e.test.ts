@@ -164,6 +164,7 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
     fixture: Fixture,
     state: "open" | "closed" | "invalidated",
     printState: "not_ready" | "pending" | "failed" | "printed",
+    invalidationSource: "claim_lost" | "admin" = "claim_lost",
   ): Promise<string> {
     const deviceId = await seedDevice(fixture, `Box ${state}`);
     const boxId = randomUUID();
@@ -182,6 +183,7 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
       printErrorCode: printState === "failed" ? "TEST_PRINT_FAILURE" : null,
       closedAt: state === "closed" ? changedAt : null,
       invalidatedAt: state === "invalidated" ? changedAt : null,
+      invalidationSource: state === "invalidated" ? invalidationSource : null,
       printedAt: printState === "printed" ? changedAt : null,
     });
     return boxId;
@@ -326,7 +328,8 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
     const fixture = await seedRunningInventory();
     await seedBox(fixture, "open", "not_ready");
     await seedBox(fixture, "open", "not_ready");
-    await seedBox(fixture, "invalidated", "not_ready");
+    await seedBox(fixture, "invalidated", "not_ready", "claim_lost");
+    await seedBox(fixture, "invalidated", "not_ready", "admin");
     await seedBox(fixture, "closed", "failed");
     await seedRequiredDiscrepancies(fixture);
     const response = await fixture.agent
@@ -336,7 +339,18 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
     expect(response.body.blockers).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "OPEN_REPACK_BOX", count: 2, boxId: null }),
-        expect.objectContaining({ code: "INVALIDATED_REPACK_BOX", count: 1, boxId: null }),
+        expect.objectContaining({
+          code: "INVALIDATED_REPACK_BOX",
+          count: 1,
+          boxId: null,
+          invalidationSource: "claim_lost",
+        }),
+        expect.objectContaining({
+          code: "INVALIDATED_REPACK_BOX",
+          count: 1,
+          boxId: null,
+          invalidationSource: "admin",
+        }),
         expect.objectContaining({ code: "UNRESOLVED_BOX_PRINT", count: 1, boxId: null }),
         expect.objectContaining({
           code: "UNRESOLVED_DISCREPANCY",
@@ -353,11 +367,6 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
           discrepancyCategory: "date_mismatch",
           count: 1,
         }),
-        expect.objectContaining({
-          code: "UNRESOLVED_DISCREPANCY",
-          discrepancyCategory: "voided",
-          count: 1,
-        }),
       ]),
     );
     expect(
@@ -365,6 +374,32 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
         (item: { discrepancyCategory?: string }) => item.discrepancyCategory === "missing",
       ),
     ).toBe(false);
+  });
+
+  it("does not treat audited voided scans as safe-close blockers", async () => {
+    const fixture = await seedRunningInventory();
+    await seedRequiredDiscrepancies(fixture);
+    await db
+      .update(schema.inventoryCodeResults)
+      .set({ classification: "voided" })
+      .where(
+        and(
+          eq(schema.inventoryCodeResults.tenantId, fixture.tenantId),
+          eq(schema.inventoryCodeResults.inventoryId, fixture.inventoryId),
+        ),
+      );
+
+    const preview = await fixture.agent
+      .get(`/inventories/${fixture.inventoryId}/close-preview`)
+      .expect(200);
+    expect(preview.body.blockers).not.toContainEqual(
+      expect.objectContaining({
+        code: "UNRESOLVED_DISCREPANCY",
+        discrepancyCategory: "voided",
+      }),
+    );
+
+    await fixture.agent.post(`/inventories/${fixture.inventoryId}/close`).send({}).expect(201);
   });
 
   it("requires emergency reason and explicit blocker acknowledgement, then stores the exact snapshot", async () => {

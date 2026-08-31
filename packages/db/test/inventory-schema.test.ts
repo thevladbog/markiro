@@ -424,6 +424,7 @@ describe("inventory execution schema", () => {
         "inventoryRepackBoxes",
         "inventoryRepackItems",
         "inventoryRepackPrintAttempts",
+        "inventoryCorrectionBatches",
         "inventoryCorrections",
         "inventoryLateEvents",
       ].map((name) => getTableName(table(name))),
@@ -436,6 +437,7 @@ describe("inventory execution schema", () => {
       "inventory_repack_boxes",
       "inventory_repack_items",
       "inventory_repack_print_attempts",
+      "inventory_correction_batches",
       "inventory_corrections",
       "inventory_late_events",
     ]);
@@ -458,6 +460,7 @@ describe("inventory execution schema", () => {
       "repack_action",
     ]);
     expect(enumValues("inventoryRepackBoxStateEnum")).toEqual(["open", "closed", "invalidated"]);
+    expect(enumValues("inventoryRepackInvalidationSourceEnum")).toEqual(["claim_lost", "admin"]);
     expect(enumValues("inventoryRepackPrintStateEnum")).toEqual([
       "not_ready",
       "pending",
@@ -481,10 +484,36 @@ describe("inventory execution schema", () => {
   });
 
   it("persists exact correction request and effect evidence with a coherent backfill", () => {
+    const batchColumns = getTableConfig(table("inventoryCorrectionBatches")).columns.map(
+      (column) => ({ name: column.name, notNull: column.notNull }),
+    );
+    expect(batchColumns).toEqual(
+      expect.arrayContaining([
+        { name: "request_digest", notNull: true },
+        { name: "selected_event_count", notNull: true },
+        { name: "affected_code_count", notNull: true },
+        { name: "result_revision", notNull: true },
+      ]),
+    );
+    expect(
+      checkExpression("inventoryCorrectionBatches", "inventory_correction_batches_action_check"),
+    ).toContain("void_scan");
+    expect(
+      foreignKeyColumns(
+        "inventoryCorrectionBatches",
+        "inventory_correction_batches_tenant_inventory_fk",
+      ),
+    ).toEqual({
+      columns: ["tenant_id", "inventory_id"],
+      foreignColumns: ["tenant_id", "id"],
+      foreignTable: "inventories",
+    });
+
     const columns = getTableConfig(table("inventoryCorrections")).columns.map((column) => ({
       name: column.name,
       notNull: column.notNull,
     }));
+    expect(columns).toContainEqual({ name: "batch_id", notNull: false });
     expect(columns).toContainEqual({ name: "request_digest", notNull: true });
     expect(columns).toContainEqual({ name: "effect_at", notNull: true });
     expect(
@@ -498,6 +527,19 @@ describe("inventory execution schema", () => {
     expect(migration).toContain(
       'ALTER TABLE "inventory_corrections" ALTER COLUMN "effect_at" SET NOT NULL',
     );
+    expect(
+      foreignKeyColumns("inventoryCorrections", "inventory_corrections_tenant_batch_fk"),
+    ).toEqual({
+      columns: ["tenant_id", "batch_id", "inventory_id"],
+      foreignColumns: ["tenant_id", "id", "inventory_id"],
+      foreignTable: "inventory_correction_batches",
+    });
+    expect(indexColumns("inventoryCorrections", "inventory_corrections_batch_idx")).toEqual([
+      "tenant_id",
+      "inventory_id",
+      "batch_id",
+      "id",
+    ]);
   });
 
   it("tenant-scopes execution ownership through composite foreign keys", () => {
@@ -612,6 +654,13 @@ describe("inventory execution schema", () => {
         ["tenant_id", "result_id", "inventory_id", "active_observed_production_date"],
         ["tenant_id", "id", "inventory_id", "observed_production_date"],
         "inventory_code_results",
+      ],
+      [
+        "inventoryCorrectionBatches",
+        "inventory_correction_batches_tenant_inventory_fk",
+        ["tenant_id", "inventory_id"],
+        ["tenant_id", "id"],
+        "inventories",
       ],
       [
         "inventoryCorrections",
@@ -746,6 +795,14 @@ describe("inventory execution schema", () => {
       "\"origin_classification\" in ('expected', 'protected', 'ineligible')",
     );
     expect(snapshotOrigin).toContain('"snapshot_id" is not null');
+    const invalidationSource = checkExpression(
+      "inventoryRepackBoxes",
+      "inventory_repack_boxes_invalidation_source_check",
+    );
+    expect(invalidationSource).toContain("\"state\" = 'invalidated'");
+    expect(invalidationSource).toContain('"invalidation_source" is not null');
+    expect(invalidationSource).toContain("\"state\" <> 'invalidated'");
+    expect(invalidationSource).toContain('"invalidation_source" is null');
     const lifecyclePrint = checkExpression(
       "inventoryRepackBoxes",
       "inventory_repack_boxes_lifecycle_print_check",
@@ -975,6 +1032,34 @@ describe("inventory document schema", () => {
     expect(snapshot).toContain('"organization_name_snapshot"');
     expect(snapshot).toContain('"inventory_number_snapshot"');
     expect(snapshot).toContain('"inventory_closed_at_snapshot"');
+  });
+
+  it("backfills the repack box invalidation source from the recorded cabinet corrections", () => {
+    const migration = readFileSync(
+      new URL("../migrations/0105_inventory_box_invalidation_source.sql", import.meta.url),
+      "utf8",
+    );
+    const snapshot = readFileSync(
+      new URL("../migrations/meta/0105_snapshot.json", import.meta.url),
+      "utf8",
+    );
+
+    expect(migration).toContain(
+      "CREATE TYPE \"public\".\"inventory_repack_invalidation_source\" AS ENUM('claim_lost', 'admin')",
+    );
+    expect(migration).toContain('ADD COLUMN "invalidation_source"');
+    // Rows that predate the column keep the distinction the cabinet already
+    // recorded: an `invalidate_box` correction means `admin`, anything else the
+    // reversible scan conflict.
+    expect(migration).toContain('"correction"."action" = \'invalidate_box\'');
+    expect(migration).toContain("THEN 'admin'");
+    expect(migration).toContain("ELSE 'claim_lost'");
+    expect(migration).toContain('WHERE "box"."state" = \'invalidated\'');
+    expect(migration.indexOf('UPDATE "inventory_repack_boxes"')).toBeLessThan(
+      migration.indexOf('ADD CONSTRAINT "inventory_repack_boxes_invalidation_source_check"'),
+    );
+    expect(snapshot).toContain('"invalidation_source"');
+    expect(snapshot).toContain('"inventory_repack_boxes_invalidation_source_check"');
   });
 });
 

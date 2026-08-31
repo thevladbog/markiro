@@ -26,6 +26,7 @@ import { ApiPairingCodeSecretResponse } from "../device-pairing/secret-response.
 import {
   signerAgentsOverviewOpenApiSchema,
   type IssueSignerPairingCodeResultDto,
+  type RequestSignerTokenRefreshResultDto,
   type SignerAgentsOverviewDto,
 } from "./dto";
 import { SignerAgentsService } from "./signer-agents.service";
@@ -68,6 +69,35 @@ export class SignerAgentsController {
     return result;
   }
 
+  @Post("token-refresh")
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: "Request an immediate True API token refresh" })
+  @ApiResponse({
+    status: 202,
+    description: "A refresh task was queued or was already pending.",
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["status"],
+      properties: { status: { type: "string", enum: ["queued", "already_pending"] } },
+    },
+  })
+  @ApiHttpErrors(401, 403, 409, 503)
+  @RequireSubscriptionWrite()
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE, CABINET_CAPABILITY.CREDENTIALS_MANAGE)
+  async requestTokenRefresh(
+    @Req() req: RequestWithTenant,
+  ): Promise<RequestSignerTokenRefreshResultDto> {
+    try {
+      const result = await this.service.requestTokenRefresh(req.tenantId!);
+      this.auditMutation(req, "chz_signer_token.refresh", null, "succeeded");
+      return result;
+    } catch (error) {
+      this.auditMutation(req, "chz_signer_token.refresh", null, "failed");
+      throw error;
+    }
+  }
+
   @Post(":id/revoke")
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: "Revoke a signer agent" })
@@ -91,7 +121,8 @@ export class SignerAgentsController {
 
   private auditMutation(
     req: RequestWithTenant,
-    action: "chz_signer_pairing_code.issue" | "chz_signer_agent.revoke",
+    action:
+      "chz_signer_pairing_code.issue" | "chz_signer_agent.revoke" | "chz_signer_token.refresh",
     resourceId: string | null,
     outcome: "succeeded" | "failed",
   ): void {

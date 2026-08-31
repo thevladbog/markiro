@@ -558,6 +558,45 @@ describe.skipIf(!databaseUrl)("inventory sync PostgreSQL facts", () => {
     );
   });
 
+  it("records an invalidation source for exactly the invalidated boxes", async () => {
+    await expectConstraintViolation(
+      `insert into inventory_repack_boxes
+         (tenant_id, inventory_id, new_sscc, owner_device_id, capacity, production_date,
+          state, print_state, invalidated_at, invalidation_source)
+       values ($1, $2, '046800899000000015', $3, 12, '2026-08-01', 'invalidated', 'not_ready',
+               now(), null)`,
+      [tenantId, inventoryId, deviceAId],
+    );
+    await expectConstraintViolation(
+      `insert into inventory_repack_boxes
+         (tenant_id, inventory_id, new_sscc, owner_device_id, capacity, production_date,
+          state, print_state, invalidation_source)
+       values ($1, $2, '046800899000000016', $3, 12, '2026-08-01', 'open', 'not_ready',
+               'claim_lost')`,
+      [tenantId, inventoryId, deviceAId],
+    );
+    await client.query(
+      `insert into inventory_repack_boxes
+         (tenant_id, inventory_id, new_sscc, owner_device_id, capacity, production_date,
+          state, print_state, invalidated_at, invalidation_source)
+       values ($1, $2, '046800899000000017', $3, 12, '2026-08-01', 'invalidated', 'not_ready',
+               now(), 'claim_lost'),
+              ($1, $2, '046800899000000018', $3, 12, '2026-08-01', 'invalidated', 'not_ready',
+               now(), 'admin')`,
+      [tenantId, inventoryId, deviceAId],
+    );
+    const sources = await client.query<{ new_sscc: string; invalidation_source: string }>(
+      `select new_sscc, invalidation_source from inventory_repack_boxes
+        where tenant_id = $1 and inventory_id = $2 and state = 'invalidated'
+        order by new_sscc`,
+      [tenantId, inventoryId],
+    );
+    expect(sources.rows).toEqual([
+      { new_sscc: "046800899000000017", invalidation_source: "claim_lost" },
+      { new_sscc: "046800899000000018", invalidation_source: "admin" },
+    ]);
+  });
+
   it("requires complete quarantine resolution evidence", async () => {
     await expectConstraintViolation(
       `insert into inventory_late_events

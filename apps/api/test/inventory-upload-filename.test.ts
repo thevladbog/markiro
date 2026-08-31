@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { AuthorizationGuard } from "../src/authorization/authorization.guard";
 import { InventoryCloseService } from "../src/modules/inventories/inventory-close.service";
+import { InventoryCorrectionBatchesService } from "../src/modules/inventories/inventory-correction-batches.service";
 import { InventoryCorrectionsService } from "../src/modules/inventories/inventory-corrections.service";
 import { InventoryDocumentsService } from "../src/modules/inventories/inventory-documents.service";
 import { InventoryLifecycleService } from "../src/modules/inventories/inventory-lifecycle.service";
@@ -39,6 +40,7 @@ describe("inventory import multipart filename", () => {
         { provide: InventoryLifecycleService, useValue: {} },
         { provide: InventoryReconciliationService, useValue: {} },
         { provide: InventoryCorrectionsService, useValue: {} },
+        { provide: InventoryCorrectionBatchesService, useValue: {} },
         { provide: InventoryCloseService, useValue: {} },
         { provide: InventoryDocumentsService, useValue: {} },
       ],

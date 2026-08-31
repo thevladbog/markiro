@@ -16,6 +16,25 @@ export function formatInventoryBoxIdentity(sscc: string, fallback: string): stri
   return parsed === null ? fallback : formatSsccHri(parsed);
 }
 
+/** Returns a validated canonical identity suitable for clipboard use. */
+export function formatInventoryEventCopyIdentity(
+  kind: InventoryEventKind,
+  rawPayload: string | null,
+): string | null {
+  if (rawPayload === null) return null;
+
+  if (kind === "item") {
+    try {
+      return canonicalizeKm(rawPayload).raw;
+    } catch {
+      return null;
+    }
+  }
+
+  const sscc = parseScannedSscc(rawPayload);
+  return sscc === null ? null : `00${sscc}`;
+}
+
 /** Converts retained scan evidence into a readable, non-secret admin identity. */
 export function formatInventoryEventIdentity(
   kind: InventoryEventKind,
