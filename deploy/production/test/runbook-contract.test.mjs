@@ -117,6 +117,20 @@ test("production deploy runbook requires key-only pinned SSH and ephemeral GHCR 
     assert.match(runbook + "\n" + secrets, new RegExp(escapeRegExp(value)));
 });
 
+test("production secrets runbook requires a protected CHZ token encryption key", async () => {
+  const runbook = await read("docs/runbooks/yandex-secrets.md");
+  for (const required of [
+    "CHZ_TOKEN_ENCRYPTION_KEY",
+    "32 байта",
+    "base64",
+    "новую версию Lockbox",
+    "все существующие записи",
+    "Предыдущую версию не удалять",
+    "не печатать",
+  ])
+    assert.match(runbook, new RegExp(escapeRegExp(required), "i"));
+});
+
 test("production runbooks keep API private and assign public TLS to direct Caddy", async () => {
   const runbook = await read("docs/runbooks/saas-production-deploy.md");
   assert.match(runbook, /Caddy слушает 80\/443 на VM/);
