@@ -56,6 +56,7 @@ let listMode: "ok" | "pending" | "error" = "ok";
 let pairingCodeExpiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
 
 const revokeSpy = vi.fn();
+const refreshTokenSpy = vi.fn();
 
 beforeEach(() => {
   agentsFixture = [];
@@ -63,6 +64,7 @@ beforeEach(() => {
   listMode = "ok";
   pairingCodeExpiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
   revokeSpy.mockClear();
+  refreshTokenSpy.mockClear();
 });
 
 const ADMIN_ACCESS: AccessDocument = {
@@ -95,6 +97,11 @@ function renderPanel(access: AccessDocument = ADMIN_ACCESS) {
 
     if (method === "POST" && path === "/signer-agents/pairing-code") {
       return jsonResponse(200, { code: "01234567", expiresAt: pairingCodeExpiresAt });
+    }
+
+    if (method === "POST" && path === "/signer-agents/token-refresh") {
+      refreshTokenSpy();
+      return jsonResponse(202, { status: "queued" });
     }
 
     const revokeMatch = /^\/signer-agents\/([^/]+)\/revoke$/.exec(path);
@@ -131,12 +138,60 @@ describe("SignerAgentsPanel", () => {
     expect(screen.getByText(/нет токена|no token/i)).toBeDefined();
   });
 
-  it("reveals a pairing code once after the button is pressed", async () => {
+  it("shows and copies the exact eight pairing digits", async () => {
+    const copySpy = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: copySpy } });
     renderPanel();
     await userEvent.click(
       await screen.findByRole("button", { name: /код привязки|pairing code/i }),
     );
-    expect(await screen.findByText(/0123\s?4567/)).toBeDefined();
+    const code = await screen.findByTestId("signer-pairing-code");
+    expect(code.textContent).toBe("01234567");
+
+    await userEvent.click(screen.getByRole("button", { name: /скопировать|copy/i }));
+    expect(copySpy).toHaveBeenCalledWith("01234567");
+  });
+
+  it("clears a previous copy error when a new pairing code is issued", async () => {
+    const copySpy = vi.fn().mockRejectedValue(new Error("Clipboard unavailable"));
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: copySpy } });
+    renderPanel();
+
+    const issueButton = await screen.findByRole("button", {
+      name: /код привязки|pairing code/i,
+    });
+    await userEvent.click(issueButton);
+    await userEvent.click(screen.getByRole("button", { name: /скопировать|copy/i }));
+    expect(
+      await screen.findByText(/не удалось скопировать код|could not copy the code/i),
+    ).toBeDefined();
+
+    await userEvent.click(issueButton);
+    await waitFor(() =>
+      expect(screen.queryByText(/не удалось скопировать код|could not copy the code/i)).toBeNull(),
+    );
+  });
+
+  it("lets an administrator request a True API token refresh", async () => {
+    agentsFixture = [agentFixture()];
+    renderPanel();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /обновить токен|refresh token/i }),
+    );
+
+    await waitFor(() => expect(refreshTokenSpy).toHaveBeenCalledOnce());
+    expect(await screen.findByText(/задача.*отправлена|task.*sent/i)).toBeDefined();
+    expect(
+      (
+        screen.getByRole("button", {
+          name: /обновить токен|refresh token/i,
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+
+    await userEvent.click(screen.getByRole("button", { name: /обновить токен|refresh token/i }));
+    expect(refreshTokenSpy).toHaveBeenCalledOnce();
   });
 
   it("пустое состояние объясняет, как подключить агента", async () => {
@@ -162,6 +217,7 @@ describe("SignerAgentsPanel", () => {
 
     expect(await screen.findByText("BUH-PC")).toBeDefined();
     expect(screen.queryByRole("button", { name: /код привязки/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /обновить токен/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /отозвать/i })).toBeNull();
     const download = screen.getByRole("link", { name: /скачать.*подписант.*windows/i });
     expect(download.getAttribute("href")).toBe("https://releases.markiro.app/signer/download");

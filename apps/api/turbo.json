@@ -14,7 +14,8 @@
         "SAAS_ADMIN_ORIGIN",
         "KIOSK_ORIGIN",
         "STATION_ORIGIN",
-        "PAIRING_CODE_PEPPER"
+        "PAIRING_CODE_PEPPER",
+        "CHZ_TOKEN_ENCRYPTION_KEY"
       ]
     }
   }

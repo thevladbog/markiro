@@ -12,6 +12,19 @@ describe("Pairing", () => {
     expect(onPair).toHaveBeenCalledWith("01234567");
   });
 
+  it("accepts a cabinet code pasted with a visual separator", async () => {
+    const onPair = vi.fn().mockResolvedValue({ ok: true, tenantName: "ООО Ромашка" });
+    const user = userEvent.setup();
+    render(<Pairing onPair={onPair} hostname="BUH-PC" />);
+
+    const input = screen.getByLabelText(/код привязки|pairing code/i);
+    await user.click(input);
+    await user.paste("0123 4567");
+    await user.click(screen.getByRole("button", { name: /привязать|pair/i }));
+
+    expect(onPair).toHaveBeenCalledWith("01234567");
+  });
+
   it("keeps the button disabled until the code is complete", async () => {
     const onPair = vi.fn();
     render(<Pairing onPair={onPair} hostname="BUH-PC" />);

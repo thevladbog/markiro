@@ -272,6 +272,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /shift-close-conflicts/:eventId/dismiss (StationShiftCloseController.dismiss)",
       "POST /signer-agents/:id/revoke (SignerAgentsController.revoke)",
       "POST /signer-agents/pairing-code (SignerAgentsController.issuePairingCode)",
+      "POST /signer-agents/token-refresh (SignerAgentsController.requestTokenRefresh)",
       "POST /station-devices (StationDevicesController.create)",
       "POST /station-devices/:id/pairing-code (StationDevicesController.issuePairingCode)",
       "POST /team/invitations (TeamController.createInvitation)",

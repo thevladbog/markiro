@@ -519,6 +519,17 @@ export function issueSignerPairingCode(): Promise<SignerPairingCodeResult> {
   });
 }
 
+export interface SignerTokenRefreshResult {
+  status: "queued" | "already_pending";
+}
+
+/** `POST /signer-agents/token-refresh` -- asks the paired agent to renew the tenant's True API token now instead of waiting for the next scheduler pass. */
+export function requestSignerTokenRefresh(): Promise<SignerTokenRefreshResult> {
+  return apiFetch<SignerTokenRefreshResult>("/signer-agents/token-refresh", {
+    method: "POST",
+  });
+}
+
 /** `POST /signer-agents/:id/revoke` -- revokes a paired agent (204, no body). Invalidates the overview so the revoked status and the newly-hidden revoke button both show up without a manual refetch. */
 export function useRevokeSignerAgent(): UseMutationResult<void, Error, string> {
   const queryClient = useQueryClient();

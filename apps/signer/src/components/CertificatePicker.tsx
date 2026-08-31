@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Select, Spinner } from "@markiro/ui";
+import { Alert, Button, Spinner } from "@markiro/ui";
 import { bridge, type CertificateSummary } from "../lib/bridge.js";
 
 const EXPIRY_WARNING_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
@@ -33,9 +33,13 @@ export function CertificatePicker({
   selected: string | null;
   onSelected: () => void;
 }): ReactElement {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [certificates, setCertificates] = useState<CertificateSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const dateFormatter = useMemo(
+    () => new Intl.DateTimeFormat(i18n.language, { dateStyle: "long" }),
+    [i18n.language],
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -60,32 +64,61 @@ export function CertificatePicker({
   const warning = chosen ? expiryWarning(chosen.notAfter) : null;
 
   return (
-    <div>
+    <div className="signer-certificate">
       {warning ? (
         <Alert tone={warning === "expired" ? "error" : "warn"}>
           {t(`certificates.${warning}`, {
-            at: new Date(chosen?.notAfter ?? "").toLocaleDateString(),
+            at: new Date(chosen?.notAfter ?? "").toLocaleDateString(i18n.language),
           })}
         </Alert>
       ) : null}
-      <Select
-        label={t("certificates.label")}
-        value={selected ?? ""}
-        onValueChange={(thumbprint) => {
-          if (thumbprint) void bridge.selectCertificate(thumbprint).then(onSelected);
-        }}
-        options={certificates.map((certificate) => ({
-          value: certificate.thumbprint,
-          label: `${certificate.subject} · ${new Date(certificate.notAfter).toLocaleDateString()}`,
-        }))}
-      />
-      <Button
-        onClick={() =>
-          void bridge.listCertificates().then((list) => setCertificates(usableCertificates(list)))
-        }
-      >
-        {t("certificates.refresh")}
-      </Button>
+      <fieldset className="signer-certificate__fieldset">
+        <legend className="signer-certificate__legend">{t("certificates.label")}</legend>
+        <div className="signer-certificate__options">
+          {certificates.map((certificate) => (
+            <label
+              key={certificate.thumbprint}
+              className="signer-certificate__option"
+              data-selected={certificate.thumbprint === selected}
+            >
+              <input
+                type="radio"
+                name="signer-certificate"
+                value={certificate.thumbprint}
+                checked={certificate.thumbprint === selected}
+                onChange={() =>
+                  void bridge.selectCertificate(certificate.thumbprint).then(onSelected)
+                }
+              />
+              <span className="signer-certificate__details">
+                <strong className="signer-certificate__subject">{certificate.subject}</strong>
+                <span className="signer-certificate__meta">
+                  <span>
+                    {t("certificates.validUntil", {
+                      at: dateFormatter.format(new Date(certificate.notAfter)),
+                    })}
+                  </span>
+                  {certificate.inn ? (
+                    <span>{t("certificates.inn", { inn: certificate.inn })}</span>
+                  ) : null}
+                  <span className="signer-certificate__thumbprint">
+                    {t("certificates.thumbprint", { thumbprint: certificate.thumbprint })}
+                  </span>
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <div>
+        <Button
+          onClick={() =>
+            void bridge.listCertificates().then((list) => setCertificates(usableCertificates(list)))
+          }
+        >
+          {t("certificates.refresh")}
+        </Button>
+      </div>
     </div>
   );
 }
