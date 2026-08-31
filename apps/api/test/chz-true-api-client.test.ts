@@ -12,7 +12,7 @@ function deps(fetchImpl: TrueApiClientDependencies["fetch"]): TrueApiClientDepen
 }
 
 describe("TrueApiClient", () => {
-  it("orders a filtered CIS report with the params object encoded as a string", async () => {
+  it("orders a filtered CIS report using the documented dispenser task contract", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const client = new TrueApiClient(
       deps(async (url, init) => {
@@ -34,13 +34,19 @@ describe("TrueApiClient", () => {
     expect(headers.get("Authorization")).toBe("Bearer t0ken");
 
     const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
-    expect(body.productGroupCode).toBe(8);
-    expect(body.periodicity).toBe("SINGLE");
+    expect(body).toEqual({
+      format: "CSV",
+      name: "FILTERED_CIS_REPORT",
+      periodicity: "SINGLE",
+      productGroupCode: "8",
+      params: expect.any(String),
+    });
     // `params` travels as a STRING, not a nested object -- this is the part of
     // the dispenser contract that is easy to get wrong and silent when wrong.
     expect(typeof body.params).toBe("string");
-    expect(JSON.parse(body.params as string)).toMatchObject({
+    expect(JSON.parse(body.params as string)).toEqual({
       participantInn: "7700000000",
+      packageType: ["UNIT"],
       status: "EMITTED",
       includeGtin: ["04600000000017"],
     });
