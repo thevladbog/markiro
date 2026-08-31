@@ -80,6 +80,15 @@ export type InventoryCodeClassification = (typeof INVENTORY_CODE_CLASSIFICATIONS
 export const INVENTORY_REPACK_BOX_STATES = ["open", "closed", "invalidated"] as const;
 export type InventoryRepackBoxState = (typeof INVENTORY_REPACK_BOX_STATES)[number];
 
+/**
+ * Why a repack box is invalidated. `claim_lost` is the reversible scan-conflict
+ * outcome an operator can undo from the terminal; `admin` is the irreversible
+ * cabinet correction. Mirrors `invalidation_source` in the station SQLite mirror.
+ */
+export const INVENTORY_REPACK_INVALIDATION_SOURCES = ["claim_lost", "admin"] as const;
+export type InventoryRepackInvalidationSource =
+  (typeof INVENTORY_REPACK_INVALIDATION_SOURCES)[number];
+
 export const INVENTORY_REPACK_PRINT_STATES = [
   "not_ready",
   "pending",
@@ -145,6 +154,10 @@ export const inventoryRepackBoxStateEnum = pgEnum(
 export const inventoryRepackPrintStateEnum = pgEnum(
   "inventory_repack_print_state",
   INVENTORY_REPACK_PRINT_STATES,
+);
+export const inventoryRepackInvalidationSourceEnum = pgEnum(
+  "inventory_repack_invalidation_source",
+  INVENTORY_REPACK_INVALIDATION_SOURCES,
 );
 export const inventoryCorrectionActionEnum = pgEnum(
   "inventory_correction_action",
@@ -1199,6 +1212,7 @@ export const inventoryRepackBoxes = pgTable(
     capacity: integer("capacity").notNull(),
     productionDate: date("production_date").notNull(),
     state: inventoryRepackBoxStateEnum("state").notNull().default("open"),
+    invalidationSource: inventoryRepackInvalidationSourceEnum("invalidation_source"),
     printState: inventoryRepackPrintStateEnum("print_state").notNull().default("not_ready"),
     printAttemptCount: integer("print_attempt_count").notNull().default(0),
     printErrorCode: text("print_error_code"),
@@ -1272,6 +1286,11 @@ export const inventoryRepackBoxes = pgTable(
       sql`(${table.state} = 'open' and ${table.closedAt} is null and ${table.invalidatedAt} is null)
         or (${table.state} = 'closed' and ${table.closedAt} is not null and ${table.invalidatedAt} is null)
         or (${table.state} = 'invalidated' and ${table.invalidatedAt} is not null)`,
+    ),
+    check(
+      "inventory_repack_boxes_invalidation_source_check",
+      sql`(${table.state} = 'invalidated' and ${table.invalidationSource} is not null)
+        or (${table.state} <> 'invalidated' and ${table.invalidationSource} is null)`,
     ),
     check(
       "inventory_repack_boxes_lifecycle_print_check",

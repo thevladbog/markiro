@@ -136,6 +136,14 @@ export const INVENTORY_REQUIRED_DISCREPANCY_CATEGORIES = [
 export type InventoryRequiredDiscrepancyCategory =
   (typeof INVENTORY_REQUIRED_DISCREPANCY_CATEGORIES)[number];
 
+/**
+ * Why a repack box is invalidated. `claim_lost` is the scan-conflict outcome the
+ * operator can still return to work from the terminal; `admin` is the irreversible
+ * `invalidate_box` correction made from the cabinet.
+ */
+export const INVENTORY_BOX_INVALIDATION_SOURCES = ["claim_lost", "admin"] as const;
+export type InventoryBoxInvalidationSource = (typeof INVENTORY_BOX_INVALIDATION_SOURCES)[number];
+
 export interface InventoryCloseBlockerDto {
   code: InventoryCloseBlockerCode;
   count: number;
@@ -143,6 +151,7 @@ export interface InventoryCloseBlockerDto {
   deviceId: string | null;
   boxId: string | null;
   discrepancyCategory: InventoryRequiredDiscrepancyCategory | null;
+  invalidationSource: InventoryBoxInvalidationSource | null;
 }
 
 export interface InventoryCloseDto {
@@ -470,6 +479,7 @@ export interface InventoryLiveBoxDto {
   terminalName: string;
   productionDate: string;
   state: "open" | "closed" | "invalidated";
+  invalidationSource: InventoryBoxInvalidationSource | null;
   printState: "not_ready" | "pending" | "printing" | "printed" | "failed";
   itemCount: number;
 }
@@ -1027,7 +1037,15 @@ export const completeInventoryOpenApiSchema: SchemaObject = {
 const inventoryCloseBlockerOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["code", "count", "participantId", "deviceId", "boxId", "discrepancyCategory"],
+  required: [
+    "code",
+    "count",
+    "participantId",
+    "deviceId",
+    "boxId",
+    "discrepancyCategory",
+    "invalidationSource",
+  ],
   properties: {
     code: { type: "string", enum: [...INVENTORY_CLOSE_BLOCKER_CODES] },
     count: { type: "integer", minimum: 1 },
@@ -1037,6 +1055,11 @@ const inventoryCloseBlockerOpenApiSchema: SchemaObject = {
     discrepancyCategory: {
       type: "string",
       enum: [...INVENTORY_REQUIRED_DISCREPANCY_CATEGORIES],
+      nullable: true,
+    },
+    invalidationSource: {
+      type: "string",
+      enum: [...INVENTORY_BOX_INVALIDATION_SOURCES],
       nullable: true,
     },
   },
@@ -1490,6 +1513,7 @@ const inventoryLiveBoxOpenApiSchema: SchemaObject = {
     "terminalName",
     "productionDate",
     "state",
+    "invalidationSource",
     "printState",
     "itemCount",
   ],
@@ -1500,6 +1524,11 @@ const inventoryLiveBoxOpenApiSchema: SchemaObject = {
     terminalName: { type: "string" },
     productionDate: dateSchema,
     state: { type: "string", enum: ["open", "closed", "invalidated"] },
+    invalidationSource: {
+      type: "string",
+      enum: [...INVENTORY_BOX_INVALIDATION_SOURCES],
+      nullable: true,
+    },
     printState: {
       type: "string",
       enum: ["not_ready", "pending", "printing", "printed", "failed"],

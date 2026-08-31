@@ -736,6 +736,13 @@
       "when": 1788120982502,
       "tag": "0104_inventory_correction_batches",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1788131610611,
+      "tag": "0105_inventory_box_invalidation_source",
+      "breakpoints": true
     }
   ]
 }

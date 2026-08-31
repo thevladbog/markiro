@@ -46,8 +46,12 @@ describe("loadLegalArtifacts", () => {
     expect(artifacts.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(16);
     expect(artifacts.filter(({ kind }) => kind === "template-docx")).toHaveLength(4);
     expect(artifacts.every(({ href }) => href.startsWith("/legal/files/"))).toBe(true);
-    expect(artifacts.every(({ fileName }) => /_2026\.08-01_(?:ru|en)\./.test(fileName))).toBe(true);
-    expect(artifacts.every(({ fileName }) => !fileName.includes("2026.08.01"))).toBe(true);
+    // One release train (2026.08) in the current dash-separated naming scheme;
+    // the sequence varies once a document is reissued (MKR-INS-07 is on 02).
+    expect(artifacts.every(({ fileName }) => /_2026\.08-\d{2}_(?:ru|en)\./.test(fileName))).toBe(
+      true,
+    );
+    expect(artifacts.every(({ fileName }) => !/_2026\.08\.\d{2}_/.test(fileName))).toBe(true);
   });
 
   it.each([

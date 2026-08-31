@@ -460,6 +460,7 @@ describe("inventory execution schema", () => {
       "repack_action",
     ]);
     expect(enumValues("inventoryRepackBoxStateEnum")).toEqual(["open", "closed", "invalidated"]);
+    expect(enumValues("inventoryRepackInvalidationSourceEnum")).toEqual(["claim_lost", "admin"]);
     expect(enumValues("inventoryRepackPrintStateEnum")).toEqual([
       "not_ready",
       "pending",
@@ -794,6 +795,14 @@ describe("inventory execution schema", () => {
       "\"origin_classification\" in ('expected', 'protected', 'ineligible')",
     );
     expect(snapshotOrigin).toContain('"snapshot_id" is not null');
+    const invalidationSource = checkExpression(
+      "inventoryRepackBoxes",
+      "inventory_repack_boxes_invalidation_source_check",
+    );
+    expect(invalidationSource).toContain("\"state\" = 'invalidated'");
+    expect(invalidationSource).toContain('"invalidation_source" is not null');
+    expect(invalidationSource).toContain("\"state\" <> 'invalidated'");
+    expect(invalidationSource).toContain('"invalidation_source" is null');
     const lifecyclePrint = checkExpression(
       "inventoryRepackBoxes",
       "inventory_repack_boxes_lifecycle_print_check",
@@ -1023,6 +1032,34 @@ describe("inventory document schema", () => {
     expect(snapshot).toContain('"organization_name_snapshot"');
     expect(snapshot).toContain('"inventory_number_snapshot"');
     expect(snapshot).toContain('"inventory_closed_at_snapshot"');
+  });
+
+  it("backfills the repack box invalidation source from the recorded cabinet corrections", () => {
+    const migration = readFileSync(
+      new URL("../migrations/0105_inventory_box_invalidation_source.sql", import.meta.url),
+      "utf8",
+    );
+    const snapshot = readFileSync(
+      new URL("../migrations/meta/0105_snapshot.json", import.meta.url),
+      "utf8",
+    );
+
+    expect(migration).toContain(
+      "CREATE TYPE \"public\".\"inventory_repack_invalidation_source\" AS ENUM('claim_lost', 'admin')",
+    );
+    expect(migration).toContain('ADD COLUMN "invalidation_source"');
+    // Rows that predate the column keep the distinction the cabinet already
+    // recorded: an `invalidate_box` correction means `admin`, anything else the
+    // reversible scan conflict.
+    expect(migration).toContain('"correction"."action" = \'invalidate_box\'');
+    expect(migration).toContain("THEN 'admin'");
+    expect(migration).toContain("ELSE 'claim_lost'");
+    expect(migration).toContain('WHERE "box"."state" = \'invalidated\'');
+    expect(migration.indexOf('UPDATE "inventory_repack_boxes"')).toBeLessThan(
+      migration.indexOf('ADD CONSTRAINT "inventory_repack_boxes_invalidation_source_check"'),
+    );
+    expect(snapshot).toContain('"invalidation_source"');
+    expect(snapshot).toContain('"inventory_repack_boxes_invalidation_source_check"');
   });
 });
 

@@ -207,7 +207,11 @@ export function InventoryLivePage({
                     <span className="mk-inventory-evidence-list__state">
                       <StatusChip
                         status={box.state === "invalidated" ? "error" : "info"}
-                        label={t(`pages.inventory.live.boxState.${box.state}`)}
+                        label={
+                          box.invalidationSource === null
+                            ? t(`pages.inventory.live.boxState.${box.state}`)
+                            : t(`pages.inventory.live.boxInvalidation.${box.invalidationSource}`)
+                        }
                       />
                       <small>
                         {t(`pages.inventory.live.printState.${box.printState}`)} ·{" "}

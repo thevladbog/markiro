@@ -23,6 +23,19 @@ const BLOCKER_KEYS: Record<InventoryCloseBlocker["code"], string> = {
   UNRESOLVED_DISCREPANCY: "discrepancies",
 };
 
+/**
+ * Invalidated boxes split by source: the cabinet's own `invalidate_box` correction
+ * blocks a safe close forever, while a scan conflict can still be undone from the
+ * terminal. The manager needs the difference to decide between calling the line and
+ * closing the inventory in emergency mode.
+ */
+function blockerKey(blocker: InventoryCloseBlocker): string {
+  if (blocker.code === "INVALIDATED_REPACK_BOX" && blocker.invalidationSource !== null) {
+    return `invalidated_${blocker.invalidationSource}`;
+  }
+  return BLOCKER_KEYS[blocker.code];
+}
+
 export function InventoryClosePanel({
   inventoryId,
   status,
@@ -177,10 +190,15 @@ export function InventoryClosePanel({
             <Alert tone="warn">{t("pages.inventory.close.blocked")}</Alert>
             <ul className="mk-inventory-close-blockers">
               {blockers.map((item) => (
-                <li key={`${item.code}:${item.discrepancyCategory ?? "all"}`}>
-                  {t(`pages.inventory.close.blocker.${BLOCKER_KEYS[item.code]}`, {
+                <li
+                  key={`${item.code}:${item.discrepancyCategory ?? item.invalidationSource ?? "all"}`}
+                >
+                  {t(`pages.inventory.close.blocker.${blockerKey(item)}`, {
                     count: item.count,
                   })}
+                  {item.code === "INVALIDATED_REPACK_BOX" && item.invalidationSource !== null ? (
+                    <small>{t(`pages.inventory.close.blockerHint.${blockerKey(item)}`)}</small>
+                  ) : null}
                 </li>
               ))}
             </ul>

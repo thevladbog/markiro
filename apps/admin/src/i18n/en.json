@@ -485,6 +485,10 @@
           "closed": "Closed",
           "invalidated": "Invalidated"
         },
+        "boxInvalidation": {
+          "claim_lost": "Invalidated (scan conflict)",
+          "admin": "Invalidated (from the cabinet)"
+        },
         "printState": {
           "not_ready": "Not ready to print",
           "pending": "Queued for printing",
@@ -543,8 +547,14 @@
           "participantBoxes": "Open boxes reported by stations: {{count}}",
           "openBoxes": "Open boxes: {{count}}",
           "invalidated": "Invalidated boxes: {{count}}",
+          "invalidated_claim_lost": "Boxes invalidated by a scan conflict: {{count}}",
+          "invalidated_admin": "Boxes invalidated from the cabinet: {{count}}",
           "unresolvedPrint": "Unfinished box printing: {{count}}",
           "discrepancies": "Required discrepancies without a decision: {{count}}"
+        },
+        "blockerHint": {
+          "invalidated_claim_lost": "The operator can return such a box to work from the terminal — the blocker clears once they do.",
+          "invalidated_admin": "«Invalidate box» cannot be undone: this blocker stays until an emergency close."
         }
       },
       "documents": {
