@@ -6,6 +6,7 @@ import { INVENTORY_CHZ_STATUSES, parseScannedSscc, type InventoryChzStatus } fro
 
 import { DB } from "../../auth/auth.module";
 import type {
+  InventoryBoxInvalidationSource,
   InventoryDiscrepancyCategory,
   InventoryDiscrepancyDto,
   InventoryDiscrepancyWinnerDto,
@@ -79,6 +80,7 @@ interface LiveBoxRow {
   terminalName: string;
   productionDate: string;
   state: "open" | "closed" | "invalidated";
+  invalidationSource: InventoryBoxInvalidationSource | null;
   printState: "not_ready" | "pending" | "printing" | "printed" | "failed";
   itemCount: number;
 }
@@ -243,6 +245,7 @@ export class InventoryReconciliationService {
           d.name as "terminalName",
           b.production_date as "productionDate",
           b.state::text as state,
+          b.invalidation_source::text as "invalidationSource",
           b.print_state::text as "printState",
           count(i.id) filter (where i.removed_at is null)::int as "itemCount"
         from inventory_repack_boxes b
@@ -779,6 +782,14 @@ function parseLiveBoxRow(value: unknown): InventoryLiveBoxDto {
   ) {
     throw new Error("Inventory box print state is invalid");
   }
+  const invalidationSource = readNullableString(record, "invalidationSource");
+  if (
+    invalidationSource !== null &&
+    invalidationSource !== "claim_lost" &&
+    invalidationSource !== "admin"
+  ) {
+    throw new Error("Inventory box invalidation source is invalid");
+  }
   return {
     id: readString(record, "id"),
     sscc: readString(record, "sscc"),
@@ -786,6 +797,7 @@ function parseLiveBoxRow(value: unknown): InventoryLiveBoxDto {
     terminalName: readString(record, "terminalName"),
     productionDate: readString(record, "productionDate"),
     state,
+    invalidationSource,
     printState,
     itemCount: readInteger(record, "itemCount"),
   };

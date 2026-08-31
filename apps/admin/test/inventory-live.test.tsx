@@ -79,11 +79,11 @@ const progress = {
   dateMismatchCount: 1,
   voidedCount: 0,
   oldBoxCount: 4,
-  newBoxCount: 2,
-  invalidatedBoxCount: 0,
+  newBoxCount: 3,
+  invalidatedBoxCount: 2,
   pendingEventCount: 3,
   openBoxCount: 1,
-  boxTotal: 1,
+  boxTotal: 3,
   boxesTruncated: false,
   verifiedBoxTotal: 1,
   verifiedBoxesTruncated: false,
@@ -130,8 +130,31 @@ const progress = {
       terminalName: "Станция упаковки № 1",
       productionDate: "2025-09-19",
       state: "open",
+      invalidationSource: null,
       printState: "not_ready",
       itemCount: 7,
+    },
+    {
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      sscc: "146000000000000029",
+      terminalId: "77777777-7777-4777-8777-777777777777",
+      terminalName: "Станция упаковки № 1",
+      productionDate: "2025-09-19",
+      state: "invalidated",
+      invalidationSource: "claim_lost",
+      printState: "not_ready",
+      itemCount: 0,
+    },
+    {
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      sscc: "146000000000000036",
+      terminalId: "77777777-7777-4777-8777-777777777777",
+      terminalName: "Станция упаковки № 1",
+      productionDate: "2025-09-19",
+      state: "invalidated",
+      invalidationSource: "admin",
+      printState: "not_ready",
+      itemCount: 3,
     },
   ],
   verifiedBoxes: [
@@ -297,8 +320,13 @@ it("shows new boxes only for repacking and translates duplicate verdicts", async
     expect(await screen.findByRole("heading", { name: "Новые короба" })).toBeDefined();
     expect(screen.queryByRole("heading", { name: "Проверенные короба" })).toBeNull();
     expect(screen.getByText("146000000000000012")).toBeDefined();
-    expect(screen.getByText(/Не готова к печати/)).toBeDefined();
+    expect(screen.getAllByText(/Не готова к печати/)).toHaveLength(3);
     expect(screen.getByText("Повторный скан")).toBeDefined();
+    // An invalidated box names the reason, because only the scan-conflict one can
+    // be returned to work from the terminal.
+    expect(screen.getByText("Аннулирован (конфликт сканов)")).toBeDefined();
+    expect(screen.getByText("Аннулирован (из кабинета)")).toBeDefined();
+    expect(screen.queryByText("Аннулирован")).toBeNull();
   } finally {
     repackDetail.mode = previous.mode;
     repackDetail.boxLabelTemplateId = previous.boxLabelTemplateId;

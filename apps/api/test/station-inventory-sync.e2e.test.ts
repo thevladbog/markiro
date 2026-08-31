@@ -1541,6 +1541,16 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         .where(eq(schema.inventoryRepackBoxes.id, foreignReservationBoxId)),
     ).toEqual([]);
 
+    expect(
+      await db
+        .select({
+          state: schema.inventoryRepackBoxes.state,
+          invalidationSource: schema.inventoryRepackBoxes.invalidationSource,
+        })
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.id, boxBId)),
+    ).toEqual([{ state: "invalidated", invalidationSource: "claim_lost" }]);
+
     const resolutionAt = "2026-08-25T12:00:04.500Z";
     const resolveConflict = repackEvent("b", {
       scannedAt: resolutionAt,
@@ -1573,10 +1583,13 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
     });
     expect(
       await db
-        .select({ state: schema.inventoryRepackBoxes.state })
+        .select({
+          state: schema.inventoryRepackBoxes.state,
+          invalidationSource: schema.inventoryRepackBoxes.invalidationSource,
+        })
         .from(schema.inventoryRepackBoxes)
         .where(eq(schema.inventoryRepackBoxes.id, boxBId)),
-    ).toEqual([{ state: "open" }]);
+    ).toEqual([{ state: "open", invalidationSource: null }]);
     expect(
       await db
         .select({ action: schema.tenantAuditEvents.action, after: schema.tenantAuditEvents.after })
@@ -1605,7 +1618,11 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
     const adminInvalidatedAt = "2026-08-25T12:00:04.700Z";
     await db
       .update(schema.inventoryRepackBoxes)
-      .set({ state: "invalidated", invalidatedAt: new Date(adminInvalidatedAt) })
+      .set({
+        state: "invalidated",
+        invalidationSource: "admin",
+        invalidatedAt: new Date(adminInvalidatedAt),
+      })
       .where(eq(schema.inventoryRepackBoxes.id, boxBId));
     await db.execute(sql`
       insert into inventory_corrections
@@ -1645,10 +1662,13 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
     );
     expect(
       await db
-        .select({ state: schema.inventoryRepackBoxes.state })
+        .select({
+          state: schema.inventoryRepackBoxes.state,
+          invalidationSource: schema.inventoryRepackBoxes.invalidationSource,
+        })
         .from(schema.inventoryRepackBoxes)
         .where(eq(schema.inventoryRepackBoxes.id, boxBId)),
-    ).toEqual([{ state: "invalidated" }]);
+    ).toEqual([{ state: "invalidated", invalidationSource: "admin" }]);
 
     const closedAt = "2026-08-25T12:00:05.000Z";
     const close = repackEvent("a", {
