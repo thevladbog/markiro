@@ -1888,6 +1888,12 @@ export const platformCommercialContracts = {
       response: billingActSchema,
     },
     document: billingActDocumentSchema,
+    documents: {
+      download: {
+        params: z.object({ actId: platformUuidSchema, documentId: documentIdSchema }).strict(),
+        response: commercialDocumentDownloadSchema,
+      },
+    },
   },
   payments: {
     list: { response: z.object({ items: z.array(billingPaymentSchema) }).strict() },

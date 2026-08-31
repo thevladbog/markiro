@@ -536,6 +536,9 @@
       "openRequest": "Open request",
       "openTenant": "Open tenant",
       "openInvoice": "Open invoice",
+      "downloadPdf": "Download PDF",
+      "downloadError": "Could not get the act PDF download link.",
+      "popupBlocked": "The browser blocked the PDF. Allow pop-ups and try again.",
       "loadError": "Could not load the act",
       "forbiddenTitle": "Act unavailable",
       "forbiddenBody": "Billing read permission is required to view the act."

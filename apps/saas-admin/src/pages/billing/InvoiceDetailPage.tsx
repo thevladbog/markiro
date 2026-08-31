@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router";
 import { Alert, Button, Checkbox, ConfirmDialog, SectionHeader, StatusChip } from "@markiro/ui";
-import { SIGNED_PRINT_SELLER_TAX_ID } from "@markiro/platform-contracts";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import {
   applyInvoice,
@@ -19,7 +18,6 @@ import {
 } from "./api.js";
 import { InvoiceFlowSteps, type FlowState } from "./InvoiceFlowSteps.js";
 import { invoiceStatusTone } from "./invoice-status.js";
-import { sellerTaxId } from "./seller-snapshot.js";
 
 const DOCUMENT_PENDING_TIMEOUT_MS = 5 * 60 * 1000;
 const DOCUMENT_REFRESH_INTERVAL_MS = 2_000;
@@ -187,7 +185,6 @@ export function InvoiceDetailPage() {
     );
   }
   const invoice = detail.data;
-  const signedPrintAllowed = sellerTaxId(invoice.sellerSnapshot) === SIGNED_PRINT_SELLER_TAX_ID;
   const state = flowState(invoice);
   const manualDecisionMissing = pendingLines.some(
     (line) =>
@@ -425,12 +422,8 @@ export function InvoiceDetailPage() {
             label={t("billing.documents.signed")}
             checked={withSignatureSeal}
             onCheckedChange={setWithSignatureSeal}
-            disabled={!signedPrintAllowed || issue.isPending || document.isPending}
-            hint={t(
-              signedPrintAllowed
-                ? "billing.documents.signedHint"
-                : "billing.documents.signedUnavailable",
-            )}
+            disabled={issue.isPending || document.isPending}
+            hint={t("billing.documents.signedHint")}
           />
         ) : null}
       </section>

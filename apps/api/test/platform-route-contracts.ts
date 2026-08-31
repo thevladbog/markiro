@@ -360,6 +360,12 @@ export const CURRENT_SAAS_ROUTES = [
     platformCommercialContracts.billingActs.cancel.response,
     { body: platformCommercialContracts.billingActs.cancel.body },
   ),
+  route(
+    "get",
+    "/platform/billing/acts/{id}/documents/{documentId}/download",
+    "200",
+    platformCommercialContracts.billingActs.documents.download.response,
+  ),
   route("get", "/platform/payments", "200", platformCommercialContracts.payments.list.response),
   route(
     "get",

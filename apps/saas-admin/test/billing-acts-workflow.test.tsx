@@ -153,6 +153,50 @@ describe("generated billing acts", () => {
     expect(screen.queryByText(INVOICE_ID)).toBeNull();
   });
 
+  it("downloads the ready act PDF from its detail page", async () => {
+    const documentUrl = "https://objects.example.test/acts/MRK-ACT-000021.pdf";
+    const target = { opener: {}, location: { replace: vi.fn() }, close: vi.fn() };
+    const requestedUrls: string[] = [];
+    vi.stubGlobal(
+      "open",
+      vi.fn(() => target),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        requestedUrls.push(url);
+        if (url.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (url.endsWith(`/api/platform/billing/acts/${ACT_ID}`)) {
+          return jsonResponse(200, { ...act("issued"), requestId: null });
+        }
+        if (url.endsWith(`/api/platform/invoices/${INVOICE_ID}`)) {
+          return jsonResponse(200, invoiceDetail);
+        }
+        if (
+          url.endsWith(
+            `/api/platform/billing/acts/${ACT_ID}/documents/71111111-1111-4111-8111-111111111121/download`,
+          )
+        ) {
+          return jsonResponse(200, { url: documentUrl });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    renderSaasApp({ initialEntry: `/billing-acts/${ACT_ID}` });
+    await user.click(await screen.findByRole("button", { name: "Скачать PDF" }));
+
+    await waitFor(() =>
+      expect(requestedUrls).toContain(
+        `/api/platform/billing/acts/${ACT_ID}/documents/71111111-1111-4111-8111-111111111121/download`,
+      ),
+    );
+    await waitFor(() => expect(target.location.replace).toHaveBeenCalledWith(documentUrl));
+    expect(target.opener).toBeNull();
+  });
+
   it("shows an acts registry with business labels and links", async () => {
     vi.stubGlobal(
       "fetch",
@@ -253,6 +297,43 @@ describe("generated billing acts", () => {
     await waitFor(() =>
       expect(requests.filter(({ url }) => url.endsWith("/issue"))).toHaveLength(1),
     );
+  });
+
+  it("allows choosing the signed form without duplicating the server seller check", async () => {
+    const invoiceWithAnotherSellerSnapshot = {
+      ...invoiceDetail,
+      sellerSnapshot: {
+        ...invoiceDetail.sellerSnapshot,
+        inn: "7700000000",
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (url.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (url.endsWith("/api/platform/invoices") && method === "GET") {
+          return jsonResponse(200, { items: [invoice] });
+        }
+        if (url.endsWith(`/api/platform/invoices/${INVOICE_ID}`) && method === "GET") {
+          return jsonResponse(200, invoiceWithAnotherSellerSnapshot);
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    renderSaasApp({ initialEntry: "/billing-acts/new" });
+    await user.click(await screen.findByRole("combobox", { name: "Счёт-основание" }));
+    await user.click(screen.getByRole("option", { name: /MRK-INV-000021/ }));
+
+    const signedPrint = await screen.findByRole("checkbox", {
+      name: "Добавить подпись и печать",
+    });
+    expect(signedPrint.hasAttribute("disabled")).toBe(false);
+    await user.click(signedPrint);
+    expect(signedPrint.getAttribute("aria-checked")).toBe("true");
   });
 
   it("retries generation with the same issue operation and does not create a second act", async () => {

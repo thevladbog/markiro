@@ -1674,5 +1674,19 @@ describe("platform commercial contracts", () => {
         objectKey: `tenant-billing/${TENANT_ID}/acts/redacted/redacted.pdf`,
       }).success,
     ).toBe(false);
+    expect(
+      platformCommercialContracts.billingActs.documents.download.params.parse({
+        actId: "87111111-1111-4111-8111-111111111119",
+        documentId: document.id,
+      }),
+    ).toEqual({
+      actId: "87111111-1111-4111-8111-111111111119",
+      documentId: document.id,
+    });
+    expect(
+      platformCommercialContracts.billingActs.documents.download.response.parse({
+        url: "https://objects.example.test/acts/document.pdf",
+      }),
+    ).toEqual({ url: "https://objects.example.test/acts/document.pdf" });
   });
 });

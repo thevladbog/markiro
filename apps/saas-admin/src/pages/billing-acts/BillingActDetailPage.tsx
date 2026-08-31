@@ -1,17 +1,19 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
-import { Alert, SectionHeader, Spinner, StatusChip } from "@markiro/ui";
+import { Alert, Button, SectionHeader, Spinner, StatusChip } from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { getBillingRequest } from "../billing-requests/api.js";
 import { getInvoice } from "../billing/api.js";
-import { getBillingAct } from "./api.js";
+import { getBillingAct, getBillingActDocumentDownload } from "./api.js";
 
 export function BillingActDetailPage() {
   const { t } = useTranslation();
   const principal = usePlatformPrincipal();
   const { actId } = useParams();
+  const [downloadBlocked, setDownloadBlocked] = useState(false);
   const detail = useQuery({
     queryKey: ["platform", "billing", "acts", actId],
     queryFn: () => getBillingAct(actId!),
@@ -26,6 +28,9 @@ export function BillingActDetailPage() {
     queryKey: ["platform", "billing", "requests", detail.data?.requestId],
     queryFn: () => getBillingRequest(detail.data!.requestId!),
     enabled: Boolean(detail.data?.requestId),
+  });
+  const downloadDocument = useMutation({
+    mutationFn: (documentId: string) => getBillingActDocumentDownload(actId!, documentId),
   });
 
   if (!principal.capabilities.includes("billing.read")) {
@@ -47,6 +52,19 @@ export function BillingActDetailPage() {
   }
 
   const act = detail.data;
+  const openDocument = (documentId: string) => {
+    setDownloadBlocked(false);
+    const target = window.open("about:blank", "_blank");
+    if (!target) {
+      setDownloadBlocked(true);
+      return;
+    }
+    target.opener = null;
+    void downloadDocument
+      .mutateAsync(documentId)
+      .then(({ url }) => target.location.replace(url))
+      .catch(() => target.close());
+  };
   return (
     <section className="catalog-page billing-act-detail">
       <SectionHeader
@@ -102,6 +120,24 @@ export function BillingActDetailPage() {
           <Link to={`/invoices/${act.invoiceId}`}>
             {invoice.data?.number ?? t("billingActs.detail.openInvoice")}
           </Link>
+        </div>
+      ) : null}
+      {downloadDocument.isError || downloadBlocked ? (
+        <Alert tone="error">
+          {downloadBlocked
+            ? t("billingActs.detail.popupBlocked")
+            : t("billingActs.detail.downloadError")}
+        </Alert>
+      ) : null}
+      {act.document?.state === "ready" ? (
+        <div className="billing-request-actions">
+          <Button
+            variant="secondary"
+            loading={downloadDocument.isPending}
+            onClick={() => openDocument(act.document!.id)}
+          >
+            {t("billingActs.detail.downloadPdf")}
+          </Button>
         </div>
       ) : null}
     </section>
