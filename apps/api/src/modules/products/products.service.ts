@@ -133,30 +133,31 @@ export class ProductsService {
     const status = this.computeStatus({ chzProductGroupCode, boxCapacity, palletCapacity });
 
     try {
-      const [row] = await this.db
-        .insert(schema.products)
-        .values({
-          tenantId,
-          gtin14,
-          name: data.name,
-          chzProductGroupCode,
-          boxCapacity,
-          palletCapacity,
-          status,
-          archived: data.archived ?? false,
-          defaultCounterpartyId: data.defaultCounterpartyId ?? null,
-          unitPrice: data.unitPrice ?? null,
-          printName: data.printName ?? null,
-          egaisCode: data.egaisCode ?? null,
-          shelfLifeDays: data.shelfLifeDays ?? null,
-          externalRef: data.externalRef ?? null,
-        })
-        .returning({ id: schema.products.id });
-
-      if (!row) {
-        throw new InternalServerErrorException("Failed to create product");
-      }
-      return this.getProduct(tenantId, row.id);
+      const productId = await this.db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(schema.products)
+          .values({
+            tenantId,
+            gtin14,
+            name: data.name,
+            chzProductGroupCode,
+            boxCapacity,
+            palletCapacity,
+            status,
+            archived: data.archived ?? false,
+            defaultCounterpartyId: data.defaultCounterpartyId ?? null,
+            unitPrice: data.unitPrice ?? null,
+            printName: data.printName ?? null,
+            egaisCode: data.egaisCode ?? null,
+            shelfLifeDays: data.shelfLifeDays ?? null,
+            externalRef: data.externalRef ?? null,
+          })
+          .returning({ id: schema.products.id });
+        if (!row) throw new InternalServerErrorException("Failed to create product");
+        await this.replaceLegacyEgaisCode(tx, tenantId, row.id, data.egaisCode ?? null);
+        return row.id;
+      });
+      return this.getProduct(tenantId, productId);
     } catch (error) {
       this.handleWriteError(error);
     }
@@ -218,6 +219,9 @@ export class ProductsService {
         if (!row) {
           throw new NotFoundException("Product not found or does not belong to this tenant");
         }
+        if (data.egaisCode !== undefined) {
+          await this.replaceLegacyEgaisCode(tx, tenantId, id, data.egaisCode);
+        }
         if (
           productGtinActuallyChanged(
             { tenantId, productId: id, gtin14: current.gtin14 },
@@ -231,6 +235,34 @@ export class ProductsService {
       return this.getProduct(tenantId, updatedId);
     } catch (error) {
       this.handleWriteError(error);
+    }
+  }
+
+  private async replaceLegacyEgaisCode(
+    tx: ProductAuditTx,
+    tenantId: string,
+    productId: string,
+    code: string | null,
+  ): Promise<void> {
+    if (code !== null && !/^\d{19}$/.test(code)) {
+      throw new BadRequestException({ code: "EGAIS_CODE_INVALID" });
+    }
+    await tx
+      .delete(schema.productEgaisCodes)
+      .where(
+        and(
+          eq(schema.productEgaisCodes.tenantId, tenantId),
+          eq(schema.productEgaisCodes.productId, productId),
+        ),
+      );
+    if (code !== null) {
+      await tx.insert(schema.productEgaisCodes).values({
+        tenantId,
+        productId,
+        code,
+        isPrimary: true,
+        source: "manual",
+      });
     }
   }
 

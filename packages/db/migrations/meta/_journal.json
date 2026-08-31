@@ -750,6 +750,13 @@
       "when": 1788174917121,
       "tag": "0106_product_active_gtin_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1788215240615,
+      "tag": "0107_product_regulatory_foundation",
+      "breakpoints": true
     }
   ]
 }
