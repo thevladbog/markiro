@@ -3,6 +3,23 @@ name: Yandex infrastructure
 on:
   pull_request:
     branches: [main]
+    paths:
+      - .github/workflows/yandex-infrastructure.yml
+      - .github/workflows/deploy-production.yml
+      - .github/workflows/deploy-vbtech-production.yml
+      - .npmrc
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - patches/**
+      - compose.production.yml
+      - deploy/production/**
+      - deploy/yandex/**
+      - infra/yandex/**
+      - docs/runbooks/saas-production-deploy.md
+      - docs/runbooks/yandex-*.md
+      - docs/superpowers/plans/2026-08-09-yandex-direct-vm-mvp.md
+      - docs/superpowers/specs/2026-08-09-yandex-direct-vm-mvp-design.md
   workflow_dispatch:
     inputs:
       mode:
@@ -71,8 +88,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: markiro-yandex-production-state
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('markiro-yandex-pr-{0}', github.event.pull_request.number) || 'markiro-yandex-production-state' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   TERRAFORM_VERSION: 1.15.8
