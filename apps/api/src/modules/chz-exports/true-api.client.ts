@@ -47,7 +47,7 @@ export class TrueApiClient {
     // and returns an unfiltered report.
     const params = JSON.stringify({
       participantInn: input.participantInn,
-      packageType: PACKAGE_TYPE,
+      packageType: [PACKAGE_TYPE],
       status: input.chzStatus,
       ...(input.gtins.length > 0 ? { includeGtin: input.gtins } : {}),
     });
@@ -58,9 +58,10 @@ export class TrueApiClient {
       {
         method: "POST",
         body: JSON.stringify({
-          reportId: "FILTERED_CIS_REPORT",
-          productGroupCode: input.productGroupCode,
+          format: "CSV",
+          name: "FILTERED_CIS_REPORT",
           periodicity: "SINGLE",
+          productGroupCode: String(input.productGroupCode),
           params,
         }),
       },
