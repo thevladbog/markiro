@@ -20,7 +20,49 @@ concurrency:
 # whole runner (and the only Postgres) to itself. The local full gate stays
 # `pnpm turbo lint typecheck test build --concurrency=1 --force`.
 jobs:
+  classify-changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.affected.outputs.full }}
+      verify_static: ${{ steps.affected.outputs.verify_static }}
+      verify_api_tests: ${{ steps.affected.outputs.verify_api_tests }}
+      verify_app_tests: ${{ steps.affected.outputs.verify_app_tests }}
+      tenant_team_infrastructure: ${{ steps.affected.outputs.tenant_team_infrastructure }}
+      production_bundle: ${{ steps.affected.outputs.production_bundle }}
+      station_rust: ${{ steps.affected.outputs.station_rust }}
+      station_windows_build: ${{ steps.affected.outputs.station_windows_build }}
+      signer_rust: ${{ steps.affected.outputs.signer_rust }}
+      signer_windows_build: ${{ steps.affected.outputs.signer_windows_build }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Classify changed files
+        id: affected
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            diff_file="$(mktemp)"
+            trap 'rm -f "$diff_file"' EXIT
+            if git diff --name-only --no-renames -z "$BASE_SHA" "$HEAD_SHA" > "$diff_file"; then
+              node tools/ci/affected.mjs --stdin-zero --github-output "$GITHUB_OUTPUT" < "$diff_file"
+            else
+              node tools/ci/affected.mjs --full --github-output "$GITHUB_OUTPUT"
+            fi
+          else
+            node tools/ci/affected.mjs --full --github-output "$GITHUB_OUTPUT"
+          fi
+
   verify-static:
+    needs: classify-changes
+    if: needs.classify-changes.outputs.verify_static == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -44,6 +86,8 @@ jobs:
       - run: pnpm turbo lint typecheck build --concurrency=1 --force
 
   verify-api-tests:
+    needs: classify-changes
+    if: needs.classify-changes.outputs.verify_api_tests == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -88,6 +132,8 @@ jobs:
       - run: pnpm turbo test --filter=@markiro/db --filter=@markiro/api --concurrency=1 --force
 
   verify-app-tests:
+    needs: classify-changes
+    if: needs.classify-changes.outputs.verify_app_tests == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -106,6 +152,8 @@ jobs:
       - run: pnpm turbo test --filter=!@markiro/db --filter=!@markiro/api --concurrency=1 --force
 
   tenant-team-infrastructure:
+    needs: classify-changes
+    if: needs.classify-changes.outputs.tenant_team_infrastructure == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
@@ -167,6 +215,8 @@ jobs:
         run: docker compose -f docker-compose.dev.yml down --volumes
 
   production-bundle:
+    needs: classify-changes
+    if: needs.classify-changes.outputs.production_bundle == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -332,6 +382,8 @@ jobs:
           -f deploy/production/compose.ci.yml down --volumes --remove-orphans
 
   station-rust:
+    needs: classify-changes
+    if: needs.classify-changes.outputs.station_rust == 'true'
     runs-on: ubuntu-latest
     # WebKit pulls a large dependency tree and GitHub's Azure apt mirror can
     # occasionally take more than 20 minutes to serve it before Rust even runs.
@@ -370,6 +422,8 @@ jobs:
           cargo test  --manifest-path apps/station/src-tauri/Cargo.toml
 
   station-windows-build:
+    needs: classify-changes
+    if: needs.classify-changes.outputs.station_windows_build == 'true'
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
@@ -394,6 +448,8 @@ jobs:
         run: pnpm --filter @markiro/station tauri build --debug --no-bundle
 
   signer-rust:
+    needs: classify-changes
+    if: needs.classify-changes.outputs.signer_rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -424,6 +480,8 @@ jobs:
           cargo test  --manifest-path apps/signer/Cargo.toml
 
   signer-windows-build:
+    needs: classify-changes
+    if: needs.classify-changes.outputs.signer_windows_build == 'true'
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
@@ -437,6 +495,7 @@ jobs:
           cache: pnpm
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
       - run: pnpm install --frozen-lockfile
+      - run: pnpm test:signer-release:contract
       - name: Build signer webview + workspace deps
         run: pnpm turbo build --filter '@markiro/signer...'
       # The CryptoAPI and DPAPI modules only compile on Windows, so this is the
@@ -445,3 +504,30 @@ jobs:
         run: cargo test --manifest-path apps/signer/Cargo.toml
       - name: Compile the Windows Tauri application
         run: pnpm --filter @markiro/signer tauri build --debug --no-bundle
+
+  ci-required:
+    needs:
+      - classify-changes
+      - verify-static
+      - verify-api-tests
+      - verify-app-tests
+      - tenant-team-infrastructure
+      - production-bundle
+      - station-rust
+      - station-windows-build
+      - signer-rust
+      - signer-windows-build
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Verify required CI results
+        env:
+          CI_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: node tools/ci/required-results.mjs --needs-env CI_NEEDS_JSON
