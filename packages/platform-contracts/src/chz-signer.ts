@@ -35,7 +35,13 @@ export const chzSignerTaskSchema = z
 
 export const chzSignerTaskCompleteSchema = z
   .object({
-    token: z.string().min(1).max(8192),
+    // True API still issues JWTs and does not publish a maximum token length.
+    // Keep a bounded value below Express's default JSON-body limit, but leave
+    // enough room for certificate-heavy JWT claims returned in production.
+    token: z
+      .string()
+      .min(1)
+      .max(64 * 1024),
     expiresAt: z.iso.datetime({ offset: true }),
     certThumbprint: z.string().trim().min(1).max(128),
     certSubject: z.string().trim().max(1000).optional(),

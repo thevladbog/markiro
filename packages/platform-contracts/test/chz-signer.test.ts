@@ -53,4 +53,14 @@ describe("chz-signer contracts", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("accepts a long True API JWT in a completion report", () => {
+    expect(
+      chzSignerTaskCompleteSchema.safeParse({
+        token: "x".repeat(16_384),
+        expiresAt: "2026-08-31T12:00:00.000Z",
+        certThumbprint: "AB12",
+      }).success,
+    ).toBe(true);
+  });
 });
