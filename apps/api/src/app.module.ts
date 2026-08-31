@@ -60,6 +60,7 @@ import { InventoriesModule } from "./modules/inventories/inventories.module";
 import { ChzExportsModule } from "./modules/chz-exports/chz-exports.module";
 import { ChzCodeStatusesModule } from "./modules/chz-code-statuses/chz-code-statuses.module";
 import { DashboardModule } from "./modules/dashboard/dashboard.module";
+import { ProductRegulatoryModule } from "./modules/product-regulatory/product-regulatory.module";
 
 @Module({})
 export class AppModule {
@@ -110,6 +111,7 @@ export class AppModule {
         OrgProfileModule,
         CounterpartiesModule,
         ProductsModule,
+        ProductRegulatoryModule,
         LinesModule,
         ShiftsModule,
         DashboardModule,
