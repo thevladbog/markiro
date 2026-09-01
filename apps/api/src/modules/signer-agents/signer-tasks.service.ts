@@ -123,8 +123,9 @@ export class SignerTasksService {
             eq(schema.chzSignerTasks.status, "claimed"),
           ),
         )
-        .returning({ id: schema.chzSignerTasks.id });
+        .returning({ id: schema.chzSignerTasks.id, payload: schema.chzSignerTasks.payload });
       if (!task) throw new NotFoundException();
+      const tokenType = chzTrueApiAuthPayloadSchema.parse(task.payload).tokenFormat ?? "jwt";
       await tx
         .insert(schema.chzApiTokens)
         .values({
@@ -132,6 +133,7 @@ export class SignerTasksService {
           encryptedToken: encrypted.encryptedToken,
           tokenNonce: encrypted.tokenNonce,
           tokenTag: encrypted.tokenTag,
+          tokenType,
           obtainedAt,
           expiresAt,
           agentId,
@@ -143,6 +145,7 @@ export class SignerTasksService {
             encryptedToken: encrypted.encryptedToken,
             tokenNonce: encrypted.tokenNonce,
             tokenTag: encrypted.tokenTag,
+            tokenType,
             obtainedAt,
             expiresAt,
             agentId,

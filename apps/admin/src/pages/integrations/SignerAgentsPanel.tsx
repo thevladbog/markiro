@@ -74,6 +74,7 @@ export function SignerAgentsPanel() {
   const [copyError, setCopyError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshRequest, setRefreshRequest] = useState<{
+    taskId: string;
     result: SignerTokenRefreshResult["status"];
     previousObtainedAt: string | null;
   } | null>(null);
@@ -86,12 +87,33 @@ export function SignerAgentsPanel() {
   );
 
   const hasActiveAgent = data?.agents.some((agent) => agent.status === "active") ?? false;
+  const refreshTaskOpen =
+    data?.refreshTask?.status === "pending" || data?.refreshTask?.status === "claimed";
+  const refreshTaskFailure =
+    data?.refreshTask?.status === "failed" || data?.refreshTask?.status === "expired"
+      ? data.refreshTask.errorMessage ||
+        t(`pages.integrations.channel.signer.task.${data.refreshTask.status}`)
+      : null;
 
   useEffect(() => {
-    if (!refreshRequest) return;
+    if (!refreshRequest && !refreshTaskOpen) return;
     const timer = window.setInterval(() => {
       void refetch().then((response) => {
+        if (!refreshRequest) return;
         const obtainedAt = response.data?.token.obtainedAt ?? null;
+        const task = response.data?.refreshTask;
+        if (
+          task?.id === refreshRequest.taskId &&
+          (task.status === "failed" || task.status === "expired")
+        ) {
+          setRefreshRequest(null);
+          return;
+        }
+        if (task?.id === refreshRequest.taskId && task.status === "completed") {
+          setRefreshRequest(null);
+          toast("ok", t("pages.integrations.channel.signer.refreshComplete"));
+          return;
+        }
         if (obtainedAt && obtainedAt !== refreshRequest.previousObtainedAt) {
           setRefreshRequest(null);
           toast("ok", t("pages.integrations.channel.signer.refreshComplete"));
@@ -99,7 +121,7 @@ export function SignerAgentsPanel() {
       });
     }, 5_000);
     return () => window.clearInterval(timer);
-  }, [refetch, refreshRequest, t]);
+  }, [refetch, refreshRequest, refreshTaskOpen, t]);
 
   const handleIssue = async () => {
     setIssuing(true);
@@ -135,6 +157,7 @@ export function SignerAgentsPanel() {
     try {
       const result = await requestSignerTokenRefresh();
       setRefreshRequest({
+        taskId: result.taskId,
         result: result.status,
         previousObtainedAt: data?.token.obtainedAt ?? null,
       });
@@ -278,7 +301,7 @@ export function SignerAgentsPanel() {
             <Button
               type="button"
               variant="secondary"
-              loading={refreshing || refreshRequest !== null}
+              loading={refreshing || refreshRequest !== null || refreshTaskOpen}
               onClick={() => void handleRefreshToken()}
             >
               {t("pages.integrations.channel.signer.refreshToken")}
@@ -286,11 +309,15 @@ export function SignerAgentsPanel() {
           ) : null}
         </div>
 
-        {refreshRequest ? (
+        {refreshRequest || refreshTaskOpen ? (
           <Alert tone="info">
-            {t(`pages.integrations.channel.signer.refresh.${refreshRequest.result}`)}
+            {t(
+              `pages.integrations.channel.signer.refresh.${refreshRequest?.result ?? "already_pending"}`,
+            )}
           </Alert>
         ) : null}
+
+        {refreshTaskFailure ? <Alert tone="error">{refreshTaskFailure}</Alert> : null}
 
         {canManage ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

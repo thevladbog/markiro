@@ -27,15 +27,16 @@ const productionEnv = {
 } satisfies NodeJS.ProcessEnv;
 
 describe("CHZ environment", () => {
-  it("keeps JWT as the safe default and only accepts the announced UUID mode explicitly", () => {
-    expect(loadEnv(productionEnv).CHZ_TRUE_API_TOKEN_FORMAT).toBe("jwt");
+  it("uses UUID tokens by default while retaining an explicit JWT rollback mode", () => {
+    expect(loadEnv(productionEnv).CHZ_TRUE_API_TOKEN_FORMAT).toBe("uuid");
     expect(
       loadEnv({ ...productionEnv, CHZ_TRUE_API_TOKEN_FORMAT: "uuid" }).CHZ_TRUE_API_TOKEN_FORMAT,
     ).toBe("uuid");
     expect(() => loadEnv({ ...productionEnv, CHZ_TRUE_API_TOKEN_FORMAT: "opaque" })).toThrow();
-    expect(loadChzTrueApiTokenFormat({})).toBe("jwt");
-    expect(loadChzTrueApiTokenFormat({ CHZ_TRUE_API_TOKEN_FORMAT: "" })).toBe("jwt");
+    expect(loadChzTrueApiTokenFormat({})).toBe("uuid");
+    expect(loadChzTrueApiTokenFormat({ CHZ_TRUE_API_TOKEN_FORMAT: "" })).toBe("uuid");
     expect(loadChzTrueApiTokenFormat({ CHZ_TRUE_API_TOKEN_FORMAT: "uuid" })).toBe("uuid");
+    expect(loadChzTrueApiTokenFormat({ CHZ_TRUE_API_TOKEN_FORMAT: "jwt" })).toBe("jwt");
   });
 
   it("boots production without CHZ_TOKEN_ENCRYPTION_KEY and treats blank value as unconfigured", () => {
