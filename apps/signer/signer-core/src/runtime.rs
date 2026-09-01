@@ -6,13 +6,13 @@
 //! attempts are exhausted, it is reported so the claim does not stay stuck
 //! until the cloud's 30-minute deadline.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::cloud::{CloudClient, PairError};
 use crate::contracts::{cap_cert_subject, SignerErrorCode, TaskComplete, TaskFail};
-use crate::journal::{redact, Journal, JournalEntry};
+use crate::journal::{redact, Journal, JournalEntry, JournalExportMetadata};
 use crate::signer::Signer;
 use crate::storage::{self, AgentConfig, SecretStore};
 use crate::trueapi::obtain_token;
@@ -111,13 +111,25 @@ impl Runtime {
         let http = reqwest::Client::builder()
             .build()
             .map_err(|e| SignerError::Network(e.to_string()))?;
+        let journal = match Journal::open(config_dir.join("journal")) {
+            Ok(journal) => journal,
+            Err(error) => {
+                tracing::warn!(%error, "could not open persistent signer journal");
+                let mut journal = Journal::default();
+                journal.append(JournalEntry::new(
+                    "Journal persistence unavailable",
+                    Some(&error.to_string()),
+                ));
+                journal
+            }
+        };
         Ok(Self {
             config_dir,
             signer,
             secrets,
             app_version,
             hostname: crate::hostname::resolve_hostname(),
-            journal: Mutex::new(Journal::default()),
+            journal: Mutex::new(journal),
             last_token_expires_at: Mutex::new(None),
             last_error: Mutex::new(None),
             http,
@@ -478,6 +490,20 @@ impl Runtime {
         storage::write_config(&self.config_dir, &config)
     }
 
+    pub fn export_journal(&self, destination: &Path) -> Result<(), SignerError> {
+        let config = self.config().unwrap_or_default();
+        let metadata = JournalExportMetadata {
+            app_version: self.app_version.clone(),
+            hostname: self.hostname.clone(),
+            tenant_name: config.tenant_name,
+        };
+        self.journal
+            .lock()
+            .map_err(|_| SignerError::Storage("journal lock is poisoned".into()))?
+            .export_zip(destination, &metadata)
+            .map_err(|error| SignerError::Storage(error.to_string()))
+    }
+
     async fn fail_with_retry(
         &self,
         client: &CloudClient,
@@ -631,6 +657,54 @@ mod tests {
         let (_dir, runtime) = test_runtime();
         runtime.select_certificate("AB12").unwrap();
         assert_eq!(runtime.config().unwrap().cert_thumbprint.as_deref(), Some("AB12"));
+    }
+
+    #[test]
+    fn journal_entries_survive_runtime_recreation() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let runtime = Runtime::new(
+                dir.path().to_path_buf(),
+                Arc::new(NoSigner),
+                Arc::new(PlainStore),
+                "0.1.0".into(),
+            )
+            .unwrap();
+            runtime.note("Agent started", Some("safe detail"));
+        }
+
+        let restarted = Runtime::new(
+            dir.path().to_path_buf(),
+            Arc::new(NoSigner),
+            Arc::new(PlainStore),
+            "0.1.0".into(),
+        )
+        .unwrap();
+
+        assert_eq!(restarted.status().journal.len(), 1);
+        assert_eq!(restarted.status().journal[0].message, "Agent started");
+    }
+
+    #[test]
+    fn runtime_exports_the_full_journal_with_agent_metadata() {
+        use std::io::Read as _;
+
+        let (dir, runtime) = test_runtime();
+        runtime.note("Agent started", None);
+        let destination = dir.path().join("export.zip");
+
+        runtime.export_journal(&destination).unwrap();
+
+        let file = std::fs::File::open(destination).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut metadata = String::new();
+        archive
+            .by_name("metadata.json")
+            .unwrap()
+            .read_to_string(&mut metadata)
+            .unwrap();
+        assert!(metadata.contains("0.1.0"));
+        assert!(metadata.contains(&runtime.status().hostname));
     }
 
     // --- F1: `status()` must reflect the real, current value of the two
