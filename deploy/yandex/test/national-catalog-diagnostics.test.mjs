@@ -60,12 +60,12 @@ function dependencies(outputs, commands = []) {
   };
 }
 
-test("hosted National Catalog diagnostic can execute only the active API CLI", async () => {
+test("hosted National Catalog diagnostic discovers the active API with shell-safe SSH arguments", async () => {
   const commands = [];
   const result = await runHostedNationalCatalogDiagnostics(
     HOSTED_ENVIRONMENT,
     dependencies(
-      ["a1b2c3d4e5f6\tapi\n", `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(EVIDENCE)}\n`],
+      ["a1b2c3d4e5f6\n", `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(EVIDENCE)}\n`],
       commands,
     ),
   );
@@ -73,17 +73,16 @@ test("hosted National Catalog diagnostic can execute only the active API CLI", a
   assert.deepEqual(result, EVIDENCE);
   assert.equal(commands.length, 2);
   assert.equal(commands[0].command, "ssh");
-  assert.deepEqual(commands[0].args.slice(-10), [
+  assert.deepEqual(commands[0].args.slice(-9), [
     "markiro-deploy@203.0.113.42",
     "sudo",
     "/usr/bin/docker",
     "ps",
+    "-q",
     "--filter",
     "label=com.docker.compose.project=markiro-production",
     "--filter",
     "label=com.docker.compose.service=api",
-    "--format",
-    '{{.ID}}\t{{.Label "com.docker.compose.service"}}',
   ]);
   assert.equal(commands[1].command, "ssh");
   assert.deepEqual(commands[1].args.slice(-8), [
@@ -99,11 +98,12 @@ test("hosted National Catalog diagnostic can execute only the active API CLI", a
   assert.equal(commands[1].options, undefined);
 });
 
-test("hosted National Catalog diagnostic rejects ambiguous containers and widened evidence", async () => {
+test("hosted National Catalog diagnostic rejects missing or ambiguous containers and widened evidence", async () => {
   for (const outputs of [
-    ["a1b2c3d4e5f6\tapi\nb1c2d3e4f5a6\tapi\n"],
+    [""],
+    ["a1b2c3d4e5f6\nb1c2d3e4f5a6\n"],
     [
-      "a1b2c3d4e5f6\tapi\n",
+      "a1b2c3d4e5f6\n",
       `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify({ ...EVIDENCE, token: "leak" })}\n`,
     ],
   ]) {
@@ -166,7 +166,7 @@ test("hosted National Catalog diagnostic rejects malformed or inconsistent evide
       () =>
         runHostedNationalCatalogDiagnostics(
           HOSTED_ENVIRONMENT,
-          dependencies(["a1b2c3d4e5f6\tapi\n", output]),
+          dependencies(["a1b2c3d4e5f6\n", output]),
         ),
       /National Catalog diagnostic response is invalid/,
     );
@@ -185,7 +185,7 @@ test("hosted National Catalog diagnostic accepts only the first failing check as
     const result = await runHostedNationalCatalogDiagnostics(
       HOSTED_ENVIRONMENT,
       dependencies([
-        "a1b2c3d4e5f6\tapi\n",
+        "a1b2c3d4e5f6\n",
         {
           exitCode: 1,
           stdout: `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(expected)}\n`,
@@ -210,7 +210,7 @@ test("hosted National Catalog diagnostic accepts a bounded source status without
     const result = await runHostedNationalCatalogDiagnostics(
       HOSTED_ENVIRONMENT,
       dependencies([
-        "a1b2c3d4e5f6\tapi\n",
+        "a1b2c3d4e5f6\n",
         {
           exitCode: 1,
           stdout: `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(expected)}\n`,
@@ -230,7 +230,7 @@ test("hosted National Catalog diagnostic preserves bounded evidence from remote 
   };
   const commands = [];
   const result = await runHostedNationalCatalogDiagnostics(HOSTED_ENVIRONMENT, {
-    ...dependencies(["a1b2c3d4e5f6\tapi\n"], commands),
+    ...dependencies(["a1b2c3d4e5f6\n"], commands),
     runDiagnostic: async (command, args, options) => {
       commands.push({ command, args, options });
       return {
@@ -276,7 +276,7 @@ test("hosted National Catalog diagnostic rejects widened or inconsistent remote 
       () =>
         runHostedNationalCatalogDiagnostics(
           HOSTED_ENVIRONMENT,
-          dependencies(["a1b2c3d4e5f6\tapi\n", execution]),
+          dependencies(["a1b2c3d4e5f6\n", execution]),
         ),
       /National Catalog diagnostic response is invalid/,
     );
@@ -330,7 +330,7 @@ test("hosted National Catalog CLI classifies the boundary that lost API evidence
     },
     {
       name: "API CLI transport",
-      outputs: ["a1b2c3d4e5f6\tapi\n"],
+      outputs: ["a1b2c3d4e5f6\n"],
       runDiagnostic: async () => {
         throw new Error("private SSH or Docker detail");
       },
@@ -338,12 +338,12 @@ test("hosted National Catalog CLI classifies the boundary that lost API evidence
     },
     {
       name: "missing API evidence",
-      outputs: ["a1b2c3d4e5f6\tapi\n", { exitCode: 1, stdout: "" }],
+      outputs: ["a1b2c3d4e5f6\n", { exitCode: 1, stdout: "" }],
       stage: "api-cli-evidence-missing",
     },
     {
       name: "invalid API evidence",
-      outputs: ["a1b2c3d4e5f6\tapi\n", { exitCode: 1, stdout: "private malformed evidence\n" }],
+      outputs: ["a1b2c3d4e5f6\n", { exitCode: 1, stdout: "private malformed evidence\n" }],
       stage: "api-cli-evidence-invalid",
     },
   ]) {
@@ -438,7 +438,7 @@ test("hosted National Catalog CLI classifies remaining host stages and preserves
       name: "unexpected API CLI exit",
       environment: HOSTED_ENVIRONMENT,
       supplied: dependencies([
-        "a1b2c3d4e5f6\tapi\n",
+        "a1b2c3d4e5f6\n",
         { exitCode: 2, stdout: "private ignored output\n" },
       ]),
       stage: "api-cli-exit",
@@ -447,7 +447,7 @@ test("hosted National Catalog CLI classifies remaining host stages and preserves
       name: "API CLI exit mismatch",
       environment: HOSTED_ENVIRONMENT,
       supplied: dependencies([
-        "a1b2c3d4e5f6\tapi\n",
+        "a1b2c3d4e5f6\n",
         {
           exitCode: 0,
           stdout: `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(refused)}\n`,
@@ -460,7 +460,7 @@ test("hosted National Catalog CLI classifies remaining host stages and preserves
       environment: HOSTED_ENVIRONMENT,
       supplied: {
         ...dependencies([
-          "a1b2c3d4e5f6\tapi\n",
+          "a1b2c3d4e5f6\n",
           `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(EVIDENCE)}\n`,
         ]),
         rm: async () => {
