@@ -17,7 +17,7 @@ not require a `304`: that behavior is not documented for those methods.
 Record outside source control:
 
 - tenant identity selected as `NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID`;
-- the owner's confirmation that the tenant's current GISMТ token may perform
+- the owner's confirmation that the tenant's current GIS MT token may perform
   these reads, including the role/right evidence for categories, attributes,
   own-card, and published-card access;
 - a known GTIN that is safe to use as `NATIONAL_CATALOG_LIVE_GTIN`;
