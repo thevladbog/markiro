@@ -181,6 +181,7 @@ export async function verifyPreparedSignerRelease({ directory, version }) {
     }
     hashes[name] = actualHash;
   }
+  hashes[CHECKSUM_FILE] = sha256(bytes[CHECKSUM_FILE]);
 
   return {
     directory,

@@ -1,4 +1,4 @@
-import { CopyObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { CopyObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
 
 import { signerArtifactNames } from "./version.mjs";
@@ -11,7 +11,9 @@ export const SIGNER_PUBLIC_BASE_URL = "https://releases.markiro.app";
 const YANDEX_S3_ENDPOINT = "https://storage.yandexcloud.net";
 const INSTALLER_CONTENT_TYPE = "application/vnd.microsoft.portable-executable";
 const MUTABLE_CACHE_CONTROL = "public, max-age=0, must-revalidate";
+const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const SOURCE_KEY_METADATA = "signer-source-key";
+const SHA256_METADATA = "signer-sha256";
 
 /**
  * The signer shares a bucket with the Station's releases, so every key goes
@@ -54,6 +56,16 @@ export function createSignerObjectStore({ env = process.env, Client = S3Client }
   });
   return {
     bucket,
+    head: (key) => headSignerObject({ client, bucket, key }),
+    putImmutable: (key, body, contentType, expectedSha256) =>
+      putSignerImmutableObject({
+        client,
+        bucket,
+        key,
+        body,
+        contentType,
+        expectedSha256,
+      }),
     put: (key, body, contentType) => putSignerObject({ client, bucket, key, body, contentType }),
     copyInstallerToDownload: ({ immutableKey, attachmentFilename }) =>
       copySignerInstallerToDownload({
@@ -63,6 +75,46 @@ export function createSignerObjectStore({ env = process.env, Client = S3Client }
         attachmentFilename,
       }),
   };
+}
+
+export async function headSignerObject({ client, bucket, key }) {
+  assertSignerKey(key);
+  try {
+    const response = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    const value = response.Metadata?.[SHA256_METADATA];
+    if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) {
+      throw new Error(`immutable signer object has no trusted checksum metadata: ${key}`);
+    }
+    return value;
+  } catch (error) {
+    if (error?.name === "NotFound" || error?.$metadata?.httpStatusCode === 404) return null;
+    throw error;
+  }
+}
+
+export async function putSignerImmutableObject({
+  client,
+  bucket,
+  key,
+  body,
+  contentType,
+  expectedSha256,
+}) {
+  assertSignerKey(key);
+  const actualSha256 = createHash("sha256").update(body).digest("hex");
+  if (actualSha256 !== expectedSha256) {
+    throw new Error(`immutable signer checksum does not match bytes: ${key}`);
+  }
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+      CacheControl: IMMUTABLE_CACHE_CONTROL,
+      Metadata: { [SHA256_METADATA]: expectedSha256 },
+    }),
+  );
 }
 
 export async function putSignerObject({ client, bucket, key, body, contentType }) {
