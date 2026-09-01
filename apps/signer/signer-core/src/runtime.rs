@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::cloud::{CloudClient, PairError};
 use crate::contracts::{cap_cert_subject, SignerErrorCode, TaskComplete, TaskFail};
@@ -19,6 +19,7 @@ use crate::trueapi::obtain_token;
 use crate::SignerError;
 
 const POLL_WAIT_MS: u32 = 25_000;
+const POLL_OUTAGE_GRACE: Duration = Duration::from_secs(5 * 60);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 const REPORT_ATTEMPTS: u32 = 3;
 
@@ -27,6 +28,8 @@ const REPORT_ATTEMPTS: u32 = 3;
 pub enum AgentPhase {
     Unpaired,
     Idle,
+    Reconnecting,
+    Unavailable,
     Working,
     Degraded,
 }
@@ -35,6 +38,7 @@ pub enum AgentPhase {
 #[serde(rename_all = "camelCase")]
 pub struct AgentStatus {
     pub phase: AgentPhase,
+    pub app_version: String,
     /// The resolved machine name (never read from the webview — see
     /// `crate::hostname`), so the pairing screen can show it before pairing
     /// and it stays correct even if the operating system's idea of the
@@ -73,6 +77,53 @@ pub fn backoff_for(attempt: u32) -> Duration {
     Duration::from_secs(seconds).min(MAX_BACKOFF)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PollTransition {
+    Started,
+    Retrying,
+    BecameUnavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PollRecovery {
+    duration: Duration,
+    attempts: u32,
+}
+
+#[derive(Debug, Default)]
+struct PollIncident {
+    started_at: Option<Instant>,
+    attempts: u32,
+    unavailable_emitted: bool,
+}
+
+impl PollIncident {
+    fn record_failure(&mut self, now: Instant) -> PollTransition {
+        self.attempts = self.attempts.saturating_add(1);
+        let Some(started_at) = self.started_at else {
+            self.started_at = Some(now);
+            return PollTransition::Started;
+        };
+        if !self.unavailable_emitted
+            && now.saturating_duration_since(started_at) >= POLL_OUTAGE_GRACE
+        {
+            self.unavailable_emitted = true;
+            return PollTransition::BecameUnavailable;
+        }
+        PollTransition::Retrying
+    }
+
+    fn recover(&mut self, now: Instant) -> Option<PollRecovery> {
+        let started_at = self.started_at?;
+        let recovery = PollRecovery {
+            duration: now.saturating_duration_since(started_at),
+            attempts: self.attempts,
+        };
+        *self = Self::default();
+        Some(recovery)
+    }
+}
+
 pub struct Runtime {
     config_dir: PathBuf,
     signer: Arc<dyn Signer>,
@@ -84,6 +135,7 @@ pub struct Runtime {
     /// `tauri.localhost`, not the PC name.
     hostname: String,
     journal: Mutex<Journal>,
+    phase: Mutex<AgentPhase>,
     /// The two pieces of `AgentStatus` that do not derive from
     /// `AgentConfig` on disk: `status()` used to hard-code both to `None`
     /// and rely on call sites patching a freshly built `AgentStatus`, which
@@ -123,6 +175,10 @@ impl Runtime {
                 journal
             }
         };
+        let phase = match storage::read_config(&config_dir) {
+            Ok(config) if config.is_paired() => AgentPhase::Idle,
+            _ => AgentPhase::Unpaired,
+        };
         Ok(Self {
             config_dir,
             signer,
@@ -130,6 +186,7 @@ impl Runtime {
             app_version,
             hostname: crate::hostname::resolve_hostname(),
             journal: Mutex::new(journal),
+            phase: Mutex::new(phase),
             last_token_expires_at: Mutex::new(None),
             last_error: Mutex::new(None),
             http,
@@ -156,6 +213,12 @@ impl Runtime {
         }
     }
 
+    fn set_phase(&self, phase: AgentPhase) {
+        if let Ok(mut guard) = self.phase.lock() {
+            *guard = phase;
+        }
+    }
+
     pub fn config(&self) -> Result<AgentConfig, SignerError> {
         storage::read_config(&self.config_dir)
     }
@@ -176,7 +239,12 @@ impl Runtime {
     pub fn status(&self) -> AgentStatus {
         let config = self.config().unwrap_or_default();
         AgentStatus {
-            phase: if config.is_paired() { AgentPhase::Idle } else { AgentPhase::Unpaired },
+            phase: if config.is_paired() {
+                self.phase.lock().map(|phase| *phase).unwrap_or(AgentPhase::Degraded)
+            } else {
+                AgentPhase::Unpaired
+            },
+            app_version: self.app_version.clone(),
             hostname: self.hostname.clone(),
             tenant_name: config.tenant_name,
             cert_thumbprint: config.cert_thumbprint,
@@ -212,6 +280,7 @@ impl Runtime {
             },
         )
         .map_err(|e| PairError::Network(e.to_string()))?;
+        self.set_phase(AgentPhase::Idle);
         self.note("Agent paired", Some(&paired.tenant_name));
         Ok(paired.tenant_name)
     }
@@ -222,6 +291,7 @@ impl Runtime {
         storage::clear_credential(&self.config_dir)?;
         self.set_last_token_expires_at(None);
         self.set_last_error(None);
+        self.set_phase(AgentPhase::Unpaired);
         self.note("Agent unpaired", None);
         Ok(())
     }
@@ -231,6 +301,7 @@ impl Runtime {
         F: Fn(AgentStatus) + Send + Sync + 'static,
     {
         let mut failures: u32 = 0;
+        let mut poll_incident = PollIncident::default();
         loop {
             let config = match self.config() {
                 Ok(config) => config,
@@ -283,20 +354,20 @@ impl Runtime {
 
             match client.poll(&secret, POLL_WAIT_MS).await {
                 Ok(None) => {
-                    // A poll that answers is proof the previous failure is over.
-                    // Without this the status panel keeps showing the old error
-                    // under a healthy phase until the next token lands, which
-                    // can be ten hours away.
                     failures = 0;
-                    self.set_last_error(None);
-                    on_change(self.status());
+                    if self.finish_poll_incident(&mut poll_incident, Instant::now()) {
+                        self.set_phase(AgentPhase::Idle);
+                        on_change(self.status());
+                    }
                 }
                 Ok(Some(task)) => {
                     failures = 0;
+                    self.finish_poll_incident(&mut poll_incident, Instant::now());
                     self.note("Task received", Some(&task.id));
                     self.execute(&client, &secret, &task, &on_change).await;
                 }
                 Err(SignerError::Revoked) => {
+                    self.finish_poll_incident(&mut poll_incident, Instant::now());
                     self.note("The cabinet revoked this agent", None);
                     if let Err(unpair_error) = self.unpair() {
                         // Same busy-spin hazard as above: if the write fails,
@@ -310,7 +381,30 @@ impl Runtime {
                     tokio::time::sleep(backoff_for(failures)).await;
                     failures = failures.saturating_add(1);
                 }
+                Err(error @ SignerError::Network(_)) => {
+                    match poll_incident.record_failure(Instant::now()) {
+                        PollTransition::Started => {
+                            self.note("Connection interrupted; reconnecting", None);
+                            self.set_last_error(None);
+                            self.set_phase(AgentPhase::Reconnecting);
+                            on_change(self.status());
+                        }
+                        PollTransition::Retrying => {}
+                        PollTransition::BecameUnavailable => {
+                            self.note(
+                                "Cloud unavailable for five minutes",
+                                Some(&error.to_string()),
+                            );
+                            self.set_last_error(Some(error.to_string()));
+                            self.set_phase(AgentPhase::Unavailable);
+                            on_change(self.status());
+                        }
+                    }
+                    tokio::time::sleep(backoff_for(failures)).await;
+                    failures = failures.saturating_add(1);
+                }
                 Err(error) => {
+                    self.finish_poll_incident(&mut poll_incident, Instant::now());
                     self.note("Poll failed", Some(&error.to_string()));
                     // Emit the Degraded status before sleeping through the
                     // backoff, not after: the sleep can run for up to
@@ -318,14 +412,27 @@ impl Runtime {
                     // returns would leave the UI showing nothing wrong for
                     // that whole window after a failure.
                     self.set_last_error(Some(error.to_string()));
-                    let mut status = self.status();
-                    status.phase = AgentPhase::Degraded;
-                    on_change(status);
+                    self.set_phase(AgentPhase::Degraded);
+                    on_change(self.status());
                     tokio::time::sleep(backoff_for(failures)).await;
                     failures = failures.saturating_add(1);
                 }
             }
         }
+    }
+
+    fn finish_poll_incident(&self, incident: &mut PollIncident, now: Instant) -> bool {
+        let Some(recovery) = incident.recover(now) else {
+            return false;
+        };
+        let detail = format!(
+            "after {} seconds and {} attempts",
+            recovery.duration.as_secs(),
+            recovery.attempts
+        );
+        self.note("Connection restored", Some(&detail));
+        self.set_last_error(None);
+        true
     }
 
     async fn execute<F>(
@@ -337,9 +444,8 @@ impl Runtime {
     ) where
         F: Fn(AgentStatus) + Send + Sync + 'static,
     {
-        let mut status = self.status();
-        status.phase = AgentPhase::Working;
-        on_change(status);
+        self.set_phase(AgentPhase::Working);
+        on_change(self.status());
 
         // Re-read rather than trusting a snapshot taken before the poll that
         // just returned this task: that poll can hold for up to
@@ -358,6 +464,8 @@ impl Runtime {
                 self.note_report_failure("Could not report the missing certificate", &error);
             }
             self.note("No certificate selected", None);
+            self.set_phase(AgentPhase::Degraded);
+            on_change(self.status());
             return;
         };
 
@@ -442,14 +550,14 @@ impl Runtime {
                         self.note("True API token delivered", None);
                         self.set_last_token_expires_at(Some(token.expires_at));
                         self.set_last_error(None);
+                        self.set_phase(AgentPhase::Idle);
                         on_change(self.status());
                     }
                     Err(error) => {
                         self.note_report_failure("Could not report the token", &error);
                         self.set_last_error(Some(error.to_string()));
-                        let mut status = self.status();
-                        status.phase = AgentPhase::Degraded;
-                        on_change(status);
+                        self.set_phase(AgentPhase::Degraded);
+                        on_change(self.status());
                     }
                 }
             }
@@ -464,9 +572,8 @@ impl Runtime {
                     }
                 }
                 self.set_last_error(Some(error.to_string()));
-                let mut status = self.status();
-                status.phase = AgentPhase::Degraded;
-                on_change(status);
+                self.set_phase(AgentPhase::Degraded);
+                on_change(self.status());
             }
         }
     }
@@ -636,6 +743,63 @@ mod tests {
         assert_eq!(backoff_for(1).as_secs(), 4);
         assert_eq!(backoff_for(2).as_secs(), 8);
         assert_eq!(backoff_for(10).as_secs(), 60, "must be capped so a recovered link is picked up promptly");
+    }
+
+    #[test]
+    fn poll_incident_emits_only_at_start_and_after_the_grace_period() {
+        let started_at = Instant::now();
+        let mut incident = PollIncident::default();
+
+        assert_eq!(incident.record_failure(started_at), PollTransition::Started);
+        assert_eq!(incident.attempts, 1);
+        assert_eq!(
+            incident.record_failure(started_at + POLL_OUTAGE_GRACE - Duration::from_secs(1)),
+            PollTransition::Retrying
+        );
+        assert_eq!(
+            incident.record_failure(started_at + POLL_OUTAGE_GRACE),
+            PollTransition::BecameUnavailable
+        );
+        assert_eq!(
+            incident.record_failure(started_at + POLL_OUTAGE_GRACE + Duration::from_secs(30)),
+            PollTransition::Retrying,
+            "the unavailable transition must not be emitted repeatedly"
+        );
+        assert_eq!(incident.attempts, 4);
+    }
+
+    #[test]
+    fn poll_incident_recovers_once_with_duration_and_attempts() {
+        let started_at = Instant::now();
+        let mut incident = PollIncident::default();
+        incident.record_failure(started_at);
+        incident.record_failure(started_at + Duration::from_secs(20));
+
+        let recovery = incident
+            .recover(started_at + Duration::from_secs(45))
+            .expect("an active incident must recover");
+        assert_eq!(recovery.duration, Duration::from_secs(45));
+        assert_eq!(recovery.attempts, 2);
+        assert_eq!(incident.recover(started_at + Duration::from_secs(46)), None);
+    }
+
+    #[test]
+    fn status_keeps_the_runtime_phase_and_exposes_the_installed_version() {
+        let (dir, runtime) = test_runtime();
+        storage::write_config(
+            dir.path(),
+            &AgentConfig {
+                server_url: Some("https://admin.markiro.app".into()),
+                agent_secret_protected: Some("protected".into()),
+                ..AgentConfig::default()
+            },
+        )
+        .unwrap();
+        runtime.set_phase(AgentPhase::Reconnecting);
+        let status = runtime.status();
+
+        assert_eq!(status.phase, AgentPhase::Reconnecting);
+        assert_eq!(status.app_version, "0.1.0");
     }
 
     #[test]
