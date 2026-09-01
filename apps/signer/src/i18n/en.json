@@ -23,12 +23,19 @@
     "noToken": "No token received yet",
     "unpair": "Unpair the agent"
   },
+  "tabs": {
+    "label": "Signer sections",
+    "status": "Status",
+    "journal": "Journal"
+  },
   "certificates": {
     "label": "Certificate for signing",
     "loading": "Reading the certificate store…",
     "empty": "No GOST certificate with a private key was found. Check that CryptoPro is installed and the token is plugged in.",
     "unavailable": "Could not read the certificate store.",
     "refresh": "Refresh list",
+    "chooseAnother": "Choose another",
+    "cancel": "Cancel",
     "validUntil": "Valid until {{at}}",
     "inn": "INN: {{inn}}",
     "thumbprint": "Thumbprint: {{thumbprint}}",
@@ -41,5 +48,18 @@
     "installing": "Updating…",
     "failed": "Could not install the update. Check the connection and try again."
   },
-  "journal": { "title": "Recent events", "empty": "No events yet" }
+  "journal": {
+    "title": "Event journal",
+    "hint": "The latest 200 events are available in the app. Export includes the full saved journal.",
+    "empty": "No events yet",
+    "unknownDate": "Time unavailable",
+    "paginationLabel": "Journal pages",
+    "previous": "Previous",
+    "next": "Next",
+    "page": "Page {{page}} of {{count}}",
+    "export": "Export journal",
+    "exporting": "Exporting…",
+    "exported": "Journal saved: {{path}}",
+    "exportFailed": "Could not export the journal. Choose another folder and try again."
+  }
 }
