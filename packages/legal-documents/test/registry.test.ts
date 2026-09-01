@@ -42,13 +42,17 @@ describe("legal document registry", () => {
 
   it("pins paired, unique public routes and valid initial metadata", () => {
     expect(() => validateLegalRegistry(LEGAL_RELEASES)).not.toThrow();
-    // Every code is still on its first revision except the two reissued on
-    // 2026-08-31: MKR-INS-07 for the invalidation source the cabinet now shows,
-    // and MKR-INS-06 for the refreshed screenshots it embeds.
-    const reissued = new Set(["MKR-INS-06", "MKR-INS-07"]);
+    // Every code is still on its first revision except the reissued ones:
+    // MKR-INS-06 (2026.08/02, refreshed screenshots) and MKR-INS-07
+    // (2026.08/03: the corrections page was rebuilt around scan-event tabs
+    // and bulk selection, and voided scans stopped blocking safe close).
+    const reissuedRevision: Record<string, string> = {
+      "MKR-INS-06": "2026.08/02",
+      "MKR-INS-07": "2026.08/03",
+    };
     expect(
-      LEGAL_RELEASES.every(({ code, revision }) =>
-        reissued.has(code) ? revision === "2026.08/02" : revision === "2026.08/01",
+      LEGAL_RELEASES.every(
+        ({ code, revision }) => revision === (reissuedRevision[code] ?? "2026.08/01"),
       ),
     ).toBe(true);
     expect(
@@ -70,7 +74,7 @@ describe("legal document registry", () => {
     expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-08-22");
     expect(findLegalRelease("MKR-INS-05").effectiveDate).toBe("2026-08-30");
     expect(findLegalRelease("MKR-INS-06").effectiveDate).toBe("2026-08-31");
-    expect(findLegalRelease("MKR-INS-07").effectiveDate).toBe("2026-08-31");
+    expect(findLegalRelease("MKR-INS-07").effectiveDate).toBe("2026-09-01");
     expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-08-30");
     expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(16);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
