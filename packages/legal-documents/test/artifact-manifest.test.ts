@@ -296,7 +296,11 @@ function artifactEntry(
   // 2026.08/03 on 2026-09-01; every
   // other code is still on its first revision.
   const revision =
-    code === "MKR-INS-07" ? "2026.08/03" : code === "MKR-INS-06" ? "2026.08/02" : "2026.08/01";
+    code === "MKR-INS-07"
+      ? "2026.08/03"
+      : code === "MKR-INS-06" || code === "MKR-INS-04"
+        ? "2026.08/02"
+        : "2026.08/01";
   const fileName = `markiro_${code.toLowerCase()}_${revision.replace("/", "-")}_${locale}.${extension}`;
   const bytes = artifactBytes(fileName);
   return {
@@ -307,13 +311,13 @@ function artifactEntry(
       effectiveDate:
         code === "MKR-INS-01" || code === "MKR-INS-02"
           ? "2026-08-21"
-          : code === "MKR-INS-03" || code === "MKR-INS-04"
+          : code === "MKR-INS-03"
             ? "2026-08-22"
             : code === "MKR-INS-05" || code === "MKR-INS-08"
               ? "2026-08-30"
               : code === "MKR-INS-06"
                 ? "2026-08-31"
-                : code === "MKR-INS-07"
+                : code === "MKR-INS-07" || code === "MKR-INS-04"
                   ? "2026-09-01"
                   : "2026-08-15",
       locale,
@@ -1210,7 +1214,7 @@ describe("legal artifact release generation", () => {
       "MKR-INS-01|ru|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.08/01/21.08.2026",
       "MKR-INS-02|ru|legal-pdf|https://markiro.app/d/MKR-INS-02/2026.08/01/21.08.2026",
       "MKR-INS-03|ru|legal-pdf|https://markiro.app/d/MKR-INS-03/2026.08/01/22.08.2026",
-      "MKR-INS-04|ru|legal-pdf|https://markiro.app/d/MKR-INS-04/2026.08/01/22.08.2026",
+      "MKR-INS-04|ru|legal-pdf|https://markiro.app/d/MKR-INS-04/2026.08/02/01.09.2026",
       "MKR-INS-05|ru|legal-pdf|https://markiro.app/d/MKR-INS-05/2026.08/01/30.08.2026",
       "MKR-INS-06|ru|legal-pdf|https://markiro.app/d/MKR-INS-06/2026.08/02/31.08.2026",
       "MKR-INS-07|ru|legal-pdf|https://markiro.app/d/MKR-INS-07/2026.08/03/01.09.2026",
