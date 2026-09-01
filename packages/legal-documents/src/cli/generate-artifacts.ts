@@ -18,6 +18,7 @@ import {
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { inflateSync } from "node:zlib";
 
 import { unzlibSync, zlibSync } from "fflate";
 
@@ -152,7 +153,10 @@ export function libreOfficeEnvironment(
   return {
     ...baseEnvironment,
     HOME: profileDirectory,
-    TMPDIR: process.platform === "darwin" ? "/private/tmp" : "/tmp",
+    // Task-local rather than the machine-wide temp root, so no state left by
+    // one conversion (or by anything else on the machine) is visible to the
+    // next one.
+    TMPDIR: path.join(profileDirectory, "tmp"),
     XDG_CACHE_HOME: path.join(profileDirectory, "xdg-cache"),
     XDG_CONFIG_HOME: path.join(profileDirectory, "xdg-config"),
   };
@@ -982,6 +986,7 @@ function createDefaultDependencies(): ArtifactGenerationDependencies {
       const profileDirectory = libreOfficeProfileDirectory(outputDirectory, sourcePath);
       await mkdir(profileDirectory, { recursive: true });
       await Promise.all([
+        mkdir(path.join(profileDirectory, "tmp"), { recursive: true }),
         mkdir(path.join(profileDirectory, "xdg-cache"), { recursive: true }),
         mkdir(path.join(profileDirectory, "xdg-config"), { recursive: true }),
       ]);
@@ -1401,13 +1406,171 @@ export async function acquireArtifactGenerationLock(
   };
 }
 
+interface PdfStreamParts {
+  readonly header: string;
+  readonly payload: Buffer;
+  readonly suffix: string;
+}
+
+function splitPdfStreamObject(body: Buffer): PdfStreamParts | null {
+  const streamMarker = Buffer.from("stream\n", "latin1");
+  const streamOffset = body.indexOf(streamMarker);
+  if (streamOffset < 0) return null;
+  const payloadStart = streamOffset + streamMarker.byteLength;
+  const endStreamOffset = body.indexOf(Buffer.from("\nendstream", "latin1"), payloadStart);
+  if (endStreamOffset < 0) throw new Error("Release PDF stream object has no endstream marker");
+  return {
+    header: body.toString("latin1", 0, payloadStart),
+    payload: body.subarray(payloadStart, endStreamOffset),
+    suffix: body.toString("latin1", endStreamOffset),
+  };
+}
+
+function indirectLengthHolders(bytes: Buffer, xref: ClassicXref): Set<number> {
+  const holders = new Set<number>();
+  xref.entries.forEach((entry, objectNumber) => {
+    if (objectNumber === 0 || entry.status !== "n") return;
+    const parts = splitPdfStreamObject(readPdfObjectBody(bytes, xref, objectNumber).body);
+    const holder = parts && /\/Length\s+(\d+)\s+0\s+R/.exec(parts.header)?.[1];
+    if (holder) holders.add(Number(holder));
+  });
+  return holders;
+}
+
+/**
+ * Byte-inequality fallback for regenerated release PDFs. LibreOffice's Flate
+ * output is an implementation detail of whatever zlib it links: the same
+ * pixels and glyphs can deflate to different bytes after a toolchain update,
+ * which must not read as a content change. Two PDFs are accepted as
+ * equivalent when they agree object-for-object — identical structure,
+ * trailer, and non-stream bodies, with stream payloads compared DECOMPRESSED
+ * (and their direct or indirect /Length values allowed to follow suit).
+ * Anything else — a changed glyph, image, or metadata byte — still throws.
+ */
+export function assertContentEquivalentPdf(
+  expected: Buffer,
+  actual: Buffer,
+  fileName: string,
+): void {
+  const fail = (reason: string): never => {
+    throw new Error(`Existing release is not content-equivalent: ${fileName} (${reason})`);
+  };
+  let expectedXref: ClassicXref;
+  let actualXref: ClassicXref;
+  try {
+    expectedXref = parseClassicXref(expected);
+    actualXref = parseClassicXref(actual);
+  } catch (error) {
+    // A file that cannot even be walked as a release PDF gets no equivalence
+    // tolerance -- surface it as the plain byte-gate failure it is.
+    throw new Error(
+      `Existing release is not byte-identical: ${fileName} (equivalence not established: ${
+        error instanceof Error ? error.message : String(error)
+      })`,
+      { cause: error },
+    );
+  }
+  if (expectedXref.entries.length !== actualXref.entries.length) fail("object count");
+  if (expectedXref.trailerBody !== actualXref.trailerBody) fail("trailer");
+  const expectedHolders = indirectLengthHolders(expected, expectedXref);
+  const actualHolders = indirectLengthHolders(actual, actualXref);
+  if (
+    expectedHolders.size !== actualHolders.size ||
+    [...expectedHolders].some((holder) => !actualHolders.has(holder))
+  ) {
+    fail("stream length indirection");
+  }
+  expectedXref.entries.forEach((entry, objectNumber) => {
+    const actualEntry = actualXref.entries[objectNumber];
+    if (!actualEntry || entry.status !== actualEntry.status) fail(`object ${objectNumber} status`);
+    if (objectNumber === 0 || entry.status !== "n") return;
+    const expectedBody = readPdfObjectBody(expected, expectedXref, objectNumber).body;
+    const actualBody = readPdfObjectBody(actual, actualXref, objectNumber).body;
+    if (expectedBody.equals(actualBody)) return;
+    const expectedParts = splitPdfStreamObject(expectedBody);
+    const actualParts = splitPdfStreamObject(actualBody);
+    if (!expectedParts || !actualParts) {
+      const lengths =
+        expectedHolders.has(objectNumber) &&
+        /^\d+$/.test(expectedBody.toString("latin1")) &&
+        /^\d+$/.test(actualBody.toString("latin1"));
+      if (!lengths) fail(`object ${objectNumber} body`);
+      return;
+    }
+    if (expectedParts.suffix !== actualParts.suffix) fail(`object ${objectNumber} stream suffix`);
+    const directLength = /\/Length\s+\d+(?!\s+0\s+R)/;
+    if (
+      expectedParts.header !== actualParts.header &&
+      expectedParts.header.replace(directLength, "/Length #") !==
+        actualParts.header.replace(directLength, "/Length #")
+    ) {
+      fail(`object ${objectNumber} stream header`);
+    }
+    if (expectedParts.payload.equals(actualParts.payload)) return;
+    if (!expectedParts.header.includes("/Filter/FlateDecode")) {
+      fail(`object ${objectNumber} uncompressed stream payload`);
+    }
+    let expectedInflated: Buffer;
+    let actualInflated: Buffer;
+    try {
+      expectedInflated = inflateSync(expectedParts.payload);
+      actualInflated = inflateSync(actualParts.payload);
+    } catch {
+      return fail(`object ${objectNumber} stream inflate`);
+    }
+    if (!expectedInflated.equals(actualInflated)) fail(`object ${objectNumber} stream content`);
+  });
+}
+
+function assertContentEquivalentManifest(
+  expectedBytes: Buffer,
+  actualBytes: Buffer,
+  divergentFiles: ReadonlySet<string>,
+): void {
+  const parse = (raw: Buffer): unknown => JSON.parse(raw.toString("utf8"));
+  const expected = parse(expectedBytes);
+  const actual = parse(actualBytes);
+  if (!Array.isArray(expected) || !Array.isArray(actual) || expected.length !== actual.length) {
+    throw new Error("Existing release is not content-equivalent: artifacts.json (shape)");
+  }
+  for (const [index, expectedEntry] of expected.entries()) {
+    const actualEntry: unknown = actual[index];
+    const strip = (entry: unknown): unknown => {
+      if (
+        typeof entry !== "object" ||
+        entry === null ||
+        typeof (entry as { fileName?: unknown }).fileName !== "string" ||
+        !divergentFiles.has((entry as { fileName: string }).fileName)
+      ) {
+        return entry;
+      }
+      const rest = { ...(entry as Record<string, unknown>) };
+      delete rest["bytes"];
+      delete rest["sha256"];
+      return rest;
+    };
+    if (JSON.stringify(strip(expectedEntry)) !== JSON.stringify(strip(actualEntry))) {
+      throw new Error(
+        `Existing release is not content-equivalent: artifacts.json (entry ${index})`,
+      );
+    }
+  }
+}
+
 async function compareReleaseDirectories(expectedRoot: string, actualRoot: string): Promise<void> {
   const expectedRootEntries = (await readdir(expectedRoot)).sort();
   const actualRootEntries = (await readdir(actualRoot)).sort();
   if (JSON.stringify(expectedRootEntries) !== JSON.stringify(actualRootEntries)) {
     throw new Error("Existing release is not byte-identical to generated output");
   }
-  for (const rootEntry of expectedRootEntries) {
+  // Directories (the artifact files) are compared before root files, because
+  // the manifest's tolerance for a divergent hash extends exactly to the
+  // files whose bytes drifted while their CONTENT proved identical.
+  const orderedEntries = [...expectedRootEntries].sort(
+    (left, right) => Number(right === "files") - Number(left === "files"),
+  );
+  const divergentFiles = new Set<string>();
+  for (const rootEntry of orderedEntries) {
     const expectedPath = path.join(expectedRoot, rootEntry);
     const actualPath = path.join(actualRoot, rootEntry);
     await assertNoSymlink(actualPath);
@@ -1430,19 +1593,41 @@ async function compareReleaseDirectories(expectedRoot: string, actualRoot: strin
           readFile(expectedFile),
           readFile(actualFile),
         ]);
-        if (!expectedBytes.equals(actualBytes)) {
+        if (expectedBytes.equals(actualBytes)) continue;
+        if (!fileName.endsWith(".pdf")) {
           throw new Error(`Existing release is not byte-identical: ${fileName}`);
         }
+        try {
+          assertContentEquivalentPdf(expectedBytes, actualBytes, fileName);
+        } catch (cause) {
+          // An unparseable or genuinely different file is a gate failure; the
+          // equivalence detail rides along so drift and tampering read apart.
+          throw new Error(
+            `Existing release is not byte-identical: ${fileName} (${
+              cause instanceof Error ? cause.message : String(cause)
+            })`,
+            { cause },
+          );
+        }
+        divergentFiles.add(fileName);
       }
     } else {
       const [expectedBytes, actualBytes] = await Promise.all([
         readFile(expectedPath),
         readFile(actualPath),
       ]);
-      if (!expectedBytes.equals(actualBytes)) {
+      if (expectedBytes.equals(actualBytes)) continue;
+      if (rootEntry !== "artifacts.json" || divergentFiles.size === 0) {
         throw new Error(`Existing release is not byte-identical: ${rootEntry}`);
       }
+      assertContentEquivalentManifest(expectedBytes, actualBytes, divergentFiles);
     }
+  }
+  if (divergentFiles.size > 0) {
+    console.warn(
+      `Release reproduced content-equivalent but not byte-identical (compression drift); ` +
+        `attested bytes remain authoritative: ${[...divergentFiles].sort().join(", ")}`,
+    );
   }
 }
 
