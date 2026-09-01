@@ -19,7 +19,7 @@ export function buildChzTrueApiAuthPayload(settings: {
   };
 }
 
-/** Начинаем обновление за 90 минут до истечения 10-часового токена. */
+/** Начинаем обновление за 90 минут до срока, переданного True API. */
 export const CHZ_TOKEN_REFRESH_LEAD_MS = 90 * 60_000;
 /** pending/claimed задача старше 30 минут считается протухшей. */
 export const CHZ_TASK_STALE_MS = 30 * 60_000;

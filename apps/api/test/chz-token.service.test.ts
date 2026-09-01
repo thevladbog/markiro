@@ -229,6 +229,7 @@ describe.skipIf(!ready)("ChzTokenService", () => {
         payload: {
           trueApiBaseUrl: "https://markirovka.sandbox.crptech.ru/api/v3/true-api",
           inn: "7707083893",
+          tokenFormat: "uuid",
         },
       },
     ]);

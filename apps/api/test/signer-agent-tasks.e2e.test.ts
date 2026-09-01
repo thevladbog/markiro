@@ -60,13 +60,16 @@ describe.skipIf(!ready)("signer agent task queue", () => {
   // per tenant+type, so every `it` below must terminalize (complete/fail/
   // expire) the task it creates before the next `insertTask()` call --
   // otherwise the insert races the partial unique index and fails.
-  async function insertTask(): Promise<string> {
+  async function insertTask(tokenFormat?: "jwt" | "uuid"): Promise<string> {
     const [row] = await db
       .insert(schema.chzSignerTasks)
       .values({
         tenantId,
         type: "true_api_auth",
-        payload: { trueApiBaseUrl: "https://markirovka.sandbox.crptech.ru/api/v3/true-api" },
+        payload: {
+          trueApiBaseUrl: "https://markirovka.sandbox.crptech.ru/api/v3/true-api",
+          ...(tokenFormat ? { tokenFormat } : {}),
+        },
       })
       .returning({ id: schema.chzSignerTasks.id });
     return row!.id;
@@ -81,7 +84,7 @@ describe.skipIf(!ready)("signer agent task queue", () => {
 
   it("claims, returns and completes a task, storing the encrypted token", async () => {
     const { agentId, secret } = await pairAgent();
-    const taskId = await insertTask();
+    const taskId = await insertTask("uuid");
     const next = await request(app!.getHttpServer())
       .get("/signer-agent/tasks/next?wait=0")
       .set("x-signer-token", secret)
@@ -109,6 +112,7 @@ describe.skipIf(!ready)("signer agent task queue", () => {
     expect(stored).toBeTruthy();
     expect(stored!.encryptedToken.toString("utf8")).not.toContain("long-true-api-jwt");
     expect(stored!.agentId).toBe(agentId);
+    expect(stored!.tokenType).toBe("uuid");
 
     const overview = await agent.get("/signer-agents").expect(200);
     expect(overview.body.token.status).toBe("active");
