@@ -41,6 +41,8 @@ import {
   productReadinessOpenApiSchema,
   regulatoryCategoryOptionsOpenApiSchema,
   regulatoryProfileOpenApiSchema,
+  regulatoryProposalOpenApiSchema,
+  regulatoryProposalPreviewOpenApiSchema,
   updateRegulatoryAttributesSchema,
   type ApplyRegulatoryProposalDto,
   type CategoryChangePreviewDto,
@@ -114,7 +116,7 @@ export class ProductRegulatoryController {
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @ApiOperation({ summary: "Preview and persist a product category change" })
   @ApiZodBody(categoryChangePreviewSchema)
-  @ApiCreatedResponse({ schema: { type: "object", additionalProperties: true } })
+  @ApiCreatedResponse({ schema: regulatoryProposalPreviewOpenApiSchema })
   @ApiZodValidationError()
   @ApiHttpErrors(401, 403, 404, 409)
   @ApiCabinetAuth()
@@ -124,6 +126,53 @@ export class ProductRegulatoryController {
     @Body(new ZodValidationPipe(categoryChangePreviewSchema)) body: CategoryChangePreviewDto,
   ) {
     return this.regulatory.previewCategoryChange(req.tenantId!, req.userId!, id, body);
+  }
+
+  @Post("category-binding-previews")
+  @RequireSubscriptionWrite()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Preview and persist an initial product category binding" })
+  @ApiZodBody(categoryChangePreviewSchema)
+  @ApiCreatedResponse({ schema: regulatoryProposalPreviewOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409)
+  @ApiCabinetAuth()
+  previewCategoryBinding(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(categoryChangePreviewSchema)) body: CategoryChangePreviewDto,
+  ) {
+    return this.regulatory.previewCategoryBinding(req.tenantId!, req.userId!, id, body);
+  }
+
+  @Get("regulatory-proposals/:proposalId")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "Read a persisted product regulatory proposal" })
+  @ApiOkResponse({ schema: regulatoryProposalOpenApiSchema })
+  @ApiHttpErrors(401, 403, 404)
+  @ApiCabinetAuth()
+  getProposal(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Param("proposalId") proposalId: string,
+  ) {
+    return this.regulatory.getProposal(req.tenantId!, id, proposalId);
+  }
+
+  @Post("regulatory-proposals/:proposalId/reject")
+  @HttpCode(200)
+  @RequireSubscriptionWrite()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Reject a persisted product regulatory proposal" })
+  @ApiOkResponse({ schema: regulatoryProposalOpenApiSchema })
+  @ApiHttpErrors(401, 403, 404, 409)
+  @ApiCabinetAuth()
+  rejectProposal(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Param("proposalId") proposalId: string,
+  ) {
+    return this.regulatory.rejectProposal(req.tenantId!, req.userId!, id, proposalId);
   }
 
   @Post("regulatory-proposals/:proposalId/apply")
