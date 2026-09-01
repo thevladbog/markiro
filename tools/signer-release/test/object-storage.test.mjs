@@ -6,6 +6,8 @@ import {
   assertSignerKey,
   copySignerInstallerToDownload,
   createSignerObjectStore,
+  headSignerObject,
+  putSignerImmutableObject,
   SIGNER_DOWNLOAD_KEY,
   SIGNER_MANIFEST_KEY,
   signerObjectKey,
@@ -63,6 +65,49 @@ test("refuses to build a store when a credential is missing", () => {
       }),
     /credential/,
   );
+});
+
+test("stores immutable objects with their checksum metadata", async () => {
+  const commands = [];
+  const client = { send: async (command) => commands.push(command) };
+  const body = Buffer.from("signed bytes");
+  const expectedSha256 = createHash("sha256").update(body).digest("hex");
+
+  await putSignerImmutableObject({
+    client,
+    bucket: ENV.YANDEX_STATION_RELEASE_BUCKET,
+    key: "signer/stable/releases/0.1.5/file.bin",
+    body,
+    contentType: "application/octet-stream",
+    expectedSha256,
+  });
+
+  assert.equal(commands[0].constructor.name, "PutObjectCommand");
+  assert.equal(commands[0].input.CacheControl, "public, max-age=31536000, immutable");
+  assert.deepEqual(commands[0].input.Metadata, { "signer-sha256": expectedSha256 });
+});
+
+test("reads immutable checksum metadata and treats 404 as absent", async () => {
+  const key = "signer/stable/releases/0.1.5/file.bin";
+  const found = await headSignerObject({
+    client: { send: async () => ({ Metadata: { "signer-sha256": "a".repeat(64) } }) },
+    bucket: ENV.YANDEX_STATION_RELEASE_BUCKET,
+    key,
+  });
+  assert.equal(found, "a".repeat(64));
+
+  const missing = await headSignerObject({
+    client: {
+      send: async () => {
+        const error = new Error("missing");
+        error.$metadata = { httpStatusCode: 404 };
+        throw error;
+      },
+    },
+    bucket: ENV.YANDEX_STATION_RELEASE_BUCKET,
+    key,
+  });
+  assert.equal(missing, null);
 });
 
 test("copies the exact immutable stable installer to the versionless download", async () => {

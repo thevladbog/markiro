@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Spinner } from "@markiro/ui";
 import { UpdateBanner } from "./components/UpdateBanner.js";
@@ -8,6 +8,7 @@ import {
   checkForUpdate,
   UPDATE_CHECK_INTERVAL_MS,
   type SignerUpdate,
+  type UpdateCheckResult,
 } from "./lib/updates.js";
 import { Pairing } from "./pages/Pairing.js";
 import { Status } from "./pages/Status.js";
@@ -28,17 +29,24 @@ export function App(): ReactElement {
   const [update, setUpdate] = useState<SignerUpdate | null>(null);
   const announced = useRef(new Set<string>());
 
+  const runUpdateCheck = useCallback(async (): Promise<UpdateCheckResult> => {
+    const result = await checkForUpdate();
+    if (result.status !== "available") return result;
+    setUpdate(result.update);
+    return result;
+  }, []);
+
   useEffect(() => {
-    // The check is deliberately quiet: `checkForUpdate` resolves to null on
-    // failure, so an unreachable mirror costs a console warning and nothing
-    // else. The tray announces each version once; the banner is where the
-    // operator consents.
+    // The background check is deliberately quiet: an unreachable mirror costs
+    // a console warning and nothing else. A manual check uses the same request
+    // but shows its result. The tray announces each version once; the banner is
+    // where the operator consents.
     let disposed = false;
     const run = async (): Promise<void> => {
-      const found = await checkForUpdate();
-      if (disposed || !found) return;
-      setUpdate(found);
-      await announceUpdate(found, announced.current);
+      const result = await checkForUpdate();
+      if (disposed || result.status !== "available") return;
+      setUpdate(result.update);
+      await announceUpdate(result.update, announced.current);
     };
     void run();
     const timer = setInterval(() => void run(), UPDATE_CHECK_INTERVAL_MS);
@@ -90,7 +98,11 @@ export function App(): ReactElement {
   return (
     <>
       <UpdateBanner update={update} onInstalled={() => setUpdate(null)} />
-      <Status status={status} onChanged={() => void bridge.status().then(setStatus)} />
+      <Status
+        status={status}
+        onChanged={() => void bridge.status().then(setStatus)}
+        onCheckForUpdate={runUpdateCheck}
+      />
     </>
   );
 }
