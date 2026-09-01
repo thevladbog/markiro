@@ -156,7 +156,23 @@ test("shared packages fan out to their current consumers", () => {
       ["verify_static", "verify_api_tests", "verify_app_tests", "production_bundle"],
     ],
     [
-      "packages/platform-contracts/src/chz-signer.ts",
+      "packages/platform-contracts/src/commercial.ts",
+      ["verify_static", "verify_api_tests", "verify_app_tests", "production_bundle"],
+    ],
+  ];
+
+  for (const [path, expected] of cases) {
+    assert.deepEqual(enabledJobs(classifyChangedFiles([path])), expected, path);
+  }
+});
+
+test("only the mirrored CHZ Signer contract selects native Signer verification", () => {
+  for (const path of [
+    "packages/platform-contracts/src/chz-signer.ts",
+    "packages/platform-contracts/fixtures/chz-signer/pair-response.json",
+  ]) {
+    assert.deepEqual(
+      enabledJobs(classifyChangedFiles([path])),
       [
         "verify_static",
         "verify_api_tests",
@@ -165,11 +181,8 @@ test("shared packages fan out to their current consumers", () => {
         "signer_rust",
         "signer_windows_build",
       ],
-    ],
-  ];
-
-  for (const [path, expected] of cases) {
-    assert.deepEqual(enabledJobs(classifyChangedFiles([path])), expected, path);
+      path,
+    );
   }
 });
 

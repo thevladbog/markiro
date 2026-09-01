@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import { assertRequiredResults } from "../required-results.mjs";
@@ -120,7 +123,12 @@ test("rejects missing and non-boolean classifier outputs", () => {
   );
 });
 
-test("CLI accepts a valid needs JSON environment value", () => {
+test("CLI publishes a true result and summary for a valid needs payload", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "markiro-ci-required-"));
+  const outputPath = join(directory, "github-output.txt");
+  const summaryPath = join(directory, "github-summary.md");
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+
   const child = spawnSync(
     process.execPath,
     ["tools/ci/required-results.mjs", "--needs-env", "CI_NEEDS_JSON"],
@@ -129,15 +137,24 @@ test("CLI accepts a valid needs JSON environment value", () => {
       env: {
         ...process.env,
         CI_NEEDS_JSON: JSON.stringify(needsFixture()),
+        GITHUB_OUTPUT: outputPath,
+        GITHUB_STEP_SUMMARY: summaryPath,
       },
       encoding: "utf8",
     },
   );
 
   assert.equal(child.status, 0, child.stderr);
+  assert.equal(readFileSync(outputPath, "utf8"), "result=true\n");
+  assert.match(readFileSync(summaryPath, "utf8"), /Required CI result: `true`/);
 });
 
-test("CLI exits non-zero when selected work was skipped", () => {
+test("CLI publishes a false result and summary when selected work was skipped", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "markiro-ci-required-"));
+  const outputPath = join(directory, "github-output.txt");
+  const summaryPath = join(directory, "github-summary.md");
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+
   const child = spawnSync(
     process.execPath,
     ["tools/ci/required-results.mjs", "--needs-env", "CI_NEEDS_JSON"],
@@ -146,6 +163,8 @@ test("CLI exits non-zero when selected work was skipped", () => {
       env: {
         ...process.env,
         CI_NEEDS_JSON: JSON.stringify(needsFixture({ results: { "signer-rust": "skipped" } })),
+        GITHUB_OUTPUT: outputPath,
+        GITHUB_STEP_SUMMARY: summaryPath,
       },
       encoding: "utf8",
     },
@@ -153,4 +172,7 @@ test("CLI exits non-zero when selected work was skipped", () => {
 
   assert.notEqual(child.status, 0);
   assert.match(child.stderr, /selected job signer-rust finished with skipped/);
+  assert.equal(readFileSync(outputPath, "utf8"), "result=false\n");
+  assert.match(readFileSync(summaryPath, "utf8"), /Required CI result: `false`/);
+  assert.match(readFileSync(summaryPath, "utf8"), /selected job signer-rust finished with skipped/);
 });
