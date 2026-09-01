@@ -49,7 +49,6 @@ const sharedJobs = Object.freeze({
     "verify_api_tests",
     "verify_app_tests",
     "production_bundle",
-    ...signerJobs,
   ],
 });
 
@@ -98,6 +97,13 @@ function isRootToolchainPath(path) {
 function jobsForPath(path) {
   if (isDocumentation(path)) return [];
   if (isRootToolchainPath(path)) return HEAVY_JOBS;
+
+  if (
+    path === "packages/platform-contracts/src/chz-signer.ts" ||
+    path.startsWith("packages/platform-contracts/fixtures/chz-signer/")
+  ) {
+    return [...sharedJobs["platform-contracts"], ...signerJobs];
+  }
 
   if (path.startsWith("apps/signer/")) {
     if (
