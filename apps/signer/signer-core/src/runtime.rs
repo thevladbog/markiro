@@ -240,7 +240,10 @@ impl Runtime {
         let config = self.config().unwrap_or_default();
         AgentStatus {
             phase: if config.is_paired() {
-                self.phase.lock().map(|phase| *phase).unwrap_or(AgentPhase::Degraded)
+                self.phase
+                    .lock()
+                    .map(|phase| *phase)
+                    .unwrap_or(AgentPhase::Degraded)
             } else {
                 AgentPhase::Unpaired
             },

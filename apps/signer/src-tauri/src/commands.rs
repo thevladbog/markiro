@@ -26,16 +26,17 @@ pub async fn signer_pair(
     let server_url = config
         .server_url
         .unwrap_or_else(|| crate::default_server_url().to_string());
-    let tenant_name = state
-        .runtime
-        .pair(&server_url, &code)
-        .await
-        .map_err(|error| match error {
-            // The cloud deliberately does not distinguish wrong from expired
-            // from rate-limited, so neither do we.
-            PairError::Rejected => "rejected".to_string(),
-            PairError::Network(_) => "unavailable".to_string(),
-        })?;
+    let tenant_name =
+        state
+            .runtime
+            .pair(&server_url, &code)
+            .await
+            .map_err(|error| match error {
+                // The cloud deliberately does not distinguish wrong from expired
+                // from rate-limited, so neither do we.
+                PairError::Rejected => "rejected".to_string(),
+                PairError::Network(_) => "unavailable".to_string(),
+            })?;
     publish_status(&app, &state.runtime);
     Ok(tenant_name)
 }

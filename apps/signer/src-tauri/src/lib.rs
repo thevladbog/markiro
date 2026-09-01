@@ -73,7 +73,7 @@ pub fn run() {
             let open = MenuItem::with_id(app, "open", "Открыть", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &quit])?;
-            let tray_icon = TrayIconBuilder::new()
+            let tray_icon = TrayIconBuilder::with_id("markiro-signer")
                 .icon(SIGNER_ICON.clone())
                 .tooltip("Markiro Подписант")
                 .menu(&menu)
@@ -97,7 +97,9 @@ pub fn run() {
             );
             tray_controller.update_status(app.handle(), &initial_status);
             app.manage(tray_controller);
-            app.manage(commands::SignerState { runtime: runtime.clone() });
+            app.manage(commands::SignerState {
+                runtime: runtime.clone(),
+            });
 
             let animation_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
