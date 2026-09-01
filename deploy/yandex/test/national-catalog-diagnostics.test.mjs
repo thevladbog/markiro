@@ -41,13 +41,18 @@ const EVIDENCE = Object.freeze({
 
 function dependencies(outputs, commands = []) {
   let index = 0;
+  const next = (command, args, options) => {
+    commands.push({ command, args, options });
+    const output = outputs[index];
+    index += 1;
+    return output;
+  };
   return {
     validatePrivateKey: async () => undefined,
-    run: async (command, args, options) => {
-      commands.push({ command, args, options });
-      const output = outputs[index];
-      index += 1;
-      return output;
+    run: async (command, args, options) => next(command, args, options),
+    runDiagnostic: async (command, args, options) => {
+      const output = next(command, args, options);
+      return typeof output === "string" ? { exitCode: 0, stdout: output } : output;
     },
     mkdtemp: async () => "/runner/national-catalog-known-hosts",
     writeFile: async () => undefined,
@@ -181,7 +186,10 @@ test("hosted National Catalog diagnostic accepts only the first failing check as
       HOSTED_ENVIRONMENT,
       dependencies([
         "a1b2c3d4e5f6\tapi\n",
-        `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(expected)}\n`,
+        {
+          exitCode: 1,
+          stdout: `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(expected)}\n`,
+        },
       ]),
     );
     assert.deepEqual(result, expected);
@@ -201,10 +209,75 @@ test("hosted National Catalog diagnostic accepts a bounded source status without
       HOSTED_ENVIRONMENT,
       dependencies([
         "a1b2c3d4e5f6\tapi\n",
-        `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(expected)}\n`,
+        {
+          exitCode: 1,
+          stdout: `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(expected)}\n`,
+        },
       ]),
     );
     assert.deepEqual(result, expected);
+  }
+});
+
+test("hosted National Catalog diagnostic preserves bounded evidence from remote exit one", async () => {
+  const expected = {
+    version: 2,
+    passed: false,
+    sourceStatus: "active-token-missing",
+    checks: [],
+  };
+  const commands = [];
+  const result = await runHostedNationalCatalogDiagnostics(HOSTED_ENVIRONMENT, {
+    ...dependencies(["a1b2c3d4e5f6\tapi\n"], commands),
+    runDiagnostic: async (command, args, options) => {
+      commands.push({ command, args, options });
+      return {
+        exitCode: 1,
+        stdout: `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(expected)}\n`,
+      };
+    },
+  });
+
+  assert.deepEqual(result, expected);
+  assert.equal(commands.length, 2);
+  assert.equal(commands[1].command, "ssh");
+  assert.deepEqual(commands[1].args.slice(-8), [
+    "markiro-deploy@203.0.113.42",
+    "sudo",
+    "/usr/bin/docker",
+    "exec",
+    "-i",
+    "a1b2c3d4e5f6",
+    "node",
+    "dist/national-catalog-live-diagnostic.js",
+  ]);
+  assert.equal(commands[1].options, undefined);
+});
+
+test("hosted National Catalog diagnostic rejects widened or inconsistent remote exits", async () => {
+  const refused = {
+    version: 2,
+    passed: false,
+    sourceStatus: "active-token-missing",
+    checks: [],
+  };
+  const passedLine = `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(EVIDENCE)}\n`;
+  const refusedLine = `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(refused)}\n`;
+
+  for (const execution of [
+    { exitCode: 2, stdout: refusedLine },
+    { exitCode: 0, stdout: refusedLine },
+    { exitCode: 1, stdout: passedLine },
+    { exitCode: 1, stdout: refusedLine, stderr: "private" },
+  ]) {
+    await assert.rejects(
+      () =>
+        runHostedNationalCatalogDiagnostics(
+          HOSTED_ENVIRONMENT,
+          dependencies(["a1b2c3d4e5f6\tapi\n", execution]),
+        ),
+      /National Catalog diagnostic response is invalid/,
+    );
   }
 });
 

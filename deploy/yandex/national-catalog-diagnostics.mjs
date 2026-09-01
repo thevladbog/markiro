@@ -8,6 +8,7 @@ import {
   authenticatedKnownHosts,
   publicIpv4,
   runCommand,
+  runCommandWithStatus,
   validateHostedPrivateKey,
 } from "./remote-deploy.mjs";
 
@@ -156,6 +157,7 @@ export async function runHostedNationalCatalogDiagnostics(
     rm,
     validatePrivateKey: (path) => validateHostedPrivateKey(path, { readFile, stat }),
     run: (command, args, options) => runCommand(command, args, options),
+    runDiagnostic: (command, args, options) => runCommandWithStatus(command, args, options),
     ...supplied,
   };
   const address = publicIpv4(requiredEnvironment("YC_APP_PUBLIC_ADDRESS", environment));
@@ -205,7 +207,7 @@ export async function runHostedNationalCatalogDiagnostics(
       '{{.ID}}\t{{.Label "com.docker.compose.service"}}',
     ]);
     const containerId = parseContainer(containerOutput);
-    const output = await system.run("ssh", [
+    const execution = await system.runDiagnostic("ssh", [
       ...sshBase,
       "sudo",
       "/usr/bin/docker",
@@ -215,7 +217,14 @@ export async function runHostedNationalCatalogDiagnostics(
       "node",
       "dist/national-catalog-live-diagnostic.js",
     ]);
-    result = parseEvidence(output);
+    if (
+      !hasExactKeys(execution, "exitCode,stdout") ||
+      ![0, 1].includes(execution.exitCode) ||
+      typeof execution.stdout !== "string"
+    )
+      throw invalidResponse();
+    result = parseEvidence(execution.stdout);
+    if (execution.exitCode !== (result.passed ? 0 : 1)) throw invalidResponse();
   } catch (error) {
     failure = error;
   }
