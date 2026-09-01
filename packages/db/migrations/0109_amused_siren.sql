@@ -1,0 +1,2 @@
+ALTER TABLE "national_catalog_card_snapshots" DROP CONSTRAINT "national_catalog_card_snapshots_content_uq";--> statement-breakpoint
+ALTER TABLE "national_catalog_card_snapshots" ADD CONSTRAINT "national_catalog_card_snapshots_content_uq" UNIQUE("tenant_id","product_id","card_id","source_method","content_hash");

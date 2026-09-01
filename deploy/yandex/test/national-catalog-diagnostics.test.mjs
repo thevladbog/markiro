@@ -16,28 +16,77 @@ const HOSTED_ENVIRONMENT = Object.freeze({
 });
 
 const EVIDENCE = Object.freeze({
-  version: 2,
+  version: 3,
   passed: true,
   sourceStatus: "ready",
+  contractStatus: "conformant",
+  capabilities: {
+    schemaRead: "available",
+    ownedCardRead: "available",
+    publishedCardRead: "available",
+  },
   checks: [
-    { method: "categories", outcome: "ok", resultCount: 3, etagPresent: true },
+    {
+      method: "categories",
+      outcome: "ok",
+      resultCount: 3,
+      cacheObservation: "etag_present",
+      usagePresent: true,
+    },
     {
       method: "categories-repeat",
       outcome: "not_modified",
       resultCount: 0,
-      etagPresent: false,
+      cacheObservation: "not_modified",
+      usagePresent: false,
     },
-    { method: "attributes", outcome: "ok", resultCount: 42, etagPresent: false },
-    { method: "feed-product", outcome: "ok", resultCount: 1, etagPresent: false },
-    { method: "product", outcome: "ok", resultCount: 1, etagPresent: true },
+    {
+      method: "attributes",
+      outcome: "ok",
+      resultCount: 42,
+      cacheObservation: "not_checked",
+      usagePresent: true,
+    },
+    {
+      method: "feed-product",
+      outcome: "ok",
+      resultCount: 1,
+      cacheObservation: "not_checked",
+      usagePresent: true,
+    },
+    {
+      method: "product",
+      outcome: "ok",
+      resultCount: 1,
+      cacheObservation: "etag_present",
+      usagePresent: true,
+    },
     {
       method: "product-repeat",
       outcome: "not_modified",
       resultCount: 0,
-      etagPresent: false,
+      cacheObservation: "not_modified",
+      usagePresent: false,
     },
   ],
+  violations: [],
 });
+
+function sourceFailureEvidence(sourceStatus = "active-token-missing") {
+  return {
+    version: 3,
+    passed: false,
+    sourceStatus,
+    contractStatus: "degraded",
+    capabilities: {
+      schemaRead: "not_checked",
+      ownedCardRead: "not_checked",
+      publishedCardRead: "not_checked",
+    },
+    checks: [],
+    violations: [{ capability: "source", code: "source_unavailable" }],
+  };
+}
 
 function dependencies(outputs, commands = []) {
   let index = 0;
@@ -118,32 +167,34 @@ test("hosted National Catalog diagnostic rejects malformed or inconsistent evide
   const line = (value) => `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(value)}\n`;
   const wrongOrder = structuredClone(EVIDENCE);
   [wrongOrder.checks[0], wrongOrder.checks[1]] = [wrongOrder.checks[1], wrongOrder.checks[0]];
-  const emptyFeed = structuredClone(EVIDENCE);
-  emptyFeed.checks[3].resultCount = 0;
-  const multipleProduct = structuredClone(EVIDENCE);
-  multipleProduct.checks[4].resultCount = 2;
   const nonzeroNotModified = structuredClone(EVIDENCE);
   nonzeroNotModified.checks[5].resultCount = 1;
-  const inconsistentPassed = structuredClone(EVIDENCE);
-  inconsistentPassed.passed = false;
   const inconsistentSource = structuredClone(EVIDENCE);
   inconsistentSource.sourceStatus = "active-token-missing";
   const unknownSource = structuredClone(EVIDENCE);
   unknownSource.sourceStatus = "private-provider-detail";
-  const continuedAfterMissingEtag = structuredClone(EVIDENCE);
-  continuedAfterMissingEtag.passed = false;
-  continuedAfterMissingEtag.checks[0].etagPresent = false;
-  const continuedAfterRefusal = structuredClone(EVIDENCE);
-  continuedAfterRefusal.passed = false;
-  continuedAfterRefusal.checks[2] = {
-    method: "attributes",
-    outcome: "forbidden",
-    resultCount: 0,
-    etagPresent: false,
-  };
-  const continuedAfterCardinalityFailure = structuredClone(EVIDENCE);
-  continuedAfterCardinalityFailure.passed = false;
-  continuedAfterCardinalityFailure.checks[4].resultCount = 0;
+  const unknownCapability = structuredClone(EVIDENCE);
+  unknownCapability.capabilities.schemaRead = "private";
+  const unknownCache = structuredClone(EVIDENCE);
+  unknownCache.checks[0].cacheObservation = "private";
+  const unknownOutcome = structuredClone(EVIDENCE);
+  unknownOutcome.checks[0].outcome = "private";
+  const negativeCount = structuredClone(EVIDENCE);
+  negativeCount.checks[0].resultCount = -1;
+  const excessiveCount = structuredClone(EVIDENCE);
+  excessiveCount.checks[0].resultCount = 1_000_001;
+  const widenedCapability = structuredClone(EVIDENCE);
+  widenedCapability.capabilities.tenantId = "private-tenant";
+  const widenedCheck = structuredClone(EVIDENCE);
+  widenedCheck.checks[0].gtin = "private-gtin";
+  const widenedViolation = sourceFailureEvidence();
+  widenedViolation.violations[0].message = "private-provider-message";
+  const unknownViolation = sourceFailureEvidence();
+  unknownViolation.violations[0].code = "private-code";
+  const wrongVersion = structuredClone(EVIDENCE);
+  wrongVersion.version = 2;
+  const unknownVersion = structuredClone(EVIDENCE);
+  unknownVersion.version = 4;
 
   for (const output of [
     "MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS {not-json}\n",
@@ -152,15 +203,20 @@ test("hosted National Catalog diagnostic rejects malformed or inconsistent evide
     `unexpected output\n${line(EVIDENCE)}`,
     `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${"x".repeat(8 * 1024)}\n`,
     line(wrongOrder),
-    line(emptyFeed),
-    line(multipleProduct),
     line(nonzeroNotModified),
-    line(inconsistentPassed),
     line(inconsistentSource),
     line(unknownSource),
-    line(continuedAfterMissingEtag),
-    line(continuedAfterRefusal),
-    line(continuedAfterCardinalityFailure),
+    line(unknownCapability),
+    line(unknownCache),
+    line(unknownOutcome),
+    line(negativeCount),
+    line(excessiveCount),
+    line(widenedCapability),
+    line(widenedCheck),
+    line(widenedViolation),
+    line(unknownViolation),
+    line(wrongVersion),
+    line(unknownVersion),
   ]) {
     await assert.rejects(
       () =>
@@ -173,27 +229,59 @@ test("hosted National Catalog diagnostic rejects malformed or inconsistent evide
   }
 });
 
-test("hosted National Catalog diagnostic accepts only the first failing check as a prefix", async () => {
-  for (const checks of [
-    [{ method: "categories", outcome: "forbidden", resultCount: 0, etagPresent: false }],
-    [{ method: "categories", outcome: "ok", resultCount: 3, etagPresent: false }],
-    EVIDENCE.checks
-      .slice(0, 4)
-      .map((check, index) => (index === 3 ? { ...check, resultCount: 0 } : check)),
-  ]) {
-    const expected = { version: 2, passed: false, sourceStatus: "ready", checks };
-    const result = await runHostedNationalCatalogDiagnostics(
-      HOSTED_ENVIRONMENT,
-      dependencies([
-        "a1b2c3d4e5f6\n",
-        {
-          exitCode: 1,
-          stdout: `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(expected)}\n`,
-        },
-      ]),
-    );
-    assert.deepEqual(result, expected);
-  }
+test("hosted National Catalog diagnostic accepts independent skipped and failing capabilities", async () => {
+  const expected = {
+    version: 3,
+    passed: false,
+    sourceStatus: "ready",
+    contractStatus: "degraded",
+    capabilities: {
+      schemaRead: "unavailable",
+      ownedCardRead: "unavailable",
+      publishedCardRead: "available",
+    },
+    checks: [
+      {
+        method: "categories",
+        outcome: "unavailable",
+        resultCount: 0,
+        cacheObservation: "not_checked",
+        usagePresent: false,
+      },
+      EVIDENCE.checks[2],
+      {
+        method: "feed-product",
+        outcome: "forbidden",
+        resultCount: 0,
+        cacheObservation: "not_checked",
+        usagePresent: false,
+      },
+      { ...EVIDENCE.checks[4], cacheObservation: "etag_missing" },
+      {
+        method: "product-repeat",
+        outcome: "ok",
+        resultCount: 1,
+        cacheObservation: "same_hash",
+        usagePresent: true,
+      },
+    ],
+    violations: [
+      { capability: "schema_read", code: "schema_read_failed" },
+      { capability: "owned_card_read", code: "owned_card_read_failed" },
+      { capability: "published_card_read", code: "cache_contract_degraded" },
+    ],
+  };
+  const result = await runHostedNationalCatalogDiagnostics(
+    HOSTED_ENVIRONMENT,
+    dependencies([
+      "a1b2c3d4e5f6\n",
+      {
+        exitCode: 1,
+        stdout: `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(expected)}\n`,
+      },
+    ]),
+  );
+  assert.deepEqual(result, expected);
 });
 
 test("hosted National Catalog diagnostic accepts a bounded source status without provider checks", async () => {
@@ -206,7 +294,7 @@ test("hosted National Catalog diagnostic accepts a bounded source status without
     "product-gtin-unavailable",
     "token-decryption-failed",
   ]) {
-    const expected = { version: 2, passed: false, sourceStatus, checks: [] };
+    const expected = sourceFailureEvidence(sourceStatus);
     const result = await runHostedNationalCatalogDiagnostics(
       HOSTED_ENVIRONMENT,
       dependencies([
@@ -222,12 +310,7 @@ test("hosted National Catalog diagnostic accepts a bounded source status without
 });
 
 test("hosted National Catalog diagnostic preserves bounded evidence from remote exit one", async () => {
-  const expected = {
-    version: 2,
-    passed: false,
-    sourceStatus: "active-token-missing",
-    checks: [],
-  };
+  const expected = sourceFailureEvidence();
   const commands = [];
   const result = await runHostedNationalCatalogDiagnostics(HOSTED_ENVIRONMENT, {
     ...dependencies(["a1b2c3d4e5f6\n"], commands),
@@ -257,12 +340,7 @@ test("hosted National Catalog diagnostic preserves bounded evidence from remote 
 });
 
 test("hosted National Catalog diagnostic rejects widened or inconsistent remote exits", async () => {
-  const refused = {
-    version: 2,
-    passed: false,
-    sourceStatus: "active-token-missing",
-    checks: [],
-  };
+  const refused = sourceFailureEvidence();
   const passedLine = `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(EVIDENCE)}\n`;
   const refusedLine = `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(refused)}\n`;
 
@@ -286,12 +364,7 @@ test("hosted National Catalog diagnostic rejects widened or inconsistent remote 
 test("hosted National Catalog CLI prints safe evidence before failing a refused contract", async () => {
   let stdout = "";
   let stderr = "";
-  const refused = {
-    version: 2,
-    passed: false,
-    sourceStatus: "ready",
-    checks: [{ method: "categories", outcome: "forbidden", resultCount: 0, etagPresent: false }],
-  };
+  const refused = sourceFailureEvidence();
   const exitCode = await runNationalCatalogDiagnosticsCli({
     argv: ["run"],
     runDiagnostics: async () => refused,
@@ -301,7 +374,7 @@ test("hosted National Catalog CLI prints safe evidence before failing a refused 
   assert.equal(exitCode, 1);
   assert.equal(stdout, `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(refused)}\n`);
   assert.equal(stderr, "");
-  assert.doesNotMatch(stdout, /token|gtin|tenant|provider detail/i);
+  assert.doesNotMatch(stdout, /private-bearer-token|04601234567890|tenant-id|provider detail/i);
 });
 
 test("hosted National Catalog CLI reduces unclassified private failures to a fixed stage", async () => {
@@ -408,12 +481,7 @@ test("hosted National Catalog CLI revalidates a tampered typed stage before seri
 });
 
 test("hosted National Catalog CLI classifies remaining host stages and preserves primary failure", async () => {
-  const refused = {
-    version: 2,
-    passed: false,
-    sourceStatus: "active-token-missing",
-    checks: [],
-  };
+  const refused = sourceFailureEvidence();
   const cases = [
     {
       name: "configuration",

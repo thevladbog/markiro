@@ -21,6 +21,12 @@ export interface NationalCatalogRequestOptions {
   ifNoneMatch?: string;
 }
 
+export interface NationalCatalogCategoriesRequest extends NationalCatalogRequestOptions {
+  catId?: number;
+  gismtCode?: number;
+  tnved?: string;
+}
+
 export type NationalCatalogAttributeType = "a" | "b" | "m" | "r" | "o";
 
 /** Bounded documented selectors for `/v3/attributes`. */
@@ -38,6 +44,7 @@ export interface NationalCatalogCategory {
   level: number;
   active: boolean;
   gismtCodes: number[];
+  raw: Record<string, unknown>;
 }
 
 export interface NationalCatalogAttributeDefinition {
@@ -56,6 +63,7 @@ export interface NationalCatalogAttributeDefinition {
   type: string | null;
   preset: string[];
   presetUrl: string | null;
+  raw: Record<string, unknown>;
 }
 
 export interface NationalCatalogDependentAttribute {
@@ -104,29 +112,61 @@ export interface NationalCatalogProduct {
   identifiers: NationalCatalogProductIdentifier[];
   categories: NationalCatalogProductCategory[];
   attributes: NationalCatalogProductAttribute[];
+  raw: Record<string, unknown>;
 }
 
-/**
- * The raw envelope is intentionally server-only. It preserves provider fields
- * not yet modeled by Markiro without promoting them into the normalized API.
- */
 export interface NationalCatalogCategoriesResponse {
   categories: NationalCatalogCategory[];
-  raw: Record<string, unknown>;
 }
 
 export interface NationalCatalogAttributesResponse {
   attributes: NationalCatalogAttributeDefinition[];
-  raw: Record<string, unknown>;
 }
 
 export interface NationalCatalogProductsResponse {
   products: NationalCatalogProduct[];
-  raw: Record<string, unknown>;
+}
+
+export interface NationalCatalogEtagsRequest extends NationalCatalogRequestOptions {
+  brandId?: number;
+  ownerInn?: string;
+  catId?: number;
+  offset?: number;
+}
+
+export interface NationalCatalogEtagEntry {
+  goodId: number;
+  etag: string;
+}
+
+export interface NationalCatalogEtagsResponse {
+  goodsCount: number;
+  offset: number;
+  lastProductNumber: number;
+  total: number;
+  goods: NationalCatalogEtagEntry[];
+}
+
+export interface NationalCatalogUsageValue {
+  used: number;
+  limit: number;
+}
+
+export interface NationalCatalogUsage {
+  total: NationalCatalogUsageValue | null;
+  method: NationalCatalogUsageValue | null;
+}
+
+export interface NationalCatalogOk<T> {
+  status: "ok";
+  value: T;
+  etag: string | null;
+  contentHash: string;
+  usage: NationalCatalogUsage;
 }
 
 export type NationalCatalogResult<T> =
-  | { status: "ok"; value: T; etag: string | null }
+  | NationalCatalogOk<T>
   | { status: "not_modified" }
   | { status: "not_found" }
   | { status: "unauthorized" }

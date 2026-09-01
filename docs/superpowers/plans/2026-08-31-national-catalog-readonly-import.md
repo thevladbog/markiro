@@ -1,5 +1,14 @@
 # National Catalog Read-Only Import Implementation Plan
 
+> **Superseded before Task 2 (2026-09-01).** Task 1 below is retained as implementation
+> history. Continue the import only from
+> `docs/superpowers/specs/2026-09-01-national-catalog-foundation-hardening-design.md` and
+> `docs/superpowers/plans/2026-09-01-national-catalog-foundation-hardening.md`, after the
+> hardened PR 1 production diagnostic is reviewed. The newer contract requires bounded
+> byte reads, per-card raw snapshots, content-hash fallback, a separate freshness cursor,
+> and strict source-aware proposals; the earlier ETag-only and whole-envelope instructions
+> below must not be implemented.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Read categories, schemas, and product cards from the National Catalog; persist immutable observations; and apply user-confirmed field proposals without outbound card mutation.

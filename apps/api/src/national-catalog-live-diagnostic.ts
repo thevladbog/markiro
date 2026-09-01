@@ -25,18 +25,52 @@ export type NationalCatalogDiagnosticSourceStatus =
   | "token-decryption-failed";
 type UnavailableSourceStatus = Exclude<NationalCatalogDiagnosticSourceStatus, "ready">;
 
-export interface NationalCatalogDiagnosticCheck {
+type CapabilityState = "available" | "unavailable" | "not_checked";
+type CapabilityName = "source" | "schema_read" | "owned_card_read" | "published_card_read";
+type CacheObservation =
+  "not_checked" | "etag_present" | "etag_missing" | "not_modified" | "same_hash" | "changed_hash";
+type ViolationCode =
+  | "source_unavailable"
+  | "schema_read_failed"
+  | "owned_card_read_failed"
+  | "published_card_read_failed"
+  | "cache_contract_degraded"
+  | "usage_headers_missing";
+
+export interface NationalCatalogDiagnosticObservation {
   method: MethodName;
   outcome: Outcome;
   resultCount: number;
   etagPresent: boolean;
+  contentHash: string | null;
+  usagePresent: boolean;
+}
+
+export interface NationalCatalogDiagnosticCheck {
+  method: MethodName;
+  outcome: Outcome;
+  resultCount: number;
+  cacheObservation: CacheObservation;
+  usagePresent: boolean;
+}
+
+export interface NationalCatalogDiagnosticViolation {
+  capability: CapabilityName;
+  code: ViolationCode;
 }
 
 export interface NationalCatalogDiagnosticEvidence {
-  version: 2;
+  version: 3;
   passed: boolean;
   sourceStatus: NationalCatalogDiagnosticSourceStatus;
+  contractStatus: "conformant" | "degraded";
+  capabilities: {
+    schemaRead: CapabilityState;
+    ownedCardRead: CapabilityState;
+    publishedCardRead: CapabilityState;
+  };
   checks: NationalCatalogDiagnosticCheck[];
+  violations: NationalCatalogDiagnosticViolation[];
 }
 
 type SourceResult =
@@ -90,78 +124,240 @@ interface CliOptions {
   stderr?: Writable;
 }
 
-function check(
+function observation(
   method: MethodName,
   result: NationalCatalogResult<unknown>,
   resultCount: number,
-): NationalCatalogDiagnosticCheck {
+): NationalCatalogDiagnosticObservation {
   return {
     method,
     outcome: result.status,
     resultCount,
     etagPresent: result.status === "ok" && result.etag !== null,
+    contentHash: result.status === "ok" ? result.contentHash : null,
+    usagePresent:
+      result.status === "ok" && result.usage.total !== null && result.usage.method !== null,
   };
 }
 
-function evidence(
-  checks: NationalCatalogDiagnosticCheck[],
-  passed: boolean,
-  sourceStatus: NationalCatalogDiagnosticSourceStatus = "ready",
+export function evaluateNationalCatalogDiagnostic(
+  sourceStatus: NationalCatalogDiagnosticSourceStatus,
+  observations: readonly NationalCatalogDiagnosticObservation[],
 ): NationalCatalogDiagnosticEvidence {
-  return { version: 2, passed, sourceStatus, checks };
+  if (sourceStatus !== "ready") {
+    return {
+      version: 3,
+      passed: false,
+      sourceStatus,
+      contractStatus: "degraded",
+      capabilities: {
+        schemaRead: "not_checked",
+        ownedCardRead: "not_checked",
+        publishedCardRead: "not_checked",
+      },
+      checks: [],
+      violations: [{ capability: "source", code: "source_unavailable" }],
+    };
+  }
+
+  const byMethod = new Map(observations.map((entry) => [entry.method, entry]));
+  const categories = byMethod.get("categories");
+  const attributes = byMethod.get("attributes");
+  const feedProduct = byMethod.get("feed-product");
+  const product = byMethod.get("product");
+  const categoriesRepeat = byMethod.get("categories-repeat");
+  const productRepeat = byMethod.get("product-repeat");
+  const schemaRead =
+    categories?.outcome === "ok" &&
+    attributes?.outcome === "ok" &&
+    repeatProvesStableContent(categories, categoriesRepeat);
+  const ownedCardRead = feedProduct?.outcome === "ok";
+  const publishedCardRead =
+    product?.outcome === "ok" && repeatProvesStableContent(product, productRepeat);
+  const violations: NationalCatalogDiagnosticViolation[] = [];
+  const addViolation = (violation: NationalCatalogDiagnosticViolation) => {
+    if (
+      !violations.some(
+        (candidate) =>
+          candidate.code === violation.code && candidate.capability === violation.capability,
+      )
+    ) {
+      violations.push(violation);
+    }
+  };
+
+  if (!schemaRead) addViolation({ capability: "schema_read", code: "schema_read_failed" });
+  if (!ownedCardRead) {
+    addViolation({ capability: "owned_card_read", code: "owned_card_read_failed" });
+  }
+  if (!publishedCardRead) {
+    addViolation({ capability: "published_card_read", code: "published_card_read_failed" });
+  }
+
+  for (const [primaryMethod, repeatMethod, capability] of [
+    ["categories", "categories-repeat", "schema_read"],
+    ["product", "product-repeat", "published_card_read"],
+  ] as const) {
+    const primary = byMethod.get(primaryMethod);
+    if (primary?.outcome !== "ok") continue;
+    const repeat = byMethod.get(repeatMethod);
+    const conformant = primary.etagPresent && repeat?.outcome === "not_modified";
+    if (!conformant) {
+      addViolation({ capability, code: "cache_contract_degraded" });
+    }
+  }
+
+  for (const [method, capability] of [
+    ["categories", "schema_read"],
+    ["attributes", "schema_read"],
+    ["feed-product", "owned_card_read"],
+    ["product", "published_card_read"],
+  ] as const) {
+    const primary = byMethod.get(method);
+    if (primary?.outcome === "ok" && !primary.usagePresent) {
+      addViolation({ capability, code: "usage_headers_missing" });
+    }
+  }
+
+  const checks = observations.map((entry): NationalCatalogDiagnosticCheck => ({
+    method: entry.method,
+    outcome: entry.outcome,
+    resultCount: entry.resultCount,
+    cacheObservation: cacheObservation(entry, byMethod),
+    usagePresent: entry.usagePresent,
+  }));
+  return {
+    version: 3,
+    passed: schemaRead && (ownedCardRead || publishedCardRead),
+    sourceStatus,
+    contractStatus: violations.length === 0 ? "conformant" : "degraded",
+    capabilities: {
+      schemaRead: schemaRead ? "available" : "unavailable",
+      ownedCardRead: ownedCardRead ? "available" : "unavailable",
+      publishedCardRead: publishedCardRead ? "available" : "unavailable",
+    },
+    checks,
+    violations,
+  };
+}
+
+function repeatProvesStableContent(
+  primary: NationalCatalogDiagnosticObservation | undefined,
+  repeat: NationalCatalogDiagnosticObservation | undefined,
+): boolean {
+  if (primary?.outcome !== "ok") return false;
+  return (
+    repeat?.outcome === "not_modified" ||
+    (repeat?.outcome === "ok" && repeat.contentHash === primary.contentHash)
+  );
+}
+
+function cacheObservation(
+  entry: NationalCatalogDiagnosticObservation,
+  byMethod: ReadonlyMap<MethodName, NationalCatalogDiagnosticObservation>,
+): CacheObservation {
+  if (entry.method === "categories" || entry.method === "product") {
+    return entry.outcome === "ok"
+      ? entry.etagPresent
+        ? "etag_present"
+        : "etag_missing"
+      : "not_checked";
+  }
+  if (entry.method !== "categories-repeat" && entry.method !== "product-repeat") {
+    return "not_checked";
+  }
+  if (entry.outcome === "not_modified") return "not_modified";
+  if (entry.outcome !== "ok") return "not_checked";
+  const primary = byMethod.get(entry.method === "categories-repeat" ? "categories" : "product");
+  return primary?.contentHash === entry.contentHash ? "same_hash" : "changed_hash";
 }
 
 export async function collectNationalCatalogLiveDiagnostic(
   dependencies: DiagnosticDependencies,
 ): Promise<NationalCatalogDiagnosticEvidence> {
   const source = await dependencies.loadSource();
-  if (source.status !== "ok") return evidence([], false, source.sourceStatus);
+  if (source.status !== "ok") {
+    return evaluateNationalCatalogDiagnostic(source.sourceStatus, []);
+  }
 
-  const checks: NationalCatalogDiagnosticCheck[] = [];
-  const categories = await dependencies.client.listCategories(source.auth);
-  checks.push(
-    check(
+  const observations: NationalCatalogDiagnosticObservation[] = [];
+  const categories = await attempt(() => dependencies.client.listCategories(source.auth));
+  observations.push(
+    observation(
       "categories",
       categories,
       categories.status === "ok" ? categories.value.categories.length : 0,
     ),
   );
-  if (categories.status !== "ok" || categories.etag === null) return evidence(checks, false);
+  if (categories.status === "ok") {
+    const repeatedCategories = await attempt(() =>
+      dependencies.client.listCategories(
+        source.auth,
+        categories.etag === null ? {} : { ifNoneMatch: categories.etag },
+      ),
+    );
+    observations.push(
+      observation(
+        "categories-repeat",
+        repeatedCategories,
+        repeatedCategories.status === "ok" ? repeatedCategories.value.categories.length : 0,
+      ),
+    );
+  }
 
-  const repeatedCategories = await dependencies.client.listCategories(source.auth, {
-    ifNoneMatch: categories.etag,
-  });
-  checks.push(check("categories-repeat", repeatedCategories, 0));
-  if (repeatedCategories.status !== "not_modified") return evidence(checks, false);
-
-  const attributes = await dependencies.client.getAttributes(source.auth);
-  checks.push(
-    check(
+  const attributes = await attempt(() => dependencies.client.getAttributes(source.auth));
+  observations.push(
+    observation(
       "attributes",
       attributes,
       attributes.status === "ok" ? attributes.value.attributes.length : 0,
     ),
   );
-  if (attributes.status !== "ok") return evidence(checks, false);
 
-  const feedProduct = await dependencies.client.getFeedProducts(source.auth, [source.gtin]);
-  const feedProductCount = feedProduct.status === "ok" ? feedProduct.value.products.length : 0;
-  checks.push(check("feed-product", feedProduct, feedProductCount));
-  if (feedProduct.status !== "ok" || feedProductCount !== 1) return evidence(checks, false);
-
-  const product = await dependencies.client.getPublishedProducts(source.auth, [source.gtin]);
-  const productCount = product.status === "ok" ? product.value.products.length : 0;
-  checks.push(check("product", product, productCount));
-  if (product.status !== "ok" || productCount !== 1 || product.etag === null)
-    return evidence(checks, false);
-
-  const repeatedProduct = await dependencies.client.getPublishedProducts(
-    source.auth,
-    [source.gtin],
-    { ifNoneMatch: product.etag },
+  const feedProduct = await attempt(() =>
+    dependencies.client.getFeedProducts(source.auth, [source.gtin]),
   );
-  checks.push(check("product-repeat", repeatedProduct, 0));
-  return evidence(checks, repeatedProduct.status === "not_modified");
+  observations.push(
+    observation(
+      "feed-product",
+      feedProduct,
+      feedProduct.status === "ok" ? feedProduct.value.products.length : 0,
+    ),
+  );
+
+  const product = await attempt(() =>
+    dependencies.client.getPublishedProducts(source.auth, [source.gtin]),
+  );
+  observations.push(
+    observation("product", product, product.status === "ok" ? product.value.products.length : 0),
+  );
+  if (product.status === "ok") {
+    const repeatedProduct = await attempt(() =>
+      dependencies.client.getPublishedProducts(
+        source.auth,
+        [source.gtin],
+        product.etag === null ? {} : { ifNoneMatch: product.etag },
+      ),
+    );
+    observations.push(
+      observation(
+        "product-repeat",
+        repeatedProduct,
+        repeatedProduct.status === "ok" ? repeatedProduct.value.products.length : 0,
+      ),
+    );
+  }
+  return evaluateNationalCatalogDiagnostic("ready", observations);
+}
+
+async function attempt<T>(
+  request: () => Promise<NationalCatalogResult<T>>,
+): Promise<NationalCatalogResult<T>> {
+  try {
+    return await request();
+  } catch {
+    return { status: "unavailable" };
+  }
 }
 
 export async function loadNationalCatalogProductionSource(
@@ -238,7 +434,7 @@ function productionSourceDependencies(
 async function collectProductionEvidence(): Promise<NationalCatalogDiagnosticEvidence> {
   const env = loadEnv();
   const encryptionKey = env.CHZ_TOKEN_ENCRYPTION_KEY;
-  if (!encryptionKey) return evidence([], false, "encryption-key-missing");
+  if (!encryptionKey) return evaluateNationalCatalogDiagnostic("encryption-key-missing", []);
   const connection = createDb(env.DATABASE_URL);
   try {
     return await collectNationalCatalogLiveDiagnostic({
