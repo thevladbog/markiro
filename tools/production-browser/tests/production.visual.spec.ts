@@ -996,9 +996,7 @@ test("report dialog: stale run warns after late data", async ({ page }) => {
   const unexpected = await installApi(page, "exportsStale");
   await openHarness(page, "/shifts");
   await page.getByRole("button", { name: "Сформировать отчет" }).click();
-  await expect(
-    page.getByText("Данные смены изменились — сформируйте новый отчет."),
-  ).toBeVisible();
+  await expect(page.getByText("Данные смены изменились — сформируйте новый отчет.")).toBeVisible();
   await screenshotFullMain(page, screenshotPath09("exports-stale"));
   expect(unexpected).toEqual([]);
 });
