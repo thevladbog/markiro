@@ -47,7 +47,7 @@ For `publish`, the workflow reads stable state from both channels:
 1. the highest non-draft `signer-v*` release in `thevladbog/markiro-station-releases`;
 2. the validated Yandex stable `latest.json` version, if present.
 
-If both channels have a version, they must agree. If only one channel has the newest version, the workflow refuses a new release and directs the owner to `repair`. This prevents a partial publication from being skipped by an automatic bump.
+If both channels have a version, they must agree. The one migration exception is an empty distribution repository paired with the already published Yandex `0.1.4` baseline; that state calculates `0.1.5` without copying historical releases. Any other state where only one channel has the newest version refuses a new release and directs the owner to `repair`. This prevents a partial publication from being skipped by an automatic bump.
 
 The next version is calculated from the agreed version using the selected semantic bump. The workflow writes that version into a temporary Tauri configuration overlay in `$RUNNER_TEMP`. It does not commit or push a version change to `main`. The release contract verifies the effective merged Tauri configuration before packaging.
 
@@ -121,7 +121,7 @@ Journal behavior is transition-based:
 
 The window may show a quiet `Переподключение` state immediately, but no error alert or operating-system notification appears before the threshold. At the threshold it shows `Нет связи` and emits exactly one notification for that incident.
 
-Immediate task errors keep their existing degraded behavior. A later healthy poll may clear a transport incident, but it must not erase an unresolved actionable task error without an explicit successful task outcome or the existing recovery rule for that error class.
+Immediate task errors keep their existing degraded behavior and are not routed through the polling incident timer.
 
 ## Tray indicator
 
