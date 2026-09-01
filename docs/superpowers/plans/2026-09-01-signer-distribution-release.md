@@ -58,10 +58,10 @@ test("refuses split-brain stable channels", () => {
 });
 
 test("accepts the one-time distribution migration baseline", () => {
-  assert.deepEqual(
-    reconcileStableVersions({ githubVersion: null, yandexVersion: "0.1.4" }),
-    { kind: "aligned", version: "0.1.4" },
-  );
+  assert.deepEqual(reconcileStableVersions({ githubVersion: null, yandexVersion: "0.1.4" }), {
+    kind: "aligned",
+    version: "0.1.4",
+  });
 });
 
 test("rejects prerelease and malformed tags", () => {
@@ -173,7 +173,10 @@ const evidence = {
 await writeFile(join(outputDir, "release-evidence.json"), `${JSON.stringify(evidence, null, 2)}\n`);
 await writeFile(
   join(outputDir, "SHA256SUMS"),
-  `${assetHashes.map(([name, hash]) => `${hash}  ${name}`).sort().join("\n")}\n`,
+  `${assetHashes
+    .map(([name, hash]) => `${hash}  ${name}`)
+    .sort()
+    .join("\n")}\n`,
 );
 ```
 
@@ -212,16 +215,19 @@ git commit -m "feat(signer-release): prepare recoverable release assets"
 - [ ] **Step 1: Change publish tests to use a prepared directory and assert immutable-before-alias-before-manifest ordering.**
 
 ```js
-assert.deepEqual(operations.map((entry) => entry.kind), [
-  "put-immutable",
-  "put-immutable",
-  "verify",
-  "verify",
-  "copy-download",
-  "verify",
-  "put-manifest",
-  "verify",
-]);
+assert.deepEqual(
+  operations.map((entry) => entry.kind),
+  [
+    "put-immutable",
+    "put-immutable",
+    "verify",
+    "verify",
+    "copy-download",
+    "verify",
+    "put-manifest",
+    "verify",
+  ],
+);
 ```
 
 Add a repair test where immutable objects already exist with matching hashes and no write occurs, plus a mismatch test that fails before either mutable pointer changes.

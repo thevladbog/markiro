@@ -129,14 +129,14 @@ The base Signer icon remains unchanged. A small circular badge is composited ove
 
 States:
 
-| Runtime state | Badge | Motion | Tooltip |
-| --- | --- | --- | --- |
-| Unpaired | Gray | Static | `Markiro Подписант — не привязан` |
-| Connected / idle | Green | Static | `Markiro Подписант — работает` |
-| Working | Blue | Gentle two- or three-frame pulse | `Markiro Подписант — выполняет подпись` |
-| Reconnecting under five minutes | Yellow | Static | `Markiro Подписант — переподключение` |
-| Unavailable for five minutes | Red | Static | `Markiro Подписант — нет связи` |
-| Installing update | Blue | Gentle pulse | `Markiro Подписант — устанавливает обновление` |
+| Runtime state                   | Badge  | Motion                           | Tooltip                                        |
+| ------------------------------- | ------ | -------------------------------- | ---------------------------------------------- |
+| Unpaired                        | Gray   | Static                           | `Markiro Подписант — не привязан`              |
+| Connected / idle                | Green  | Static                           | `Markiro Подписант — работает`                 |
+| Working                         | Blue   | Gentle two- or three-frame pulse | `Markiro Подписант — выполняет подпись`        |
+| Reconnecting under five minutes | Yellow | Static                           | `Markiro Подписант — переподключение`          |
+| Unavailable for five minutes    | Red    | Static                           | `Markiro Подписант — нет связи`                |
+| Installing update               | Blue   | Gentle pulse                     | `Markiro Подписант — устанавливает обновление` |
 
 Persistent states never animate. Motion is reserved for bounded active work, avoids rapid flashing, and stops when the state changes. Tooltip text carries the same meaning as the color, so status is not color-only.
 
