@@ -867,8 +867,10 @@ function RepackInventoryWorkScreen({
   const dialogBusyRef = useRef(false);
   const queueRef = useRef<ScanQueue | null>(null);
   const boxDateRef = useRef("");
+  const refreshSeqRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    const seq = (refreshSeqRef.current += 1);
     const [nextState, nextRecent, nextReprint] = await Promise.all([
       readInventoryRepackState(exec, inventory.inventoryId, inventory.snapshotId, deviceId),
       listRecentInventoryOperations(exec, inventory.inventoryId, inventory.snapshotId),
@@ -878,12 +880,11 @@ function RepackInventoryWorkScreen({
         deviceId,
       }),
     ]);
-    if (mounted.current) {
-      setState(nextState);
-      setRecent(nextRecent);
-      setUnresolvedReprint(nextReprint);
-      setRefreshRevision((current) => current + 1);
-    }
+    if (!mounted.current || refreshSeqRef.current !== seq) return;
+    setState(nextState);
+    setRecent(nextRecent);
+    setUnresolvedReprint(nextReprint);
+    setRefreshRevision((current) => current + 1);
   }, [deviceId, exec, inventory.inventoryId, inventory.snapshotId]);
   boxDateRef.current = state.box?.productionDate ?? "";
 
