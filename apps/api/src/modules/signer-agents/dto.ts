@@ -25,6 +25,7 @@ export interface SignerAgentSummaryDto {
 
 export interface SignerTokenStatusDto {
   status: ChzTokenUiStatus;
+  tokenType: "jwt" | "uuid" | null;
   obtainedAt: string | null;
   expiresAt: string | null;
   certThumbprint: string | null;
@@ -89,9 +90,10 @@ const signerAgentSummaryOpenApiSchema: SchemaObject = {
 const signerTokenStatusOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["status", "obtainedAt", "expiresAt", "certThumbprint"],
+  required: ["status", "tokenType", "obtainedAt", "expiresAt", "certThumbprint"],
   properties: {
     status: { type: "string", enum: ["none", "active", "expiring", "expired"] },
+    tokenType: { type: "string", enum: ["jwt", "uuid"], nullable: true },
     obtainedAt: { type: "string", format: "date-time", nullable: true },
     expiresAt: { type: "string", format: "date-time", nullable: true },
     certThumbprint: { type: "string", nullable: true },

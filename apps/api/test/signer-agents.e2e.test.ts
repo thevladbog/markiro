@@ -69,6 +69,7 @@ describe.skipIf(!ready)("signer agents pairing", () => {
       ),
     ).toBe(true);
     expect(overview.body.token.status).toBe("none");
+    expect(overview.body.token.tokenType).toBeNull();
   });
 
   it("revokes an agent", async () => {

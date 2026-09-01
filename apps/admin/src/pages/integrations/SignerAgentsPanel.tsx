@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import {
   Alert,
+  Badge,
   Button,
   Card,
   ConfirmDialog,
@@ -288,6 +289,11 @@ export function SignerAgentsPanel() {
                 status={TOKEN_CHIP_STATUS[data.token.status]}
                 label={t(`pages.integrations.channel.signer.token.${data.token.status}`)}
               />
+            ) : null}
+            {data?.token.tokenType ? (
+              <Badge tone="neutral">
+                {t(`pages.integrations.channel.signer.tokenType.${data.token.tokenType}`)}
+              </Badge>
             ) : null}
             {data?.token.expiresAt ? (
               <span style={{ font: "var(--text-body)", color: "var(--fg-3)" }}>

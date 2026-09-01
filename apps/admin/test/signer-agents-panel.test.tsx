@@ -46,6 +46,7 @@ function agentFixture(overrides: Partial<SignerAgent> = {}): SignerAgent {
 
 const NO_TOKEN: SignerTokenStatus = {
   status: "none",
+  tokenType: null,
   obtainedAt: null,
   expiresAt: null,
   certThumbprint: null,
@@ -158,6 +159,20 @@ describe("SignerAgentsPanel", () => {
 
     expect(await screen.findByText("BUH-PC")).toBeDefined();
     expect(screen.getByText(/нет токена|no token/i)).toBeDefined();
+    expect(screen.queryByText(/^UUID$/)).toBeNull();
+  });
+
+  it("shows the persisted format of an active True API token", async () => {
+    tokenFixture = {
+      status: "active",
+      tokenType: "uuid",
+      obtainedAt: "2026-09-01T05:00:00Z",
+      expiresAt: "2026-09-02T05:00:00Z",
+      certThumbprint: "AB12",
+    };
+    renderPanel();
+
+    expect(await screen.findByText(/^UUID$/)).toBeDefined();
   });
 
   it("shows and copies the exact eight pairing digits", async () => {
