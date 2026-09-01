@@ -10,10 +10,19 @@ afterEach(() => {
 });
 
 describe("CHZ signer task payload", () => {
-  it("keeps the default JWT wire payload compatible with existing agents", () => {
+  it("sends the UUID format explicitly by default", () => {
     delete process.env.CHZ_TRUE_API_TOKEN_FORMAT;
     expect(buildChzTrueApiAuthPayload({ environment: "production" })).toEqual({
       trueApiBaseUrl: "https://markirovka.crpt.ru/api/v3/true-api",
+      tokenFormat: "uuid",
+    });
+  });
+
+  it("keeps an explicit JWT rollback payload available", () => {
+    process.env.CHZ_TRUE_API_TOKEN_FORMAT = "jwt";
+    expect(buildChzTrueApiAuthPayload({ environment: "production" })).toEqual({
+      trueApiBaseUrl: "https://markirovka.crpt.ru/api/v3/true-api",
+      tokenFormat: "jwt",
     });
   });
 
