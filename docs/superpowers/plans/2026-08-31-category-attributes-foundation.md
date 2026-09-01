@@ -1,5 +1,12 @@
 # Category Attributes Foundation Implementation Plan
 
+> **Superseded foundation contract (2026-09-01).** This file remains implementation
+> history for the original foundation. New work must follow
+> `docs/superpowers/specs/2026-09-01-national-catalog-foundation-hardening-design.md` and
+> `docs/superpowers/plans/2026-09-01-national-catalog-foundation-hardening.md`; in
+> particular, do not reuse the legacy requirement-rule shape, proposal diff/sourceRef
+> semantics, lifecycle shortcuts, or snapshot identity described below.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add the versioned category-schema, tenant product-profile, provenance, EGAIS, proposal, category-change, and readiness foundation without calling the National Catalog or changing Station.

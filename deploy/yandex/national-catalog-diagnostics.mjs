@@ -42,6 +42,30 @@ const SOURCE_STATUSES = Object.freeze([
   "product-gtin-unavailable",
   "token-decryption-failed",
 ]);
+const CAPABILITY_STATES = Object.freeze(["available", "unavailable", "not_checked"]);
+const CONTRACT_STATUSES = Object.freeze(["conformant", "degraded"]);
+const CACHE_OBSERVATIONS = Object.freeze([
+  "not_checked",
+  "etag_present",
+  "etag_missing",
+  "not_modified",
+  "same_hash",
+  "changed_hash",
+]);
+const VIOLATION_CAPABILITIES = Object.freeze([
+  "source",
+  "schema_read",
+  "owned_card_read",
+  "published_card_read",
+]);
+const VIOLATION_CODES = Object.freeze([
+  "source_unavailable",
+  "schema_read_failed",
+  "owned_card_read_failed",
+  "published_card_read_failed",
+  "cache_contract_degraded",
+  "usage_headers_missing",
+]);
 const FAILURE_STAGES = Object.freeze([
   "configuration",
   "credential-validation",
@@ -98,68 +122,103 @@ function hasExactKeys(value, keys) {
   );
 }
 
-function validCheck(value, index) {
-  return (
-    hasExactKeys(value, "etagPresent,method,outcome,resultCount") &&
-    value.method === METHODS[index] &&
-    OUTCOMES.includes(value.outcome) &&
-    Number.isSafeInteger(value.resultCount) &&
-    value.resultCount >= 0 &&
-    value.resultCount <= 1_000_000 &&
-    typeof value.etagPresent === "boolean" &&
-    (value.outcome === "ok" || (value.etagPresent === false && value.resultCount === 0))
-  );
-}
-
-function evidencePassed(checks) {
-  return (
-    checks.length === METHODS.length &&
-    checks[0].outcome === "ok" &&
-    checks[0].etagPresent === true &&
-    checks[1].outcome === "not_modified" &&
-    checks[2].outcome === "ok" &&
-    checks[3].outcome === "ok" &&
-    checks[3].resultCount === 1 &&
-    checks[4].outcome === "ok" &&
-    checks[4].resultCount === 1 &&
-    checks[4].etagPresent === true &&
-    checks[5].outcome === "not_modified"
-  );
-}
-
-function checkAllowsContinuation(check, index) {
-  if (index === 0) return check.outcome === "ok" && check.etagPresent === true;
-  if (index === 1) return check.outcome === "not_modified";
-  if (index === 2) return check.outcome === "ok";
-  if (index === 3) return check.outcome === "ok" && check.resultCount === 1;
-  if (index === 4)
-    return check.outcome === "ok" && check.resultCount === 1 && check.etagPresent === true;
-  return false;
-}
-
-function isCanonicalPrefix(checks) {
-  if (checks.length === 0) return false;
-  for (let index = 0; index < checks.length - 1; index += 1) {
-    if (!checkAllowsContinuation(checks[index], index)) return false;
+function validCheck(value) {
+  if (
+    !hasExactKeys(value, "cacheObservation,method,outcome,resultCount,usagePresent") ||
+    !METHODS.includes(value.method) ||
+    !OUTCOMES.includes(value.outcome) ||
+    !CACHE_OBSERVATIONS.includes(value.cacheObservation) ||
+    !Number.isSafeInteger(value.resultCount) ||
+    value.resultCount < 0 ||
+    value.resultCount > 1_000_000 ||
+    typeof value.usagePresent !== "boolean"
+  ) {
+    return false;
   }
+  const repeat = value.method === "categories-repeat" || value.method === "product-repeat";
+  const cachePrimary = value.method === "categories" || value.method === "product";
+  if (value.outcome === "ok") {
+    if (repeat && !["same_hash", "changed_hash"].includes(value.cacheObservation)) return false;
+    if (cachePrimary && !["etag_present", "etag_missing"].includes(value.cacheObservation))
+      return false;
+    if (!repeat && !cachePrimary && value.cacheObservation !== "not_checked") return false;
+    return true;
+  }
+  if (value.resultCount !== 0 || value.usagePresent) return false;
+  if (value.outcome === "not_modified") {
+    return repeat && value.cacheObservation === "not_modified";
+  }
+  return value.cacheObservation === "not_checked";
+}
+
+function validCheckSequence(checks) {
+  if (checks.length < 4 || checks.length > METHODS.length || !checks.every(validCheck))
+    return false;
+  let previousIndex = -1;
+  for (const check of checks) {
+    const index = METHODS.indexOf(check.method);
+    if (index <= previousIndex) return false;
+    previousIndex = index;
+  }
+  for (const required of ["categories", "attributes", "feed-product", "product"]) {
+    if (!checks.some((check) => check.method === required)) return false;
+  }
+  const byMethod = new Map(checks.map((check) => [check.method, check]));
+  if (
+    (byMethod.has("categories-repeat") && byMethod.get("categories")?.outcome !== "ok") ||
+    (byMethod.has("product-repeat") && byMethod.get("product")?.outcome !== "ok")
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function validCapabilities(value, sourceReady) {
+  if (!hasExactKeys(value, "ownedCardRead,publishedCardRead,schemaRead")) return false;
+  const states = [value.schemaRead, value.ownedCardRead, value.publishedCardRead];
   return (
-    checks.length === METHODS.length ||
-    !checkAllowsContinuation(checks[checks.length - 1], checks.length - 1)
+    states.every((state) => CAPABILITY_STATES.includes(state)) &&
+    (sourceReady
+      ? states.every((state) => state !== "not_checked")
+      : states.every((state) => state === "not_checked"))
+  );
+}
+
+function validViolation(value) {
+  return (
+    hasExactKeys(value, "capability,code") &&
+    VIOLATION_CAPABILITIES.includes(value.capability) &&
+    VIOLATION_CODES.includes(value.code)
   );
 }
 
 function validateEvidence(value) {
   const sourceReady = value?.sourceStatus === "ready";
   if (
-    !hasExactKeys(value, "checks,passed,sourceStatus,version") ||
-    value.version !== 2 ||
+    !hasExactKeys(
+      value,
+      "capabilities,checks,contractStatus,passed,sourceStatus,version,violations",
+    ) ||
+    value.version !== 3 ||
     typeof value.passed !== "boolean" ||
     !SOURCE_STATUSES.includes(value.sourceStatus) ||
+    !CONTRACT_STATUSES.includes(value.contractStatus) ||
+    !validCapabilities(value.capabilities, sourceReady) ||
     !Array.isArray(value.checks) ||
-    value.checks.length > METHODS.length ||
-    !value.checks.every(validCheck) ||
-    (sourceReady ? !isCanonicalPrefix(value.checks) : value.checks.length !== 0) ||
-    value.passed !== (sourceReady && evidencePassed(value.checks))
+    !Array.isArray(value.violations) ||
+    value.violations.length > 32 ||
+    !value.violations.every(validViolation) ||
+    (value.contractStatus === "conformant"
+      ? value.violations.length !== 0
+      : value.violations.length === 0) ||
+    (sourceReady
+      ? !validCheckSequence(value.checks)
+      : value.passed ||
+        value.contractStatus !== "degraded" ||
+        value.checks.length !== 0 ||
+        value.violations.length !== 1 ||
+        value.violations[0].capability !== "source" ||
+        value.violations[0].code !== "source_unavailable")
   )
     throw invalidResponse();
   return value;

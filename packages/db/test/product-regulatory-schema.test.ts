@@ -54,6 +54,18 @@ function foreignKey(tableName: string, foreignKeyName: string) {
   };
 }
 
+function uniqueConstraintColumns(tableName: string, constraintName: string): string[] {
+  const found = getTableConfig(table(tableName)).uniqueConstraints.find(
+    (item) => item.name === constraintName,
+  );
+  if (found === undefined) throw new Error(`missing unique constraint ${constraintName}`);
+  return found.columns.map((column) => column.name);
+}
+
+function columnNames(tableName: string): string[] {
+  return getTableConfig(table(tableName)).columns.map((column) => column.name);
+}
+
 describe("product regulatory schema", () => {
   it("exports the global and tenant regulatory tables", () => {
     expect(
@@ -65,7 +77,9 @@ describe("product regulatory schema", () => {
         "productRegulatoryAttributeValues",
         "productEgaisCodes",
         "nationalCatalogCardSnapshots",
+        "nationalCatalogCardFreshness",
         "productRegulatoryProposals",
+        "productRegulatoryBindingHistory",
       ].map((name) => getTableName(table(name))),
     ).toEqual([
       "national_catalog_schema_versions",
@@ -75,7 +89,9 @@ describe("product regulatory schema", () => {
       "product_regulatory_attribute_values",
       "product_egais_codes",
       "national_catalog_card_snapshots",
+      "national_catalog_card_freshness",
       "product_regulatory_proposals",
+      "product_regulatory_binding_history",
     ]);
   });
 
@@ -99,6 +115,41 @@ describe("product regulatory schema", () => {
       "rejected",
       "stale",
     ]);
+    expect(enumValues("productRegulatoryProposalKind")).toEqual([
+      "category_binding",
+      "category_change",
+      "national_catalog_import",
+    ]);
+    expect(enumValues("nationalCatalogCardSourceMethod")).toEqual([
+      "legacy_unknown",
+      "feed_product",
+      "product",
+    ]);
+    expect(enumValues("nationalCatalogFreshnessOutcome")).toEqual([
+      "changed",
+      "unchanged",
+      "not_modified",
+      "not_found",
+      "unauthorized",
+      "forbidden",
+      "rate_limited",
+      "invalid_response",
+      "unavailable",
+    ]);
+  });
+
+  it("deduplicates schema content within a scope rather than globally", () => {
+    expect(
+      uniqueConstraintColumns(
+        "nationalCatalogSchemaVersions",
+        "national_catalog_schema_versions_scope_content_uq",
+      ),
+    ).toEqual(["scope_key", "content_hash"]);
+    expect(
+      getTableConfig(table("nationalCatalogSchemaVersions")).uniqueConstraints.map(
+        (constraint) => constraint.name,
+      ),
+    ).not.toContain("national_catalog_schema_versions_content_hash_uq");
   });
 
   it("allows only one active National Catalog schema per scope", () => {
@@ -131,15 +182,98 @@ describe("product regulatory schema", () => {
         ],
         ["productEgaisCodes", "product_egais_codes_tenant_product_fk"],
         ["nationalCatalogCardSnapshots", "national_catalog_card_snapshots_tenant_product_fk"],
+        ["nationalCatalogCardFreshness", "national_catalog_card_freshness_tenant_product_fk"],
         ["productRegulatoryProposals", "product_regulatory_proposals_tenant_product_fk"],
+        ["productRegulatoryBindingHistory", "product_regulatory_binding_history_tenant_product_fk"],
       ].map(([tableName, foreignKeyName]) => foreignKey(tableName!, foreignKeyName!)),
     ).toEqual(
-      Array.from({ length: 5 }, () => ({
+      Array.from({ length: 7 }, () => ({
         table: "products",
         columns: ["tenant_id", "product_id"],
         foreignColumns: ["tenant_id", "id"],
       })),
     );
+  });
+
+  it("stores versioned snapshot observations and a tenant-safe freshness cursor", () => {
+    expect(columnNames("nationalCatalogCardSnapshots")).toEqual(
+      expect.arrayContaining(["source_method", "payload_format_version"]),
+    );
+    expect(columnNames("nationalCatalogCardFreshness")).toEqual(
+      expect.arrayContaining([
+        "tenant_id",
+        "product_id",
+        "card_id",
+        "source_method",
+        "latest_snapshot_id",
+        "provider_etag",
+        "content_hash",
+        "last_checked_at",
+        "last_changed_at",
+        "last_outcome",
+      ]),
+    );
+    expect(
+      foreignKey("nationalCatalogCardFreshness", "national_catalog_card_freshness_snapshot_fk"),
+    ).toEqual({
+      table: "national_catalog_card_snapshots",
+      columns: ["tenant_id", "product_id", "card_id", "source_method", "latest_snapshot_id"],
+      foreignColumns: ["tenant_id", "product_id", "card_id", "source_method", "id"],
+    });
+    expect(
+      uniqueConstraintColumns(
+        "nationalCatalogCardSnapshots",
+        "national_catalog_card_snapshots_content_uq",
+      ),
+    ).toEqual(["tenant_id", "product_id", "card_id", "source_method", "content_hash"]);
+  });
+
+  it("persists proposal kind, expiry, terminal provenance, and replay selection", () => {
+    expect(columnNames("productRegulatoryProposals")).toEqual(
+      expect.arrayContaining([
+        "kind",
+        "expires_at",
+        "terminal_reason",
+        "applied_selection",
+        "applied_selection_hash",
+        "rejected_by",
+      ]),
+    );
+    expect(
+      uniqueConstraintColumns(
+        "productRegulatoryProposals",
+        "product_regulatory_proposals_tenant_product_id_uq",
+      ),
+    ).toEqual(["tenant_id", "product_id", "id"]);
+  });
+
+  it("keeps append-only binding provenance linked through composite tenant identity", () => {
+    expect(columnNames("productRegulatoryBindingHistory")).toEqual(
+      expect.arrayContaining([
+        "tenant_id",
+        "product_id",
+        "proposal_id",
+        "prior_category_id",
+        "prior_schema_version_id",
+        "next_category_id",
+        "next_schema_version_id",
+        "resulting_revision",
+        "source",
+        "source_ref",
+        "actor_id",
+        "created_at",
+      ]),
+    );
+    expect(
+      foreignKey(
+        "productRegulatoryBindingHistory",
+        "product_regulatory_binding_history_proposal_fk",
+      ),
+    ).toEqual({
+      table: "product_regulatory_proposals",
+      columns: ["tenant_id", "product_id", "proposal_id"],
+      foreignColumns: ["tenant_id", "product_id", "id"],
+    });
   });
 
   it("keeps one current attribute value per product and attribute", () => {

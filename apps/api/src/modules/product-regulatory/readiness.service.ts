@@ -2,8 +2,8 @@ import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, eq, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
-  categorySchemaDefinitionSchema,
   evaluateProductReadiness,
+  parseCategorySchemaDefinition,
   type ProductAttributeValues,
   type ProductReadinessDimensionResult,
 } from "@markiro/domain";
@@ -67,6 +67,7 @@ export class ProductReadinessService {
       const evaluated = evaluateProductReadiness({
         schemaVersionId: "category-not-confirmed",
         schema: {
+          formatVersion: 2,
           categoryId: "unconfirmed",
           scopeKey: "category:unconfirmed|tnved:none",
           attributes: [],
@@ -100,7 +101,7 @@ export class ProductReadinessService {
       .where(eq(schema.nationalCatalogSchemaVersions.id, profile.schemaVersionId))
       .limit(1);
     if (!pinnedSchema) throw new NotFoundException("Pinned category schema not found");
-    const definition = categorySchemaDefinitionSchema.parse(pinnedSchema.definition);
+    const definition = parseCategorySchemaDefinition(pinnedSchema.definition);
     const [activeSchema] = await this.db
       .select({ id: schema.nationalCatalogSchemaVersions.id })
       .from(schema.nationalCatalogSchemaVersions)

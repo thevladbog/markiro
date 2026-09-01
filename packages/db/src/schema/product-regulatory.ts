@@ -38,6 +38,27 @@ export const productRegulatoryProposalStatus = pgEnum("product_regulatory_propos
   "rejected",
   "stale",
 ]);
+export const productRegulatoryProposalKind = pgEnum("product_regulatory_proposal_kind", [
+  "category_binding",
+  "category_change",
+  "national_catalog_import",
+]);
+export const nationalCatalogCardSourceMethod = pgEnum("national_catalog_card_source_method", [
+  "legacy_unknown",
+  "feed_product",
+  "product",
+]);
+export const nationalCatalogFreshnessOutcome = pgEnum("national_catalog_freshness_outcome", [
+  "changed",
+  "unchanged",
+  "not_modified",
+  "not_found",
+  "unauthorized",
+  "forbidden",
+  "rate_limited",
+  "invalid_response",
+  "unavailable",
+]);
 export const nationalCatalogCategoryGroupMappingState = pgEnum(
   "national_catalog_category_group_mapping_state",
   ["exact", "ambiguous", "unmapped"],
@@ -69,7 +90,10 @@ export const nationalCatalogSchemaVersions = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    unique("national_catalog_schema_versions_content_hash_uq").on(table.contentHash),
+    unique("national_catalog_schema_versions_scope_content_uq").on(
+      table.scopeKey,
+      table.contentHash,
+    ),
     uniqueIndex("national_catalog_schema_versions_active_scope_uq")
       .on(table.scopeKey)
       .where(sql`${table.status} = 'active'`),
@@ -224,20 +248,35 @@ export const nationalCatalogCardSnapshots = pgTable(
     gtin14: char("gtin14", { length: 14 }).notNull(),
     cardId: text("card_id").notNull(),
     cardStatus: text("card_status").notNull(),
+    sourceMethod: nationalCatalogCardSourceMethod("source_method").notNull(),
+    payloadFormatVersion: integer("payload_format_version").notNull(),
     etag: text("etag"),
     contentHash: char("content_hash", { length: 64 }).notNull(),
     payload: jsonb("payload").notNull(),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
   },
   (table) => [
+    check(
+      "national_catalog_card_snapshots_payload_format_version_ck",
+      sql`${table.payloadFormatVersion} >= 1`,
+    ),
     unique("national_catalog_card_snapshots_tenant_product_id_uq").on(
       table.tenantId,
       table.productId,
       table.id,
     ),
+    unique("national_catalog_card_snapshots_cursor_identity_uq").on(
+      table.tenantId,
+      table.productId,
+      table.cardId,
+      table.sourceMethod,
+      table.id,
+    ),
     unique("national_catalog_card_snapshots_content_uq").on(
       table.tenantId,
       table.productId,
+      table.cardId,
+      table.sourceMethod,
       table.contentHash,
     ),
     foreignKey({
@@ -248,6 +287,55 @@ export const nationalCatalogCardSnapshots = pgTable(
   ],
 );
 
+export const nationalCatalogCardFreshness = pgTable(
+  "national_catalog_card_freshness",
+  {
+    tenantId: tenantId(),
+    productId: uuid("product_id").notNull(),
+    cardId: text("card_id").notNull(),
+    sourceMethod: nationalCatalogCardSourceMethod("source_method").notNull(),
+    latestSnapshotId: uuid("latest_snapshot_id").notNull(),
+    providerEtag: text("provider_etag"),
+    contentHash: char("content_hash", { length: 64 }).notNull(),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }).notNull(),
+    lastChangedAt: timestamp("last_changed_at", { withTimezone: true }).notNull(),
+    lastOutcome: nationalCatalogFreshnessOutcome("last_outcome").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.tenantId, table.productId, table.cardId, table.sourceMethod],
+    }),
+    check(
+      "national_catalog_card_freshness_source_method_ck",
+      sql`${table.sourceMethod} <> 'legacy_unknown'`,
+    ),
+    foreignKey({
+      name: "national_catalog_card_freshness_tenant_product_fk",
+      columns: [table.tenantId, table.productId],
+      foreignColumns: [products.tenantId, products.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "national_catalog_card_freshness_snapshot_fk",
+      columns: [
+        table.tenantId,
+        table.productId,
+        table.cardId,
+        table.sourceMethod,
+        table.latestSnapshotId,
+      ],
+      foreignColumns: [
+        nationalCatalogCardSnapshots.tenantId,
+        nationalCatalogCardSnapshots.productId,
+        nationalCatalogCardSnapshots.cardId,
+        nationalCatalogCardSnapshots.sourceMethod,
+        nationalCatalogCardSnapshots.id,
+      ],
+    }),
+  ],
+);
+
 export const productRegulatoryProposals = pgTable(
   "product_regulatory_proposals",
   {
@@ -255,19 +343,39 @@ export const productRegulatoryProposals = pgTable(
     tenantId: tenantId(),
     productId: uuid("product_id").notNull(),
     snapshotId: uuid("snapshot_id"),
+    kind: productRegulatoryProposalKind("kind").notNull(),
     source: productAttributeSource("source").notNull(),
     sourceRef: text("source_ref"),
     baseRevision: integer("base_revision").notNull(),
     diff: jsonb("diff").notNull(),
     status: productRegulatoryProposalStatus("status").notNull().default("preview"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    terminalReason: text("terminal_reason"),
+    appliedSelection: jsonb("applied_selection"),
+    appliedSelectionHash: char("applied_selection_hash", { length: 64 }),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     appliedBy: text("applied_by").references(() => user.id, { onDelete: "set null" }),
+    rejectedBy: text("rejected_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     appliedAt: timestamp("applied_at", { withTimezone: true }),
     rejectedAt: timestamp("rejected_at", { withTimezone: true }),
     staleAt: timestamp("stale_at", { withTimezone: true }),
   },
   (table) => [
+    unique("product_regulatory_proposals_tenant_product_id_uq").on(
+      table.tenantId,
+      table.productId,
+      table.id,
+    ),
+    check("product_regulatory_proposals_base_revision_ck", sql`${table.baseRevision} >= 0`),
+    check(
+      "product_regulatory_proposals_applied_selection_ck",
+      sql`${table.appliedSelection} is null or jsonb_typeof(${table.appliedSelection}) = 'array'`,
+    ),
+    check(
+      "product_regulatory_proposals_applied_selection_hash_ck",
+      sql`${table.appliedSelectionHash} is null or ${table.appliedSelection} is not null`,
+    ),
     foreignKey({
       name: "product_regulatory_proposals_tenant_product_fk",
       columns: [table.tenantId, table.productId],
@@ -280,6 +388,49 @@ export const productRegulatoryProposals = pgTable(
         nationalCatalogCardSnapshots.tenantId,
         nationalCatalogCardSnapshots.productId,
         nationalCatalogCardSnapshots.id,
+      ],
+    }),
+  ],
+);
+
+export const productRegulatoryBindingHistory = pgTable(
+  "product_regulatory_binding_history",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    productId: uuid("product_id").notNull(),
+    proposalId: uuid("proposal_id"),
+    priorCategoryId: text("prior_category_id"),
+    priorSchemaVersionId: uuid("prior_schema_version_id").references(
+      () => nationalCatalogSchemaVersions.id,
+    ),
+    nextCategoryId: text("next_category_id").notNull(),
+    nextSchemaVersionId: uuid("next_schema_version_id")
+      .notNull()
+      .references(() => nationalCatalogSchemaVersions.id),
+    resultingRevision: integer("resulting_revision").notNull(),
+    source: productAttributeSource("source").notNull(),
+    sourceRef: text("source_ref"),
+    actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "product_regulatory_binding_history_resulting_revision_ck",
+      sql`${table.resultingRevision} > 0`,
+    ),
+    foreignKey({
+      name: "product_regulatory_binding_history_tenant_product_fk",
+      columns: [table.tenantId, table.productId],
+      foreignColumns: [products.tenantId, products.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "product_regulatory_binding_history_proposal_fk",
+      columns: [table.tenantId, table.productId, table.proposalId],
+      foreignColumns: [
+        productRegulatoryProposals.tenantId,
+        productRegulatoryProposals.productId,
+        productRegulatoryProposals.id,
       ],
     }),
   ],
