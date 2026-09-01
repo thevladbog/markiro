@@ -335,25 +335,24 @@ describe("National Catalog production live diagnostic", () => {
     for (const passed of [true, false] as const) {
       let stdout = "";
       let stderr = "";
+      const collected = passed
+        ? await collectNationalCatalogLiveDiagnostic({
+            loadSource: async () => source(),
+            client: successfulClient([]),
+          })
+        : ({
+            version: 2,
+            passed: false,
+            sourceStatus: "active-token-missing",
+            checks: [],
+          } as const);
       const exitCode = await runNationalCatalogLiveDiagnosticCli({
-        collect: async () => ({
-          version: 2,
-          passed,
-          sourceStatus: passed ? "ready" : "active-token-missing",
-          checks: [],
-        }),
+        collect: async () => collected,
         stdout: { write: (value: string) => (stdout += value) },
         stderr: { write: (value: string) => (stderr += value) },
       });
       expect(exitCode).toBe(0);
-      expect(stdout).toBe(
-        `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify({
-          version: 2,
-          passed,
-          sourceStatus: passed ? "ready" : "active-token-missing",
-          checks: [],
-        })}\n`,
-      );
+      expect(stdout).toBe(`MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(collected)}\n`);
       expect(stderr).toBe("");
     }
   });
