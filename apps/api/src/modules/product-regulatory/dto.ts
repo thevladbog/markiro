@@ -140,6 +140,14 @@ const productAttributeValueOpenApiSchema: SchemaObject = {
   ],
 };
 
+const nullOpenApiSchema: SchemaObject = { type: "string", nullable: true, enum: [null] };
+const nullableProductAttributeValueOpenApiSchema: SchemaObject = {
+  oneOf: [...(productAttributeValueOpenApiSchema.oneOf ?? []), nullOpenApiSchema],
+};
+const nullableStableFieldValueOpenApiSchema: SchemaObject = {
+  oneOf: [{ type: "string" }, { type: "integer", minimum: 1 }, nullOpenApiSchema],
+};
+
 export const productReadinessOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -287,8 +295,8 @@ const proposalEntryOpenApiSchema: SchemaObject = {
           type: "string",
           enum: ["transferable", "convertible", "inapplicable", "conflict"],
         },
-        currentValue: { ...productAttributeValueOpenApiSchema, nullable: true },
-        proposedValue: { ...productAttributeValueOpenApiSchema, nullable: true },
+        currentValue: nullableProductAttributeValueOpenApiSchema,
+        proposedValue: nullableProductAttributeValueOpenApiSchema,
       },
     },
     {
@@ -332,14 +340,8 @@ const proposalEntryOpenApiSchema: SchemaObject = {
             },
           },
         },
-        currentValue: {
-          oneOf: [{ type: "string" }, { type: "integer", minimum: 1 }],
-          nullable: true,
-        },
-        proposedValue: {
-          oneOf: [{ type: "string" }, { type: "integer", minimum: 1 }],
-          nullable: true,
-        },
+        currentValue: nullableStableFieldValueOpenApiSchema,
+        proposedValue: nullableStableFieldValueOpenApiSchema,
       },
     },
   ],

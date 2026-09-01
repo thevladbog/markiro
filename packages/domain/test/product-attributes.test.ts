@@ -180,6 +180,25 @@ describe("categorySchemaDefinitionSchema", () => {
 });
 
 describe("parseCategorySchemaDefinition", () => {
+  it("reports current-version errors without falling back to the legacy schema", () => {
+    const parse = () =>
+      parseCategorySchemaDefinition({
+        formatVersion: 1,
+        categoryId: "versioned",
+        scopeKey: "category:versioned|tnved:none",
+        attributes: [],
+      });
+
+    expect(parse).toThrow();
+    try {
+      parse();
+    } catch (error) {
+      expect(error).toMatchObject({
+        issues: [expect.objectContaining({ path: ["formatVersion"] })],
+      });
+    }
+  });
+
   it("normalizes legacy layers and conditions without rewriting their semantics", () => {
     const parsed = parseCategorySchemaDefinition({
       categoryId: "legacy",

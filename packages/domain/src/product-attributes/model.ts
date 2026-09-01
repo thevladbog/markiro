@@ -149,6 +149,9 @@ const legacyCategorySchemaDefinitionSchema = z
 export function parseCategorySchemaDefinition(value: unknown): CategorySchemaDefinition {
   const current = categorySchemaDefinitionSchema.safeParse(value);
   if (current.success) return current.data;
+  if (typeof value === "object" && value !== null && "formatVersion" in value) {
+    throw current.error;
+  }
 
   const legacy = legacyCategorySchemaDefinitionSchema.parse(value);
   return categorySchemaDefinitionSchema.parse({

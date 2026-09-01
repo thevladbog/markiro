@@ -125,6 +125,9 @@ ALTER TABLE "national_catalog_card_snapshots" ADD CONSTRAINT "national_catalog_c
 ALTER TABLE "product_regulatory_proposals" ADD CONSTRAINT "product_regulatory_proposals_base_revision_ck" CHECK ("product_regulatory_proposals"."base_revision" >= 0);--> statement-breakpoint
 ALTER TABLE "product_regulatory_proposals" ADD CONSTRAINT "product_regulatory_proposals_applied_selection_ck" CHECK ("product_regulatory_proposals"."applied_selection" is null or jsonb_typeof("product_regulatory_proposals"."applied_selection") = 'array');--> statement-breakpoint
 ALTER TABLE "product_regulatory_proposals" ADD CONSTRAINT "product_regulatory_proposals_applied_selection_hash_ck" CHECK ("product_regulatory_proposals"."applied_selection_hash" is null or "product_regulatory_proposals"."applied_selection" is not null);--> statement-breakpoint
+UPDATE "product_regulatory_profiles"
+SET "revision" = 1
+WHERE "revision" <= 0;--> statement-breakpoint
 INSERT INTO "product_regulatory_binding_history" (
 	"tenant_id",
 	"product_id",

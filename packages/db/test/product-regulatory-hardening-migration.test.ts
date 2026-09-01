@@ -26,6 +26,7 @@ describe.skipIf(!databaseUrl)("product regulatory hardening migration", () => {
 
   const tenantId = "product-regulatory-hardening";
   const productId = "00000000-0000-4000-8000-000000010801";
+  const nonPositiveRevisionProductId = "00000000-0000-4000-8000-000000010807";
   const schemaVersionId = "00000000-0000-4000-8000-000000010802";
   const snapshotId = "00000000-0000-4000-8000-000000010803";
   const appliedProposalId = "00000000-0000-4000-8000-000000010804";
@@ -57,9 +58,11 @@ describe.skipIf(!databaseUrl)("product regulatory hardening migration", () => {
     await pool.query(
       `INSERT INTO products
          (id, tenant_id, gtin14, name, chz_product_group_code, egais_code)
-       VALUES ($1, $2, '00000000010801', 'Legacy regulatory product', 15,
-         'legacy-value-must-remain')`,
-      [productId, tenantId],
+       VALUES
+         ($1, $2, '00000000010801', 'Legacy regulatory product', 15,
+          'legacy-value-must-remain'),
+         ($3, $2, '00000000010802', 'Invalid legacy revision', 15, null)`,
+      [productId, tenantId, nonPositiveRevisionProductId],
     );
     await pool.query(
       `INSERT INTO national_catalog_schema_versions
@@ -75,9 +78,12 @@ describe.skipIf(!databaseUrl)("product regulatory hardening migration", () => {
       `INSERT INTO product_regulatory_profiles
          (tenant_id, product_id, revision, category_id, category_name, schema_version_id,
           source, confirmed_at)
-       VALUES ($1, $2, 7, 'legacy-category', 'Legacy category', $3, 'manual',
-         '2026-08-01T01:00:00Z')`,
-      [tenantId, productId, schemaVersionId],
+       VALUES
+         ($1, $2, 7, 'legacy-category', 'Legacy category', $3, 'manual',
+          '2026-08-01T01:00:00Z'),
+         ($1, $4, -2, 'legacy-category', 'Legacy category', $3, 'migration',
+          '2026-08-01T01:30:00Z')`,
+      [tenantId, productId, schemaVersionId, nonPositiveRevisionProductId],
     );
     await pool.query(
       `INSERT INTO product_regulatory_proposals
@@ -178,6 +184,24 @@ describe.skipIf(!databaseUrl)("product regulatory hardening migration", () => {
         created_at: new Date("2026-08-01T01:00:00Z"),
       },
     ]);
+  });
+
+  it("normalizes a non-positive legacy profile revision before history backfill", async () => {
+    const profile = await pool.query(
+      `SELECT revision
+       FROM product_regulatory_profiles
+       WHERE tenant_id = $1 AND product_id = $2`,
+      [tenantId, nonPositiveRevisionProductId],
+    );
+    const history = await pool.query(
+      `SELECT resulting_revision
+       FROM product_regulatory_binding_history
+       WHERE tenant_id = $1 AND product_id = $2`,
+      [tenantId, nonPositiveRevisionProductId],
+    );
+
+    expect(profile.rows).toEqual([{ revision: 1 }]);
+    expect(history.rows).toEqual([{ resulting_revision: 1 }]);
   });
 
   it("classifies legacy proposals, gives them deterministic expiry, and separates replay data", async () => {

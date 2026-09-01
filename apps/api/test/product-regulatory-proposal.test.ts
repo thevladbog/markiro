@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import type { ReferenceObject, SchemaObject } from "@nestjs/swagger";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -11,6 +12,7 @@ import {
   applyRegulatoryProposalSchema,
   categoryChangePreviewSchema,
   productReadinessOpenApiSchema,
+  regulatoryProposalDiffOpenApiSchema,
   regulatoryProposalOpenApiSchema,
   regulatoryProposalPreviewOpenApiSchema,
 } from "../src/modules/product-regulatory/dto";
@@ -21,6 +23,11 @@ const randomSnapshotId = "00000000-0000-4000-8000-000000030099";
 const mappingId = "00000000-0000-4000-8000-000000030003";
 const entryA = "00000000-0000-4000-8000-000000030011";
 const entryB = "00000000-0000-4000-8000-000000030012";
+
+function inlineSchema(value: SchemaObject | ReferenceObject | undefined): SchemaObject {
+  if (value === undefined || "$ref" in value) throw new Error("Expected an inline OpenAPI schema");
+  return value;
+}
 
 const target = {
   schemaVersionId,
@@ -357,5 +364,29 @@ describe("proposal DTO and OpenAPI boundaries", () => {
       additionalProperties: false,
       required: expect.arrayContaining(["id", "kind", "source", "status", "diff"]),
     });
+  });
+
+  it("documents null as a dedicated variant for nullable proposal values", () => {
+    const categoryDiff = inlineSchema(regulatoryProposalDiffOpenApiSchema.oneOf?.[0]);
+    const entries = inlineSchema(categoryDiff.properties?.entries);
+    const entryUnion = inlineSchema(entries.items);
+    const attributeEntrySchema = inlineSchema(entryUnion.oneOf?.[0]);
+    const stableFieldEntrySchema = inlineSchema(entryUnion.oneOf?.[2]);
+    const nullVariant = { type: "string", nullable: true, enum: [null] };
+
+    for (const field of ["currentValue", "proposedValue"] as const) {
+      const attributeValue = inlineSchema(attributeEntrySchema.properties?.[field]);
+      expect(attributeValue.nullable).toBeUndefined();
+      expect(attributeValue.oneOf).toHaveLength(6);
+      expect(attributeValue.oneOf).toContainEqual(nullVariant);
+
+      const stableValue = inlineSchema(stableFieldEntrySchema.properties?.[field]);
+      expect(stableValue.nullable).toBeUndefined();
+      expect(stableValue.oneOf).toEqual([
+        { type: "string" },
+        { type: "integer", minimum: 1 },
+        nullVariant,
+      ]);
+    }
   });
 });
