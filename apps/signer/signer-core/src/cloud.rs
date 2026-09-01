@@ -105,6 +105,9 @@ impl CloudClient {
                 .await
                 .map(|body| body.task)
                 .map_err(|e| SignerError::Protocol(e.to_string())),
+            status if status.is_server_error() => {
+                Err(SignerError::Network(format!("poll answered {status}")))
+            }
             status => Err(SignerError::Protocol(format!("poll answered {status}"))),
         }
     }
@@ -247,6 +250,36 @@ mod tests {
             .await;
         let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
         assert!(matches!(client.poll("s3cret", 0).await, Err(SignerError::Revoked)));
+    }
+
+    #[tokio::test]
+    async fn poll_treats_server_unavailability_as_network() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/signer-agent/tasks/next"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        let client = CloudClient::new(&server.uri(), "0.1.5").unwrap();
+        assert!(matches!(
+            client.poll("s3cret", 0).await,
+            Err(SignerError::Network(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn poll_keeps_a_malformed_success_as_protocol() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/signer-agent/tasks/next"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not-json"))
+            .mount(&server)
+            .await;
+        let client = CloudClient::new(&server.uri(), "0.1.5").unwrap();
+        assert!(matches!(
+            client.poll("s3cret", 0).await,
+            Err(SignerError::Protocol(_))
+        ));
     }
 
     #[tokio::test]
