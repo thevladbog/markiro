@@ -1,4 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MutableRefObject,
+} from "react";
 import { Alert, Button, Card, PinPad, SignalOverlay } from "@markiro/ui";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import type { StationInventoryBundleManifest } from "@markiro/domain";
@@ -1835,14 +1843,27 @@ function ConflictFixture({ variant, locale }: { variant: string; locale: Gallery
  * surface is stateless per call (see hardware.ts's own doc comment), so a
  * synthetic contract that just resolves is enough for WorkstationSetup to
  * render every field; nothing in this gallery clicks "Connect"/"Test". */
-function gallerySetupHardware(): HardwareContract {
+function gallerySetupHardware(
+  scanListenerRef: MutableRefObject<((raw: string) => void) | null>,
+): HardwareContract {
   const usbPrinters: UsbPrinterInfo[] = [{ name: "DEMO-USB-PRINTER", port: "USB001" }];
   return {
     listScannerPorts: () => Promise.resolve(["DEMO-COM1", "DEMO-COM2"]),
     listUsbPrinters: () => Promise.resolve(usbPrinters),
     openScanner: () => Promise.resolve(),
     closeScanner: () => Promise.resolve(),
-    onScan: () => Promise.resolve(() => undefined),
+    // Captured so the fixture can play a synthetic scan through the REAL
+    // check path (same idea as `galleryPrintScanSource` below): the verdict
+    // on the frame is computed by WorkstationSetup itself, not staged.
+    onScan: (listener) => {
+      scanListenerRef.current = listener;
+      // Clear only our own registration: under StrictMode the first mount's
+      // deferred stop() resolves AFTER the second mount has re-subscribed,
+      // and an unconditional clear would wipe the live listener.
+      return Promise.resolve(() => {
+        if (scanListenerRef.current === listener) scanListenerRef.current = null;
+      });
+    },
     onScannerStatus: () => Promise.resolve(() => undefined),
     print: () => Promise.resolve(),
   };
@@ -1879,22 +1900,68 @@ function gallerySetupExecutor(): SqlExecutor {
  */
 function SetupFixture({ tab, locale }: { tab: string; locale: GalleryLocale }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const hw = useMemo(gallerySetupHardware, []);
+  const scanListenerRef = useRef<((raw: string) => void) | null>(null);
+  const hw = useMemo(() => gallerySetupHardware(scanListenerRef), []);
   const exec = useMemo(gallerySetupExecutor, []);
   const [sound, setSound] = useState<SoundSettings>({ muted: false, volume: 0.7 });
 
   useLayoutEffect(() => {
-    if (tab === "scanner") return;
     const root = rootRef.current;
     if (!root) return;
     const t = i18n.getFixedT(locale);
-    const label = tab === "printer" ? t("setup.printer") : t("setup.sound");
-    setTimeout(() => {
-      const button = Array.from(root.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find(
-        (candidate) => candidate.textContent?.trim() === label,
-      );
-      button?.click();
-    }, 0);
+    // Walk the real screen into the state each frame documents, through the
+    // component's own controls and scan path — the same clicks and scans an
+    // installer performs. Steps run in order and poll, because each one waits
+    // for asynchronous work the previous one started (tab switch, the test
+    // print rendering its label bytes).
+    const steps: (() => boolean)[] = [];
+    if (tab !== "scanner") {
+      const label = tab === "printer" ? t("setup.printer") : t("setup.sound");
+      steps.push(() => {
+        const button = Array.from(root.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find(
+          (candidate) => candidate.textContent?.trim() === label,
+        );
+        if (!button) return false;
+        button.click();
+        return true;
+      });
+    }
+    if (tab === "scanner") {
+      // Scan the on-screen code back: WorkstationSetup judges it against its
+      // own state, so the frame's «works correctly» verdict is genuine.
+      steps.push(() => {
+        const code = root.querySelector('[data-testid="scanner-test-code"]')?.textContent?.trim();
+        const deliver = scanListenerRef.current;
+        if (!code || !deliver) return false;
+        deliver(code);
+        return true;
+      });
+    }
+    if (tab === "printer") {
+      steps.push(() => {
+        const button = Array.from(root.querySelectorAll<HTMLButtonElement>("button")).find(
+          (candidate) => candidate.textContent?.trim() === t("setup.testPrint"),
+        );
+        if (!button || button.disabled) return false;
+        button.click();
+        return true;
+      });
+      steps.push(() => {
+        const code = root
+          .querySelector('[data-testid="printer-test-label"] code')
+          ?.textContent?.trim();
+        const deliver = scanListenerRef.current;
+        if (!code || !deliver) return false;
+        deliver(code);
+        return true;
+      });
+    }
+    let index = 0;
+    const timer = setInterval(() => {
+      while (index < steps.length && steps[index]!()) index += 1;
+      if (index >= steps.length) clearInterval(timer);
+    }, 50);
+    return () => clearInterval(timer);
   }, [tab, locale]);
 
   return (
