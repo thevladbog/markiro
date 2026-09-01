@@ -5,6 +5,7 @@ import {
   loadNationalCatalogProductionSource,
   runNationalCatalogLiveDiagnosticCli,
   type NationalCatalogDiagnosticClient,
+  type NationalCatalogDiagnosticEvidence,
   type NationalCatalogProductionTokenCandidate,
 } from "../src/national-catalog-live-diagnostic";
 
@@ -335,17 +336,17 @@ describe("National Catalog production live diagnostic", () => {
     for (const passed of [true, false] as const) {
       let stdout = "";
       let stderr = "";
-      const collected = passed
+      const collected: NationalCatalogDiagnosticEvidence = passed
         ? await collectNationalCatalogLiveDiagnostic({
             loadSource: async () => source(),
             client: successfulClient([]),
           })
-        : ({
+        : {
             version: 2,
             passed: false,
             sourceStatus: "active-token-missing",
             checks: [],
-          } as const);
+          };
       const exitCode = await runNationalCatalogLiveDiagnosticCli({
         collect: async () => collected,
         stdout: { write: (value: string) => (stdout += value) },
