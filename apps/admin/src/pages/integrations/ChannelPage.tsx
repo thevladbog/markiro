@@ -71,6 +71,16 @@ interface CommercemlSettingsValues {
   silentAfterHours: number;
 }
 
+interface ChzSettingsValues {
+  mchdInn: string;
+}
+
+function chzSettingsValuesOf(channel: ChannelDetailDto): ChzSettingsValues {
+  return {
+    mchdInn: typeof channel.settings["mchdInn"] === "string" ? channel.settings["mchdInn"] : "",
+  };
+}
+
 /** Derives `useForm`'s values from the server's `ChannelDetailDto` -- shared by the initial `defaultValues` and by the resync effect below, so both read the same shape the same way. */
 function commercemlSettingsValuesOf(channel: ChannelDetailDto): CommercemlSettingsValues {
   const rawMapping = channel.settings["statusMapping"];
@@ -319,6 +329,64 @@ function CommercemlSettingsForm({
   );
 }
 
+function ChzSettingsForm({
+  channel,
+  onSave,
+  saving,
+}: {
+  channel: ChannelDetailDto;
+  onSave: (patch: Record<string, unknown>) => Promise<void>;
+  saving: boolean;
+}) {
+  const { t } = useTranslation();
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { isDirty, errors },
+  } = useForm<ChzSettingsValues>({ defaultValues: chzSettingsValuesOf(channel) });
+
+  useEffect(() => {
+    if (!isDirty) reset(chzSettingsValuesOf(channel));
+  }, [channel, isDirty, reset]);
+
+  const submit = handleSubmit(async (values) => {
+    try {
+      await onSave({ mchdInn: values.mchdInn.trim() });
+      reset(values);
+    } catch {
+      // The wrapper reports the failure and the entered INN must stay editable.
+    }
+  });
+
+  return (
+    <form
+      noValidate
+      onSubmit={(event) => void submit(event)}
+      style={{ display: "flex", flexDirection: "column", gap: 16 }}
+    >
+      <Input
+        inputMode="numeric"
+        label={t("pages.integrations.channel.settings.mchdInnLabel")}
+        hint={t("pages.integrations.channel.settings.mchdInnHint")}
+        {...errorProp(errors.mchdInn?.message ? t(errors.mchdInn.message) : undefined)}
+        {...register("mchdInn", {
+          required: "pages.integrations.channel.settings.mchdInnError",
+          pattern: {
+            value: /^\d{10}(?:\d{2})?$/,
+            message: "pages.integrations.channel.settings.mchdInnError",
+          },
+        })}
+      />
+      <div>
+        <Button type="submit" loading={saving}>
+          {t("pages.integrations.channel.settings.saveAction")}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 /**
  * The channel page's credentials sub-section -- the exchange login/secret
  * pair for an inbound channel. Brief 08's channel page spec ("For an
@@ -417,6 +485,34 @@ function AuthorizedCommercemlSettings({ channel }: { channel: ChannelDetailDto }
 
   return (
     <CommercemlSettingsForm
+      channel={channel}
+      onSave={handleSaveSettings}
+      saving={updateSettings.isPending}
+    />
+  );
+}
+
+function AuthorizedChzSettings({ channel }: { channel: ChannelDetailDto }) {
+  const { t } = useTranslation();
+  const updateSettings = useUpdateChannelSettings(channel.type);
+
+  const handleSaveSettings = async (patch: Record<string, unknown>) => {
+    try {
+      await updateSettings.mutateAsync(patch);
+      toast("ok", t("pages.integrations.channel.settings.saveSuccess"));
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.integrations.channel.settings.saveError"),
+      );
+      throw error;
+    }
+  };
+
+  return (
+    <ChzSettingsForm
       channel={channel}
       onSave={handleSaveSettings}
       saving={updateSettings.isPending}
@@ -613,6 +709,12 @@ export function ChannelPage() {
         {channel.type === "commerceml" ? (
           canWriteIntegrations ? (
             <AuthorizedCommercemlSettings channel={channel} />
+          ) : (
+            <RestrictedChannelSettingsNotice />
+          )
+        ) : channel.type === "chestny_znak" ? (
+          canWriteIntegrations ? (
+            <AuthorizedChzSettings channel={channel} />
           ) : (
             <RestrictedChannelSettingsNotice />
           )
