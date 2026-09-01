@@ -399,7 +399,7 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
         number: `INV-ACT-${randomUUID()}`,
         status: "issued",
         issueDate: fixedNow,
-        sellerSnapshot: { legalName: "ИП Богатырев Владислав Сергеевич", taxId: "234190622844" },
+        sellerSnapshot: { legalName: "ИП Богатырев Владислав Сергеевич", taxId: "234106228141" },
         buyerSnapshot: { legalName: "ООО Фабрика", taxId: "7700000000" },
         subtotal: "100.00",
         vatTotal: "0.00",

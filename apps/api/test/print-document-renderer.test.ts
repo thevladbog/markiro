@@ -114,7 +114,7 @@ describe("print document HTML renderer", () => {
   it("renders an authorized seller signature and seal only for the signed variant", () => {
     const authorizedInvoice = {
       ...baseInvoice,
-      seller: { ...baseInvoice.seller, taxId: "234190622844" },
+      seller: { ...baseInvoice.seller, taxId: "234106228141" },
     };
 
     const clean = renderPrintHtml(authorizedInvoice, { printVariant: "clean" });
@@ -293,7 +293,7 @@ describe("print document HTML renderer", () => {
   it("renders distinct clean and signed PDF bytes for the authorized seller", async () => {
     const authorizedInvoice = {
       ...baseInvoice,
-      seller: { ...baseInvoice.seller, taxId: "234190622844" },
+      seller: { ...baseInvoice.seller, taxId: "234106228141" },
     };
 
     const clean = await renderPrintPdf(authorizedInvoice, { printVariant: "clean" });
