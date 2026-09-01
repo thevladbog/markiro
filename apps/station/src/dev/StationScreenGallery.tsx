@@ -2090,6 +2090,8 @@ function galleryUpdateController(
   };
 }
 
+const galleryInstalledVersion = () => Promise.resolve("0.1.0-beta.22");
+
 /**
  * Mirrors UpdateCenter.tsx's own render tree (the real component, backed by
  * a synthetic controller implementing its exact interface) instead of
@@ -2114,6 +2116,7 @@ function UpdateFixture({ variant }: { variant: string }) {
       activeShift={activeShift}
       pendingOutbox={0}
       onBack={() => undefined}
+      readInstalledVersion={galleryInstalledVersion}
     />
   );
 }

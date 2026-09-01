@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import { Alert, Button, StatusChip } from "@markiro/ui";
+import { getVersion } from "@tauri-apps/api/app";
 import { useTranslation } from "react-i18next";
 import type { StationUpdaterController } from "../lib/use-station-updater.js";
 import { StationScreen } from "../ui/StationScreen.js";
@@ -10,6 +11,7 @@ export interface UpdateCenterProps {
   activeShift: boolean;
   pendingOutbox: number;
   onBack: () => void;
+  readInstalledVersion?: () => Promise<string>;
 }
 
 export function UpdateCenter({
@@ -17,10 +19,12 @@ export function UpdateCenter({
   activeShift,
   pendingOutbox,
   onBack,
+  readInstalledVersion = getVersion,
 }: UpdateCenterProps) {
   const { t } = useTranslation();
   const sourceTitleId = useId();
   const [confirming, setConfirming] = useState(false);
+  const [installedVersion, setInstalledVersion] = useState<string | null | undefined>(undefined);
   const available = controller.persisted?.available ?? null;
   const cancel = controller.cancel;
   const busy = controller.phase !== "idle";
@@ -37,6 +41,21 @@ export function UpdateCenter({
     },
     [cancel],
   );
+
+  useEffect(() => {
+    let active = true;
+    void readInstalledVersion().then(
+      (version) => {
+        if (active) setInstalledVersion(version);
+      },
+      () => {
+        if (active) setInstalledVersion(null);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [readInstalledVersion]);
 
   return (
     <StationScreen
@@ -80,6 +99,14 @@ export function UpdateCenter({
       }
     >
       <div className="station-update-center" data-update-severity={controller.severity}>
+        <p className="station-update-center__version" aria-live="polite">
+          <span>{t("updates.installed")}</span>
+          <strong>
+            {installedVersion === undefined
+              ? t("updates.versionLoading")
+              : (installedVersion ?? t("updates.versionUnavailable"))}
+          </strong>
+        </p>
         {available ? (
           <>
             <p className="station-update-center__version">

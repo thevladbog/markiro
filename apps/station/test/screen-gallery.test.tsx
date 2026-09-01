@@ -645,4 +645,11 @@ describe("development screen gallery", () => {
       expect(view.container.textContent).toContain(expectedCopy);
     });
   });
+
+  it("renders deterministic installed metadata in the current-version gallery", async () => {
+    render(<StationScreenGallery request={{ state: "update-current", locale: "ru" }} />);
+
+    expect(await screen.findByText("0.1.0-beta.22")).toBeDefined();
+    expect(screen.getByText("На станции установлена актуальная версия.")).toBeDefined();
+  });
 });
