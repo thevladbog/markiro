@@ -1,5 +1,10 @@
 # Signer Agent Stable Release Implementation Plan
 
+> **Historical plan:** This records the initial release implementation. The
+> workflow-owned version, distribution-repository, and exact-byte repair
+> extension is implemented by
+> `docs/superpowers/plans/2026-09-01-signer-distribution-release.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Publish a signed, installable Windows build of the Chestny ZNAK signer agent to `https://releases.markiro.app/signer/stable/` and to a GitHub Release, and teach the installed agent to update itself with the operator's consent.
