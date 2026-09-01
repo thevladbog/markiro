@@ -8,6 +8,34 @@ body {
   overflow-y: auto;
 }
 
+.signer-update-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--info-border);
+  border-radius: var(--r-2);
+  background: var(--info-bg);
+}
+
+.signer-update-banner__copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--info-fg);
+  font: var(--text-body-sm);
+  line-height: 1.45;
+}
+
+.signer-update-banner__copy p {
+  margin: 4px 0 0;
+  color: var(--fg-2);
+}
+
+.signer-update-banner > button {
+  flex: 0 0 auto;
+}
+
 .signer-pairing__content,
 .signer-status__content,
 .signer-certificate {
@@ -79,6 +107,41 @@ body {
   font: var(--text-caption);
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.signer-update-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px 20px;
+}
+
+.signer-update-control__copy h2,
+.signer-update-control__copy p,
+.signer-update-control__result p {
+  margin: 0;
+}
+
+.signer-update-control__copy h2 {
+  color: var(--fg-1);
+  font: var(--text-body);
+  font-weight: 600;
+}
+
+.signer-update-control__copy p,
+.signer-update-control__result {
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+  line-height: 1.45;
+}
+
+.signer-update-control__copy p {
+  margin-top: 4px;
+}
+
+.signer-update-control__result {
+  grid-column: 1 / -1;
+  min-height: 20px;
 }
 
 .signer-certificate {
@@ -299,9 +362,30 @@ body {
     padding: 12px;
   }
 
+  .signer-update-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .signer-update-banner > button {
+    align-self: flex-start;
+  }
+
   .signer-journal-panel__header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .signer-update-control {
+    grid-template-columns: 1fr;
+  }
+
+  .signer-update-control > button {
+    justify-self: start;
+  }
+
+  .signer-update-control__result {
+    grid-column: 1;
   }
 
   .signer-journal-panel__header button {

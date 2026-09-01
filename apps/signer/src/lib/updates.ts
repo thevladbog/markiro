@@ -10,30 +10,48 @@ export interface SignerUpdate {
   install: () => Promise<void>;
 }
 
+export type UpdateCheckResult =
+  | { readonly status: "current" }
+  | { readonly status: "available"; readonly update: SignerUpdate }
+  | { readonly status: "failed" };
+
 /** Once a day is often enough for a tray agent; the mirror changes far less. */
 export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-/**
- * Returns `null` both when there is no update and when the check failed. The
- * agent's job is to keep the tenant's token fresh; an unreachable mirror is a
- * reason to log and carry on, never a reason to stop.
- */
-export async function checkForUpdate(): Promise<SignerUpdate | null> {
+let updateCheckInFlight: Promise<UpdateCheckResult> | null = null;
+
+async function performUpdateCheck(): Promise<UpdateCheckResult> {
   try {
     const found = await check();
-    if (!found) return null;
+    if (!found) return { status: "current" };
     return {
-      version: found.version,
-      notes: found.body ?? null,
-      install: async () => {
-        await found.downloadAndInstall();
-        await relaunch();
+      status: "available",
+      update: {
+        version: found.version,
+        notes: found.body ?? null,
+        install: async () => {
+          await found.downloadAndInstall();
+          await relaunch();
+        },
       },
     };
   } catch (error) {
     console.warn("signer update check failed", error);
-    return null;
+    return { status: "failed" };
   }
+}
+
+/** Background and operator checks share one request. A failed background check
+ * stays quiet in `App`; the manual control can still distinguish it from an
+ * up-to-date client and explain what the operator should do. */
+export function checkForUpdate(): Promise<UpdateCheckResult> {
+  if (updateCheckInFlight) return updateCheckInFlight;
+  const pending = performUpdateCheck();
+  updateCheckInFlight = pending;
+  void pending.finally(() => {
+    if (updateCheckInFlight === pending) updateCheckInFlight = null;
+  });
+  return pending;
 }
 
 /**

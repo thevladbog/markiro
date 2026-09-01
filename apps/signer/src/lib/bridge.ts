@@ -1,11 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export type AgentPhase = "unpaired" | "idle" | "working" | "degraded";
+export type AgentPhase =
+  "unpaired" | "idle" | "reconnecting" | "unavailable" | "working" | "degraded";
 
 /** Mirrors `signer_core::runtime::AgentStatus`. */
 export interface AgentStatus {
   phase: AgentPhase;
+  appVersion: string;
   /** Resolved in Rust (`signer_core::hostname::resolve_hostname`), not read
    *  from the webview: `window.location.hostname` in a Tauri 2 custom-protocol
    *  build is the `tauri.localhost` origin, never the PC name. */

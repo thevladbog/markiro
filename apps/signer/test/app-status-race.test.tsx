@@ -33,6 +33,7 @@ vi.mock("../src/lib/bridge.js", () => ({
 
 const eventStatus: AgentStatus = {
   phase: "degraded",
+  appVersion: "0.1.5",
   hostname: "BUH-PC",
   tenantName: "Event tenant",
   certThumbprint: "AB12",
@@ -43,6 +44,7 @@ const eventStatus: AgentStatus = {
 
 const staleSnapshot: AgentStatus = {
   phase: "unpaired",
+  appVersion: "0.1.5",
   hostname: "BUH-PC",
   tenantName: null,
   certThumbprint: null,
