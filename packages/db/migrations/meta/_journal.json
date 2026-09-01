@@ -757,6 +757,13 @@
       "when": 1788215240615,
       "tag": "0107_product_regulatory_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1788280146157,
+      "tag": "0108_white_silver_sable",
+      "breakpoints": true
     }
   ]
 }
