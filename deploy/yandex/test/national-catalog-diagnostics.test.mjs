@@ -16,8 +16,9 @@ const HOSTED_ENVIRONMENT = Object.freeze({
 });
 
 const EVIDENCE = Object.freeze({
-  version: 1,
+  version: 2,
   passed: true,
+  sourceStatus: "ready",
   checks: [
     { method: "categories", outcome: "ok", resultCount: 3, etagPresent: true },
     {
@@ -120,6 +121,10 @@ test("hosted National Catalog diagnostic rejects malformed or inconsistent evide
   nonzeroNotModified.checks[5].resultCount = 1;
   const inconsistentPassed = structuredClone(EVIDENCE);
   inconsistentPassed.passed = false;
+  const inconsistentSource = structuredClone(EVIDENCE);
+  inconsistentSource.sourceStatus = "active-token-missing";
+  const unknownSource = structuredClone(EVIDENCE);
+  unknownSource.sourceStatus = "private-provider-detail";
   const continuedAfterMissingEtag = structuredClone(EVIDENCE);
   continuedAfterMissingEtag.passed = false;
   continuedAfterMissingEtag.checks[0].etagPresent = false;
@@ -146,6 +151,8 @@ test("hosted National Catalog diagnostic rejects malformed or inconsistent evide
     line(multipleProduct),
     line(nonzeroNotModified),
     line(inconsistentPassed),
+    line(inconsistentSource),
+    line(unknownSource),
     line(continuedAfterMissingEtag),
     line(continuedAfterRefusal),
     line(continuedAfterCardinalityFailure),
@@ -169,7 +176,27 @@ test("hosted National Catalog diagnostic accepts only the first failing check as
       .slice(0, 4)
       .map((check, index) => (index === 3 ? { ...check, resultCount: 0 } : check)),
   ]) {
-    const expected = { version: 1, passed: false, checks };
+    const expected = { version: 2, passed: false, sourceStatus: "ready", checks };
+    const result = await runHostedNationalCatalogDiagnostics(
+      HOSTED_ENVIRONMENT,
+      dependencies([
+        "a1b2c3d4e5f6\tapi\n",
+        `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(expected)}\n`,
+      ]),
+    );
+    assert.deepEqual(result, expected);
+  }
+});
+
+test("hosted National Catalog diagnostic accepts a bounded source status without provider checks", async () => {
+  for (const sourceStatus of [
+    "encryption-key-missing",
+    "active-token-missing",
+    "active-token-ambiguous",
+    "product-gtin-unavailable",
+    "token-decryption-failed",
+  ]) {
+    const expected = { version: 2, passed: false, sourceStatus, checks: [] };
     const result = await runHostedNationalCatalogDiagnostics(
       HOSTED_ENVIRONMENT,
       dependencies([
@@ -185,8 +212,9 @@ test("hosted National Catalog CLI prints safe evidence before failing a refused 
   let stdout = "";
   let stderr = "";
   const refused = {
-    version: 1,
+    version: 2,
     passed: false,
+    sourceStatus: "ready",
     checks: [{ method: "categories", outcome: "forbidden", resultCount: 0, etagPresent: false }],
   };
   const exitCode = await runNationalCatalogDiagnosticsCli({

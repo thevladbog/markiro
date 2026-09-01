@@ -14,6 +14,14 @@ const PRODUCTION_NATIONAL_CATALOG_BASE_URL = "https://апи.националь�
 type MethodName =
   "categories" | "categories-repeat" | "attributes" | "feed-product" | "product" | "product-repeat";
 type Outcome = NationalCatalogResult<unknown>["status"];
+export type NationalCatalogDiagnosticSourceStatus =
+  | "ready"
+  | "encryption-key-missing"
+  | "active-token-missing"
+  | "active-token-ambiguous"
+  | "product-gtin-unavailable"
+  | "token-decryption-failed";
+type UnavailableSourceStatus = Exclude<NationalCatalogDiagnosticSourceStatus, "ready">;
 
 export interface NationalCatalogDiagnosticCheck {
   method: MethodName;
@@ -23,14 +31,15 @@ export interface NationalCatalogDiagnosticCheck {
 }
 
 export interface NationalCatalogDiagnosticEvidence {
-  version: 1;
+  version: 2;
   passed: boolean;
+  sourceStatus: NationalCatalogDiagnosticSourceStatus;
   checks: NationalCatalogDiagnosticCheck[];
 }
 
 type SourceResult =
   | { status: "ok"; auth: NationalCatalogAuth; gtin: string }
-  | { status: "unavailable" | "ambiguous" };
+  | { status: "unavailable"; sourceStatus: UnavailableSourceStatus };
 
 export interface NationalCatalogProductionTokenCandidate {
   tenantId: string;
@@ -95,15 +104,16 @@ function check(
 function evidence(
   checks: NationalCatalogDiagnosticCheck[],
   passed: boolean,
+  sourceStatus: NationalCatalogDiagnosticSourceStatus = "ready",
 ): NationalCatalogDiagnosticEvidence {
-  return { version: 1, passed, checks };
+  return { version: 2, passed, sourceStatus, checks };
 }
 
 export async function collectNationalCatalogLiveDiagnostic(
   dependencies: DiagnosticDependencies,
 ): Promise<NationalCatalogDiagnosticEvidence> {
   const source = await dependencies.loadSource();
-  if (source.status !== "ok") throw new Error("National Catalog diagnostic source is unavailable");
+  if (source.status !== "ok") return evidence([], false, source.sourceStatus);
 
   const checks: NationalCatalogDiagnosticCheck[] = [];
   const categories = await dependencies.client.listCategories(source.auth);
@@ -156,21 +166,24 @@ export async function loadNationalCatalogProductionSource(
   dependencies: NationalCatalogProductionSourceDependencies,
 ): Promise<SourceResult> {
   const tokenRows = await dependencies.listActiveTokens();
-  if (tokenRows.length === 0) return { status: "unavailable" };
-  if (tokenRows.length !== 1) return { status: "ambiguous" };
+  if (tokenRows.length === 0)
+    return { status: "unavailable", sourceStatus: "active-token-missing" };
+  if (tokenRows.length !== 1)
+    return { status: "unavailable", sourceStatus: "active-token-ambiguous" };
 
   const tokenRow = tokenRows[0];
-  if (!tokenRow) return { status: "unavailable" };
+  if (!tokenRow) return { status: "unavailable", sourceStatus: "active-token-missing" };
   const gtin = (await dependencies.findProductGtin(tokenRow.tenantId))?.trim();
-  if (!gtin || !/^\d{14}$/.test(gtin)) return { status: "unavailable" };
+  if (!gtin || !/^\d{14}$/.test(gtin))
+    return { status: "unavailable", sourceStatus: "product-gtin-unavailable" };
 
   let token: string;
   try {
     token = dependencies.decryptToken(tokenRow.tenantId, tokenRow);
   } catch {
-    return { status: "unavailable" };
+    return { status: "unavailable", sourceStatus: "token-decryption-failed" };
   }
-  if (!token) return { status: "unavailable" };
+  if (!token) return { status: "unavailable", sourceStatus: "token-decryption-failed" };
   return {
     status: "ok",
     auth: { baseUrl: PRODUCTION_NATIONAL_CATALOG_BASE_URL, token },
@@ -212,7 +225,7 @@ function productionSourceDependencies(
 async function collectProductionEvidence(): Promise<NationalCatalogDiagnosticEvidence> {
   const env = loadEnv();
   const encryptionKey = env.CHZ_TOKEN_ENCRYPTION_KEY;
-  if (!encryptionKey) throw new Error("National Catalog diagnostic source is unavailable");
+  if (!encryptionKey) return evidence([], false, "encryption-key-missing");
   const connection = createDb(env.DATABASE_URL);
   try {
     return await collectNationalCatalogLiveDiagnostic({

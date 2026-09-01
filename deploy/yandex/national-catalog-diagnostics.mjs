@@ -31,6 +31,14 @@ const OUTCOMES = Object.freeze([
   "invalid_response",
   "unavailable",
 ]);
+const SOURCE_STATUSES = Object.freeze([
+  "ready",
+  "encryption-key-missing",
+  "active-token-missing",
+  "active-token-ambiguous",
+  "product-gtin-unavailable",
+  "token-decryption-failed",
+]);
 
 function invalidResponse() {
   return new Error("National Catalog diagnostic response is invalid");
@@ -102,15 +110,17 @@ function isCanonicalPrefix(checks) {
 }
 
 function validateEvidence(value) {
+  const sourceReady = value?.sourceStatus === "ready";
   if (
-    !hasExactKeys(value, "checks,passed,version") ||
-    value.version !== 1 ||
+    !hasExactKeys(value, "checks,passed,sourceStatus,version") ||
+    value.version !== 2 ||
     typeof value.passed !== "boolean" ||
+    !SOURCE_STATUSES.includes(value.sourceStatus) ||
     !Array.isArray(value.checks) ||
     value.checks.length > METHODS.length ||
     !value.checks.every(validCheck) ||
-    !isCanonicalPrefix(value.checks) ||
-    value.passed !== evidencePassed(value.checks)
+    (sourceReady ? !isCanonicalPrefix(value.checks) : value.checks.length !== 0) ||
+    value.passed !== (sourceReady && evidencePassed(value.checks))
   )
     throw invalidResponse();
   return value;
