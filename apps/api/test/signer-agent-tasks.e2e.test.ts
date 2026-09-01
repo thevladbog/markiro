@@ -116,6 +116,7 @@ describe.skipIf(!ready)("signer agent task queue", () => {
 
     const overview = await agent.get("/signer-agents").expect(200);
     expect(overview.body.token.status).toBe("active");
+    expect(overview.body.token.tokenType).toBe("uuid");
     const agentRow = overview.body.agents.find((a: { id: string }) => a.id === agentId);
     expect(agentRow.certThumbprint).toBe("AB12");
   });

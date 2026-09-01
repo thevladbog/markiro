@@ -475,6 +475,7 @@ export interface SignerAgent {
 /** Mirrors `SignerTokenStatusDto` -- the tenant's current True API token, obtained by whichever agent last authenticated. */
 export interface SignerTokenStatus {
   status: "none" | "active" | "expiring" | "expired";
+  tokenType: "jwt" | "uuid" | null;
   obtainedAt: string | null;
   expiresAt: string | null;
   certThumbprint: string | null;

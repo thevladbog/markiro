@@ -40,6 +40,7 @@ const MINT_ATTEMPTS = 5;
 
 const AGENT_STATUSES = new Set<string>(schema.CHZ_SIGNER_AGENT_STATUSES);
 const TASK_STATUSES = new Set<string>(schema.CHZ_SIGNER_TASK_STATUSES);
+const TOKEN_TYPES = new Set(["jwt", "uuid"] as const);
 
 /** Narrows a raw `chz_signer_agents.status` DB value, throwing on corruption. */
 function toAgentStatus(status: string): schema.ChzSignerAgentStatus {
@@ -54,6 +55,13 @@ function toRefreshTaskStatus(status: string): SignerRefreshTaskStatus {
     throw new Error(`Unexpected chz_signer_tasks.status value: ${status}`);
   }
   return status as SignerRefreshTaskStatus;
+}
+
+function toTokenType(tokenType: string): "jwt" | "uuid" {
+  if (!TOKEN_TYPES.has(tokenType as "jwt" | "uuid")) {
+    throw new Error(`Unexpected chz_api_tokens.token_type value: ${tokenType}`);
+  }
+  return tokenType as "jwt" | "uuid";
 }
 
 class PairingCodeHashCollisionError extends Error {}
@@ -126,7 +134,13 @@ export class SignerAgentsService {
 
   private tokenStatus(token: typeof schema.chzApiTokens.$inferSelect | null): SignerTokenStatusDto {
     if (!token) {
-      return { status: "none", obtainedAt: null, expiresAt: null, certThumbprint: null };
+      return {
+        status: "none",
+        tokenType: null,
+        obtainedAt: null,
+        expiresAt: null,
+        certThumbprint: null,
+      };
     }
     const now = Date.now();
     const expiresAt = token.expiresAt.getTime();
@@ -138,6 +152,7 @@ export class SignerAgentsService {
           : "active";
     return {
       status,
+      tokenType: toTokenType(token.tokenType),
       obtainedAt: token.obtainedAt.toISOString(),
       expiresAt: token.expiresAt.toISOString(),
       certThumbprint: token.certThumbprint,

@@ -3024,6 +3024,10 @@
             "expiring": "expiring",
             "expired": "expired"
           },
+          "tokenType": {
+            "jwt": "JWT",
+            "uuid": "UUID"
+          },
           "tokenExpires": "valid until {{at}}",
           "refreshToken": "Refresh token",
           "refreshError": "Could not request a token refresh",

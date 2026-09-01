@@ -3024,6 +3024,10 @@
             "expiring": "истекает",
             "expired": "истёк"
           },
+          "tokenType": {
+            "jwt": "JWT",
+            "uuid": "UUID"
+          },
           "tokenExpires": "действует до {{at}}",
           "refreshToken": "Обновить токен",
           "refreshError": "Не удалось запросить обновление токена",
