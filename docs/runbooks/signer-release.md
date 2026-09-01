@@ -132,11 +132,14 @@ was published, which no automated check can do for you.
 
 Do this once per release on a Windows machine. It is the part nobody works out
 under pressure, and it is the only check that covers the whole loop.
+Record the complete Windows-only client and tray checks from
+[`signer-windows-acceptance.md`](signer-windows-acceptance.md) at the same time.
 
 1. Install the **previous** stable version and pair it with a tenant.
 2. Cut the new release as above.
-3. Open the agent's window. Within a moment it offers the new version and
-   raises one tray notification.
+3. Open the agent's window and press **Проверить обновления**. Confirm that it
+   offers the new version and raises no duplicate tray notification if the
+   quiet background check found the same release first.
 4. **Confirm nothing has installed yet.** The agent must still be signing, on
    the old version, until someone presses the button. Installing restarts the
    agent, and the agent is what keeps the tenant's True API token fresh — a
