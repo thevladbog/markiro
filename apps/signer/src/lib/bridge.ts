@@ -14,7 +14,13 @@ export interface AgentStatus {
   certThumbprint: string | null;
   lastTokenExpiresAt: string | null;
   lastError: string | null;
-  journal: { message: string; detail: string | null }[];
+  journal: JournalEntry[];
+}
+
+export interface JournalEntry {
+  occurredAt: string;
+  message: string;
+  detail: string | null;
 }
 
 /** Mirrors `signer_core::signer::CertificateSummary`. */
@@ -44,6 +50,7 @@ export const bridge = {
   selectCertificate: (thumbprint: string) =>
     invoke<void>("signer_select_certificate", { thumbprint }),
   setServerUrl: (url: string) => invoke<void>("signer_set_server_url", { url }),
+  exportJournal: () => invoke<string | null>("signer_export_journal"),
   notifyUpdateAvailable: (version: string) => invoke<void>("signer_notify_update", { version }),
   onStatus: (listener: (status: AgentStatus) => void) =>
     listen<AgentStatus>("signer://status", (event) => listener(event.payload)),

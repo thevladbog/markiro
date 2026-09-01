@@ -21,6 +21,14 @@ const unusable: CertificateSummary = {
   hasPrivateKey: false,
 };
 
+const replacement: CertificateSummary = {
+  thumbprint: "EF56",
+  subject: "ИП Васильева",
+  inn: "770123456789",
+  notAfter: "2031-06-15T00:00:00Z",
+  hasPrivateKey: true,
+};
+
 vi.mock("../src/lib/bridge.js", () => ({
   bridge: {
     listCertificates: vi.fn(),
@@ -76,5 +84,24 @@ describe("CertificatePicker", () => {
     await screen.findByRole("alert");
     expect(localeDateSpy).toHaveBeenCalledWith("ru");
     localeDateSpy.mockRestore();
+  });
+
+  it("shows only the selected certificate until the operator chooses to replace it", async () => {
+    const { bridge } = await import("../src/lib/bridge.js");
+    vi.mocked(bridge.listCertificates).mockResolvedValue([usable, replacement]);
+    const user = userEvent.setup();
+
+    render(<CertificatePicker selected="AB12" onSelected={vi.fn()} />);
+
+    expect(await screen.findByRole("radio", { name: /ООО Ромашка/ })).toBeDefined();
+    expect(screen.queryByRole("radio", { name: /ИП Васильева/ })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /Выбрать другой|Choose another/ }));
+
+    expect(screen.getByRole("radio", { name: /ООО Ромашка/ })).toBeDefined();
+    expect(screen.getByRole("radio", { name: /ИП Васильева/ })).toBeDefined();
+
+    await user.click(screen.getByRole("button", { name: /Отменить|Cancel/ }));
+    expect(screen.queryByRole("radio", { name: /ИП Васильева/ })).toBeNull();
   });
 });

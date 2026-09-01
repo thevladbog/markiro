@@ -4,6 +4,7 @@ use signer_core::cloud::PairError;
 use signer_core::runtime::{AgentStatus, Runtime};
 use signer_core::signer::{CertificateSummary, Signer};
 use signer_core::storage::{self, SecretStore};
+use tauri_plugin_dialog::DialogExt as _;
 
 pub struct SignerState {
     pub runtime: Arc<Runtime>,
@@ -65,6 +66,28 @@ pub fn signer_set_server_url(
 ) -> Result<(), String> {
     storage::validate_http_url(&url).map_err(|e| e.to_string())?;
     state.runtime.set_server_url(&url).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn signer_export_journal(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SignerState>,
+) -> Result<Option<String>, String> {
+    let Some(destination) = app
+        .dialog()
+        .file()
+        .set_file_name("markiro-signer-logs.zip")
+        .add_filter("ZIP", &["zip"])
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let destination = destination.into_path().map_err(|error| error.to_string())?;
+    state
+        .runtime
+        .export_journal(&destination)
+        .map_err(|error| error.to_string())?;
+    Ok(Some(destination.display().to_string()))
 }
 
 /// An available update is actionable in the same sense a degraded phase is:

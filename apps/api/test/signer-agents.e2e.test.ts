@@ -69,6 +69,7 @@ describe.skipIf(!ready)("signer agents pairing", () => {
       ),
     ).toBe(true);
     expect(overview.body.token.status).toBe("none");
+    expect(overview.body.token.tokenType).toBeNull();
   });
 
   it("revokes an agent", async () => {
@@ -92,11 +93,13 @@ describe.skipIf(!ready)("signer agents pairing", () => {
       .send({ pairingCode: issued.code, hostname: "TOKEN-PC", appVersion: "0.1.0" })
       .expect(201);
 
-    await agent.post("/signer-agents/token-refresh").expect(202).expect({ status: "queued" });
-    await agent
-      .post("/signer-agents/token-refresh")
-      .expect(202)
-      .expect({ status: "already_pending" });
+    const queued = await agent.post("/signer-agents/token-refresh").expect(202);
+    expect(queued.body.status).toBe("queued");
+    expect(queued.body.taskId).toMatch(/^[0-9a-f-]{36}$/);
+    await agent.post("/signer-agents/token-refresh").expect(202).expect({
+      status: "already_pending",
+      taskId: queued.body.taskId,
+    });
 
     const next = await request(app!.getHttpServer())
       .get("/signer-agent/tasks/next?wait=0")
@@ -106,6 +109,23 @@ describe.skipIf(!ready)("signer agents pairing", () => {
     expect(next.body.task.payload.trueApiBaseUrl).toBe(
       "https://markirovka.crpt.ru/api/v3/true-api",
     );
+    expect(next.body.task.payload.tokenFormat).toBe("uuid");
+
+    await request(app!.getHttpServer())
+      .post(`/signer-agent/tasks/${next.body.task.id}/fail`)
+      .set("x-signer-token", pair.body.agentSecret)
+      .send({ errorCode: "TRUE_API", message: "Авторизация по МЧД отклонена" })
+      .expect(204);
+
+    const overview = await agent.get("/signer-agents").expect(200);
+    expect(overview.body.refreshTask).toEqual({
+      id: queued.body.taskId,
+      status: "failed",
+      errorCode: "TRUE_API",
+      errorMessage: "Авторизация по МЧД отклонена",
+      createdAt: expect.any(String),
+      completedAt: expect.any(String),
+    });
   });
 
   it("does not queue a refresh for a tenant without an active agent", async () => {

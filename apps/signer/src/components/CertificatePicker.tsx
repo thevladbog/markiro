@@ -36,6 +36,7 @@ export function CertificatePicker({
   const { t, i18n } = useTranslation();
   const [certificates, setCertificates] = useState<CertificateSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [choosing, setChoosing] = useState(selected === null);
   const dateFormatter = useMemo(
     () => new Intl.DateTimeFormat(i18n.language, { dateStyle: "long" }),
     [i18n.language],
@@ -62,6 +63,7 @@ export function CertificatePicker({
 
   const chosen = certificates.find((certificate) => certificate.thumbprint === selected);
   const warning = chosen ? expiryWarning(chosen.notAfter) : null;
+  const visibleCertificates = chosen && !choosing ? [chosen] : certificates;
 
   return (
     <div className="signer-certificate">
@@ -75,7 +77,7 @@ export function CertificatePicker({
       <fieldset className="signer-certificate__fieldset">
         <legend className="signer-certificate__legend">{t("certificates.label")}</legend>
         <div className="signer-certificate__options">
-          {certificates.map((certificate) => (
+          {visibleCertificates.map((certificate) => (
             <label
               key={certificate.thumbprint}
               className="signer-certificate__option"
@@ -86,9 +88,10 @@ export function CertificatePicker({
                 name="signer-certificate"
                 value={certificate.thumbprint}
                 checked={certificate.thumbprint === selected}
-                onChange={() =>
-                  void bridge.selectCertificate(certificate.thumbprint).then(onSelected)
-                }
+                onChange={() => {
+                  setChoosing(false);
+                  void bridge.selectCertificate(certificate.thumbprint).then(onSelected);
+                }}
               />
               <span className="signer-certificate__details">
                 <strong className="signer-certificate__subject">{certificate.subject}</strong>
@@ -110,8 +113,19 @@ export function CertificatePicker({
           ))}
         </div>
       </fieldset>
-      <div>
+      <div className="signer-certificate__actions">
+        {chosen && !choosing ? (
+          <Button variant="secondary" onClick={() => setChoosing(true)}>
+            {t("certificates.chooseAnother")}
+          </Button>
+        ) : null}
+        {chosen && choosing ? (
+          <Button variant="secondary" onClick={() => setChoosing(false)}>
+            {t("certificates.cancel")}
+          </Button>
+        ) : null}
         <Button
+          variant={chosen ? "secondary" : "primary"}
           onClick={() =>
             void bridge.listCertificates().then((list) => setCertificates(usableCertificates(list)))
           }

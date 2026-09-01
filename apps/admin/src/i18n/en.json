@@ -3024,6 +3024,10 @@
             "expiring": "expiring",
             "expired": "expired"
           },
+          "tokenType": {
+            "jwt": "JWT",
+            "uuid": "UUID"
+          },
           "tokenExpires": "valid until {{at}}",
           "refreshToken": "Refresh token",
           "refreshError": "Could not request a token refresh",
@@ -3031,6 +3035,10 @@
           "refresh": {
             "queued": "The task was sent to the agent. Keep Markiro Signer running; the status will update automatically.",
             "already_pending": "A task is already waiting for the agent. Keep Markiro Signer running; the status will update automatically."
+          },
+          "task": {
+            "failed": "The agent could not refresh the True API token.",
+            "expired": "The agent did not respond in time. Request another token refresh."
           },
           "issueCode": "Get pairing code",
           "issueError": "Could not get a pairing code",

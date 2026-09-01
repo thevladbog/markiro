@@ -160,7 +160,7 @@ export async function validateHostedPrivateKey(path, system) {
   }
 }
 
-export function runCommand(command, args, options = {}) {
+export function runCommandWithStatus(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     let child;
     let settled = false;
@@ -194,8 +194,11 @@ export function runCommand(command, args, options = {}) {
     child.once("close", (code) => {
       if (settled) return;
       settled = true;
-      if (code === 0) resolve(Buffer.concat(stdout).toString("utf8"));
-      else reject(new Error("private remote command failed"));
+      if (Number.isSafeInteger(code) && code >= 0 && code <= 255) {
+        resolve({ exitCode: code, stdout: Buffer.concat(stdout).toString("utf8") });
+      } else {
+        reject(new Error("private remote command failed"));
+      }
     });
     if (options.input) {
       child.stdin.on("error", fail);
@@ -206,6 +209,12 @@ export function runCommand(command, args, options = {}) {
       }
     }
   });
+}
+
+export async function runCommand(command, args, options = {}) {
+  const result = await runCommandWithStatus(command, args, options);
+  if (result.exitCode !== 0) throw new Error("private remote command failed");
+  return result.stdout;
 }
 
 export async function streamArchive(tarArguments, sshArguments, options = {}) {

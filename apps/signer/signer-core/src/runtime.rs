@@ -2,17 +2,17 @@
 //!
 //! Two rules shape it. A 401 on any authenticated call means the cabinet
 //! revoked this agent, so local state is wiped and the UI returns to pairing.
-//! A network failure is *not* reported as a task failure: the claim stays with
-//! us until the cloud's 30-minute deadline, and reporting `fail` would burn the
-//! refresh window over a blip.
+//! A network failure is retried inside the True API flow. If those bounded
+//! attempts are exhausted, it is reported so the claim does not stay stuck
+//! until the cloud's 30-minute deadline.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::cloud::{CloudClient, PairError};
 use crate::contracts::{cap_cert_subject, SignerErrorCode, TaskComplete, TaskFail};
-use crate::journal::{redact, Journal, JournalEntry};
+use crate::journal::{redact, Journal, JournalEntry, JournalExportMetadata};
 use crate::signer::Signer;
 use crate::storage::{self, AgentConfig, SecretStore};
 use crate::trueapi::obtain_token;
@@ -20,6 +20,7 @@ use crate::SignerError;
 
 const POLL_WAIT_MS: u32 = 25_000;
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
+const REPORT_ATTEMPTS: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,8 +47,8 @@ pub struct AgentStatus {
     pub journal: Vec<JournalEntry>,
 }
 
-/// Which failures are worth telling the cloud about. `None` means "keep the
-/// claim and retry locally".
+/// Which failures are worth telling the cloud about. True API transport errors
+/// reach this point only after the bounded local retry loop is exhausted.
 pub fn classify(error: &SignerError) -> Option<SignerErrorCode> {
     match error {
         SignerError::CryptoProviderMissing(_) => Some(SignerErrorCode::CryptoProviderMissing),
@@ -55,8 +56,9 @@ pub fn classify(error: &SignerError) -> Option<SignerErrorCode> {
         SignerError::CertExpired(_) => Some(SignerErrorCode::CryptoCertExpired),
         SignerError::ContainerUnavailable(_) => Some(SignerErrorCode::CryptoContainerUnavailable),
         SignerError::PinRequired => Some(SignerErrorCode::CryptoPinRequired),
+        SignerError::Network(_) => Some(SignerErrorCode::Network),
         SignerError::TrueApi(_) => Some(SignerErrorCode::TrueApi),
-        SignerError::Network(_) | SignerError::Revoked | SignerError::Storage(_) | SignerError::Protocol(_) => None,
+        SignerError::Revoked | SignerError::Storage(_) | SignerError::Protocol(_) => None,
     }
 }
 
@@ -109,13 +111,25 @@ impl Runtime {
         let http = reqwest::Client::builder()
             .build()
             .map_err(|e| SignerError::Network(e.to_string()))?;
+        let journal = match Journal::open(config_dir.join("journal")) {
+            Ok(journal) => journal,
+            Err(error) => {
+                tracing::warn!(%error, "could not open persistent signer journal");
+                let mut journal = Journal::default();
+                journal.append(JournalEntry::new(
+                    "Journal persistence unavailable",
+                    Some(&error.to_string()),
+                ));
+                journal
+            }
+        };
         Ok(Self {
             config_dir,
             signer,
             secrets,
             app_version,
             hostname: crate::hostname::resolve_hostname(),
-            journal: Mutex::new(Journal::default()),
+            journal: Mutex::new(journal),
             last_token_expires_at: Mutex::new(None),
             last_error: Mutex::new(None),
             http,
@@ -337,7 +351,10 @@ impl Runtime {
                 SignerErrorCode::CryptoCertNotFound,
                 "no certificate has been selected in the agent",
             );
-            if let Err(error) = client.fail(secret, &task.id, &body).await {
+            if let Err(error) = self
+                .fail_with_retry(client, secret, &task.id, &body)
+                .await
+            {
                 self.note_report_failure("Could not report the missing certificate", &error);
             }
             self.note("No certificate selected", None);
@@ -403,7 +420,6 @@ impl Runtime {
                 // here must not throw that work away and leave the cloud
                 // sitting on the claim for its full 30-minute deadline, so
                 // retry a bounded number of times before giving up.
-                const COMPLETE_ATTEMPTS: u32 = 3;
                 let mut attempt = 0u32;
                 let result = loop {
                     let outcome = client.complete(secret, &task.id, &body).await;
@@ -414,8 +430,7 @@ impl Runtime {
                     let done = matches!(
                         outcome,
                         Ok(()) | Err(SignerError::Revoked) | Err(SignerError::Protocol(_))
-                    )
-                        || attempt >= COMPLETE_ATTEMPTS;
+                    ) || attempt >= REPORT_ATTEMPTS;
                     if done {
                         break outcome;
                     }
@@ -442,7 +457,9 @@ impl Runtime {
                 self.note("Signing failed", Some(&error.to_string()));
                 if let Some(code) = classify(&error) {
                     let body = TaskFail::new(code, error.to_string());
-                    if let Err(fail_error) = client.fail(secret, &task.id, &body).await {
+                    if let Err(fail_error) =
+                        self.fail_with_retry(client, secret, &task.id, &body).await
+                    {
                         self.note_report_failure("Could not report the failure", &fail_error);
                     }
                 }
@@ -473,6 +490,42 @@ impl Runtime {
         storage::write_config(&self.config_dir, &config)
     }
 
+    pub fn export_journal(&self, destination: &Path) -> Result<(), SignerError> {
+        let config = self.config().unwrap_or_default();
+        let metadata = JournalExportMetadata {
+            app_version: self.app_version.clone(),
+            hostname: self.hostname.clone(),
+            tenant_name: config.tenant_name,
+        };
+        self.journal
+            .lock()
+            .map_err(|_| SignerError::Storage("journal lock is poisoned".into()))?
+            .export_zip(destination, &metadata)
+            .map_err(|error| SignerError::Storage(error.to_string()))
+    }
+
+    async fn fail_with_retry(
+        &self,
+        client: &CloudClient,
+        secret: &str,
+        task_id: &str,
+        body: &TaskFail,
+    ) -> Result<(), SignerError> {
+        let mut attempt = 0u32;
+        loop {
+            let outcome = client.fail(secret, task_id, body).await;
+            attempt += 1;
+            let done = matches!(
+                outcome,
+                Ok(()) | Err(SignerError::Revoked) | Err(SignerError::Protocol(_))
+            ) || attempt >= REPORT_ATTEMPTS;
+            if done {
+                return outcome;
+            }
+            tokio::time::sleep(backoff_for(attempt - 1)).await;
+        }
+    }
+
     /// Journals a failed report call (`complete`/`fail`), distinguishing a
     /// revocation from any other failure: a 401 here means the cabinet revoked
     /// this agent mid-task, which is a materially different situation from a
@@ -491,8 +544,13 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contracts::SignerErrorCode;
+    use crate::contracts::{
+        SignerErrorCode, SignerTask, TaskType, TokenFormat, TrueApiAuthPayload,
+    };
     use crate::signer::CertificateSummary;
+    use std::io::ErrorKind;
+    use wiremock::matchers::{body_json, body_json_string, method, path};
+    use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
     struct NoSigner;
     impl Signer for NoSigner {
@@ -511,6 +569,16 @@ mod tests {
         }
         fn unprotect(&self, protected: &str) -> Result<String, SignerError> {
             Ok(protected.to_string())
+        }
+    }
+
+    struct PayloadSigner;
+    impl Signer for PayloadSigner {
+        fn list_certificates(&self) -> Result<Vec<CertificateSummary>, SignerError> {
+            Ok(vec![])
+        }
+        fn sign_attached(&self, _thumbprint: &str, payload: &[u8]) -> Result<String, SignerError> {
+            Ok(format!("signed-{}", String::from_utf8_lossy(payload)))
         }
     }
 
@@ -552,10 +620,13 @@ mod tests {
             classify(&SignerError::TrueApi("x".into())),
             Some(SignerErrorCode::TrueApi)
         );
-        // A transient network failure must NOT be reported as a task failure:
-        // the cloud re-enqueues after its own timeout, and failing the task
-        // would waste the whole refresh window on a blip.
-        assert_eq!(classify(&SignerError::Network("x".into())), None);
+        // Network blips are retried before classification. Once those bounded
+        // attempts are exhausted, reporting NETWORK releases the claimed task
+        // so the cabinet can request another refresh immediately.
+        assert_eq!(
+            classify(&SignerError::Network("x".into())),
+            Some(SignerErrorCode::Network)
+        );
         assert_eq!(classify(&SignerError::Revoked), None);
     }
 
@@ -586,6 +657,54 @@ mod tests {
         let (_dir, runtime) = test_runtime();
         runtime.select_certificate("AB12").unwrap();
         assert_eq!(runtime.config().unwrap().cert_thumbprint.as_deref(), Some("AB12"));
+    }
+
+    #[test]
+    fn journal_entries_survive_runtime_recreation() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let runtime = Runtime::new(
+                dir.path().to_path_buf(),
+                Arc::new(NoSigner),
+                Arc::new(PlainStore),
+                "0.1.0".into(),
+            )
+            .unwrap();
+            runtime.note("Agent started", Some("safe detail"));
+        }
+
+        let restarted = Runtime::new(
+            dir.path().to_path_buf(),
+            Arc::new(NoSigner),
+            Arc::new(PlainStore),
+            "0.1.0".into(),
+        )
+        .unwrap();
+
+        assert_eq!(restarted.status().journal.len(), 1);
+        assert_eq!(restarted.status().journal[0].message, "Agent started");
+    }
+
+    #[test]
+    fn runtime_exports_the_full_journal_with_agent_metadata() {
+        use std::io::Read as _;
+
+        let (dir, runtime) = test_runtime();
+        runtime.note("Agent started", None);
+        let destination = dir.path().join("export.zip");
+
+        runtime.export_journal(&destination).unwrap();
+
+        let file = std::fs::File::open(destination).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut metadata = String::new();
+        archive
+            .by_name("metadata.json")
+            .unwrap()
+            .read_to_string(&mut metadata)
+            .unwrap();
+        assert!(metadata.contains("0.1.0"));
+        assert!(metadata.contains(&runtime.status().hostname));
     }
 
     // --- F1: `status()` must reflect the real, current value of the two
@@ -619,6 +738,127 @@ mod tests {
             Some("boom"),
             "a second status() call must not have erased it"
         );
+    }
+
+    #[tokio::test]
+    async fn retries_reporting_an_exhausted_signing_failure_after_a_network_blip() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/auth/key"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(r#"{"uuid":"u-1","data":"challenge-data"}"#),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/signer-agent/tasks/t1/fail"))
+            .and(body_json_string(
+                r#"{"errorCode":"CRYPTO_PIN_REQUIRED","message":"PIN required for the key container"}"#,
+            ))
+            .respond_with_err(|_: &Request| {
+                std::io::Error::new(ErrorKind::ConnectionReset, "connection reset")
+            })
+            .with_priority(1)
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/signer-agent/tasks/t1/fail"))
+            .and(body_json_string(
+                r#"{"errorCode":"CRYPTO_PIN_REQUIRED","message":"PIN required for the key container"}"#,
+            ))
+            .respond_with(ResponseTemplate::new(204))
+            .with_priority(2)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let (_dir, runtime) = test_runtime();
+        runtime.select_certificate("AB12").unwrap();
+        let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
+        let task = SignerTask {
+            id: "t1".into(),
+            task_type: TaskType::TrueApiAuth,
+            payload: TrueApiAuthPayload {
+                true_api_base_url: server.uri(),
+                inn: None,
+                token_format: TokenFormat::Jwt,
+            },
+        };
+
+        runtime.execute(&client, "secret", &task, &|_| {}).await;
+    }
+
+    #[tokio::test]
+    async fn reports_network_after_three_fresh_auth_attempts_are_exhausted() {
+        let server = MockServer::start().await;
+        for attempt in 1..=3 {
+            let uuid = format!("u-{attempt}");
+            let challenge = format!("challenge-{attempt}");
+            Mock::given(method("GET"))
+                .and(path("/auth/key"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "uuid": uuid,
+                    "data": challenge,
+                })))
+                .with_priority(attempt)
+                .up_to_n_times(1)
+                .expect(1)
+                .mount(&server)
+                .await;
+            Mock::given(method("POST"))
+                .and(path("/auth/simpleSignIn"))
+                .and(body_json(serde_json::json!({
+                    "uuid": format!("u-{attempt}"),
+                    "data": format!("signed-challenge-{attempt}"),
+                })))
+                .respond_with_err(|_: &Request| {
+                    std::io::Error::new(ErrorKind::ConnectionReset, "connection reset")
+                })
+                .with_priority(attempt)
+                .up_to_n_times(1)
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+        Mock::given(method("POST"))
+            .and(path("/signer-agent/tasks/t-network/fail"))
+            .and(body_json(serde_json::json!({
+                "errorCode": "NETWORK",
+                "message": format!(
+                    "network failure: error sending request for url ({}/auth/simpleSignIn)",
+                    server.uri()
+                ),
+            })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::new(
+            dir.path().to_path_buf(),
+            Arc::new(PayloadSigner),
+            Arc::new(PlainStore),
+            "0.1.0".into(),
+        )
+        .unwrap();
+        runtime.select_certificate("AB12").unwrap();
+        let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
+        let task = SignerTask {
+            id: "t-network".into(),
+            task_type: TaskType::TrueApiAuth,
+            payload: TrueApiAuthPayload {
+                true_api_base_url: server.uri(),
+                inn: None,
+                token_format: TokenFormat::Jwt,
+            },
+        };
+
+        runtime.execute(&client, "secret", &task, &|_| {}).await;
     }
 
     #[test]

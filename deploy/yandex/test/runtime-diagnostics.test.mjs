@@ -781,6 +781,14 @@ test("production diagnostics workflow is protected, serialized, read only and cl
   );
   const workflow = load(source);
   assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs, {
+    national_catalog: {
+      description: "Run the read-only National Catalog production contract",
+      required: true,
+      type: "boolean",
+      default: false,
+    },
+  });
   assert.deepEqual(Object.keys(workflow.jobs), ["diagnose"]);
   assert.deepEqual(workflow.concurrency, {
     group: "markiro-production-deployment",
@@ -808,7 +816,12 @@ test("production diagnostics workflow is protected, serialized, read only and cl
     diagnose.env.YC_APP_DEPLOY_SSH_PRIVATE_KEY,
     "${{ secrets.YC_APP_DEPLOY_SSH_PRIVATE_KEY }}",
   );
+  assert.equal(diagnose.env.RUN_NATIONAL_CATALOG_DIAGNOSTIC, "${{ inputs.national_catalog }}");
   assert.match(diagnose.run, /runtime-diagnostics[.]mjs run/);
+  assert.match(
+    diagnose.run,
+    /\[\[ "\$RUN_NATIONAL_CATALOG_DIAGNOSTIC" == "true" \]\][\s\S]*national-catalog-diagnostics[.]mjs run/,
+  );
   assert.match(diagnose.run, /chmod 600/);
 
   const cleanup = job.steps.find((step) => step.name === "Remove local diagnostic credentials");

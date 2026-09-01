@@ -177,9 +177,11 @@ test("ci-required always evaluates the classifier and every heavy job", () => {
   assert.ok(gate, "workflow must define ci-required");
   assert.equal(gate.if, "always()");
   assert.deepEqual(gate.needs, ["classify-changes", ...heavyJobs.map(([jobId]) => jobId)]);
+  assert.equal(gate.outputs.result, "${{ steps.result.outputs.result }}");
 
   const resultStep = stepByName(gate, "Verify required CI results");
   assert.ok(resultStep, "ci-required must execute the result evaluator");
+  assert.equal(resultStep.id, "result");
   assert.equal(resultStep.env.CI_NEEDS_JSON, "${{ toJSON(needs) }}");
   assert.equal(resultStep.run, "node tools/ci/required-results.mjs --needs-env CI_NEEDS_JSON");
 });

@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -48,16 +49,39 @@ export function assertRequiredResults(needs) {
   }
 }
 
+function publishResult(passed, error) {
+  const result = String(passed);
+  if (process.env.GITHUB_OUTPUT) {
+    appendFileSync(process.env.GITHUB_OUTPUT, `result=${result}\n`, "utf8");
+  }
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    const detail = passed
+      ? "Every selected job succeeded; unselected jobs were skipped or succeeded."
+      : `Required CI failed: ${error instanceof Error ? error.message : String(error)}`;
+    appendFileSync(
+      process.env.GITHUB_STEP_SUMMARY,
+      [`## Required CI result: \`${result}\``, "", detail, ""].join("\n"),
+      "utf8",
+    );
+  }
+}
+
 function runCli() {
-  const [option, environmentName, ...extra] = process.argv.slice(2);
-  if (option !== "--needs-env" || !environmentName || extra.length > 0) {
-    throw new Error("usage: required-results.mjs --needs-env <name>");
+  try {
+    const [option, environmentName, ...extra] = process.argv.slice(2);
+    if (option !== "--needs-env" || !environmentName || extra.length > 0) {
+      throw new Error("usage: required-results.mjs --needs-env <name>");
+    }
+    const serialized = process.env[environmentName];
+    if (serialized === undefined) {
+      throw new Error(`environment variable ${environmentName} is missing`);
+    }
+    assertRequiredResults(JSON.parse(serialized));
+    publishResult(true);
+  } catch (error) {
+    publishResult(false, error);
+    throw error;
   }
-  const serialized = process.env[environmentName];
-  if (serialized === undefined) {
-    throw new Error(`environment variable ${environmentName} is missing`);
-  }
-  assertRequiredResults(JSON.parse(serialized));
 }
 
 const entrypoint = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : undefined;
