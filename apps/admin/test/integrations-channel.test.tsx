@@ -174,6 +174,25 @@ function createFetchMock(options: FetchMockOptions = {}) {
     if (method === "GET" && /\/keys$/.test(path)) {
       return jsonResponse(200, { keys: [] });
     }
+    if (method === "GET" && path === "/signer-agents") {
+      return jsonResponse(200, {
+        agents: [],
+        token: {
+          status: "none",
+          obtainedAt: null,
+          expiresAt: null,
+          certThumbprint: null,
+        },
+      });
+    }
+    if (method === "GET" && path === "/integrations/chestny_znak/code-statuses") {
+      return jsonResponse(200, {
+        total: 0,
+        refreshedLastDay: 0,
+        withoutProductGroup: 0,
+        lastCheckedAt: null,
+      });
+    }
     // Plain `GET /integrations/:type` -- the channel-detail fallback.
     if (detailMode === "pending") return new Promise<Response>(() => {});
     if (detailMode === "error") return jsonResponse(500, { message: "Internal error" });
@@ -360,6 +379,27 @@ describe("ChannelPage", () => {
       "/integrations/commerceml",
       expect.objectContaining({ priceType: "Розничная" }),
     );
+  });
+
+  it("позволяет передать ИНН организации для авторизации по МЧД", async () => {
+    renderChannel("chestny_znak");
+
+    await userEvent.type(await screen.findByLabelText(/инн организации по мчд/i), "7707083893");
+    await userEvent.click(screen.getByRole("button", { name: /сохранить/i }));
+
+    expect(patchSpy).toHaveBeenCalledWith("/integrations/chestny_znak", {
+      mchdInn: "7707083893",
+    });
+  });
+
+  it("не сохраняет пустой ИНН организации по МЧД", async () => {
+    renderChannel("chestny_znak");
+
+    await screen.findByLabelText(/инн организации по мчд/i);
+    await userEvent.click(screen.getByRole("button", { name: /сохранить/i }));
+
+    expect(await screen.findByText(/введите 10 или 12 цифр инн/i)).toBeDefined();
+    expect(patchSpy).not.toHaveBeenCalled();
   });
 
   // Fix 4 (review, Task 13 follow-up): `silentAfterHours` is registered with
