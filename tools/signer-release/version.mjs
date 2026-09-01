@@ -75,6 +75,63 @@ export function buildTauriVersionOverlay(version) {
   return { version };
 }
 
+function latestVersion(tags) {
+  return (
+    tags
+      .map(parseSignerReleaseTag)
+      .filter((version) => version !== null)
+      .sort(compareVersions)
+      .at(-1) ?? null
+  );
+}
+
+export function resolveSignerReleaseAction({
+  mode,
+  bump,
+  githubPublishedTags,
+  githubDraftTags,
+  yandexVersion,
+}) {
+  const githubVersion = latestVersion(githubPublishedTags);
+  const drafts = githubDraftTags
+    .map(parseSignerReleaseTag)
+    .filter((version) => version !== null)
+    .sort(compareVersions);
+
+  if (mode === "publish") {
+    if (drafts.length > 0) {
+      throw new Error("a signer draft already exists; run repair before publishing");
+    }
+    const stable = reconcileStableVersions({ githubVersion, yandexVersion });
+    if (stable.kind === "empty") {
+      throw new Error("no signer stable baseline exists");
+    }
+    const version = bumpSignerVersion(stable.version, bump);
+    return { mode, version, tag: signerReleaseTag(version) };
+  }
+
+  if (mode === "repair") {
+    if (drafts.length !== 1) {
+      throw new Error("repair requires exactly one signer draft");
+    }
+    const version = drafts[0];
+    if (githubVersion !== null && compareVersions(version, githubVersion) <= 0) {
+      throw new Error("signer repair draft is not newer than the published release");
+    }
+    const acceptedYandexVersions = new Set(
+      [githubVersion, version, githubVersion === null ? SIGNER_DISTRIBUTION_BASELINE : null].filter(
+        (value) => value !== null,
+      ),
+    );
+    if (!acceptedYandexVersions.has(yandexVersion)) {
+      throw new Error("signer repair state disagrees with the Yandex stable version");
+    }
+    return { mode, version, tag: signerReleaseTag(version) };
+  }
+
+  throw new Error(`unsupported signer release mode: ${String(mode)}`);
+}
+
 export function signerReleaseTag(version) {
   return `signer-v${version}`;
 }

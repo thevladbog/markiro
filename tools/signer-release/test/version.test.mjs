@@ -9,6 +9,7 @@ import {
   parseSignerReleaseTag,
   readSignerVersion,
   reconcileStableVersions,
+  resolveSignerReleaseAction,
   signerArtifactNames,
   signerReleaseTag,
 } from "../version.mjs";
@@ -82,17 +83,68 @@ test("accepts empty, aligned, and one-time migration channel state", () => {
   assert.deepEqual(reconcileStableVersions({ githubVersion: null, yandexVersion: null }), {
     kind: "empty",
   });
-  assert.deepEqual(
-    reconcileStableVersions({ githubVersion: "0.1.5", yandexVersion: "0.1.5" }),
-    { kind: "aligned", version: "0.1.5" },
-  );
-  assert.deepEqual(
-    reconcileStableVersions({ githubVersion: null, yandexVersion: "0.1.4" }),
-    { kind: "aligned", version: "0.1.4" },
-  );
+  assert.deepEqual(reconcileStableVersions({ githubVersion: "0.1.5", yandexVersion: "0.1.5" }), {
+    kind: "aligned",
+    version: "0.1.5",
+  });
+  assert.deepEqual(reconcileStableVersions({ githubVersion: null, yandexVersion: "0.1.4" }), {
+    kind: "aligned",
+    version: "0.1.4",
+  });
 });
 
 test("builds a one-key Tauri version overlay", () => {
   assert.deepEqual(buildTauriVersionOverlay("0.1.5"), { version: "0.1.5" });
   assert.throws(() => buildTauriVersionOverlay("0.1.5-beta.1"), /stable semantic version/);
+});
+
+test("resolves a publish from the migration baseline", () => {
+  assert.deepEqual(
+    resolveSignerReleaseAction({
+      mode: "publish",
+      bump: "patch",
+      githubPublishedTags: [],
+      githubDraftTags: [],
+      yandexVersion: "0.1.4",
+    }),
+    { mode: "publish", version: "0.1.5", tag: "signer-v0.1.5" },
+  );
+});
+
+test("requires repair while a signer draft exists", () => {
+  assert.throws(
+    () =>
+      resolveSignerReleaseAction({
+        mode: "publish",
+        bump: "patch",
+        githubPublishedTags: ["signer-v0.1.5"],
+        githubDraftTags: ["signer-v0.1.6"],
+        yandexVersion: "0.1.5",
+      }),
+    /repair/,
+  );
+});
+
+test("repairs the one pending draft without calculating a new version", () => {
+  assert.deepEqual(
+    resolveSignerReleaseAction({
+      mode: "repair",
+      bump: "patch",
+      githubPublishedTags: ["signer-v0.1.5"],
+      githubDraftTags: ["signer-v0.1.6"],
+      yandexVersion: "0.1.5",
+    }),
+    { mode: "repair", version: "0.1.6", tag: "signer-v0.1.6" },
+  );
+  assert.throws(
+    () =>
+      resolveSignerReleaseAction({
+        mode: "repair",
+        bump: "patch",
+        githubPublishedTags: ["signer-v0.1.5"],
+        githubDraftTags: [],
+        yandexVersion: "0.1.5",
+      }),
+    /exactly one signer draft/,
+  );
 });

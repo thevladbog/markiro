@@ -54,9 +54,7 @@ function fakeMirror() {
   };
   const fetchImpl = async (url) => {
     const object = objects.get(new URL(url).pathname.slice(1));
-    return object
-      ? new Response(object.bytes, { status: 200 })
-      : new Response("", { status: 404 });
+    return object ? new Response(object.bytes, { status: 200 }) : new Response("", { status: 404 });
   };
   return { objects, operations, store, fetchImpl };
 }

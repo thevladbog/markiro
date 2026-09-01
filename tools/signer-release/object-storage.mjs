@@ -1,4 +1,9 @@
-import { CopyObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  CopyObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
 
 import { signerArtifactNames } from "./version.mjs";

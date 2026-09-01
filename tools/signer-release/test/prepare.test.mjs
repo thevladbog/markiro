@@ -18,10 +18,7 @@ async function fixture() {
   const outputDir = join(root, "prepared");
   await mkdir(bundleDir);
   await writeFile(join(bundleDir, "Markiro Signer_0.1.5_x64-setup.exe"), "signed installer");
-  await writeFile(
-    join(bundleDir, "Markiro Signer_0.1.5_x64-setup.exe.sig"),
-    `${SIGNATURE_TEXT}\n`,
-  );
+  await writeFile(join(bundleDir, "Markiro Signer_0.1.5_x64-setup.exe.sig"), `${SIGNATURE_TEXT}\n`);
   return { bundleDir, outputDir };
 }
 

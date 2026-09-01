@@ -65,9 +65,7 @@ export async function prepareSignerRelease({
   const installerBytes = await readFile(join(bundleDir, found.installer));
   const signatureBytes = await readFile(join(bundleDir, found.signature));
   const signature = signatureBytes.toString("utf8").trim();
-  const installerUrl = signerPublicUrl(
-    signerObjectKey({ version, filename: names.installer }),
-  );
+  const installerUrl = signerPublicUrl(signerObjectKey({ version, filename: names.installer }));
   const manifest = buildSignerManifest({
     version,
     pubDate,
@@ -124,13 +122,12 @@ export async function verifyPreparedSignerRelease({ directory, version }) {
   );
   const manifest = JSON.parse(bytes[MANIFEST_FILE].toString("utf8"));
   assertValidSignerManifest(manifest);
-  const expectedUrl = signerPublicUrl(
-    signerObjectKey({ version, filename: names.installer }),
-  );
+  const expectedUrl = signerPublicUrl(signerObjectKey({ version, filename: names.installer }));
   if (
     manifest.version !== version ||
     manifest.platforms["windows-x86_64"].url !== expectedUrl ||
-    manifest.platforms["windows-x86_64"].signature !== bytes[names.signature].toString("utf8").trim()
+    manifest.platforms["windows-x86_64"].signature !==
+      bytes[names.signature].toString("utf8").trim()
   ) {
     throw new Error("prepared signer manifest does not match its release assets");
   }
@@ -147,7 +144,11 @@ export async function verifyPreparedSignerRelease({ directory, version }) {
   validateSource(evidence.source?.repository, evidence.source?.sha);
 
   const primaryNames = [names.installer, names.signature, MANIFEST_FILE].sort();
-  if (Object.keys(evidence.assets ?? {}).sort().join("\n") !== primaryNames.join("\n")) {
+  if (
+    Object.keys(evidence.assets ?? {})
+      .sort()
+      .join("\n") !== primaryNames.join("\n")
+  ) {
     throw new Error("prepared signer release evidence names unexpected assets");
   }
   for (const name of primaryNames) {
