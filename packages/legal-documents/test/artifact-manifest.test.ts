@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { deflateSync } from "node:zlib";
 
 import { afterEach, describe, expect, it } from "vitest";
 import { zlibSync } from "fflate";
@@ -32,6 +33,7 @@ import {
   LIBREOFFICE_PDF_EXPORT_FILTER,
   acquireArtifactGenerationLock,
   artifactGenerationLockPath,
+  assertContentEquivalentPdf,
   assertEmbeddedPdfFonts,
   assertExtractedPdfText,
   assertNoFontSubstitutionWarnings,
@@ -292,13 +294,13 @@ function artifactEntry(
   kind: PublishedLegalArtifact["kind"],
 ): { readonly entry: PublishedLegalArtifact; readonly bytes: Uint8Array } {
   const extension = kind === "pdfa-2b" ? "pdf" : "docx";
-  // MKR-INS-06 was reissued as 2026.08/02 on 2026-08-31 and MKR-INS-07 as
-  // 2026.08/03 on 2026-09-01; every
+  // Reissues moved MKR-INS-04 to 2026.08/02 and MKR-INS-06/07 to 2026.08/03
+  // (see registry.test.ts for the reasons); every
   // other code is still on its first revision.
   const revision =
-    code === "MKR-INS-07"
+    code === "MKR-INS-06" || code === "MKR-INS-07"
       ? "2026.08/03"
-      : code === "MKR-INS-06" || code === "MKR-INS-04"
+      : code === "MKR-INS-04"
         ? "2026.08/02"
         : "2026.08/01";
   const fileName = `markiro_${code.toLowerCase()}_${revision.replace("/", "-")}_${locale}.${extension}`;
@@ -315,11 +317,9 @@ function artifactEntry(
             ? "2026-08-22"
             : code === "MKR-INS-05" || code === "MKR-INS-08"
               ? "2026-08-30"
-              : code === "MKR-INS-06"
-                ? "2026-08-31"
-                : code === "MKR-INS-07" || code === "MKR-INS-04"
-                  ? "2026-09-01"
-                  : "2026-08-15",
+              : code === "MKR-INS-04" || code === "MKR-INS-06" || code === "MKR-INS-07"
+                ? "2026-09-01"
+                : "2026-08-15",
       locale,
       kind,
       fileName,
@@ -846,7 +846,7 @@ describe("legal artifact release generation", () => {
     expect(environment).toMatchObject({
       PATH: "/usr/bin",
       HOME: "/tmp/legal-profile",
-      TMPDIR: process.platform === "darwin" ? "/private/tmp" : "/tmp",
+      TMPDIR: "/tmp/legal-profile/tmp",
       XDG_CACHE_HOME: "/tmp/legal-profile/xdg-cache",
       XDG_CONFIG_HOME: "/tmp/legal-profile/xdg-config",
     });
@@ -1004,6 +1004,72 @@ describe("legal artifact release generation", () => {
       "BAAAAA+IBMPlexSans-Regular           TrueType          WinAnsi          no  no  yes",
     );
     expect(() => assertEmbeddedPdfFonts(notEmbedded)).toThrow("embedded subset");
+  });
+
+  it("accepts recompressed but content-identical release PDFs and rejects real changes", () => {
+    // A minimal classic-xref PDF with one Flate image stream whose /Length
+    // lives in a separate object -- the shape LibreOffice emits and the shape
+    // the regeneration gate walks.
+    const buildPdf = (payload: Buffer, extra = "<</Kind/Extra>>"): Buffer => {
+      const objects = [
+        "<</Type/Catalog>>",
+        Buffer.concat([
+          Buffer.from(
+            "<</Type/XObject/Subtype/Image/Length 3 0 R/Filter/FlateDecode>>\nstream\n",
+            "latin1",
+          ),
+          payload,
+          Buffer.from("\nendstream", "latin1"),
+        ]),
+        Buffer.from(String(payload.byteLength), "latin1"),
+        extra,
+      ];
+      const chunks: Buffer[] = [Buffer.from("%PDF-1.7\n", "latin1")];
+      const offsets: number[] = [];
+      let cursor = chunks[0]!.byteLength;
+      objects.forEach((body, index) => {
+        const object = Buffer.concat([
+          Buffer.from(`${index + 1} 0 obj\n`, "latin1"),
+          Buffer.isBuffer(body) ? body : Buffer.from(body, "latin1"),
+          Buffer.from("\nendobj\n\n", "latin1"),
+        ]);
+        offsets.push(cursor);
+        chunks.push(object);
+        cursor += object.byteLength;
+      });
+      const entries = [
+        "0000000000 65535 f ",
+        ...offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n `),
+      ].join("\n");
+      chunks.push(
+        Buffer.from(
+          `xref\n0 ${objects.length + 1}\n${entries}\ntrailer\n<</Size ${objects.length + 1}>>\nstartxref\n${cursor}\n%%EOF\n`,
+          "latin1",
+        ),
+      );
+      return Buffer.concat(chunks);
+    };
+
+    const pixels = Buffer.from("identical decompressed image content", "latin1");
+    const tight = buildPdf(deflateSync(pixels, { level: 9 }));
+    const loose = buildPdf(deflateSync(pixels, { level: 1 }));
+    const fileName = "markiro_mkr-ins-06_2026.08-02_ru.pdf";
+
+    expect(tight.equals(loose)).toBe(false);
+    expect(() => assertContentEquivalentPdf(tight, loose, fileName)).not.toThrow();
+    expect(() => assertContentEquivalentPdf(tight, tight, fileName)).not.toThrow();
+
+    const otherPixels = deflateSync(Buffer.from("tampered image content", "latin1"), { level: 9 });
+    expect(() => assertContentEquivalentPdf(tight, buildPdf(otherPixels), fileName)).toThrow(
+      "stream content",
+    );
+    expect(() =>
+      assertContentEquivalentPdf(
+        tight,
+        buildPdf(deflateSync(pixels, { level: 1 }), "<</Kind/Tampered>>"),
+        fileName,
+      ),
+    ).toThrow("object 4 body");
   });
 
   it("normalizes LibreOffice PDF dates and trailer IDs without changing byte length", () => {
@@ -1216,7 +1282,7 @@ describe("legal artifact release generation", () => {
       "MKR-INS-03|ru|legal-pdf|https://markiro.app/d/MKR-INS-03/2026.08/01/22.08.2026",
       "MKR-INS-04|ru|legal-pdf|https://markiro.app/d/MKR-INS-04/2026.08/02/01.09.2026",
       "MKR-INS-05|ru|legal-pdf|https://markiro.app/d/MKR-INS-05/2026.08/01/30.08.2026",
-      "MKR-INS-06|ru|legal-pdf|https://markiro.app/d/MKR-INS-06/2026.08/02/31.08.2026",
+      "MKR-INS-06|ru|legal-pdf|https://markiro.app/d/MKR-INS-06/2026.08/03/01.09.2026",
       "MKR-INS-07|ru|legal-pdf|https://markiro.app/d/MKR-INS-07/2026.08/03/01.09.2026",
       "MKR-INS-08|ru|legal-pdf|https://markiro.app/d/MKR-INS-08/2026.08/01/30.08.2026",
     ]);
@@ -1224,7 +1290,7 @@ describe("legal artifact release generation", () => {
       new Set(["2026.08/01", "2026.08/02", "2026.08/03"]),
     );
     expect(new Set(entries.map(({ effectiveDate }) => effectiveDate))).toEqual(
-      new Set(["2026-08-15", "2026-08-21", "2026-08-22", "2026-08-30", "2026-08-31", "2026-09-01"]),
+      new Set(["2026-08-15", "2026-08-21", "2026-08-22", "2026-08-30", "2026-09-01"]),
     );
     expect(entries.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(16);
     expect(await readdir(path.dirname(outDir))).toEqual(["legal"]);
