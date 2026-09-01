@@ -1,9 +1,6 @@
-import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 import process from "node:process";
 
-import { buildSignerManifest } from "./manifest.mjs";
 import {
   createSignerObjectStore,
   SIGNER_DOWNLOAD_KEY,
@@ -12,95 +9,90 @@ import {
   signerPublicUrl,
   verifyPublishedObject,
 } from "./object-storage.mjs";
-import { signerArtifactNames } from "./version.mjs";
+import { verifyPreparedSignerRelease } from "./prepare.mjs";
 
-const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const contentType = (name) => {
+  if (name.endsWith(".exe")) return "application/vnd.microsoft.portable-executable";
+  if (name.endsWith(".json")) return "application/json";
+  return "text/plain";
+};
 
-/**
- * Tauri names the bundle from productName and version ("Markiro Signer_0.1.0_
- * x64-setup.exe"), which is not a name to put in a URL. The exact spelling has
- * changed between Tauri releases, so the directory is searched by suffix
- * rather than by a name this file predicts.
- */
-async function locateBundle(bundleDir) {
-  const entries = await readdir(bundleDir);
-  const installer = entries.find((name) => name.endsWith("-setup.exe"));
-  if (!installer) {
-    throw new Error(`no NSIS installer (*-setup.exe) in ${bundleDir}`);
-  }
-  const signature = `${installer}.sig`;
-  if (!entries.includes(signature)) {
-    throw new Error(`no detached signature ${signature} in ${bundleDir}; the build was not signed`);
-  }
-  return { installer, signature };
-}
-
-export async function publishSignerRelease({
+export async function publishPreparedSignerRelease({
   version,
-  bundleDir,
-  pubDate,
+  releaseDir,
   store,
   fetchImpl = fetch,
 }) {
-  const found = await locateBundle(bundleDir);
-  const names = signerArtifactNames(version);
-  const installerBytes = await readFile(join(bundleDir, found.installer));
-  const signatureBytes = await readFile(join(bundleDir, found.signature));
-  // Tauri compares the manifest signature verbatim; the .sig file ends with a
-  // newline that must not travel with it.
-  const signature = signatureBytes.toString("utf8").trim();
+  const prepared = await verifyPreparedSignerRelease({ directory: releaseDir, version });
+  const immutableNames = [
+    prepared.names.installer,
+    prepared.names.signature,
+    "latest.json",
+    "SHA256SUMS",
+    "release-evidence.json",
+  ];
 
-  const installerKey = signerObjectKey({ version, filename: names.installer });
-  const signatureKey = signerObjectKey({ version, filename: names.signature });
-  const installerUrl = signerPublicUrl(installerKey);
+  for (const name of immutableNames) {
+    const key = signerObjectKey({ version, filename: name });
+    const bytes = await readFile(prepared.paths[name]);
+    const expectedSha256 = prepared.hashes[name];
+    const existingSha256 = await store.head(key);
+    if (existingSha256 === null) {
+      await store.putImmutable(key, bytes, contentType(name), expectedSha256);
+    } else if (existingSha256 !== expectedSha256) {
+      throw new Error(`immutable signer object differs: ${key}`);
+    }
+  }
 
-  const manifest = buildSignerManifest({ version, pubDate, bundleUrl: installerUrl, signature });
-  const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  for (const name of immutableNames) {
+    const key = signerObjectKey({ version, filename: name });
+    await verifyPublishedObject({
+      url: signerPublicUrl(key),
+      expectedSha256: prepared.hashes[name],
+      fetchImpl,
+    });
+  }
 
-  await store.put(installerKey, installerBytes, "application/vnd.microsoft.portable-executable");
-  await store.put(signatureKey, signatureBytes, "text/plain");
+  const installerKey = signerObjectKey({
+    version,
+    filename: prepared.names.installer,
+  });
   await store.copyInstallerToDownload({
     immutableKey: installerKey,
-    attachmentFilename: names.installer,
+    attachmentFilename: prepared.names.installer,
   });
-
   const downloadUrl = signerPublicUrl(SIGNER_DOWNLOAD_KEY);
   await verifyPublishedObject({
-    url: installerUrl,
-    expectedSha256: sha256(installerBytes),
-    fetchImpl,
-  });
-  await verifyPublishedObject({
     url: downloadUrl,
-    expectedSha256: sha256(installerBytes),
+    expectedSha256: prepared.hashes[prepared.names.installer],
     fetchImpl,
   });
 
-  // Last, deliberately: latest.json is what the agent reads, so it may not
-  // name a download until both the immutable artifact and the first-install
-  // alias have landed and have been read back over public HTTPS.
+  const manifestBytes = await readFile(prepared.paths["latest.json"]);
   await store.put(SIGNER_MANIFEST_KEY, manifestBytes, "application/json");
-
   const manifestUrl = signerPublicUrl(SIGNER_MANIFEST_KEY);
   await verifyPublishedObject({
     url: manifestUrl,
-    expectedSha256: sha256(manifestBytes),
+    expectedSha256: prepared.hashes["latest.json"],
     fetchImpl,
   });
 
-  return { installerUrl, manifestUrl, downloadUrl };
+  return {
+    installerUrl: signerPublicUrl(installerKey),
+    manifestUrl,
+    downloadUrl,
+  };
 }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll("\\", "/"))) {
-  const [version, bundleDir] = process.argv.slice(2);
-  if (!version || !bundleDir) {
-    console.error("usage: node tools/signer-release/publish.mjs <version> <bundle-dir>");
+  const [version, releaseDir] = process.argv.slice(2);
+  if (!version || !releaseDir) {
+    console.error("usage: node tools/signer-release/publish.mjs <version> <prepared-release-dir>");
     process.exit(2);
   }
-  const result = await publishSignerRelease({
+  const result = await publishPreparedSignerRelease({
     version,
-    bundleDir,
-    pubDate: new Date().toISOString(),
+    releaseDir,
     store: createSignerObjectStore({}),
   });
   console.log(result.manifestUrl);

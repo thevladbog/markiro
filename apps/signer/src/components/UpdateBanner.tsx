@@ -35,9 +35,11 @@ export function UpdateBanner({
   };
 
   return (
-    <section>
-      <p>{t("updates.available", { version: update.version })}</p>
-      {update.notes ? <p>{update.notes}</p> : null}
+    <section className="signer-update-banner" aria-label={t("updates.availableLabel")}>
+      <div className="signer-update-banner__copy">
+        <strong>{t("updates.available", { version: update.version })}</strong>
+        {update.notes ? <p>{update.notes}</p> : null}
+      </div>
       {failed ? <Alert tone="error">{t("updates.failed")}</Alert> : null}
       <Button disabled={pending} onClick={() => void install()}>
         {pending ? t("updates.installing") : t("updates.install")}

@@ -4,6 +4,11 @@
 
 **Status:** Implemented; extended with the versionless first-install alias on 2026-08-31
 
+> **2026-09-01 extension:** Future releases use workflow-owned versions and are
+> staged in `thevladbog/markiro-station-releases` before Yandex publication.
+> Interrupted publication resumes from exact draft bytes. See
+> `docs/superpowers/specs/2026-09-01-signer-release-resilience-design.md`.
+
 **Scope:** Publishing a signed, installable Windows build of the Chestny ZNAK signer agent, and teaching the installed agent to update itself. One channel, `stable`.
 
 ## Why this is the last thing missing
