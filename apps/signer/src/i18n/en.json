@@ -16,6 +16,8 @@
     "phase": {
       "unpaired": "not paired",
       "idle": "waiting for a task",
+      "reconnecting": "reconnecting",
+      "unavailable": "unavailable",
       "working": "signing",
       "degraded": "error"
     },
@@ -43,6 +45,14 @@
     "expired": "The certificate expired {{at}}. Signing is not possible."
   },
   "updates": {
+    "title": "Updates",
+    "installed": "Installed version {{version}}",
+    "check": "Check for updates",
+    "checking": "Checking…",
+    "current": "The latest version is installed.",
+    "availableManual": "Version {{version}} is available. Install it from the message above.",
+    "checkFailed": "Could not check for updates. Check the connection and try again.",
+    "availableLabel": "Signer update available",
     "available": "Version {{version}} is available. Updating restarts the agent.",
     "install": "Update and restart",
     "installing": "Updating…",

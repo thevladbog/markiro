@@ -4,10 +4,14 @@ import { Alert, Button, Card, DataTabs, StatusChip } from "@markiro/ui";
 import { bridge, type AgentStatus } from "../lib/bridge.js";
 import { CertificatePicker } from "../components/CertificatePicker.js";
 import { JournalList } from "../components/JournalList.js";
+import { UpdateControl } from "../components/UpdateControl.js";
+import type { UpdateCheckResult } from "../lib/updates.js";
 
 const PHASE_TONE = {
   unpaired: "neutral",
   idle: "ok",
+  reconnecting: "warn",
+  unavailable: "error",
   working: "info",
   degraded: "error",
 } as const;
@@ -17,9 +21,11 @@ type StatusTab = "status" | "journal";
 export function Status({
   status,
   onChanged,
+  onCheckForUpdate,
 }: {
   status: AgentStatus;
   onChanged: () => void;
+  onCheckForUpdate: () => Promise<UpdateCheckResult>;
 }): ReactElement {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<StatusTab>("status");
@@ -87,6 +93,10 @@ export function Status({
                 : t("status.noToken")}
             </p>
             {status.lastError ? <p className="signer-status__error">{status.lastError}</p> : null}
+          </section>
+
+          <section className="signer-status__section">
+            <UpdateControl currentVersion={status.appVersion} onCheck={onCheckForUpdate} />
           </section>
 
           <section className="signer-status__section">

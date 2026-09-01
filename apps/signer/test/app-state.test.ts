@@ -10,6 +10,7 @@ describe("nextSignerView", () => {
     expect(
       nextSignerView({
         phase: "unpaired",
+        appVersion: "0.1.5",
         hostname: "BUH-PC",
         tenantName: null,
         certThumbprint: null,
@@ -21,10 +22,11 @@ describe("nextSignerView", () => {
   });
 
   it("shows the status panel once paired, even while degraded", () => {
-    for (const phase of ["idle", "working", "degraded"] as const) {
+    for (const phase of ["idle", "reconnecting", "unavailable", "working", "degraded"] as const) {
       expect(
         nextSignerView({
           phase,
+          appVersion: "0.1.5",
           hostname: "BUH-PC",
           tenantName: "ООО Ромашка",
           certThumbprint: "AB12",
