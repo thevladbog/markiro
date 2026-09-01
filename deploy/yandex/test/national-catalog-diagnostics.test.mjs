@@ -120,6 +120,20 @@ test("hosted National Catalog diagnostic rejects malformed or inconsistent evide
   nonzeroNotModified.checks[5].resultCount = 1;
   const inconsistentPassed = structuredClone(EVIDENCE);
   inconsistentPassed.passed = false;
+  const continuedAfterMissingEtag = structuredClone(EVIDENCE);
+  continuedAfterMissingEtag.passed = false;
+  continuedAfterMissingEtag.checks[0].etagPresent = false;
+  const continuedAfterRefusal = structuredClone(EVIDENCE);
+  continuedAfterRefusal.passed = false;
+  continuedAfterRefusal.checks[2] = {
+    method: "attributes",
+    outcome: "forbidden",
+    resultCount: 0,
+    etagPresent: false,
+  };
+  const continuedAfterCardinalityFailure = structuredClone(EVIDENCE);
+  continuedAfterCardinalityFailure.passed = false;
+  continuedAfterCardinalityFailure.checks[4].resultCount = 0;
 
   for (const output of [
     "MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS {not-json}\n",
@@ -132,6 +146,9 @@ test("hosted National Catalog diagnostic rejects malformed or inconsistent evide
     line(multipleProduct),
     line(nonzeroNotModified),
     line(inconsistentPassed),
+    line(continuedAfterMissingEtag),
+    line(continuedAfterRefusal),
+    line(continuedAfterCardinalityFailure),
   ]) {
     await assert.rejects(
       () =>
@@ -141,6 +158,26 @@ test("hosted National Catalog diagnostic rejects malformed or inconsistent evide
         ),
       /National Catalog diagnostic response is invalid/,
     );
+  }
+});
+
+test("hosted National Catalog diagnostic accepts only the first failing check as a prefix", async () => {
+  for (const checks of [
+    [{ method: "categories", outcome: "forbidden", resultCount: 0, etagPresent: false }],
+    [{ method: "categories", outcome: "ok", resultCount: 3, etagPresent: false }],
+    EVIDENCE.checks
+      .slice(0, 4)
+      .map((check, index) => (index === 3 ? { ...check, resultCount: 0 } : check)),
+  ]) {
+    const expected = { version: 1, passed: false, checks };
+    const result = await runHostedNationalCatalogDiagnostics(
+      HOSTED_ENVIRONMENT,
+      dependencies([
+        "a1b2c3d4e5f6\tapi\n",
+        `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(expected)}\n`,
+      ]),
+    );
+    assert.deepEqual(result, expected);
   }
 });
 

@@ -80,6 +80,27 @@ function evidencePassed(checks) {
   );
 }
 
+function checkAllowsContinuation(check, index) {
+  if (index === 0) return check.outcome === "ok" && check.etagPresent === true;
+  if (index === 1) return check.outcome === "not_modified";
+  if (index === 2) return check.outcome === "ok";
+  if (index === 3) return check.outcome === "ok" && check.resultCount === 1;
+  if (index === 4)
+    return check.outcome === "ok" && check.resultCount === 1 && check.etagPresent === true;
+  return false;
+}
+
+function isCanonicalPrefix(checks) {
+  if (checks.length === 0) return false;
+  for (let index = 0; index < checks.length - 1; index += 1) {
+    if (!checkAllowsContinuation(checks[index], index)) return false;
+  }
+  return (
+    checks.length === METHODS.length ||
+    !checkAllowsContinuation(checks[checks.length - 1], checks.length - 1)
+  );
+}
+
 function validateEvidence(value) {
   if (
     !hasExactKeys(value, "checks,passed,version") ||
@@ -88,6 +109,7 @@ function validateEvidence(value) {
     !Array.isArray(value.checks) ||
     value.checks.length > METHODS.length ||
     !value.checks.every(validCheck) ||
+    !isCanonicalPrefix(value.checks) ||
     value.passed !== evidencePassed(value.checks)
   )
     throw invalidResponse();
