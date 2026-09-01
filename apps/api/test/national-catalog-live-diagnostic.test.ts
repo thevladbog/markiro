@@ -462,7 +462,7 @@ describe("National Catalog production live diagnostic", () => {
         },
         {
           validatePrivateKey: async () => undefined,
-          run: async () => "a1b2c3d4e5f6\tapi\n",
+          run: async () => "a1b2c3d4e5f6\n",
           runDiagnostic: async () => ({ exitCode, stdout }),
           mkdtemp: async () => "/runner/national-catalog-known-hosts",
           writeFile: async () => undefined,

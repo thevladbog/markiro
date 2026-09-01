@@ -167,7 +167,7 @@ function validateEvidence(value) {
 function parseContainer(output) {
   if (typeof output !== "string" || Buffer.byteLength(output, "utf8") > 1024)
     throw invalidResponse();
-  const match = output.match(/^([0-9a-f]{12,64})\tapi\n$/);
+  const match = output.match(/^([0-9a-f]{12,64})\n$/);
   if (!match || !CONTAINER_ID.test(match[1])) throw invalidResponse();
   return match[1];
 }
@@ -256,12 +256,11 @@ export async function runHostedNationalCatalogDiagnostics(
         "sudo",
         "/usr/bin/docker",
         "ps",
+        "-q",
         "--filter",
         "label=com.docker.compose.project=markiro-production",
         "--filter",
         "label=com.docker.compose.service=api",
-        "--format",
-        '{{.ID}}\t{{.Label "com.docker.compose.service"}}',
       ]);
       return parseContainer(containerOutput);
     });
