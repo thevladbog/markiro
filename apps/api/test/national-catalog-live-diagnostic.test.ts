@@ -5,6 +5,7 @@ import {
   loadNationalCatalogProductionSource,
   runNationalCatalogLiveDiagnosticCli,
   type NationalCatalogDiagnosticClient,
+  type NationalCatalogDiagnosticEvidence,
   type NationalCatalogProductionTokenCandidate,
 } from "../src/national-catalog-live-diagnostic";
 
@@ -85,8 +86,9 @@ describe("National Catalog production live diagnostic", () => {
       `product:${PRIVATE_GTIN}:"product-etag"`,
     ]);
     expect(evidence).toEqual({
-      version: 1,
+      version: 2,
       passed: true,
+      sourceStatus: "ready",
       checks: [
         { method: "categories", outcome: "ok", resultCount: 1, etagPresent: true },
         {
@@ -127,8 +129,9 @@ describe("National Catalog production live diagnostic", () => {
 
     expect(calls).toEqual(["categories"]);
     expect(evidence).toEqual({
-      version: 1,
+      version: 2,
       passed: false,
+      sourceStatus: "ready",
       checks: [{ method: "categories", outcome: "forbidden", resultCount: 0, etagPresent: false }],
     });
     expect(JSON.stringify(evidence)).not.toContain("private provider detail");
@@ -205,19 +208,20 @@ describe("National Catalog production live diagnostic", () => {
     },
   );
 
-  it.each(["unavailable", "ambiguous"] as const)(
-    "makes no provider request when the source is %s",
-    async (status) => {
-      const calls: string[] = [];
-      await expect(
-        collectNationalCatalogLiveDiagnostic({
-          loadSource: async () => ({ status }),
-          client: successfulClient(calls),
-        }),
-      ).rejects.toThrow("National Catalog diagnostic source is unavailable");
-      expect(calls).toEqual([]);
-    },
-  );
+  it.each([
+    "active-token-missing",
+    "active-token-ambiguous",
+    "product-gtin-unavailable",
+    "token-decryption-failed",
+  ] as const)("makes no provider request when the source is %s", async (sourceStatus) => {
+    const calls: string[] = [];
+    const result = await collectNationalCatalogLiveDiagnostic({
+      loadSource: async () => ({ status: "unavailable", sourceStatus }),
+      client: successfulClient(calls),
+    });
+    expect(result).toEqual({ version: 2, passed: false, sourceStatus, checks: [] });
+    expect(calls).toEqual([]);
+  });
 
   it("resolves the product and token with the same selected tenant identity", async () => {
     const token: NationalCatalogProductionTokenCandidate = {
@@ -260,8 +264,8 @@ describe("National Catalog production live diagnostic", () => {
       tokenTag: Buffer.alloc(1),
     };
     for (const [tokens, expected] of [
-      [[], "unavailable"],
-      [[token, { ...token, tenantId: "tenant-b" }], "ambiguous"],
+      [[], "active-token-missing"],
+      [[token, { ...token, tenantId: "tenant-b" }], "active-token-ambiguous"],
     ] as const) {
       const calls: string[] = [];
       const result = await loadNationalCatalogProductionSource({
@@ -275,7 +279,7 @@ describe("National Catalog production live diagnostic", () => {
           return PRIVATE_TOKEN;
         },
       });
-      expect(result).toEqual({ status: expected });
+      expect(result).toEqual({ status: "unavailable", sourceStatus: expected });
       expect(calls).toEqual([]);
     }
   });
@@ -301,7 +305,10 @@ describe("National Catalog production live diagnostic", () => {
           return PRIVATE_TOKEN;
         },
       });
-      expect(result).toEqual({ status: "unavailable" });
+      expect(result).toEqual({
+        status: "unavailable",
+        sourceStatus: "product-gtin-unavailable",
+      });
       expect(decrypted).toBe(false);
     },
   );
@@ -322,22 +329,31 @@ describe("National Catalog production live diagnostic", () => {
         throw new Error("private crypto detail");
       },
     });
-    expect(result).toEqual({ status: "unavailable" });
+    expect(result).toEqual({ status: "unavailable", sourceStatus: "token-decryption-failed" });
   });
 
   it("CLI prints one canonical safe line for the host-side gate to evaluate", async () => {
     for (const passed of [true, false] as const) {
       let stdout = "";
       let stderr = "";
+      const collected: NationalCatalogDiagnosticEvidence = passed
+        ? await collectNationalCatalogLiveDiagnostic({
+            loadSource: async () => source(),
+            client: successfulClient([]),
+          })
+        : {
+            version: 2,
+            passed: false,
+            sourceStatus: "active-token-missing",
+            checks: [],
+          };
       const exitCode = await runNationalCatalogLiveDiagnosticCli({
-        collect: async () => ({ version: 1, passed, checks: [] }),
+        collect: async () => collected,
         stdout: { write: (value: string) => (stdout += value) },
         stderr: { write: (value: string) => (stderr += value) },
       });
       expect(exitCode).toBe(0);
-      expect(stdout).toBe(
-        `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify({ version: 1, passed, checks: [] })}\n`,
-      );
+      expect(stdout).toBe(`MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(collected)}\n`);
       expect(stderr).toBe("");
     }
   });
