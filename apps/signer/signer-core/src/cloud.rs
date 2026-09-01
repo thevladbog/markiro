@@ -152,13 +152,13 @@ impl CloudClient {
                 "the task is no longer claimed by this agent".to_string(),
             )),
             status if status.is_success() => Ok(()),
-            // Everything else -- 503 (no encryption key configured), a plain
-            // 500/502/504, or anything else unexpected -- is not a definitive
-            // client-side verdict the way 401/404 are. Treating it as
-            // `Protocol` would make the retry loop in `runtime.rs` give up
-            // for good, throwing away a token that already cost a PIN prompt
-            // and a True API round trip over what may be a transient blip.
-            status => Err(SignerError::Network(format!("report answered {status}"))),
+            // A rejected payload will not become valid when replayed. Keep
+            // only provider/gateway failures retryable; redirects and other
+            // unexpected verdicts are terminal protocol errors too.
+            status if status.is_server_error() => {
+                Err(SignerError::Network(format!("report answered {status}")))
+            }
+            status => Err(SignerError::Protocol(format!("report answered {status}"))),
         }
     }
 }
@@ -302,6 +302,23 @@ mod tests {
         assert!(matches!(
             client.complete("s", "t1", &body).await,
             Err(SignerError::Network(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_client_error_on_report_is_protocol_not_retryable_network() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/signer-agent/tasks/t1/fail"))
+            .respond_with(ResponseTemplate::new(422))
+            .mount(&server)
+            .await;
+        let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
+        let body = TaskFail::new(SignerErrorCode::Network, "network retries exhausted");
+
+        assert!(matches!(
+            client.fail("s", "t1", &body).await,
+            Err(SignerError::Protocol(_))
         ));
     }
 
