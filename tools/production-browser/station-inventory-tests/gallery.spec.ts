@@ -139,10 +139,27 @@ test.afterAll(async () => {
   );
 });
 
-test("all inventory gallery fixtures satisfy the bilingual floor viewport contract", async ({
-  page,
-}) => {
-  test.setTimeout(120_000);
+const viewportGroups: ReadonlyArray<readonly (typeof viewports)[number][]> = artifactMode
+  ? [viewports]
+  : viewports.map((viewport) => [viewport]);
+
+for (const testedViewports of viewportGroups) {
+  const viewportLabel = testedViewports
+    .map((viewport) => `${viewport.width}x${viewport.height}`)
+    .join(", ");
+  test(`inventory gallery fixtures satisfy the bilingual floor contract at ${viewportLabel}`, async ({
+    page,
+  }) => {
+    test.setTimeout(120_000 * testedViewports.length);
+    await verifyViewports(page, testedViewports);
+  });
+}
+
+async function verifyViewports(
+  page: Page,
+  testedViewports: readonly (typeof viewports)[number][],
+): Promise<void> {
+  const resultStart = results.length;
   const consoleErrors: string[] = [];
   const consoleWarnings: string[] = [];
   const pageErrors: string[] = [];
@@ -166,7 +183,7 @@ test("all inventory gallery fixtures satisfy the bilingual floor viewport contra
     }
   });
 
-  for (const viewport of viewports) {
+  for (const viewport of testedViewports) {
     await page.setViewportSize(viewport);
     for (const locale of locales) {
       for (const state of states) {
@@ -439,10 +456,11 @@ test("all inventory gallery fixtures satisfy the bilingual floor viewport contra
     }
   }
 
-  const failed = results.filter((row) => !row.passed);
+  const currentResults = results.slice(resultStart);
+  const failed = currentResults.filter((row) => !row.passed);
   expect(failed, JSON.stringify(failed, null, 2)).toEqual([]);
-  expect(results).toHaveLength(states.length * locales.length * viewports.length);
-});
+  expect(currentResults).toHaveLength(states.length * locales.length * testedViewports.length);
+}
 
 async function focusVisibleAction(page: Page): Promise<void> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
