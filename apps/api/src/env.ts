@@ -72,7 +72,7 @@ const stationOriginSchema = z.url().transform((value, ctx) => {
 });
 
 const explicitBooleanSchema = z.enum(["true", "false"]).transform((value) => value === "true");
-const chzTrueApiTokenFormatSchema = z.enum(["jwt", "uuid"]).default("jwt");
+const chzTrueApiTokenFormatSchema = z.enum(["jwt", "uuid"]).default("uuid");
 
 const optionalHttpsUrlSchema = z
   .string()
@@ -208,8 +208,8 @@ const EnvSchema = z
     DADATA_TOKEN: z.string().trim().min(1).optional(),
     DADATA_SECRET: z.string().trim().min(1).optional(),
     CHZ_TOKEN_ENCRYPTION_KEY: encryptionKeySchema.optional(),
-    // The announced UUID-token exchange is opt-in until it is confirmed in
-    // the provider sandbox and production. Existing deployments stay on JWT.
+    // UUID tokens are the confirmed production default. Keep the explicit JWT
+    // value as a short-lived rollback switch while legacy tasks drain.
     CHZ_TRUE_API_TOKEN_FORMAT: chzTrueApiTokenFormatSchema,
     // National Catalog stays disabled until a deployment explicitly selects a
     // validated endpoint and a tenant authorized to read its schema.
