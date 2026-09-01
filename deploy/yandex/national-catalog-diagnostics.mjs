@@ -46,6 +46,7 @@ const FAILURE_STAGES = Object.freeze([
   "configuration",
   "credential-validation",
   "workspace-setup",
+  "api-container-discovery-transport",
   "api-container-discovery",
   "api-cli-transport",
   "api-cli-exit",
@@ -250,8 +251,8 @@ export async function runHostedNationalCatalogDiagnostics(
       "ConnectTimeout=15",
       `${login}@${address}`,
     ];
-    const containerId = await atFailureStage("api-container-discovery", async () => {
-      const containerOutput = await system.run("ssh", [
+    const containerOutput = await atFailureStage("api-container-discovery-transport", () =>
+      system.run("ssh", [
         ...sshBase,
         "sudo",
         "/usr/bin/docker",
@@ -261,9 +262,11 @@ export async function runHostedNationalCatalogDiagnostics(
         "label=com.docker.compose.project=markiro-production",
         "--filter",
         "label=com.docker.compose.service=api",
-      ]);
-      return parseContainer(containerOutput);
-    });
+      ]),
+    );
+    const containerId = await atFailureStage("api-container-discovery", async () =>
+      parseContainer(containerOutput),
+    );
     const execution = await atFailureStage("api-cli-transport", () =>
       system.runDiagnostic("ssh", [
         ...sshBase,
