@@ -324,7 +324,15 @@ test("hosted National Catalog CLI reduces unclassified private failures to a fix
 test("hosted National Catalog CLI classifies the boundary that lost API evidence", async () => {
   for (const testCase of [
     {
-      name: "container discovery",
+      name: "container discovery transport",
+      outputs: [],
+      run: async () => {
+        throw new Error("private SSH or Docker discovery detail");
+      },
+      stage: "api-container-discovery-transport",
+    },
+    {
+      name: "container discovery result",
       outputs: ["private-container-output\n"],
       stage: "api-container-discovery",
     },
@@ -350,6 +358,7 @@ test("hosted National Catalog CLI classifies the boundary that lost API evidence
     let stdout = "";
     let stderr = "";
     const supplied = dependencies(testCase.outputs);
+    if (testCase.run) supplied.run = testCase.run;
     if (testCase.runDiagnostic) supplied.runDiagnostic = testCase.runDiagnostic;
     const exitCode = await runNationalCatalogDiagnosticsCli({
       argv: ["run"],
