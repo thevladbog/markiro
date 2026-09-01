@@ -108,6 +108,42 @@ test("hosted National Catalog diagnostic rejects ambiguous containers and widene
   }
 });
 
+test("hosted National Catalog diagnostic rejects malformed or inconsistent evidence", async () => {
+  const line = (value) => `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(value)}\n`;
+  const wrongOrder = structuredClone(EVIDENCE);
+  [wrongOrder.checks[0], wrongOrder.checks[1]] = [wrongOrder.checks[1], wrongOrder.checks[0]];
+  const emptyFeed = structuredClone(EVIDENCE);
+  emptyFeed.checks[3].resultCount = 0;
+  const multipleProduct = structuredClone(EVIDENCE);
+  multipleProduct.checks[4].resultCount = 2;
+  const nonzeroNotModified = structuredClone(EVIDENCE);
+  nonzeroNotModified.checks[5].resultCount = 1;
+  const inconsistentPassed = structuredClone(EVIDENCE);
+  inconsistentPassed.passed = false;
+
+  for (const output of [
+    "MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS {not-json}\n",
+    line(EVIDENCE).trimEnd(),
+    `${line(EVIDENCE)}\n`,
+    `unexpected output\n${line(EVIDENCE)}`,
+    `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${"x".repeat(8 * 1024)}\n`,
+    line(wrongOrder),
+    line(emptyFeed),
+    line(multipleProduct),
+    line(nonzeroNotModified),
+    line(inconsistentPassed),
+  ]) {
+    await assert.rejects(
+      () =>
+        runHostedNationalCatalogDiagnostics(
+          HOSTED_ENVIRONMENT,
+          dependencies(["a1b2c3d4e5f6\tapi\n", output]),
+        ),
+      /National Catalog diagnostic response is invalid/,
+    );
+  }
+});
+
 test("hosted National Catalog CLI prints safe evidence before failing a refused contract", async () => {
   let stdout = "";
   let stderr = "";

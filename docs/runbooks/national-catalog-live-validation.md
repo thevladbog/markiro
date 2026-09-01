@@ -63,9 +63,11 @@ NATIONAL_CATALOG_LIVE_GTIN=known-gtin
 ```
 
 `NATIONAL_CATALOG_BASE_URL` must be the authorized environment selected by the
-deployment owner. Markiro deliberately has no default production National
-Catalog endpoint. Keep `NATIONAL_CATALOG_REQUEST_TIMEOUT_MS` at its 15000 ms
-default unless an operator has a documented reason to adjust it.
+deployment owner. This configurable local/integration path deliberately has no
+default production endpoint; the protected production diagnostic described
+above is a separate path with the official endpoint pinned in code. Keep
+`NATIONAL_CATALOG_REQUEST_TIMEOUT_MS` at its 15000 ms default unless an operator
+has a documented reason to adjust it.
 
 Run:
 

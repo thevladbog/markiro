@@ -60,7 +60,7 @@ function validCheck(value, index) {
     value.resultCount >= 0 &&
     value.resultCount <= 1_000_000 &&
     typeof value.etagPresent === "boolean" &&
-    (value.outcome === "ok" || value.etagPresent === false)
+    (value.outcome === "ok" || (value.etagPresent === false && value.resultCount === 0))
   );
 }
 
@@ -72,7 +72,9 @@ function evidencePassed(checks) {
     checks[1].outcome === "not_modified" &&
     checks[2].outcome === "ok" &&
     checks[3].outcome === "ok" &&
+    checks[3].resultCount === 1 &&
     checks[4].outcome === "ok" &&
+    checks[4].resultCount === 1 &&
     checks[4].etagPresent === true &&
     checks[5].outcome === "not_modified"
   );

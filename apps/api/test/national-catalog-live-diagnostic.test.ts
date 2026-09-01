@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   collectNationalCatalogLiveDiagnostic,
+  loadNationalCatalogProductionSource,
   runNationalCatalogLiveDiagnosticCli,
   type NationalCatalogDiagnosticClient,
+  type NationalCatalogProductionTokenCandidate,
 } from "../src/national-catalog-live-diagnostic";
 
 const PRIVATE_TOKEN = "private-bearer-token";
@@ -130,6 +132,197 @@ describe("National Catalog production live diagnostic", () => {
       checks: [{ method: "categories", outcome: "forbidden", resultCount: 0, etagPresent: false }],
     });
     expect(JSON.stringify(evidence)).not.toContain("private provider detail");
+  });
+
+  it.each([0, 2])(
+    "fails closed when feed-product returns %i cards and does not continue",
+    async (resultCount) => {
+      const calls: string[] = [];
+      const client = successfulClient(calls);
+      client.getFeedProducts = async () => {
+        calls.push("feed-product");
+        return {
+          status: "ok",
+          value: { products: Array.from({ length: resultCount }, () => ({})), raw: {} },
+          etag: null,
+        } as const;
+      };
+
+      const result = await collectNationalCatalogLiveDiagnostic({
+        loadSource: async () => source(),
+        client,
+      });
+
+      expect(calls).toEqual([
+        "categories",
+        'categories:"categories-etag"',
+        "attributes",
+        "feed-product",
+      ]);
+      expect(result.passed).toBe(false);
+      expect(result.checks.at(-1)).toEqual({
+        method: "feed-product",
+        outcome: "ok",
+        resultCount,
+        etagPresent: false,
+      });
+    },
+  );
+
+  it.each([0, 2])(
+    "fails closed when product returns %i cards and does not request its ETag again",
+    async (resultCount) => {
+      const calls: string[] = [];
+      const client = successfulClient(calls);
+      client.getPublishedProducts = async () => {
+        calls.push("product");
+        return {
+          status: "ok",
+          value: { products: Array.from({ length: resultCount }, () => ({})), raw: {} },
+          etag: '"product-etag"',
+        } as const;
+      };
+
+      const result = await collectNationalCatalogLiveDiagnostic({
+        loadSource: async () => source(),
+        client,
+      });
+
+      expect(calls).toEqual([
+        "categories",
+        'categories:"categories-etag"',
+        "attributes",
+        `feed-product:${PRIVATE_GTIN}`,
+        "product",
+      ]);
+      expect(result.passed).toBe(false);
+      expect(result.checks.at(-1)).toEqual({
+        method: "product",
+        outcome: "ok",
+        resultCount,
+        etagPresent: true,
+      });
+    },
+  );
+
+  it.each(["unavailable", "ambiguous"] as const)(
+    "makes no provider request when the source is %s",
+    async (status) => {
+      const calls: string[] = [];
+      await expect(
+        collectNationalCatalogLiveDiagnostic({
+          loadSource: async () => ({ status }),
+          client: successfulClient(calls),
+        }),
+      ).rejects.toThrow("National Catalog diagnostic source is unavailable");
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it("resolves the product and token with the same selected tenant identity", async () => {
+    const token: NationalCatalogProductionTokenCandidate = {
+      tenantId: "tenant-a",
+      encryptedToken: Buffer.from("encrypted"),
+      tokenNonce: Buffer.from("nonce"),
+      tokenTag: Buffer.from("tag"),
+    };
+    const calls: string[] = [];
+
+    const result = await loadNationalCatalogProductionSource({
+      listActiveTokens: async () => [token],
+      findProductGtin: async (tenantId) => {
+        calls.push(`product:${tenantId}`);
+        return "04601234567890";
+      },
+      decryptToken: (tenantId, candidate) => {
+        calls.push(`decrypt:${tenantId}`);
+        expect(candidate).toBe(token);
+        return PRIVATE_TOKEN;
+      },
+    });
+
+    expect(calls).toEqual(["product:tenant-a", "decrypt:tenant-a"]);
+    expect(result).toEqual({
+      status: "ok",
+      auth: {
+        baseUrl: "https://апи.национальный-каталог.рф",
+        token: PRIVATE_TOKEN,
+      },
+      gtin: "04601234567890",
+    });
+  });
+
+  it("fails closed before product or crypto work for zero or ambiguous token tenants", async () => {
+    const token = {
+      tenantId: "tenant-a",
+      encryptedToken: Buffer.alloc(1),
+      tokenNonce: Buffer.alloc(1),
+      tokenTag: Buffer.alloc(1),
+    };
+    for (const [tokens, expected] of [
+      [[], "unavailable"],
+      [[token, { ...token, tenantId: "tenant-b" }], "ambiguous"],
+    ] as const) {
+      const calls: string[] = [];
+      const result = await loadNationalCatalogProductionSource({
+        listActiveTokens: async () => tokens,
+        findProductGtin: async () => {
+          calls.push("product");
+          return PRIVATE_GTIN;
+        },
+        decryptToken: () => {
+          calls.push("decrypt");
+          return PRIVATE_TOKEN;
+        },
+      });
+      expect(result).toEqual({ status: expected });
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it.each([null, "", "123", "0460123456789x"])(
+    "fails closed for missing or invalid same-tenant GTIN %s without decrypting",
+    async (gtin) => {
+      const token = {
+        tenantId: "tenant-a",
+        encryptedToken: Buffer.alloc(1),
+        tokenNonce: Buffer.alloc(1),
+        tokenTag: Buffer.alloc(1),
+      };
+      let decrypted = false;
+      const result = await loadNationalCatalogProductionSource({
+        listActiveTokens: async () => [token],
+        findProductGtin: async (tenantId) => {
+          expect(tenantId).toBe("tenant-a");
+          return gtin;
+        },
+        decryptToken: () => {
+          decrypted = true;
+          return PRIVATE_TOKEN;
+        },
+      });
+      expect(result).toEqual({ status: "unavailable" });
+      expect(decrypted).toBe(false);
+    },
+  );
+
+  it("fails closed when tenant-bound token decryption fails", async () => {
+    const result = await loadNationalCatalogProductionSource({
+      listActiveTokens: async () => [
+        {
+          tenantId: "tenant-a",
+          encryptedToken: Buffer.alloc(1),
+          tokenNonce: Buffer.alloc(1),
+          tokenTag: Buffer.alloc(1),
+        },
+      ],
+      findProductGtin: async () => PRIVATE_GTIN,
+      decryptToken: (tenantId) => {
+        expect(tenantId).toBe("tenant-a");
+        throw new Error("private crypto detail");
+      },
+    });
+    expect(result).toEqual({ status: "unavailable" });
   });
 
   it("CLI prints one canonical safe line for the host-side gate to evaluate", async () => {

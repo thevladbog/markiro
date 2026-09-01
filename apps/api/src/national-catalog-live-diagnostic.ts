@@ -32,6 +32,19 @@ type SourceResult =
   | { status: "ok"; auth: NationalCatalogAuth; gtin: string }
   | { status: "unavailable" | "ambiguous" };
 
+export interface NationalCatalogProductionTokenCandidate {
+  tenantId: string;
+  encryptedToken: Buffer;
+  tokenNonce: Buffer;
+  tokenTag: Buffer;
+}
+
+interface NationalCatalogProductionSourceDependencies {
+  listActiveTokens: () => Promise<readonly NationalCatalogProductionTokenCandidate[]>;
+  findProductGtin: (tenantId: string) => Promise<string | null>;
+  decryptToken: (tenantId: string, token: NationalCatalogProductionTokenCandidate) => string;
+}
+
 export interface NationalCatalogDiagnosticClient {
   listCategories(
     auth: NationalCatalogAuth,
@@ -120,20 +133,15 @@ export async function collectNationalCatalogLiveDiagnostic(
   if (attributes.status !== "ok") return evidence(checks, false);
 
   const feedProduct = await dependencies.client.getFeedProducts(source.auth, [source.gtin]);
-  checks.push(
-    check(
-      "feed-product",
-      feedProduct,
-      feedProduct.status === "ok" ? feedProduct.value.products.length : 0,
-    ),
-  );
-  if (feedProduct.status !== "ok") return evidence(checks, false);
+  const feedProductCount = feedProduct.status === "ok" ? feedProduct.value.products.length : 0;
+  checks.push(check("feed-product", feedProduct, feedProductCount));
+  if (feedProduct.status !== "ok" || feedProductCount !== 1) return evidence(checks, false);
 
   const product = await dependencies.client.getPublishedProducts(source.auth, [source.gtin]);
-  checks.push(
-    check("product", product, product.status === "ok" ? product.value.products.length : 0),
-  );
-  if (product.status !== "ok" || product.etag === null) return evidence(checks, false);
+  const productCount = product.status === "ok" ? product.value.products.length : 0;
+  checks.push(check("product", product, productCount));
+  if (product.status !== "ok" || productCount !== 1 || product.etag === null)
+    return evidence(checks, false);
 
   const repeatedProduct = await dependencies.client.getPublishedProducts(
     source.auth,
@@ -144,44 +152,60 @@ export async function collectNationalCatalogLiveDiagnostic(
   return evidence(checks, repeatedProduct.status === "not_modified");
 }
 
-async function loadProductionSource(db: Db, encryptionKey: Buffer): Promise<SourceResult> {
-  const tokenRows = await db
-    .select({
-      tenantId: schema.chzApiTokens.tenantId,
-      encryptedToken: schema.chzApiTokens.encryptedToken,
-      tokenNonce: schema.chzApiTokens.tokenNonce,
-      tokenTag: schema.chzApiTokens.tokenTag,
-    })
-    .from(schema.chzApiTokens)
-    .where(gt(schema.chzApiTokens.expiresAt, new Date()))
-    .orderBy(asc(schema.chzApiTokens.tenantId))
-    .limit(2);
+export async function loadNationalCatalogProductionSource(
+  dependencies: NationalCatalogProductionSourceDependencies,
+): Promise<SourceResult> {
+  const tokenRows = await dependencies.listActiveTokens();
   if (tokenRows.length === 0) return { status: "unavailable" };
   if (tokenRows.length !== 1) return { status: "ambiguous" };
 
   const tokenRow = tokenRows[0];
   if (!tokenRow) return { status: "unavailable" };
-  const [product] = await db
-    .select({ gtin: schema.products.gtin14 })
-    .from(schema.products)
-    .where(
-      and(eq(schema.products.tenantId, tokenRow.tenantId), eq(schema.products.archived, false)),
-    )
-    .orderBy(asc(schema.products.gtin14))
-    .limit(1);
-  const gtin = product?.gtin.trim();
+  const gtin = (await dependencies.findProductGtin(tokenRow.tenantId))?.trim();
   if (!gtin || !/^\d{14}$/.test(gtin)) return { status: "unavailable" };
 
   let token: string;
   try {
-    token = new ChzCryptoService(encryptionKey).decrypt(tokenRow.tenantId, tokenRow);
+    token = dependencies.decryptToken(tokenRow.tenantId, tokenRow);
   } catch {
     return { status: "unavailable" };
   }
+  if (!token) return { status: "unavailable" };
   return {
     status: "ok",
     auth: { baseUrl: PRODUCTION_NATIONAL_CATALOG_BASE_URL, token },
     gtin,
+  };
+}
+
+function productionSourceDependencies(
+  db: Db,
+  encryptionKey: Buffer,
+): NationalCatalogProductionSourceDependencies {
+  const crypto = new ChzCryptoService(encryptionKey);
+  return {
+    listActiveTokens: () =>
+      db
+        .select({
+          tenantId: schema.chzApiTokens.tenantId,
+          encryptedToken: schema.chzApiTokens.encryptedToken,
+          tokenNonce: schema.chzApiTokens.tokenNonce,
+          tokenTag: schema.chzApiTokens.tokenTag,
+        })
+        .from(schema.chzApiTokens)
+        .where(gt(schema.chzApiTokens.expiresAt, new Date()))
+        .orderBy(asc(schema.chzApiTokens.tenantId))
+        .limit(2),
+    findProductGtin: async (tenantId) => {
+      const [product] = await db
+        .select({ gtin: schema.products.gtin14 })
+        .from(schema.products)
+        .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.archived, false)))
+        .orderBy(asc(schema.products.gtin14))
+        .limit(1);
+      return product?.gtin ?? null;
+    },
+    decryptToken: (tenantId, token) => crypto.decrypt(tenantId, token),
   };
 }
 
@@ -192,7 +216,10 @@ async function collectProductionEvidence(): Promise<NationalCatalogDiagnosticEvi
   const connection = createDb(env.DATABASE_URL);
   try {
     return await collectNationalCatalogLiveDiagnostic({
-      loadSource: () => loadProductionSource(connection.db, encryptionKey),
+      loadSource: () =>
+        loadNationalCatalogProductionSource(
+          productionSourceDependencies(connection.db, encryptionKey),
+        ),
       client: new NationalCatalogClient(undefined, env.NATIONAL_CATALOG_REQUEST_TIMEOUT_MS),
     });
   } finally {
