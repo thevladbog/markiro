@@ -1,11 +1,20 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { UpdateCenter } from "../src/pages/UpdateCenter.js";
 import type { StationUpdaterController } from "../src/lib/use-station-updater.js";
 
+const { getVersionMock } = vi.hoisted(() => ({ getVersionMock: vi.fn() }));
+
+vi.mock("@tauri-apps/api/app", () => ({ getVersion: getVersionMock }));
+
 beforeAll(async () => {
   await i18n.changeLanguage("en");
+});
+
+beforeEach(() => {
+  getVersionMock.mockReset();
+  getVersionMock.mockResolvedValue("0.1.0-beta.22");
 });
 
 function controllerFixture(version = "0.1.0-beta.2"): StationUpdaterController {
@@ -31,7 +40,7 @@ function controllerFixture(version = "0.1.0-beta.2"): StationUpdaterController {
 }
 
 describe("UpdateCenter", () => {
-  it("shows a known version and requires confirmation before install", async () => {
+  it("shows installed and available versions separately before install", async () => {
     const controller = controllerFixture();
     render(
       <UpdateCenter
@@ -41,6 +50,8 @@ describe("UpdateCenter", () => {
         onBack={() => {}}
       />,
     );
+    expect(screen.getByText("Installed version")).toBeDefined();
+    expect(await screen.findByText("0.1.0-beta.22")).toBeDefined();
     expect(screen.getByText("0.1.0-beta.2")).toBeDefined();
     expect(screen.getByText("Source: Markiro (Yandex)")).toBeDefined();
     expect(screen.getAllByRole("status").length).toBeGreaterThan(0);
@@ -49,6 +60,44 @@ describe("UpdateCenter", () => {
     expect(screen.getByText("7 operations are still waiting to sync")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Confirm update" }));
     await waitFor(() => expect(controller.install).toHaveBeenCalledOnce());
+  });
+
+  it("reports when the installed version cannot be read", async () => {
+    getVersionMock.mockRejectedValueOnce(new Error("Tauri app metadata unavailable"));
+
+    render(
+      <UpdateCenter
+        controller={controllerFixture()}
+        activeShift={false}
+        pendingOutbox={0}
+        onBack={() => {}}
+      />,
+    );
+
+    expect(await screen.findByText("Version unavailable")).toBeDefined();
+  });
+
+  it("keeps the installed version row visible while metadata loads with no update available", () => {
+    getVersionMock.mockReturnValueOnce(new Promise<string>(() => {}));
+    const controller = controllerFixture();
+
+    render(
+      <UpdateCenter
+        controller={{
+          ...controller,
+          persisted: { ...controller.persisted!, available: null },
+          severity: "none",
+          origin: null,
+        }}
+        activeShift={false}
+        pendingOutbox={0}
+        onBack={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("Installed version")).toBeDefined();
+    expect(screen.getByText("Reading…")).toBeDefined();
+    expect(screen.getByText("This station is up to date.")).toBeDefined();
   });
 
   it("allows checks but disables install during an active shift", () => {
