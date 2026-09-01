@@ -11,6 +11,7 @@ import {
   atDeploymentStage,
   deployRelease,
   runCommand,
+  runCommandWithStatus,
   runRemoteDeployCli,
   runRemoteDeployment,
   streamArchive,
@@ -151,6 +152,34 @@ function commandChild() {
     },
   });
 }
+
+test("remote command status preserves bounded stdout for a nonzero diagnostic exit", async () => {
+  const child = commandChild();
+  const command = runCommandWithStatus("ssh", ["private-host"], { spawn: () => child });
+  child.stdout.end("MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS safe\n");
+  child.stderr.end("private-token-must-not-surface");
+  child.exitCode = 1;
+  child.emit("close", 1);
+
+  assert.deepEqual(await command, {
+    exitCode: 1,
+    stdout: "MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS safe\n",
+  });
+});
+
+test("ordinary remote commands still reject a nonzero exit without exposing stdout", async () => {
+  const child = commandChild();
+  const command = runCommand("ssh", ["private-host"], { spawn: () => child });
+  child.stdout.end("private-token-must-not-surface");
+  child.exitCode = 1;
+  child.emit("close", 1);
+
+  await assert.rejects(command, (error) => {
+    assert.equal(error.message, "private remote command failed");
+    assert.equal(error.message.includes("private-token-must-not-surface"), false);
+    return true;
+  });
+});
 
 test("remote command stdin failure settles once with one fixed private rejection", async () => {
   const child = commandChild();
