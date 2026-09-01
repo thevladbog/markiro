@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,6 +18,7 @@ import { jsonResponse } from "./helpers/http.js";
 // kiosks-routing.test.tsx).
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -54,6 +55,14 @@ let agentsFixture: SignerAgent[] = [];
 let tokenFixture: SignerTokenStatus = NO_TOKEN;
 let listMode: "ok" | "pending" | "error" = "ok";
 let pairingCodeExpiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
+let refreshTaskFixture: {
+  id: string;
+  status: "pending" | "claimed" | "completed" | "failed" | "expired";
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  completedAt: string | null;
+} | null = null;
 
 const revokeSpy = vi.fn();
 const refreshTokenSpy = vi.fn();
@@ -63,6 +72,7 @@ beforeEach(() => {
   tokenFixture = NO_TOKEN;
   listMode = "ok";
   pairingCodeExpiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
+  refreshTaskFixture = null;
   revokeSpy.mockClear();
   refreshTokenSpy.mockClear();
 });
@@ -92,7 +102,11 @@ function renderPanel(access: AccessDocument = ADMIN_ACCESS) {
     if (method === "GET" && path === "/signer-agents") {
       if (listMode === "pending") return new Promise<Response>(() => {});
       if (listMode === "error") return jsonResponse(500, { message: "Internal error" });
-      return jsonResponse(200, { agents: agentsFixture, token: tokenFixture });
+      return jsonResponse(200, {
+        agents: agentsFixture,
+        token: tokenFixture,
+        refreshTask: refreshTaskFixture,
+      });
     }
 
     if (method === "POST" && path === "/signer-agents/pairing-code") {
@@ -101,7 +115,15 @@ function renderPanel(access: AccessDocument = ADMIN_ACCESS) {
 
     if (method === "POST" && path === "/signer-agents/token-refresh") {
       refreshTokenSpy();
-      return jsonResponse(202, { status: "queued" });
+      refreshTaskFixture = {
+        id: "11111111-1111-4111-8111-111111111111",
+        status: "pending",
+        errorCode: null,
+        errorMessage: null,
+        createdAt: "2026-09-01T00:00:00Z",
+        completedAt: null,
+      };
+      return jsonResponse(202, { status: "queued", taskId: refreshTaskFixture.id });
     }
 
     const revokeMatch = /^\/signer-agents\/([^/]+)\/revoke$/.exec(path);
@@ -192,6 +214,125 @@ describe("SignerAgentsPanel", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /обновить токен|refresh token/i }));
     expect(refreshTokenSpy).toHaveBeenCalledOnce();
+  });
+
+  it("stops waiting and shows the signer task failure", async () => {
+    agentsFixture = [agentFixture()];
+    const polls: Array<() => void> = [];
+    vi.spyOn(window, "setInterval").mockImplementation((handler: TimerHandler) => {
+      if (typeof handler === "function") polls.push(() => handler());
+      return setTimeout(() => undefined, 60_000);
+    });
+    const { fetchMock } = renderPanel();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /обновить токен|refresh token/i }),
+    );
+    await waitFor(() => expect(refreshTokenSpy).toHaveBeenCalledOnce());
+    await waitFor(() => expect(polls.length).toBeGreaterThan(0));
+
+    refreshTaskFixture = {
+      id: "11111111-1111-4111-8111-111111111111",
+      status: "failed",
+      errorCode: "TRUE_API",
+      errorMessage: "Авторизация по МЧД отклонена",
+      createdAt: "2026-09-01T00:00:00Z",
+      completedAt: "2026-09-01T00:00:05Z",
+    };
+    const overviewCallsBeforePoll = fetchMock.mock.calls.filter(
+      ([url, init]) => (init?.method ?? "GET") === "GET" && String(url).endsWith("/signer-agents"),
+    ).length;
+    await act(async () => polls.forEach((poll) => poll()));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url, init]) =>
+            (init?.method ?? "GET") === "GET" && String(url).endsWith("/signer-agents"),
+        ).length,
+      ).toBeGreaterThan(overviewCallsBeforePoll),
+    );
+
+    expect(await screen.findByText("Авторизация по МЧД отклонена")).toBeDefined();
+    expect(
+      (
+        screen.getByRole("button", {
+          name: /обновить токен|refresh token/i,
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+  });
+
+  it("stops waiting when the matching signer task completes", async () => {
+    agentsFixture = [agentFixture()];
+    const polls: Array<() => void> = [];
+    vi.spyOn(window, "setInterval").mockImplementation((handler: TimerHandler) => {
+      if (typeof handler === "function") polls.push(() => handler());
+      return setTimeout(() => undefined, 60_000);
+    });
+    renderPanel();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /обновить токен|refresh token/i }),
+    );
+    await waitFor(() => expect(refreshTokenSpy).toHaveBeenCalledOnce());
+    await waitFor(() => expect(polls.length).toBeGreaterThan(0));
+
+    refreshTaskFixture = {
+      id: "11111111-1111-4111-8111-111111111111",
+      status: "completed",
+      errorCode: null,
+      errorMessage: null,
+      createdAt: "2026-09-01T00:00:00Z",
+      completedAt: "2026-09-01T00:00:05Z",
+    };
+    await act(async () => polls.forEach((poll) => poll()));
+
+    expect(
+      await screen.findByText(/токен true api обновлён|true api token refreshed/i),
+    ).toBeDefined();
+    expect(
+      (
+        screen.getByRole("button", {
+          name: /обновить токен|refresh token/i,
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+  });
+
+  it("polls a refresh task that was already open when the panel loaded", async () => {
+    agentsFixture = [agentFixture()];
+    refreshTaskFixture = {
+      id: "11111111-1111-4111-8111-111111111111",
+      status: "pending",
+      errorCode: null,
+      errorMessage: null,
+      createdAt: "2026-09-01T00:00:00Z",
+      completedAt: null,
+    };
+    const polls: Array<() => void> = [];
+    vi.spyOn(window, "setInterval").mockImplementation((handler: TimerHandler) => {
+      if (typeof handler === "function") polls.push(() => handler());
+      return setTimeout(() => undefined, 60_000);
+    });
+    renderPanel();
+
+    const refreshButton = await screen.findByRole("button", {
+      name: /обновить токен|refresh token/i,
+    });
+    expect((refreshButton as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(polls.length).toBeGreaterThan(0));
+
+    refreshTaskFixture = {
+      ...refreshTaskFixture,
+      status: "failed",
+      errorCode: "NETWORK",
+      errorMessage: "Подписант не смог связаться с True API",
+      completedAt: "2026-09-01T00:00:05Z",
+    };
+    await act(async () => polls.forEach((poll) => poll()));
+
+    expect(await screen.findByText("Подписант не смог связаться с True API")).toBeDefined();
+    expect((refreshButton as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("пустое состояние объясняет, как подключить агента", async () => {

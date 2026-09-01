@@ -30,9 +30,21 @@ export interface SignerTokenStatusDto {
   certThumbprint: string | null;
 }
 
+export type SignerRefreshTaskStatus = "pending" | "claimed" | "completed" | "failed" | "expired";
+
+export interface SignerRefreshTaskDto {
+  id: string;
+  status: SignerRefreshTaskStatus;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
 export interface SignerAgentsOverviewDto {
   agents: SignerAgentSummaryDto[];
   token: SignerTokenStatusDto;
+  refreshTask: SignerRefreshTaskDto | null;
 }
 
 export interface IssueSignerPairingCodeResultDto {
@@ -42,6 +54,7 @@ export interface IssueSignerPairingCodeResultDto {
 
 export interface RequestSignerTokenRefreshResultDto {
   status: "queued" | "already_pending";
+  taskId: string;
 }
 
 const signerAgentSummaryOpenApiSchema: SchemaObject = {
@@ -85,13 +98,31 @@ const signerTokenStatusOpenApiSchema: SchemaObject = {
   },
 };
 
+const signerRefreshTaskOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "status", "errorCode", "errorMessage", "createdAt", "completedAt"],
+  properties: {
+    id: { type: "string", format: "uuid" },
+    status: {
+      type: "string",
+      enum: ["pending", "claimed", "completed", "failed", "expired"],
+    },
+    errorCode: { type: "string", nullable: true },
+    errorMessage: { type: "string", nullable: true },
+    createdAt: { type: "string", format: "date-time" },
+    completedAt: { type: "string", format: "date-time", nullable: true },
+  },
+};
+
 export const signerAgentsOverviewOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["agents", "token"],
+  required: ["agents", "token", "refreshTask"],
   properties: {
     agents: { type: "array", items: signerAgentSummaryOpenApiSchema },
     token: signerTokenStatusOpenApiSchema,
+    refreshTask: { ...signerRefreshTaskOpenApiSchema, nullable: true },
   },
 };
 
