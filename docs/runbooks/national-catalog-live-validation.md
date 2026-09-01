@@ -47,7 +47,8 @@ bearer, provider error message, headers, and payloads are never emitted. An
 unexpected internal or transport failure produces only
 `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS_FAILURE {"stage":"<stage>"}`. The stage
 is restricted to `configuration`, `credential-validation`, `workspace-setup`,
-`api-container-discovery`, `api-cli-transport`, `api-cli-exit`,
+`api-container-discovery-transport`, `api-container-discovery`,
+`api-cli-transport`, `api-cli-exit`,
 `api-cli-evidence-missing`, `api-cli-evidence-invalid`,
 `api-cli-exit-mismatch`, `cleanup`, or `unknown`; arbitrary exception text is
 never serialized.
