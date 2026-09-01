@@ -687,6 +687,11 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     // from the scheduled job's current/next-month maintenance -- so this
     // test isolates the shift-ownership guard rejection specifically.
     const scannedAt = monthsAgoUTC(2).toISOString();
+    const name = partitionName("scan_events", monthsAgoUTC(2, 1));
+    const partitionBefore = await db.execute(
+      sql`SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relname = ${name} AND n.nspname = current_schema()`,
+    );
 
     const res = await request(app!.getHttpServer())
       .post("/station/scans")
@@ -699,12 +704,11 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
     expect(res.body.message).toBe("Unknown shift in batch");
 
-    const name = partitionName("scan_events", monthsAgoUTC(2, 1));
-    const exists = await db.execute(
+    const partitionAfter = await db.execute(
       sql`SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE c.relname = ${name} AND n.nspname = current_schema()`,
     );
-    expect(exists.rows).toHaveLength(0);
+    expect(partitionAfter.rows).toEqual(partitionBefore.rows);
   });
 
   it(

@@ -26,7 +26,7 @@ const invoice = {
     kind: "sole_proprietor",
     fullName: "ИП Богатырёв Владислав Сергеевич",
     displayName: "ИП Богатырёв Владислав Сергеевич",
-    inn: "234190622844",
+    inn: "234106228141",
   },
   buyerSnapshot: { legalName: "ООО Фабрика" },
   sellerBankAccountSnapshot: null,
