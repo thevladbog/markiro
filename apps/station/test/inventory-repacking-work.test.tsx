@@ -186,6 +186,99 @@ describe("repack inventory work screen", () => {
     await act(async () => i18n.changeLanguage("ru"));
   });
 
+  it("keeps the latest box composition when an older refresh resolves last", async () => {
+    const db = new DatabaseSync(":memory:");
+    const baseExec = makeExec(db);
+    await applyMigrations(baseExec);
+    db.prepare(
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0043', ?)",
+    ).run(INVENTORY_ID, SNAPSHOT_ID);
+    db.prepare(
+      `INSERT INTO sscc_pool
+         (issuer_prefix, extension_digit, from_serial, to_serial, next_serial)
+       VALUES ('460068200', 0, 1, 100, 1)`,
+    ).run();
+    const km = canonicalizeKm(`01${GTIN}21REPACK-LATE-REFRESH`);
+    db.prepare(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+          source_production_date, parent_sscc, expected, protected)
+       VALUES (?, ?, ?, ?, ?, 'INTRODUCED', '2026-08-19', ?, 1, 0)`,
+    ).run(SNAPSHOT_ID, kmHash(km), km.raw, GTIN, km.serial, OLD_SSCC);
+
+    const gate = deferred();
+    let staleRefreshStarted = false;
+    let staleStateCaptured = false;
+    let staleStateDelivered = false;
+    const suspended: SqlExecutor = {
+      run: (sql, params) => baseExec.run(sql, params),
+      all: async <T,>(sql: string, params?: unknown[]) => {
+        const box = db
+          .prepare(
+            `SELECT box.box_id,
+                    (SELECT COUNT(*) FROM inventory_repack_items_mirror item
+                      WHERE item.box_id = box.box_id AND item.removed_at IS NULL) AS item_count
+               FROM inventory_repack_boxes_mirror box
+              LIMIT 1`,
+          )
+          .get() as { box_id: string; item_count: number } | undefined;
+
+        if (
+          !staleRefreshStarted &&
+          box?.item_count === 0 &&
+          /FROM inventory_scan_events_mirror e/i.test(sql)
+        ) {
+          staleRefreshStarted = true;
+        }
+
+        if (
+          staleRefreshStarted &&
+          !staleStateCaptured &&
+          box?.item_count === 0 &&
+          /SELECT box\.box_id, box\.old_sscc_context/i.test(sql)
+        ) {
+          const result = await baseExec.all<T>(sql, params);
+          staleStateCaptured = true;
+          await gate.promise;
+          staleStateDelivered = true;
+          return result;
+        }
+
+        return baseExec.all<T>(sql, params);
+      },
+    };
+    const scan = scanner();
+
+    render(
+      <InventoryWorkScreen
+        exec={suspended}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+        createEventId={() => crypto.randomUUID()}
+        now={() => "2026-08-25T10:00:01.000Z"}
+      />,
+    );
+    await waitFor(() => expect(scan.active()).toBe(true));
+
+    scan.emit(OLD_SSCC);
+    await waitFor(() => expect(staleStateCaptured).toBe(true));
+
+    scan.emit(km.raw);
+    await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toBe("1 / 20"));
+
+    gate.release();
+    await waitFor(() => expect(staleStateDelivered).toBe(true));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(screen.getByTestId("repack-count").textContent).toBe("1 / 20");
+    fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
+    expect(await screen.findByRole("button", { name: "Убрать последнюю бутылку" })).toBeDefined();
+  });
+
   it("offers one explicit recovery transition for an invalidated owned box", async () => {
     const db = new DatabaseSync(":memory:");
     const exec = makeExec(db);
