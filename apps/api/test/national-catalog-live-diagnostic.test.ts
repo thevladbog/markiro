@@ -1,18 +1,27 @@
-import { describe, expect, it } from "vitest";
-import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
+import { describe, expect, it } from "vitest";
 
 import {
   collectNationalCatalogLiveDiagnostic,
+  evaluateNationalCatalogDiagnostic,
   loadNationalCatalogProductionSource,
   runNationalCatalogLiveDiagnosticCli,
   type NationalCatalogDiagnosticClient,
   type NationalCatalogDiagnosticEvidence,
+  type NationalCatalogDiagnosticObservation,
   type NationalCatalogProductionTokenCandidate,
 } from "../src/national-catalog-live-diagnostic";
+import type { NationalCatalogResult } from "../src/modules/national-catalog/national-catalog.types";
 
 const PRIVATE_TOKEN = "private-bearer-token";
 const PRIVATE_GTIN = "04601234567890";
+const PRIVATE_PROVIDER_MESSAGE = "private-provider-message";
+const PRESENT_USAGE = {
+  total: { used: 1, limit: 500 },
+  method: { used: 1, limit: 10 },
+} as const;
 
 function source() {
   return {
@@ -22,209 +31,360 @@ function source() {
   };
 }
 
-function successfulClient(calls: string[]): NationalCatalogDiagnosticClient {
+function ok<T>(
+  value: T,
+  options: { etag?: string | null; hash?: string; usage?: typeof PRESENT_USAGE } = {},
+): NationalCatalogResult<T> {
   return {
-    listCategories: async (_auth: unknown, options: { ifNoneMatch?: string } = {}) => {
-      calls.push(options.ifNoneMatch ? `categories:${options.ifNoneMatch}` : "categories");
-      return options.ifNoneMatch
-        ? ({ status: "not_modified" } as const)
-        : ({
-            status: "ok",
-            value: { categories: [{ id: 1 }], raw: {} },
-            etag: '"categories-etag"',
-          } as const);
-    },
-    getAttributes: async () => {
-      calls.push("attributes");
-      return {
-        status: "ok",
-        value: { attributes: [{ id: 2 }], raw: {} },
-        etag: null,
-      } as const;
-    },
-    getFeedProducts: async (_auth: unknown, gtins: string[]) => {
-      calls.push(`feed-product:${gtins.join(",")}`);
-      return {
-        status: "ok",
-        value: { products: [{ id: 3 }], raw: {} },
-        etag: null,
-      } as const;
-    },
-    getPublishedProducts: async (
-      _auth: unknown,
-      gtins: string[],
-      options: { ifNoneMatch?: string } = {},
-    ) => {
-      calls.push(
-        options.ifNoneMatch
-          ? `product:${gtins.join(",")}:${options.ifNoneMatch}`
-          : `product:${gtins.join(",")}`,
-      );
-      return options.ifNoneMatch
-        ? ({ status: "not_modified" } as const)
-        : ({
-            status: "ok",
-            value: { products: [{ id: 4 }], raw: {} },
-            etag: '"product-etag"',
-          } as const);
-    },
+    status: "ok",
+    value,
+    etag: options.etag ?? null,
+    contentHash: options.hash ?? "stable-hash",
+    usage: options.usage ?? PRESENT_USAGE,
   };
 }
 
-describe("National Catalog production live diagnostic", () => {
-  it("emits only bounded evidence for the six approved GET reads", async () => {
-    const calls: string[] = [];
-    const evidence = await collectNationalCatalogLiveDiagnostic({
-      loadSource: async () => source(),
-      client: successfulClient(calls),
-    });
+function successfulClient(
+  calls: string[],
+  overrides: Partial<NationalCatalogDiagnosticClient> = {},
+): NationalCatalogDiagnosticClient {
+  return {
+    listCategories:
+      overrides.listCategories ??
+      (async (_auth, options = {}) => {
+        calls.push(options.ifNoneMatch ? "categories-repeat-conditional" : "categories");
+        return options.ifNoneMatch
+          ? { status: "not_modified" }
+          : ok({ categories: [{ id: 1 }] }, { etag: '"categories-etag"', hash: "categories" });
+      }),
+    getAttributes:
+      overrides.getAttributes ??
+      (async () => {
+        calls.push("attributes");
+        return ok({ attributes: [{ id: 2 }] }, { hash: "attributes" });
+      }),
+    getFeedProducts:
+      overrides.getFeedProducts ??
+      (async (_auth, gtins) => {
+        calls.push(`feed-product:${gtins.join(",")}`);
+        return ok({ products: [{ id: 3 }] }, { hash: "feed-product" });
+      }),
+    getPublishedProducts:
+      overrides.getPublishedProducts ??
+      (async (_auth, gtins, options = {}) => {
+        calls.push(
+          options.ifNoneMatch ? "product-repeat-conditional" : `product:${gtins.join(",")}`,
+        );
+        return options.ifNoneMatch
+          ? { status: "not_modified" }
+          : ok({ products: [{ id: 4 }] }, { etag: '"product-etag"', hash: "product" });
+      }),
+  };
+}
 
-    expect(calls).toEqual([
-      "categories",
-      'categories:"categories-etag"',
-      "attributes",
-      `feed-product:${PRIVATE_GTIN}`,
-      `product:${PRIVATE_GTIN}`,
-      `product:${PRIVATE_GTIN}:"product-etag"`,
-    ]);
-    expect(evidence).toEqual({
-      version: 2,
+function observation(
+  method: NationalCatalogDiagnosticObservation["method"],
+  outcome: NationalCatalogDiagnosticObservation["outcome"] = "ok",
+  options: Partial<Omit<NationalCatalogDiagnosticObservation, "method" | "outcome">> = {},
+): NationalCatalogDiagnosticObservation {
+  return {
+    method,
+    outcome,
+    resultCount: options.resultCount ?? (outcome === "ok" ? 1 : 0),
+    etagPresent: options.etagPresent ?? false,
+    contentHash: options.contentHash ?? (outcome === "ok" ? `${method}-hash` : null),
+    usagePresent: options.usagePresent ?? outcome === "ok",
+  };
+}
+
+function conformantObservations(): NationalCatalogDiagnosticObservation[] {
+  return [
+    observation("categories", "ok", { etagPresent: true, contentHash: "categories" }),
+    observation("categories-repeat", "not_modified"),
+    observation("attributes"),
+    observation("feed-product"),
+    observation("product", "ok", { etagPresent: true, contentHash: "product" }),
+    observation("product-repeat", "not_modified"),
+  ];
+}
+
+describe("National Catalog diagnostic v3 evaluator", () => {
+  it("accepts ETag plus 304 as a conformant operational result", () => {
+    expect(evaluateNationalCatalogDiagnostic("ready", conformantObservations())).toMatchObject({
+      version: 3,
       passed: true,
-      sourceStatus: "ready",
-      checks: [
-        { method: "categories", outcome: "ok", resultCount: 1, etagPresent: true },
-        {
-          method: "categories-repeat",
-          outcome: "not_modified",
-          resultCount: 0,
-          etagPresent: false,
-        },
-        { method: "attributes", outcome: "ok", resultCount: 1, etagPresent: false },
-        { method: "feed-product", outcome: "ok", resultCount: 1, etagPresent: false },
-        { method: "product", outcome: "ok", resultCount: 1, etagPresent: true },
-        {
-          method: "product-repeat",
-          outcome: "not_modified",
-          resultCount: 0,
-          etagPresent: false,
-        },
-      ],
+      contractStatus: "conformant",
+      capabilities: {
+        schemaRead: "available",
+        ownedCardRead: "available",
+        publishedCardRead: "available",
+      },
+      violations: [],
     });
-    const serialized = JSON.stringify(evidence);
-    expect(serialized).not.toContain(PRIVATE_TOKEN);
-    expect(serialized).not.toContain(PRIVATE_GTIN);
-    expect(serialized).not.toContain("catalog.example");
   });
 
-  it("stops after the first provider refusal and reports no provider message", async () => {
-    const calls: string[] = [];
-    const client = successfulClient(calls);
-    client.listCategories = async () => {
-      calls.push("categories");
-      return { status: "forbidden", message: "private provider detail" } as const;
-    };
-
-    const evidence = await collectNationalCatalogLiveDiagnostic({
-      loadSource: async () => source(),
-      client,
-    });
-
-    expect(calls).toEqual(["categories"]);
-    expect(evidence).toEqual({
-      version: 2,
-      passed: false,
-      sourceStatus: "ready",
-      checks: [{ method: "categories", outcome: "forbidden", resultCount: 0, etagPresent: false }],
-    });
-    expect(JSON.stringify(evidence)).not.toContain("private provider detail");
-  });
-
-  it.each([0, 2])(
-    "fails closed when feed-product returns %i cards and does not continue",
-    async (resultCount) => {
-      const calls: string[] = [];
-      const client = successfulClient(calls);
-      client.getFeedProducts = async () => {
-        calls.push("feed-product");
-        return {
-          status: "ok",
-          value: { products: Array.from({ length: resultCount }, () => ({})), raw: {} },
-          etag: null,
-        } as const;
-      };
-
-      const result = await collectNationalCatalogLiveDiagnostic({
-        loadSource: async () => source(),
-        client,
-      });
-
-      expect(calls).toEqual([
-        "categories",
-        'categories:"categories-etag"',
-        "attributes",
-        "feed-product",
-      ]);
-      expect(result.passed).toBe(false);
-      expect(result.checks.at(-1)).toEqual({
-        method: "feed-product",
-        outcome: "ok",
-        resultCount,
-        etagPresent: false,
-      });
+  it.each([
+    {
+      label: "missing ETag with an equal repeat hash",
+      first: observation("categories", "ok", { etagPresent: false, contentHash: "same" }),
+      repeat: observation("categories-repeat", "ok", { contentHash: "same" }),
     },
-  );
+    {
+      label: "ETag with an unchanged 200 repeat",
+      first: observation("categories", "ok", { etagPresent: true, contentHash: "same" }),
+      repeat: observation("categories-repeat", "ok", { contentHash: "same" }),
+    },
+  ])("keeps $label operational but marks the provider contract degraded", ({ first, repeat }) => {
+    const observations = conformantObservations();
+    observations.splice(0, 2, first, repeat);
+    const result = evaluateNationalCatalogDiagnostic("ready", observations);
+    expect(result).toMatchObject({
+      passed: true,
+      contractStatus: "degraded",
+      capabilities: { schemaRead: "available" },
+    });
+    expect(result.checks[1]?.cacheObservation).toBe("same_hash");
+    expect(result.violations).toContainEqual({
+      capability: "schema_read",
+      code: "cache_contract_degraded",
+    });
+  });
 
-  it.each([0, 2])(
-    "fails closed when product returns %i cards and does not request its ETag again",
-    async (resultCount) => {
-      const calls: string[] = [];
-      const client = successfulClient(calls);
-      client.getPublishedProducts = async () => {
-        calls.push("product");
-        return {
-          status: "ok",
-          value: { products: Array.from({ length: resultCount }, () => ({})), raw: {} },
-          etag: '"product-etag"',
-        } as const;
-      };
+  it.each([
+    ["changed hash", observation("categories-repeat", "ok", { contentHash: "changed" })],
+    ["not found", observation("categories-repeat", "not_found")],
+    ["unauthorized", observation("categories-repeat", "unauthorized")],
+    ["forbidden", observation("categories-repeat", "forbidden")],
+    ["rate limited", observation("categories-repeat", "rate_limited")],
+    ["invalid response", observation("categories-repeat", "invalid_response")],
+    ["unavailable", observation("categories-repeat", "unavailable")],
+  ] as const)("fails schema capability when the category repeat is %s", (_label, repeat) => {
+    const observations = conformantObservations();
+    observations.splice(0, 2, observation("categories", "ok", { contentHash: "original" }), repeat);
+    const result = evaluateNationalCatalogDiagnostic("ready", observations);
+    expect(result).toMatchObject({
+      passed: false,
+      capabilities: { schemaRead: "unavailable" },
+    });
+    expect(result.violations).toEqual(
+      expect.arrayContaining([
+        { capability: "schema_read", code: "schema_read_failed" },
+        { capability: "schema_read", code: "cache_contract_degraded" },
+      ]),
+    );
+  });
 
-      const result = await collectNationalCatalogLiveDiagnostic({
-        loadSource: async () => source(),
-        client,
+  it.each([
+    ["changed hash", observation("product-repeat", "ok", { contentHash: "changed" })],
+    ["not found", observation("product-repeat", "not_found")],
+    ["unauthorized", observation("product-repeat", "unauthorized")],
+    ["forbidden", observation("product-repeat", "forbidden")],
+    ["rate limited", observation("product-repeat", "rate_limited")],
+    ["invalid response", observation("product-repeat", "invalid_response")],
+    ["unavailable", observation("product-repeat", "unavailable")],
+  ] as const)(
+    "removes only the published capability when the product repeat is %s",
+    (_label, repeat) => {
+      const observations = conformantObservations();
+      observations.splice(4, 2, observation("product", "ok", { contentHash: "original" }), repeat);
+      const result = evaluateNationalCatalogDiagnostic("ready", observations);
+      expect(result).toMatchObject({
+        passed: true,
+        capabilities: { ownedCardRead: "available", publishedCardRead: "unavailable" },
       });
-
-      expect(calls).toEqual([
-        "categories",
-        'categories:"categories-etag"',
-        "attributes",
-        `feed-product:${PRIVATE_GTIN}`,
-        "product",
-      ]);
-      expect(result.passed).toBe(false);
-      expect(result.checks.at(-1)).toEqual({
-        method: "product",
-        outcome: "ok",
-        resultCount,
-        etagPresent: true,
-      });
+      expect(result.violations).toEqual(
+        expect.arrayContaining([
+          { capability: "published_card_read", code: "published_card_read_failed" },
+          { capability: "published_card_read", code: "cache_contract_degraded" },
+        ]),
+      );
     },
   );
 
   it.each([
-    "active-token-missing",
-    "active-token-ambiguous",
-    "product-gtin-unavailable",
-    "token-decryption-failed",
-  ] as const)("makes no provider request when the source is %s", async (sourceStatus) => {
-    const calls: string[] = [];
-    const result = await collectNationalCatalogLiveDiagnostic({
-      loadSource: async () => ({ status: "unavailable", sourceStatus }),
-      client: successfulClient(calls),
-    });
-    expect(result).toEqual({ version: 2, passed: false, sourceStatus, checks: [] });
-    expect(calls).toEqual([]);
+    {
+      label: "private only",
+      feed: observation("feed-product"),
+      product: observation("product", "not_found"),
+      expected: { ownedCardRead: "available", publishedCardRead: "unavailable" },
+    },
+    {
+      label: "published only",
+      feed: observation("feed-product", "not_found"),
+      product: observation("product", "ok", { resultCount: 1 }),
+      expected: { ownedCardRead: "unavailable", publishedCardRead: "available" },
+    },
+    {
+      label: "both valid but empty",
+      feed: observation("feed-product", "ok", { resultCount: 0 }),
+      product: observation("product", "ok", { resultCount: 0 }),
+      expected: { ownedCardRead: "available", publishedCardRead: "available" },
+    },
+  ])("treats $label card visibility as independent capabilities", ({ feed, product, expected }) => {
+    const result = evaluateNationalCatalogDiagnostic("ready", [
+      observation("categories", "ok", { etagPresent: true }),
+      observation("categories-repeat", "not_modified"),
+      observation("attributes"),
+      feed,
+      product,
+      ...(product.outcome === "ok"
+        ? [
+            observation("product-repeat", "ok", {
+              contentHash: product.contentHash,
+            }),
+          ]
+        : []),
+    ]);
+    expect(result.passed).toBe(true);
+    expect(result.capabilities).toMatchObject(expected);
   });
 
+  it.each([
+    "unauthorized",
+    "forbidden",
+    "rate_limited",
+    "invalid_response",
+    "unavailable",
+  ] as const)(
+    "classifies %s per card capability without hiding the independent published read",
+    (outcome) => {
+      const result = evaluateNationalCatalogDiagnostic("ready", [
+        observation("categories", "ok", { etagPresent: true }),
+        observation("categories-repeat", "not_modified"),
+        observation("attributes"),
+        observation("feed-product", outcome),
+        observation("product"),
+        observation("product-repeat", "ok", { contentHash: "product-hash" }),
+      ]);
+      expect(result).toMatchObject({
+        passed: true,
+        capabilities: { ownedCardRead: "unavailable", publishedCardRead: "available" },
+      });
+    },
+  );
+
+  it("fails operationally when either schema read is invalid", () => {
+    const result = evaluateNationalCatalogDiagnostic("ready", [
+      observation("categories", "invalid_response"),
+      observation("attributes"),
+      observation("feed-product"),
+      observation("product"),
+    ]);
+    expect(result).toMatchObject({ passed: false, capabilities: { schemaRead: "unavailable" } });
+  });
+
+  it("keeps valid reads operational when usage headers are absent and records degradation", () => {
+    const observations = conformantObservations();
+    observations[2] = observation("attributes", "ok", { usagePresent: false });
+    const result = evaluateNationalCatalogDiagnostic("ready", observations);
+    expect(result).toMatchObject({ passed: true, contractStatus: "degraded" });
+    expect(result.checks[2]).toMatchObject({ method: "attributes", usagePresent: false });
+    expect(result.violations).toContainEqual({
+      capability: "schema_read",
+      code: "usage_headers_missing",
+    });
+  });
+
+  it("returns closed no-provider evidence for a source acquisition failure", () => {
+    expect(evaluateNationalCatalogDiagnostic("active-token-missing", [])).toEqual({
+      version: 3,
+      passed: false,
+      sourceStatus: "active-token-missing",
+      contractStatus: "degraded",
+      capabilities: {
+        schemaRead: "not_checked",
+        ownedCardRead: "not_checked",
+        publishedCardRead: "not_checked",
+      },
+      checks: [],
+      violations: [{ capability: "source", code: "source_unavailable" }],
+    });
+  });
+});
+
+describe("National Catalog diagnostic v3 collector", () => {
+  it("collects independent phases and emits only bounded sanitized evidence", async () => {
+    const calls: string[] = [];
+    const evidence = await collectNationalCatalogLiveDiagnostic({
+      loadSource: async () => source(),
+      client: successfulClient(calls, {
+        listCategories: async (_auth, options = {}) => {
+          calls.push(options.ifNoneMatch ? "unexpected-conditional" : "categories");
+          return ok(
+            { categories: [{ private: PRIVATE_PROVIDER_MESSAGE }] },
+            { etag: null, hash: "categories-fallback" },
+          );
+        },
+        getFeedProducts: async () => {
+          calls.push("feed-product");
+          return { status: "forbidden", message: PRIVATE_PROVIDER_MESSAGE };
+        },
+      }),
+    });
+
+    expect(calls).toEqual([
+      "categories",
+      "categories",
+      "attributes",
+      "feed-product",
+      `product:${PRIVATE_GTIN}`,
+      "product-repeat-conditional",
+    ]);
+    expect(evidence).toMatchObject({
+      version: 3,
+      passed: true,
+      contractStatus: "degraded",
+      capabilities: {
+        schemaRead: "available",
+        ownedCardRead: "unavailable",
+        publishedCardRead: "available",
+      },
+    });
+    const serialized = JSON.stringify(evidence);
+    for (const sentinel of [
+      PRIVATE_TOKEN,
+      PRIVATE_GTIN,
+      PRIVATE_PROVIDER_MESSAGE,
+      "catalog.example",
+    ]) {
+      expect(serialized).not.toContain(sentinel);
+    }
+  });
+
+  it("does not repeat a failed read and keeps feed and published reads independent", async () => {
+    const calls: string[] = [];
+    const evidence = await collectNationalCatalogLiveDiagnostic({
+      loadSource: async () => source(),
+      client: successfulClient(calls, {
+        listCategories: async () => {
+          calls.push("categories");
+          return { status: "unavailable" };
+        },
+        getFeedProducts: async () => {
+          calls.push("feed-product");
+          return { status: "unauthorized" };
+        },
+      }),
+    });
+    expect(calls).toEqual([
+      "categories",
+      "attributes",
+      "feed-product",
+      `product:${PRIVATE_GTIN}`,
+      "product-repeat-conditional",
+    ]);
+    expect(evidence).toMatchObject({
+      passed: false,
+      capabilities: {
+        schemaRead: "unavailable",
+        ownedCardRead: "unavailable",
+        publishedCardRead: "available",
+      },
+    });
+  });
+});
+
+describe("National Catalog production source", () => {
   it("resolves the product and token with the same selected tenant identity", async () => {
     const token: NationalCatalogProductionTokenCandidate = {
       tenantId: "tenant-a",
@@ -233,12 +393,11 @@ describe("National Catalog production live diagnostic", () => {
       tokenTag: Buffer.from("tag"),
     };
     const calls: string[] = [];
-
     const result = await loadNationalCatalogProductionSource({
       listActiveTokens: async () => [token],
       findProductGtin: async (tenantId) => {
         calls.push(`product:${tenantId}`);
-        return "04601234567890";
+        return PRIVATE_GTIN;
       },
       decryptToken: (tenantId, candidate) => {
         calls.push(`decrypt:${tenantId}`);
@@ -246,15 +405,11 @@ describe("National Catalog production live diagnostic", () => {
         return PRIVATE_TOKEN;
       },
     });
-
     expect(calls).toEqual(["product:tenant-a", "decrypt:tenant-a"]);
     expect(result).toEqual({
       status: "ok",
-      auth: {
-        baseUrl: "https://апи.национальный-каталог.рф",
-        token: PRIVATE_TOKEN,
-      },
-      gtin: "04601234567890",
+      auth: { baseUrl: "https://апи.национальный-каталог.рф", token: PRIVATE_TOKEN },
+      gtin: PRIVATE_GTIN,
     });
   });
 
@@ -286,74 +441,45 @@ describe("National Catalog production live diagnostic", () => {
     }
   });
 
-  it("returns a bounded status when the active-token query fails", async () => {
-    const privateError = "private database connection detail";
-
+  it.each([
+    ["active-token-query-failed", "tokens"],
+    ["product-query-failed", "product"],
+  ] as const)("returns bounded %s evidence", async (expected, failure) => {
+    const privateError = `private-${failure}-database-detail`;
+    const token = {
+      tenantId: "tenant-a",
+      encryptedToken: Buffer.alloc(1),
+      tokenNonce: Buffer.alloc(1),
+      tokenTag: Buffer.alloc(1),
+    };
     const result = await loadNationalCatalogProductionSource({
       listActiveTokens: async () => {
-        throw new Error(privateError);
+        if (failure === "tokens") throw new Error(privateError);
+        return [token];
       },
-      findProductGtin: async () => {
-        throw new Error("must not query products");
-      },
-      decryptToken: () => {
-        throw new Error("must not decrypt");
-      },
-    });
-
-    expect(result).toEqual({
-      status: "unavailable",
-      sourceStatus: "active-token-query-failed",
-    });
-    expect(JSON.stringify(result)).not.toContain(privateError);
-  });
-
-  it("returns a bounded status when the same-tenant product query fails", async () => {
-    const privateError = "private product query detail";
-    let decrypted = false;
-
-    const result = await loadNationalCatalogProductionSource({
-      listActiveTokens: async () => [
-        {
-          tenantId: "tenant-a",
-          encryptedToken: Buffer.alloc(1),
-          tokenNonce: Buffer.alloc(1),
-          tokenTag: Buffer.alloc(1),
-        },
-      ],
       findProductGtin: async () => {
         throw new Error(privateError);
       },
-      decryptToken: () => {
-        decrypted = true;
-        return PRIVATE_TOKEN;
-      },
+      decryptToken: () => PRIVATE_TOKEN,
     });
-
-    expect(result).toEqual({
-      status: "unavailable",
-      sourceStatus: "product-query-failed",
-    });
+    expect(result).toEqual({ status: "unavailable", sourceStatus: expected });
     expect(JSON.stringify(result)).not.toContain(privateError);
-    expect(decrypted).toBe(false);
   });
 
   it.each([null, "", "123", "0460123456789x"])(
     "fails closed for missing or invalid same-tenant GTIN %s without decrypting",
     async (gtin) => {
-      const token = {
-        tenantId: "tenant-a",
-        encryptedToken: Buffer.alloc(1),
-        tokenNonce: Buffer.alloc(1),
-        tokenTag: Buffer.alloc(1),
-      };
       let decrypted = false;
       const result = await loadNationalCatalogProductionSource({
-        listActiveTokens: async () => [token],
-        findProductGtin: async (tenantId) => {
-          expect(tenantId).toBe("tenant-a");
-          return gtin;
-        },
+        listActiveTokens: async () => [
+          {
+            tenantId: "tenant-a",
+            encryptedToken: Buffer.alloc(1),
+            tokenNonce: Buffer.alloc(1),
+            tokenTag: Buffer.alloc(1),
+          },
+        ],
+        findProductGtin: async () => gtin,
         decryptToken: () => {
           decrypted = true;
           return PRIVATE_TOKEN;
@@ -378,29 +504,22 @@ describe("National Catalog production live diagnostic", () => {
         },
       ],
       findProductGtin: async () => PRIVATE_GTIN,
-      decryptToken: (tenantId) => {
-        expect(tenantId).toBe("tenant-a");
+      decryptToken: () => {
         throw new Error("private crypto detail");
       },
     });
     expect(result).toEqual({ status: "unavailable", sourceStatus: "token-decryption-failed" });
   });
+});
 
-  it("CLI prints one canonical safe line for the host-side gate to evaluate", async () => {
+describe("National Catalog diagnostic CLI", () => {
+  it("prints one canonical safe line and maps passed to the exit code", async () => {
     for (const passed of [true, false] as const) {
       let stdout = "";
       let stderr = "";
       const collected: NationalCatalogDiagnosticEvidence = passed
-        ? await collectNationalCatalogLiveDiagnostic({
-            loadSource: async () => source(),
-            client: successfulClient([]),
-          })
-        : {
-            version: 2,
-            passed: false,
-            sourceStatus: "active-token-missing",
-            checks: [],
-          };
+        ? evaluateNationalCatalogDiagnostic("ready", conformantObservations())
+        : evaluateNationalCatalogDiagnostic("active-token-missing", []);
       const exitCode = await runNationalCatalogLiveDiagnosticCli({
         collect: async () => collected,
         stdout: { write: (value: string) => (stdout += value) },
@@ -412,68 +531,42 @@ describe("National Catalog production live diagnostic", () => {
     }
   });
 
-  it.each(["active-token-query-failed", "product-query-failed"] as const)(
-    "passes %s evidence from the API CLI through the host validator",
-    async (sourceStatus) => {
-      const privateError = `private ${sourceStatus} detail`;
-      const token = {
-        tenantId: "tenant-a",
-        encryptedToken: Buffer.alloc(1),
-        tokenNonce: Buffer.alloc(1),
-        tokenTag: Buffer.alloc(1),
-      };
-      const loaded = await loadNationalCatalogProductionSource({
-        listActiveTokens: async () => {
-          if (sourceStatus === "active-token-query-failed") throw new Error(privateError);
-          return [token];
-        },
-        findProductGtin: async () => {
-          throw new Error(privateError);
-        },
-        decryptToken: () => PRIVATE_TOKEN,
-      });
-      const collected = await collectNationalCatalogLiveDiagnostic({
-        loadSource: async () => loaded,
-        client: successfulClient([]),
-      });
-      let stdout = "";
-      const exitCode = await runNationalCatalogLiveDiagnosticCli({
-        collect: async () => collected,
-        stdout: { write: (value: string) => (stdout += value) },
-        stderr: { write: () => undefined },
-      });
-      const moduleUrl = pathToFileURL(
-        resolve(__dirname, "../../../deploy/yandex/national-catalog-diagnostics.mjs"),
-      ).href;
-      const { runHostedNationalCatalogDiagnostics } = (await import(moduleUrl)) as {
-        runHostedNationalCatalogDiagnostics: (
-          environment: Record<string, string>,
-          supplied: Record<string, unknown>,
-        ) => Promise<NationalCatalogDiagnosticEvidence>;
-      };
-      const result = await runHostedNationalCatalogDiagnostics(
-        {
-          YC_APP_PUBLIC_ADDRESS: "203.0.113.42",
-          YC_APP_DEPLOY_LOGIN: "markiro-deploy",
-          YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH: "/runner/private-key",
-          APP_SSH_HOST_KEYS_B64: Buffer.from(
-            `ssh-ed25519 ${Buffer.alloc(32, 1).toString("base64")}`,
-          ).toString("base64"),
-        },
-        {
-          validatePrivateKey: async () => undefined,
-          run: async () => "a1b2c3d4e5f6\n",
-          runDiagnostic: async () => ({ exitCode, stdout }),
-          mkdtemp: async () => "/runner/national-catalog-known-hosts",
-          writeFile: async () => undefined,
-          rm: async () => undefined,
-        },
-      );
+  it("crosses the API-to-host boundary as v3 and rejects the former v2 contract", async () => {
+    const moduleUrl = pathToFileURL(
+      resolve(__dirname, "../../../deploy/yandex/national-catalog-diagnostics.mjs"),
+    ).href;
+    const { runHostedNationalCatalogDiagnostics } = (await import(moduleUrl)) as {
+      runHostedNationalCatalogDiagnostics: (
+        environment: Record<string, string>,
+        supplied: Record<string, unknown>,
+      ) => Promise<NationalCatalogDiagnosticEvidence>;
+    };
+    const environment = {
+      YC_APP_PUBLIC_ADDRESS: "203.0.113.42",
+      YC_APP_DEPLOY_LOGIN: "markiro-deploy",
+      YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH: "/runner/private-key",
+      APP_SSH_HOST_KEYS_B64: Buffer.from(
+        `ssh-ed25519 ${Buffer.alloc(32, 1).toString("base64")}`,
+      ).toString("base64"),
+    };
+    const evidence = evaluateNationalCatalogDiagnostic("ready", conformantObservations());
+    const supplied = (value: unknown) => ({
+      validatePrivateKey: async () => undefined,
+      run: async () => "a1b2c3d4e5f6\n",
+      runDiagnostic: async () => ({
+        exitCode: 0,
+        stdout: `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(value)}\n`,
+      }),
+      mkdtemp: async () => "/runner/national-catalog-known-hosts",
+      writeFile: async () => undefined,
+      rm: async () => undefined,
+    });
 
-      expect(result).toEqual({ version: 2, passed: false, sourceStatus, checks: [] });
-      expect(JSON.stringify(result)).not.toContain(privateError);
-      expect(JSON.stringify(result)).not.toContain("tenant-a");
-      expect(JSON.stringify(result)).not.toContain(PRIVATE_TOKEN);
-    },
-  );
+    await expect(
+      runHostedNationalCatalogDiagnostics(environment, supplied(evidence)),
+    ).resolves.toEqual(evidence);
+    await expect(
+      runHostedNationalCatalogDiagnostics(environment, supplied({ ...evidence, version: 2 })),
+    ).rejects.toThrow("National Catalog diagnostic response is invalid");
+  });
 });

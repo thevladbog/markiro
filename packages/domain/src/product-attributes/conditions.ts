@@ -1,11 +1,12 @@
 import type {
   AttributeCondition,
+  AttributeRequirementRule,
   CategoryAttributeDefinition,
   ProductAttributeValue,
   ProductAttributeValues,
+  RegulatoryLayer,
+  RequirementLevel,
 } from "./model.js";
-
-type RegulatoryLayer = "code_ordering" | "circulation";
 
 export function conditionMatches(
   condition: AttributeCondition,
@@ -29,9 +30,19 @@ export function isAttributeRequired(
   values: ProductAttributeValues,
   layer: RegulatoryLayer,
 ): boolean {
-  if (definition.requiredLayers.includes(layer)) return true;
-  if (layer === "code_ordering") return false;
-  return definition.requiredWhen.some((condition) =>
-    conditionMatches(condition, values[condition.attributeId]),
+  return activeRequirementRules(definition, values, layer, "mandatory").length > 0;
+}
+
+export function activeRequirementRules(
+  definition: CategoryAttributeDefinition,
+  values: ProductAttributeValues,
+  layer: RegulatoryLayer,
+  level: RequirementLevel,
+): AttributeRequirementRule[] {
+  return definition.requirementRules.filter(
+    (rule) =>
+      rule.layer === layer &&
+      rule.level === level &&
+      (rule.when === null || conditionMatches(rule.when, values[rule.when.attributeId])),
   );
 }

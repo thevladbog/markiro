@@ -22,7 +22,7 @@ export type UpdateRegulatoryAttributesDto = z.infer<typeof updateRegulatoryAttri
 
 export const categoryChangePreviewSchema = z
   .object({
-    baseRevision: z.number().int().positive(),
+    baseRevision: z.number().int().nonnegative(),
     targetSchemaVersionId: z.string().uuid(),
     tnVedCode: z.string().trim().min(1).nullable(),
     okpd2Code: z.string().trim().min(1).nullable(),
@@ -32,7 +32,16 @@ export const categoryChangePreviewSchema = z
 export type CategoryChangePreviewDto = z.infer<typeof categoryChangePreviewSchema>;
 
 export const applyRegulatoryProposalSchema = z
-  .object({ acceptedEntryIds: z.array(z.string().uuid()).max(200) })
+  .object({
+    acceptedEntryIds: z
+      .array(z.string().uuid())
+      .max(200)
+      .superRefine((ids, context) => {
+        if (new Set(ids).size !== ids.length) {
+          context.addIssue({ code: "custom", message: "Duplicate accepted proposal entry ID" });
+        }
+      }),
+  })
   .strict();
 export type ApplyRegulatoryProposalDto = z.infer<typeof applyRegulatoryProposalSchema>;
 
@@ -131,6 +140,14 @@ const productAttributeValueOpenApiSchema: SchemaObject = {
   ],
 };
 
+const nullOpenApiSchema: SchemaObject = { type: "string", nullable: true, enum: [null] };
+const nullableProductAttributeValueOpenApiSchema: SchemaObject = {
+  oneOf: [...(productAttributeValueOpenApiSchema.oneOf ?? []), nullOpenApiSchema],
+};
+const nullableStableFieldValueOpenApiSchema: SchemaObject = {
+  oneOf: [{ type: "string" }, { type: "integer", minimum: 1 }, nullOpenApiSchema],
+};
+
 export const productReadinessOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -142,7 +159,7 @@ export const productReadinessOpenApiSchema: SchemaObject = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["dimension", "state", "reasons"],
+        required: ["dimension", "state", "reasons", "recommendations"],
         properties: {
           dimension: {
             type: "string",
@@ -150,6 +167,7 @@ export const productReadinessOpenApiSchema: SchemaObject = {
           },
           state: { type: "string", enum: ["ready", "not_ready", "not_applicable", "stale"] },
           reasons: { type: "array", items: readinessReasonOpenApiSchema },
+          recommendations: { type: "array", items: readinessReasonOpenApiSchema },
         },
       },
     },
@@ -240,3 +258,184 @@ export const regulatoryCategoryOptionsOpenApiSchema: SchemaObject = {
     },
   },
 };
+
+const targetBindingOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["schemaVersionId", "categoryId", "categoryName", "tnVedCode", "okpd2Code"],
+  properties: {
+    schemaVersionId: { type: "string", format: "uuid" },
+    categoryId: { type: "string" },
+    categoryName: { type: "string" },
+    tnVedCode: { type: "string", nullable: true },
+    okpd2Code: { type: "string", nullable: true },
+  },
+};
+
+const proposalEntryOpenApiSchema: SchemaObject = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "entryId",
+        "target",
+        "targetSchemaVersionId",
+        "targetAttributeId",
+        "disposition",
+        "currentValue",
+        "proposedValue",
+      ],
+      properties: {
+        entryId: { type: "string", format: "uuid" },
+        target: { type: "string", enum: ["attribute"] },
+        targetSchemaVersionId: { type: "string", format: "uuid" },
+        targetAttributeId: { type: "string" },
+        disposition: {
+          type: "string",
+          enum: ["transferable", "convertible", "inapplicable", "conflict"],
+        },
+        currentValue: nullableProductAttributeValueOpenApiSchema,
+        proposedValue: nullableProductAttributeValueOpenApiSchema,
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["entryId", "target", "current", "proposed"],
+      properties: {
+        entryId: { type: "string", format: "uuid" },
+        target: { type: "string", enum: ["egais_codes"] },
+        current: egaisCollectionOpenApiSchema(),
+        proposed: egaisCollectionOpenApiSchema(),
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "entryId",
+        "target",
+        "targetField",
+        "mappingId",
+        "mappingVersion",
+        "conversion",
+        "currentValue",
+        "proposedValue",
+      ],
+      properties: {
+        entryId: { type: "string", format: "uuid" },
+        target: { type: "string", enum: ["stable_field"] },
+        targetField: { type: "string", enum: ["name", "print_name", "shelf_life_days"] },
+        mappingId: { type: "string", format: "uuid" },
+        mappingVersion: { type: "integer", minimum: 1 },
+        conversion: {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind"],
+          properties: {
+            kind: {
+              type: "string",
+              enum: ["identity", "string_trim", "positive_integer"],
+            },
+          },
+        },
+        currentValue: nullableStableFieldValueOpenApiSchema,
+        proposedValue: nullableStableFieldValueOpenApiSchema,
+      },
+    },
+  ],
+};
+
+const categoryProposalDiffProperties = {
+  version: { type: "integer", enum: [1] } as SchemaObject,
+  kind: { type: "string", enum: ["category_binding", "category_change"] } as SchemaObject,
+  target: targetBindingOpenApiSchema,
+  entries: { type: "array", maxItems: 200, items: proposalEntryOpenApiSchema } as SchemaObject,
+};
+
+export const regulatoryProposalDiffOpenApiSchema: SchemaObject = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["version", "kind", "target", "entries"],
+      properties: categoryProposalDiffProperties,
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["version", "kind", "entries"],
+      properties: {
+        version: { type: "integer", enum: [1] },
+        kind: { type: "string", enum: ["national_catalog_import"] },
+        entries: { type: "array", maxItems: 200, items: proposalEntryOpenApiSchema },
+      },
+    },
+  ],
+};
+
+export const regulatoryProposalPreviewOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["proposalId", "baseRevision", "diff"],
+  properties: {
+    proposalId: { type: "string", format: "uuid" },
+    baseRevision: { type: "integer", minimum: 0 },
+    diff: regulatoryProposalDiffOpenApiSchema,
+  },
+};
+
+export const regulatoryProposalOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "kind",
+    "source",
+    "sourceRef",
+    "snapshotId",
+    "baseRevision",
+    "diff",
+    "status",
+    "expiresAt",
+    "terminalReason",
+    "createdAt",
+    "appliedAt",
+    "rejectedAt",
+    "staleAt",
+  ],
+  properties: {
+    id: { type: "string", format: "uuid" },
+    kind: {
+      type: "string",
+      enum: ["category_binding", "category_change", "national_catalog_import"],
+    },
+    source: { type: "string", enum: ["manual", "1c", "national_catalog", "migration"] },
+    sourceRef: { type: "string", nullable: true },
+    snapshotId: { type: "string", format: "uuid", nullable: true },
+    baseRevision: { type: "integer", minimum: 0 },
+    diff: regulatoryProposalDiffOpenApiSchema,
+    status: { type: "string", enum: ["preview", "applied", "rejected", "stale"] },
+    expiresAt: { type: "string", format: "date-time" },
+    terminalReason: { type: "string", nullable: true },
+    createdAt: { type: "string", format: "date-time" },
+    appliedAt: { type: "string", format: "date-time", nullable: true },
+    rejectedAt: { type: "string", format: "date-time", nullable: true },
+    staleAt: { type: "string", format: "date-time", nullable: true },
+  },
+};
+
+export const regulatoryProposalRejectionOpenApiSchema = regulatoryProposalOpenApiSchema;
+
+function egaisCollectionOpenApiSchema(): SchemaObject {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["codes", "primaryCode"],
+    properties: {
+      codes: { type: "array", maxItems: 20, items: { type: "string", pattern: "^[0-9]{19}$" } },
+      primaryCode: { type: "string", pattern: "^[0-9]{19}$", nullable: true },
+    },
+  };
+}
