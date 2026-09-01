@@ -161,6 +161,74 @@ describe("NationalCatalogClient", () => {
     });
   });
 
+  it("rejects non-positive, fractional, and unsafe provider identities", async () => {
+    const categoryMutations = [
+      (payload: typeof categoryPayload) => (payload.result[0]!.cat_id = 0),
+      (payload: typeof categoryPayload) => (payload.result[0]!.cat_parent_id = -1),
+      (payload: typeof categoryPayload) => (payload.result[0]!.cat_level = 1.5),
+      (payload: typeof categoryPayload) => (payload.result[0]!.gismt_codes = [1.5]),
+    ];
+    for (const mutate of categoryMutations) {
+      const payload = structuredClone(categoryPayload);
+      mutate(payload);
+      const client = new NationalCatalogClient(
+        dependencies(async () => new Response(JSON.stringify(payload), { status: 200 })),
+      );
+      await expect(client.listCategories(auth)).resolves.toEqual({ status: "invalid_response" });
+    }
+
+    const attributeMutations = [
+      (payload: typeof attributePayload) => (payload.result[0]!.attr_id = -1),
+      (payload: typeof attributePayload) => (payload.result[0]!.attr_group_id = 1.5),
+    ];
+    for (const mutate of attributeMutations) {
+      const payload = structuredClone(attributePayload);
+      mutate(payload);
+      const client = new NationalCatalogClient(
+        dependencies(async () => new Response(JSON.stringify(payload), { status: 200 })),
+      );
+      await expect(client.getAttributes(auth)).resolves.toEqual({ status: "invalid_response" });
+    }
+
+    const nestedIdentityPayload = structuredClone(attributePayload);
+    (
+      nestedIdentityPayload.result[0] as unknown as {
+        dependent_attributes: unknown[];
+      }
+    ).dependent_attributes = [
+      {
+        value: "ДА",
+        atters: [{ attr_id: 0, first_layer: true, second_layer: false, attr_type: "m" }],
+      },
+    ];
+    const nestedIdentityClient = new NationalCatalogClient(
+      dependencies(
+        async () => new Response(JSON.stringify(nestedIdentityPayload), { status: 200 }),
+      ),
+    );
+    await expect(nestedIdentityClient.getAttributes(auth)).resolves.toEqual({
+      status: "invalid_response",
+    });
+
+    const productMutations = [
+      (payload: typeof productPayload) => (payload.result[0]!.good_id = 0),
+      (payload: typeof productPayload) => (payload.result[0]!.categories[0]!.cat_id = -1),
+      (payload: typeof productPayload) => (payload.result[0]!.good_attrs[0]!.attr_id = 1.5),
+      (payload: typeof productPayload) => (payload.result[0]!.good_attrs[0]!.attr_group_id = 0),
+      (payload: typeof productPayload) => (payload.result[0]!.identified_by[0]!.multiplier = -1),
+    ];
+    for (const mutate of productMutations) {
+      const payload = structuredClone(productPayload);
+      mutate(payload);
+      const client = new NationalCatalogClient(
+        dependencies(async () => new Response(JSON.stringify(payload), { status: 200 })),
+      );
+      await expect(client.getFeedProducts(auth, ["0000000000001"])).resolves.toEqual({
+        status: "invalid_response",
+      });
+    }
+  });
+
   it("serializes bounded category and TN VED selectors for the applicable attribute model", async () => {
     const calls: string[] = [];
     const client = new NationalCatalogClient(

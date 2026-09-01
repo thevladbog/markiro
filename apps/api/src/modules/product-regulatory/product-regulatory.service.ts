@@ -153,7 +153,7 @@ export class ProductRegulatoryService {
         if (!attribute) this.invalidAttribute(item.attributeId);
         if (item.value !== null) {
           const parsed = productAttributeValueSchema.safeParse(item.value);
-          if (!parsed.success || parsed.data.type !== attribute.valueType) {
+          if (!parsed.success || !validateProductAttributeValue(attribute, parsed.data)) {
             this.invalidAttribute(item.attributeId);
           }
         }
@@ -437,14 +437,15 @@ export class ProductRegulatoryService {
       }
 
       const target = diff.kind === "national_catalog_import" ? null : diff.target;
+      const operationSchemaVersionId = target?.schemaVersionId ?? profile?.schemaVersionId ?? null;
       let targetDefinition: ReturnType<typeof parseCategorySchemaDefinition> | null = null;
       let sourceObservedAt: Date | null = null;
-      if (target !== null) {
-        targetDefinition = await this.loadActiveDefinition(tx, target.schemaVersionId);
+      if (operationSchemaVersionId !== null) {
+        targetDefinition = await this.loadActiveDefinition(tx, operationSchemaVersionId);
         await this.requireCategoryCompatibility(
           tx,
           product.chzProductGroupCode,
-          target.schemaVersionId,
+          operationSchemaVersionId,
         );
       }
       if (diff.kind === "national_catalog_import") {
@@ -501,6 +502,12 @@ export class ProductRegulatoryService {
         if (entry.target === "attribute") {
           if (entry.proposedValue === null) {
             throw new BadRequestException({ code: "REGULATORY_PROPOSAL_ENTRY_INVALID" });
+          }
+          if (
+            operationSchemaVersionId === null ||
+            entry.targetSchemaVersionId !== operationSchemaVersionId
+          ) {
+            throw new ConflictException({ code: "REGULATORY_PROPOSAL_MAPPING_DRIFT" });
           }
           let definition = definitions.get(entry.targetSchemaVersionId);
           if (!definition) {
@@ -749,7 +756,7 @@ export class ProductRegulatoryService {
           resultingRevision,
           selectedEntryIds: accepted,
           selectionHash: selection.hash,
-          dispositions: dispositionCounts(diff.entries),
+          dispositions: dispositionCounts(selected),
         },
       });
       return "applied" as const;

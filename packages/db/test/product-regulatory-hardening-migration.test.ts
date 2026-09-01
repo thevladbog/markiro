@@ -232,6 +232,36 @@ describe.skipIf(!databaseUrl)("product regulatory hardening migration", () => {
     ]);
   });
 
+  it("deduplicates immutable card content within an exact card and read method", async () => {
+    const sharedHash = "c".repeat(64);
+    await expect(
+      pool.query(
+        `INSERT INTO national_catalog_card_snapshots
+           (tenant_id, product_id, gtin14, card_id, card_status, source_method,
+            payload_format_version, content_hash, payload, fetched_at)
+         VALUES
+           ($1, $2, '00000000010801', 'same-card', 'published', 'feed_product', 2,
+            $3, '{"good_id":1}'::jsonb, now()),
+           ($1, $2, '00000000010801', 'same-card', 'published', 'product', 2,
+            $3, '{"good_id":1}'::jsonb, now()),
+           ($1, $2, '00000000010801', 'another-card', 'published', 'feed_product', 2,
+            $3, '{"good_id":1}'::jsonb, now())`,
+        [tenantId, productId, sharedHash],
+      ),
+    ).resolves.toBeDefined();
+
+    await expect(
+      pool.query(
+        `INSERT INTO national_catalog_card_snapshots
+           (tenant_id, product_id, gtin14, card_id, card_status, source_method,
+            payload_format_version, content_hash, payload, fetched_at)
+         VALUES ($1, $2, '00000000010801', 'same-card', 'published', 'feed_product', 2,
+           $3, '{"good_id":1}'::jsonb, now())`,
+        [tenantId, productId, sharedHash],
+      ),
+    ).rejects.toMatchObject({ code: "23505" });
+  });
+
   it("does not rewrite compatibility data on the source product", async () => {
     const product = await pool.query(`SELECT egais_code FROM products WHERE id = $1`, [productId]);
     expect(product.rows).toEqual([{ egais_code: "legacy-value-must-remain" }]);

@@ -254,8 +254,9 @@ Proposal persistence gains:
 - a separately stored applied selection and selection hash;
 - timestamps and actors for apply/reject/stale transitions.
 
-`sourceRef` always identifies the source observation, such as a snapshot. It is immutable
-and is never reused for accepted entry IDs or UI state.
+`sourceRef` always identifies the source observation. A National Catalog import uses the
+canonical `national-catalog-snapshot:<snapshot UUID>` form and must match `snapshotId`
+exactly. It is immutable and is never reused for accepted entry IDs or UI state.
 
 Proposal `diff` is parsed by a strict, versioned discriminated union before it is shown or
 applied. Unsupported fields, duplicate entry IDs, inconsistent current values, and
@@ -277,7 +278,8 @@ Existing proposals are handled without rewriting their immutable diff:
 
 ### Card snapshots and freshness cursor
 
-Snapshots remain immutable, tenant scoped, product scoped, and deduplicated by content.
+Snapshots remain immutable, tenant scoped, product scoped, and deduplicated by content
+within the exact card and source method identity.
 Each snapshot stores one card item rather than a whole multi-card response envelope and
 records which read method observed it. A payload format version distinguishes new
 per-card snapshots from any legacy whole-envelope rows. Existing rows whose method cannot

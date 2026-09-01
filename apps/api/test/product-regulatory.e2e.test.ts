@@ -12,6 +12,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
+import { nationalCatalogSnapshotSourceRef } from "../src/modules/product-regulatory/proposal-schema";
 import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = Boolean(
@@ -131,7 +132,7 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
       confirmedBy: actorUserId,
       confirmedAt: new Date(),
     });
-    return { productId, schemaVersionId };
+    return { productId, schemaVersionId, scopeKey };
   }
 
   async function seedUnboundProduct(tenantId: string, groupCode = 23) {
@@ -262,6 +263,70 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
       before: [{ attributeId: "hasSweetener", value: null }],
       after: [{ attributeId: "hasSweetener", value: { type: "boolean", value: false } }],
     });
+  });
+
+  it("rejects manual values outside reviewed units and restricted presets", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const tenant = await signUpAndActivate(owner);
+    const seeded = await seedProfile(tenant.tenantId, tenant.actorUserId);
+    await db
+      .update(schema.nationalCatalogSchemaVersions)
+      .set({
+        definition: {
+          formatVersion: 2,
+          categoryId: "softdrinks",
+          scopeKey: seeded.scopeKey,
+          attributes: [
+            {
+              id: "volume",
+              label: "Объём",
+              valueType: "decimal",
+              multiplicity: "one",
+              unit: { canonical: "l", allowed: ["l", "ml"] },
+              requirementRules: [],
+              presetMode: "none",
+              presets: [],
+            },
+            {
+              id: "packageKind",
+              label: "Упаковка",
+              valueType: "enum",
+              multiplicity: "one",
+              unit: null,
+              requirementRules: [],
+              presetMode: "restricted",
+              presets: [{ value: "bottle", label: "Бутылка" }],
+            },
+          ],
+        },
+      })
+      .where(eq(schema.nationalCatalogSchemaVersions.id, seeded.schemaVersionId));
+
+    await owner
+      .patch(`/products/${seeded.productId}/regulatory-attributes`)
+      .send({
+        baseRevision: 1,
+        values: [{ attributeId: "volume", value: { type: "decimal", value: "1", unit: "kg" } }],
+      })
+      .expect(400);
+    await owner
+      .patch(`/products/${seeded.productId}/regulatory-attributes`)
+      .send({
+        baseRevision: 1,
+        values: [{ attributeId: "packageKind", value: { type: "enum", value: "can" } }],
+      })
+      .expect(400);
+
+    const [profile] = await db
+      .select({ revision: schema.productRegulatoryProfiles.revision })
+      .from(schema.productRegulatoryProfiles)
+      .where(eq(schema.productRegulatoryProfiles.productId, seeded.productId));
+    const values = await db
+      .select()
+      .from(schema.productRegulatoryAttributeValues)
+      .where(eq(schema.productRegulatoryAttributeValues.productId, seeded.productId));
+    expect(profile?.revision).toBe(1);
+    expect(values).toEqual([]);
   });
 
   it("previews and applies an exact category transfer, then stores multiple EGAIS codes", async () => {
@@ -577,16 +642,102 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
     expect(expiredRow?.status).toBe("stale");
   });
 
+  it("rejects a National Catalog attribute from a different active schema atomically", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const tenant = await signUpAndActivate(owner);
+    const seeded = await seedProfile(tenant.tenantId, tenant.actorUserId);
+    const otherSchema = await seedMappedSchema(tenant.actorUserId);
+    await db.insert(schema.nationalCatalogCategoryGroupMappings).values({
+      chzProductGroupCode: 23,
+      schemaVersionId: seeded.schemaVersionId,
+      categoryId: "softdrinks",
+      state: "exact",
+      reviewedBy: tenant.actorUserId,
+      reviewedAt: new Date(),
+    });
+    const [product] = await db
+      .select({ gtin14: schema.products.gtin14 })
+      .from(schema.products)
+      .where(eq(schema.products.id, seeded.productId));
+    const snapshotId = randomUUID();
+    await db.insert(schema.nationalCatalogCardSnapshots).values({
+      id: snapshotId,
+      tenantId: tenant.tenantId,
+      productId: seeded.productId,
+      gtin14: product!.gtin14,
+      cardId: "different-schema-card",
+      cardStatus: "published",
+      sourceMethod: "product",
+      payloadFormatVersion: 2,
+      contentHash: createHash("sha256").update(snapshotId).digest("hex"),
+      payload: { good_id: 900001 },
+      fetchedAt: new Date(),
+    });
+    const proposalId = randomUUID();
+    const entryId = randomUUID();
+    await db.insert(schema.productRegulatoryProposals).values({
+      id: proposalId,
+      tenantId: tenant.tenantId,
+      productId: seeded.productId,
+      snapshotId,
+      kind: "national_catalog_import",
+      source: "national_catalog",
+      sourceRef: nationalCatalogSnapshotSourceRef(snapshotId),
+      baseRevision: 1,
+      diff: {
+        version: 1,
+        kind: "national_catalog_import",
+        entries: [
+          {
+            entryId,
+            target: "attribute",
+            targetSchemaVersionId: otherSchema.schemaVersionId,
+            targetAttributeId: "brandColor",
+            disposition: "convertible",
+            currentValue: null,
+            proposedValue: { type: "string", value: "Синий" },
+          },
+        ],
+      },
+      expiresAt: new Date(Date.now() + 60_000),
+      createdBy: tenant.actorUserId,
+    });
+
+    await owner
+      .post(`/products/${seeded.productId}/regulatory-proposals/${proposalId}/apply`)
+      .send({ acceptedEntryIds: [entryId] })
+      .expect(409);
+
+    const values = await db
+      .select()
+      .from(schema.productRegulatoryAttributeValues)
+      .where(eq(schema.productRegulatoryAttributeValues.productId, seeded.productId));
+    const [proposal] = await db
+      .select({ status: schema.productRegulatoryProposals.status })
+      .from(schema.productRegulatoryProposals)
+      .where(eq(schema.productRegulatoryProposals.id, proposalId));
+    expect(values).toEqual([]);
+    expect(proposal?.status).toBe("preview");
+  });
+
   it("applies National Catalog provenance and validates every operation before writing", async () => {
     const owner = request.agent(app!.getHttpServer());
     const tenant = await signUpAndActivate(owner);
     const seeded = await seedProfile(tenant.tenantId, tenant.actorUserId);
+    await db.insert(schema.nationalCatalogCategoryGroupMappings).values({
+      chzProductGroupCode: 23,
+      schemaVersionId: seeded.schemaVersionId,
+      categoryId: "softdrinks",
+      state: "exact",
+      reviewedBy: tenant.actorUserId,
+      reviewedAt: new Date(),
+    });
     const [product] = await db
       .select({ gtin14: schema.products.gtin14, name: schema.products.name })
       .from(schema.products)
       .where(eq(schema.products.id, seeded.productId));
     const snapshotId = randomUUID();
-    const sourceRef = "national-catalog-card:720679";
+    const sourceRef = nationalCatalogSnapshotSourceRef(snapshotId);
     const snapshotFetchedAt = new Date("2026-08-31T12:00:00.000Z");
     await db.insert(schema.nationalCatalogCardSnapshots).values({
       id: snapshotId,
@@ -602,6 +753,7 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
       fetchedAt: snapshotFetchedAt,
     });
     const entryId = randomUUID();
+    const unselectedConflictEntryId = randomUUID();
     const proposalId = randomUUID();
     const now = new Date();
     await db.insert(schema.productRegulatoryProposals).values({
@@ -625,6 +777,15 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
             disposition: "convertible",
             currentValue: null,
             proposedValue: { type: "boolean", value: true },
+          },
+          {
+            entryId: unselectedConflictEntryId,
+            target: "attribute",
+            targetSchemaVersionId: seeded.schemaVersionId,
+            targetAttributeId: "hasSweetener",
+            disposition: "conflict",
+            currentValue: { type: "boolean", value: false },
+            proposedValue: null,
           },
         ],
       },
@@ -664,6 +825,18 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
       appliedSelection: [entryId],
       appliedSelectionHash: selectionHash,
     });
+    const [applyAudit] = await db
+      .select({ after: schema.tenantAuditEvents.after })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenant.tenantId),
+          eq(schema.tenantAuditEvents.action, "product.regulatory_proposal.applied"),
+          eq(schema.tenantAuditEvents.targetId, seeded.productId),
+        ),
+      )
+      .limit(1);
+    expect(applyAudit?.after).toMatchObject({ dispositions: { convertible: 1 } });
 
     const invalidProposalId = randomUUID();
     const validMappingId = randomUUID();

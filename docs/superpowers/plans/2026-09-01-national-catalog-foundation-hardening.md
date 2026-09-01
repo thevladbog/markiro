@@ -192,6 +192,9 @@ git commit -m "fix(domain): version regulatory requirement rules"
 - Create: `packages/db/test/product-regulatory-hardening-migration.test.ts`
 - Create: `packages/db/migrations/0108_<generated-name>.sql`
 - Create: `packages/db/migrations/meta/0108_snapshot.json`
+- Create: `packages/db/migrations/0109_<generated-name>.sql` when the post-review snapshot
+  deduplication correction is generated separately
+- Create: `packages/db/migrations/meta/0109_snapshot.json` in that case
 - Modify: `packages/db/migrations/meta/_journal.json`
 
 **Schema additions:**
@@ -206,6 +209,7 @@ git commit -m "fix(domain): version regulatory requirement rules"
 - `product_regulatory_binding_history` append-only table;
 - `national_catalog_card_freshness` mutable cursor table;
 - composite freshness/snapshot identity across tenant, product, card, and source method;
+- snapshot content uniqueness within tenant, product, card, and source method;
 - composite proposal identity needed by tenant/product/proposal foreign keys;
 - `(scope_key, content_hash)` schema-version uniqueness replacing global hash uniqueness.
 
@@ -333,8 +337,8 @@ Common entry targets are closed unions:
   value, and exact conversion metadata.
 
 Category binding/change contains a target binding. National Catalog import pins
-`snapshotId`/`sourceRef` through the proposal row and cannot carry another source inside
-the diff.
+`snapshotId` and the exact `national-catalog-snapshot:<snapshot UUID>` `sourceRef` through
+the proposal row and cannot carry another source inside the diff.
 
 - [ ] **Step 1: Write failing pure proposal tests**
 

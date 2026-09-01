@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   canonicalProposalSelection,
+  nationalCatalogSnapshotSourceRef,
   parsePersistedProposalDiff,
 } from "../src/modules/product-regulatory/proposal-schema";
 import {
@@ -16,6 +17,7 @@ import {
 
 const schemaVersionId = "00000000-0000-4000-8000-000000030001";
 const snapshotId = "00000000-0000-4000-8000-000000030002";
+const randomSnapshotId = "00000000-0000-4000-8000-000000030099";
 const mappingId = "00000000-0000-4000-8000-000000030003";
 const entryA = "00000000-0000-4000-8000-000000030011";
 const entryB = "00000000-0000-4000-8000-000000030012";
@@ -107,7 +109,7 @@ describe("persisted regulatory proposal contract", () => {
           kind: "national_catalog_import",
           source: "national_catalog",
           snapshotId,
-          sourceRef: "national-catalog-card:720679",
+          sourceRef: nationalCatalogSnapshotSourceRef(snapshotId),
         }),
       ),
     ).toEqual(diff);
@@ -153,7 +155,7 @@ describe("persisted regulatory proposal contract", () => {
       kind: "national_catalog_import",
       source: "national_catalog",
       snapshotId,
-      sourceRef: "national-catalog-card:720679",
+      sourceRef: nationalCatalogSnapshotSourceRef(snapshotId),
     });
     const base = {
       version: 1,
@@ -209,7 +211,7 @@ describe("persisted regulatory proposal contract", () => {
       kind: "national_catalog_import",
       source: "national_catalog",
       snapshotId,
-      sourceRef: "national-catalog-card:720679",
+      sourceRef: nationalCatalogSnapshotSourceRef(snapshotId),
     });
     const stable = {
       entryId: entryA,
@@ -242,6 +244,20 @@ describe("persisted regulatory proposal contract", () => {
         importContext,
       ),
     ).toThrow();
+  });
+
+  it("requires the immutable source reference to identify the exact snapshot", () => {
+    expect(() =>
+      parsePersistedProposalDiff(
+        { version: 1, kind: "national_catalog_import", entries: [] },
+        context({
+          kind: "national_catalog_import",
+          source: "national_catalog",
+          snapshotId,
+          sourceRef: nationalCatalogSnapshotSourceRef(randomSnapshotId),
+        }),
+      ),
+    ).toThrow(/source reference/i);
   });
 
   it("rejects source/kind mismatches and unpinned National Catalog imports", () => {

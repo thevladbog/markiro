@@ -4,6 +4,7 @@ import { productAttributeValueSchema } from "@markiro/domain";
 import { z } from "zod";
 
 export const REGULATORY_PROPOSAL_TTL_MS = 24 * 60 * 60 * 1000;
+const NATIONAL_CATALOG_SNAPSHOT_SOURCE_REF_PREFIX = "national-catalog-snapshot:";
 
 const nonEmptyStringSchema = z.string().trim().min(1);
 const uuidSchema = z.string().uuid();
@@ -232,6 +233,10 @@ const proposalContextSchema = z
 export type PersistedProposalDiff = z.infer<typeof versionedProposalDiffSchema>;
 export type PersistedProposalContext = z.infer<typeof proposalContextSchema>;
 
+export function nationalCatalogSnapshotSourceRef(snapshotId: string): string {
+  return `${NATIONAL_CATALOG_SNAPSHOT_SOURCE_REF_PREFIX}${uuidSchema.parse(snapshotId)}`;
+}
+
 export function parsePersistedProposalDiff(
   value: unknown,
   inputContext: PersistedProposalContext,
@@ -252,8 +257,10 @@ export function parsePersistedProposalDiff(
     if (proposalContext.snapshotId === null) {
       throw new TypeError("National Catalog import requires a snapshot");
     }
-    if (proposalContext.sourceRef === null) {
-      throw new TypeError("National Catalog import requires an immutable source reference");
+    if (
+      proposalContext.sourceRef !== nationalCatalogSnapshotSourceRef(proposalContext.snapshotId)
+    ) {
+      throw new TypeError("National Catalog source reference must identify the exact snapshot");
     }
   } else {
     if (proposalContext.source === "national_catalog") {

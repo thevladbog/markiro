@@ -165,9 +165,15 @@ export function evaluateNationalCatalogDiagnostic(
   const attributes = byMethod.get("attributes");
   const feedProduct = byMethod.get("feed-product");
   const product = byMethod.get("product");
-  const schemaRead = categories?.outcome === "ok" && attributes?.outcome === "ok";
+  const categoriesRepeat = byMethod.get("categories-repeat");
+  const productRepeat = byMethod.get("product-repeat");
+  const schemaRead =
+    categories?.outcome === "ok" &&
+    attributes?.outcome === "ok" &&
+    repeatProvesStableContent(categories, categoriesRepeat);
   const ownedCardRead = feedProduct?.outcome === "ok";
-  const publishedCardRead = product?.outcome === "ok";
+  const publishedCardRead =
+    product?.outcome === "ok" && repeatProvesStableContent(product, productRepeat);
   const violations: NationalCatalogDiagnosticViolation[] = [];
   const addViolation = (violation: NationalCatalogDiagnosticViolation) => {
     if (
@@ -233,6 +239,17 @@ export function evaluateNationalCatalogDiagnostic(
     checks,
     violations,
   };
+}
+
+function repeatProvesStableContent(
+  primary: NationalCatalogDiagnosticObservation | undefined,
+  repeat: NationalCatalogDiagnosticObservation | undefined,
+): boolean {
+  if (primary?.outcome !== "ok") return false;
+  return (
+    repeat?.outcome === "not_modified" ||
+    (repeat?.outcome === "ok" && repeat.contentHash === primary.contentHash)
+  );
 }
 
 function cacheObservation(

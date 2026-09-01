@@ -275,6 +275,8 @@ export const nationalCatalogCardSnapshots = pgTable(
     unique("national_catalog_card_snapshots_content_uq").on(
       table.tenantId,
       table.productId,
+      table.cardId,
+      table.sourceMethod,
       table.contentHash,
     ),
     foreignKey({

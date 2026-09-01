@@ -382,12 +382,12 @@ function parseCategories(payload: unknown): NationalCatalogCategoriesResponse | 
   for (const row of envelope.result) {
     const record = asRecord(row);
     if (!record) return null;
-    const id = number(record.cat_id);
+    const id = positiveInteger(record.cat_id);
     const name = string(record.cat_name);
-    const parentId = nullableNumber(record.cat_parent_id);
-    const level = number(record.cat_level);
+    const parentId = nullablePositiveInteger(record.cat_parent_id);
+    const level = nonNegativeInteger(record.cat_level);
     const active = boolean(record.category_active);
-    const gismtCodes = optionalNumberArray(record.gismt_codes);
+    const gismtCodes = optionalPositiveIntegerArray(record.gismt_codes);
     if (
       id === null ||
       name === null ||
@@ -410,8 +410,8 @@ function parseAttributes(payload: unknown): NationalCatalogAttributesResponse | 
   for (const row of envelope.result) {
     const record = asRecord(row);
     if (!record) return null;
-    const id = number(record.attr_id);
-    const groupId = number(record.attr_group_id);
+    const id = positiveInteger(record.attr_id);
+    const groupId = positiveInteger(record.attr_group_id);
     const groupName = string(record.attr_group_name);
     const name = string(record.attr_name);
     const presetOnly = boolean(record.attr_preset_only);
@@ -516,7 +516,7 @@ function parseEtags(payload: unknown): NationalCatalogEtagsResponse | null {
 function parseProduct(value: unknown): NationalCatalogProduct | null {
   const record = asRecord(value);
   if (!record) return null;
-  const id = number(record.good_id);
+  const id = positiveInteger(record.good_id);
   const name = optionalNullableString(record.good_name);
   const status = optionalNullableString(record.good_status);
   const identifiers = parseIdentifiers(record.identified_by);
@@ -544,7 +544,7 @@ function parseIdentifiers(value: unknown): NationalCatalogProductIdentifier[] | 
     if (!record) return null;
     const identifier = string(record.value);
     const type = string(record.type);
-    const multiplier = optionalNullableNumber(record.multiplier);
+    const multiplier = optionalNullablePositiveInteger(record.multiplier);
     const level = optionalNullableString(record.level);
     if (identifier === null || type === null || multiplier === undefined || level === undefined)
       return null;
@@ -560,7 +560,7 @@ function parseProductCategories(value: unknown): NationalCatalogProductCategory[
   for (const row of rows) {
     const record = asRecord(row);
     if (!record) return null;
-    const id = number(record.cat_id);
+    const id = positiveInteger(record.cat_id);
     const name = string(record.cat_name);
     if (id === null || name === null) return null;
     categories.push({ id, name });
@@ -575,18 +575,18 @@ function parseProductAttributes(value: unknown): NationalCatalogProductAttribute
   for (const row of rows) {
     const record = asRecord(row);
     if (!record) return null;
-    const id = number(record.attr_id);
+    const id = positiveInteger(record.attr_id);
     const name = string(record.attr_name);
     const attributeValue = string(record.attr_value);
-    const valueId = optionalNullableNumber(record.value_id);
-    const attributeValueId = optionalNullableNumber(record.attr_value_id);
+    const valueId = optionalNullableNonNegativeInteger(record.value_id);
+    const attributeValueId = optionalNullableNonNegativeInteger(record.attr_value_id);
     const valueType = optionalNullableString(record.attr_value_type);
-    const groupId = optionalNullableNumber(record.attr_group_id);
+    const groupId = optionalNullablePositiveInteger(record.attr_group_id);
     const groupName = optionalNullableString(record.attr_group_name);
-    const locationId = optionalNullableNumber(record.location_id);
+    const locationId = optionalNullablePositiveInteger(record.location_id);
     const level = optionalNullableString(record.level);
     const gtin = optionalNullableString(record.gtin);
-    const multiplier = optionalNullableNumber(record.multiplier);
+    const multiplier = optionalNullablePositiveInteger(record.multiplier);
     if (
       id === null ||
       name === null ||
@@ -649,10 +649,6 @@ function nullableString(value: unknown): string | null | undefined {
       : undefined;
 }
 
-function number(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
 function nonNegativeInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
@@ -661,10 +657,10 @@ function positiveInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
-function nullableNumber(value: unknown): number | null | undefined {
+function nullablePositiveInteger(value: unknown): number | null | undefined {
   return value === undefined
     ? undefined
-    : value === null || (typeof value === "number" && Number.isFinite(value))
+    : value === null || (typeof value === "number" && Number.isSafeInteger(value) && value > 0)
       ? value
       : undefined;
 }
@@ -673,23 +669,28 @@ function optionalNullableString(value: unknown): string | null | undefined {
   return value === undefined ? null : nullableString(value);
 }
 
-function optionalNullableNumber(value: unknown): number | null | undefined {
-  return value === undefined ? null : nullableNumber(value);
+function optionalNullablePositiveInteger(value: unknown): number | null | undefined {
+  return value === undefined ? null : nullablePositiveInteger(value);
+}
+
+function optionalNullableNonNegativeInteger(value: unknown): number | null | undefined {
+  if (value === undefined || value === null) return null;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
 function boolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
 }
 
-function numberArray(value: unknown): number[] | null {
+function positiveIntegerArray(value: unknown): number[] | null {
   return Array.isArray(value) &&
-    value.every((item) => typeof item === "number" && Number.isFinite(item))
+    value.every((item): item is number => positiveInteger(item) !== null)
     ? value
     : null;
 }
 
-function optionalNumberArray(value: unknown): number[] | null {
-  return value === undefined ? [] : numberArray(value);
+function optionalPositiveIntegerArray(value: unknown): number[] | null {
+  return value === undefined ? [] : positiveIntegerArray(value);
 }
 
 function stringArray(value: unknown): string[] | null {
@@ -743,7 +744,7 @@ function parseOptionalDependentAttributeRules(
   for (const row of rows) {
     const record = asRecord(row);
     if (!record) return null;
-    const id = optionalNullableNumber(record.attr_id);
+    const id = optionalNullablePositiveInteger(record.attr_id);
     const firstLayer = boolean(record.first_layer);
     const secondLayer = boolean(record.second_layer);
     const type = optionalNullableString(record.attr_type);

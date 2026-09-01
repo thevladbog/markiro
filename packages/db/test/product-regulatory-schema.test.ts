@@ -220,6 +220,12 @@ describe("product regulatory schema", () => {
       columns: ["tenant_id", "product_id", "card_id", "source_method", "latest_snapshot_id"],
       foreignColumns: ["tenant_id", "product_id", "card_id", "source_method", "id"],
     });
+    expect(
+      uniqueConstraintColumns(
+        "nationalCatalogCardSnapshots",
+        "national_catalog_card_snapshots_content_uq",
+      ),
+    ).toEqual(["tenant_id", "product_id", "card_id", "source_method", "content_hash"]);
   });
 
   it("persists proposal kind, expiry, terminal provenance, and replay selection", () => {

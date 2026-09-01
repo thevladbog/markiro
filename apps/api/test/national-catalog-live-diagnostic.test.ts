@@ -151,6 +151,57 @@ describe("National Catalog diagnostic v3 evaluator", () => {
   });
 
   it.each([
+    ["changed hash", observation("categories-repeat", "ok", { contentHash: "changed" })],
+    ["not found", observation("categories-repeat", "not_found")],
+    ["unauthorized", observation("categories-repeat", "unauthorized")],
+    ["forbidden", observation("categories-repeat", "forbidden")],
+    ["rate limited", observation("categories-repeat", "rate_limited")],
+    ["invalid response", observation("categories-repeat", "invalid_response")],
+    ["unavailable", observation("categories-repeat", "unavailable")],
+  ] as const)("fails schema capability when the category repeat is %s", (_label, repeat) => {
+    const observations = conformantObservations();
+    observations.splice(0, 2, observation("categories", "ok", { contentHash: "original" }), repeat);
+    const result = evaluateNationalCatalogDiagnostic("ready", observations);
+    expect(result).toMatchObject({
+      passed: false,
+      capabilities: { schemaRead: "unavailable" },
+    });
+    expect(result.violations).toEqual(
+      expect.arrayContaining([
+        { capability: "schema_read", code: "schema_read_failed" },
+        { capability: "schema_read", code: "cache_contract_degraded" },
+      ]),
+    );
+  });
+
+  it.each([
+    ["changed hash", observation("product-repeat", "ok", { contentHash: "changed" })],
+    ["not found", observation("product-repeat", "not_found")],
+    ["unauthorized", observation("product-repeat", "unauthorized")],
+    ["forbidden", observation("product-repeat", "forbidden")],
+    ["rate limited", observation("product-repeat", "rate_limited")],
+    ["invalid response", observation("product-repeat", "invalid_response")],
+    ["unavailable", observation("product-repeat", "unavailable")],
+  ] as const)(
+    "removes only the published capability when the product repeat is %s",
+    (_label, repeat) => {
+      const observations = conformantObservations();
+      observations.splice(4, 2, observation("product", "ok", { contentHash: "original" }), repeat);
+      const result = evaluateNationalCatalogDiagnostic("ready", observations);
+      expect(result).toMatchObject({
+        passed: true,
+        capabilities: { ownedCardRead: "available", publishedCardRead: "unavailable" },
+      });
+      expect(result.violations).toEqual(
+        expect.arrayContaining([
+          { capability: "published_card_read", code: "published_card_read_failed" },
+          { capability: "published_card_read", code: "cache_contract_degraded" },
+        ]),
+      );
+    },
+  );
+
+  it.each([
     {
       label: "private only",
       feed: observation("feed-product"),
@@ -176,6 +227,13 @@ describe("National Catalog diagnostic v3 evaluator", () => {
       observation("attributes"),
       feed,
       product,
+      ...(product.outcome === "ok"
+        ? [
+            observation("product-repeat", "ok", {
+              contentHash: product.contentHash,
+            }),
+          ]
+        : []),
     ]);
     expect(result.passed).toBe(true);
     expect(result.capabilities).toMatchObject(expected);
@@ -196,6 +254,7 @@ describe("National Catalog diagnostic v3 evaluator", () => {
         observation("attributes"),
         observation("feed-product", outcome),
         observation("product"),
+        observation("product-repeat", "ok", { contentHash: "product-hash" }),
       ]);
       expect(result).toMatchObject({
         passed: true,
