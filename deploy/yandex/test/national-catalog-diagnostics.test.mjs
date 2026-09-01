@@ -76,7 +76,7 @@ test("hosted National Catalog diagnostic discovers the active API with shell-saf
   assert.deepEqual(commands[0].args.slice(-9), [
     "markiro-deploy@203.0.113.42",
     "sudo",
-    "/usr/bin/docker",
+    "/usr/local/bin/docker",
     "ps",
     "-q",
     "--filter",
@@ -88,7 +88,7 @@ test("hosted National Catalog diagnostic discovers the active API with shell-saf
   assert.deepEqual(commands[1].args.slice(-8), [
     "markiro-deploy@203.0.113.42",
     "sudo",
-    "/usr/bin/docker",
+    "/usr/local/bin/docker",
     "exec",
     "-i",
     "a1b2c3d4e5f6",
@@ -246,7 +246,7 @@ test("hosted National Catalog diagnostic preserves bounded evidence from remote 
   assert.deepEqual(commands[1].args.slice(-8), [
     "markiro-deploy@203.0.113.42",
     "sudo",
-    "/usr/bin/docker",
+    "/usr/local/bin/docker",
     "exec",
     "-i",
     "a1b2c3d4e5f6",

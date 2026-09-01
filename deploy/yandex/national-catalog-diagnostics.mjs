@@ -255,7 +255,7 @@ export async function runHostedNationalCatalogDiagnostics(
       system.run("ssh", [
         ...sshBase,
         "sudo",
-        "/usr/bin/docker",
+        "/usr/local/bin/docker",
         "ps",
         "-q",
         "--filter",
@@ -271,7 +271,7 @@ export async function runHostedNationalCatalogDiagnostics(
       system.runDiagnostic("ssh", [
         ...sshBase,
         "sudo",
-        "/usr/bin/docker",
+        "/usr/local/bin/docker",
         "exec",
         "-i",
         containerId,
