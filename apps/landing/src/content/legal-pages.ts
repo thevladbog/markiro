@@ -67,6 +67,10 @@ const DESCRIPTION_BY_CODE = {
     ru: "Печатная инструкция менеджера: производственная линия, станции на линии, планирование смены, режимы, агрегация и запуск.",
     en: "Printable manager instruction: production lines, stations on a line, shift planning, modes, aggregation, and launch.",
   },
+  "MKR-INS-09": {
+    ru: "Печатная инструкция менеджера: наблюдение за производством, закрытие смены из кабинета, данные после закрытия, отчёты для ГИС МТ и разбор их отказов.",
+    en: "Printable manager instruction: production monitoring, closing a shift from the cabinet, late data, GIS MT reports, and resolving their failures.",
+  },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 
 export interface LegalDocumentPageDefinition {
