@@ -1,3 +1,6 @@
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -467,5 +470,44 @@ describe("National Catalog diagnostic CLI", () => {
       expect(stdout).toBe(`MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(collected)}\n`);
       expect(stderr).toBe("");
     }
+  });
+
+  it("crosses the API-to-host boundary as v3 and rejects the former v2 contract", async () => {
+    const moduleUrl = pathToFileURL(
+      resolve(__dirname, "../../../deploy/yandex/national-catalog-diagnostics.mjs"),
+    ).href;
+    const { runHostedNationalCatalogDiagnostics } = (await import(moduleUrl)) as {
+      runHostedNationalCatalogDiagnostics: (
+        environment: Record<string, string>,
+        supplied: Record<string, unknown>,
+      ) => Promise<NationalCatalogDiagnosticEvidence>;
+    };
+    const environment = {
+      YC_APP_PUBLIC_ADDRESS: "203.0.113.42",
+      YC_APP_DEPLOY_LOGIN: "markiro-deploy",
+      YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH: "/runner/private-key",
+      APP_SSH_HOST_KEYS_B64: Buffer.from(
+        `ssh-ed25519 ${Buffer.alloc(32, 1).toString("base64")}`,
+      ).toString("base64"),
+    };
+    const evidence = evaluateNationalCatalogDiagnostic("ready", conformantObservations());
+    const supplied = (value: unknown) => ({
+      validatePrivateKey: async () => undefined,
+      run: async () => "a1b2c3d4e5f6\n",
+      runDiagnostic: async () => ({
+        exitCode: 0,
+        stdout: `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(value)}\n`,
+      }),
+      mkdtemp: async () => "/runner/national-catalog-known-hosts",
+      writeFile: async () => undefined,
+      rm: async () => undefined,
+    });
+
+    await expect(
+      runHostedNationalCatalogDiagnostics(environment, supplied(evidence)),
+    ).resolves.toEqual(evidence);
+    await expect(
+      runHostedNationalCatalogDiagnostics(environment, supplied({ ...evidence, version: 2 })),
+    ).rejects.toThrow("National Catalog diagnostic response is invalid");
   });
 });
