@@ -13,6 +13,7 @@ import {
 
 const PRIVATE_TOKEN = "private-bearer-token";
 const PRIVATE_GTIN = "04601234567890";
+const NO_USAGE = { total: null, method: null } as const;
 
 function source() {
   return {
@@ -32,6 +33,8 @@ function successfulClient(calls: string[]): NationalCatalogDiagnosticClient {
             status: "ok",
             value: { categories: [{ id: 1 }], raw: {} },
             etag: '"categories-etag"',
+            contentHash: "categories-hash",
+            usage: NO_USAGE,
           } as const);
     },
     getAttributes: async () => {
@@ -40,6 +43,8 @@ function successfulClient(calls: string[]): NationalCatalogDiagnosticClient {
         status: "ok",
         value: { attributes: [{ id: 2 }], raw: {} },
         etag: null,
+        contentHash: "attributes-hash",
+        usage: NO_USAGE,
       } as const;
     },
     getFeedProducts: async (_auth: unknown, gtins: string[]) => {
@@ -48,6 +53,8 @@ function successfulClient(calls: string[]): NationalCatalogDiagnosticClient {
         status: "ok",
         value: { products: [{ id: 3 }], raw: {} },
         etag: null,
+        contentHash: "feed-product-hash",
+        usage: NO_USAGE,
       } as const;
     },
     getPublishedProducts: async (
@@ -66,6 +73,8 @@ function successfulClient(calls: string[]): NationalCatalogDiagnosticClient {
             status: "ok",
             value: { products: [{ id: 4 }], raw: {} },
             etag: '"product-etag"',
+            contentHash: "product-hash",
+            usage: NO_USAGE,
           } as const);
     },
   };
@@ -150,6 +159,8 @@ describe("National Catalog production live diagnostic", () => {
           status: "ok",
           value: { products: Array.from({ length: resultCount }, () => ({})), raw: {} },
           etag: null,
+          contentHash: "feed-product-hash",
+          usage: NO_USAGE,
         } as const;
       };
 
@@ -185,6 +196,8 @@ describe("National Catalog production live diagnostic", () => {
           status: "ok",
           value: { products: Array.from({ length: resultCount }, () => ({})), raw: {} },
           etag: '"product-etag"',
+          contentHash: "product-hash",
+          usage: NO_USAGE,
         } as const;
       };
 

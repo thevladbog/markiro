@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { createHash } from "node:crypto";
 
 import {
   productionNationalCatalogClientDependencies,
@@ -6,11 +7,14 @@ import {
   type NationalCatalogAttributesRequest,
   type NationalCatalogAttributesResponse,
   type NationalCatalogAuth,
+  type NationalCatalogCategoriesRequest,
   type NationalCatalogCategoriesResponse,
   type NationalCatalogCategory,
   type NationalCatalogClientDependencies,
   type NationalCatalogDependentAttribute,
   type NationalCatalogDependentAttributeRule,
+  type NationalCatalogEtagsRequest,
+  type NationalCatalogEtagsResponse,
   type NationalCatalogProduct,
   type NationalCatalogProductAttribute,
   type NationalCatalogProductCategory,
@@ -24,10 +28,19 @@ export type { NationalCatalogClientDependencies } from "./national-catalog.types
 
 const CATEGORIES_PATH = "/v3/categories";
 const ATTRIBUTES_PATH = "/v3/attributes";
+const ETAGS_PATH = "/v3/etagslist";
 const FEED_PRODUCT_PATH = "/v3/feed-product";
 const PRODUCT_PATH = "/v3/product";
 export const NATIONAL_CATALOG_PRODUCT_BATCH_LIMIT = 25;
+export const NATIONAL_CATALOG_RESPONSE_BYTE_LIMITS = {
+  categories: 4 * 1024 * 1024,
+  attributes: 16 * 1024 * 1024,
+  products: 16 * 1024 * 1024,
+  etags: 1024 * 1024,
+} as const;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+const REJECTION_RESPONSE_BYTE_LIMIT = 64 * 1024;
+const ETAGS_PAGE_LIMIT = 100;
 const ATTRIBUTE_TYPES = ["a", "b", "m", "r", "o"] as const;
 
 @Injectable()
@@ -39,16 +52,41 @@ export class NationalCatalogClient {
 
   async listCategories(
     auth: NationalCatalogAuth,
-    options: NationalCatalogRequestOptions = {},
+    options: NationalCatalogCategoriesRequest = {},
   ): Promise<NationalCatalogResult<NationalCatalogCategoriesResponse>> {
-    return this.request(auth, CATEGORIES_PATH, options, parseCategories);
+    return this.request(
+      auth,
+      categoriesPath(options),
+      options,
+      NATIONAL_CATALOG_RESPONSE_BYTE_LIMITS.categories,
+      parseCategories,
+    );
   }
 
   async getAttributes(
     auth: NationalCatalogAuth,
     options: NationalCatalogAttributesRequest = {},
   ): Promise<NationalCatalogResult<NationalCatalogAttributesResponse>> {
-    return this.request(auth, attributesPath(options), options, parseAttributes);
+    return this.request(
+      auth,
+      attributesPath(options),
+      options,
+      NATIONAL_CATALOG_RESPONSE_BYTE_LIMITS.attributes,
+      parseAttributes,
+    );
+  }
+
+  async listEtags(
+    auth: NationalCatalogAuth,
+    options: NationalCatalogEtagsRequest = {},
+  ): Promise<NationalCatalogResult<NationalCatalogEtagsResponse>> {
+    return this.request(
+      auth,
+      etagsPath(options),
+      options,
+      NATIONAL_CATALOG_RESPONSE_BYTE_LIMITS.etags,
+      parseEtags,
+    );
   }
 
   async getFeedProducts(
@@ -56,7 +94,13 @@ export class NationalCatalogClient {
     gtins: string[],
     options: NationalCatalogRequestOptions = {},
   ): Promise<NationalCatalogResult<NationalCatalogProductsResponse>> {
-    return this.request(auth, productPath(FEED_PRODUCT_PATH, gtins), options, parseProducts);
+    return this.request(
+      auth,
+      productPath(FEED_PRODUCT_PATH, gtins),
+      options,
+      NATIONAL_CATALOG_RESPONSE_BYTE_LIMITS.products,
+      parseProducts,
+    );
   }
 
   async getPublishedProducts(
@@ -64,13 +108,20 @@ export class NationalCatalogClient {
     gtins: string[],
     options: NationalCatalogRequestOptions = {},
   ): Promise<NationalCatalogResult<NationalCatalogProductsResponse>> {
-    return this.request(auth, productPath(PRODUCT_PATH, gtins), options, parseProducts);
+    return this.request(
+      auth,
+      productPath(PRODUCT_PATH, gtins),
+      options,
+      NATIONAL_CATALOG_RESPONSE_BYTE_LIMITS.products,
+      parseProducts,
+    );
   }
 
   private async request<T>(
     auth: NationalCatalogAuth,
     path: string,
     options: NationalCatalogRequestOptions,
+    responseByteLimit: number,
     parse: (payload: unknown) => T | null,
   ): Promise<NationalCatalogResult<T>> {
     const controller = new AbortController();
@@ -90,7 +141,10 @@ export class NationalCatalogClient {
       if (response.status === 304) return { status: "not_modified" };
       if (response.status === 401) return { status: "unauthorized" };
       if (response.status === 403) {
-        return { status: "forbidden", message: await rejectionMessage(response) };
+        return {
+          status: "forbidden",
+          message: await rejectionMessage(response, controller),
+        };
       }
       if (response.status === 404) return { status: "not_found" };
       if (response.status === 429) {
@@ -103,15 +157,26 @@ export class NationalCatalogClient {
       if (response.status >= 400 && response.status < 500) return { status: "invalid_response" };
       if (!response.ok) return { status: "unavailable" };
 
+      const bytes = await readResponseBytes(response, responseByteLimit, controller);
+      if (bytes === null) return { status: "invalid_response" };
       let payload: unknown;
       try {
-        payload = await response.json();
+        payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
       } catch {
         return { status: "invalid_response" };
       }
       const value = parse(payload);
       if (value === null) return { status: "invalid_response" };
-      return { status: "ok", value, etag: response.headers.get("etag") };
+      return {
+        status: "ok",
+        value,
+        etag: response.headers.get("etag"),
+        contentHash: createHash("sha256").update(bytes).digest("hex"),
+        usage: {
+          total: usageValue(response.headers.get("API-Usage-Limit")),
+          method: usageValue(response.headers.get("API-Method-Usage-Limit")),
+        },
+      };
     } catch {
       return { status: "unavailable" };
     } finally {
@@ -120,17 +185,25 @@ export class NationalCatalogClient {
   }
 }
 
+function categoriesPath(options: NationalCatalogCategoriesRequest): string {
+  const { catId, gismtCode, tnved } = options;
+  validatePositiveInteger(catId, "catId");
+  validatePositiveInteger(gismtCode, "gismtCode");
+  validateTnved(tnved);
+  const query = new URLSearchParams();
+  if (catId !== undefined) query.set("cat_id", String(catId));
+  if (gismtCode !== undefined) query.set("gismt_code", String(gismtCode));
+  if (tnved !== undefined) query.set("tnved", tnved);
+  return withQuery(CATEGORIES_PATH, query);
+}
+
 function attributesPath(options: NationalCatalogAttributesRequest): string {
   const { catId, tnved, isSet, attrType } = options;
   if (catId !== undefined && tnved !== undefined) {
     throw new TypeError("National Catalog attribute selectors cannot combine catId and tnved");
   }
-  if (catId !== undefined && (!Number.isSafeInteger(catId) || catId < 1)) {
-    throw new TypeError("National Catalog catId must be a positive integer");
-  }
-  if (tnved !== undefined && !/^\d{4,10}$/.test(tnved)) {
-    throw new TypeError("National Catalog tnved must contain four to 10 digits");
-  }
+  validatePositiveInteger(catId, "catId");
+  validateTnved(tnved);
   if (isSet !== undefined && typeof isSet !== "boolean") {
     throw new TypeError("National Catalog isSet must be a boolean");
   }
@@ -146,8 +219,25 @@ function attributesPath(options: NationalCatalogAttributesRequest): string {
   if (tnved !== undefined) query.set("tnved", tnved);
   if (isSet !== undefined) query.set("is_set", isSet ? "1" : "0");
   if (attrType !== undefined) query.set("attr_type", attrType);
-  const serialized = query.toString();
-  return serialized.length > 0 ? `${ATTRIBUTES_PATH}?${serialized}` : ATTRIBUTES_PATH;
+  return withQuery(ATTRIBUTES_PATH, query);
+}
+
+function etagsPath(options: NationalCatalogEtagsRequest): string {
+  const { brandId, ownerInn, catId, offset } = options;
+  validatePositiveInteger(brandId, "brandId");
+  validatePositiveInteger(catId, "catId");
+  if (offset !== undefined && (!Number.isSafeInteger(offset) || offset < 0)) {
+    throw new TypeError("National Catalog offset must be a non-negative integer");
+  }
+  if (ownerInn !== undefined && !isValidInn(ownerInn)) {
+    throw new TypeError("National Catalog ownerInn must be a valid INN");
+  }
+  const query = new URLSearchParams();
+  if (brandId !== undefined) query.set("brand_id", String(brandId));
+  if (ownerInn !== undefined) query.set("owner_inn", ownerInn);
+  if (catId !== undefined) query.set("cat_id", String(catId));
+  if (offset !== undefined) query.set("offset", String(offset));
+  return withQuery(ETAGS_PATH, query);
 }
 
 function productPath(
@@ -173,15 +263,78 @@ function urlFor(baseUrl: string, path: string): string {
   return new URL(path, `${base.toString().replace(/\/$/, "")}/`).toString();
 }
 
-async function rejectionMessage(response: Response): Promise<string> {
+async function rejectionMessage(response: Response, controller: AbortController): Promise<string> {
   try {
-    const payload: unknown = await response.json();
+    const bytes = await readResponseBytes(response, REJECTION_RESPONSE_BYTE_LIMIT, controller);
+    if (bytes === null) return "";
+    const payload: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
     const record = asRecord(payload);
     const message = record?.error_message ?? record?.errorMessage ?? record?.message;
-    return typeof message === "string" ? message.slice(0, 500) : "";
+    return typeof message === "string" ? sanitizeRejectionMessage(message) : "";
   } catch {
     return "";
   }
+}
+
+function sanitizeRejectionMessage(message: string): string {
+  return [...message]
+    .map((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint < 32 || codePoint === 127 ? " " : character;
+    })
+    .join("")
+    .slice(0, 500);
+}
+
+async function readResponseBytes(
+  response: Response,
+  limit: number,
+  controller: AbortController,
+): Promise<Uint8Array | null> {
+  const declaredLength = response.headers.get("content-length");
+  if (declaredLength && /^\d+$/.test(declaredLength) && Number(declaredLength) > limit) {
+    controller.abort();
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
+  if (!response.body) return null;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) {
+        controller.abort();
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+function usageValue(value: string | null): { used: number; limit: number } | null {
+  const match = /^(\d+)\/(\d+)$/.exec(value ?? "");
+  if (!match) return null;
+  const used = Number(match[1]);
+  const limit = Number(match[2]);
+  return Number.isSafeInteger(used) && Number.isSafeInteger(limit) && limit > 0 && used <= limit
+    ? { used, limit }
+    : null;
 }
 
 function retryAfterSeconds(response: Response): number | null {
@@ -189,6 +342,37 @@ function retryAfterSeconds(response: Response): number | null {
   if (!value || !/^\d+$/.test(value)) return null;
   const seconds = Number(value);
   return Number.isSafeInteger(seconds) ? seconds : null;
+}
+
+function validatePositiveInteger(value: number | undefined, name: string): void {
+  if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) {
+    throw new TypeError(`National Catalog ${name} must be a positive integer`);
+  }
+}
+
+function validateTnved(value: string | undefined): void {
+  if (value !== undefined && !/^\d{4,10}$/.test(value)) {
+    throw new TypeError("National Catalog tnved must contain four to 10 digits");
+  }
+}
+
+function withQuery(path: string, query: URLSearchParams): string {
+  const serialized = query.toString();
+  return serialized.length > 0 ? `${path}?${serialized}` : path;
+}
+
+function isValidInn(value: string): boolean {
+  if (!/^\d{10}(?:\d{2})?$/.test(value)) return false;
+  const digits = [...value].map(Number);
+  const checksum = (weights: number[]): number =>
+    (weights.reduce((sum, weight, index) => sum + weight * (digits[index] ?? 0), 0) % 11) % 10;
+  if (digits.length === 10) {
+    return checksum([2, 4, 10, 3, 5, 9, 4, 6, 8]) === digits[9];
+  }
+  return (
+    checksum([7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) === digits[10] &&
+    checksum([3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) === digits[11]
+  );
 }
 
 function parseCategories(payload: unknown): NationalCatalogCategoriesResponse | null {
@@ -214,9 +398,9 @@ function parseCategories(payload: unknown): NationalCatalogCategoriesResponse | 
     ) {
       return null;
     }
-    categories.push({ id, name, parentId, level, active, gismtCodes });
+    categories.push({ id, name, parentId, level, active, gismtCodes, raw: record });
   }
-  return { categories, raw: envelope.raw };
+  return { categories };
 }
 
 function parseAttributes(payload: unknown): NationalCatalogAttributesResponse | null {
@@ -276,9 +460,10 @@ function parseAttributes(payload: unknown): NationalCatalogAttributesResponse | 
       type,
       preset,
       presetUrl,
+      raw: record,
     });
   }
-  return { attributes, raw: envelope.raw };
+  return { attributes };
 }
 
 function parseProducts(payload: unknown): NationalCatalogProductsResponse | null {
@@ -290,7 +475,42 @@ function parseProducts(payload: unknown): NationalCatalogProductsResponse | null
     if (!product) return null;
     products.push(product);
   }
-  return { products, raw: envelope.raw };
+  return { products };
+}
+
+function parseEtags(payload: unknown): NationalCatalogEtagsResponse | null {
+  const envelope = asRecord(payload);
+  const result = asRecord(envelope?.result);
+  if (!envelope || envelope.apiversion !== 3 || !result) return null;
+  const goodsCount = nonNegativeInteger(result.goods_count);
+  const offset = nonNegativeInteger(result.offset);
+  const lastProductNumber = nonNegativeInteger(result.last_product_number);
+  const total = nonNegativeInteger(result.total);
+  const rows = array(result.goods);
+  if (
+    goodsCount === null ||
+    offset === null ||
+    lastProductNumber === null ||
+    total === null ||
+    !rows ||
+    rows.length > ETAGS_PAGE_LIMIT ||
+    goodsCount !== rows.length ||
+    lastProductNumber !== offset + goodsCount ||
+    total < lastProductNumber
+  ) {
+    return null;
+  }
+  const goods: NationalCatalogEtagsResponse["goods"] = [];
+  for (const row of rows) {
+    const record = asRecord(row);
+    const goodId = positiveInteger(record?.good_id);
+    const etag = string(record?.etag);
+    if (!record || goodId === null || etag === null || !/^[!-~]{1,512}$/.test(etag)) {
+      return null;
+    }
+    goods.push({ goodId, etag });
+  }
+  return { goodsCount, offset, lastProductNumber, total, goods };
 }
 
 function parseProduct(value: unknown): NationalCatalogProduct | null {
@@ -312,7 +532,7 @@ function parseProduct(value: unknown): NationalCatalogProduct | null {
   ) {
     return null;
   }
-  return { id, name, status, identifiers, categories, attributes };
+  return { id, name, status, identifiers, categories, attributes, raw: record };
 }
 
 function parseIdentifiers(value: unknown): NationalCatalogProductIdentifier[] | null {
@@ -401,12 +621,10 @@ function parseProductAttributes(value: unknown): NationalCatalogProductAttribute
   return attributes;
 }
 
-function responseEnvelope(
-  payload: unknown,
-): { raw: Record<string, unknown>; result: unknown[] } | null {
-  const raw = asRecord(payload);
-  if (!raw || raw.apiversion !== 3 || !Array.isArray(raw.result)) return null;
-  return { raw, result: raw.result };
+function responseEnvelope(payload: unknown): { result: unknown[] } | null {
+  const envelope = asRecord(payload);
+  if (!envelope || envelope.apiversion !== 3 || !Array.isArray(envelope.result)) return null;
+  return { result: envelope.result };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -433,6 +651,14 @@ function nullableString(value: unknown): string | null | undefined {
 
 function number(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function nonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function positiveInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 function nullableNumber(value: unknown): number | null | undefined {

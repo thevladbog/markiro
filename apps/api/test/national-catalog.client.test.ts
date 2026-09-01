@@ -1,11 +1,18 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import {
+  NATIONAL_CATALOG_RESPONSE_BYTE_LIMITS,
   NationalCatalogClient,
   type NationalCatalogClientDependencies,
 } from "../src/modules/national-catalog/national-catalog.client";
 
 const auth = { baseUrl: "https://catalog.example.test", token: "catalog-token" };
+
+function contentHash(payload: unknown): string {
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
 
 function dependencies(
   fetchImpl: NationalCatalogClientDependencies["fetch"],
@@ -94,6 +101,8 @@ describe("NationalCatalogClient", () => {
     await expect(client.listCategories(auth, { ifNoneMatch: '"categories-v0"' })).resolves.toEqual({
       status: "ok",
       etag: '"categories-v1"',
+      contentHash: contentHash(categoryPayload),
+      usage: { total: null, method: null },
       value: {
         categories: [
           {
@@ -103,9 +112,9 @@ describe("NationalCatalogClient", () => {
             level: 2,
             active: true,
             gismtCodes: [7],
+            raw: categoryPayload.result[0],
           },
         ],
-        raw: categoryPayload,
       },
     });
     expect(calls).toHaveLength(1);
@@ -125,6 +134,8 @@ describe("NationalCatalogClient", () => {
     await expect(client.getAttributes(auth)).resolves.toEqual({
       status: "ok",
       etag: null,
+      contentHash: contentHash(attributePayload),
+      usage: { total: null, method: null },
       value: {
         attributes: [
           {
@@ -143,9 +154,9 @@ describe("NationalCatalogClient", () => {
             type: "m",
             preset: ["ДУХИ"],
             presetUrl: null,
+            raw: attributePayload.result[0],
           },
         ],
-        raw: attributePayload,
       },
     });
   });
@@ -185,6 +196,162 @@ describe("NationalCatalogClient", () => {
       "National Catalog tnved must contain four to 10 digits",
     );
     expect(calls).toHaveLength(2);
+  });
+
+  it("serializes and validates the documented category selectors", async () => {
+    const calls: string[] = [];
+    const client = new NationalCatalogClient(
+      dependencies(async (url) => {
+        calls.push(String(url));
+        return new Response(JSON.stringify(categoryPayload), { status: 200 });
+      }),
+    );
+
+    await expect(
+      client.listCategories(auth, { catId: 30064, gismtCode: 7, tnved: "3303001000" }),
+    ).resolves.toMatchObject({ status: "ok" });
+    expect(calls).toEqual([
+      "https://catalog.example.test/v3/categories?cat_id=30064&gismt_code=7&tnved=3303001000",
+    ]);
+
+    await expect(client.listCategories(auth, { catId: 0 })).rejects.toThrow(
+      "National Catalog catId must be a positive integer",
+    );
+    await expect(client.listCategories(auth, { gismtCode: -1 })).rejects.toThrow(
+      "National Catalog gismtCode must be a positive integer",
+    );
+    await expect(client.listCategories(auth, { tnved: "33-03" })).rejects.toThrow(
+      "National Catalog tnved must contain four to 10 digits",
+    );
+    expect(calls).toHaveLength(1);
+  });
+
+  it("reads and strictly validates a documented etagslist page", async () => {
+    const calls: string[] = [];
+    const payload = {
+      apiversion: 3,
+      result: {
+        goods_count: 2,
+        offset: 100,
+        last_product_number: 102,
+        total: 102,
+        goods: [
+          { good_id: 720679, etag: "32b3502ff24f7c30" },
+          { good_id: 720680, etag: "8529021f8808aaa9" },
+        ],
+      },
+    };
+    const client = new NationalCatalogClient(
+      dependencies(async (url) => {
+        calls.push(String(url));
+        return new Response(JSON.stringify(payload), { status: 200 });
+      }),
+    );
+
+    await expect(
+      client.listEtags(auth, {
+        brandId: 42,
+        ownerInn: "7707083893",
+        catId: 30064,
+        offset: 100,
+      }),
+    ).resolves.toMatchObject({
+      status: "ok",
+      value: {
+        goodsCount: 2,
+        offset: 100,
+        lastProductNumber: 102,
+        total: 102,
+        goods: [
+          { goodId: 720679, etag: "32b3502ff24f7c30" },
+          { goodId: 720680, etag: "8529021f8808aaa9" },
+        ],
+      },
+    });
+    expect(calls).toEqual([
+      "https://catalog.example.test/v3/etagslist?brand_id=42&owner_inn=7707083893&cat_id=30064&offset=100",
+    ]);
+
+    await expect(client.listEtags(auth, { brandId: 0 })).rejects.toThrow(
+      "National Catalog brandId must be a positive integer",
+    );
+    await expect(client.listEtags(auth, { catId: 1.5 })).rejects.toThrow(
+      "National Catalog catId must be a positive integer",
+    );
+    await expect(client.listEtags(auth, { offset: -1 })).rejects.toThrow(
+      "National Catalog offset must be a non-negative integer",
+    );
+    await expect(client.listEtags(auth, { ownerInn: "012345" })).rejects.toThrow(
+      "National Catalog ownerInn must be a valid INN",
+    );
+    expect(calls).toHaveLength(1);
+  });
+
+  it("rejects oversized, inconsistent, and malformed etagslist pages", async () => {
+    const valid = {
+      goods_count: 1,
+      offset: 0,
+      last_product_number: 1,
+      total: 1,
+      goods: [{ good_id: 1, etag: "etag-1" }],
+    };
+    const payloads = [
+      { ...valid, goods_count: 2 },
+      { ...valid, last_product_number: 0 },
+      { ...valid, total: 0 },
+      { ...valid, goods: [{ good_id: 0, etag: "etag-1" }] },
+      { ...valid, goods: [{ good_id: 1, etag: "" }] },
+      { ...valid, goods: [{ good_id: 1, etag: "bad etag" }] },
+      {
+        goods_count: 101,
+        offset: 0,
+        last_product_number: 101,
+        total: 101,
+        goods: Array.from({ length: 101 }, (_, index) => ({
+          good_id: index + 1,
+          etag: `etag-${index + 1}`,
+        })),
+      },
+    ];
+
+    for (const result of payloads) {
+      const client = new NationalCatalogClient(
+        dependencies(
+          async () => new Response(JSON.stringify({ apiversion: 3, result }), { status: 200 }),
+        ),
+      );
+      await expect(client.listEtags(auth)).resolves.toEqual({ status: "invalid_response" });
+    }
+
+    const fullPageGoods = Array.from({ length: 100 }, (_, index) => ({
+      good_id: index + 1,
+      etag: `etag-${index + 1}`,
+    }));
+    const fullPage = new NationalCatalogClient(
+      dependencies(
+        async () =>
+          new Response(
+            JSON.stringify({
+              apiversion: 3,
+              result: {
+                goods_count: 100,
+                offset: 0,
+                last_product_number: 100,
+                total: 100,
+                goods: fullPageGoods,
+              },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    await expect(fullPage.listEtags(auth)).resolves.toMatchObject({
+      status: "ok",
+      value: {
+        goodsCount: 100,
+        goods: expect.arrayContaining([{ goodId: 100, etag: "etag-100" }]),
+      },
+    });
   });
 
   it("normalizes omitted optional category and attribute fields to safe empty values", async () => {
@@ -494,6 +661,152 @@ describe("NationalCatalogClient", () => {
       }),
     );
     await expect(network.listCategories(auth)).resolves.toEqual({ status: "unavailable" });
+  });
+
+  it("parses optional usage metadata and hashes the exact successful response bytes", async () => {
+    const body = `${JSON.stringify(categoryPayload)}\n`;
+    const client = new NationalCatalogClient(
+      dependencies(
+        async () =>
+          new Response(body, {
+            status: 200,
+            headers: {
+              "API-Usage-Limit": "1/500",
+              "API-Method-Usage-Limit": "1/10",
+            },
+          }),
+      ),
+    );
+
+    await expect(client.listCategories(auth)).resolves.toMatchObject({
+      status: "ok",
+      contentHash: createHash("sha256").update(body).digest("hex"),
+      usage: {
+        total: { used: 1, limit: 500 },
+        method: { used: 1, limit: 10 },
+      },
+    });
+
+    const malformed = new NationalCatalogClient(
+      dependencies(
+        async () =>
+          new Response(JSON.stringify(categoryPayload), {
+            status: 200,
+            headers: {
+              "API-Usage-Limit": "used/limit",
+              "API-Method-Usage-Limit": "11/10",
+            },
+          }),
+      ),
+    );
+    await expect(malformed.listCategories(auth)).resolves.toMatchObject({
+      status: "ok",
+      usage: { total: null, method: null },
+    });
+  });
+
+  it("accepts the exact method body bound and rejects one byte over before parsing", async () => {
+    const json = JSON.stringify({ apiversion: 3, result: [] });
+    const atBound = `${json}${" ".repeat(
+      NATIONAL_CATALOG_RESPONSE_BYTE_LIMITS.categories - Buffer.byteLength(json),
+    )}`;
+    const overBound = `${atBound} `;
+    let cancelled = 0;
+    const client = new NationalCatalogClient(
+      dependencies(
+        async (_url, init) => {
+          const conditional = new Headers((init as RequestInit).headers).get("If-None-Match");
+          return new Response(conditional === "over" ? overBound : atBound, { status: 200 });
+        },
+        () => () => {
+          cancelled += 1;
+        },
+      ),
+    );
+
+    await expect(client.listCategories(auth)).resolves.toMatchObject({ status: "ok" });
+    await expect(client.listCategories(auth, { ifNoneMatch: "over" })).resolves.toEqual({
+      status: "invalid_response",
+    });
+    expect(cancelled).toBe(2);
+  });
+
+  it("classifies invalid UTF-8, invalid JSON, and a truncated successful stream as invalid_response", async () => {
+    const invalidUtf8 = new NationalCatalogClient(
+      dependencies(async () => new Response(new Uint8Array([0xc3, 0x28]), { status: 200 })),
+    );
+    await expect(invalidUtf8.listCategories(auth)).resolves.toEqual({
+      status: "invalid_response",
+    });
+
+    const invalidJson = new NationalCatalogClient(
+      dependencies(async () => new Response("{", { status: 200 })),
+    );
+    await expect(invalidJson.listCategories(auth)).resolves.toEqual({
+      status: "invalid_response",
+    });
+
+    const truncated = new NationalCatalogClient(
+      dependencies(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode('{"apiversion":3,"result":['));
+                controller.error(new Error("truncated"));
+              },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    await expect(truncated.listCategories(auth)).resolves.toEqual({
+      status: "invalid_response",
+    });
+  });
+
+  it("always clears the scheduled abort after a transport failure", async () => {
+    let cancelled = false;
+    const client = new NationalCatalogClient(
+      dependencies(
+        async () => {
+          throw new Error("connection reset");
+        },
+        () => () => {
+          cancelled = true;
+        },
+      ),
+    );
+
+    await expect(client.listCategories(auth)).resolves.toEqual({ status: "unavailable" });
+    expect(cancelled).toBe(true);
+  });
+
+  it("retains raw provider data only at each item boundary", async () => {
+    const providerHeaderSentinel = "must-not-enter-raw-data";
+    const client = new NationalCatalogClient(
+      dependencies(
+        async () =>
+          new Response(JSON.stringify(productPayload), {
+            status: 200,
+            headers: {
+              Authorization: providerHeaderSentinel,
+              "API-Usage-Limit": "1/500",
+            },
+          }),
+      ),
+    );
+
+    const result = await client.getPublishedProducts(auth, ["0000000000001"]);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected successful product response");
+    expect(result.value).not.toHaveProperty("raw");
+    expect(result.value.products[0]?.raw).toEqual(productPayload.result[0]);
+    expect(JSON.stringify(result.value.products[0]?.raw)).toContain(
+      "kept out of the normalized record",
+    );
+    expect(JSON.stringify(result.value.products[0]?.raw)).not.toContain(providerHeaderSentinel);
+    expect(JSON.stringify(result.value.products[0]?.raw)).not.toContain("API-Usage-Limit");
   });
 
   it("cancels the request using the configured timeout and maps an abort to unavailable", async () => {
