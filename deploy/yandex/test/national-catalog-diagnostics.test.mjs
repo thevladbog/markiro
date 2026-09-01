@@ -304,7 +304,7 @@ test("hosted National Catalog CLI prints safe evidence before failing a refused 
   assert.doesNotMatch(stdout, /token|gtin|tenant|provider detail/i);
 });
 
-test("hosted National Catalog CLI reduces private failures to one fixed line", async () => {
+test("hosted National Catalog CLI reduces unclassified private failures to a fixed stage", async () => {
   let stdout = "";
   let stderr = "";
   const exitCode = await runNationalCatalogDiagnosticsCli({
@@ -317,5 +317,192 @@ test("hosted National Catalog CLI reduces private failures to one fixed line", a
   });
   assert.equal(exitCode, 1);
   assert.equal(stdout, "");
-  assert.equal(stderr, "MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS_FAILURE\n");
+  assert.equal(stderr, 'MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS_FAILURE {"stage":"unknown"}\n');
+  assert.doesNotMatch(stderr, /private-bearer-token|tenant-id|gtin/);
+});
+
+test("hosted National Catalog CLI classifies the boundary that lost API evidence", async () => {
+  for (const testCase of [
+    {
+      name: "container discovery",
+      outputs: ["private-container-output\n"],
+      stage: "api-container-discovery",
+    },
+    {
+      name: "API CLI transport",
+      outputs: ["a1b2c3d4e5f6\tapi\n"],
+      runDiagnostic: async () => {
+        throw new Error("private SSH or Docker detail");
+      },
+      stage: "api-cli-transport",
+    },
+    {
+      name: "missing API evidence",
+      outputs: ["a1b2c3d4e5f6\tapi\n", { exitCode: 1, stdout: "" }],
+      stage: "api-cli-evidence-missing",
+    },
+    {
+      name: "invalid API evidence",
+      outputs: ["a1b2c3d4e5f6\tapi\n", { exitCode: 1, stdout: "private malformed evidence\n" }],
+      stage: "api-cli-evidence-invalid",
+    },
+  ]) {
+    let stdout = "";
+    let stderr = "";
+    const supplied = dependencies(testCase.outputs);
+    if (testCase.runDiagnostic) supplied.runDiagnostic = testCase.runDiagnostic;
+    const exitCode = await runNationalCatalogDiagnosticsCli({
+      argv: ["run"],
+      environment: HOSTED_ENVIRONMENT,
+      supplied,
+      stdout: { write: (value) => (stdout += value) },
+      stderr: { write: (value) => (stderr += value) },
+    });
+
+    assert.equal(exitCode, 1, testCase.name);
+    assert.equal(stdout, "", testCase.name);
+    assert.equal(
+      stderr,
+      `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS_FAILURE {"stage":"${testCase.stage}"}\n`,
+      testCase.name,
+    );
+    assert.doesNotMatch(stderr, /private|container-output|SSH|Docker/i, testCase.name);
+  }
+});
+
+test("hosted National Catalog CLI revalidates a tampered typed stage before serialization", async () => {
+  let typedFailure;
+  try {
+    await runHostedNationalCatalogDiagnostics(
+      { ...HOSTED_ENVIRONMENT, YC_APP_DEPLOY_LOGIN: "private-login" },
+      dependencies([]),
+    );
+  } catch (error) {
+    typedFailure = error;
+  }
+  assert.ok(typedFailure instanceof Error);
+  typedFailure.stage = "private-tenant-id";
+
+  let stderr = "";
+  const exitCode = await runNationalCatalogDiagnosticsCli({
+    argv: ["run"],
+    runDiagnostics: async () => {
+      throw typedFailure;
+    },
+    stdout: { write: () => undefined },
+    stderr: { write: (value) => (stderr += value) },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(stderr, 'MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS_FAILURE {"stage":"unknown"}\n');
+  assert.doesNotMatch(stderr, /private|tenant|login/i);
+});
+
+test("hosted National Catalog CLI classifies remaining host stages and preserves primary failure", async () => {
+  const refused = {
+    version: 2,
+    passed: false,
+    sourceStatus: "active-token-missing",
+    checks: [],
+  };
+  const cases = [
+    {
+      name: "configuration",
+      environment: { ...HOSTED_ENVIRONMENT, YC_APP_DEPLOY_LOGIN: "private-login" },
+      supplied: dependencies([]),
+      stage: "configuration",
+    },
+    {
+      name: "credential validation",
+      environment: HOSTED_ENVIRONMENT,
+      supplied: {
+        ...dependencies([]),
+        validatePrivateKey: async () => {
+          throw new Error("private credential detail");
+        },
+      },
+      stage: "credential-validation",
+    },
+    {
+      name: "workspace setup",
+      environment: HOSTED_ENVIRONMENT,
+      supplied: {
+        ...dependencies([]),
+        mkdtemp: async () => {
+          throw new Error("private workspace detail");
+        },
+      },
+      stage: "workspace-setup",
+    },
+    {
+      name: "unexpected API CLI exit",
+      environment: HOSTED_ENVIRONMENT,
+      supplied: dependencies([
+        "a1b2c3d4e5f6\tapi\n",
+        { exitCode: 2, stdout: "private ignored output\n" },
+      ]),
+      stage: "api-cli-exit",
+    },
+    {
+      name: "API CLI exit mismatch",
+      environment: HOSTED_ENVIRONMENT,
+      supplied: dependencies([
+        "a1b2c3d4e5f6\tapi\n",
+        {
+          exitCode: 0,
+          stdout: `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(refused)}\n`,
+        },
+      ]),
+      stage: "api-cli-exit-mismatch",
+    },
+    {
+      name: "cleanup",
+      environment: HOSTED_ENVIRONMENT,
+      supplied: {
+        ...dependencies([
+          "a1b2c3d4e5f6\tapi\n",
+          `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(EVIDENCE)}\n`,
+        ]),
+        rm: async () => {
+          throw new Error("private cleanup detail");
+        },
+      },
+      stage: "cleanup",
+    },
+    {
+      name: "primary failure wins over cleanup",
+      environment: HOSTED_ENVIRONMENT,
+      supplied: {
+        ...dependencies(["private-container-output\n"]),
+        rm: async () => {
+          throw new Error("private cleanup detail");
+        },
+      },
+      stage: "api-container-discovery",
+    },
+  ];
+
+  for (const testCase of cases) {
+    let stdout = "";
+    let stderr = "";
+    const exitCode = await runNationalCatalogDiagnosticsCli({
+      argv: ["run"],
+      environment: testCase.environment,
+      supplied: testCase.supplied,
+      stdout: { write: (value) => (stdout += value) },
+      stderr: { write: (value) => (stderr += value) },
+    });
+
+    assert.equal(exitCode, 1, testCase.name);
+    assert.equal(stdout, "", testCase.name);
+    assert.equal(
+      stderr,
+      `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS_FAILURE {"stage":"${testCase.stage}"}\n`,
+      testCase.name,
+    );
+    assert.doesNotMatch(
+      stderr,
+      /private-login|private credential detail|private workspace detail|private cleanup detail|private-container-output/i,
+    );
+  }
 });
