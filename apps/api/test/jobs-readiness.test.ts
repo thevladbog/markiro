@@ -4,6 +4,8 @@ import type { WipData, WorkerState } from "pg-boss";
 import {
   BUILD_INVENTORY_DOCUMENT_QUEUE,
   BUILD_SHIFT_EXPORT_QUEUE,
+  NATIONAL_CATALOG_PRODUCT_FRESHNESS_QUEUE,
+  NATIONAL_CATALOG_SCHEMA_REFRESH_QUEUE,
   PgBossService,
 } from "../src/jobs/jobs.module";
 import type { ExchangeSessionService } from "../src/modules/exchange/exchange-session.service";
@@ -38,7 +40,7 @@ vi.mock("@markiro/db", async (importOriginal) => {
   };
 });
 
-const WORKER_IDS = Array.from({ length: 15 }, (_, index) => `worker-${index + 1}`);
+const WORKER_IDS = Array.from({ length: 17 }, (_, index) => `worker-${index + 1}`);
 
 function wip(id: string, state: WorkerState = "active"): WipData {
   return {
@@ -69,6 +71,7 @@ function fakeBoss(options: { workIds?: string[]; failWorkAt?: number } = {}) {
     stop: vi.fn(async () => undefined),
     createQueue: vi.fn(async () => undefined),
     schedule: vi.fn(async () => undefined),
+    unschedule: vi.fn(async () => undefined),
     work: vi.fn(async (_name?: string) => {
       const index = workIndex;
       workIndex += 1;
@@ -99,7 +102,10 @@ function fakeBoss(options: { workIds?: string[]; failWorkAt?: number } = {}) {
   return boss;
 }
 
-function serviceWith(boss: ReturnType<typeof fakeBoss>) {
+function serviceWith(
+  boss: ReturnType<typeof fakeBoss>,
+  options: { nationalCatalogSchemaSourceTenantId?: string } = {},
+) {
   pgBossMock.instances.push(boss);
   // `.orderBy().limit()` (shift export / inventory document reconciliation)
   // and `.groupBy().orderBy().limit()` (chz export reconciliation) both
@@ -164,6 +170,9 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
       chzExportRunner,
       chzCodeStatusIngest,
       chzCodeStatusRefresh,
+      undefined,
+      undefined,
+      options.nationalCatalogSchemaSourceTenantId,
     ),
     subscriptionStatus,
     signerScheduler,
@@ -175,18 +184,58 @@ describe("PgBossService readiness", () => {
     pgBossMock.instances.length = 0;
   });
 
-  it("accepts the exact fifteen successfully registered active workers including document jobs", async () => {
+  it("accepts the exact seventeen successfully registered active workers including National Catalog jobs", async () => {
     const boss = fakeBoss();
     const { service, subscriptionStatus, signerScheduler } = serviceWith(boss);
 
     await service.onModuleInit();
 
     await expect(service.checkReady()).resolves.toBeUndefined();
-    expect(boss.work).toHaveBeenCalledTimes(15);
+    expect(boss.work).toHaveBeenCalledTimes(17);
     expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(BUILD_SHIFT_EXPORT_QUEUE);
     expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(BUILD_INVENTORY_DOCUMENT_QUEUE);
+    expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(
+      NATIONAL_CATALOG_PRODUCT_FRESHNESS_QUEUE,
+    );
+    expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(
+      NATIONAL_CATALOG_SCHEMA_REFRESH_QUEUE,
+    );
+    expect(boss.unschedule).toHaveBeenCalledWith(NATIONAL_CATALOG_SCHEMA_REFRESH_QUEUE);
+    expect(boss.schedule).not.toHaveBeenCalledWith(
+      NATIONAL_CATALOG_SCHEMA_REFRESH_QUEUE,
+      expect.any(String),
+    );
+    expect(boss.createQueue).toHaveBeenCalledWith(NATIONAL_CATALOG_PRODUCT_FRESHNESS_QUEUE, {
+      policy: "stately",
+      retryLimit: 3,
+      retryDelay: 60,
+      retryBackoff: true,
+      retryDelayMax: 900,
+    });
+    expect(boss.createQueue).toHaveBeenCalledWith(NATIONAL_CATALOG_SCHEMA_REFRESH_QUEUE, {
+      policy: "stately",
+      retryLimit: 3,
+      retryDelay: 60,
+      retryBackoff: true,
+      retryDelayMax: 900,
+    });
     expect(subscriptionStatus.run).toHaveBeenCalledTimes(1);
     expect(signerScheduler.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("schedules schema refresh only when a reviewed source tenant is configured", async () => {
+    const boss = fakeBoss();
+    const { service } = serviceWith(boss, {
+      nationalCatalogSchemaSourceTenantId: "source-tenant",
+    });
+
+    await service.onModuleInit();
+
+    expect(boss.unschedule).not.toHaveBeenCalledWith(NATIONAL_CATALOG_SCHEMA_REFRESH_QUEUE);
+    expect(boss.schedule).toHaveBeenCalledWith(
+      NATIONAL_CATALOG_SCHEMA_REFRESH_QUEUE,
+      expect.any(String),
+    );
   });
 
   it.each([

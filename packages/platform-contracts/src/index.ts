@@ -31,6 +31,17 @@ export {
   platformHealthSchema,
   platformOperationsContracts,
 } from "./operations.js";
+export {
+  nationalCatalogAttributeMappingReviewBodySchema,
+  nationalCatalogAttributeMappingReviewResponseSchema,
+  nationalCatalogGroupMappingReviewBodySchema,
+  nationalCatalogGroupMappingReviewResponseSchema,
+  nationalCatalogSchemaActivationResponseSchema,
+  nationalCatalogSchemaRefreshBodySchema,
+  nationalCatalogSchemaRefreshResponseSchema,
+  nationalCatalogSchemaVersionParamsSchema,
+  platformNationalCatalogContracts,
+} from "./national-catalog.js";
 export type {
   OperationsAuditEventSummary,
   OperationsDecisionItem,

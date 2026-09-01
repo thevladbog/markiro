@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   Module,
+  Optional,
   type DynamicModule,
   type OnModuleDestroy,
   type OnModuleInit,
@@ -48,11 +49,18 @@ import {
   MATERIALIZE_SUBSCRIPTION_STATUSES_QUEUE,
   SubscriptionStatusJob,
 } from "../subscriptions/subscription-status.job";
+import { NationalCatalogFreshnessService } from "../modules/national-catalog/national-catalog-freshness.service";
+import { NationalCatalogSchemaService } from "../modules/national-catalog/national-catalog-schema.service";
+import { NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID } from "../modules/national-catalog/national-catalog.tokens";
 
 export const PG_CONNECTION_STRING = "JOBS_PG_CONNECTION_STRING";
 export const BUILD_SHIFT_EXPORT_QUEUE = "build-shift-export";
 export const BUILD_INVENTORY_DOCUMENT_QUEUE = "build-inventory-document-run";
 export const RUN_CHZ_EXPORT_QUEUE = "run-chz-export";
+export const NATIONAL_CATALOG_SCHEMA_REFRESH_QUEUE = "national-catalog-schema-refresh";
+export const NATIONAL_CATALOG_PRODUCT_FRESHNESS_QUEUE = "national-catalog-product-freshness";
+const NATIONAL_CATALOG_SCHEMA_REFRESH_CRON = "15 2 * * *";
+const NATIONAL_CATALOG_PRODUCT_FRESHNESS_CRON = "*/30 * * * *";
 /**
  * One pass per invocation, then re-enqueue: a dispenser task can take minutes,
  * and holding a pg-boss worker that long would starve the queue and lose
@@ -390,6 +398,11 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     private readonly chzExportRunner: ChzExportRunnerService,
     private readonly chzCodeStatusIngest: ChzCodeStatusIngestService,
     private readonly chzCodeStatusRefresh: ChzCodeStatusRefreshService,
+    @Optional() private readonly nationalCatalogFreshness?: NationalCatalogFreshnessService,
+    @Optional() private readonly nationalCatalogSchemas?: NationalCatalogSchemaService,
+    @Optional()
+    @Inject(NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID)
+    private readonly nationalCatalogSchemaSourceTenantId?: string,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -688,6 +701,52 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         }),
       );
 
+      await boss.createQueue(NATIONAL_CATALOG_PRODUCT_FRESHNESS_QUEUE, {
+        policy: "stately",
+        retryLimit: 3,
+        retryDelay: 60,
+        retryBackoff: true,
+        retryDelayMax: 900,
+      });
+      await boss.schedule(
+        NATIONAL_CATALOG_PRODUCT_FRESHNESS_QUEUE,
+        NATIONAL_CATALOG_PRODUCT_FRESHNESS_CRON,
+      );
+      this.workerIds.push(
+        await boss.work(NATIONAL_CATALOG_PRODUCT_FRESHNESS_QUEUE, async () => {
+          await this.nationalCatalogFreshness?.run();
+        }),
+      );
+
+      await boss.createQueue(NATIONAL_CATALOG_SCHEMA_REFRESH_QUEUE, {
+        policy: "stately",
+        retryLimit: 3,
+        retryDelay: 60,
+        retryBackoff: true,
+        retryDelayMax: 900,
+      });
+      if (this.nationalCatalogSchemaSourceTenantId === undefined) {
+        await boss.unschedule(NATIONAL_CATALOG_SCHEMA_REFRESH_QUEUE);
+        this.logger.log(
+          "National Catalog schema refresh disabled: source tenant is not configured",
+        );
+      } else {
+        await boss.schedule(
+          NATIONAL_CATALOG_SCHEMA_REFRESH_QUEUE,
+          NATIONAL_CATALOG_SCHEMA_REFRESH_CRON,
+        );
+      }
+      this.workerIds.push(
+        await boss.work(NATIONAL_CATALOG_SCHEMA_REFRESH_QUEUE, async () => {
+          if (
+            this.nationalCatalogSchemas &&
+            this.nationalCatalogSchemaSourceTenantId !== undefined
+          ) {
+            await this.nationalCatalogSchemas.refresh(this.nationalCatalogSchemaSourceTenantId);
+          }
+        }),
+      );
+
       // Also run all ten maintenance paths once immediately at boot rather
       // than waiting for the first tick of any schedule.
       await this.runEnsurePartitions();
@@ -879,7 +938,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       throw new Error("pg-boss database probe failed");
     }
     if (
-      this.workerIds.length !== 15 ||
+      this.workerIds.length !== 17 ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {
