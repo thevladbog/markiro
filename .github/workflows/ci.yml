@@ -534,6 +534,8 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      result: ${{ steps.result.outputs.result }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -542,6 +544,7 @@ jobs:
         with:
           node-version: 24
       - name: Verify required CI results
+        id: result
         env:
           CI_NEEDS_JSON: ${{ toJSON(needs) }}
         run: node tools/ci/required-results.mjs --needs-env CI_NEEDS_JSON

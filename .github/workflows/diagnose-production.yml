@@ -2,6 +2,12 @@ name: Diagnose production runtime
 
 on:
   workflow_dispatch:
+    inputs:
+      national_catalog:
+        description: Run the read-only National Catalog production contract
+        required: true
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -28,6 +34,7 @@ jobs:
       - name: Diagnose production runtime
         env:
           YC_APP_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.YC_APP_DEPLOY_SSH_PRIVATE_KEY }}
+          RUN_NATIONAL_CATALOG_DIAGNOSTIC: ${{ inputs.national_catalog }}
         run: |
           set -euo pipefail
           umask 077
@@ -38,6 +45,9 @@ jobs:
           chmod 600 "$key_path"
           export YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH="$key_path"
           node deploy/yandex/runtime-diagnostics.mjs run
+          if [[ "$RUN_NATIONAL_CATALOG_DIAGNOSTIC" == "true" ]]; then
+            node deploy/yandex/national-catalog-diagnostics.mjs run
+          fi
 
       - name: Remove local diagnostic credentials
         if: always()

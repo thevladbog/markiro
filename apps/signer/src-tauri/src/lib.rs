@@ -33,6 +33,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         // Autostart is handled by the NSIS installer's `Run` registry hook
         // (`windows/installer-hooks.nsh`), which works without the app ever
         // having run -- the plugin form was registered here too, with its
@@ -116,6 +117,7 @@ pub fn run() {
             commands::signer_list_certificates,
             commands::signer_select_certificate,
             commands::signer_set_server_url,
+            commands::signer_export_journal,
             commands::signer_notify_update,
         ])
         .run(tauri::generate_context!())

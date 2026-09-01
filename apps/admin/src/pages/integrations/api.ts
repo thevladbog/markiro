@@ -475,15 +475,26 @@ export interface SignerAgent {
 /** Mirrors `SignerTokenStatusDto` -- the tenant's current True API token, obtained by whichever agent last authenticated. */
 export interface SignerTokenStatus {
   status: "none" | "active" | "expiring" | "expired";
+  tokenType: "jwt" | "uuid" | null;
   obtainedAt: string | null;
   expiresAt: string | null;
   certThumbprint: string | null;
+}
+
+export interface SignerRefreshTask {
+  id: string;
+  status: "pending" | "claimed" | "completed" | "failed" | "expired";
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  completedAt: string | null;
 }
 
 /** Mirrors `SignerAgentsOverviewDto` -- the full `GET /signer-agents` response. */
 export interface SignerAgentsOverview {
   agents: SignerAgent[];
   token: SignerTokenStatus;
+  refreshTask: SignerRefreshTask | null;
 }
 
 /** Cache key for the signer agents overview. The endpoint is mounted flat (`@Controller("signer-agents")`, no `/integrations` prefix), but the cache key stays nested under the channel so channel-level invalidation covers it. */
@@ -521,6 +532,7 @@ export function issueSignerPairingCode(): Promise<SignerPairingCodeResult> {
 
 export interface SignerTokenRefreshResult {
   status: "queued" | "already_pending";
+  taskId: string;
 }
 
 /** `POST /signer-agents/token-refresh` -- asks the paired agent to renew the tenant's True API token now instead of waiting for the next scheduler pass. */

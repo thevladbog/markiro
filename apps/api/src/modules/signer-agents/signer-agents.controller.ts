@@ -78,8 +78,11 @@ export class SignerAgentsController {
     schema: {
       type: "object",
       additionalProperties: false,
-      required: ["status"],
-      properties: { status: { type: "string", enum: ["queued", "already_pending"] } },
+      required: ["status", "taskId"],
+      properties: {
+        status: { type: "string", enum: ["queued", "already_pending"] },
+        taskId: { type: "string", format: "uuid" },
+      },
     },
   })
   @ApiHttpErrors(401, 403, 409, 503)

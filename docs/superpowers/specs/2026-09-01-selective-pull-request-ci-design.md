@@ -76,14 +76,21 @@ them.
 
 Shared packages fan out according to their current workspace consumers:
 
-| Changed area                  | Required downstream areas                                     |
-| ----------------------------- | ------------------------------------------------------------- |
-| `packages/ui`                 | all web apps, Station, Signer, production bundle              |
-| `packages/domain`             | API, Admin, Kiosk, Landing, Station, production bundle        |
-| `packages/db`                 | API, Admin, Station, tenant infrastructure, production bundle |
-| `packages/email`              | API, tenant infrastructure, production bundle                 |
-| `packages/legal-documents`    | API, Landing, production bundle                               |
-| `packages/platform-contracts` | API, Admin/SaaS Admin, Signer, production bundle              |
+| Changed area                 | Required downstream areas                                     |
+| ---------------------------- | ------------------------------------------------------------- |
+| `packages/ui`                | all web apps, Station, Signer, production bundle              |
+| `packages/domain`            | API, Admin, Kiosk, Landing, Station, production bundle        |
+| `packages/db`                | API, Admin, Station, tenant infrastructure, production bundle |
+| `packages/email`             | API, tenant infrastructure, production bundle                 |
+| `packages/legal-documents`   | API, Landing, production bundle                               |
+| Other platform contracts     | API, Admin/SaaS Admin, production bundle                      |
+| CHZ Signer source + fixtures | API, Admin/SaaS Admin, Signer, production bundle              |
+
+The native Signer jobs are selected only for
+`packages/platform-contracts/src/chz-signer.ts` and the shared fixtures under
+`packages/platform-contracts/fixtures/chz-signer/`. Other platform contracts
+are consumed by the web and API surfaces but are not mirrored by the Rust
+Signer.
 
 Deployment and release tooling selects the contract or build that consumes it.
 Files that change the repository-wide toolchain select all jobs.
@@ -108,6 +115,11 @@ heavy job. Its tested result evaluator enforces these rules:
 
 This makes the policy reviewable and prevents a malformed condition from turning
 a required failure into a green aggregate result.
+
+The evaluator also publishes an explicit `result=true` or `result=false` job
+output and writes the same value, plus the failure reason when applicable, to
+the GitHub step summary. The job conclusion remains the authoritative branch
+protection signal.
 
 ## Testing
 

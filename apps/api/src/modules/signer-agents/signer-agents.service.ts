@@ -32,12 +32,15 @@ import type {
   PairSignerAgentResultDto,
   RequestSignerTokenRefreshResultDto,
   SignerAgentsOverviewDto,
+  SignerRefreshTaskStatus,
   SignerTokenStatusDto,
 } from "./dto";
 
 const MINT_ATTEMPTS = 5;
 
 const AGENT_STATUSES = new Set<string>(schema.CHZ_SIGNER_AGENT_STATUSES);
+const TASK_STATUSES = new Set<string>(schema.CHZ_SIGNER_TASK_STATUSES);
+const TOKEN_TYPES = new Set(["jwt", "uuid"] as const);
 
 /** Narrows a raw `chz_signer_agents.status` DB value, throwing on corruption. */
 function toAgentStatus(status: string): schema.ChzSignerAgentStatus {
@@ -45,6 +48,20 @@ function toAgentStatus(status: string): schema.ChzSignerAgentStatus {
     throw new Error(`Unexpected chz_signer_agents.status value: ${status}`);
   }
   return status as schema.ChzSignerAgentStatus;
+}
+
+function toRefreshTaskStatus(status: string): SignerRefreshTaskStatus {
+  if (!TASK_STATUSES.has(status)) {
+    throw new Error(`Unexpected chz_signer_tasks.status value: ${status}`);
+  }
+  return status as SignerRefreshTaskStatus;
+}
+
+function toTokenType(tokenType: string): "jwt" | "uuid" {
+  if (!TOKEN_TYPES.has(tokenType as "jwt" | "uuid")) {
+    throw new Error(`Unexpected chz_api_tokens.token_type value: ${tokenType}`);
+  }
+  return tokenType as "jwt" | "uuid";
 }
 
 class PairingCodeHashCollisionError extends Error {}
@@ -70,6 +87,24 @@ export class SignerAgentsService {
       .select()
       .from(schema.chzApiTokens)
       .where(eq(schema.chzApiTokens.tenantId, tenantId));
+    const [refreshTask] = await this.db
+      .select({
+        id: schema.chzSignerTasks.id,
+        status: schema.chzSignerTasks.status,
+        errorCode: schema.chzSignerTasks.errorCode,
+        errorMessage: schema.chzSignerTasks.errorMessage,
+        createdAt: schema.chzSignerTasks.createdAt,
+        completedAt: schema.chzSignerTasks.completedAt,
+      })
+      .from(schema.chzSignerTasks)
+      .where(
+        and(
+          eq(schema.chzSignerTasks.tenantId, tenantId),
+          eq(schema.chzSignerTasks.type, "true_api_auth"),
+        ),
+      )
+      .orderBy(desc(schema.chzSignerTasks.createdAt))
+      .limit(1);
     return {
       agents: agents.map((a) => ({
         id: a.id,
@@ -84,12 +119,28 @@ export class SignerAgentsService {
         createdAt: a.createdAt.toISOString(),
       })),
       token: this.tokenStatus(token ?? null),
+      refreshTask: refreshTask
+        ? {
+            id: refreshTask.id,
+            status: toRefreshTaskStatus(refreshTask.status),
+            errorCode: refreshTask.errorCode,
+            errorMessage: refreshTask.errorMessage,
+            createdAt: refreshTask.createdAt.toISOString(),
+            completedAt: refreshTask.completedAt?.toISOString() ?? null,
+          }
+        : null,
     };
   }
 
   private tokenStatus(token: typeof schema.chzApiTokens.$inferSelect | null): SignerTokenStatusDto {
     if (!token) {
-      return { status: "none", obtainedAt: null, expiresAt: null, certThumbprint: null };
+      return {
+        status: "none",
+        tokenType: null,
+        obtainedAt: null,
+        expiresAt: null,
+        certThumbprint: null,
+      };
     }
     const now = Date.now();
     const expiresAt = token.expiresAt.getTime();
@@ -101,6 +152,7 @@ export class SignerAgentsService {
           : "active";
     return {
       status,
+      tokenType: toTokenType(token.tokenType),
       obtainedAt: token.obtainedAt.toISOString(),
       expiresAt: token.expiresAt.toISOString(),
       certThumbprint: token.certThumbprint,
@@ -194,7 +246,7 @@ export class SignerAgentsService {
         ),
       )
       .limit(1);
-    if (openTask) return { status: "already_pending" };
+    if (openTask) return { status: "already_pending", taskId: openTask.id };
 
     const [channel] = await this.db
       .select({ settings: schema.integrationChannels.settings })
@@ -219,7 +271,21 @@ export class SignerAgentsService {
       })
       .onConflictDoNothing()
       .returning({ id: schema.chzSignerTasks.id });
-    if (!inserted) return { status: "already_pending" };
+    if (!inserted) {
+      const [winner] = await this.db
+        .select({ id: schema.chzSignerTasks.id })
+        .from(schema.chzSignerTasks)
+        .where(
+          and(
+            eq(schema.chzSignerTasks.tenantId, tenantId),
+            eq(schema.chzSignerTasks.type, "true_api_auth"),
+            inArray(schema.chzSignerTasks.status, ["pending", "claimed"]),
+          ),
+        )
+        .limit(1);
+      if (!winner) throw new ConflictException("Signer refresh task race could not be resolved");
+      return { status: "already_pending", taskId: winner.id };
+    }
 
     await this.journal
       .append({
@@ -235,7 +301,7 @@ export class SignerAgentsService {
       .catch((error) =>
         this.logger.warn(`manual signer token refresh journal append failed: ${error}`),
       );
-    return { status: "queued" };
+    return { status: "queued", taskId: inserted.id };
   }
 
   async revoke(tenantId: string, agentId: string): Promise<void> {
