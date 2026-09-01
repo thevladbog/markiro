@@ -15,6 +15,7 @@ vi.mock("../src/lib/bridge.js", () => ({
 
 const status: AgentStatus = {
   phase: "idle",
+  appVersion: "0.1.5",
   hostname: "BUH-PC",
   tenantName: "ООО Ромашка",
   certThumbprint: null,
@@ -30,7 +31,13 @@ const status: AgentStatus = {
 describe("Status journal", () => {
   it("keeps diagnostics on a separate tab and paginates newest events", async () => {
     const user = userEvent.setup();
-    render(<Status status={status} onChanged={vi.fn()} />);
+    render(
+      <Status
+        status={status}
+        onChanged={vi.fn()}
+        onCheckForUpdate={vi.fn().mockResolvedValue({ status: "current" })}
+      />,
+    );
 
     expect(screen.queryByText("Событие 21")).toBeNull();
     await user.click(screen.getByRole("tab", { name: /Журнал|Journal/ }));
@@ -48,7 +55,13 @@ describe("Status journal", () => {
   it("exports the persistent journal and confirms where it was saved", async () => {
     const { bridge } = await import("../src/lib/bridge.js");
     const user = userEvent.setup();
-    render(<Status status={status} onChanged={vi.fn()} />);
+    render(
+      <Status
+        status={status}
+        onChanged={vi.fn()}
+        onCheckForUpdate={vi.fn().mockResolvedValue({ status: "current" })}
+      />,
+    );
 
     await user.click(screen.getByRole("tab", { name: /Журнал|Journal/ }));
     await user.click(screen.getByRole("button", { name: /Экспортировать журнал|Export journal/ }));

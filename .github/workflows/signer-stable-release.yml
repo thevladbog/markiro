@@ -3,6 +3,18 @@ name: Publish signer stable
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: Publish a new version or repair the one pending draft
+        required: true
+        type: choice
+        default: publish
+        options: [publish, repair]
+      bump:
+        description: Semantic bump for publish; ignored by repair
+        required: true
+        type: choice
+        default: patch
+        options: [patch, minor, major]
       owner_confirmation:
         description: Type PUBLISH-SIGNER-STABLE; only the repository owner may dispatch
         required: true
@@ -14,6 +26,9 @@ permissions:
 concurrency:
   group: signer-stable-release
   cancel-in-progress: false
+
+env:
+  SIGNER_RELEASE_REPOSITORY: thevladbog/markiro-station-releases
 
 jobs:
   authorize:
@@ -28,20 +43,88 @@ jobs:
           OWNER_CONFIRMATION: ${{ inputs.owner_confirmation }}
           RELEASE_ACTOR: ${{ github.actor }}
           RELEASE_OWNER: ${{ github.repository_owner }}
+          RELEASE_MODE: ${{ inputs.mode }}
+          RELEASE_BUMP: ${{ inputs.bump }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
           test "$RELEASE_ACTOR" = "$RELEASE_OWNER"
           test "$OWNER_CONFIRMATION" = "PUBLISH-SIGNER-STABLE"
+          test "$RELEASE_MODE" = "publish" -o "$RELEASE_MODE" = "repair"
+          test "$RELEASE_BUMP" = "patch" -o "$RELEASE_BUMP" = "minor" -o "$RELEASE_BUMP" = "major"
 
-  release:
+  state:
     if: github.ref == 'refs/heads/main'
     needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: station-release
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.resolve.outputs.mode }}
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Resolve GitHub and Yandex stable state
+        id: resolve
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.STATION_RELEASE_REPOSITORY_TOKEN }}
+          RELEASE_MODE: ${{ inputs.mode }}
+          RELEASE_BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          releases="$RUNNER_TEMP/signer-releases.json"
+          manifest="$RUNNER_TEMP/signer-latest.json"
+          gh release list --repo "$SIGNER_RELEASE_REPOSITORY" --limit 200 \
+            --json tagName,isDraft,isPrerelease > "$releases"
+          curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 \
+            --retry 3 --retry-all-errors --retry-max-time 30 \
+            --output "$manifest" \
+            https://releases.markiro.app/signer/stable/latest.json
+          RELEASES_FILE="$releases" MANIFEST_FILE="$manifest" node --input-type=module <<'NODE'
+          import { appendFile, readFile } from "node:fs/promises";
+          import { assertValidSignerManifest } from "./tools/signer-release/manifest.mjs";
+          import { resolveSignerReleaseAction } from "./tools/signer-release/version.mjs";
+
+          const releases = JSON.parse(await readFile(process.env.RELEASES_FILE, "utf8"));
+          const manifest = JSON.parse(await readFile(process.env.MANIFEST_FILE, "utf8"));
+          assertValidSignerManifest(manifest);
+          const action = resolveSignerReleaseAction({
+            mode: process.env.RELEASE_MODE,
+            bump: process.env.RELEASE_BUMP,
+            githubPublishedTags: releases
+              .filter((release) => !release.isDraft && !release.isPrerelease)
+              .map((release) => release.tagName),
+            githubDraftTags: releases
+              .filter((release) => release.isDraft)
+              .map((release) => release.tagName),
+            yandexVersion: manifest.version,
+          });
+          await appendFile(
+            process.env.GITHUB_OUTPUT,
+            `mode=${action.mode}\nversion=${action.version}\ntag=${action.tag}\n`,
+          );
+          NODE
+
+  release:
+    if: inputs.mode == 'publish'
+    needs: [authorize, state]
     runs-on: windows-latest
     timeout-minutes: 60
     environment: station-release
     permissions:
-      contents: write
+      contents: read
+    env:
+      RELEASE_VERSION: ${{ needs.state.outputs.version }}
+      RELEASE_TAG: ${{ needs.state.outputs.tag }}
+      VERSION_OVERLAY: ${{ runner.temp }}/signer-version-overlay.json
+      RELEASE_DIR: ${{ runner.temp }}/signer-release
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -57,24 +140,26 @@ jobs:
         shell: bash
         run: pnpm install --frozen-lockfile
 
-      - name: Resolve and gate the release version
-        id: version
+      - name: Prepare the effective release version
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
           SIGNING_KEY: ${{ secrets.SIGNER_TAURI_SIGNING_PRIVATE_KEY }}
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNER_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           test -n "$SIGNING_KEY"
           test -n "$SIGNING_KEY_PASSWORD"
+          RELEASE_VERSION="$RELEASE_VERSION" VERSION_OVERLAY="$VERSION_OVERLAY" \
+            node --input-type=module <<'NODE'
+          import { writeFile } from "node:fs/promises";
+          import { buildTauriVersionOverlay } from "./tools/signer-release/version.mjs";
+          await writeFile(
+            process.env.VERSION_OVERLAY,
+            `${JSON.stringify(buildTauriVersionOverlay(process.env.RELEASE_VERSION))}\n`,
+          );
+          NODE
           pnpm test:signer-release:contract
-          version="$(node -e 'import("./tools/signer-release/version.mjs").then(async (m) => process.stdout.write(await m.readSignerVersion()))')"
-          tag="signer-v$version"
-          existing="$(gh release list --limit 200 --json tagName --jq '[.[].tagName] | join(",")')"
-          node -e 'import("./tools/signer-release/version.mjs").then((m) => m.assertTagIsFree(process.argv[1], process.argv[2] ? process.argv[2].split(",") : []))' "$tag" "$existing"
-          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
-          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
 
       - name: Verify the signer before releasing it
         shell: bash
@@ -84,8 +169,6 @@ jobs:
           pnpm --filter @markiro/signer test
           pnpm --filter @markiro/signer typecheck
           pnpm --filter @markiro/signer lint
-          # The CryptoAPI and DPAPI paths only compile on Windows, so this is
-          # the last chance to run them before the build a customer installs.
           cargo test --manifest-path apps/signer/Cargo.toml
 
       - name: Build signed Windows artifacts
@@ -103,16 +186,54 @@ jobs:
           chmod 600 "$signing_key_file"
           export TAURI_SIGNING_PRIVATE_KEY="$signing_key_file"
           pnpm --filter @markiro/signer tauri build \
-            --config src-tauri/tauri.stable.conf.json
-          # apps/signer/Cargo.toml is a workspace ([workspace] members
-          # signer-core + src-tauri), so cargo puts the shared target dir at the
-          # workspace root — NOT under src-tauri the way the Station's
-          # standalone crate does.
+            --config src-tauri/tauri.stable.conf.json \
+            --config "$VERSION_OVERLAY"
           bundle_dir="apps/signer/target/release/bundle/nsis"
           test -n "$(find "$bundle_dir" -maxdepth 1 -type f -name '*-setup.exe' -print -quit)"
           printf 'bundle_dir=%s\n' "$bundle_dir" >> "$GITHUB_OUTPUT"
 
-      - name: Publish to the release mirror
+      - name: Prepare immutable release assets
+        shell: bash
+        env:
+          BUNDLE_DIR: ${{ steps.build.outputs.bundle_dir }}
+        run: |
+          set -euo pipefail
+          mkdir "$RELEASE_DIR"
+          RELEASE_VERSION="$RELEASE_VERSION" BUNDLE_DIR="$BUNDLE_DIR" RELEASE_DIR="$RELEASE_DIR" \
+            SOURCE_REPOSITORY="$GITHUB_REPOSITORY" SOURCE_SHA="$GITHUB_SHA" \
+            node --input-type=module <<'NODE'
+          import { prepareSignerRelease } from "./tools/signer-release/prepare.mjs";
+          await prepareSignerRelease({
+            version: process.env.RELEASE_VERSION,
+            sourceRepository: process.env.SOURCE_REPOSITORY,
+            sourceSha: process.env.SOURCE_SHA,
+            bundleDir: process.env.BUNDLE_DIR,
+            outputDir: process.env.RELEASE_DIR,
+            pubDate: new Date().toISOString(),
+          });
+          NODE
+
+      - name: Stage exact assets in a draft GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.STATION_RELEASE_REPOSITORY_TOKEN }}
+        run: |
+          set -euo pipefail
+          target_sha="$(gh api "repos/$SIGNER_RELEASE_REPOSITORY/commits/main" --jq .sha)"
+          notes="$RUNNER_TEMP/notes.md"
+          {
+            printf 'Установщик агента подписи Честного ЗНАКа для Windows.\n\n'
+            printf 'Исходный код: %s@%s\n\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+            printf 'Постоянная ссылка: https://releases.markiro.app/signer/download\n\n'
+            printf 'Обновление устанавливается только после подтверждения оператора.\n'
+          } > "$notes"
+          gh release create "$RELEASE_TAG" "$RELEASE_DIR"/* --draft \
+            --repo "$SIGNER_RELEASE_REPOSITORY" \
+            --target "$target_sha" \
+            --title "Markiro Подписант $RELEASE_VERSION" \
+            --notes-file "$notes"
+
+      - name: Publish exact assets to the release mirror
         id: mirror
         shell: bash
         env:
@@ -120,35 +241,83 @@ jobs:
           YANDEX_STATION_RELEASE_BUCKET: ${{ vars.YANDEX_STATION_RELEASE_BUCKET }}
           YANDEX_STATION_RELEASE_ACCESS_KEY_ID: ${{ secrets.YANDEX_STATION_RELEASE_ACCESS_KEY_ID }}
           YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-          BUNDLE_DIR: ${{ steps.build.outputs.bundle_dir }}
         run: |
           set -euo pipefail
-          node tools/signer-release/publish.mjs "$RELEASE_VERSION" "$BUNDLE_DIR" \
+          node tools/signer-release/publish.mjs "$RELEASE_VERSION" "$RELEASE_DIR" \
             | tee "$RUNNER_TEMP/published.txt"
           printf 'manifest_url=%s\n' "$(sed -n 1p "$RUNNER_TEMP/published.txt")" >> "$GITHUB_OUTPUT"
           printf 'installer_url=%s\n' "$(sed -n 2p "$RUNNER_TEMP/published.txt")" >> "$GITHUB_OUTPUT"
           printf 'download_url=%s\n' "$(sed -n 3p "$RUNNER_TEMP/published.txt")" >> "$GITHUB_OUTPUT"
 
-      - name: Announce the GitHub Release
+      - name: Publish the verified GitHub Release
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
-          BUNDLE_DIR: ${{ steps.build.outputs.bundle_dir }}
-          DOWNLOAD_URL: ${{ steps.mirror.outputs.download_url }}
+          GH_TOKEN: ${{ secrets.STATION_RELEASE_REPOSITORY_TOKEN }}
         run: |
           set -euo pipefail
-          installer="$(find "$BUNDLE_DIR" -maxdepth 1 -type f -name '*-setup.exe' -print -quit)"
-          named="$RUNNER_TEMP/markiro-signer-$RELEASE_VERSION-windows-x86_64-setup.exe"
-          cp "$installer" "$named"
-          notes="$RUNNER_TEMP/notes.md"
-          {
-            printf 'Установщик агента подписи Честного ЗНАКа для Windows.\n\n'
-            printf 'Постоянная ссылка: %s\n\n' "$DOWNLOAD_URL"
-            printf 'Установленный агент обновляется сам, с подтверждением оператора.\n'
-          } > "$notes"
-          gh release create "$RELEASE_TAG" "$named" \
-            --title "Markiro Подписант $RELEASE_VERSION" \
-            --notes-file "$notes"
+          gh release edit "$RELEASE_TAG" --draft=false --latest \
+            --repo "$SIGNER_RELEASE_REPOSITORY"
+
+  repair:
+    if: inputs.mode == 'repair'
+    needs: [authorize, state]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: station-release
+    permissions:
+      contents: read
+    env:
+      RELEASE_VERSION: ${{ needs.state.outputs.version }}
+      RELEASE_TAG: ${{ needs.state.outputs.tag }}
+      RELEASE_DIR: ${{ runner.temp }}/signer-release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked workspace dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Download and verify the pending draft assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.STATION_RELEASE_REPOSITORY_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir "$RELEASE_DIR"
+          gh release download "$RELEASE_TAG" --repo "$SIGNER_RELEASE_REPOSITORY" \
+            --dir "$RELEASE_DIR"
+          RELEASE_VERSION="$RELEASE_VERSION" RELEASE_DIR="$RELEASE_DIR" \
+            node --input-type=module <<'NODE'
+          import { verifyPreparedSignerRelease } from "./tools/signer-release/prepare.mjs";
+          await verifyPreparedSignerRelease({
+            directory: process.env.RELEASE_DIR,
+            version: process.env.RELEASE_VERSION,
+          });
+          NODE
+
+      - name: Repair the release mirror from exact draft bytes
+        shell: bash
+        env:
+          YANDEX_STATION_RELEASE_ENDPOINT: ${{ vars.YANDEX_STATION_RELEASE_ENDPOINT }}
+          YANDEX_STATION_RELEASE_BUCKET: ${{ vars.YANDEX_STATION_RELEASE_BUCKET }}
+          YANDEX_STATION_RELEASE_ACCESS_KEY_ID: ${{ secrets.YANDEX_STATION_RELEASE_ACCESS_KEY_ID }}
+          YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          node tools/signer-release/publish.mjs "$RELEASE_VERSION" "$RELEASE_DIR"
+
+      - name: Publish the repaired GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.STATION_RELEASE_REPOSITORY_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release edit "$RELEASE_TAG" --draft=false --latest \
+            --repo "$SIGNER_RELEASE_REPOSITORY"

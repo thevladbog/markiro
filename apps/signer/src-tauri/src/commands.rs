@@ -4,6 +4,7 @@ use signer_core::cloud::PairError;
 use signer_core::runtime::{AgentStatus, Runtime};
 use signer_core::signer::{CertificateSummary, Signer};
 use signer_core::storage::{self, SecretStore};
+use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt as _;
 
 pub struct SignerState {
@@ -17,6 +18,7 @@ pub fn signer_status(state: tauri::State<'_, SignerState>) -> AgentStatus {
 
 #[tauri::command]
 pub async fn signer_pair(
+    app: tauri::AppHandle,
     state: tauri::State<'_, SignerState>,
     code: String,
 ) -> Result<String, String> {
@@ -24,21 +26,29 @@ pub async fn signer_pair(
     let server_url = config
         .server_url
         .unwrap_or_else(|| crate::default_server_url().to_string());
-    state
-        .runtime
-        .pair(&server_url, &code)
-        .await
-        .map_err(|error| match error {
-            // The cloud deliberately does not distinguish wrong from expired
-            // from rate-limited, so neither do we.
-            PairError::Rejected => "rejected".to_string(),
-            PairError::Network(_) => "unavailable".to_string(),
-        })
+    let tenant_name =
+        state
+            .runtime
+            .pair(&server_url, &code)
+            .await
+            .map_err(|error| match error {
+                // The cloud deliberately does not distinguish wrong from expired
+                // from rate-limited, so neither do we.
+                PairError::Rejected => "rejected".to_string(),
+                PairError::Network(_) => "unavailable".to_string(),
+            })?;
+    publish_status(&app, &state.runtime);
+    Ok(tenant_name)
 }
 
 #[tauri::command]
-pub fn signer_unpair(state: tauri::State<'_, SignerState>) -> Result<(), String> {
-    state.runtime.unpair().map_err(|e| e.to_string())
+pub fn signer_unpair(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SignerState>,
+) -> Result<(), String> {
+    state.runtime.unpair().map_err(|e| e.to_string())?;
+    publish_status(&app, &state.runtime);
+    Ok(())
 }
 
 #[tauri::command]
@@ -103,6 +113,21 @@ pub fn signer_notify_update(app: tauri::AppHandle, version: String) {
         .title("Markiro Подписант")
         .body(format!("Доступна версия {version}"))
         .show();
+}
+
+#[tauri::command]
+pub fn signer_set_update_activity(
+    tray: tauri::State<'_, crate::tray::TrayController>,
+    active: bool,
+) {
+    tray.set_update_active(active);
+}
+
+fn publish_status(app: &tauri::AppHandle, runtime: &Runtime) {
+    let status = runtime.status();
+    app.state::<crate::tray::TrayController>()
+        .update_status(app, &status);
+    let _ = app.emit(crate::STATUS_EVENT, status);
 }
 
 /// The agent only ships for Windows; on other platforms the shell still builds
