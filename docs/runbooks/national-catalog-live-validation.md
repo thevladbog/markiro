@@ -45,7 +45,12 @@ The workflow output is limited to a closed source-status enum, method outcome,
 result count, ETag presence, and the aggregate pass/fail flag. Tenant, GTIN,
 bearer, provider error message, headers, and payloads are never emitted. An
 unexpected internal or transport failure produces only
-`MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS_FAILURE`.
+`MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS_FAILURE {"stage":"<stage>"}`. The stage
+is restricted to `configuration`, `credential-validation`, `workspace-setup`,
+`api-container-discovery`, `api-cli-transport`, `api-cli-exit`,
+`api-cli-evidence-missing`, `api-cli-evidence-invalid`,
+`api-cli-exit-mismatch`, `cleanup`, or `unknown`; arbitrary exception text is
+never serialized.
 
 ## Explicit local or sandbox run
 

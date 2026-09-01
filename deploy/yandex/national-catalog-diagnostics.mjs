@@ -42,6 +42,41 @@ const SOURCE_STATUSES = Object.freeze([
   "product-gtin-unavailable",
   "token-decryption-failed",
 ]);
+const FAILURE_STAGES = Object.freeze([
+  "configuration",
+  "credential-validation",
+  "workspace-setup",
+  "api-container-discovery",
+  "api-cli-transport",
+  "api-cli-exit",
+  "api-cli-evidence-missing",
+  "api-cli-evidence-invalid",
+  "api-cli-exit-mismatch",
+  "cleanup",
+  "unknown",
+]);
+
+class NationalCatalogDiagnosticStageError extends Error {
+  constructor(stage, cause) {
+    super(cause instanceof Error ? cause.message : "National Catalog diagnostic failed", { cause });
+    this.name = "NationalCatalogDiagnosticStageError";
+    this.stage = FAILURE_STAGES.includes(stage) ? stage : "unknown";
+  }
+}
+
+async function atFailureStage(stage, operation) {
+  try {
+    return await operation();
+  } catch (cause) {
+    if (cause instanceof NationalCatalogDiagnosticStageError) throw cause;
+    throw new NationalCatalogDiagnosticStageError(stage, cause);
+  }
+}
+
+function diagnosticFailureStage(error) {
+  const stage = error instanceof NationalCatalogDiagnosticStageError ? error.stage : "unknown";
+  return FAILURE_STAGES.includes(stage) ? stage : "unknown";
+}
 
 function invalidResponse() {
   return new Error("National Catalog diagnostic response is invalid");
@@ -162,23 +197,42 @@ export async function runHostedNationalCatalogDiagnostics(
     runDiagnostic: (command, args, options) => runCommandWithStatus(command, args, options),
     ...supplied,
   };
-  const address = publicIpv4(requiredEnvironment("YC_APP_PUBLIC_ADDRESS", environment));
-  const login = requiredEnvironment("YC_APP_DEPLOY_LOGIN", environment);
-  if (login !== "markiro-deploy")
-    throw new Error("National Catalog diagnostic configuration is incomplete");
-  const identity = requiredEnvironment("YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH", environment);
-  const knownHosts = authenticatedKnownHosts(
-    requiredEnvironment("APP_SSH_HOST_KEYS_B64", environment),
-    address,
+  const { address, identity, knownHosts, login } = await atFailureStage(
+    "configuration",
+    async () => {
+      const configuredAddress = publicIpv4(
+        requiredEnvironment("YC_APP_PUBLIC_ADDRESS", environment),
+      );
+      const configuredLogin = requiredEnvironment("YC_APP_DEPLOY_LOGIN", environment);
+      if (configuredLogin !== "markiro-deploy")
+        throw new Error("National Catalog diagnostic configuration is incomplete");
+      const configuredIdentity = requiredEnvironment(
+        "YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH",
+        environment,
+      );
+      return {
+        address: configuredAddress,
+        identity: configuredIdentity,
+        knownHosts: authenticatedKnownHosts(
+          requiredEnvironment("APP_SSH_HOST_KEYS_B64", environment),
+          configuredAddress,
+        ),
+        login: configuredLogin,
+      };
+    },
   );
-  await system.validatePrivateKey(identity);
+  await atFailureStage("credential-validation", () => system.validatePrivateKey(identity));
 
-  const directory = await system.mkdtemp(join(tmpdir(), "markiro-national-catalog-diagnostics-"));
+  const directory = await atFailureStage("workspace-setup", () =>
+    system.mkdtemp(join(tmpdir(), "markiro-national-catalog-diagnostics-")),
+  );
   let failure;
   let result;
   try {
     const knownHostsPath = join(directory, "known_hosts");
-    await system.writeFile(knownHostsPath, knownHosts, { encoding: "utf8", mode: 0o600 });
+    await atFailureStage("workspace-setup", () =>
+      system.writeFile(knownHostsPath, knownHosts, { encoding: "utf8", mode: 0o600 }),
+    );
     const sshBase = [
       "-F",
       "/dev/null",
@@ -196,37 +250,44 @@ export async function runHostedNationalCatalogDiagnostics(
       "ConnectTimeout=15",
       `${login}@${address}`,
     ];
-    const containerOutput = await system.run("ssh", [
-      ...sshBase,
-      "sudo",
-      "/usr/bin/docker",
-      "ps",
-      "--filter",
-      "label=com.docker.compose.project=markiro-production",
-      "--filter",
-      "label=com.docker.compose.service=api",
-      "--format",
-      '{{.ID}}\t{{.Label "com.docker.compose.service"}}',
-    ]);
-    const containerId = parseContainer(containerOutput);
-    const execution = await system.runDiagnostic("ssh", [
-      ...sshBase,
-      "sudo",
-      "/usr/bin/docker",
-      "exec",
-      "-i",
-      containerId,
-      "node",
-      "dist/national-catalog-live-diagnostic.js",
-    ]);
-    if (
-      !hasExactKeys(execution, "exitCode,stdout") ||
-      ![0, 1].includes(execution.exitCode) ||
-      typeof execution.stdout !== "string"
-    )
-      throw invalidResponse();
-    result = parseEvidence(execution.stdout);
-    if (execution.exitCode !== (result.passed ? 0 : 1)) throw invalidResponse();
+    const containerId = await atFailureStage("api-container-discovery", async () => {
+      const containerOutput = await system.run("ssh", [
+        ...sshBase,
+        "sudo",
+        "/usr/bin/docker",
+        "ps",
+        "--filter",
+        "label=com.docker.compose.project=markiro-production",
+        "--filter",
+        "label=com.docker.compose.service=api",
+        "--format",
+        '{{.ID}}\t{{.Label "com.docker.compose.service"}}',
+      ]);
+      return parseContainer(containerOutput);
+    });
+    const execution = await atFailureStage("api-cli-transport", () =>
+      system.runDiagnostic("ssh", [
+        ...sshBase,
+        "sudo",
+        "/usr/bin/docker",
+        "exec",
+        "-i",
+        containerId,
+        "node",
+        "dist/national-catalog-live-diagnostic.js",
+      ]),
+    );
+    if (!hasExactKeys(execution, "exitCode,stdout") || typeof execution.stdout !== "string")
+      throw new NationalCatalogDiagnosticStageError("api-cli-evidence-invalid", invalidResponse());
+    if (![0, 1].includes(execution.exitCode))
+      throw new NationalCatalogDiagnosticStageError("api-cli-exit", invalidResponse());
+    if (execution.stdout.length === 0)
+      throw new NationalCatalogDiagnosticStageError("api-cli-evidence-missing", invalidResponse());
+    result = await atFailureStage("api-cli-evidence-invalid", async () =>
+      parseEvidence(execution.stdout),
+    );
+    if (execution.exitCode !== (result.passed ? 0 : 1))
+      throw new NationalCatalogDiagnosticStageError("api-cli-exit-mismatch", invalidResponse());
   } catch (error) {
     failure = error;
   }
@@ -235,7 +296,7 @@ export async function runHostedNationalCatalogDiagnostics(
   try {
     await system.rm(directory, { recursive: true, force: true });
   } catch (error) {
-    cleanupFailure = error;
+    cleanupFailure = new NationalCatalogDiagnosticStageError("cleanup", error);
   }
   if (failure) throw failure;
   if (cleanupFailure) throw cleanupFailure;
@@ -254,8 +315,10 @@ export async function runNationalCatalogDiagnosticsCli(options = {}) {
     );
     stdout.write(`MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(result)}\n`);
     return result.passed ? 0 : 1;
-  } catch {
-    stderr.write("MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS_FAILURE\n");
+  } catch (error) {
+    stderr.write(
+      `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS_FAILURE ${JSON.stringify({ stage: diagnosticFailureStage(error) })}\n`,
+    );
     return 1;
   }
 }
