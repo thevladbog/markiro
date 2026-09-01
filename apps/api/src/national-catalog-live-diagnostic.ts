@@ -17,8 +17,10 @@ type Outcome = NationalCatalogResult<unknown>["status"];
 export type NationalCatalogDiagnosticSourceStatus =
   | "ready"
   | "encryption-key-missing"
+  | "active-token-query-failed"
   | "active-token-missing"
   | "active-token-ambiguous"
+  | "product-query-failed"
   | "product-gtin-unavailable"
   | "token-decryption-failed";
 type UnavailableSourceStatus = Exclude<NationalCatalogDiagnosticSourceStatus, "ready">;
@@ -165,7 +167,12 @@ export async function collectNationalCatalogLiveDiagnostic(
 export async function loadNationalCatalogProductionSource(
   dependencies: NationalCatalogProductionSourceDependencies,
 ): Promise<SourceResult> {
-  const tokenRows = await dependencies.listActiveTokens();
+  let tokenRows: readonly NationalCatalogProductionTokenCandidate[];
+  try {
+    tokenRows = await dependencies.listActiveTokens();
+  } catch {
+    return { status: "unavailable", sourceStatus: "active-token-query-failed" };
+  }
   if (tokenRows.length === 0)
     return { status: "unavailable", sourceStatus: "active-token-missing" };
   if (tokenRows.length !== 1)
@@ -173,7 +180,13 @@ export async function loadNationalCatalogProductionSource(
 
   const tokenRow = tokenRows[0];
   if (!tokenRow) return { status: "unavailable", sourceStatus: "active-token-missing" };
-  const gtin = (await dependencies.findProductGtin(tokenRow.tenantId))?.trim();
+  let productGtin: string | null;
+  try {
+    productGtin = await dependencies.findProductGtin(tokenRow.tenantId);
+  } catch {
+    return { status: "unavailable", sourceStatus: "product-query-failed" };
+  }
+  const gtin = productGtin?.trim();
   if (!gtin || !/^\d{14}$/.test(gtin))
     return { status: "unavailable", sourceStatus: "product-gtin-unavailable" };
 
@@ -248,10 +261,9 @@ export async function runNationalCatalogLiveDiagnosticCli(
   try {
     const result = await (options.collect ?? collectProductionEvidence)();
     stdout.write(`MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(result)}\n`);
-    // The host-side wrapper validates the closed schema and turns passed=false
-    // into the workflow failure. Returning zero here preserves the bounded
-    // stdout when the provider refuses a documented read.
-    return 0;
+    // The host-side wrapper preserves stdout for exit one, validates the
+    // closed schema, and requires the exit code to match this result.
+    return result.passed ? 0 : 1;
   } catch {
     stderr.write("MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS_FAILURE\n");
     return 1;

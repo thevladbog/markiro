@@ -35,8 +35,10 @@ const OUTCOMES = Object.freeze([
 const SOURCE_STATUSES = Object.freeze([
   "ready",
   "encryption-key-missing",
+  "active-token-query-failed",
   "active-token-missing",
   "active-token-ambiguous",
+  "product-query-failed",
   "product-gtin-unavailable",
   "token-decryption-failed",
 ]);

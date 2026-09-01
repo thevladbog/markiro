@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
 
 import {
   collectNationalCatalogLiveDiagnostic,
@@ -284,6 +286,58 @@ describe("National Catalog production live diagnostic", () => {
     }
   });
 
+  it("returns a bounded status when the active-token query fails", async () => {
+    const privateError = "private database connection detail";
+
+    const result = await loadNationalCatalogProductionSource({
+      listActiveTokens: async () => {
+        throw new Error(privateError);
+      },
+      findProductGtin: async () => {
+        throw new Error("must not query products");
+      },
+      decryptToken: () => {
+        throw new Error("must not decrypt");
+      },
+    });
+
+    expect(result).toEqual({
+      status: "unavailable",
+      sourceStatus: "active-token-query-failed",
+    });
+    expect(JSON.stringify(result)).not.toContain(privateError);
+  });
+
+  it("returns a bounded status when the same-tenant product query fails", async () => {
+    const privateError = "private product query detail";
+    let decrypted = false;
+
+    const result = await loadNationalCatalogProductionSource({
+      listActiveTokens: async () => [
+        {
+          tenantId: "tenant-a",
+          encryptedToken: Buffer.alloc(1),
+          tokenNonce: Buffer.alloc(1),
+          tokenTag: Buffer.alloc(1),
+        },
+      ],
+      findProductGtin: async () => {
+        throw new Error(privateError);
+      },
+      decryptToken: () => {
+        decrypted = true;
+        return PRIVATE_TOKEN;
+      },
+    });
+
+    expect(result).toEqual({
+      status: "unavailable",
+      sourceStatus: "product-query-failed",
+    });
+    expect(JSON.stringify(result)).not.toContain(privateError);
+    expect(decrypted).toBe(false);
+  });
+
   it.each([null, "", "123", "0460123456789x"])(
     "fails closed for missing or invalid same-tenant GTIN %s without decrypting",
     async (gtin) => {
@@ -352,9 +406,74 @@ describe("National Catalog production live diagnostic", () => {
         stdout: { write: (value: string) => (stdout += value) },
         stderr: { write: (value: string) => (stderr += value) },
       });
-      expect(exitCode).toBe(0);
+      expect(exitCode).toBe(passed ? 0 : 1);
       expect(stdout).toBe(`MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS ${JSON.stringify(collected)}\n`);
       expect(stderr).toBe("");
     }
   });
+
+  it.each(["active-token-query-failed", "product-query-failed"] as const)(
+    "passes %s evidence from the API CLI through the host validator",
+    async (sourceStatus) => {
+      const privateError = `private ${sourceStatus} detail`;
+      const token = {
+        tenantId: "tenant-a",
+        encryptedToken: Buffer.alloc(1),
+        tokenNonce: Buffer.alloc(1),
+        tokenTag: Buffer.alloc(1),
+      };
+      const loaded = await loadNationalCatalogProductionSource({
+        listActiveTokens: async () => {
+          if (sourceStatus === "active-token-query-failed") throw new Error(privateError);
+          return [token];
+        },
+        findProductGtin: async () => {
+          throw new Error(privateError);
+        },
+        decryptToken: () => PRIVATE_TOKEN,
+      });
+      const collected = await collectNationalCatalogLiveDiagnostic({
+        loadSource: async () => loaded,
+        client: successfulClient([]),
+      });
+      let stdout = "";
+      const exitCode = await runNationalCatalogLiveDiagnosticCli({
+        collect: async () => collected,
+        stdout: { write: (value: string) => (stdout += value) },
+        stderr: { write: () => undefined },
+      });
+      const moduleUrl = pathToFileURL(
+        resolve(__dirname, "../../../deploy/yandex/national-catalog-diagnostics.mjs"),
+      ).href;
+      const { runHostedNationalCatalogDiagnostics } = (await import(moduleUrl)) as {
+        runHostedNationalCatalogDiagnostics: (
+          environment: Record<string, string>,
+          supplied: Record<string, unknown>,
+        ) => Promise<NationalCatalogDiagnosticEvidence>;
+      };
+      const result = await runHostedNationalCatalogDiagnostics(
+        {
+          YC_APP_PUBLIC_ADDRESS: "203.0.113.42",
+          YC_APP_DEPLOY_LOGIN: "markiro-deploy",
+          YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH: "/runner/private-key",
+          APP_SSH_HOST_KEYS_B64: Buffer.from(
+            `ssh-ed25519 ${Buffer.alloc(32, 1).toString("base64")}`,
+          ).toString("base64"),
+        },
+        {
+          validatePrivateKey: async () => undefined,
+          run: async () => "a1b2c3d4e5f6\tapi\n",
+          runDiagnostic: async () => ({ exitCode, stdout }),
+          mkdtemp: async () => "/runner/national-catalog-known-hosts",
+          writeFile: async () => undefined,
+          rm: async () => undefined,
+        },
+      );
+
+      expect(result).toEqual({ version: 2, passed: false, sourceStatus, checks: [] });
+      expect(JSON.stringify(result)).not.toContain(privateError);
+      expect(JSON.stringify(result)).not.toContain("tenant-a");
+      expect(JSON.stringify(result)).not.toContain(PRIVATE_TOKEN);
+    },
+  );
 });
