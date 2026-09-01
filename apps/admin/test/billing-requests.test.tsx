@@ -91,6 +91,7 @@ function renderBilling(element: React.ReactNode, initialEntry = "/billing/reques
 
 afterEach(async () => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   await i18n.changeLanguage("ru");
@@ -336,6 +337,8 @@ it("invalidates only the request family and overview after a request mutation", 
 });
 
 it("prefills valid limit context and never sends an invalid URL context", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-08-15T12:00:00.000Z"));
   const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => json(request));
   vi.stubGlobal("fetch", fetch);
   vi.stubGlobal("crypto", { randomUUID: vi.fn(() => KEY) });

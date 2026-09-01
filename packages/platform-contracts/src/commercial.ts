@@ -581,7 +581,7 @@ export const offerDetailSchema = z.discriminatedUnion("status", [
   expiredOfferDetailSchema,
 ]);
 
-export const SIGNED_PRINT_SELLER_TAX_ID = "234190622844";
+export const SIGNED_PRINT_SELLER_TAX_ID = "234106228141";
 export const printDocumentVariantSchema = z.enum(["clean", "signed"]);
 const printDocumentGenerationSchema = z
   .object({ printVariant: printDocumentVariantSchema.default("clean") })

@@ -61,7 +61,7 @@ const invoiceBase = {
   sellerSnapshot: {
     kind: "sole_proprietor",
     displayName: "Markiro",
-    inn: "234190622844",
+    inn: "234106228141",
   },
   buyerSnapshot: { displayName: "Factory" },
   subtotal: "12500.00",
