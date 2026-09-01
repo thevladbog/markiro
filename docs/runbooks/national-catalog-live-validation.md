@@ -41,10 +41,11 @@ same tenant, decrypts the bearer only inside the API container, and uses the
 official production National Catalog endpoint. It does not add National
 Catalog values to the production Lockbox inventory.
 
-The workflow output is limited to method outcome, result count, ETag presence,
-and the aggregate pass/fail flag. Tenant, GTIN, bearer, provider error message,
-headers, and payloads are never emitted. A failed or ambiguous source selection
-produces only `MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS_FAILURE`.
+The workflow output is limited to a closed source-status enum, method outcome,
+result count, ETag presence, and the aggregate pass/fail flag. Tenant, GTIN,
+bearer, provider error message, headers, and payloads are never emitted. An
+unexpected internal or transport failure produces only
+`MARKIRO_NATIONAL_CATALOG_DIAGNOSTICS_FAILURE`.
 
 ## Explicit local or sandbox run
 
