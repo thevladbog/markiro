@@ -5,13 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const checkMock = vi.fn();
 const relaunchMock = vi.fn();
 const notifyMock = vi.fn();
+const updateActivityMock = vi.fn();
 
 vi.mock("@tauri-apps/plugin-updater", () => ({
   check: (...args: unknown[]) => checkMock(...args),
 }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: () => relaunchMock() }));
 vi.mock("../src/lib/bridge.js", () => ({
-  bridge: { notifyUpdateAvailable: (version: string) => notifyMock(version) },
+  bridge: {
+    notifyUpdateAvailable: (version: string) => notifyMock(version),
+    setUpdateActivity: (active: boolean) => updateActivityMock(active),
+  },
 }));
 
 import "../src/i18n/index.js";
@@ -26,7 +30,9 @@ describe("signer updates", () => {
     checkMock.mockReset();
     relaunchMock.mockReset();
     notifyMock.mockReset();
+    updateActivityMock.mockReset();
     notifyMock.mockResolvedValue(undefined);
+    updateActivityMock.mockResolvedValue(undefined);
     warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
   });
 
@@ -99,6 +105,7 @@ describe("signer updates", () => {
 
     expect(downloadAndInstall).toHaveBeenCalledTimes(1);
     expect(relaunchMock).toHaveBeenCalledTimes(1);
+    expect(updateActivityMock.mock.calls).toEqual([[true], [false]]);
   });
 
   it("announces a version to the tray at most once", async () => {
@@ -136,6 +143,7 @@ describe("signer updates", () => {
 
     // The banner reports the failure and stays; it must not take the window down.
     expect(relaunchMock).not.toHaveBeenCalled();
+    expect(updateActivityMock.mock.calls).toEqual([[true], [false]]);
     expect(screen.getByRole("alert").textContent).toBeTruthy();
   });
 

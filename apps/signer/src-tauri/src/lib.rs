@@ -1,4 +1,5 @@
 mod commands;
+mod tray;
 
 use std::sync::Arc;
 
@@ -65,8 +66,6 @@ pub fn run() {
             // `Result` rather than unwrapping and taking the whole agent down.
             let runtime = Runtime::new(config_dir, signer, secrets, version)?;
             let runtime = Arc::new(runtime);
-            app.manage(commands::SignerState { runtime: runtime.clone() });
-
             if let Some(window) = app.get_webview_window("main") {
                 window.set_icon(SIGNER_ICON.clone())?;
             }
@@ -74,7 +73,7 @@ pub fn run() {
             let open = MenuItem::with_id(app, "open", "Открыть", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &quit])?;
-            TrayIconBuilder::new()
+            let tray_icon = TrayIconBuilder::new()
                 .icon(SIGNER_ICON.clone())
                 .tooltip("Markiro Подписант")
                 .menu(&menu)
@@ -90,11 +89,31 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            let initial_status = runtime.status();
+            let tray_controller = tray::TrayController::new(
+                tray_icon,
+                SIGNER_ICON.clone().to_owned(),
+                initial_status.phase,
+            );
+            tray_controller.update_status(app.handle(), &initial_status);
+            app.manage(tray_controller);
+            app.manage(commands::SignerState { runtime: runtime.clone() });
+
+            let animation_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                    animation_handle.state::<tray::TrayController>().tick();
+                }
+            });
+
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 runtime
                     .run(move |status| {
-                        notify_if_actionable(&handle, &status);
+                        handle
+                            .state::<tray::TrayController>()
+                            .update_status(&handle, &status);
                         let _ = handle.emit(STATUS_EVENT, status);
                     })
                     .await;
@@ -119,29 +138,8 @@ pub fn run() {
             commands::signer_set_server_url,
             commands::signer_export_journal,
             commands::signer_notify_update,
+            commands::signer_set_update_activity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Markiro signer");
-}
-
-/// A tray notification is the only way the operator learns about a failure
-/// that needs their hands — an absent token, a locked container, a missing
-/// provider. Everything else stays in the window's journal so the tray does
-/// not cry wolf.
-fn notify_if_actionable(app: &tauri::AppHandle, status: &signer_core::runtime::AgentStatus) {
-    use signer_core::runtime::AgentPhase;
-    use tauri_plugin_notification::NotificationExt as _;
-
-    if status.phase != AgentPhase::Degraded {
-        return;
-    }
-    let Some(detail) = status.last_error.as_deref() else {
-        return;
-    };
-    let _ = app
-        .notification()
-        .builder()
-        .title("Markiro Подписант")
-        .body(detail)
-        .show();
 }

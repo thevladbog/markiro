@@ -30,8 +30,21 @@ async function performUpdateCheck(): Promise<UpdateCheckResult> {
         version: found.version,
         notes: found.body ?? null,
         install: async () => {
-          await found.downloadAndInstall();
-          await relaunch();
+          try {
+            await bridge.setUpdateActivity(true);
+          } catch (error) {
+            console.warn("signer tray update activity failed", error);
+          }
+          try {
+            await found.downloadAndInstall();
+            await relaunch();
+          } finally {
+            try {
+              await bridge.setUpdateActivity(false);
+            } catch (error) {
+              console.warn("signer tray update activity reset failed", error);
+            }
+          }
         },
       },
     };

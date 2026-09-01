@@ -54,6 +54,8 @@ export const bridge = {
   setServerUrl: (url: string) => invoke<void>("signer_set_server_url", { url }),
   exportJournal: () => invoke<string | null>("signer_export_journal"),
   notifyUpdateAvailable: (version: string) => invoke<void>("signer_notify_update", { version }),
+  setUpdateActivity: (active: boolean) =>
+    invoke<void>("signer_set_update_activity", { active }),
   onStatus: (listener: (status: AgentStatus) => void) =>
     listen<AgentStatus>("signer://status", (event) => listener(event.payload)),
 };
