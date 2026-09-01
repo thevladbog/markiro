@@ -15,7 +15,7 @@ export function buildChzTrueApiAuthPayload(settings: {
   return {
     trueApiBaseUrl: CHZ_TRUE_API_BASE_URLS[settings.environment],
     ...(settings.mchdInn ? { inn: settings.mchdInn } : {}),
-    tokenFormat,
+    ...(tokenFormat === "uuid" ? { tokenFormat } : {}),
   };
 }
 

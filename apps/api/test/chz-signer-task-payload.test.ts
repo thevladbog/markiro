@@ -18,11 +18,10 @@ describe("CHZ signer task payload", () => {
     });
   });
 
-  it("keeps an explicit JWT rollback payload available", () => {
+  it("restores the legacy wire payload for an explicit JWT rollback", () => {
     process.env.CHZ_TRUE_API_TOKEN_FORMAT = "jwt";
     expect(buildChzTrueApiAuthPayload({ environment: "production" })).toEqual({
       trueApiBaseUrl: "https://markirovka.crpt.ru/api/v3/true-api",
-      tokenFormat: "jwt",
     });
   });
 

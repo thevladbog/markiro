@@ -142,7 +142,7 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
     expect(chzTrueApiAuthPayloadSchema.parse(task.payload).tokenFormat).toBe("uuid");
   });
 
-  it("propagates the explicit JWT rollback format into signer tasks", async () => {
+  it("restores the legacy signer task shape for an explicit JWT rollback", async () => {
     const previous = process.env.CHZ_TRUE_API_TOKEN_FORMAT;
     process.env.CHZ_TRUE_API_TOKEN_FORMAT = "jwt";
     try {
@@ -150,7 +150,7 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
       await insertAgent(tenantId);
       await svc.run(new Date());
       const task = await singlePendingTask(tenantId);
-      expect(chzTrueApiAuthPayloadSchema.parse(task.payload).tokenFormat).toBe("jwt");
+      expect(task.payload).not.toHaveProperty("tokenFormat");
     } finally {
       if (previous === undefined) delete process.env.CHZ_TRUE_API_TOKEN_FORMAT;
       else process.env.CHZ_TRUE_API_TOKEN_FORMAT = previous;
