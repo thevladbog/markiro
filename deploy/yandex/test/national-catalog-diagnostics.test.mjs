@@ -199,8 +199,10 @@ test("hosted National Catalog diagnostic accepts only the first failing check as
 test("hosted National Catalog diagnostic accepts a bounded source status without provider checks", async () => {
   for (const sourceStatus of [
     "encryption-key-missing",
+    "active-token-query-failed",
     "active-token-missing",
     "active-token-ambiguous",
+    "product-query-failed",
     "product-gtin-unavailable",
     "token-decryption-failed",
   ]) {
