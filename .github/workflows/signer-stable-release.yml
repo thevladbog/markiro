@@ -123,8 +123,6 @@ jobs:
     env:
       RELEASE_VERSION: ${{ needs.state.outputs.version }}
       RELEASE_TAG: ${{ needs.state.outputs.tag }}
-      VERSION_OVERLAY: ${{ runner.temp }}/signer-version-overlay.json
-      RELEASE_DIR: ${{ runner.temp }}/signer-release
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -135,6 +133,12 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Configure release working paths
+        shell: bash
+        run: |
+          printf 'VERSION_OVERLAY=%s\n' "$RUNNER_TEMP/signer-version-overlay.json" >> "$GITHUB_ENV"
+          printf 'RELEASE_DIR=%s\n' "$RUNNER_TEMP/signer-release" >> "$GITHUB_ENV"
 
       - name: Install locked workspace dependencies
         shell: bash
@@ -269,7 +273,6 @@ jobs:
     env:
       RELEASE_VERSION: ${{ needs.state.outputs.version }}
       RELEASE_TAG: ${{ needs.state.outputs.tag }}
-      RELEASE_DIR: ${{ runner.temp }}/signer-release
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -279,6 +282,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+
+      - name: Configure release working paths
+        shell: bash
+        run: printf 'RELEASE_DIR=%s\n' "$RUNNER_TEMP/signer-release" >> "$GITHUB_ENV"
 
       - name: Install locked workspace dependencies
         shell: bash

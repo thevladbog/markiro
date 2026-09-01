@@ -62,6 +62,21 @@ test("builds Windows with the stable config overlay", () => {
   assert.doesNotMatch(workflow, /--no-bundle/);
 });
 
+test("resolves runner paths only after each job starts", () => {
+  for (const [jobName, job] of Object.entries(parsed.jobs)) {
+    for (const [variableName, value] of Object.entries(job.env ?? {})) {
+      assert.doesNotMatch(
+        String(value),
+        /\$\{\{\s*runner\./,
+        `${jobName}.env.${variableName} cannot access the runner context`,
+      );
+    }
+  }
+  assert.match(workflow, /\$RUNNER_TEMP\/signer-version-overlay\.json/);
+  assert.match(workflow, /\$RUNNER_TEMP\/signer-release/);
+  assert.match(workflow, />> "\$GITHUB_ENV"/);
+});
+
 test("never puts the signing key on a command line", () => {
   assert.match(workflow, /normalize-signing-key\.mjs/);
   assert.match(workflow, /chmod 600/);
