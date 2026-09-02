@@ -204,4 +204,207 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
       },
     ],
   },
+  en: {
+    locale: "en",
+    title: "Scanning station: workstation setup",
+    summary:
+      "This is an informational translation. The matching Russian revision is authoritative. Technician's guide: pairing the station with the cabinet, connecting the scanner and the printer, sound, and station updates.",
+    sections: [
+      {
+        id: "purpose",
+        heading: "1. Purpose",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "This instruction is intended for a technician or an administrator and covers preparing a scanning station workstation: pairing the station with the cabinet, connecting the barcode scanner and the label printer, sound, and updates. It is performed when a new workstation is commissioned or when hardware is replaced.",
+          },
+          {
+            kind: "paragraph",
+            text: "The operator's daily work is covered by separate instructions: sign-in and shift start (MKR-INS-01), the work cycle (MKR-INS-02), exceptions (MKR-INS-03).",
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "The screenshots use demo data. Addresses, version numbers and names on your station will differ.",
+          },
+        ],
+      },
+      {
+        id: "pairing",
+        heading: "2. Pairing the station",
+        blocks: [
+          {
+            kind: "step",
+            title: "Create a pairing code in the cabinet",
+            text: "Open the station page in the administrator cabinet and create an eight-digit pairing code for this line. The code is single-use and valid for a limited time.",
+          },
+          {
+            kind: "step",
+            title: "Enter the code on the station",
+            text: "On the “Connect station” screen, type the eight-digit code into the “Pairing code” field on the on-screen keyboard or scan it, then tap “Pair station”. The station shows “Pairing…” — the code is being checked and the settings are being downloaded.",
+            image: {
+              id: "pairing-waiting",
+              caption: "The “Connect station” screen: entering the code from the cabinet",
+            },
+            expected: "The station showed “Station connected”.",
+          },
+          {
+            kind: "step",
+            title: "Move on to hardware setup",
+            text: "After the “Station connected” message the station proceeds to work by itself. Open the hardware setup with the “Equipment setup” button on the connection screen (before entering the code) or the “Workstation setup” button on the shift selection screen. Configure the scanner, the printer and the sound (sections 3–5).",
+            image: { id: "pairing-success", caption: "The station is connected to the cabinet" },
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "If the station reports “This pairing code is not valid” or “This pairing code has expired”, create a new pairing code in the cabinet and enter it here. The old code will not work again.",
+          },
+        ],
+      },
+      {
+        id: "scanner",
+        heading: "3. Scanner",
+        blocks: [
+          {
+            kind: "step",
+            title: "Connect and check the scanner",
+            text: "On the “Scanner” tab, in the “Connection” block, choose the “Port” and the “Baud rate” according to the scanner's datasheet, then tap “Connect scanner”. Next to it is the “Scanner check” block: the station shows a barcode with a caption and asks you to “Scan this code straight off the screen”. Scan it from the monitor — on success you will see “Code matches — the scanner works correctly”. If a different code came in, the station shows exactly what it received; the “New code” button issues a fresh code for another check.",
+            image: {
+              id: "setup-scanner",
+              caption: "Scanner setup: connection and the on-screen code check",
+            },
+            expected: "“Code matches — the scanner works correctly”.",
+          },
+          {
+            kind: "paragraph",
+            text: "If the scanner works in keyboard mode (input emulation), choose “No serial scanner (keyboard-wedge)” — the port and the baud rate are not configured in this mode.",
+          },
+        ],
+      },
+      {
+        id: "printer",
+        heading: "4. Printer",
+        blocks: [
+          {
+            kind: "step",
+            title: "Choose the printer connection",
+            text: "On the “Printer” tab, in the “Connection” block, set the “Printer connection”: “Network (TCP)” — the “Printer address” and the “Printer TCP port”; “Serial (COM port)” — the port and the baud rate; “Windows (USB)” — pick an installed Windows printer from the list (the “Refresh list” button re-reads it). Then choose the “Printer language” — ZPL or TSPL, per the printer's documentation. If this workstation does not print labels, keep “No printer”.",
+            image: {
+              id: "setup-printer",
+              caption: "Printer setup: connection and the print check",
+            },
+          },
+          {
+            kind: "step",
+            title: "Pass the print check",
+            text: "In the “Print check” block the station asks you to “Print a test label, then scan it”. Tap “Test print” — the “Test label sent to the printer” message only confirms the sending. Then scan the code from the label that came out: on success you will see “Label printed and recognized — the printer works”. This checks the whole chain at once — the connection, the printer language, the print quality and the scanner.",
+            expected: "“Label printed and recognized — the printer works”.",
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "The “Verify each printed label by scanning it back” checkbox enables the mandatory box label verification after printing (covered by the work cycle instruction). Keeping it on is recommended for aggregation workstations.",
+          },
+        ],
+      },
+      {
+        id: "sound",
+        heading: "5. Sound",
+        blocks: [
+          {
+            kind: "step",
+            title: "Turn the station sound on",
+            text: "In the “Sound” block, enable the audio signals. Line operators rely on the scan verdict sounds — without them it is easy to miss a duplicate or an error while not looking at the screen.",
+            image: { id: "setup-sound", caption: "Station sound setup" },
+          },
+        ],
+      },
+      {
+        id: "updates",
+        heading: "6. Station updates",
+        blocks: [
+          {
+            kind: "step",
+            title: "Check the station version",
+            text: "Open “Station updates” (the “Updates” indicator on the shift selection screen) and tap “Check for updates”. If the version is current, the station reports: “This station is up to date.”",
+            image: { id: "update-current", caption: "The update center: the version is current" },
+          },
+          {
+            kind: "step",
+            title: "Install an available update",
+            text: "If a new version is available, the station shows its age: “Released recently”, “This release is more than 7 days old” or “This release is more than 30 days old; update when convenient”. Tap “Download and install” and confirm — the version is downloaded and the station restarts. Updates are installed manually only.",
+            image: {
+              id: "update-warn",
+              caption: "An update is available: the release age and installation",
+            },
+            expected: "The station restarted on the new version.",
+          },
+          {
+            kind: "step",
+            title: "Do not update the station during a shift",
+            text: "While a shift is active, installation is blocked: “Leave the active shift before installing”. Wait until the operator closes the shift; unsent operations must reach the server too.",
+            image: {
+              id: "update-active-shift",
+              caption: "Installation is blocked by an active shift",
+            },
+          },
+        ],
+      },
+      {
+        id: "service",
+        heading: "7. Service operations",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "The “Re-pair this station” button (in the workstation setup) is used only when a service user needs to pair this same station again: the device key is deleted, and the local production records stay on the station. “Service connection” is a separate path with credentials issued by support; it does not replace the normal code-based pairing.",
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Both operations are rare and are performed only together with Markiro support. Do not run them to fix ordinary connectivity or hardware problems.",
+          },
+        ],
+      },
+      {
+        id: "troubleshooting",
+        heading: "8. Frequently asked questions",
+        blocks: [
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "The scanner or the printer is labelled configured, not detected",
+                detail:
+                  "The saved device was not found on this machine: check the cable and the power, then pick the port or the printer again in the setup.",
+              },
+              {
+                term: "No installed Windows printers found",
+                detail:
+                  "Install the printer driver through Windows, then tap “Refresh list” in the “Printer” block.",
+              },
+              {
+                term: "The test label did not come out or is not recognized",
+                detail:
+                  "The sent message does not guarantee printing. Check the connection address/port, the printer language (ZPL/TSPL per the documentation) and the ribbon, then repeat “Test print”. The check only counts after scanning the code from the label — if the station shows that a different code came in, you scanned the wrong label (for example, yesterday's test one).",
+              },
+              {
+                term: "The pairing code has expired",
+                detail:
+                  "Codes are single-use and time-limited. Create a new code in the administrator cabinet and enter it on the station.",
+              },
+              {
+                term: "The station must move to another line",
+                detail:
+                  "Contact Markiro support — re-pairing on your own without guidance is not recommended.",
+              },
+            ],
+          },
+          {
+            kind: "paragraph",
+            text: "If your problem is not listed above, contact Markiro support: hello@v-b.tech.",
+          },
+        ],
+      },
+    ],
+  },
 } as const satisfies LegalDocumentSource["content"];
