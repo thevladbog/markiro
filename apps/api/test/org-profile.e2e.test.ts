@@ -134,6 +134,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       inn: null,
       timeZone: "Europe/Moscow",
       defaultBoxLabelTemplateId: null,
+      categoryBoxLabelTemplateDefaults: [],
+      productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
       logoRevision: null,
@@ -158,6 +160,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       inn: "7701234567",
       timeZone: "Europe/Moscow",
       defaultBoxLabelTemplateId: null,
+      categoryBoxLabelTemplateDefaults: [],
+      productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
       logoRevision: null,
@@ -184,6 +188,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       inn: "7709876543",
       timeZone: "Europe/Moscow",
       defaultBoxLabelTemplateId: null,
+      categoryBoxLabelTemplateDefaults: [],
+      productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
       logoRevision: null,
@@ -313,6 +319,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       inn: "7701234567",
       timeZone: "Europe/Moscow",
       defaultBoxLabelTemplateId: null,
+      categoryBoxLabelTemplateDefaults: [],
+      productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
       logoRevision: null,
@@ -326,6 +334,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       inn: "7701234567",
       timeZone: "Europe/Moscow",
       defaultBoxLabelTemplateId: null,
+      categoryBoxLabelTemplateDefaults: [],
+      productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
       logoRevision: null,
@@ -355,6 +365,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       inn: null,
       timeZone: "Europe/Moscow",
       defaultBoxLabelTemplateId: null,
+      categoryBoxLabelTemplateDefaults: [],
+      productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
       logoRevision: null,
@@ -384,6 +396,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       inn: null,
       timeZone: "Europe/Moscow",
       defaultBoxLabelTemplateId: null,
+      categoryBoxLabelTemplateDefaults: [],
+      productGroupsInUse: [],
       pickupLimitsEnabled: false,
       logoUrl: null,
       logoRevision: null,
@@ -737,5 +751,164 @@ describe.skipIf(!ready)("org profile e2e", () => {
         ),
       );
     expect(old?.status).toBe("deleting");
+  });
+  const BOX_SPEC = {
+    widthMm: 58,
+    heightMm: 40,
+    dpi: 203,
+    language: "zpl",
+    elements: [{ kind: "text", id: "t", xMm: 2, yMm: 2, text: "Box", fontSizePt: 12 }],
+  };
+
+  async function createTemplate(
+    agent: ReturnType<typeof request.agent>,
+    body: Record<string, unknown>,
+  ): Promise<string> {
+    const res = await agent
+      .post("/label-templates")
+      .send({ name: "T", spec: BOX_SPEC, ...body })
+      .expect(201);
+    return res.body.id as string;
+  }
+
+  async function seedProductInGroup(tenantId: string, code: number, archived = false) {
+    await db.insert(schema.products).values({
+      id: randomUUID(),
+      tenantId,
+      gtin14: `${Math.floor(Math.random() * 1e13)}`.padStart(14, "0"),
+      name: `Product ${code}`,
+      status: "active",
+      chzProductGroupCode: code,
+      archived,
+    });
+  }
+
+  async function activate(agent: ReturnType<typeof request.agent>): Promise<string> {
+    const orgId = await signUpWithInactiveOrg(agent);
+    await agent
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: orgId })
+      .expect(200);
+    return orgId;
+  }
+
+  it("reports product groups in use from non-archived products only", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await activate(agent);
+    await seedProductInGroup(orgId, 15);
+    await seedProductInGroup(orgId, 8);
+    await seedProductInGroup(orgId, 22, true);
+
+    const profile = await agent.get("/org/profile").expect(200);
+    expect(profile.body.productGroupsInUse).toEqual([8, 15]);
+    expect(profile.body.categoryBoxLabelTemplateDefaults).toEqual([]);
+  });
+
+  it("only accepts an enabled universal template as the organisation default", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await activate(agent);
+    const scoped = await createTemplate(agent, { chzProductGroupCodes: [15] });
+    const disabled = await createTemplate(agent, { enabled: false });
+
+    const scopedRes = await agent
+      .put("/org/profile")
+      .send({ defaultBoxLabelTemplateId: scoped })
+      .expect(400);
+    expect(scopedRes.body).toMatchObject({
+      code: "BOX_LABEL_TEMPLATE_NOT_ELIGIBLE",
+      field: "defaultBoxLabelTemplateId",
+    });
+    await agent.put("/org/profile").send({ defaultBoxLabelTemplateId: disabled }).expect(400);
+  });
+
+  it("replaces category defaults as a whole list, validating eligibility, and audits the change", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await activate(agent);
+    const beer = await createTemplate(agent, { chzProductGroupCodes: [15] });
+    const universal = await createTemplate(agent, {});
+
+    const set = await agent
+      .put("/org/profile")
+      .send({
+        categoryBoxLabelTemplateDefaults: [
+          { chzProductGroupCode: 15, templateId: beer },
+          { chzProductGroupCode: 8, templateId: universal },
+        ],
+      })
+      .expect(200);
+    expect(set.body.categoryBoxLabelTemplateDefaults).toEqual([
+      { chzProductGroupCode: 8, templateId: universal },
+      { chzProductGroupCode: 15, templateId: beer },
+    ]);
+
+    // Beer template does not cover milk (8).
+    const wrong = await agent
+      .put("/org/profile")
+      .send({ categoryBoxLabelTemplateDefaults: [{ chzProductGroupCode: 8, templateId: beer }] })
+      .expect(400);
+    expect(wrong.body).toMatchObject({
+      code: "BOX_LABEL_TEMPLATE_NOT_ELIGIBLE",
+      field: "categoryBoxLabelTemplateDefaults",
+      chzProductGroupCode: 8,
+    });
+
+    // Duplicate codes and unknown codes are rejected before any write.
+    await agent
+      .put("/org/profile")
+      .send({
+        categoryBoxLabelTemplateDefaults: [
+          { chzProductGroupCode: 15, templateId: beer },
+          { chzProductGroupCode: 15, templateId: universal },
+        ],
+      })
+      .expect(400);
+    await agent
+      .put("/org/profile")
+      .send({
+        categoryBoxLabelTemplateDefaults: [{ chzProductGroupCode: 999999, templateId: universal }],
+      })
+      .expect(400);
+
+    // Omitting the field keeps the list; sending a shorter list drops rows.
+    const kept = await agent.put("/org/profile").send({ inn: "7701234567" }).expect(200);
+    expect(kept.body.categoryBoxLabelTemplateDefaults).toHaveLength(2);
+    const shrunk = await agent
+      .put("/org/profile")
+      .send({ categoryBoxLabelTemplateDefaults: [{ chzProductGroupCode: 15, templateId: beer }] })
+      .expect(200);
+    expect(shrunk.body.categoryBoxLabelTemplateDefaults).toEqual([
+      { chzProductGroupCode: 15, templateId: beer },
+    ]);
+
+    const audits = await db
+      .select({
+        action: schema.tenantAuditEvents.action,
+        before: schema.tenantAuditEvents.before,
+        after: schema.tenantAuditEvents.after,
+        targetType: schema.tenantAuditEvents.targetType,
+        targetId: schema.tenantAuditEvents.targetId,
+        outcome: schema.tenantAuditEvents.outcome,
+      })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, orgId),
+          eq(schema.tenantAuditEvents.action, "tenant.box_label_template_defaults.updated"),
+        ),
+      )
+      .orderBy(desc(schema.tenantAuditEvents.createdAt));
+    expect(audits).toHaveLength(2);
+    expect(audits[0]).toMatchObject({
+      outcome: "success",
+      targetType: "tenant",
+      targetId: orgId,
+      before: {
+        defaults: [
+          { chzProductGroupCode: 8, templateId: universal },
+          { chzProductGroupCode: 15, templateId: beer },
+        ],
+      },
+      after: { defaults: [{ chzProductGroupCode: 15, templateId: beer }] },
+    });
   });
 });

@@ -15,15 +15,33 @@ const gs1PrefixSchema = z.string().regex(/^\d{4,12}$/, "gs1Prefixes entries must
 
 const timeZoneSchema = z.string().refine(isIanaTimeZone, "timeZone must be an IANA timezone");
 
+const categoryBoxLabelTemplateDefaultSchema = z.object({
+  chzProductGroupCode: z.number().int().positive(),
+  templateId: z.string().uuid(),
+});
+
 export const putOrgProfileSchema = z.object({
   gln: glnSchema.nullable().optional(),
   gs1Prefixes: z.array(gs1PrefixSchema).optional(),
   inn: z.string().nullable().optional(),
   timeZone: timeZoneSchema.optional(),
   defaultBoxLabelTemplateId: z.string().uuid().nullable().optional(),
+  /** Full replacement of the per-category box-label defaults; omitted keeps the current list. */
+  categoryBoxLabelTemplateDefaults: z
+    .array(categoryBoxLabelTemplateDefaultSchema)
+    .refine(
+      (items) => new Set(items.map((item) => item.chzProductGroupCode)).size === items.length,
+      { message: "categoryBoxLabelTemplateDefaults must not repeat a product group" },
+    )
+    .optional(),
   pickupLimitsEnabled: z.boolean().optional(),
 });
 export type PutOrgProfileDto = z.infer<typeof putOrgProfileSchema>;
+
+export interface CategoryBoxLabelTemplateDefaultDto {
+  chzProductGroupCode: number;
+  templateId: string;
+}
 
 export interface OrgProfileDto {
   gln: string | null;
@@ -31,6 +49,9 @@ export interface OrgProfileDto {
   inn: string | null;
   timeZone: string;
   defaultBoxLabelTemplateId: string | null;
+  categoryBoxLabelTemplateDefaults: CategoryBoxLabelTemplateDefaultDto[];
+  /** Distinct ЧЗ product-group codes of non-archived products, ascending. A UI hint only. */
+  productGroupsInUse: number[];
   pickupLimitsEnabled: boolean;
   logoUrl: string | null;
   logoRevision: string | null;
@@ -84,6 +105,8 @@ export const orgProfileOpenApiSchema: SchemaObject = {
     "gs1Prefixes",
     "inn",
     "defaultBoxLabelTemplateId",
+    "categoryBoxLabelTemplateDefaults",
+    "productGroupsInUse",
     "pickupLimitsEnabled",
     "logoUrl",
     "logoRevision",
@@ -93,6 +116,16 @@ export const orgProfileOpenApiSchema: SchemaObject = {
     gs1Prefixes: { type: "array", items: { type: "string", pattern: "^\\d{4,12}$" } },
     inn: { type: "string", nullable: true },
     defaultBoxLabelTemplateId: { ...uuidSchema, nullable: true },
+    categoryBoxLabelTemplateDefaults: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["chzProductGroupCode", "templateId"],
+        properties: { chzProductGroupCode: { type: "integer" }, templateId: uuidSchema },
+      },
+    },
+    productGroupsInUse: { type: "array", items: { type: "integer" } },
     pickupLimitsEnabled: { type: "boolean" },
     logoUrl: { type: "string", nullable: true },
     logoRevision: { ...uuidSchema, nullable: true },

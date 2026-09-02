@@ -9,15 +9,21 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { and, eq, inArray, isNull, lt, lte, notExists, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lt, lte, notExists, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import { isBoxLabelTemplateEligible } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
+import {
+  assertKnownProductGroupCodes,
+  findLabelTemplateEligibility,
+} from "../label-templates/box-label-template-eligibility";
 import { isMissingObjectError, ObjectStorageService } from "../storage/object-storage.service";
 import { BOX_EXTENSION_DIGIT, deriveIssuerPrefix, SsccService } from "../sscc/sscc.service";
 import type { SsccCounterStateDto } from "../sscc/dto";
 import { processLogo } from "./logo-processor";
 import { RasterImageInputError } from "../profile/raster-image-processor";
 import type {
+  CategoryBoxLabelTemplateDefaultDto,
   KioskBrandingDto,
   OrganizationLogoDto,
   OrgProfileDto,
@@ -44,7 +50,7 @@ export class OrgProfileService {
 
   /** Returns the tenant's profile, or the empty defaults if no row exists yet. */
   async getProfile(tenantId: string): Promise<OrgProfileDto> {
-    const [[row], [pickupPolicy], [logo]] = await Promise.all([
+    const [[row], [pickupPolicy], [logo], categoryDefaults, groupsInUse] = await Promise.all([
       this.db.select().from(schema.orgProfiles).where(eq(schema.orgProfiles.tenantId, tenantId)),
       this.db
         .select({ limitsEnabled: schema.pickupTenantPolicies.limitsEnabled })
@@ -63,6 +69,26 @@ export class OrgProfileService {
         )
         .where(eq(schema.orgProfiles.tenantId, tenantId))
         .limit(1),
+      this.db
+        .select({
+          chzProductGroupCode: schema.orgBoxLabelTemplateDefaults.chzProductGroupCode,
+          templateId: schema.orgBoxLabelTemplateDefaults.templateId,
+        })
+        .from(schema.orgBoxLabelTemplateDefaults)
+        .where(eq(schema.orgBoxLabelTemplateDefaults.tenantId, tenantId))
+        .orderBy(schema.orgBoxLabelTemplateDefaults.chzProductGroupCode),
+      this.db
+        .select({ code: schema.products.chzProductGroupCode })
+        .from(schema.products)
+        .where(
+          and(
+            eq(schema.products.tenantId, tenantId),
+            eq(schema.products.archived, false),
+            isNotNull(schema.products.chzProductGroupCode),
+          ),
+        )
+        .groupBy(schema.products.chzProductGroupCode)
+        .orderBy(schema.products.chzProductGroupCode),
     ]);
     if (!pickupPolicy) {
       throw new InternalServerErrorException("Tenant pickup policy is not configured");
@@ -73,6 +99,8 @@ export class OrgProfileService {
       inn: row?.inn ?? null,
       timeZone: row?.timeZone ?? "Europe/Moscow",
       defaultBoxLabelTemplateId: row?.defaultBoxLabelTemplateId ?? null,
+      categoryBoxLabelTemplateDefaults: categoryDefaults,
+      productGroupsInUse: groupsInUse.flatMap((group) => (group.code === null ? [] : [group.code])),
       pickupLimitsEnabled: pickupPolicy.limitsEnabled,
       logoRevision: logo?.revision ?? null,
       logoUrl: logo?.revision ? `/org/profile/logo/${logo.revision}` : null,
@@ -101,6 +129,47 @@ export class OrgProfileService {
 
     try {
       await this.db.transaction(async (tx) => {
+        if (patch.defaultBoxLabelTemplateId) {
+          const template = await findLabelTemplateEligibility(
+            tx,
+            tenantId,
+            patch.defaultBoxLabelTemplateId,
+            "share",
+          );
+          if (!template) {
+            throw new BadRequestException("Unknown box label template for this organization");
+          }
+          if (!template.enabled || template.chzProductGroupCodes !== null) {
+            throw new BadRequestException({
+              code: "BOX_LABEL_TEMPLATE_NOT_ELIGIBLE",
+              message: "The organisation default must be an enabled template for all categories",
+              field: "defaultBoxLabelTemplateId",
+            });
+          }
+        }
+        if (patch.categoryBoxLabelTemplateDefaults !== undefined) {
+          await assertKnownProductGroupCodes(
+            tx,
+            patch.categoryBoxLabelTemplateDefaults.map((item) => item.chzProductGroupCode),
+          );
+          for (const item of patch.categoryBoxLabelTemplateDefaults) {
+            const template = await findLabelTemplateEligibility(
+              tx,
+              tenantId,
+              item.templateId,
+              "share",
+            );
+            if (!template || !isBoxLabelTemplateEligible(template, item.chzProductGroupCode)) {
+              throw new BadRequestException({
+                code: "BOX_LABEL_TEMPLATE_NOT_ELIGIBLE",
+                message: "The category default must be an enabled template covering that category",
+                field: "categoryBoxLabelTemplateDefaults",
+                chzProductGroupCode: item.chzProductGroupCode,
+              });
+            }
+          }
+        }
+
         await tx
           .insert(schema.orgProfiles)
           .values({
@@ -117,6 +186,43 @@ export class OrgProfileService {
             target: schema.orgProfiles.tenantId,
             set: setClause,
           });
+
+        if (patch.categoryBoxLabelTemplateDefaults !== undefined) {
+          const before: CategoryBoxLabelTemplateDefaultDto[] = await tx
+            .select({
+              chzProductGroupCode: schema.orgBoxLabelTemplateDefaults.chzProductGroupCode,
+              templateId: schema.orgBoxLabelTemplateDefaults.templateId,
+            })
+            .from(schema.orgBoxLabelTemplateDefaults)
+            .where(eq(schema.orgBoxLabelTemplateDefaults.tenantId, tenantId))
+            .orderBy(schema.orgBoxLabelTemplateDefaults.chzProductGroupCode);
+          const after: CategoryBoxLabelTemplateDefaultDto[] = patch.categoryBoxLabelTemplateDefaults
+            .map((item) => ({
+              chzProductGroupCode: item.chzProductGroupCode,
+              templateId: item.templateId,
+            }))
+            .sort((a, b) => a.chzProductGroupCode - b.chzProductGroupCode);
+          await tx
+            .delete(schema.orgBoxLabelTemplateDefaults)
+            .where(eq(schema.orgBoxLabelTemplateDefaults.tenantId, tenantId));
+          if (after.length > 0) {
+            await tx
+              .insert(schema.orgBoxLabelTemplateDefaults)
+              .values(after.map((item) => ({ tenantId, ...item })));
+          }
+          if (JSON.stringify(before) !== JSON.stringify(after)) {
+            await tx.insert(schema.tenantAuditEvents).values({
+              organizationId: tenantId,
+              actorUserId,
+              action: "tenant.box_label_template_defaults.updated",
+              outcome: "success",
+              targetType: "tenant",
+              targetId: tenantId,
+              before: { defaults: before },
+              after: { defaults: after },
+            });
+          }
+        }
 
         if (patch.pickupLimitsEnabled !== undefined) {
           const [policy] = await tx
