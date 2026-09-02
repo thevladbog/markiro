@@ -751,7 +751,9 @@ describe("NewShift", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
     await waitFor(() => expect(screen.getByTestId("new-shift-template")).toBeDefined());
-    expect(fetchMock.mock.calls[2]?.[0]).toBe("http://localhost:3000/shifts/box-label-templates");
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(
+      "http://localhost:3000/shifts/box-label-templates?productId=p1",
+    );
     expect(screen.queryByTestId("new-shift-found")).toBeNull();
     // The admin default arrives preselected and badged.
     const defaultOption = screen.getByRole("button", { name: /Box 58x40/ });

@@ -140,10 +140,12 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
     setError(null);
     setBusy(true);
     try {
+      // The server filters by the product's ЧЗ category and resolves the
+      // category/organisation default; the station never sees scope metadata.
       const config = await client.get<{
         items: BoxLabelTemplateOption[];
         defaultBoxLabelTemplateId: string | null;
-      }>("/shifts/box-label-templates");
+      }>(`/shifts/box-label-templates?productId=${encodeURIComponent(product.id)}`);
       const preselected =
         config.defaultBoxLabelTemplateId !== null &&
         config.items.some((item) => item.id === config.defaultBoxLabelTemplateId)
