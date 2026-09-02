@@ -39,11 +39,11 @@ describe.skipIf(!liveConfigured)("National Catalog live read contract", () => {
     if (token.status !== "ok") {
       throw new Error(`National Catalog source tenant token is ${token.status}`);
     }
-    if (!env.NATIONAL_CATALOG_BASE_URL || !process.env.NATIONAL_CATALOG_LIVE_GTIN) {
+    if (!env.NATIONAL_CATALOG_BASE_URL || !env.NATIONAL_CATALOG_LIVE_GTIN) {
       throw new Error("National Catalog live configuration disappeared after the opt-in check");
     }
     const auth = { baseUrl: env.NATIONAL_CATALOG_BASE_URL, token: token.auth.token };
-    const gtin = process.env.NATIONAL_CATALOG_LIVE_GTIN.trim();
+    const gtin = env.NATIONAL_CATALOG_LIVE_GTIN;
 
     const categories = await client.listCategories(auth);
     record(

@@ -92,6 +92,12 @@ const optionalHttpsUrlSchema = z
   })
   .optional();
 
+const optionalNationalCatalogLiveGtinSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{14}$/)
+  .optional();
+
 const encryptionKeySchema = z
   .string()
   .refine((value) => {
@@ -215,6 +221,7 @@ const EnvSchema = z
     // validated endpoint and a tenant authorized to read its schema.
     NATIONAL_CATALOG_BASE_URL: optionalHttpsUrlSchema,
     NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID: z.string().trim().min(1).optional(),
+    NATIONAL_CATALOG_LIVE_GTIN: optionalNationalCatalogLiveGtinSchema,
     NATIONAL_CATALOG_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1).default(15_000),
   })
   .superRefine((env, ctx) => {
@@ -319,6 +326,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     "CHZ_TRUE_API_TOKEN_FORMAT",
     "NATIONAL_CATALOG_BASE_URL",
     "NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID",
+    "NATIONAL_CATALOG_LIVE_GTIN",
     "NATIONAL_CATALOG_REQUEST_TIMEOUT_MS",
   ]) {
     if (normalizedSource[name]?.trim() === "") delete normalizedSource[name];
