@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +15,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   LIBREOFFICE_PROFILE_FONT_DIRECTORIES,
+  assertPinnedFontsInstalled,
   stageLibreOfficeFonts,
 } from "../src/cli/generate-artifacts.js";
 
@@ -58,6 +66,44 @@ describe("vendored fonts", () => {
       "SIL OPEN FONT LICENSE Version 1.1",
     );
   });
+});
+
+describe("assertPinnedFontsInstalled", () => {
+  const withTempDir = (run: (dir: string) => Promise<void>): Promise<void> => {
+    const dir = mkdtempSync(path.join(tmpdir(), "markiro-system-fonts-"));
+    return run(dir).finally(() => rmSync(dir, { force: true, recursive: true }));
+  };
+
+  it("passes when every pinned font is installed byte-for-byte", () =>
+    withTempDir(async (dir) => {
+      for (const { name } of PINNED_FONTS) {
+        copyFileSync(path.join(FONTS_ROOT, name), path.join(dir, name));
+      }
+      await expect(assertPinnedFontsInstalled([dir], "darwin")).resolves.toBeUndefined();
+    }));
+
+  it("rejects when a pinned font is missing", () =>
+    withTempDir(async (dir) => {
+      await expect(assertPinnedFontsInstalled([dir], "darwin")).rejects.toThrow(
+        /is not installed for LibreOffice/,
+      );
+    }));
+
+  it("rejects when an installed font drifts from the pin", () =>
+    withTempDir(async (dir) => {
+      for (const { name } of PINNED_FONTS) {
+        copyFileSync(path.join(FONTS_ROOT, name), path.join(dir, name));
+      }
+      writeFileSync(path.join(dir, PINNED_FONTS[0].name), "drifted");
+      await expect(assertPinnedFontsInstalled([dir], "darwin")).rejects.toThrow(
+        /does not match the vendored pin/,
+      );
+    }));
+
+  it("is a no-op outside macOS", () =>
+    withTempDir(async (dir) => {
+      await expect(assertPinnedFontsInstalled([dir], "linux")).resolves.toBeUndefined();
+    }));
 });
 
 describe("stageLibreOfficeFonts", () => {

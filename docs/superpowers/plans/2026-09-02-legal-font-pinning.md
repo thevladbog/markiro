@@ -24,6 +24,7 @@
 ### Task 1: Вендоринг шрифтов + пин-тест
 
 **Files:**
+
 - Create: `packages/legal-documents/fonts/IBMPlexSans-Regular.ttf` (копия из `~/Library/Fonts/`)
 - Create: `packages/legal-documents/fonts/IBMPlexSans-Bold.ttf`
 - Create: `packages/legal-documents/fonts/IBMPlexMono-Regular.ttf`
@@ -33,6 +34,7 @@
 - Test: `packages/legal-documents/test/fonts.test.ts`
 
 **Interfaces:**
+
 - Consumes: ничего.
 - Produces: каталог `packages/legal-documents/fonts/` с ровно шестью файлами (4 × `.ttf` + `OFL.txt` + `README.md`). Task 2 читает `*.ttf` из него.
 
@@ -67,12 +69,12 @@ Expected: grep печатает `1` (или больше), head показыва
 (проверено `pdffonts` по всем 17 PDF релиза): курсивы и другие веса
 не используются.
 
-| Файл | Семейство | Версия | sha256 |
-| --- | --- | --- | --- |
-| `IBMPlexSans-Regular.ttf` | IBM Plex Sans | 3.005 | `975dcda37d80f038dcd143c22e33ca2d97a0cc5a929aace1c749153b0fe1afa5` |
-| `IBMPlexSans-Bold.ttf` | IBM Plex Sans | 3.005 | `9e6c74a889a700d707613d24548fe4ffa6bc59559a0689d2cf9e133bdcdafb2f` |
-| `IBMPlexMono-Regular.ttf` | IBM Plex Mono | 2.004 | `fe11304a5fe956d5744e9b6a246cc83d90425245e75a62230044966ca96a7f50` |
-| `IBMPlexMono-Bold.ttf` | IBM Plex Mono | 2.004 | `ca403c56931baef307d20ba64b69acb71abcad61f75e66414661d57484b690ec` |
+| Файл                      | Семейство     | Версия | sha256                                                             |
+| ------------------------- | ------------- | ------ | ------------------------------------------------------------------ |
+| `IBMPlexSans-Regular.ttf` | IBM Plex Sans | 3.005  | `975dcda37d80f038dcd143c22e33ca2d97a0cc5a929aace1c749153b0fe1afa5` |
+| `IBMPlexSans-Bold.ttf`    | IBM Plex Sans | 3.005  | `9e6c74a889a700d707613d24548fe4ffa6bc59559a0689d2cf9e133bdcdafb2f` |
+| `IBMPlexMono-Regular.ttf` | IBM Plex Mono | 2.004  | `fe11304a5fe956d5744e9b6a246cc83d90425245e75a62230044966ca96a7f50` |
+| `IBMPlexMono-Bold.ttf`    | IBM Plex Mono | 2.004  | `ca403c56931baef307d20ba64b69acb71abcad61f75e66414661d57484b690ec` |
 
 Источник: https://github.com/IBM/plex (лицензия — SIL OFL 1.1, см.
 `OFL.txt`; разрешает редистрибуцию). Файлы байт-в-байт совпадают со
@@ -84,7 +86,7 @@ Expected: grep печатает `1` (или больше), head показыва
 каждой конвертацией, так что генерация работает и на машине без
 установленных IBM Plex.
 
-Ограничение: если в системе установлена *другая* версия Plex, какая из
+Ограничение: если в системе установлена _другая_ версия Plex, какая из
 двух копий победит при совпадении имени семейства — внутреннее
 поведение LibreOffice. Дрейф ловится байт-сверкой с манифестом и
 аттестацией (`artifacts:verify`, `deploy/production/verify-legal-artifacts.mjs`).
@@ -179,10 +181,12 @@ git commit -m "feat(legal): vendor the four embedded IBM Plex faces with a byte 
 ### Task 2: stageLibreOfficeFonts + подключение к конвертации
 
 **Files:**
+
 - Modify: `packages/legal-documents/src/cli/generate-artifacts.ts` (импорты ~строка 3-17; новый код рядом с `libreOfficeEnvironment` ~строка 149-163; вызов в `convertPdf` внутри `createDefaultDependencies` ~строка 985-998)
 - Test: `packages/legal-documents/test/fonts.test.ts` (дописать describe-блок)
 
 **Interfaces:**
+
 - Consumes: каталог `packages/legal-documents/fonts/*.ttf` из Task 1.
 - Produces: `export const LIBREOFFICE_PROFILE_FONT_DIRECTORIES: readonly string[]` (относительные пути) и `export async function stageLibreOfficeFonts(profileDirectory: string): Promise<void>` в `src/cli/generate-artifacts.ts`. Task 3 полагается на то, что каждый вызов `convertPdf` стейджит шрифты.
 
@@ -308,9 +312,11 @@ git commit -m "feat(legal): stage vendored IBM Plex fonts into each LibreOffice 
 Задача доказывает два утверждения приёмки: (а) без системных Plex генерация проходит и даёт байт-идентичный релиз; (б) со штатными шрифтами — тоже. Изменений кода в задаче нет; коммитится только результат «артефакты не изменились» (т.е. НИЧЕГО в `apps/landing/public/legal/`).
 
 **Files:**
+
 - Modify: нет (только временные перемещения шрифтов вне репозитория).
 
 **Interfaces:**
+
 - Consumes: `stageLibreOfficeFonts`, задействованный в `convertPdf` (Task 2).
 - Produces: подтверждение байт-идентичности для отчёта в PR.
 
@@ -358,6 +364,7 @@ Expected: generate «Validated 21 …», verify зелёный, git status по 
 ### Task 4: Финальная верификация ветки
 
 **Files:**
+
 - Modify: возможно только форматирование новых файлов.
 
 - [ ] **Step 1: Формат и линт**
