@@ -42,6 +42,11 @@ const PROFILE = {
   logoUrl: null as string | null,
   logoRevision: null as string | null,
   defaultBoxLabelTemplateId: null as string | null,
+  categoryBoxLabelTemplateDefaults: [] as Array<{
+    chzProductGroupCode: number;
+    templateId: string;
+  }>,
+  productGroupsInUse: [] as number[],
 };
 const EMPTY_PROFILE = { ...PROFILE, gln: null, gs1Prefixes: [], inn: null };
 const COUNTER = { extensionDigit: 0, nextSerial: 45_000, minSerial: 40_000, blockedBy: null };
@@ -57,9 +62,28 @@ const LABEL_TEMPLATES = [
     heightMm: 75,
     dpi: 203 as const,
     language: "zpl" as const,
+    enabled: true,
+    chzProductGroupCodes: null as number[] | null,
     updatedAt: "2026-08-14T08:00:00.000Z",
   },
+  {
+    id: "tpl-beer",
+    name: "Пиво 58×40",
+    widthMm: 58,
+    heightMm: 40,
+    dpi: 203 as const,
+    language: "zpl" as const,
+    enabled: true,
+    chzProductGroupCodes: [15] as number[] | null,
+    updatedAt: "2026-08-15T08:00:00.000Z",
+  },
 ];
+const PRODUCT_GROUPS = {
+  items: [
+    { code: 8, alias: "milk", name: "Молочная продукция" },
+    { code: 15, alias: "beer", name: "Пиво" },
+  ],
+};
 
 /** Routes the shared `fetch` mock by URL/method -- both GET/PUT `/org/profile` and its `/sscc` sibling are called on this one page. */
 function routeFetch(overrides: {
@@ -69,6 +93,7 @@ function routeFetch(overrides: {
   labelTemplates?: (init?: RequestInit) => Response | Promise<Response>;
 }) {
   return vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/api/chz-product-groups") return jsonResponse(200, PRODUCT_GROUPS);
     if (url === "/api/org/profile/logo") {
       return overrides.logo ? overrides.logo(init) : jsonResponse(204, undefined);
     }
@@ -890,5 +915,79 @@ describe("OrgProfilePage", () => {
     const card = await cardOf("Счётчик SSCC для коробов");
     await waitFor(() => expect(within(card).getByText(/Ещё ничего не напечатано/)).toBeDefined());
     expect(within(card).queryByText(/напечатано до 0/)).toBeNull();
+  });
+  it("offers only universal enabled templates as the organisation default", async () => {
+    vi.stubGlobal("fetch", routeFetch({}));
+    renderPage();
+    const profileCard = await cardOf("Профиль организации");
+    const select = (await within(profileCard).findByLabelText(
+      "Шаблон этикетки короба по умолчанию",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBeGreaterThan(1));
+    const labels = Array.from(select.options).map((option) => option.textContent);
+    expect(labels).not.toContain("Пиво 58×40");
+    expect(labels).toContain(LABEL_TEMPLATES[0]!.name);
+  });
+
+  it("saves a category default chosen from eligible templates", async () => {
+    let profile = { ...PROFILE, productGroupsInUse: [8, 15] };
+    const fetchMock = routeFetch({
+      profile: (init) => {
+        if (init?.method === "PUT") {
+          const body = JSON.parse(init.body as string) as {
+            categoryBoxLabelTemplateDefaults?: typeof profile.categoryBoxLabelTemplateDefaults;
+          };
+          profile = {
+            ...profile,
+            categoryBoxLabelTemplateDefaults: body.categoryBoxLabelTemplateDefaults ?? [],
+          };
+        }
+        return jsonResponse(200, profile);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const beerSelect = (await within(profileCard).findByLabelText("Пиво")) as HTMLSelectElement;
+    await waitFor(() => expect(beerSelect.options.length).toBeGreaterThan(1));
+    const beerLabels = Array.from(beerSelect.options).map((option) => option.textContent);
+    expect(beerLabels).toContain("Пиво 58×40");
+    fireEvent.change(beerSelect, { target: { value: "tpl-beer" } });
+
+    const milkSelect = within(profileCard).getByLabelText(
+      "Молочная продукция",
+    ) as HTMLSelectElement;
+    expect(Array.from(milkSelect.options).map((option) => option.textContent)).not.toContain(
+      "Пиво 58×40",
+    );
+
+    fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/org/profile",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({
+            gln: PROFILE.gln,
+            inn: PROFILE.inn,
+            timeZone: PROFILE.timeZone,
+            gs1Prefixes: PROFILE.gs1Prefixes,
+            categoryBoxLabelTemplateDefaults: [{ chzProductGroupCode: 15, templateId: "tpl-beer" }],
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("shows an empty hint when no catalog product carries a category", async () => {
+    vi.stubGlobal("fetch", routeFetch({}));
+    renderPage();
+    const profileCard = await cardOf("Профиль организации");
+    expect(
+      await within(profileCard).findByText(
+        "Назначьте товарам категории в каталоге, чтобы задать шаблон для категории.",
+      ),
+    ).toBeDefined();
   });
 });

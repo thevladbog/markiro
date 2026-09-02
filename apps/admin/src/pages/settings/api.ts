@@ -14,8 +14,16 @@ import type { SsccCounterStateDto } from "../../lib/sscc-counter.js";
 export type { SsccCounterStateDto } from "../../lib/sscc-counter.js";
 
 /** Mirrors `apps/api/src/modules/org-profile/dto.ts`'s `OrgProfileDto`. */
+export interface CategoryBoxLabelTemplateDefaultDto {
+  chzProductGroupCode: number;
+  templateId: string;
+}
+
 export interface OrgProfileDto {
   defaultBoxLabelTemplateId: string | null;
+  categoryBoxLabelTemplateDefaults: CategoryBoxLabelTemplateDefaultDto[];
+  /** Distinct ЧЗ product-group codes of non-archived catalog products. */
+  productGroupsInUse: number[];
   gln: string | null;
   gs1Prefixes: string[];
   inn: string | null;
@@ -28,7 +36,13 @@ export interface OrgProfileDto {
 export type PutOrgProfileInput = Partial<
   Pick<
     OrgProfileDto,
-    "defaultBoxLabelTemplateId" | "gln" | "gs1Prefixes" | "inn" | "pickupLimitsEnabled" | "timeZone"
+    | "defaultBoxLabelTemplateId"
+    | "categoryBoxLabelTemplateDefaults"
+    | "gln"
+    | "gs1Prefixes"
+    | "inn"
+    | "pickupLimitsEnabled"
+    | "timeZone"
   >
 >;
 
