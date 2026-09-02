@@ -1,5 +1,6 @@
 import { Global, Module, type DynamicModule } from "@nestjs/common";
 
+import { DB } from "../../auth/auth.module";
 import type { Env } from "../../env";
 import { ChzTokenService } from "../chz-exports/chz-token.service";
 import { ChzCryptoService } from "../signer-agents/chz-crypto.service";
@@ -41,7 +42,12 @@ export class NationalCatalogModule {
           useFactory: () => new ChzCryptoService(env.CHZ_TOKEN_ENCRYPTION_KEY),
         },
         ChzTokenService,
-        NationalCatalogProposalService,
+        {
+          provide: NationalCatalogProposalService,
+          inject: [DB],
+          useFactory: (db: ConstructorParameters<typeof NationalCatalogProposalService>[0]) =>
+            new NationalCatalogProposalService(db),
+        },
         nationalCatalogProductsRepositoryProvider,
         nationalCatalogSchemaRepositoryProvider,
         nationalCatalogFreshnessRepositoryProvider,
