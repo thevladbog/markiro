@@ -545,7 +545,7 @@ function parseIdentifiers(value: unknown): NationalCatalogProductIdentifier[] | 
     if (!record) return null;
     const identifier = string(record.value);
     const type = string(record.type);
-    const multiplier = optionalNullablePositiveInteger(record.multiplier);
+    const multiplier = optionalNullableProviderMultiplier(record.multiplier);
     const level = optionalNullableString(record.level);
     if (identifier === null || type === null || multiplier === undefined || level === undefined)
       return null;
@@ -587,7 +587,7 @@ function parseProductAttributes(value: unknown): NationalCatalogProductAttribute
     const locationId = optionalNullablePositiveInteger(record.location_id);
     const level = optionalNullableString(record.level);
     const gtin = optionalNullableString(record.gtin);
-    const multiplier = optionalNullablePositiveInteger(record.multiplier);
+    const multiplier = optionalNullableProviderMultiplier(record.multiplier);
     if (
       id === null ||
       name === null ||
@@ -672,6 +672,13 @@ function optionalNullableString(value: unknown): string | null | undefined {
 
 function optionalNullablePositiveInteger(value: unknown): number | null | undefined {
   return value === undefined ? null : nullablePositiveInteger(value);
+}
+
+function optionalNullableProviderMultiplier(value: unknown): number | null | undefined {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "number") return positiveInteger(value) ?? undefined;
+  if (typeof value !== "string" || !/^\d+$/.test(value)) return undefined;
+  return positiveInteger(Number(value)) ?? undefined;
 }
 
 function optionalNullableNonNegativeInteger(value: unknown): number | null | undefined {

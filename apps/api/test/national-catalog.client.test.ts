@@ -66,7 +66,14 @@ const productPayload = {
       good_id: 720679,
       good_name: "Чешки детские",
       good_status: "published",
-      identified_by: [{ value: "0000000000001", type: "gtin", multiplier: 1, level: "trade-unit" }],
+      identified_by: [
+        {
+          value: "0000000000001",
+          type: "gtin",
+          multiplier: 1 as number | string | null,
+          level: "trade-unit",
+        },
+      ],
       categories: [{ cat_id: 30064, cat_name: "Продовольственные товары" }],
       good_attrs: [
         {
@@ -78,6 +85,7 @@ const productPayload = {
           attr_value_type: "",
           attr_group_id: 22,
           attr_group_name: "Нормативно-сопроводительная документация",
+          multiplier: null as number | string | null,
         },
       ],
       provider_only: "kept out of the normalized record",
@@ -653,6 +661,47 @@ describe("NationalCatalogClient", () => {
       "https://catalog.example.test/v3/product?gtin=04600000000017",
     ]);
   });
+
+  it("normalizes provider multiplier strings for owned and published card reads", async () => {
+    const payload = structuredClone(productPayload);
+    payload.result[0]!.identified_by[0]!.multiplier = "2";
+    payload.result[0]!.good_attrs[0]!.multiplier = "";
+    const client = new NationalCatalogClient(
+      dependencies(async () => new Response(JSON.stringify(payload), { status: 200 })),
+    );
+
+    const expected = {
+      status: "ok",
+      value: {
+        products: [
+          {
+            identifiers: [expect.objectContaining({ multiplier: 2 })],
+            attributes: [expect.objectContaining({ multiplier: null })],
+          },
+        ],
+      },
+    };
+
+    await expect(client.getFeedProducts(auth, ["0000000000001"])).resolves.toMatchObject(expected);
+    await expect(client.getPublishedProducts(auth, ["0000000000001"])).resolves.toMatchObject(
+      expected,
+    );
+  });
+
+  it.each(["0", "-1", "1.5", " 1", "1 ", "one", "9007199254740992"])(
+    "rejects malformed provider multiplier %j",
+    async (multiplier) => {
+      const payload = structuredClone(productPayload);
+      payload.result[0]!.good_attrs[0]!.multiplier = multiplier;
+      const client = new NationalCatalogClient(
+        dependencies(async () => new Response(JSON.stringify(payload), { status: 200 })),
+      );
+
+      await expect(client.getFeedProducts(auth, ["0000000000001"])).resolves.toEqual({
+        status: "invalid_response",
+      });
+    },
+  );
 
   it("rejects empty, non-digit, and over-limit GTIN batches before any request", async () => {
     let calls = 0;
