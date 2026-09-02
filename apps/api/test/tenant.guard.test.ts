@@ -1,4 +1,4 @@
-import { ForbiddenException, HttpStatus, UnauthorizedException } from "@nestjs/common";
+import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import type { ExecutionContext } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import type * as DrizzleOrm from "drizzle-orm";
@@ -46,12 +46,32 @@ interface FakeDeviceRow {
   revokedAt: Date | null;
 }
 
+interface FakeApiKeyRow {
+  id: string;
+  configId: string;
+  referenceId: string;
+  key: string;
+  enabled: boolean | null;
+  expiresAt: Date | null;
+}
+
+const LIVE_STATION_API_KEY: FakeApiKeyRow = {
+  id: "key_1",
+  configId: "station",
+  referenceId: "org_9",
+  key: "Mmd7iUNcMXtl8TAGNXwbLM6DPlgae5WsvJ8-xqqgPZw",
+  enabled: true,
+  expiresAt: null,
+};
+
 /** Maps the real drizzle column objects the guard filters on to a row field. */
-const COLUMN_FIELD = new Map<unknown, keyof FakeDeviceRow>([
+const COLUMN_FIELD = new Map<unknown, string>([
   [schema.stationDevices.tenantId, "tenantId"],
   [schema.stationDevices.apiKeyId, "apiKeyId"],
   [schema.stationDevices.id, "id"],
   [schema.stationDevices.revokedAt, "revokedAt"],
+  [schema.apikey.key, "key"],
+  [schema.apikey.configId, "configId"],
 ]);
 
 type FakeCondition =
@@ -59,16 +79,17 @@ type FakeCondition =
   | { __op: "is-null"; column: unknown }
   | { __op: "and"; conditions: FakeCondition[] };
 
-function matches(condition: FakeCondition, row: FakeDeviceRow): boolean {
+function matches(condition: FakeCondition, row: object): boolean {
   if (condition.__op === "and") {
     return condition.conditions.every((c) => matches(c, row));
   }
   const field = COLUMN_FIELD.get(condition.column);
   if (!field) throw new Error("fakeDb: unexpected column in test condition");
-  if (condition.__op === "is-null") return row[field] === null;
+  const value = (row as Record<string, unknown>)[field];
+  if (condition.__op === "is-null") return value === null;
   // SQL `column = NULL` never matches; callers must use Drizzle's `isNull`.
   if (condition.value === null) return false;
-  return row[field] === condition.value;
+  return value === condition.value;
 }
 
 function fakeAuth(getSession: Auth["api"]["getSession"]): Auth {
@@ -87,14 +108,22 @@ function fakeAuth(getSession: Auth["api"]["getSession"]): Auth {
 function fakeDb(
   deviceRows: FakeDeviceRow[] = [],
   beforeHeartbeatUpdate: (() => void) | undefined = undefined,
+  apiKeyRows: FakeApiKeyRow[] = [],
 ): Db {
   return {
     select: () => ({
-      from: () => ({
-        where: async (condition: FakeCondition) =>
-          deviceRows
+      from: (table: unknown) => ({
+        where: async (condition: FakeCondition) => {
+          if (table === schema.apikey) {
+            return apiKeyRows.filter((row) => matches(condition, row));
+          }
+          if (table !== schema.stationDevices) {
+            throw new Error("fakeDb: unexpected table in test query");
+          }
+          return deviceRows
             .filter((row) => matches(condition, row))
-            .map((row) => ({ id: row.id, lineId: row.lineId })),
+            .map((row) => ({ id: row.id, lineId: row.lineId }));
+        },
       }),
     }),
     update: () => ({
@@ -167,6 +196,41 @@ function fakeAuthWithApiKey(
 }
 
 describe("TenantGuard api-key path", () => {
+  it("keeps a live station credential valid when the plugin collapses a verifier failure", async () => {
+    const guard = new TenantGuard(
+      fakeAuthWithApiKey(
+        async () => null,
+        async () => ({
+          valid: false,
+          error: { message: "Invalid API key", code: "INVALID_API_KEY" },
+          key: null,
+        }),
+      ),
+      fakeDb(
+        [
+          {
+            id: "device_1",
+            tenantId: "org_9",
+            apiKeyId: "key_1",
+            lineId: null,
+            lastSeenAt: null,
+            revokedAt: null,
+          },
+        ],
+        undefined,
+        [LIVE_STATION_API_KEY],
+      ),
+    );
+    const req: FakeRequest = { headers: { "x-api-key": "mk_valid" } };
+
+    await expect(guard.canActivate(contextFor(req))).resolves.toBe(true);
+    expect(req).toMatchObject({
+      tenantId: "org_9",
+      authKind: "station",
+      deviceId: "device_1",
+    });
+  });
+
   it("resolves tenantId from a valid x-api-key when there is no session", async () => {
     const guard = new TenantGuard(
       fakeAuthWithApiKey(
@@ -177,16 +241,20 @@ describe("TenantGuard api-key path", () => {
           key: { id: "key_1", referenceId: "org_9", enabled: true },
         }),
       ),
-      fakeDb([
-        {
-          id: "device_1",
-          tenantId: "org_9",
-          apiKeyId: "key_1",
-          lineId: null,
-          lastSeenAt: null,
-          revokedAt: null,
-        },
-      ]),
+      fakeDb(
+        [
+          {
+            id: "device_1",
+            tenantId: "org_9",
+            apiKeyId: "key_1",
+            lineId: null,
+            lastSeenAt: null,
+            revokedAt: null,
+          },
+        ],
+        undefined,
+        [LIVE_STATION_API_KEY],
+      ),
     );
     const req: FakeRequest = { headers: { "x-api-key": "mk_valid" } };
 
@@ -208,22 +276,25 @@ describe("TenantGuard api-key path", () => {
     await expect(guard.canActivate(contextFor(req))).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it("preserves station enrollment when api-key verification is temporarily rate limited", async () => {
+  it.each([
+    ["disabled", { ...LIVE_STATION_API_KEY, enabled: false }],
+    ["expired", { ...LIVE_STATION_API_KEY, expiresAt: new Date("2000-01-01T00:00:00.000Z") }],
+  ])("reports an explicitly %s station key as revoked", async (_reason, apiKeyRow) => {
     const guard = new TenantGuard(
       fakeAuthWithApiKey(
         async () => null,
-        async () => ({
-          valid: false,
-          error: { message: "Rate limit exceeded.", code: "RATE_LIMITED" },
-          key: null,
-        }),
+        async () => ({ valid: true, error: null, key: null }),
       ),
-      fakeDb(),
+      fakeDb([], undefined, [apiKeyRow]),
     );
-    const req: FakeRequest = { headers: { "x-api-key": "mk_still_valid" } };
+    const req: FakeRequest = { headers: { "x-api-key": "mk_valid" } };
 
-    await expect(guard.canActivate(contextFor(req))).rejects.toMatchObject({
-      status: HttpStatus.TOO_MANY_REQUESTS,
+    const error = await guard.canActivate(contextFor(req)).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(UnauthorizedException);
+    expect((error as UnauthorizedException).getResponse()).toEqual({
+      message: "Station credential revoked",
+      code: "STATION_CREDENTIAL_REVOKED",
     });
   });
 
@@ -264,7 +335,7 @@ describe("TenantGuard api-key path", () => {
           key: { id: "key_1", referenceId: "org_9", enabled: true },
         }),
       ),
-      fakeDb(deviceRows),
+      fakeDb(deviceRows, undefined, [LIVE_STATION_API_KEY]),
     );
     const req: FakeRequest = { headers: { "x-api-key": "mk_valid" } };
 
@@ -296,7 +367,7 @@ describe("TenantGuard api-key path", () => {
           key: { id: "key_1", referenceId: "org_9", enabled: true },
         }),
       ),
-      fakeDb(deviceRows),
+      fakeDb(deviceRows, undefined, [LIVE_STATION_API_KEY]),
     );
     const req: FakeRequest = { headers: { "x-api-key": "mk_valid" } };
 
@@ -324,16 +395,20 @@ describe("TenantGuard api-key path", () => {
           key: { id: "key_1", referenceId: "org_9", enabled: true },
         }),
       ),
-      fakeDb([
-        {
-          id: "device_evil",
-          tenantId: "org_other",
-          apiKeyId: "key_1",
-          lineId: null,
-          lastSeenAt: null,
-          revokedAt: null,
-        },
-      ]),
+      fakeDb(
+        [
+          {
+            id: "device_evil",
+            tenantId: "org_other",
+            apiKeyId: "key_1",
+            lineId: null,
+            lastSeenAt: null,
+            revokedAt: null,
+          },
+        ],
+        undefined,
+        [LIVE_STATION_API_KEY],
+      ),
     );
     const req: FakeRequest = { headers: { "x-api-key": "mk_valid" } };
 
@@ -358,10 +433,39 @@ describe("TenantGuard api-key path", () => {
       ),
       fakeDb(deviceRows),
     );
-    const req: FakeRequest = { headers: { "x-api-key": "mk_revoked" } };
+    const req: FakeRequest = { headers: { "x-api-key": "mk_valid" } };
 
-    await expect(guard.canActivate(contextFor(req))).rejects.toBeInstanceOf(UnauthorizedException);
+    const error = await guard.canActivate(contextFor(req)).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(UnauthorizedException);
+    expect((error as UnauthorizedException).getResponse()).toEqual({
+      message: "Station credential revoked",
+      code: "STATION_CREDENTIAL_REVOKED",
+    });
     expect(deviceRows[0]?.lastSeenAt).toBeNull();
+  });
+
+  it("propagates station credential database failures instead of reporting revocation", async () => {
+    const guard = new TenantGuard(
+      fakeAuthWithApiKey(
+        async () => null,
+        async () => ({ valid: false, error: null, key: null }),
+      ),
+      {
+        select: () => ({
+          from: () => ({
+            where: async () => {
+              throw new Error("station credential database unavailable");
+            },
+          }),
+        }),
+      } as unknown as Db,
+    );
+    const req: FakeRequest = { headers: { "x-api-key": "mk_valid" } };
+
+    await expect(guard.canActivate(contextFor(req))).rejects.toThrow(
+      "station credential database unavailable",
+    );
   });
 
   it("rejects a revoked durable station row without updating its heartbeat", async () => {
@@ -384,9 +488,9 @@ describe("TenantGuard api-key path", () => {
           key: { id: "key_1", referenceId: "org_9", enabled: true },
         }),
       ),
-      fakeDb(deviceRows),
+      fakeDb(deviceRows, undefined, [LIVE_STATION_API_KEY]),
     );
-    const req: FakeRequest = { headers: { "x-api-key": "mk_revoked" } };
+    const req: FakeRequest = { headers: { "x-api-key": "mk_valid" } };
 
     await expect(guard.canActivate(contextFor(req))).rejects.toBeInstanceOf(UnauthorizedException);
     expect(deviceRows[0]?.lastSeenAt).toBeNull();
@@ -416,7 +520,7 @@ describe("TenantGuard api-key path", () => {
         const device = deviceRows[0];
         if (!device) throw new Error("Expected station fixture");
         device.revokedAt = new Date("2026-08-06T01:00:00.000Z");
-      }),
+      }, [LIVE_STATION_API_KEY]),
     );
     const req: FakeRequest = { headers: { "x-api-key": "mk_valid" } };
 

@@ -18,8 +18,14 @@ export class StationApiError extends Error {
 
 export type ServerReachability = "checking" | "reachable" | "unreachable";
 
+export const STATION_CREDENTIAL_REVOKED_CODE = "STATION_CREDENTIAL_REVOKED";
+
 export function isStationCredentialRejection(error: unknown): error is StationApiError {
-  return error instanceof StationApiError && error.status === 401;
+  return (
+    error instanceof StationApiError &&
+    error.status === 401 &&
+    error.code === STATION_CREDENTIAL_REVOKED_CODE
+  );
 }
 
 export interface StationClient {
@@ -119,36 +125,6 @@ export function createStationClient(
   const base = (cfg.serverUrl ?? "").replace(/\/+$/, "");
   const credentialBoundary = options.credentialBoundary;
   let latestRequestSequence = 0;
-  let credentialRejectionProbe: Promise<boolean> | null = null;
-
-  /**
-   * A single ordinary 401 is not enough evidence for deleting the durable
-   * station credential. Reverse proxies and the api-key verifier can both
-   * produce an isolated 401 while the key itself remains valid. Confirm it
-   * against the smallest station-authenticated read before crossing the
-   * destructive credential boundary. Concurrent failures share one probe.
-   */
-  function confirmCredentialRejection(): Promise<boolean> {
-    if (credentialRejectionProbe) return credentialRejectionProbe;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    const probe = fetch(`${base}/shifts`, {
-      headers: {
-        "Content-Type": "application/json",
-        "x-station-capabilities": STATION_CAPABILITIES,
-        ...(cfg.apiKey ? { "x-api-key": cfg.apiKey } : {}),
-      },
-      signal: controller.signal,
-    })
-      .then((response) => response.status === 401)
-      .catch(() => false)
-      .finally(() => {
-        clearTimeout(timer);
-        if (credentialRejectionProbe === probe) credentialRejectionProbe = null;
-      });
-    credentialRejectionProbe = probe;
-    return probe;
-  }
 
   async function request<T>(
     method: "GET" | "POST",
@@ -197,16 +173,13 @@ export function createStationClient(
     } catch (error) {
       if (!receivedResponse) reportReachability("unreachable");
       if (credentialBoundary && isStationCredentialRejection(error)) {
-        const confirmed = await confirmCredentialRejection();
-        if (confirmed) {
-          await rejectCredentialGeneration(
-            {
-              machineId: credentialBoundary.machineId,
-              generation: credentialBoundary.generation,
-            },
-            credentialBoundary.onCredentialRejected,
-          );
-        }
+        await rejectCredentialGeneration(
+          {
+            machineId: credentialBoundary.machineId,
+            generation: credentialBoundary.generation,
+          },
+          credentialBoundary.onCredentialRejected,
+        );
       }
       throw error;
     } finally {

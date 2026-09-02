@@ -799,7 +799,9 @@ describe("sync engine", () => {
       const exec = await migratedExec();
       await seedInstallId(exec, "install-sealed");
       await seed(exec, 2);
-      const post = vi.fn().mockRejectedValue(new StationApiError(401, "rejected"));
+      const post = vi
+        .fn()
+        .mockRejectedValue(new StationApiError(401, "rejected", "STATION_CREDENTIAL_REVOKED"));
       const onCredentialRejected = vi.fn();
 
       const engine = createSyncEngine({
@@ -853,7 +855,9 @@ describe("sync engine", () => {
         return base.all<T>(sql, params);
       },
     };
-    const post = vi.fn().mockRejectedValue(new StationApiError(401, "rejected"));
+    const post = vi
+      .fn()
+      .mockRejectedValue(new StationApiError(401, "rejected", "STATION_CREDENTIAL_REVOKED"));
     const onCredentialRejected = vi.fn();
     vi.spyOn(console, "error").mockImplementation(() => {});
     const engine = createSyncEngine({
@@ -878,7 +882,9 @@ describe("sync engine", () => {
   it("publishes one rejection across overlapping engines and permits a fresh key generation", async () => {
     const exec = await migratedExec();
     await seed(exec, 1);
-    const rejectedPost = vi.fn().mockRejectedValue(new StationApiError(401, "rejected"));
+    const rejectedPost = vi
+      .fn()
+      .mockRejectedValue(new StationApiError(401, "rejected", "STATION_CREDENTIAL_REVOKED"));
     const onCredentialRejected = vi.fn();
     const rejectedGeneration = createCredentialGeneration();
     const engines = [0, 1].map(() =>
@@ -1007,7 +1013,7 @@ describe("sync engine", () => {
       });
     const atSeal = await snapshot();
 
-    rejectA(new StationApiError(401, "rejected"));
+    rejectA(new StationApiError(401, "rejected", "STATION_CREDENTIAL_REVOKED"));
     await a.idle();
     resolveB({
       applied: 1,
@@ -1070,7 +1076,7 @@ describe("sync engine", () => {
         expect(postB).toHaveBeenCalledTimes(1);
       });
 
-      rejectA(new StationApiError(401, "rejected"));
+      rejectA(new StationApiError(401, "rejected", "STATION_CREDENTIAL_REVOKED"));
       await a.idle();
       rejectB(new StationApiError(503, "unavailable"));
       await b.idle();
@@ -1167,7 +1173,7 @@ describe("sync engine", () => {
 
       resolveB({ applied: 1, alreadyApplied: false, conflicts: [] });
       await deleteReached;
-      rejectA(new StationApiError(401, "rejected"));
+      rejectA(new StationApiError(401, "rejected", "STATION_CREDENTIAL_REVOKED"));
       const sealingIdle = a.idle();
       let sealingSettled = false;
       void sealingIdle.then(() => {
