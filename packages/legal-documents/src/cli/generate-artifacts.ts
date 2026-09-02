@@ -1,6 +1,7 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import {
+  copyFile,
   lstat,
   link,
   mkdir,
@@ -175,6 +176,36 @@ export function libreOfficeProfileDirectory(outputDirectory: string, sourcePath:
     "libreoffice-home",
     path.basename(sourcePath, ".docx"),
   );
+}
+
+// dist/cli/../../fonts and src/cli/../../fonts both resolve to the package
+// root, mirroring INSTRUCTION_ASSETS_ROOT below.
+const VENDORED_FONTS_ROOT = fileURLToPath(new URL("../../fonts/", import.meta.url));
+
+// LibreOffice scans <UserInstallation>/user/fonts on every platform. The
+// profile is anchored by HOME on macOS and by XDG_CONFIG_HOME elsewhere
+// (libreOfficeEnvironment), so stage the fonts under both roots instead of
+// branching on the platform.
+export const LIBREOFFICE_PROFILE_FONT_DIRECTORIES: readonly string[] = [
+  path.join("Library", "Application Support", "LibreOffice", "4", "user", "fonts"),
+  path.join("xdg-config", "libreoffice", "4", "user", "fonts"),
+];
+
+export async function stageLibreOfficeFonts(profileDirectory: string): Promise<void> {
+  const entries = await readdir(VENDORED_FONTS_ROOT, { withFileTypes: true });
+  const fonts = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".ttf"))
+    .map(({ name }) => name);
+  if (fonts.length === 0) {
+    throw new Error(`Vendored IBM Plex fonts are missing at ${VENDORED_FONTS_ROOT}`);
+  }
+  for (const directory of LIBREOFFICE_PROFILE_FONT_DIRECTORIES) {
+    const target = path.join(profileDirectory, directory);
+    await mkdir(target, { recursive: true });
+    for (const name of fonts) {
+      await copyFile(path.join(VENDORED_FONTS_ROOT, name), path.join(target, name));
+    }
+  }
 }
 
 export function assertReleaseLibreOfficeVersion(versionOutput: string, preview: boolean): void {
@@ -990,6 +1021,7 @@ function createDefaultDependencies(): ArtifactGenerationDependencies {
         mkdir(path.join(profileDirectory, "xdg-cache"), { recursive: true }),
         mkdir(path.join(profileDirectory, "xdg-config"), { recursive: true }),
       ]);
+      await stageLibreOfficeFonts(profileDirectory);
       return runTextCommand(
         sofficeBin,
         libreOfficePdfExportArguments(outputDirectory, sourcePath),

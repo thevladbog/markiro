@@ -1,9 +1,15 @@
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
+
+import {
+  LIBREOFFICE_PROFILE_FONT_DIRECTORIES,
+  stageLibreOfficeFonts,
+} from "../src/cli/generate-artifacts.js";
 
 const FONTS_ROOT = fileURLToPath(new URL("../fonts/", import.meta.url));
 
@@ -51,5 +57,23 @@ describe("vendored fonts", () => {
     expect(readFileSync(path.join(FONTS_ROOT, "OFL.txt"), "utf8")).toContain(
       "SIL OPEN FONT LICENSE Version 1.1",
     );
+  });
+});
+
+describe("stageLibreOfficeFonts", () => {
+  it("copies every vendored TTF into both profile font directories", async () => {
+    const profile = mkdtempSync(path.join(tmpdir(), "markiro-fonts-"));
+    try {
+      await stageLibreOfficeFonts(profile);
+      expect(LIBREOFFICE_PROFILE_FONT_DIRECTORIES).toHaveLength(2);
+      for (const directory of LIBREOFFICE_PROFILE_FONT_DIRECTORIES) {
+        for (const { name, sha256 } of PINNED_FONTS) {
+          const staged = readFileSync(path.join(profile, directory, name));
+          expect(createHash("sha256").update(staged).digest("hex")).toBe(sha256);
+        }
+      }
+    } finally {
+      rmSync(profile, { force: true, recursive: true });
+    }
   });
 });
