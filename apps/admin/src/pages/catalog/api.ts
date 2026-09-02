@@ -187,11 +187,14 @@ export function useProducts(params: ListProductsParams = {}): UseQueryResult<Pro
 }
 
 /** `GET /chz-product-groups` -- global reference data, safe to cache for the session. */
-export function useChzProductGroups(): UseQueryResult<ChzProductGroupDto[]> {
+export function useChzProductGroups(
+  options: { enabled?: boolean } = {},
+): UseQueryResult<ChzProductGroupDto[]> {
   return useQuery({
     queryKey: CHZ_PRODUCT_GROUPS_QUERY_KEY,
     queryFn: fetchChzProductGroups,
     staleTime: Infinity,
+    enabled: options.enabled ?? true,
   });
 }
 

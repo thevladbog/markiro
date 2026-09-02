@@ -26,6 +26,9 @@ export interface LabelTemplateSummaryDto {
   heightMm: number;
   dpi: 203 | 300;
   language: "zpl" | "tspl";
+  enabled: boolean;
+  /** `null` means every category; otherwise ЧЗ product-group codes. */
+  chzProductGroupCodes: number[] | null;
   updatedAt: string;
 }
 
@@ -33,8 +36,17 @@ export interface LabelTemplateDto {
   id: string;
   name: string;
   spec: LabelTemplateSpec;
+  enabled: boolean;
+  chzProductGroupCodes: number[] | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export type LabelTemplateEnabledFilter = "true" | "false" | "all";
+
+export interface ListLabelTemplatesParams {
+  /** Omitted = enabled only (the API default), which is what every picker wants. */
+  enabled?: LabelTemplateEnabledFilter;
 }
 
 interface ListLabelTemplatesResponse {
@@ -44,8 +56,15 @@ interface ListLabelTemplatesResponse {
 /** Shared TanStack Query cache key for the label-templates list. */
 export const LABEL_TEMPLATES_QUERY_KEY = ["label-templates"] as const;
 
-async function fetchLabelTemplates(): Promise<LabelTemplateSummaryDto[]> {
-  const response = await apiFetch<ListLabelTemplatesResponse>("/label-templates");
+async function fetchLabelTemplates(
+  params: ListLabelTemplatesParams,
+): Promise<LabelTemplateSummaryDto[]> {
+  const search = new URLSearchParams();
+  if (params.enabled !== undefined) search.set("enabled", params.enabled);
+  const query = search.toString();
+  const response = await apiFetch<ListLabelTemplatesResponse>(
+    `/label-templates${query ? `?${query}` : ""}`,
+  );
   return response.items;
 }
 
@@ -56,6 +75,8 @@ function fetchLabelTemplate(id: string): Promise<LabelTemplateDto> {
 export interface CreateLabelTemplateInput {
   name: string;
   spec: LabelTemplateSpec;
+  enabled?: boolean;
+  chzProductGroupCodes?: number[] | null;
 }
 
 export type UpdateLabelTemplateInput = Partial<CreateLabelTemplateInput>;
@@ -78,8 +99,13 @@ function patchLabelTemplate(
 }
 
 /** `GET /label-templates` -- the active tenant's label template summaries. */
-export function useLabelTemplates(): UseQueryResult<LabelTemplateSummaryDto[]> {
-  return useQuery({ queryKey: LABEL_TEMPLATES_QUERY_KEY, queryFn: fetchLabelTemplates });
+export function useLabelTemplates(
+  params: ListLabelTemplatesParams = {},
+): UseQueryResult<LabelTemplateSummaryDto[]> {
+  return useQuery({
+    queryKey: [...LABEL_TEMPLATES_QUERY_KEY, "list", params],
+    queryFn: () => fetchLabelTemplates(params),
+  });
 }
 
 /**

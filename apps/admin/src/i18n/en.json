@@ -1668,6 +1668,26 @@
       "newTemplateCard": "+ New template",
       "sizeBadge": "{{width}}×{{height}} mm",
       "dpiBadge": "{{dpi}} dpi",
+      "filterLabel": "Show",
+      "filterAll": "All",
+      "filterEnabled": "Enabled",
+      "filterDisabled": "Disabled",
+      "filterEmpty": "No templates in this state.",
+      "disabledBadge": "Disabled",
+      "scopeAll": "All categories",
+      "scopeCount": "Categories: {{count}}",
+      "enableAction": "Enable",
+      "disableAction": "Disable",
+      "toasts": {
+        "enableSuccess": "Template enabled",
+        "disableSuccess": "Template disabled",
+        "toggleError": "Could not change the template state"
+      },
+      "defaultConflict": {
+        "organization": "The template is the organisation default.",
+        "categories": "The template is the default for categories: {{categories}}.",
+        "hint": "Pick another template in the organisation settings first."
+      },
       "editor": {
         "back": "← Templates",
         "nameLabel": "Name",

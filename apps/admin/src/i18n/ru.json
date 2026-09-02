@@ -1668,6 +1668,26 @@
       "newTemplateCard": "+ Новый шаблон",
       "sizeBadge": "{{width}}×{{height}} мм",
       "dpiBadge": "{{dpi}} dpi",
+      "filterLabel": "Показывать",
+      "filterAll": "Все",
+      "filterEnabled": "Включённые",
+      "filterDisabled": "Выключенные",
+      "filterEmpty": "Нет шаблонов с таким состоянием.",
+      "disabledBadge": "Выключен",
+      "scopeAll": "Все категории",
+      "scopeCount": "Категорий: {{count}}",
+      "enableAction": "Включить",
+      "disableAction": "Выключить",
+      "toasts": {
+        "enableSuccess": "Шаблон включён",
+        "disableSuccess": "Шаблон выключен",
+        "toggleError": "Не удалось изменить состояние шаблона"
+      },
+      "defaultConflict": {
+        "organization": "Шаблон назначен дефолтом организации.",
+        "categories": "Шаблон назначен дефолтом категорий: {{categories}}.",
+        "hint": "Сначала выберите другой шаблон в настройках организации."
+      },
       "editor": {
         "back": "← Шаблоны",
         "nameLabel": "Название",
