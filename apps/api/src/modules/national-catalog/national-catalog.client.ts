@@ -580,7 +580,7 @@ function parseProductAttributes(value: unknown): NationalCatalogProductAttribute
     const name = string(record.attr_name);
     const attributeValue = string(record.attr_value);
     const valueId = optionalNullableNonNegativeInteger(record.value_id);
-    const attributeValueId = optionalNullableNonNegativeInteger(record.attr_value_id);
+    const attributeValueId = optionalNullableProviderAttributeValueId(record.attr_value_id);
     const valueType = optionalNullableString(record.attr_value_type);
     const groupId = optionalNullablePositiveInteger(record.attr_group_id);
     const groupName = optionalNullableString(record.attr_group_name);
@@ -677,13 +677,17 @@ function optionalNullablePositiveInteger(value: unknown): number | null | undefi
 function optionalNullableProviderMultiplier(value: unknown): number | null | undefined {
   if (value === undefined || value === null || value === "") return null;
   if (typeof value === "number") return positiveInteger(value) ?? undefined;
-  if (typeof value !== "string" || !/^\d+$/.test(value)) return undefined;
+  if (typeof value !== "string" || !/^\d+(?:\.0+)?$/.test(value)) return undefined;
   return positiveInteger(Number(value)) ?? undefined;
 }
 
 function optionalNullableNonNegativeInteger(value: unknown): number | null | undefined {
   if (value === undefined || value === null) return null;
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+function optionalNullableProviderAttributeValueId(value: unknown): number | null | undefined {
+  return value === "" ? null : optionalNullableNonNegativeInteger(value);
 }
 
 function boolean(value: unknown): boolean | null {
