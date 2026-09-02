@@ -42,8 +42,8 @@ describe("loadLegalArtifacts", () => {
   it("loads the complete release set and verifies current bytes and hashes", async () => {
     const artifacts = await loadLegalArtifacts(publicRoot);
 
-    expect(artifacts).toHaveLength(21);
-    expect(artifacts.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(17);
+    expect(artifacts).toHaveLength(26);
+    expect(artifacts.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(22);
     expect(artifacts.filter(({ kind }) => kind === "template-docx")).toHaveLength(4);
     expect(artifacts.every(({ href }) => href.startsWith("/legal/files/"))).toBe(true);
     // The current dash-separated naming scheme (period-sequence); the period
@@ -130,15 +130,17 @@ describe("loadLegalArtifacts", () => {
   );
 
   it("rejects an English artifact for a Russian-only instruction", async () => {
+    // MKR-INS-06 is a cabinet instruction outside INSTRUCTION_EN_PUBLISHED;
+    // the station instructions (01-05) now legitimately publish English.
     const root = await copiedPublicRoot();
     await editManifest(root, (manifest) => {
       manifest.push({
-        code: "MKR-INS-01",
-        revision: "2026.09/01",
-        effectiveDate: "2026-09-02",
+        code: "MKR-INS-06",
+        revision: "2026.08/03",
+        effectiveDate: "2026-09-01",
         locale: "en",
         kind: "pdfa-2b",
-        fileName: "markiro_mkr-ins-01_2026.09-01_en.pdf",
+        fileName: "markiro_mkr-ins-06_2026.08-03_en.pdf",
         bytes: 1,
         sha256: "0".repeat(64),
         mediaType: "application/pdf",

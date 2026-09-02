@@ -103,7 +103,9 @@ jobs:
     needs: classify-changes
     if: needs.classify-changes.outputs.verify_api_tests == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The db+api suite finishes green in ~15:05 on slow runners; a 15-minute
+    # budget killed two fully passing runs right at the summary line.
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:17-alpine

@@ -213,6 +213,13 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function revokedStationCredentialResponse(message = "revoked"): Response {
+  return new Response(JSON.stringify({ message, code: "STATION_CREDENTIAL_REVOKED" }), {
+    status: 401,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 /** Row shape `readOperatorsMirror` expects back from `plugin:sql|select`. */
 function operatorMirrorRow(
   pinHash: string,
@@ -2067,19 +2074,13 @@ describe("App", () => {
       }
       if (path === "/shifts") {
         if (rejectInventoryList) {
-          return new Response(JSON.stringify({ message: "revoked" }), {
-            status: 401,
-            headers: { "Content-Type": "application/json" },
-          });
+          return revokedStationCredentialResponse();
         }
         return new Response(JSON.stringify({ items: [] }));
       }
       if (path === "/station/inventory-tasks") {
         if (rejectInventoryList) {
-          return new Response(JSON.stringify({ message: "revoked" }), {
-            status: 401,
-            headers: { "Content-Type": "application/json" },
-          });
+          return revokedStationCredentialResponse();
         }
         return new Response(
           JSON.stringify({
@@ -2993,7 +2994,7 @@ describe("App", () => {
     expect(screen.getByTestId("server-status").textContent).toBe("Available");
   });
 
-  it("backfills a real legacy config before sync and later recovers a 401 against the same durable device", async () => {
+  it("backfills a real legacy config before sync and later handles explicit revocation for the same durable device", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const persistedConfig: Record<string, unknown> = {
       machine_id: "legacy-machine",
@@ -3039,10 +3040,7 @@ describe("App", () => {
       }
       if (init?.method === "POST" && path === "/station/scans") {
         order.push("sync");
-        return new Response(JSON.stringify({ message: "revoked" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        });
+        return revokedStationCredentialResponse();
       }
       return new Response(JSON.stringify({ items: [] }), {
         status: 200,
@@ -3744,7 +3742,7 @@ describe("App", () => {
     expect(screen.queryByText("credential-not-to-render")).toBeNull();
   });
 
-  it("recovers an empty-queue station when the swallowed roster refresh receives 401", async () => {
+  it("recovers an empty-queue station when the swallowed roster refresh receives explicit revocation", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const persistedConfig: Record<string, unknown> = {
       machine_id: "m1",
@@ -3764,7 +3762,7 @@ describe("App", () => {
     const roster = new Promise<Response>((resolve) => {
       rejectRoster = () => {
         credentialRevoked = true;
-        resolve(new Response(JSON.stringify({ message: "revoked" }), { status: 401 }));
+        resolve(revokedStationCredentialResponse());
       };
     });
     vi.stubGlobal(
@@ -3772,9 +3770,7 @@ describe("App", () => {
       vi.fn((url: string) => {
         if (new URL(url).pathname === "/station/operators") return roster;
         if (new URL(url).pathname === "/shifts" && credentialRevoked) {
-          return Promise.resolve(
-            new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
-          );
+          return Promise.resolve(revokedStationCredentialResponse());
         }
         return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
       }),
@@ -3787,7 +3783,7 @@ describe("App", () => {
     await expectEmptyQueueCredentialRecovery(persistedConfig, outbox);
   });
 
-  it("recovers an empty-queue station when the shift list receives 401", async () => {
+  it("recovers an empty-queue station when the shift list receives explicit revocation", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const persistedConfig: Record<string, unknown> = {
       machine_id: "m1",
@@ -3814,7 +3810,7 @@ describe("App", () => {
           return Promise.resolve(
             shiftRequests === 1
               ? new Response(JSON.stringify({ items: [] }), { status: 200 })
-              : new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
+              : revokedStationCredentialResponse(),
           );
         }
         return Promise.resolve(new Response("{}", { status: 200 }));
@@ -3828,7 +3824,7 @@ describe("App", () => {
     await expectEmptyQueueCredentialRecovery(persistedConfig, outbox);
   });
 
-  it("recovers an empty-queue station when opening a listed shift receives 401", async () => {
+  it("recovers an empty-queue station when opening a listed shift receives explicit revocation", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const persistedConfig: Record<string, unknown> = {
       machine_id: "m1",
@@ -3852,9 +3848,7 @@ describe("App", () => {
         }
         if (path === "/shifts") {
           if (credentialRevoked) {
-            return Promise.resolve(
-              new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
-            );
+            return Promise.resolve(revokedStationCredentialResponse());
           }
           return Promise.resolve(
             new Response(
@@ -3875,9 +3869,7 @@ describe("App", () => {
         }
         if (init?.method === "POST" && path === "/shifts/shift-1/open") {
           credentialRevoked = true;
-          return Promise.resolve(
-            new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
-          );
+          return Promise.resolve(revokedStationCredentialResponse());
         }
         return Promise.resolve(new Response("{}", { status: 200 }));
       }),
@@ -3890,7 +3882,7 @@ describe("App", () => {
     await expectEmptyQueueCredentialRecovery(persistedConfig, outbox);
   });
 
-  it("recovers an empty-queue station when a swallowed shift bundle receives 401", async () => {
+  it("recovers an empty-queue station when a swallowed shift bundle receives explicit revocation", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const persistedConfig: Record<string, unknown> = {
       machine_id: "m1",
@@ -3914,9 +3906,7 @@ describe("App", () => {
         }
         if (path === "/shifts") {
           if (credentialRevoked) {
-            return Promise.resolve(
-              new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
-            );
+            return Promise.resolve(revokedStationCredentialResponse());
           }
           return Promise.resolve(
             new Response(
@@ -3944,9 +3934,7 @@ describe("App", () => {
         }
         if (path === "/shifts/shift-1/bundle") {
           credentialRevoked = true;
-          return Promise.resolve(
-            new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
-          );
+          return Promise.resolve(revokedStationCredentialResponse());
         }
         return Promise.resolve(new Response("{}", { status: 200 }));
       }),
@@ -3977,16 +3965,13 @@ describe("App", () => {
     let rejectShiftList!: () => void;
     let rejectSync!: () => void;
     const roster = new Promise<Response>((resolve) => {
-      rejectRoster = () =>
-        resolve(new Response(JSON.stringify({ message: "revoked roster" }), { status: 401 }));
+      rejectRoster = () => resolve(revokedStationCredentialResponse("revoked roster"));
     });
     const shiftList = new Promise<Response>((resolve) => {
-      rejectShiftList = () =>
-        resolve(new Response(JSON.stringify({ message: "revoked shifts" }), { status: 401 }));
+      rejectShiftList = () => resolve(revokedStationCredentialResponse("revoked shifts"));
     });
     const sync = new Promise<Response>((resolve) => {
-      rejectSync = () =>
-        resolve(new Response(JSON.stringify({ message: "revoked sync" }), { status: 401 }));
+      rejectSync = () => resolve(revokedStationCredentialResponse("revoked sync"));
     });
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       const path = new URL(url).pathname;
@@ -4058,13 +4043,7 @@ describe("App", () => {
     );
     let rejectSync!: () => void;
     const rejectedResponse = new Promise<Response>((resolve) => {
-      rejectSync = () =>
-        resolve(
-          new Response(JSON.stringify({ message: "revoked" }), {
-            status: 401,
-            headers: { "Content-Type": "application/json" },
-          }),
-        );
+      rejectSync = () => resolve(revokedStationCredentialResponse());
     });
     const fetchMock = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
       if (init?.method === "POST" && new URL(url).pathname === "/station/scans") {
@@ -4115,13 +4094,7 @@ describe("App", () => {
     );
     let rejectSync!: () => void;
     const rejectedResponse = new Promise<Response>((resolve) => {
-      rejectSync = () =>
-        resolve(
-          new Response(JSON.stringify({ message: "revoked" }), {
-            status: 401,
-            headers: { "Content-Type": "application/json" },
-          }),
-        );
+      rejectSync = () => resolve(revokedStationCredentialResponse());
     });
     const fetchMock = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
       if (init?.method === "POST" && new URL(url).pathname === "/station/scans") {
