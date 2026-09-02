@@ -27,7 +27,6 @@ export interface ShiftsPanelContext {
   lines: LineDto[];
   counterparties: CounterpartyDto[];
   labelTemplates: LabelTemplateSummaryDto[];
-  defaultBoxLabelTemplateId: string | null;
   panelPending: boolean;
   panelError: boolean;
   retryPanelData: () => Promise<void>;
@@ -147,10 +146,7 @@ function CreateShiftPanel() {
         products={context.products}
         lines={context.lines}
         counterparties={context.counterparties}
-        formContext={{
-          defaultBoxLabelTemplateId: context.defaultBoxLabelTemplateId,
-          labelTemplates: context.labelTemplates,
-        }}
+        formContext={{ labelTemplates: context.labelTemplates }}
         submitting={mutation.isPending}
         submissionError={error}
         onDirtyChange={guard.setDirty}
@@ -272,10 +268,7 @@ function EditShiftPanel() {
         products={context.products}
         lines={context.lines}
         counterparties={context.counterparties}
-        formContext={{
-          defaultBoxLabelTemplateId: context.defaultBoxLabelTemplateId,
-          labelTemplates: context.labelTemplates,
-        }}
+        formContext={{ labelTemplates: context.labelTemplates }}
         submitting={mutation.isPending}
         submissionError={error}
         onDirtyChange={guard.setDirty}

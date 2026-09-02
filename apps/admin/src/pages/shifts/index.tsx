@@ -25,13 +25,7 @@ import { formatDate } from "../../lib/datetime.js";
 import { useProducts } from "../catalog/api.js";
 import { useCounterparties } from "../counterparties/api.js";
 import { useLabelTemplates } from "../labels/api.js";
-import {
-  useLines,
-  useShiftPlanningConfig,
-  useShifts,
-  type ShiftDto,
-  type ShiftStatus,
-} from "./api.js";
+import { useLines, useShifts, type ShiftDto, type ShiftStatus } from "./api.js";
 import { localCalendarDate } from "./date.js";
 import type { ShiftsPanelContext, ShiftsPanelLocationState } from "./ShiftPanelRoute.js";
 import "./shifts.css";
@@ -110,7 +104,6 @@ export function ShiftsPage() {
   const linesQuery = useLines();
   const counterpartiesQuery = useCounterparties();
   const labelTemplatesQuery = useLabelTemplates();
-  const planningConfigQuery = useShiftPlanningConfig();
 
   const items = shiftsQuery.data ?? [];
   const products = useMemo(() => productsQuery.data ?? [], [productsQuery.data]);
@@ -324,21 +317,18 @@ export function ShiftsPage() {
             lines,
             counterparties,
             labelTemplates,
-            defaultBoxLabelTemplateId: planningConfigQuery.data?.defaultBoxLabelTemplateId ?? null,
             panelPending:
               shiftsQuery.isPending ||
               productsQuery.isPending ||
               linesQuery.isPending ||
               counterpartiesQuery.isPending ||
-              labelTemplatesQuery.isPending ||
-              planningConfigQuery.isPending,
+              labelTemplatesQuery.isPending,
             panelError:
               shiftsQuery.isError ||
               productsQuery.isError ||
               linesQuery.isError ||
               counterpartiesQuery.isError ||
-              labelTemplatesQuery.isError ||
-              planningConfigQuery.isError,
+              labelTemplatesQuery.isError,
             retryPanelData: async () => {
               await Promise.all([
                 shiftsQuery.refetch(),
@@ -346,7 +336,6 @@ export function ShiftsPage() {
                 linesQuery.refetch(),
                 counterpartiesQuery.refetch(),
                 labelTemplatesQuery.refetch(),
-                planningConfigQuery.refetch(),
               ]);
             },
           } satisfies ShiftsPanelContext
