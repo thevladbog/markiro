@@ -18,8 +18,14 @@ export class StationApiError extends Error {
 
 export type ServerReachability = "checking" | "reachable" | "unreachable";
 
+export const STATION_CREDENTIAL_REVOKED_CODE = "STATION_CREDENTIAL_REVOKED";
+
 export function isStationCredentialRejection(error: unknown): error is StationApiError {
-  return error instanceof StationApiError && error.status === 401;
+  return (
+    error instanceof StationApiError &&
+    error.status === 401 &&
+    error.code === STATION_CREDENTIAL_REVOKED_CODE
+  );
 }
 
 export interface StationClient {
@@ -119,35 +125,16 @@ export function createStationClient(
   const base = (cfg.serverUrl ?? "").replace(/\/+$/, "");
   const credentialBoundary = options.credentialBoundary;
   let latestRequestSequence = 0;
-  let credentialRejectionProbe: Promise<boolean> | null = null;
 
-  /**
-   * A single ordinary 401 is not enough evidence for deleting the durable
-   * station credential. Reverse proxies and the api-key verifier can both
-   * produce an isolated 401 while the key itself remains valid. Confirm it
-   * against the smallest station-authenticated read before crossing the
-   * destructive credential boundary. Concurrent failures share one probe.
-   */
-  function confirmCredentialRejection(): Promise<boolean> {
-    if (credentialRejectionProbe) return credentialRejectionProbe;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    const probe = fetch(`${base}/shifts`, {
-      headers: {
-        "Content-Type": "application/json",
-        "x-station-capabilities": STATION_CAPABILITIES,
-        ...(cfg.apiKey ? { "x-api-key": cfg.apiKey } : {}),
+  async function rejectCredentialIfExplicit(error: unknown): Promise<void> {
+    if (!credentialBoundary || !isStationCredentialRejection(error)) return;
+    await rejectCredentialGeneration(
+      {
+        machineId: credentialBoundary.machineId,
+        generation: credentialBoundary.generation,
       },
-      signal: controller.signal,
-    })
-      .then((response) => response.status === 401)
-      .catch(() => false)
-      .finally(() => {
-        clearTimeout(timer);
-        if (credentialRejectionProbe === probe) credentialRejectionProbe = null;
-      });
-    credentialRejectionProbe = probe;
-    return probe;
+      credentialBoundary.onCredentialRejected,
+    );
   }
 
   async function request<T>(
@@ -196,18 +183,7 @@ export function createStationClient(
       return (await res.json()) as T;
     } catch (error) {
       if (!receivedResponse) reportReachability("unreachable");
-      if (credentialBoundary && isStationCredentialRejection(error)) {
-        const confirmed = await confirmCredentialRejection();
-        if (confirmed) {
-          await rejectCredentialGeneration(
-            {
-              machineId: credentialBoundary.machineId,
-              generation: credentialBoundary.generation,
-            },
-            credentialBoundary.onCredentialRejected,
-          );
-        }
-      }
+      await rejectCredentialIfExplicit(error);
       throw error;
     } finally {
       clearTimeout(timer);
@@ -217,9 +193,10 @@ export function createStationClient(
 
   return {
     get: (path) => request("GET", path),
-    // Binary media is an optional display enhancement. Its failure must not
-    // seal the line's credential generation: a CDN/proxy/media fault may hide
-    // a picture, but must not abandon queued production facts or the floor.
+    // Binary media is an optional display enhancement. Generic image/CDN
+    // failures must not seal the line's credential generation, but an explicit
+    // server revocation code still crosses the same credential boundary as any
+    // other authenticated Station request.
     download: async (path) => {
       if (credentialBoundary?.generation.sealed)
         throw new Error("station credential generation is sealed");
@@ -238,6 +215,9 @@ export function createStationClient(
           throw new StationApiError(res.status, error.message, error.code);
         }
         return await res.blob();
+      } catch (error) {
+        await rejectCredentialIfExplicit(error);
+        throw error;
       } finally {
         clearTimeout(timer);
       }

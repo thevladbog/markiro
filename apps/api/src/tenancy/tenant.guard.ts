@@ -1,19 +1,35 @@
 import {
   ForbiddenException,
-  HttpException,
-  HttpStatus,
   Inject,
   Injectable,
   UnauthorizedException,
   type CanActivate,
   type ExecutionContext,
 } from "@nestjs/common";
+import { createHash } from "node:crypto";
 import { fromNodeHeaders } from "better-auth/node";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Request } from "express";
 import { schema, type Auth, type Db } from "@markiro/db";
 import { AUTH, DB } from "../auth/auth.module";
 import type { CabinetPrincipal } from "../authorization/authorization.service";
+
+export const STATION_CREDENTIAL_REVOKED_CODE = "STATION_CREDENTIAL_REVOKED";
+
+function stationCredentialRevoked(): UnauthorizedException {
+  return new UnauthorizedException({
+    message: "Station credential revoked",
+    code: STATION_CREDENTIAL_REVOKED_CODE,
+  });
+}
+
+function hashStationApiKey(apiKey: string): string {
+  // Better Auth's api-key plugin stores SHA-256 as unpadded base64url.
+  // Keeping the lookup here direct is intentional: verifyApiKey catches
+  // infrastructure exceptions and reports them as INVALID_API_KEY, which is
+  // indistinguishable from revocation to an offline-first Station client.
+  return createHash("sha256").update(apiKey).digest("base64url");
+}
 
 /** Exported so guarded controllers can type `@Req()` without re-declaring this. */
 export interface RequestWithTenant extends Request {
@@ -36,7 +52,7 @@ export interface RequestWithTenant extends Request {
 
 /**
  * Resolves the caller's tenant from either a Better Auth session (admin/manager
- * UI) or a station's org-owned `x-api-key` (kiosk device), and requires an
+ * UI) or a desktop Tauri Station's org-owned `x-api-key`, and requires an
  * active organization: no session and no valid api-key -> 401, session
  * without an active org -> 403. On success, attaches `req.tenantId` for
  * downstream handlers/repositories, and (on the session path) `req.userId`
@@ -70,60 +86,59 @@ export class TenantGuard implements CanActivate {
     // referenceId carries the tenantId (set at enrollment, Task 6).
     const apiKey = req.headers["x-api-key"];
     if (typeof apiKey === "string" && apiKey.length > 0) {
-      // `configId` is required: the "station" apiKey configuration has no
-      // "default" fallback, so verifyApiKey without it throws
-      // NO_DEFAULT_API_KEY_CONFIGURATION_FOUND (see packages/db/src/auth-config.ts).
-      const result = await this.auth.api.verifyApiKey({
-        body: { key: apiKey, configId: "station" },
-      });
-      // Better Auth reports a live key's temporary quota exhaustion as an
-      // invalid verification result with RATE_LIMITED. Do not collapse that
-      // into 401: Station treats 401 as durable credential revocation and
-      // intentionally clears the rejected key. A 429 keeps the device paired
-      // and lets its offline-first retry path recover after the window resets.
-      if (!result.valid && result.error?.code === "RATE_LIMITED") {
-        throw new HttpException(
-          "Station credential temporarily rate limited",
-          HttpStatus.TOO_MANY_REQUESTS,
+      const [key] = await this.db
+        .select({
+          id: schema.apikey.id,
+          referenceId: schema.apikey.referenceId,
+          enabled: schema.apikey.enabled,
+          expiresAt: schema.apikey.expiresAt,
+        })
+        .from(schema.apikey)
+        .where(
+          and(
+            eq(schema.apikey.key, hashStationApiKey(apiKey)),
+            eq(schema.apikey.configId, "station"),
+          ),
         );
+      if (!key || key.enabled === false || (key.expiresAt?.getTime() ?? Infinity) <= Date.now()) {
+        throw stationCredentialRevoked();
       }
-      if (result.valid && result.key) {
-        req.tenantId = result.key.referenceId;
-        req.authKind = "station";
-        // Enrollment (station-devices.service.ts) mints exactly one api-key
-        // per device and stores that key's id as station_devices.apiKeyId --
-        // a 1:1 mapping, so this lookup is the one reliable way to learn
-        // which physical device is calling. Tenant-scoped in the statement
-        // itself, matching every other query in this codebase.
-        const [device] = await this.db
-          .select({ id: schema.stationDevices.id, lineId: schema.stationDevices.lineId })
-          .from(schema.stationDevices)
-          .where(
-            and(
-              eq(schema.stationDevices.tenantId, req.tenantId),
-              eq(schema.stationDevices.apiKeyId, result.key.id),
-              isNull(schema.stationDevices.revokedAt),
-            ),
-          );
-        // A verified Better Auth key is not a station principal by itself.
-        // The durable row is the authoritative device identity: reject an
-        // unlinked/orphaned key so a failed pairing compensation cannot turn
-        // into access to station-only endpoints.
-        if (!device) throw new UnauthorizedException();
-        req.deviceId = device.id;
-        req.deviceLineId = device.lineId;
-        await this.db
-          .update(schema.stationDevices)
-          .set({ lastSeenAt: new Date() })
-          .where(
-            and(
-              eq(schema.stationDevices.tenantId, req.tenantId),
-              eq(schema.stationDevices.id, device.id),
-              isNull(schema.stationDevices.revokedAt),
-            ),
-          );
-        return true;
-      }
+
+      req.tenantId = key.referenceId;
+      req.authKind = "station";
+      // Enrollment (station-devices.service.ts) mints exactly one api-key
+      // per device and stores that key's id as station_devices.apiKeyId --
+      // a 1:1 mapping, so this lookup is the one reliable way to learn
+      // which physical device is calling. Tenant-scoped in the statement
+      // itself, matching every other query in this codebase.
+      const [device] = await this.db
+        .select({ id: schema.stationDevices.id, lineId: schema.stationDevices.lineId })
+        .from(schema.stationDevices)
+        .where(
+          and(
+            eq(schema.stationDevices.tenantId, req.tenantId),
+            eq(schema.stationDevices.apiKeyId, key.id),
+            isNull(schema.stationDevices.revokedAt),
+          ),
+        );
+      // A live Better Auth key is not a station principal by itself. The
+      // durable row is the authoritative device identity: reject an
+      // unlinked/orphaned key so a failed pairing compensation cannot turn
+      // into access to station-only endpoints.
+      if (!device) throw stationCredentialRevoked();
+      req.deviceId = device.id;
+      req.deviceLineId = device.lineId;
+      await this.db
+        .update(schema.stationDevices)
+        .set({ lastSeenAt: new Date() })
+        .where(
+          and(
+            eq(schema.stationDevices.tenantId, req.tenantId),
+            eq(schema.stationDevices.id, device.id),
+            isNull(schema.stationDevices.revokedAt),
+          ),
+        );
+      return true;
     }
 
     throw new UnauthorizedException();
