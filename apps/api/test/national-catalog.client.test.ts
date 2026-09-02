@@ -632,6 +632,28 @@ describe("NationalCatalogClient", () => {
     ]);
   });
 
+  it("uses the singular documented GTIN selector for one-card reads", async () => {
+    const calls: string[] = [];
+    const client = new NationalCatalogClient(
+      dependencies(async (url) => {
+        calls.push(String(url));
+        return new Response(JSON.stringify(productPayload), { status: 200 });
+      }),
+    );
+
+    await expect(client.getFeedProducts(auth, ["0000000000001"])).resolves.toMatchObject({
+      status: "ok",
+    });
+    await expect(client.getPublishedProducts(auth, ["04600000000017"])).resolves.toMatchObject({
+      status: "ok",
+    });
+
+    expect(calls).toEqual([
+      "https://catalog.example.test/v3/feed-product?gtin=0000000000001",
+      "https://catalog.example.test/v3/product?gtin=04600000000017",
+    ]);
+  });
+
   it("rejects empty, non-digit, and over-limit GTIN batches before any request", async () => {
     let calls = 0;
     const client = new NationalCatalogClient(

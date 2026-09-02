@@ -59,8 +59,8 @@ function successfulClient(
       }),
     getAttributes:
       overrides.getAttributes ??
-      (async () => {
-        calls.push("attributes");
+      (async (_auth, options) => {
+        calls.push(`attributes:${options.catId ?? "missing"}`);
         return ok({ attributes: [{ id: 2 }] }, { hash: "attributes" });
       }),
     getFeedProducts:
@@ -311,7 +311,7 @@ describe("National Catalog diagnostic v3 collector", () => {
         listCategories: async (_auth, options = {}) => {
           calls.push(options.ifNoneMatch ? "unexpected-conditional" : "categories");
           return ok(
-            { categories: [{ private: PRIVATE_PROVIDER_MESSAGE }] },
+            { categories: [{ id: 17, private: PRIVATE_PROVIDER_MESSAGE }] },
             { etag: null, hash: "categories-fallback" },
           );
         },
@@ -325,7 +325,7 @@ describe("National Catalog diagnostic v3 collector", () => {
     expect(calls).toEqual([
       "categories",
       "categories",
-      "attributes",
+      "attributes:17",
       "feed-product",
       `product:${PRIVATE_GTIN}`,
       "product-repeat-conditional",
@@ -351,6 +351,30 @@ describe("National Catalog diagnostic v3 collector", () => {
     }
   });
 
+  it("selects the lowest usable category id for the bounded attribute probe", async () => {
+    const attributeCategoryIds: Array<number | undefined> = [];
+
+    const evidence = await collectNationalCatalogLiveDiagnostic({
+      loadSource: async () => source(),
+      client: successfulClient([], {
+        listCategories: async (_auth, options = {}) =>
+          options.ifNoneMatch
+            ? { status: "not_modified" }
+            : ok(
+                { categories: [{ id: 42 }, { id: 7 }, { id: 0 }, { id: 11 }] },
+                { etag: '"categories"' },
+              ),
+        getAttributes: async (_auth, options) => {
+          attributeCategoryIds.push(options.catId);
+          return ok({ attributes: [] });
+        },
+      }),
+    });
+
+    expect(attributeCategoryIds).toEqual([7]);
+    expect(evidence.capabilities.schemaRead).toBe("available");
+  });
+
   it("does not repeat a failed read and keeps feed and published reads independent", async () => {
     const calls: string[] = [];
     const evidence = await collectNationalCatalogLiveDiagnostic({
@@ -368,7 +392,6 @@ describe("National Catalog diagnostic v3 collector", () => {
     });
     expect(calls).toEqual([
       "categories",
-      "attributes",
       "feed-product",
       `product:${PRIVATE_GTIN}`,
       "product-repeat-conditional",

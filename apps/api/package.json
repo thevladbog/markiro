@@ -10,6 +10,7 @@
     "provision:tenant-owner": "node scripts/provision-tenant-owner.mjs",
     "provision:platform-admin": "node scripts/provision-platform-admin.mjs",
     "report:unmanaged-tenants": "node scripts/report-unmanaged-tenants.mjs",
+    "report:national-catalog-matrix": "node scripts/report-national-catalog-matrix.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"

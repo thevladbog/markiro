@@ -4,13 +4,13 @@ Run this gate only against a tenant that the deployment owner has authorized for
 National Catalog read validation. It makes only these GET requests:
 
 - `/v3/categories` and an immediate conditional repeat;
-- `/v3/attributes`;
+- `/v3/attributes` для одной детерминированно выбранной категории;
 - `/v3/feed-product` for a known, tenant-authorized GTIN;
 - `/v3/product` for the same GTIN and an immediate conditional repeat.
 
-The repeat must return `304 Not Modified` for `categories` and `product`.
-`attributes` and `feed-product` record their outcome and ETag presence, but do
-not require a `304`: that behavior is not documented for those methods.
+Для одиночной карточки используется документированный параметр `gtin`; `gtins`
+используется только для пакетного чтения. Отсутствие ETag или usage headers отмечается
+как деградация контракта, но неизменный content hash остаётся безопасным fallback.
 
 ## Required evidence before enabling the integration
 
@@ -86,3 +86,39 @@ The test skips when any of the three `NATIONAL_CATALOG_*` validation settings
 above is absent. A skip, `forbidden`, or unsupported method result is a stop
 gate: keep the integration disabled and obtain the tenant/right evidence before
 starting persistence or feature work.
+
+## Включение read-only импорта после merge
+
+1. Зафиксируйте вне Git подтверждение владельца source tenant и права токена на
+   categories, category-scoped attributes, feed-product и product.
+2. Опубликуйте новую версию Lockbox по инструкции `yandex-secrets.md`, сохранив все
+   существующие записи. Отдельный токен Национального каталога не добавляйте.
+3. Разверните merge SHA только защищённым `Deploy production` и повторите этот
+   диагностический gate. Сырые ответы и идентификаторы в evidence не копируйте.
+4. Платформенный администратор с `catalog.write` вызывает
+   `POST /platform/operations/national-catalog/schema-refresh`. Частичные ошибки и
+   заблокированные типы не активируются автоматически.
+5. Для каждой группы ЧЗ явно зафиксируйте решение через
+   `POST /platform/operations/national-catalog/group-mappings/:code/review`: `exact`
+   принимает ровно одну версию схемы, `ambiguous` — не менее двух кандидатов,
+   `unmapped` — пустой список. JSON-отчёт следующего шага содержит подходящие
+   `categoryIds` и `schemaVersionIds`. Этот шаг не активирует схему автоматически.
+6. В защищённой операторской среде выполните
+   `pnpm --filter @markiro/api report:national-catalog-matrix`. Exit code `2` означает,
+   что остались ambiguous/unmapped группы: завершите review и повторите отчёт.
+7. Если значения НК должны обновлять `name`, `print_name` или `shelf_life_days`,
+   явно сохраните не более одного проверенного source mapping для каждого поля через
+   `POST /platform/operations/national-catalog/schema-versions/:id/attribute-mappings/review`.
+   Пустой список отключает такие переносы для версии. ЕГАИС-коды этим маршрутом не
+   сопоставляются и автоматически из НК не импортируются.
+8. Активируйте только просмотренную версию через
+   `POST /platform/operations/national-catalog/schema-versions/:id/activate`.
+9. Для tenant smoke вызовите `POST /products/:id/national-catalog/lookups`, выберите
+   один snapshot при нескольких карточках, затем создайте preview через
+   `POST /products/:id/national-catalog/import-previews`. Применение выполняется только
+   существующим `regulatory-proposals/:proposalId/apply` с явным списком entry IDs.
+
+Для аварийного выключения опубликуйте следующую версию Lockbox с пустыми
+`NATIONAL_CATALOG_BASE_URL` и `NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID`, сохранив
+остальной payload, и снова используйте защищённый deploy. Уже сохранённые snapshots,
+proposals и применённые значения не удаляются и не переписываются.
