@@ -41,6 +41,19 @@ export interface JournalPageDto {
   sessions: JournalSessionDto[];
 }
 
+export const journalOutcomes = ["all", "ok", "warn", "error", "running"] as const;
+export const journalDirections = ["all", "in", "out", "local"] as const;
+
+export const listJournalQuerySchema = z.strictObject({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+  outcome: z.enum(journalOutcomes).default("all"),
+  direction: z.enum(journalDirections).default("all"),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+});
+export type ListJournalQueryDto = z.infer<typeof listJournalQuerySchema>;
+
 /** Выпускается ровно один раз при `POST /integrations/:type/credentials`; в базе живёт только хэш секрета. */
 export interface CredentialsIssuedDto {
   login: string;
