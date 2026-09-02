@@ -2,6 +2,10 @@
   min-width: 0;
 }
 
+.mk-catalog-table table {
+  table-layout: fixed;
+}
+
 .mk-catalog-filters__search {
   flex: 1;
   max-width: 320px;

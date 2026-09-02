@@ -1838,6 +1838,12 @@
         }
       },
       "table": {
+        "shift": "Смена",
+        "production": "Производство",
+        "planStatus": "План и статус",
+        "plannedDateShort": "Смена",
+        "productionDateShort": "Производство",
+        "planValue": "План: {{count}} шт",
         "number": "Номер",
         "plannedDate": "Дата",
         "productionDate": "Дата производства",
@@ -1857,6 +1863,30 @@
         "planned": "Запланирована",
         "active": "Активна",
         "closed": "Закрыта"
+      },
+      "details": {
+        "action": "Подробнее",
+        "title": "Смена {{number}}",
+        "loadingTitle": "Смена",
+        "outputTitle": "Результат смены",
+        "participantsTitle": "Сотрудники в смене",
+        "parametersTitle": "Параметры смены",
+        "actionsTitle": "Действия со сменой",
+        "acceptedUnits": "Принято кодов",
+        "closedBoxes": "Закрыто коробов",
+        "containedUnits": "Кодов в закрытых коробах",
+        "plannedUnits": "План, шт",
+        "acceptedScans": "Принято сканов",
+        "roleMissing": "Роль не указана",
+        "activityRange": "Активность: {{first}} — {{last}}",
+        "participantsEmpty": "Зафиксированных действий сотрудников пока нет.",
+        "unattributed_one": "{{count}} операция без указанного сотрудника.",
+        "unattributed_few": "{{count}} операции без указанного сотрудника.",
+        "unattributed_many": "{{count}} операций без указанного сотрудника.",
+        "unattributed_other": "{{count}} операции без указанного сотрудника.",
+        "counterparty": "Контрагент",
+        "reportsAfterClose": "Заказать и выгрузить отчеты можно после закрытия смены.",
+        "summaryError": "Не удалось загрузить статистику смены. Остальные данные и действия доступны."
       },
       "form": {
         "createTitle": "Новая смена",

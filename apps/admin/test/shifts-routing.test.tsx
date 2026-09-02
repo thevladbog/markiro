@@ -8,6 +8,7 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
+import type { ShiftDto } from "../src/pages/shifts/api.js";
 import { ShiftsPage } from "../src/pages/shifts/index.js";
 import { ShiftPanelRoute } from "../src/pages/shifts/ShiftPanelRoute.js";
 
@@ -29,8 +30,9 @@ const PRODUCT = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
-const SHIFT = {
+const SHIFT: ShiftDto = {
   id: "s1",
+  number: "AUG26-001",
   status: "planned",
   mode: "validation",
   productId: "p1",
@@ -43,6 +45,7 @@ const SHIFT = {
   boxLabelTemplateId: null,
   plannedQty: 500,
   plannedDate: "2026-08-06",
+  productionDate: null,
   boxCapacity: null,
   palletCapacity: null,
   palletsEnabled: false,
@@ -56,6 +59,15 @@ const SHIFT = {
 
 const PLANNING_CONFIG = {
   defaultBoxLabelTemplateId: null,
+};
+
+const EXPORT_FORMAT = {
+  id: "shift_txt_flat",
+  version: 1,
+  label: "[TXT][Без коробов] Отчет смены",
+  extension: "txt",
+  mimeType: "text/plain; charset=utf-8",
+  boxMode: "flat",
 };
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -74,6 +86,26 @@ function stubDependencies(shifts = [SHIFT], createError?: string) {
         return jsonResponse(409, { message: createError });
       }
       if (path === "/api/shifts/planning-config") return jsonResponse(200, PLANNING_CONFIG);
+      if (path === "/api/shifts/s1/summary") {
+        return jsonResponse(200, {
+          generatedAt: "2026-09-02T09:00:00.000Z",
+          output: { mode: "validation", acceptedUnits: 128 },
+          participants: [
+            {
+              employeeId: "10000000-0000-4000-8000-000000000001",
+              fullName: "Анна Соколова",
+              role: "Оператор линии",
+              firstActivityAt: "2026-09-02T06:00:00.000Z",
+              lastActivityAt: "2026-09-02T08:45:00.000Z",
+              acceptedScans: 128,
+              closedBoxes: 0,
+            },
+          ],
+          unattributed: { eventCount: 2, acceptedScans: 2, closedBoxes: 0 },
+        });
+      }
+      if (path === "/api/shift-exports/formats") return jsonResponse(200, [EXPORT_FORMAT]);
+      if (path === "/api/shifts/s1/exports") return jsonResponse(200, []);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: shifts });
       if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT] });
       return jsonResponse(200, { items: [] });
@@ -86,6 +118,7 @@ function renderPanel(initialEntries: string[]) {
     createRoutesFromElements(
       <Route path="/shifts" element={<ShiftsPage />}>
         <Route path="new" element={<ShiftPanelRoute mode="create" />} />
+        <Route path=":shiftId" element={<ShiftPanelRoute mode="details" />} />
         <Route path=":shiftId/edit" element={<ShiftPanelRoute mode="edit" />} />
       </Route>,
     ),
@@ -121,6 +154,58 @@ it("keeps the shift list mounted behind a nested create route", async () => {
   expect(router.state.location.pathname).toBe("/shifts/new");
   expect(screen.getAllByText("Молоко 1л").length).toBeGreaterThan(0);
   expect(screen.getByRole("dialog", { name: "Новая смена" })).toBeDefined();
+});
+
+it("opens route-backed shift details with output, factual employees, and unattributed warning", async () => {
+  stubDependencies();
+  const { router, user } = renderPanel(["/shifts"]);
+
+  await user.click(await screen.findByRole("button", { name: "Подробнее" }));
+
+  expect(router.state.location.pathname).toBe("/shifts/s1");
+  const panel = screen.getByRole("dialog", { name: "Смена AUG26-001" });
+  expect(within(panel).getByText("Результат смены")).toBeDefined();
+  expect(within(panel).getAllByText("128")).toHaveLength(2);
+  expect(within(panel).getByText("Анна Соколова")).toBeDefined();
+  expect(within(panel).getByText("Оператор линии")).toBeDefined();
+  expect(within(panel).getByText(/2 операции без указанного сотрудника/)).toBeDefined();
+  expect(within(panel).getByRole("button", { name: "Изменить" })).toBeDefined();
+});
+
+it("shows an em dash when a shift has no planned quantity", async () => {
+  stubDependencies([{ ...SHIFT, plannedQty: null }]);
+  const { user } = renderPanel(["/shifts"]);
+
+  await user.click(await screen.findByRole("button", { name: "Подробнее" }));
+
+  const panel = screen.getByRole("dialog", { name: "Смена AUG26-001" });
+  const metrics = panel.querySelector(".mk-shift-details__metrics");
+  const plannedMetric = metrics
+    ? within(metrics as HTMLElement)
+        .getByText("План, шт")
+        .closest(".mk-shift-details__metric")
+    : null;
+  expect(plannedMetric?.querySelector("strong")?.textContent).toBe("—");
+});
+
+it("shows report ordering and history inside a closed shift drawer", async () => {
+  stubDependencies([
+    {
+      ...SHIFT,
+      status: "closed",
+      openedAt: "2026-08-06T06:00:00.000Z",
+      closedAt: "2026-08-06T14:00:00.000Z",
+      closeReason: "Смена завершена",
+    },
+  ]);
+  const { user } = renderPanel(["/shifts"]);
+
+  await user.click(await screen.findByRole("button", { name: "Подробнее" }));
+
+  const panel = screen.getByRole("dialog", { name: "Смена AUG26-001" });
+  expect(await within(panel).findByRole("radio", { name: EXPORT_FORMAT.label })).toBeDefined();
+  expect(within(panel).getByRole("button", { name: "Сформировать отчет" })).toBeDefined();
+  expect(within(panel).getByText("Отчеты для этой смены еще не формировались.")).toBeDefined();
 });
 
 it("falls back to the shift list when a directly entered panel closes", async () => {

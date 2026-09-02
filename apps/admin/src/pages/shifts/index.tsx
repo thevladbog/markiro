@@ -7,13 +7,10 @@ import {
   Alert,
   Badge,
   Button,
-  ConfirmDialog,
   DatePicker,
   EmptyState,
   FilterBar,
-  Input,
   PageHeader,
-  RowActions,
   Select,
   Spinner,
   StatusChip,
@@ -24,15 +21,11 @@ import type { BadgeTone, SelectOption, StatusChipStatus, TableColumn } from "@ma
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import { useCan } from "../../access/context.js";
-import { ApiRequestError } from "../../api/client.js";
 import { formatDate } from "../../lib/datetime.js";
-import { toast } from "../../lib/toast.js";
 import { useProducts } from "../catalog/api.js";
 import { useCounterparties } from "../counterparties/api.js";
 import { useLabelTemplates } from "../labels/api.js";
 import {
-  useCloseShift,
-  useDeleteShift,
   useLines,
   useShiftPlanningConfig,
   useShifts,
@@ -40,7 +33,6 @@ import {
   type ShiftStatus,
 } from "./api.js";
 import { localCalendarDate } from "./date.js";
-import { ShiftExportsDialog } from "./ShiftExportsDialog.js";
 import type { ShiftsPanelContext, ShiftsPanelLocationState } from "./ShiftPanelRoute.js";
 import "./shifts.css";
 
@@ -75,169 +67,22 @@ function AuthorizedCreateShiftAction() {
   );
 }
 
-function AuthorizedPlannedShiftActions({ shift }: { shift: ShiftDto }) {
+function ShiftDetailsAction({ shift }: { shift: ShiftDto }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const deleteMutation = useDeleteShift();
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-
-  const handleDelete = async () => {
-    try {
-      setDeleteError(null);
-      await deleteMutation.mutateAsync(shift.id);
-      toast("ok", t("pages.shifts.toasts.deleteSuccess"));
-      setDeleting(false);
-    } catch (error) {
-      setDeleteError(
-        error instanceof ApiRequestError ? error.message : t("pages.shifts.toasts.deleteError"),
-      );
-    }
-  };
-
   return (
-    <>
-      <RowActions>
-        <Button
-          type="button"
-          size="compact"
-          variant="secondary"
-          onClick={() =>
-            void navigate(`${shift.id}/edit`, {
-              state: { shiftsBackground: true } satisfies ShiftsPanelLocationState,
-            })
-          }
-        >
-          {t("pages.shifts.edit")}
-        </Button>
-        <Button
-          type="button"
-          size="compact"
-          variant="destructive"
-          onClick={() => {
-            setDeleteError(null);
-            setDeleting(true);
-          }}
-        >
-          {t("pages.shifts.delete")}
-        </Button>
-      </RowActions>
-      <ConfirmDialog
-        open={deleting}
-        title={t("pages.shifts.deleteConfirmTitle")}
-        description={
-          <>
-            <p>
-              {t("pages.shifts.deleteConfirmBody", { name: shift.productName ?? shift.number })}
-            </p>
-            {deleteError ? <Alert tone="error">{deleteError}</Alert> : null}
-          </>
-        }
-        entity={shift.productName ? `${shift.number} · ${shift.productName}` : shift.number}
-        cancelLabel={t("pages.shifts.cancel")}
-        confirmLabel={t("pages.shifts.deleteConfirmAction")}
-        tone="destructive"
-        busy={deleteMutation.isPending}
-        onCancel={() => setDeleting(false)}
-        onConfirm={() => void handleDelete()}
-      />
-    </>
-  );
-}
-
-function AuthorizedCloseShiftAction({ shift }: { shift: ShiftDto }) {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-  const closeMutation = useCloseShift();
-  const [open, setOpen] = useState(false);
-  const [closeReason, setCloseReason] = useState("");
-  const [closeError, setCloseError] = useState<string | null>(null);
-
-  const handleCloseShift = async () => {
-    try {
-      setCloseError(null);
-      await closeMutation.mutateAsync({ id: shift.id, reason: closeReason.trim() });
-      toast("ok", t("pages.shifts.toasts.closeSuccess"));
-      setOpen(false);
-      setCloseReason("");
-    } catch (error) {
-      setCloseError(
-        error instanceof ApiRequestError ? error.message : t("pages.shifts.toasts.closeError"),
-      );
-    }
-  };
-
-  return (
-    <>
-      <RowActions>
-        <Button
-          type="button"
-          size="compact"
-          variant="secondary"
-          onClick={() =>
-            void navigate(`${shift.id}/edit`, {
-              state: { shiftsBackground: true } satisfies ShiftsPanelLocationState,
-            })
-          }
-        >
-          {t("pages.shifts.edit")}
-        </Button>
-        <Button
-          type="button"
-          size="compact"
-          variant="secondary"
-          onClick={() => {
-            setCloseError(null);
-            setOpen(true);
-          }}
-        >
-          {t("pages.shifts.close")}
-        </Button>
-      </RowActions>
-      <ConfirmDialog
-        open={open}
-        title={t("pages.shifts.closeModal.title")}
-        description={
-          <>
-            <Input
-              label={t("pages.shifts.closeModal.reasonLabel")}
-              value={closeReason}
-              onChange={(event) => setCloseReason(event.target.value)}
-            />
-            {closeError ? <Alert tone="error">{closeError}</Alert> : null}
-          </>
-        }
-        entity={shift.productName ? `${shift.number} · ${shift.productName}` : shift.number}
-        cancelLabel={t("pages.shifts.closeModal.cancel")}
-        confirmLabel={t("pages.shifts.closeModal.submit")}
-        tone="destructive"
-        busy={closeMutation.isPending}
-        confirmDisabled={closeReason.trim().length < 3}
-        onCancel={() => {
-          if (closeMutation.isPending) return;
-          setOpen(false);
-          setCloseReason("");
-          setCloseError(null);
-        }}
-        onConfirm={() => void handleCloseShift()}
-      />
-    </>
-  );
-}
-
-function ShiftExportAction({ shift }: { shift: ShiftDto }) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-
-  return (
-    <>
-      <RowActions>
-        <Button type="button" size="compact" variant="secondary" onClick={() => setOpen(true)}>
-          {t("pages.shifts.exports.action")}
-        </Button>
-      </RowActions>
-      {open ? <ShiftExportsDialog shift={shift} open onClose={() => setOpen(false)} /> : null}
-    </>
+    <Button
+      type="button"
+      size="compact"
+      variant="secondary"
+      onClick={() =>
+        void navigate(shift.id, {
+          state: { shiftsBackground: true } satisfies ShiftsPanelLocationState,
+        })
+      }
+    >
+      {t("pages.shifts.details.action")}
+    </Button>
   );
 }
 
@@ -289,77 +134,69 @@ export function ShiftsPage() {
   const columns: TableColumn<ShiftDto>[] = useMemo(
     () => [
       {
-        key: "number",
-        title: t("pages.shifts.table.number"),
-        mono: true,
-        render: (row) => row.number,
-      },
-      {
-        key: "plannedDate",
-        title: t("pages.shifts.table.plannedDate"),
+        key: "shift",
+        title: t("pages.shifts.table.shift"),
+        width: "18%",
+        wrap: true,
         render: (row) => {
-          const date = row.plannedDate ?? localCalendarDate(row.openedAt);
-          return date ? formatDate(date, i18n.language) : "—";
-        },
-      },
-      {
-        key: "productionDate",
-        title: t("pages.shifts.table.productionDate"),
-        render: (row) => {
-          // The effective production day: the same `productionDate ??
-          // plannedDate` fallback labels and reports apply.
-          const date = row.productionDate ?? row.plannedDate;
-          return date ? formatDate(date, i18n.language) : "—";
+          const plannedDate = row.plannedDate ?? localCalendarDate(row.openedAt);
+          const productionDate = row.productionDate ?? row.plannedDate;
+          return (
+            <div className="mk-shifts-table__stack">
+              <strong className="font-mono">{row.number}</strong>
+              <span className="mk-shifts-table__date">
+                <span>{t("pages.shifts.table.plannedDateShort")}:</span>
+                <time>{plannedDate ? formatDate(plannedDate, i18n.language) : "—"}</time>
+              </span>
+              <span className="mk-shifts-table__date">
+                <span>{t("pages.shifts.table.productionDateShort")}:</span>
+                <time>{productionDate ? formatDate(productionDate, i18n.language) : "—"}</time>
+              </span>
+            </div>
+          );
         },
       },
       {
         key: "productName",
         title: t("pages.shifts.table.product"),
+        width: "32%",
+        wrap: true,
         render: (row) => (
-          <div style={{ display: "flex", flexDirection: "column" }}>
+          <div className="mk-shifts-table__stack mk-shifts-table__product">
             <span>{row.productName ?? "—"}</span>
             {row.counterpartyName && (
-              <span style={{ font: "var(--text-caption)", color: "var(--fg-3)" }}>
-                {t("pages.shifts.forCounterparty", { name: row.counterpartyName })}
-              </span>
+              <span>{t("pages.shifts.forCounterparty", { name: row.counterpartyName })}</span>
             )}
           </div>
         ),
       },
       {
-        key: "lineName",
-        title: t("pages.shifts.table.line"),
-        render: (row) => row.lineName ?? "—",
-      },
-      {
-        key: "mode",
-        title: t("pages.shifts.table.mode"),
+        key: "production",
+        title: t("pages.shifts.table.production"),
+        width: "20%",
+        wrap: true,
         render: (row) => (
-          <Badge tone={MODE_TO_BADGE_TONE[row.mode]}>{t(`pages.shifts.mode.${row.mode}`)}</Badge>
+          <div className="mk-shifts-table__stack">
+            <span>{row.lineName ?? "—"}</span>
+            <Badge tone={MODE_TO_BADGE_TONE[row.mode]}>{t(`pages.shifts.mode.${row.mode}`)}</Badge>
+          </div>
         ),
       },
       {
-        key: "plannedQty",
-        title: t("pages.shifts.table.plannedQty"),
-        align: "right",
-        mono: true,
-        render: (row) => row.plannedQty ?? "—",
-      },
-      {
-        key: "status",
-        title: t("pages.shifts.table.status"),
+        key: "planStatus",
+        title: t("pages.shifts.table.planStatus"),
+        width: "20%",
+        wrap: true,
         render: (row) => (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div className="mk-shifts-table__stack">
+            <strong className="font-mono">{row.plannedQty ?? "—"}</strong>
+            <span>{t("pages.shifts.table.plannedQty")}</span>
             <StatusChip
               status={STATUS_TO_CHIP[row.status]}
               label={t(`pages.shifts.status.${row.status}`)}
               {...(row.status === "closed" && row.closeReason ? { title: row.closeReason } : {})}
             />
-            {row.status === "closed" && row.closeReason && (
-              <span style={{ font: "var(--text-caption)", color: "var(--fg-3)" }}>
-                {row.closeReason}
-              </span>
-            )}
+            {row.status === "closed" && row.closeReason && <span>{row.closeReason}</span>}
             {row.lateDataAt && <Badge tone="warn">{t("pages.shifts.table.lateData")}</Badge>}
           </div>
         ),
@@ -367,20 +204,12 @@ export function ShiftsPage() {
       {
         key: "actions",
         title: t("pages.shifts.table.actions"),
+        width: "128px",
         align: "right",
-        render: (row) =>
-          row.status === "closed" ? (
-            <ShiftExportAction shift={row} />
-          ) : canWrite ? (
-            row.status === "planned" ? (
-              <AuthorizedPlannedShiftActions shift={row} />
-            ) : row.status === "active" ? (
-              <AuthorizedCloseShiftAction shift={row} />
-            ) : null
-          ) : null,
+        render: (row) => <ShiftDetailsAction shift={row} />,
       },
     ],
-    [t, canWrite, i18n.language],
+    [t, i18n.language],
   );
 
   return (
@@ -485,7 +314,7 @@ export function ShiftsPage() {
           action={canWrite ? <AuthorizedCreateShiftAction /> : null}
         />
       ) : (
-        <Table columns={columns} rows={items} />
+        <Table className="mk-shifts-table" columns={columns} rows={items} />
       )}
       <Outlet
         context={

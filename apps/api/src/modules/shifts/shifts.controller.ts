@@ -52,6 +52,7 @@ import {
   shiftOpenApiSchema,
   shiftPlanningConfigOpenApiSchema,
   shiftReferenceBundleOpenApiSchema,
+  shiftSummaryOpenApiSchema,
   updateShiftOpenApiSchema,
   updateShiftSchema,
   type CloseShiftDto,
@@ -63,6 +64,7 @@ import {
   type ShiftDto,
   type ShiftPlanningConfigDto,
   type ShiftReferenceBundleDto,
+  type ShiftSummaryDto,
   type UpdateShiftDto,
 } from "./dto";
 import { ShiftsService, type EffectiveListShiftsQuery } from "./shifts.service";
@@ -122,6 +124,20 @@ export class ShiftsController {
   @ApiHttpErrors(401, 403, 429)
   async listBoxLabelTemplates(@Req() req: RequestWithTenant): Promise<ShiftBoxLabelTemplatesDto> {
     return this.shiftsService.listBoxLabelTemplates(req.tenantId!);
+  }
+
+  @Get(":id/summary")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "Read factual shift output and participants" })
+  @ApiCabinetAuth()
+  @ApiParam({ name: "id", format: "uuid" })
+  @ApiOkResponse({ schema: shiftSummaryOpenApiSchema })
+  @ApiHttpErrors(401, 403, 404)
+  async getShiftSummary(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+  ): Promise<ShiftSummaryDto> {
+    return this.shiftsService.getShiftSummary(req.tenantId!, id);
   }
 
   // Cabinet-only: not one of the station's six routes (list, create, open,

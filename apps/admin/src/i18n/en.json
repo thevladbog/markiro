@@ -1838,6 +1838,12 @@
         }
       },
       "table": {
+        "shift": "Shift",
+        "production": "Production",
+        "planStatus": "Plan and status",
+        "plannedDateShort": "Shift",
+        "productionDateShort": "Production",
+        "planValue": "Plan: {{count}} units",
         "number": "Number",
         "plannedDate": "Date",
         "productionDate": "Production date",
@@ -1857,6 +1863,30 @@
         "planned": "Planned",
         "active": "Active",
         "closed": "Closed"
+      },
+      "details": {
+        "action": "Details",
+        "title": "Shift {{number}}",
+        "loadingTitle": "Shift",
+        "outputTitle": "Shift output",
+        "participantsTitle": "Employees in this shift",
+        "parametersTitle": "Shift parameters",
+        "actionsTitle": "Shift actions",
+        "acceptedUnits": "Accepted codes",
+        "closedBoxes": "Closed boxes",
+        "containedUnits": "Codes in closed boxes",
+        "plannedUnits": "Plan, units",
+        "acceptedScans": "Accepted scans",
+        "roleMissing": "Role not specified",
+        "activityRange": "Activity: {{first}} — {{last}}",
+        "participantsEmpty": "No employee activity has been recorded yet.",
+        "unattributed_one": "{{count}} operation has no employee assigned.",
+        "unattributed_few": "{{count}} operations have no employee assigned.",
+        "unattributed_many": "{{count}} operations have no employee assigned.",
+        "unattributed_other": "{{count}} operations have no employee assigned.",
+        "counterparty": "Counterparty",
+        "reportsAfterClose": "Reports can be requested and downloaded after the shift is closed.",
+        "summaryError": "Shift statistics could not be loaded. Other data and actions are still available."
       },
       "form": {
         "createTitle": "New shift",

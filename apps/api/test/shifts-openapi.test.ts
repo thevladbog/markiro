@@ -236,4 +236,51 @@ describe("shifts OpenAPI contract", () => {
       await app.close();
     }
   });
+
+  it("documents the tenant-scoped shift summary with mode-specific output and participants", async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [ShiftsController],
+      providers: [{ provide: ShiftsService, useValue: {} }],
+    })
+      .overrideGuard(TenantGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(AuthorizationGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(SubscriptionAccessGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app = moduleRef.createNestApplication();
+    await app.init();
+
+    try {
+      const document = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().setTitle("contract test").setVersion("test").build(),
+      );
+      const summary = responseSchema(document, "/shifts/{id}/summary", "get", "200");
+
+      expectProperties(summary, ["generatedAt", "output", "participants", "unattributed"]);
+      expectRequired(summary, ["generatedAt", "output", "participants", "unattributed"]);
+      expect(property(summary, "generatedAt")).toMatchObject({
+        type: "string",
+        format: "date-time",
+      });
+      expect(property(summary, "participants").items?.properties).toMatchObject({
+        employeeId: { type: "string", format: "uuid" },
+        fullName: { type: "string" },
+        role: { type: "string", nullable: true },
+        firstActivityAt: { type: "string", format: "date-time" },
+        lastActivityAt: { type: "string", format: "date-time" },
+        acceptedScans: { type: "integer", minimum: 0 },
+        closedBoxes: { type: "integer", minimum: 0 },
+      });
+      expect(property(summary, "unattributed").properties).toMatchObject({
+        eventCount: { type: "integer", minimum: 0 },
+        acceptedScans: { type: "integer", minimum: 0 },
+        closedBoxes: { type: "integer", minimum: 0 },
+      });
+    } finally {
+      await app.close();
+    }
+  });
 });

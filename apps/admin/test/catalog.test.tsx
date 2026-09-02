@@ -243,6 +243,12 @@ describe("CatalogPage", () => {
     expect(screen.getByTestId("catalog-page").classList.contains("mk-catalog-page")).toBe(true);
     expect(screen.getByRole("group", { name: "Фильтры каталога" })).toBeDefined();
     expect(screen.getByText("2 продукта")).toBeDefined();
+    expect(screen.getByRole("table").closest(".mk-table")?.classList).toContain("mk-catalog-table");
+    const activeRow = screen.getByText(ACTIVE_PRODUCT.name).closest("tr");
+    expect(activeRow).not.toBeNull();
+    const activeCells = within(activeRow!).getAllByRole("cell");
+    expect(activeCells[2]?.style.whiteSpace).toBe("normal");
+    expect(activeCells[3]?.style.whiteSpace).toBe("normal");
   });
 
   it("shows the archive chip, filters archived products, and clears the flag from the edit form", async () => {
