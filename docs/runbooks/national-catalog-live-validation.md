@@ -35,11 +35,13 @@ enabled. The workflow reuses the dedicated `markiro-deploy` SSH identity and
 pinned host keys. It resolves exactly one running `api` container and executes
 only `dist/national-catalog-live-diagnostic.js` inside it.
 
-The production diagnostic fails closed unless there is exactly one tenant with
-an unexpired encrypted ChZ token. It selects one unarchived product from that
-same tenant, decrypts the bearer only inside the API container, and uses the
-official production National Catalog endpoint. It does not add National
-Catalog values to the production Lockbox inventory.
+The production diagnostic selects the configured
+`NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID`, queries only that tenant's active
+encrypted ChZ token, and uses the configured known
+`NATIONAL_CATALOG_LIVE_GTIN`. Other tenants and tokens may exist and do not
+make the configured source ambiguous. The bearer is decrypted only inside the
+API container, and the diagnostic uses the official production National Catalog
+endpoint.
 
 The workflow output is limited to a closed source-status enum, method outcome,
 result count, ETag presence, and the aggregate pass/fail flag. Tenant, GTIN,
@@ -92,7 +94,8 @@ starting persistence or feature work.
 1. Зафиксируйте вне Git подтверждение владельца source tenant и права токена на
    categories, category-scoped attributes, feed-product и product.
 2. Опубликуйте новую версию Lockbox по инструкции `yandex-secrets.md`, сохранив все
-   существующие записи. Отдельный токен Национального каталога не добавляйте.
+   существующие записи и предыдущую версию. Добавьте подтверждённый известный GTIN
+   в `NATIONAL_CATALOG_LIVE_GTIN`; отдельный токен Национального каталога не добавляйте.
 3. Разверните merge SHA только защищённым `Deploy production` и повторите этот
    диагностический gate. Сырые ответы и идентификаторы в evidence не копируйте.
 4. Платформенный администратор с `catalog.write` вызывает
@@ -119,6 +122,7 @@ starting persistence or feature work.
    существующим `regulatory-proposals/:proposalId/apply` с явным списком entry IDs.
 
 Для аварийного выключения опубликуйте следующую версию Lockbox с пустыми
-`NATIONAL_CATALOG_BASE_URL` и `NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID`, сохранив
-остальной payload, и снова используйте защищённый deploy. Уже сохранённые snapshots,
-proposals и применённые значения не удаляются и не переписываются.
+`NATIONAL_CATALOG_BASE_URL`, `NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID` и
+`NATIONAL_CATALOG_LIVE_GTIN`, сохранив остальной payload, и снова используйте
+защищённый deploy. Уже сохранённые snapshots, proposals и применённые значения не
+удаляются и не переписываются.

@@ -391,6 +391,7 @@ test("production environment example is a blank loadEnv inventory", async () => 
     "CHZ_TRUE_API_TOKEN_FORMAT",
     "NATIONAL_CATALOG_BASE_URL",
     "NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID",
+    "NATIONAL_CATALOG_LIVE_GTIN",
     "NATIONAL_CATALOG_REQUEST_TIMEOUT_MS",
     "S3_ENDPOINT",
     "S3_REGION",
