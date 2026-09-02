@@ -86,6 +86,8 @@ interface ListShiftsResponse {
 
 export interface ShiftPlanningConfigDto {
   defaultBoxLabelTemplateId: string | null;
+  /** Which default answered: the product's category, the organisation, or none. */
+  defaultSource: "category" | "organization" | null;
 }
 
 export interface ShiftParticipantDto {
@@ -133,8 +135,10 @@ async function fetchShifts(params: ListShiftsParams): Promise<ShiftDto[]> {
   return response.items;
 }
 
-function fetchShiftPlanningConfig(): Promise<ShiftPlanningConfigDto> {
-  return apiFetch<ShiftPlanningConfigDto>("/shifts/planning-config");
+function fetchShiftPlanningConfig(productId: string): Promise<ShiftPlanningConfigDto> {
+  return apiFetch<ShiftPlanningConfigDto>(
+    `/shifts/planning-config?productId=${encodeURIComponent(productId)}`,
+  );
 }
 
 function fetchShiftSummary(id: string): Promise<ShiftSummaryDto> {
@@ -174,11 +178,17 @@ export function useShifts(params: ListShiftsParams = {}): UseQueryResult<ShiftDt
   });
 }
 
-/** The operations-readable organisation default needed by the shift form. */
-export function useShiftPlanningConfig(): UseQueryResult<ShiftPlanningConfigDto> {
+/**
+ * The box-template default resolved for a product (category default, then
+ * organisation default). Idle until a product is chosen.
+ */
+export function useShiftPlanningConfig(
+  productId: string | null,
+): UseQueryResult<ShiftPlanningConfigDto> {
   return useQuery({
-    queryKey: SHIFT_PLANNING_CONFIG_QUERY_KEY,
-    queryFn: fetchShiftPlanningConfig,
+    queryKey: [...SHIFT_PLANNING_CONFIG_QUERY_KEY, productId],
+    queryFn: () => fetchShiftPlanningConfig(productId!),
+    enabled: productId !== null,
   });
 }
 

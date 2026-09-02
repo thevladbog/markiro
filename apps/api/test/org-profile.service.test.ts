@@ -59,6 +59,8 @@ describe("OrgProfileService box label defaults", () => {
     inn: null,
     timeZone: "Europe/Moscow",
     defaultBoxLabelTemplateId: null,
+    categoryBoxLabelTemplateDefaults: [],
+    productGroupsInUse: [],
     pickupLimitsEnabled: true,
     logoRevision: null,
     logoUrl: null,
@@ -213,7 +215,11 @@ function profileReadDatabase(queryResults: unknown[][]): OrgProfileDatabase {
   const remaining = [...queryResults];
   const select = vi.fn(() => {
     const rows = remaining.shift() ?? [];
-    const result = Object.assign(Promise.resolve(rows), { limit: () => result });
+    const result = Object.assign(Promise.resolve(rows), {
+      limit: () => result,
+      orderBy: () => result,
+      groupBy: () => result,
+    });
     return {
       from: () => ({
         where: () => result,
@@ -224,7 +230,17 @@ function profileReadDatabase(queryResults: unknown[][]): OrgProfileDatabase {
   return profileDatabase({ select });
 }
 
-function profileUpsertDb(error?: Error): {
+/** The template rows the transaction's eligibility lookup (`select … for share`) answers with. */
+const ELIGIBLE_TEMPLATE = {
+  id: "a0000000-0000-4000-8000-000000000001",
+  enabled: true,
+  chzProductGroupCodes: null,
+};
+
+function profileUpsertDb(
+  error?: Error,
+  templates: Array<typeof ELIGIBLE_TEMPLATE> = [ELIGIBLE_TEMPLATE],
+): {
   db: OrgProfileDatabase;
   values: ReturnType<typeof vi.fn<(profile: ProfileInsert) => unknown>>;
   onConflictDoUpdate: ReturnType<typeof vi.fn<(input: ProfileConflictUpdate) => Promise<void>>>;
@@ -236,7 +252,10 @@ function profileUpsertDb(error?: Error): {
     (profile: ProfileInsert) => { onConflictDoUpdate: typeof onConflictDoUpdate }
   >(() => ({ onConflictDoUpdate }));
   const insert = vi.fn(() => ({ values }));
-  const tx = profileDatabase({ insert });
+  const select = vi.fn(() => ({
+    from: () => ({ where: () => ({ for: async () => templates }) }),
+  }));
+  const tx = profileDatabase({ insert, select });
   return {
     db: profileDatabase({ transaction: async (callback) => callback(tx) }),
     values,

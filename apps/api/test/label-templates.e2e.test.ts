@@ -429,4 +429,141 @@ describe.skipIf(!ready)("label-templates e2e", () => {
     await signUpAndActivate(agent);
     await agent.get("/label-templates").expect(200);
   });
+  async function createTemplate(
+    agent: ReturnType<typeof request.agent>,
+    body: Record<string, unknown>,
+  ): Promise<{ id: string; enabled: boolean; chzProductGroupCodes: number[] | null }> {
+    const res = await agent
+      .post("/label-templates")
+      .send({ name: "Scoped", spec: VALID_SPEC, ...body })
+      .expect(201);
+    return res.body as { id: string; enabled: boolean; chzProductGroupCodes: number[] | null };
+  }
+
+  it("creates templates enabled and universal by default, and round-trips scope and flag", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const plain = await createTemplate(agent, {});
+    expect(plain.enabled).toBe(true);
+    expect(plain.chzProductGroupCodes).toBeNull();
+
+    const scoped = await createTemplate(agent, { enabled: false, chzProductGroupCodes: [15, 22] });
+    expect(scoped.enabled).toBe(false);
+    expect(scoped.chzProductGroupCodes).toEqual([15, 22]);
+
+    const fetched = await agent.get(`/label-templates/${scoped.id}`).expect(200);
+    expect(fetched.body.enabled).toBe(false);
+    expect(fetched.body.chzProductGroupCodes).toEqual([15, 22]);
+  });
+
+  it("rejects an empty, duplicated or unknown product-group scope with 400", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    await agent
+      .post("/label-templates")
+      .send({ name: "Empty", spec: VALID_SPEC, chzProductGroupCodes: [] })
+      .expect(400);
+    await agent
+      .post("/label-templates")
+      .send({ name: "Dup", spec: VALID_SPEC, chzProductGroupCodes: [15, 15] })
+      .expect(400);
+    const unknown = await agent
+      .post("/label-templates")
+      .send({ name: "Unknown", spec: VALID_SPEC, chzProductGroupCodes: [15, 999999] })
+      .expect(400);
+    expect(unknown.body.code).toBe("CHZ_PRODUCT_GROUP_UNKNOWN");
+    expect(unknown.body.codes).toEqual([999999]);
+  });
+
+  it("lists enabled templates by default and everything with enabled=all", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const on = await createTemplate(agent, { name: "On" });
+    const off = await createTemplate(agent, { name: "Off", enabled: false });
+
+    const defaultList = await agent.get("/label-templates").expect(200);
+    const defaultIds = defaultList.body.items.map((item: { id: string }) => item.id);
+    expect(defaultIds).toContain(on.id);
+    expect(defaultIds).not.toContain(off.id);
+
+    const all = await agent.get("/label-templates?enabled=all").expect(200);
+    const allIds = all.body.items.map((item: { id: string }) => item.id);
+    expect(allIds).toContain(on.id);
+    expect(allIds).toContain(off.id);
+    const offSummary = all.body.items.find((item: { id: string }) => item.id === off.id);
+    expect(offSummary).toMatchObject({ enabled: false, chzProductGroupCodes: null });
+
+    const disabledOnly = await agent.get("/label-templates?enabled=false").expect(200);
+    expect(disabledOnly.body.items.map((item: { id: string }) => item.id)).toEqual([off.id]);
+
+    await agent.get("/label-templates?enabled=maybe").expect(400);
+  });
+
+  it("refuses to disable or narrow a template that is the organisation default", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const template = await createTemplate(agent, { name: "Org default" });
+    await agent.put("/org/profile").send({ defaultBoxLabelTemplateId: template.id }).expect(200);
+
+    const disable = await agent
+      .patch(`/label-templates/${template.id}`)
+      .send({ enabled: false })
+      .expect(409);
+    expect(disable.body).toMatchObject({
+      code: "LABEL_TEMPLATE_IS_DEFAULT",
+      organizationDefault: true,
+      categoryDefaults: [],
+    });
+
+    const narrow = await agent
+      .patch(`/label-templates/${template.id}`)
+      .send({ chzProductGroupCodes: [15] })
+      .expect(409);
+    expect(narrow.body.organizationDefault).toBe(true);
+
+    // A rename alone still goes through: the invariant is only checked when
+    // enabled or scope change.
+    await agent.patch(`/label-templates/${template.id}`).send({ name: "Renamed" }).expect(200);
+    const still = await agent.get(`/label-templates/${template.id}`).expect(200);
+    expect(still.body.enabled).toBe(true);
+  });
+
+  it("refuses to scope a category default away from its category, but allows widening", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const template = await createTemplate(agent, { name: "Beer", chzProductGroupCodes: [15, 22] });
+    await db.insert(schema.orgBoxLabelTemplateDefaults).values({
+      tenantId: orgId,
+      chzProductGroupCode: 15,
+      templateId: template.id,
+    });
+
+    const drop = await agent
+      .patch(`/label-templates/${template.id}`)
+      .send({ chzProductGroupCodes: [22] })
+      .expect(409);
+    expect(drop.body).toMatchObject({ organizationDefault: false, categoryDefaults: [15] });
+
+    await agent.patch(`/label-templates/${template.id}`).send({ enabled: false }).expect(409);
+
+    const widened = await agent
+      .patch(`/label-templates/${template.id}`)
+      .send({ chzProductGroupCodes: null })
+      .expect(200);
+    expect(widened.body.chzProductGroupCodes).toBeNull();
+  });
+
+  it("answers 409 when deleting a template that is a category default", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const template = await createTemplate(agent, { name: "Beer" });
+    await db.insert(schema.orgBoxLabelTemplateDefaults).values({
+      tenantId: orgId,
+      chzProductGroupCode: 15,
+      templateId: template.id,
+    });
+    await agent.delete(`/label-templates/${template.id}`).expect(409);
+  });
 });

@@ -208,14 +208,29 @@ const CYRILLIC_FIELD_ZPL = [
   "^XZ",
 ].join("\n");
 
+const PRODUCT_GROUPS = {
+  items: [
+    { code: 8, alias: "milk", name: "Молочная продукция" },
+    { code: 15, alias: "beer", name: "Пиво" },
+  ],
+};
+
 function stubCreateFetch(id: string) {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/api/chz-product-groups") return jsonResponse(200, PRODUCT_GROUPS);
     if (url === "/api/label-templates" && init?.method === "POST") {
-      const body = JSON.parse(init.body as string) as { name: string; spec: unknown };
+      const body = JSON.parse(init.body as string) as {
+        name: string;
+        spec: unknown;
+        enabled: boolean;
+        chzProductGroupCodes: number[] | null;
+      };
       return jsonResponse(201, {
         id,
         name: body.name,
         spec: body.spec,
+        enabled: body.enabled,
+        chzProductGroupCodes: body.chzProductGroupCodes,
         createdAt: "2026-08-20T00:00:00.000Z",
         updatedAt: "2026-08-20T00:00:00.000Z",
       });
@@ -682,6 +697,8 @@ describe("Edit flow (load + PATCH)", () => {
           id: "tpl-9",
           name: "Короб",
           spec: existingSpec,
+          enabled: true,
+          chzProductGroupCodes: null,
           createdAt: "2026-07-01T00:00:00.000Z",
           updatedAt: "2026-07-01T00:00:00.000Z",
         });
@@ -882,5 +899,107 @@ describe("Font coverage warnings (PreviewPane)", () => {
         "В выбранном шрифте нет кириллицы — текст напечатается растром. Возможна потеря чёткости.",
       ),
     ).toBeNull();
+  });
+});
+
+describe("Scope and enablement", () => {
+  it("saves a selected-category scope and the enabled flag", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/chz-product-groups") return jsonResponse(200, PRODUCT_GROUPS);
+      if (url === "/api/label-templates/tpl-9" && (!init || init.method === undefined)) {
+        return jsonResponse(200, {
+          id: "tpl-9",
+          name: "Короб",
+          spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+          enabled: true,
+          chzProductGroupCodes: null,
+          createdAt: "2026-07-01T00:00:00.000Z",
+          updatedAt: "2026-07-01T00:00:00.000Z",
+        });
+      }
+      if (url === "/api/label-templates/tpl-9" && init?.method === "PATCH") {
+        const body = JSON.parse(init.body as string) as Record<string, unknown>;
+        return jsonResponse(200, {
+          id: "tpl-9",
+          createdAt: "2026-07-01T00:00:00.000Z",
+          updatedAt: "2026-08-20T00:00:00.000Z",
+          ...body,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderEditFlow("tpl-9");
+    await screen.findByLabelText("Название");
+
+    fireEvent.click(screen.getByLabelText("Включён"));
+    fireEvent.click(screen.getByLabelText("Только выбранные категории"));
+    fireEvent.click(await screen.findByLabelText("Пиво"));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([, init]) => (init as RequestInit | undefined)?.method === "PATCH",
+      );
+      expect(call).toBeDefined();
+      const body = JSON.parse((call![1] as RequestInit).body as string) as Record<string, unknown>;
+      expect(body.enabled).toBe(false);
+      expect(body.chzProductGroupCodes).toEqual([15]);
+    });
+  });
+
+  it("refuses to save a selected scope with no categories", async () => {
+    const fetchMock = stubCreateFetch("tpl-new");
+    renderCreateFlow();
+    fireEvent.click(screen.getByLabelText("Только выбранные категории"));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(
+      await screen.findByText(
+        "Выберите хотя бы одну категорию или переключитесь на «Все категории».",
+      ),
+    ).toBeDefined();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/label-templates",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("warns when an EGAIS field is used but beer is outside the scope", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/chz-product-groups") return jsonResponse(200, PRODUCT_GROUPS);
+      if (url === "/api/label-templates/tpl-9" && (!init || init.method === undefined)) {
+        return jsonResponse(200, {
+          id: "tpl-9",
+          name: "Пиво",
+          spec: {
+            widthMm: 58,
+            heightMm: 40,
+            dpi: 203,
+            language: "zpl",
+            elements: [
+              { kind: "field", id: "e", xMm: 2, yMm: 2, field: "product.egais", fontSizePt: 8 },
+            ],
+          },
+          enabled: true,
+          chzProductGroupCodes: [15],
+          createdAt: "2026-07-01T00:00:00.000Z",
+          updatedAt: "2026-07-01T00:00:00.000Z",
+        });
+      }
+      throw new Error(`Unexpected fetch: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderEditFlow("tpl-9");
+    await screen.findByLabelText("Название");
+    const hint =
+      "Поле ЕГАИС заполняется только для товаров категории «Пиво». На выбранных категориях оно будет пустым.";
+    expect(screen.queryByText(hint)).toBeNull();
+
+    // `@markiro/ui`'s Checkbox is a Radix checkbox: a button with aria-checked.
+    const beer = await screen.findByRole("checkbox", { name: "Пиво" });
+    expect(beer.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(beer);
+    fireEvent.click(screen.getByLabelText("Молочная продукция"));
+    expect(await screen.findByText(hint)).toBeDefined();
   });
 });

@@ -66,6 +66,8 @@ import {
   type ShiftReferenceBundleDto,
   type ShiftSummaryDto,
   type UpdateShiftDto,
+  boxLabelTemplateProductQuerySchema,
+  type BoxLabelTemplateProductQueryDto,
 } from "./dto";
 import { ShiftsService, type EffectiveListShiftsQuery } from "./shifts.service";
 
@@ -101,12 +103,22 @@ export class ShiftsController {
 
   @Get("planning-config")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
-  @ApiOperation({ summary: "Read the shift planning configuration" })
+  @ApiOperation({
+    summary: "Read the shift planning configuration",
+    description:
+      "With `productId`, the box-template default is resolved for that product's category (category default, then organisation default).",
+  })
   @ApiCabinetAuth()
+  @ApiZodQuery(boxLabelTemplateProductQuerySchema)
   @ApiOkResponse({ schema: shiftPlanningConfigOpenApiSchema })
-  @ApiHttpErrors(401, 403)
-  async getPlanningConfig(@Req() req: RequestWithTenant): Promise<ShiftPlanningConfigDto> {
-    return this.shiftsService.getPlanningConfig(req.tenantId!);
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404)
+  async getPlanningConfig(
+    @Req() req: RequestWithTenant,
+    @Query(new ZodValidationPipe(boxLabelTemplateProductQuerySchema))
+    query: BoxLabelTemplateProductQueryDto,
+  ): Promise<ShiftPlanningConfigDto> {
+    return this.shiftsService.getPlanningConfig(req.tenantId!, query.productId);
   }
 
   // Station-readable template summaries for the NewShift picker. Specs stay
@@ -117,13 +129,20 @@ export class ShiftsController {
   @ApiOperation({
     summary: "List box label template options",
     description:
-      "Template summaries only; a station receives a template spec exclusively through the shift bundle.",
+      "Template summaries only; a station receives a template spec exclusively through the shift bundle. " +
+      "With `productId` only templates eligible for that product's category are returned; without it, every enabled template.",
   })
   @ApiCabinetOrStationAuth()
+  @ApiZodQuery(boxLabelTemplateProductQuerySchema)
   @ApiOkResponse({ schema: shiftBoxLabelTemplatesOpenApiSchema })
-  @ApiHttpErrors(401, 403, 429)
-  async listBoxLabelTemplates(@Req() req: RequestWithTenant): Promise<ShiftBoxLabelTemplatesDto> {
-    return this.shiftsService.listBoxLabelTemplates(req.tenantId!);
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 429)
+  async listBoxLabelTemplates(
+    @Req() req: RequestWithTenant,
+    @Query(new ZodValidationPipe(boxLabelTemplateProductQuerySchema))
+    query: BoxLabelTemplateProductQueryDto,
+  ): Promise<ShiftBoxLabelTemplatesDto> {
+    return this.shiftsService.listBoxLabelTemplates(req.tenantId!, query.productId);
   }
 
   @Get(":id/summary")

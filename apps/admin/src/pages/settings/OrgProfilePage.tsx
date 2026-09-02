@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { z } from "zod";
 
-import { hasValidCheckDigit } from "@markiro/domain";
+import { hasValidCheckDigit, isBoxLabelTemplateEligible } from "@markiro/domain";
 import {
   Alert,
   Button,
@@ -37,6 +37,7 @@ import {
   type PutOrgProfileInput,
 } from "./api.js";
 import { OPERATIONAL_TIME_ZONES } from "./time-zones.js";
+import { useChzProductGroups } from "../catalog/api.js";
 import { useLabelTemplates } from "../labels/api.js";
 
 /**
@@ -65,6 +66,8 @@ function derivePrefix(gln: string | null | undefined): string | null {
  */
 const profileFormSchema = z.object({
   defaultBoxLabelTemplateId: z.string(),
+  /** ЧЗ product-group code (as a string key) → template id; "" means "same as organisation". */
+  categoryDefaults: z.record(z.string(), z.string()),
   gln: z
     .string()
     .trim()
@@ -84,8 +87,23 @@ const profileFormSchema = z.object({
 });
 type ProfileFormValues = z.infer<typeof profileFormSchema>;
 
+const CATEGORY_HEADER_STYLE = {
+  textAlign: "left",
+  padding: "6px 8px",
+  color: "var(--fg-3)",
+  font: "500 12px/16px var(--font-ui)",
+  borderBottom: "1px solid var(--line)",
+} as const;
+
+const CATEGORY_CELL_STYLE = {
+  padding: "6px 8px",
+  verticalAlign: "middle",
+  borderBottom: "1px solid var(--line)",
+} as const;
+
 const EMPTY_PROFILE_VALUES: ProfileFormValues = {
   defaultBoxLabelTemplateId: "",
+  categoryDefaults: {},
   gln: "",
   inn: "",
   timeZone: "Europe/Moscow",
@@ -118,6 +136,7 @@ function translateFieldError(t: TFunction, message: string | undefined): string 
 function toProfileInput(
   values: ProfileFormValues,
   defaultBoxLabelTemplateIdChanged: boolean,
+  categoryDefaultsChanged: boolean,
 ): PutOrgProfileInput {
   const gln = values.gln?.trim();
   const inn = values.inn?.trim();
@@ -135,11 +154,18 @@ function toProfileInput(
   if (defaultBoxLabelTemplateIdChanged) {
     input.defaultBoxLabelTemplateId = values.defaultBoxLabelTemplateId || null;
   }
+  if (categoryDefaultsChanged) {
+    input.categoryBoxLabelTemplateDefaults = Object.entries(values.categoryDefaults)
+      .filter(([, templateId]) => templateId !== "")
+      .map(([code, templateId]) => ({ chzProductGroupCode: Number(code), templateId }))
+      .sort((a, b) => a.chzProductGroupCode - b.chzProductGroupCode);
+  }
   return input;
 }
 
 function toProfileFormValues(profile: {
   defaultBoxLabelTemplateId: string | null;
+  categoryBoxLabelTemplateDefaults: Array<{ chzProductGroupCode: number; templateId: string }>;
   gln: string | null;
   inn: string | null;
   timeZone: string;
@@ -147,6 +173,12 @@ function toProfileFormValues(profile: {
 }): ProfileFormValues {
   return {
     defaultBoxLabelTemplateId: profile.defaultBoxLabelTemplateId ?? "",
+    categoryDefaults: Object.fromEntries(
+      profile.categoryBoxLabelTemplateDefaults.map((item) => [
+        String(item.chzProductGroupCode),
+        item.templateId,
+      ]),
+    ),
     gln: profile.gln ?? "",
     inn: profile.inn ?? "",
     timeZone: profile.timeZone,
@@ -191,13 +223,21 @@ export function OrgProfilePage() {
     ...(OPERATIONAL_TIME_ZONES.some((option) => option === timeZone) ? [] : [timeZone]),
   ].map((option) => ({ value: option, label: option }));
   const labelTemplates = labelTemplatesQuery.data ?? [];
+  const groupsQuery = useChzProductGroups();
+  const groups = groupsQuery.data ?? [];
+  const categoryDefaults = watchProfile("categoryDefaults");
+  // The organisation default must fit every shift, so only enabled
+  // templates for all categories qualify (the list is already enabled-only).
+  const universalTemplates = labelTemplates.filter(
+    (template) => template.enabled && template.chzProductGroupCodes === null,
+  );
   const savedTemplateIsUnavailable =
     defaultBoxLabelTemplateId !== "" &&
     labelTemplatesQuery.data !== undefined &&
-    !labelTemplates.some((template) => template.id === defaultBoxLabelTemplateId);
+    !universalTemplates.some((template) => template.id === defaultBoxLabelTemplateId);
   const labelTemplateOptions = [
     { value: "", label: t("pages.settings.profile.defaultBoxLabelTemplateUnset") },
-    ...labelTemplates.map((template) => ({ value: template.id, label: template.name })),
+    ...universalTemplates.map((template) => ({ value: template.id, label: template.name })),
     ...(savedTemplateIsUnavailable
       ? [
           {
@@ -209,11 +249,27 @@ export function OrgProfilePage() {
       : []),
   ];
 
+  const categoryRows = [
+    ...new Set([
+      ...(profileQuery.data?.productGroupsInUse ?? []),
+      ...Object.keys(categoryDefaults).map(Number),
+    ]),
+  ]
+    .map((code) => ({
+      code,
+      name: groups.find((group) => group.code === code)?.name ?? String(code),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+
   const submitProfile = handleProfileSubmit(async (values) => {
     if (savedTemplateIsUnavailable) return;
     try {
       const savedProfile = await updateProfile.mutateAsync(
-        toProfileInput(values, profileDirtyFields.defaultBoxLabelTemplateId === true),
+        toProfileInput(
+          values,
+          profileDirtyFields.defaultBoxLabelTemplateId === true,
+          profileDirtyFields.categoryDefaults !== undefined,
+        ),
       );
       resetProfile(toProfileFormValues(savedProfile));
       toast("ok", t("pages.settings.profile.toasts.updateSuccess"));
@@ -272,8 +328,11 @@ export function OrgProfilePage() {
                 {...registerProfile("gs1Prefixes")}
               />
               <Select
-                native
                 label={t("pages.settings.profile.defaultBoxLabelTemplateLabel")}
+                hint={t("pages.settings.profile.defaultBoxLabelTemplateScopeHint")}
+                searchable
+                searchLabel={t("pages.settings.profile.templateSearch")}
+                searchPlaceholder={t("pages.settings.profile.templateSearch")}
                 options={labelTemplateOptions}
                 value={defaultBoxLabelTemplateId}
                 onValueChange={(value) =>
@@ -300,6 +359,92 @@ export function OrgProfilePage() {
                   {t("pages.settings.profile.defaultBoxLabelTemplateStale")}
                 </Alert>
               ) : null}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <h3 style={{ margin: 0, font: "600 14px/20px var(--font-ui)" }}>
+                  {t("pages.settings.profile.categoryDefaultsTitle")}
+                </h3>
+                <p
+                  style={{ margin: 0, color: "var(--fg-3)", font: "400 13px/18px var(--font-ui)" }}
+                >
+                  {t("pages.settings.profile.categoryDefaultsHint")}
+                </p>
+                {categoryRows.length === 0 ? (
+                  <p
+                    style={{
+                      margin: 0,
+                      color: "var(--fg-3)",
+                      font: "400 13px/18px var(--font-ui)",
+                    }}
+                  >
+                    {t("pages.settings.profile.categoryDefaultsEmpty")}
+                  </p>
+                ) : (
+                  <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                    <thead>
+                      <tr>
+                        <th scope="col" style={CATEGORY_HEADER_STYLE}>
+                          {t("pages.settings.profile.categoryDefaultsColumnCategory")}
+                        </th>
+                        <th scope="col" style={CATEGORY_HEADER_STYLE}>
+                          {t("pages.settings.profile.categoryDefaultsColumnTemplate")}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {categoryRows.map((row) => {
+                        const value = categoryDefaults[String(row.code)] ?? "";
+                        const eligible = labelTemplates.filter((template) =>
+                          isBoxLabelTemplateEligible(template, row.code),
+                        );
+                        const stale =
+                          value !== "" && !eligible.some((template) => template.id === value);
+                        return (
+                          <tr key={row.code}>
+                            <td style={CATEGORY_CELL_STYLE}>{row.name}</td>
+                            <td style={CATEGORY_CELL_STYLE}>
+                              <Select
+                                aria-label={row.name}
+                                searchable
+                                searchLabel={t("pages.settings.profile.templateSearch")}
+                                searchPlaceholder={t("pages.settings.profile.templateSearch")}
+                                options={[
+                                  {
+                                    value: "",
+                                    label: t("pages.settings.profile.categoryDefaultInherit"),
+                                  },
+                                  ...eligible.map((template) => ({
+                                    value: template.id,
+                                    label: template.name,
+                                  })),
+                                  ...(stale
+                                    ? [
+                                        {
+                                          value,
+                                          label: t(
+                                            "pages.settings.profile.categoryDefaultStaleOption",
+                                          ),
+                                          disabled: true,
+                                        },
+                                      ]
+                                    : []),
+                                ]}
+                                value={value}
+                                onValueChange={(next) =>
+                                  setProfileValue(
+                                    "categoryDefaults",
+                                    { ...categoryDefaults, [String(row.code)]: next },
+                                    { shouldDirty: true },
+                                  )
+                                }
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
               <div>
                 <Button
                   type="submit"

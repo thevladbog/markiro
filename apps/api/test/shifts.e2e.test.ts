@@ -191,8 +191,8 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     await agent.get("/org/profile").expect(403);
 
     const response = await agent.get("/shifts/planning-config").expect(200);
-    expect(response.body).toEqual({ defaultBoxLabelTemplateId });
-    expect(Object.keys(response.body)).toEqual(["defaultBoxLabelTemplateId"]);
+    expect(response.body).toEqual({ defaultBoxLabelTemplateId, defaultSource: "organization" });
+    expect(Object.keys(response.body)).toEqual(["defaultBoxLabelTemplateId", "defaultSource"]);
   });
 
   // ---------------------------------------------------------------------
@@ -1812,5 +1812,195 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       const ids = list.body.items.map((item: { id: string }) => item.id as string);
       expect(ids).toEqual([dateless.body.id, late.body.id, early.body.id]);
     });
+  });
+  async function seedScopedLabelTemplate(
+    tenantId: string,
+    name: string,
+    scope: { enabled?: boolean; chzProductGroupCodes?: number[] | null },
+  ): Promise<string> {
+    const id = randomUUID();
+    await db.insert(schema.labelTemplates).values({
+      id,
+      tenantId,
+      name,
+      spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+      enabled: scope.enabled ?? true,
+      chzProductGroupCodes: scope.chzProductGroupCodes ?? null,
+    });
+    return id;
+  }
+
+  async function setCategoryDefault(tenantId: string, code: number, templateId: string) {
+    await db
+      .insert(schema.orgBoxLabelTemplateDefaults)
+      .values({ tenantId, chzProductGroupCode: code, templateId });
+  }
+
+  it("resolves the box template default per product: category default before organisation default", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const orgDefault = await setDefaultBoxLabelTemplate(agent, orgId, "Org default");
+    const beerDefault = await seedScopedLabelTemplate(orgId, "Beer", {
+      chzProductGroupCodes: [15],
+    });
+    await setCategoryDefault(orgId, 15, beerDefault);
+    const beer = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 15,
+      boxCapacity: 6,
+    });
+    const milk = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 6,
+    });
+
+    const beerConfig = await agent.get(`/shifts/planning-config?productId=${beer}`).expect(200);
+    expect(beerConfig.body).toEqual({
+      defaultBoxLabelTemplateId: beerDefault,
+      defaultSource: "category",
+    });
+    const milkConfig = await agent.get(`/shifts/planning-config?productId=${milk}`).expect(200);
+    expect(milkConfig.body).toEqual({
+      defaultBoxLabelTemplateId: orgDefault,
+      defaultSource: "organization",
+    });
+    const orgConfig = await agent.get("/shifts/planning-config").expect(200);
+    expect(orgConfig.body).toEqual({
+      defaultBoxLabelTemplateId: orgDefault,
+      defaultSource: "organization",
+    });
+    await agent.get(`/shifts/planning-config?productId=${randomUUID()}`).expect(404);
+
+    const beerShift = await agent
+      .post("/shifts")
+      .send({ productId: beer, mode: "aggregation" })
+      .expect(201);
+    expect(beerShift.body.boxLabelTemplateId).toBe(beerDefault);
+    const milkShift = await agent
+      .post("/shifts")
+      .send({ productId: milk, mode: "aggregation" })
+      .expect(201);
+    expect(milkShift.body.boxLabelTemplateId).toBe(orgDefault);
+  });
+
+  it("rejects an explicit box template that is disabled or scoped to another category", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    await setDefaultBoxLabelTemplate(agent, orgId);
+    const disabled = await seedScopedLabelTemplate(orgId, "Off", { enabled: false });
+    const beerOnly = await seedScopedLabelTemplate(orgId, "Beer", { chzProductGroupCodes: [15] });
+    const milk = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 6,
+    });
+
+    const off = await agent
+      .post("/shifts")
+      .send({ productId: milk, mode: "aggregation", boxLabelTemplateId: disabled })
+      .expect(422);
+    expect(off.body.code).toBe("BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
+    await agent
+      .post("/shifts")
+      .send({ productId: milk, mode: "aggregation", boxLabelTemplateId: beerOnly })
+      .expect(422);
+    // An unknown template id keeps the historical 400 contract.
+    await agent
+      .post("/shifts")
+      .send({ productId: milk, mode: "aggregation", boxLabelTemplateId: randomUUID() })
+      .expect(400);
+  });
+
+  it("keeps a planned shift editable when its template was disabled later, but blocks switching to an ineligible one", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const template = await setDefaultBoxLabelTemplate(agent, orgId);
+    const milk = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 6,
+    });
+    const created = await agent
+      .post("/shifts")
+      .send({ productId: milk, mode: "aggregation" })
+      .expect(201);
+    const shiftId = created.body.id as string;
+
+    // Detach the default, then disable the template directly (the API would
+    // refuse while it is a default).
+    await agent.put("/org/profile").send({ defaultBoxLabelTemplateId: null }).expect(200);
+    await db
+      .update(schema.labelTemplates)
+      .set({ enabled: false })
+      .where(eq(schema.labelTemplates.id, template));
+
+    await agent
+      .patch(`/shifts/${shiftId}`)
+      .send({ plannedQty: 500, boxLabelTemplateId: template })
+      .expect(200);
+    const other = await seedScopedLabelTemplate(orgId, "Beer", { chzProductGroupCodes: [15] });
+    const blocked = await agent
+      .patch(`/shifts/${shiftId}`)
+      .send({ boxLabelTemplateId: other })
+      .expect(422);
+    expect(blocked.body.code).toBe("BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
+  });
+
+  it("filters station box-template options by the product's category and hides disabled templates", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const orgDefault = await setDefaultBoxLabelTemplate(agent, orgId, "Org default");
+    const beerOnly = await seedScopedLabelTemplate(orgId, "Beer only", {
+      chzProductGroupCodes: [15],
+    });
+    const disabled = await seedScopedLabelTemplate(orgId, "Disabled", { enabled: false });
+    await setCategoryDefault(orgId, 15, beerOnly);
+    const beer = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 15,
+      boxCapacity: 6,
+    });
+    const milk = await seedProduct(orgId, {
+      status: "active",
+      chzProductGroupCode: 8,
+      boxCapacity: 6,
+    });
+    const device = await createTestStationDevice(app!, agent, "Scoped picker terminal");
+    const server = app!.getHttpServer();
+
+    const forBeer = await request(server)
+      .get(`/shifts/box-label-templates?productId=${beer}`)
+      .set("x-api-key", device.apiKey)
+      .expect(200);
+    expect(forBeer.body.defaultBoxLabelTemplateId).toBe(beerOnly);
+    expect(forBeer.body.defaultSource).toBe("category");
+    expect(forBeer.body.items.map((item: { id: string }) => item.id)).toEqual([
+      beerOnly,
+      orgDefault,
+    ]);
+
+    const forMilk = await request(server)
+      .get(`/shifts/box-label-templates?productId=${milk}`)
+      .set("x-api-key", device.apiKey)
+      .expect(200);
+    expect(forMilk.body.defaultBoxLabelTemplateId).toBe(orgDefault);
+    expect(forMilk.body.defaultSource).toBe("organization");
+    expect(forMilk.body.items.map((item: { id: string }) => item.id)).toEqual([orgDefault]);
+
+    // Legacy stations send no product: every enabled template, org default first.
+    const legacy = await request(server)
+      .get("/shifts/box-label-templates")
+      .set("x-api-key", device.apiKey)
+      .expect(200);
+    const legacyIds = legacy.body.items.map((item: { id: string }) => item.id);
+    expect(legacyIds[0]).toBe(orgDefault);
+    expect(legacyIds).toContain(beerOnly);
+    expect(legacyIds).not.toContain(disabled);
+
+    await request(server)
+      .get(`/shifts/box-label-templates?productId=${randomUUID()}`)
+      .set("x-api-key", device.apiKey)
+      .expect(404);
   });
 });

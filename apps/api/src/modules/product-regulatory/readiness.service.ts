@@ -3,6 +3,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   evaluateProductReadiness,
+  isEgaisApplicable,
   parseCategorySchemaDefinition,
   type ProductAttributeValues,
   type ProductReadinessDimensionResult,
@@ -75,7 +76,7 @@ export class ProductReadinessService {
         values: {},
         production: product,
         egais: {
-          applicable: product.chzProductGroupCode === 15,
+          applicable: isEgaisApplicable(product.chzProductGroupCode),
           codes: egaisCodes,
           primaryCode: egaisRows.find((row) => row.isPrimary)?.code ?? null,
         },
@@ -138,7 +139,7 @@ export class ProductReadinessService {
         values,
         production: product,
         egais: {
-          applicable: product.chzProductGroupCode === 15,
+          applicable: isEgaisApplicable(product.chzProductGroupCode),
           codes: egaisCodes,
           primaryCode: egaisRows.find((row) => row.isPrimary)?.code ?? null,
         },

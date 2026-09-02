@@ -64,6 +64,7 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
   const [defaultTemplateId, setDefaultTemplateId] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [templatePage, setTemplatePage] = useState(1);
+  const [templateSearch, setTemplateSearch] = useState("");
   const resolving = useRef(false);
   const mounted = useRef(true);
   const shiftEntryOperation = useRef(0);
@@ -140,10 +141,12 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
     setError(null);
     setBusy(true);
     try {
+      // The server filters by the product's ЧЗ category and resolves the
+      // category/organisation default; the station never sees scope metadata.
       const config = await client.get<{
         items: BoxLabelTemplateOption[];
         defaultBoxLabelTemplateId: string | null;
-      }>("/shifts/box-label-templates");
+      }>(`/shifts/box-label-templates?productId=${encodeURIComponent(product.id)}`);
       const preselected =
         config.defaultBoxLabelTemplateId !== null &&
         config.items.some((item) => item.id === config.defaultBoxLabelTemplateId)
@@ -153,6 +156,7 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
       setDefaultTemplateId(config.defaultBoxLabelTemplateId);
       setSelectedTemplateId(preselected);
       setTemplatePage(1);
+      setTemplateSearch("");
       setView("template");
     } catch (err) {
       setError(err instanceof StationApiError ? err.message : t("shifts.templatesLoadFailed"));
@@ -261,7 +265,11 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
   }
 
   if (view === "template" && product) {
-    const currentPage = paginate(templates, templatePage, TEMPLATE_PAGE_SIZE);
+    const needle = templateSearch.trim().toLocaleLowerCase();
+    const visibleTemplates = needle
+      ? templates.filter((option) => option.name.toLocaleLowerCase().includes(needle))
+      : templates;
+    const currentPage = paginate(visibleTemplates, templatePage, TEMPLATE_PAGE_SIZE);
     return (
       <StationScreen
         title={t("shifts.new")}
@@ -302,6 +310,23 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
             </div>
           ) : (
             <>
+              <Input
+                id="template-search"
+                size="floor"
+                type="search"
+                label={t("shifts.templateSearch")}
+                value={templateSearch}
+                disabled={busy}
+                onChange={(event) => {
+                  setTemplateSearch(event.target.value);
+                  setTemplatePage(1);
+                }}
+              />
+              {visibleTemplates.length === 0 ? (
+                <div className="new-shift__center">
+                  <p>{t("shifts.templateSearchEmpty")}</p>
+                </div>
+              ) : null}
               <div
                 className="new-shift__templates"
                 role="group"

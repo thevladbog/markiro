@@ -23,7 +23,7 @@
  * inside an `<a>`), which `react-router`'s hooks require a router context for.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -88,6 +88,8 @@ const BOX_SUMMARY = {
   heightMm: 100,
   dpi: 203 as const,
   language: "zpl" as const,
+  enabled: true,
+  chzProductGroupCodes: null as number[] | null,
   updatedAt: "2026-07-01T00:00:00.000Z",
 };
 
@@ -98,16 +100,44 @@ const UNIT_SUMMARY = {
   heightMm: 40,
   dpi: 203 as const,
   language: "tspl" as const,
+  enabled: true,
+  chzProductGroupCodes: null as number[] | null,
   updatedAt: "2026-07-02T00:00:00.000Z",
 };
 
-/** Answers both `GET /label-templates` (list) and `GET /label-templates/:id` (per-card thumbnail). */
-function stubFetch(
-  items: Array<typeof BOX_SUMMARY | typeof UNIT_SUMMARY>,
-): ReturnType<typeof vi.fn> {
-  const fetchMock = vi.fn(async (url: string) => {
-    if (url === "/api/label-templates") {
+const BEER_SUMMARY = {
+  id: "tpl-3",
+  name: "Пиво 58×40",
+  widthMm: 58,
+  heightMm: 40,
+  dpi: 203 as const,
+  language: "zpl" as const,
+  enabled: false,
+  chzProductGroupCodes: [15] as number[] | null,
+  updatedAt: "2026-07-03T00:00:00.000Z",
+};
+
+type Summary = typeof BOX_SUMMARY | typeof UNIT_SUMMARY | typeof BEER_SUMMARY;
+
+/** Answers the library list (`enabled=all`), the product-group dictionary, `GET /label-templates/:id` (per-card thumbnail) and the card toggle PATCH. */
+function stubFetch(items: Summary[]) {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/api/label-templates?enabled=all") {
       return jsonResponse(200, { items });
+    }
+    if (url === "/api/chz-product-groups") {
+      return jsonResponse(200, { items: [{ code: 15, alias: "beer", name: "Пиво" }] });
+    }
+    if (/^\/api\/label-templates\/[^/?]+$/.test(url) && init?.method === "PATCH") {
+      const body = JSON.parse(init.body as string) as { enabled?: boolean };
+      const id = url.slice("/api/label-templates/".length);
+      const summary = items.find((item) => item.id === id);
+      if (!summary) return jsonResponse(404, { message: "Not found" });
+      return jsonResponse(200, {
+        ...summary,
+        spec: SAMPLE_SPEC,
+        enabled: body.enabled ?? summary.enabled,
+      });
     }
     const match = /^\/api\/label-templates\/(.+)$/.exec(url);
     if (match) {
@@ -233,5 +263,64 @@ describe("LabelTemplatesPage", () => {
     renderPage();
     const cardLink = await screen.findByRole("link", { name: /Короб 100×100 v3/ });
     expect(cardLink.getAttribute("href")).toBe("/labels/tpl-1");
+  });
+  it("shows scope and disabled badges and filters by state", async () => {
+    stubFetch([BOX_SUMMARY, BEER_SUMMARY]);
+    renderPage();
+    await screen.findByText("Короб 100×100 v3");
+    expect(screen.getAllByText("Все категории")).toHaveLength(1);
+    expect(await screen.findByText("Пиво")).toBeDefined();
+    expect(screen.getByText("Выключен")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Выключенные" }));
+    expect(screen.queryByText("Короб 100×100 v3")).toBeNull();
+    expect(screen.getByText("Пиво 58×40")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Включённые" }));
+    expect(screen.getByText("Короб 100×100 v3")).toBeDefined();
+    expect(screen.queryByText("Пиво 58×40")).toBeNull();
+  });
+
+  it("toggles a template from the card and reports a default conflict", async () => {
+    const fetchMock = stubFetch([BOX_SUMMARY, BEER_SUMMARY]);
+    renderPage();
+    await screen.findByText("Пиво 58×40");
+    fireEvent.click(screen.getByRole("button", { name: "Включить" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/label-templates/tpl-3",
+        expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: true }) }),
+      ),
+    );
+    expect(await screen.findByText("Шаблон включён")).toBeDefined();
+
+    // A 409 on disable explains where the template is a default.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === "/api/label-templates/tpl-1" && init?.method === "PATCH") {
+          return jsonResponse(409, {
+            code: "LABEL_TEMPLATE_IS_DEFAULT",
+            message: "default",
+            organizationDefault: true,
+            categoryDefaults: [15],
+          });
+        }
+        return fetchMock(url, init);
+      }),
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: "Выключить" })[0]!);
+    expect(
+      await screen.findByText(
+        "Шаблон назначен дефолтом организации. Шаблон назначен дефолтом категорий: Пиво. Сначала выберите другой шаблон в настройках организации.",
+      ),
+    ).toBeDefined();
+  });
+
+  it("hides the toggle from read-only users", async () => {
+    stubFetch([BOX_SUMMARY]);
+    renderPage(OPERATIONS_READ_ONLY);
+    await screen.findByText("Короб 100×100 v3");
+    expect(screen.queryByRole("button", { name: "Выключить" })).toBeNull();
   });
 });

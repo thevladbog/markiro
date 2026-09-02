@@ -1671,4 +1671,93 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       await setup.pool.query(`drop function ${functionName}()`);
     }
   });
+  async function seedScopedTemplate(
+    tenantId: string,
+    scope: { enabled?: boolean; chzProductGroupCodes?: number[] | null },
+  ): Promise<string> {
+    const id = randomUUID();
+    await db.insert(schema.labelTemplates).values({
+      id,
+      tenantId,
+      name: "Scoped",
+      spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+      enabled: scope.enabled ?? true,
+      chzProductGroupCodes: scope.chzProductGroupCodes ?? null,
+    });
+    return id;
+  }
+
+  it("rejects a repack template that is disabled or scoped to another category", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId } = await seedPreparation(agent, { mode: "repack" });
+    const disabled = await seedScopedTemplate(tenantId, { enabled: false });
+    const disabledRes = await agent
+      .post("/inventories")
+      .send(createBody(productId, lineId, "repack", disabled))
+      .expect(422);
+    expect(disabledRes.body.code).toBe("INVENTORY_BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
+
+    const beerOnly = await seedScopedTemplate(tenantId, { chzProductGroupCodes: [15] });
+    await db
+      .update(schema.products)
+      .set({ chzProductGroupCode: 8 })
+      .where(eq(schema.products.id, productId));
+    const scopedRes = await agent
+      .post("/inventories")
+      .send(createBody(productId, lineId, "repack", beerOnly))
+      .expect(422);
+    expect(scopedRes.body.code).toBe("INVENTORY_BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
+  });
+
+  it("keeps an inventory editable after its template was disabled, but blocks switching to an ineligible one", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId, templateId } = await seedPreparation(agent, {
+      mode: "repack",
+    });
+    if (!templateId) throw new Error("Expected a repack template fixture");
+    const inventory = await createInventory(agent, productId, lineId, "repack", templateId);
+    await setDefaultTemplate(tenantId, null);
+    await db
+      .update(schema.labelTemplates)
+      .set({ enabled: false })
+      .where(eq(schema.labelTemplates.id, templateId));
+
+    await agent
+      .patch(`/inventories/${inventory.id}`)
+      .send({ productionDateTo: "2026-08-30", boxLabelTemplateId: templateId })
+      .expect(200);
+
+    const other = await seedScopedTemplate(tenantId, { enabled: false });
+    const blocked = await agent
+      .patch(`/inventories/${inventory.id}`)
+      .send({ boxLabelTemplateId: other })
+      .expect(422);
+    expect(blocked.body.code).toBe("INVENTORY_BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
+  });
+  it("re-validates a retained category-scoped template when the inventory's product changes", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId } = await seedPreparation(agent);
+    await db
+      .update(schema.products)
+      .set({ chzProductGroupCode: 15 })
+      .where(eq(schema.products.id, productId));
+    const beerOnly = await seedScopedTemplate(tenantId, { chzProductGroupCodes: [15] });
+    const universal = await seedScopedTemplate(tenantId, {});
+    const milk = await seedProduct(tenantId, { gtin14: "04600000000022", chzProductGroupCode: 8 });
+    const inventory = await createInventory(agent, productId, lineId, "repack", beerOnly);
+
+    // Same template, new product outside its scope: the retained template is
+    // checked against the new category.
+    const blocked = await agent
+      .patch(`/inventories/${inventory.id}`)
+      .send({ productId: milk })
+      .expect(422);
+    expect(blocked.body.code).toBe("INVENTORY_BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
+
+    const moved = await agent
+      .patch(`/inventories/${inventory.id}`)
+      .send({ productId: milk, boxLabelTemplateId: universal })
+      .expect(200);
+    expect(moved.body.boxLabelTemplateId).toBe(universal);
+  });
 });

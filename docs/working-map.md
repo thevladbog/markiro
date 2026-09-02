@@ -129,6 +129,15 @@ the same model. Station printing crosses the Tauri boundary into Rust and suppor
 raw document/byte output plus installed, USB, and network targets. Host tests do
 not prove Windows driver, printer, Cyrillic, barcode, or media acceptance.
 
+Templates carry selection metadata besides the spec: `enabled` and an optional
+ЧЗ product-group scope (`label_templates.chz_product_group_codes`, NULL = all).
+Per-category box defaults live in `org_box_label_template_defaults`; resolution
+is category default → organisation default → none. The rules are
+`isBoxLabelTemplateEligible`/`resolveBoxLabelTemplateDefault` in
+`packages/domain/src/labels/eligibility.ts`; the API wraps them in
+`apps/api/src/modules/label-templates/box-label-template-eligibility.ts`, shared
+by label-templates, org-profile, shifts and inventories.
+
 ### Integrations and background work
 
 The API integration registry and journal cover external channels, credentials,

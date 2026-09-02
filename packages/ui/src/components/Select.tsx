@@ -207,8 +207,15 @@ export function Select<TValue extends string = string>({
         {...(onValueChange === undefined
           ? {}
           : {
-              onValueChange: (nextValue: string) =>
-                onValueChange((nextValue === EMPTY_OPTION_VALUE ? "" : nextValue) as TValue),
+              onValueChange: (nextValue: string) => {
+                // Radix mirrors `value` into a hidden native <select>; while
+                // the matching option has not rendered yet (options still
+                // loading), that select reports "" and Radix echoes it back as
+                // a change. A real "no value" choice always arrives as
+                // EMPTY_OPTION_VALUE, so a raw "" is never a user action.
+                if (nextValue === "") return;
+                onValueChange((nextValue === EMPTY_OPTION_VALUE ? "" : nextValue) as TValue);
+              },
             })}
         {...(disabled === undefined ? {} : { disabled })}
         {...(name === undefined || value !== undefined ? {} : { name })}

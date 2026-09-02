@@ -1,13 +1,17 @@
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
-import { Alert, Badge, EmptyState, PageHeader, Spinner } from "@markiro/ui";
+import { Alert, Badge, Button, EmptyState, PageHeader, Spinner } from "@markiro/ui";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import { useCan } from "../../access/context.js";
-import { useLabelTemplates, type LabelTemplateSummaryDto } from "./api.js";
+import { ApiRequestError } from "../../api/client.js";
+import { toast } from "../../lib/toast.js";
+import { useChzProductGroups, type ChzProductGroupDto } from "../catalog/api.js";
+import { useLabelTemplates, useUpdateLabelTemplate, type LabelTemplateSummaryDto } from "./api.js";
+import { describeDefaultConflict, describeTemplateScope } from "./scope.js";
 import { TemplateThumb } from "./TemplateThumb.js";
 
 /**
@@ -64,45 +68,121 @@ const NEW_TEMPLATE_CARD_STYLE: CSSProperties = {
   textAlign: "center",
 };
 
-function TemplateCard({ item }: { item: LabelTemplateSummaryDto }) {
+type LibraryFilter = "all" | "enabled" | "disabled";
+
+const FILTERS: LibraryFilter[] = ["all", "enabled", "disabled"];
+
+const FILTER_LABEL_KEY: Record<LibraryFilter, string> = {
+  all: "pages.labels.filterAll",
+  enabled: "pages.labels.filterEnabled",
+  disabled: "pages.labels.filterDisabled",
+};
+
+function TemplateCard({
+  item,
+  groups,
+  canWrite,
+}: {
+  item: LabelTemplateSummaryDto;
+  groups: ChzProductGroupDto[];
+  canWrite: boolean;
+}) {
   const { t } = useTranslation();
+  const update = useUpdateLabelTemplate();
+  const scope = describeTemplateScope(item.chzProductGroupCodes, groups, t);
+
+  async function toggle(): Promise<void> {
+    const enabled = !item.enabled;
+    try {
+      await update.mutateAsync({ id: item.id, input: { enabled } });
+      toast(
+        "ok",
+        t(enabled ? "pages.labels.toasts.enableSuccess" : "pages.labels.toasts.disableSuccess"),
+      );
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.code === "LABEL_TEMPLATE_IS_DEFAULT") {
+        toast("error", describeDefaultConflict(error.details, groups, t), 8000);
+        return;
+      }
+      toast(
+        "error",
+        error instanceof ApiRequestError ? error.message : t("pages.labels.toasts.toggleError"),
+      );
+    }
+  }
+
+  // The card is a <div>; only the thumbnail + name are the link, so the
+  // toggle <button> never nests inside an <a>.
+  const body = (
+    <>
+      <TemplateThumb id={item.id} widthMm={item.widthMm} heightMm={item.heightMm} />
+      <span style={{ font: "600 14px/20px var(--font-ui)", color: "var(--fg-1)" }}>
+        {item.name}
+      </span>
+    </>
+  );
+
   return (
     <div style={CARD_STYLE}>
-      <TemplateThumb id={item.id} widthMm={item.widthMm} heightMm={item.heightMm} />
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <span style={{ font: "600 14px/20px var(--font-ui)", color: "var(--fg-1)" }}>
-          {item.name}
-        </span>
-        {/* Size and DPI only: a template has no language of its own -- it
-            prints on Zebra and TSC alike, and the station picks the language
-            from its own printer (see `editor/index.tsx`). A per-template
-            language badge would be exactly that false claim. */}
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <Badge>
-            {t("pages.labels.sizeBadge", {
-              width: item.widthMm.toFixed(1),
-              height: item.heightMm.toFixed(1),
-            })}
-          </Badge>
-          <Badge>{t("pages.labels.dpiBadge", { dpi: item.dpi })}</Badge>
-        </div>
+      {canWrite ? (
+        <Link
+          to={`/labels/${item.id}`}
+          style={{ ...CARD_LINK_STYLE, display: "flex", flexDirection: "column", gap: 12 }}
+        >
+          {body}
+        </Link>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>{body}</div>
+      )}
+      {/* Size and DPI only: a template has no language of its own -- it
+          prints on Zebra and TSC alike and the station picks the language
+          from its own printer (spec 2026-08-20), so no card badges one. */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <Badge>
+          {t("pages.labels.sizeBadge", {
+            width: item.widthMm.toFixed(1),
+            height: item.heightMm.toFixed(1),
+          })}
+        </Badge>
+        <Badge>{t("pages.labels.dpiBadge", { dpi: item.dpi })}</Badge>
+        <Badge
+          {...(scope.title ? { title: scope.title } : {})}
+          style={{
+            maxWidth: "100%",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {scope.label}
+        </Badge>
+        {item.enabled ? null : <Badge tone="neutral">{t("pages.labels.disabledBadge")}</Badge>}
       </div>
+      {canWrite ? (
+        <Button
+          type="button"
+          variant="secondary"
+          loading={update.isPending}
+          onClick={() => void toggle()}
+        >
+          {t(item.enabled ? "pages.labels.disableAction" : "pages.labels.enableAction")}
+        </Button>
+      ) : null}
     </div>
   );
 }
 
-/**
- * Admin label template library -- Plan 04 Task 8. Card grid: thumbnail
- * (Task 9's real renderer, via `TemplateThumb`), name, size/DPI
- * badges, and a trailing "+ Новый шаблон" tile, per the handoff admin
- * prototype's "Этикетки" screen. List/loading/error/empty states follow
- * the same pattern as `pages/counterparties/index.tsx` (Plan 03).
- */
 export function LabelTemplatesPage() {
   const { t } = useTranslation();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
-  const { data, isPending, isError } = useLabelTemplates();
+  const { data, isPending, isError } = useLabelTemplates({ enabled: "all" });
+  const groupsQuery = useChzProductGroups();
+  const [filter, setFilter] = useState<LibraryFilter>("all");
   const items = data ?? [];
+  const groups = groupsQuery.data ?? [];
+  const visible = items.filter((item) =>
+    filter === "all" ? true : filter === "enabled" ? item.enabled : !item.enabled,
+  );
 
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
@@ -136,28 +216,45 @@ export function LabelTemplatesPage() {
           }
         />
       ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-            gap: 16,
-          }}
-        >
-          {items.map((item) =>
-            canWrite ? (
-              <Link key={item.id} to={`/labels/${item.id}`} style={CARD_LINK_STYLE}>
-                <TemplateCard item={item} />
-              </Link>
-            ) : (
-              <TemplateCard key={item.id} item={item} />
-            ),
+        <>
+          <div
+            role="group"
+            aria-label={t("pages.labels.filterLabel")}
+            style={{ display: "flex", gap: 8 }}
+          >
+            {FILTERS.map((value) => (
+              <Button
+                key={value}
+                type="button"
+                variant={filter === value ? "primary" : "secondary"}
+                aria-pressed={filter === value}
+                onClick={() => setFilter(value)}
+              >
+                {t(FILTER_LABEL_KEY[value])}
+              </Button>
+            ))}
+          </div>
+          {visible.length === 0 ? (
+            <Alert tone="info">{t("pages.labels.filterEmpty")}</Alert>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+                gap: 16,
+              }}
+            >
+              {visible.map((item) => (
+                <TemplateCard key={item.id} item={item} groups={groups} canWrite={canWrite} />
+              ))}
+              {canWrite ? (
+                <Link to="/labels/new" style={NEW_TEMPLATE_CARD_STYLE}>
+                  {t("pages.labels.newTemplateCard")}
+                </Link>
+              ) : null}
+            </div>
           )}
-          {canWrite ? (
-            <Link to="/labels/new" style={NEW_TEMPLATE_CARD_STYLE}>
-              {t("pages.labels.newTemplateCard")}
-            </Link>
-          ) : null}
-        </div>
+        </>
       )}
     </div>
   );

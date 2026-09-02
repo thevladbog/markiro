@@ -30,6 +30,16 @@ export {
   QTY_UNIT_SUFFIX,
   sampleLabelData,
 } from "./labels/model.js";
+export {
+  isBoxLabelTemplateEligible,
+  labelTemplateUsesField,
+  resolveBoxLabelTemplateDefault,
+} from "./labels/eligibility.js";
+export type {
+  BoxLabelTemplateDefault,
+  BoxLabelTemplateDefaultSource,
+  BoxLabelTemplateEligibility,
+} from "./labels/eligibility.js";
 export { formatLabelDate, LABEL_DATE_FORMAT } from "./labels/date.js";
 export {
   code128ModuleCount,

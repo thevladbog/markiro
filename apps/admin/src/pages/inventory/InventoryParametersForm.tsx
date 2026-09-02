@@ -12,6 +12,8 @@ import {
   Spinner,
 } from "@markiro/ui";
 
+import { isBoxLabelTemplateEligible } from "@markiro/domain";
+
 import { useProducts } from "../catalog/api.js";
 import { useLabelTemplates } from "../labels/api.js";
 import { useLines, useShiftPlanningConfig } from "../shifts/api.js";
@@ -41,23 +43,53 @@ export function InventoryParametersForm({
   const products = useProducts({ archived: "all" });
   const lines = useLines();
   const templates = useLabelTemplates();
-  const planning = useShiftPlanningConfig();
   const [productId, setProductId] = useState(initialValue?.productId ?? "");
   const [lineId, setLineId] = useState(initialValue?.lineId ?? "");
   const [mode, setMode] = useState<InventoryMode>(initialValue?.mode ?? "check");
   const [templateId, setTemplateId] = useState(initialValue?.boxLabelTemplateId ?? "");
+  // A manual choice survives product changes only while it stays eligible;
+  // the default is re-applied whenever the operator has not chosen by hand.
+  const [templateTouched, setTemplateTouched] = useState(Boolean(initialValue?.boxLabelTemplateId));
   const [from, setFrom] = useState(initialValue?.productionDateFrom ?? "");
   const [to, setTo] = useState(initialValue?.productionDateTo ?? "");
   const [validationError, setValidationError] = useState<string | null>(null);
+  // The box-template default is resolved per product (category default,
+  // then organisation default), so it is only asked once a product is chosen.
+  const planning = useShiftPlanningConfig(productId ? productId : null);
+
+  const selectedProduct = (products.data ?? []).find((product) => product.id === productId) ?? null;
+  const productGroupCode = selectedProduct?.chzProductGroupCode ?? null;
+  const eligibleTemplates = !productId
+    ? []
+    : selectedProduct
+      ? (templates.data ?? []).filter((template) =>
+          isBoxLabelTemplateEligible(template, productGroupCode),
+        )
+      : (templates.data ?? []);
 
   useEffect(() => {
     if (!lineId && lines.data?.length === 1) setLineId(lines.data[0]!.id);
   }, [lineId, lines.data]);
   useEffect(() => {
-    if (!templateId && planning.data?.defaultBoxLabelTemplateId) {
-      setTemplateId(planning.data.defaultBoxLabelTemplateId);
+    if (templateTouched) return;
+    setTemplateId(planning.data?.defaultBoxLabelTemplateId ?? "");
+  }, [planning.data, templateTouched]);
+
+  function handleProductChange(next: string): void {
+    setProductId(next);
+    const nextProduct = (products.data ?? []).find((product) => product.id === next) ?? null;
+    const stillEligible =
+      templateId !== "" &&
+      (templates.data ?? []).some(
+        (template) =>
+          template.id === templateId &&
+          isBoxLabelTemplateEligible(template, nextProduct?.chzProductGroupCode ?? null),
+      );
+    if (!stillEligible) {
+      setTemplateId("");
+      setTemplateTouched(false);
     }
-  }, [planning.data, templateId]);
+  }
 
   const productOptions = useMemo(
     () =>
@@ -71,9 +103,8 @@ export function InventoryParametersForm({
       })),
     [products.data, t],
   );
-  const loading =
-    products.isPending || lines.isPending || templates.isPending || planning.isPending;
-  const loadError = products.isError || lines.isError || templates.isError || planning.isError;
+  const loading = products.isPending || lines.isPending || templates.isPending;
+  const loadError = products.isError || lines.isError || templates.isError;
 
   const submit = () => {
     if (!productId || !lineId || !from || !to || (mode === "repack" && !templateId)) {
@@ -105,7 +136,7 @@ export function InventoryParametersForm({
           label={t("pages.inventory.create.product")}
           options={productOptions}
           value={productId}
-          onValueChange={setProductId}
+          onValueChange={handleProductChange}
           placeholder={t("pages.inventory.create.productPlaceholder")}
           searchPlaceholder={t("pages.inventory.create.productSearch")}
           emptyText={t("pages.inventory.create.productEmpty")}
@@ -131,8 +162,14 @@ export function InventoryParametersForm({
           <Select
             label={t("pages.inventory.create.template")}
             value={templateId}
-            onValueChange={setTemplateId}
-            options={(templates.data ?? []).map((template) => ({
+            searchable
+            searchLabel={t("pages.inventory.create.templateSearch")}
+            searchPlaceholder={t("pages.inventory.create.templateSearch")}
+            onValueChange={(value) => {
+              setTemplateId(value);
+              setTemplateTouched(true);
+            }}
+            options={eligibleTemplates.map((template) => ({
               value: template.id,
               label: template.name,
             }))}

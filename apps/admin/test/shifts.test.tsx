@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
@@ -241,7 +241,7 @@ function DirtyReseedHarness() {
         products={[PRODUCT_A]}
         lines={[]}
         counterparties={[]}
-        formContext={{ defaultBoxLabelTemplateId: null, labelTemplates: [] }}
+        formContext={{ labelTemplates: [] }}
         onSubmit={() => undefined}
         onDirtyChange={() => undefined}
         onClose={() => undefined}
@@ -251,7 +251,17 @@ function DirtyReseedHarness() {
 }
 
 it("does not re-seed over an operator edit when initial values change in the same commit", () => {
-  render(<DirtyReseedHarness />);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => jsonResponse(200, { defaultBoxLabelTemplateId: null, defaultSource: null })),
+  );
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <DirtyReseedHarness />
+    </QueryClientProvider>,
+  );
 
   const quantity = screen.getByLabelText("Плановое количество, шт");
   fireEvent.change(quantity, { target: { value: "501" } });
@@ -268,6 +278,8 @@ const BOX_LABEL_TEMPLATE = {
   heightMm: 150,
   dpi: 203,
   language: "zpl",
+  enabled: true,
+  chzProductGroupCodes: null as number[] | null,
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
@@ -278,11 +290,29 @@ const DEFAULT_BOX_LABEL_TEMPLATE = {
   heightMm: 100,
   dpi: 203,
   language: "zpl",
+  enabled: true,
+  chzProductGroupCodes: null as number[] | null,
   updatedAt: "2026-08-14T00:00:00.000Z",
+};
+
+const BEER_ONLY_TEMPLATE = {
+  ...BOX_LABEL_TEMPLATE,
+  id: "lt-beer",
+  name: "Пиво 58×40",
+  chzProductGroupCodes: [15] as number[] | null,
+};
+
+const PRODUCT_BEER: ProductDto = {
+  ...PRODUCT_A,
+  id: "p-beer",
+  name: "Пиво светлое",
+  productGroup: "Пиво",
+  chzProductGroupCode: 15,
 };
 
 const SHIFT_PLANNING_CONFIG = {
   defaultBoxLabelTemplateId: DEFAULT_BOX_LABEL_TEMPLATE.id,
+  defaultSource: "organization" as const,
 };
 
 // Task 6: two distinct counterparties -- the buyer the goods are for, and a
@@ -1014,8 +1044,8 @@ describe("ShiftsPage", () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
-      if (path === "/api/shifts/planning-config") {
-        return jsonResponse(200, { defaultBoxLabelTemplateId: null });
+      if (path.startsWith("/api/shifts/planning-config")) {
+        return jsonResponse(200, { defaultBoxLabelTemplateId: null, defaultSource: null });
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
@@ -1210,8 +1240,8 @@ describe("ShiftsPage", () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
-      if (path === "/api/shifts/planning-config") {
-        return jsonResponse(200, { defaultBoxLabelTemplateId: null });
+      if (path.startsWith("/api/shifts/planning-config")) {
+        return jsonResponse(200, { defaultBoxLabelTemplateId: null, defaultSource: null });
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_B] });
@@ -1258,7 +1288,7 @@ describe("ShiftsPage", () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
-      if (path === "/api/shifts/planning-config") {
+      if (path.startsWith("/api/shifts/planning-config")) {
         return jsonResponse(200, SHIFT_PLANNING_CONFIG);
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
@@ -1277,13 +1307,18 @@ describe("ShiftsPage", () => {
     const templateSelect = await screen.findByRole("combobox", {
       name: "Шаблон этикетки короба",
     });
-    expect(templateSelect.textContent).toContain(
-      `Использовать настройку организации — ${DEFAULT_BOX_LABEL_TEMPLATE.name}`,
-    );
+    // The default is resolved per product, so the option only names it once
+    // a product is chosen.
+    expect(templateSelect.textContent).toContain("Сначала выберите товар");
     expect(screen.queryByRole("combobox", { name: "Шаблон этикетки" })).toBeNull();
 
     fireEvent.click(screen.getByLabelText("Агрегация"));
     await chooseOption(userEvent.setup(), "Продукт", PRODUCT_A.name);
+    await waitFor(() =>
+      expect(templateSelect.textContent).toContain(
+        `Использовать настройку организации — ${DEFAULT_BOX_LABEL_TEMPLATE.name}`,
+      ),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
 
     await waitFor(() => {
@@ -1305,7 +1340,7 @@ describe("ShiftsPage", () => {
       if (path === "/api/shifts" && init?.method === "POST") {
         return jsonResponse(201, { ...PLANNED_SHIFT, id: "new-override" });
       }
-      if (path === "/api/shifts/planning-config") {
+      if (path.startsWith("/api/shifts/planning-config")) {
         return jsonResponse(200, SHIFT_PLANNING_CONFIG);
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
@@ -1342,7 +1377,7 @@ describe("ShiftsPage", () => {
       if (path === "/api/shifts" && init?.method === "POST") {
         return jsonResponse(201, { ...PLANNED_SHIFT, id: "new-validation" });
       }
-      if (path === "/api/shifts/planning-config") {
+      if (path.startsWith("/api/shifts/planning-config")) {
         return jsonResponse(200, { ...SHIFT_PLANNING_CONFIG, defaultBoxLabelTemplateId: null });
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
@@ -1355,8 +1390,10 @@ describe("ShiftsPage", () => {
     await screen.findByText("Смены не запланированы");
     fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
     await chooseOption(userEvent.setup(), "Продукт", PRODUCT_B.name);
-    expect(screen.getByRole("combobox", { name: "Шаблон этикетки короба" }).textContent).toContain(
-      "Использовать настройку организации — Не настроен",
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Шаблон этикетки короба" }).textContent,
+      ).toContain("Использовать настройку организации — Не настроен"),
     );
     fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
 
@@ -1374,7 +1411,7 @@ describe("ShiftsPage", () => {
   it("blocks aggregation inline when neither organisation nor override has a box template", async () => {
     const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
       const path = String(url);
-      if (path === "/api/shifts/planning-config") {
+      if (path.startsWith("/api/shifts/planning-config")) {
         return jsonResponse(200, { ...SHIFT_PLANNING_CONFIG, defaultBoxLabelTemplateId: null });
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
@@ -1745,7 +1782,7 @@ describe("ShiftsPage", () => {
       if (path === "/api/shifts/s1" && init?.method === "PATCH") {
         return jsonResponse(200, snapshottedShift);
       }
-      if (path === "/api/shifts/planning-config") {
+      if (path.startsWith("/api/shifts/planning-config")) {
         return jsonResponse(200, SHIFT_PLANNING_CONFIG);
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [snapshottedShift] });
@@ -1792,7 +1829,7 @@ describe("ShiftsPage", () => {
           boxLabelTemplateId: DEFAULT_BOX_LABEL_TEMPLATE.id,
         });
       }
-      if (path === "/api/shifts/planning-config") {
+      if (path.startsWith("/api/shifts/planning-config")) {
         return jsonResponse(200, SHIFT_PLANNING_CONFIG);
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [snapshottedShift] });
@@ -1831,7 +1868,7 @@ describe("ShiftsPage", () => {
       "fetch",
       vi.fn(async (url: string) => {
         const path = String(url);
-        if (path === "/api/shifts/planning-config") {
+        if (path.startsWith("/api/shifts/planning-config")) {
           return jsonResponse(200, SHIFT_PLANNING_CONFIG);
         }
         if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
@@ -1846,9 +1883,14 @@ describe("ShiftsPage", () => {
     renderPage();
     fireEvent.click((await screen.findAllByRole("button", { name: "Plan a shift" }))[0]!);
 
-    expect(
-      (await screen.findByRole("combobox", { name: "Box label template" })).textContent,
-    ).toContain(`Use organization setting — ${DEFAULT_BOX_LABEL_TEMPLATE.name}`);
+    const templateSelect = await screen.findByRole("combobox", { name: "Box label template" });
+    expect(templateSelect.textContent).toContain("Select a product first");
+    await chooseOption(userEvent.setup(), "Product", PRODUCT_A.name);
+    await waitFor(() =>
+      expect(templateSelect.textContent).toContain(
+        `Use organization setting — ${DEFAULT_BOX_LABEL_TEMPLATE.name}`,
+      ),
+    );
     expect(screen.queryByRole("combobox", { name: "Label template" })).toBeNull();
   });
 
@@ -1867,7 +1909,7 @@ describe("ShiftsPage", () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
-      if (path === "/api/shifts/planning-config") {
+      if (path.startsWith("/api/shifts/planning-config")) {
         return jsonResponse(200, SHIFT_PLANNING_CONFIG);
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
@@ -1933,7 +1975,7 @@ describe("ShiftsPage", () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
-      if (path === "/api/shifts/planning-config") {
+      if (path.startsWith("/api/shifts/planning-config")) {
         return jsonResponse(200, SHIFT_PLANNING_CONFIG);
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
@@ -1990,5 +2032,100 @@ describe("ShiftsPage", () => {
       },
       { timeout: 3000 },
     );
+  });
+  it("offers only templates eligible for the selected product's category and labels the category default", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path.startsWith("/api/shifts/planning-config")) {
+        const productId = new URL(path, "http://localhost").searchParams.get("productId");
+        return productId === PRODUCT_BEER.id
+          ? jsonResponse(200, {
+              defaultBoxLabelTemplateId: BEER_ONLY_TEMPLATE.id,
+              defaultSource: "category",
+            })
+          : jsonResponse(200, SHIFT_PLANNING_CONFIG);
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path.startsWith("/api/products")) {
+        return jsonResponse(200, { items: [PRODUCT_A, PRODUCT_BEER] });
+      }
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, {
+          items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE, BEER_ONLY_TEMPLATE],
+        });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await screen.findByText("Новая смена");
+
+    // No product yet: the default option asks for a product.
+    const trigger = screen.getByRole("combobox", { name: "Шаблон этикетки короба" });
+    expect(trigger.textContent).toContain("Сначала выберите товар");
+
+    await chooseOption(user, "Продукт", PRODUCT_BEER.name);
+    await waitFor(() =>
+      expect(trigger.textContent).toContain("По умолчанию для категории «Пиво» — Пиво 58×40"),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/shifts/planning-config?productId=${PRODUCT_BEER.id}`,
+      expect.anything(),
+    );
+    await chooseOption(user, "Шаблон этикетки короба", BEER_ONLY_TEMPLATE.name);
+
+    // Switching to milk drops the beer-only template and falls back to the organisation default.
+    // Radix returns focus from the closed template Select asynchronously, which
+    // would dismiss a popover opened in the same tick -- let it settle first.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    await chooseOption(user, "Продукт", PRODUCT_A.name);
+    await waitFor(() =>
+      expect(trigger.textContent).toContain(
+        `Использовать настройку организации — ${DEFAULT_BOX_LABEL_TEMPLATE.name}`,
+      ),
+    );
+    fireEvent.pointerDown(trigger, {
+      button: 0,
+      ctrlKey: false,
+      pageX: 0,
+      pageY: 0,
+      pointerId: 1,
+      pointerType: "mouse",
+    });
+    expect(await screen.findByRole("option", { name: BOX_LABEL_TEMPLATE.name })).toBeDefined();
+    expect(screen.queryByRole("option", { name: BEER_ONLY_TEMPLATE.name })).toBeNull();
+  });
+  it("labels the default option as unavailable when the planning request fails", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path.startsWith("/api/shifts/planning-config")) {
+        return jsonResponse(500, { message: "Internal error" });
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await screen.findByText("Новая смена");
+
+    await chooseOption(userEvent.setup(), "Продукт", PRODUCT_A.name);
+    const trigger = screen.getByRole("combobox", { name: "Шаблон этикетки короба" });
+    await waitFor(() =>
+      expect(trigger.textContent).toContain(
+        "Использовать настройку организации — Шаблон недоступен — обновите данные",
+      ),
+    );
+    expect(trigger.textContent).not.toContain("Не настроен");
   });
 });

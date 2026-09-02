@@ -42,6 +42,11 @@ const PROFILE = {
   logoUrl: null as string | null,
   logoRevision: null as string | null,
   defaultBoxLabelTemplateId: null as string | null,
+  categoryBoxLabelTemplateDefaults: [] as Array<{
+    chzProductGroupCode: number;
+    templateId: string;
+  }>,
+  productGroupsInUse: [] as number[],
 };
 const EMPTY_PROFILE = { ...PROFILE, gln: null, gs1Prefixes: [], inn: null };
 const COUNTER = { extensionDigit: 0, nextSerial: 45_000, minSerial: 40_000, blockedBy: null };
@@ -57,9 +62,28 @@ const LABEL_TEMPLATES = [
     heightMm: 75,
     dpi: 203 as const,
     language: "zpl" as const,
+    enabled: true,
+    chzProductGroupCodes: null as number[] | null,
     updatedAt: "2026-08-14T08:00:00.000Z",
   },
+  {
+    id: "tpl-beer",
+    name: "Пиво 58×40",
+    widthMm: 58,
+    heightMm: 40,
+    dpi: 203 as const,
+    language: "zpl" as const,
+    enabled: true,
+    chzProductGroupCodes: [15] as number[] | null,
+    updatedAt: "2026-08-15T08:00:00.000Z",
+  },
 ];
+const PRODUCT_GROUPS = {
+  items: [
+    { code: 8, alias: "milk", name: "Молочная продукция" },
+    { code: 15, alias: "beer", name: "Пиво" },
+  ],
+};
 
 /** Routes the shared `fetch` mock by URL/method -- both GET/PUT `/org/profile` and its `/sscc` sibling are called on this one page. */
 function routeFetch(overrides: {
@@ -69,6 +93,7 @@ function routeFetch(overrides: {
   labelTemplates?: (init?: RequestInit) => Response | Promise<Response>;
 }) {
   return vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/api/chz-product-groups") return jsonResponse(200, PRODUCT_GROUPS);
     if (url === "/api/org/profile/logo") {
       return overrides.logo ? overrides.logo(init) : jsonResponse(204, undefined);
     }
@@ -85,6 +110,23 @@ function routeFetch(overrides: {
     }
     throw new Error(`Unexpected fetch: ${url} ${init?.method ?? "GET"}`);
   });
+}
+
+/** `@markiro/ui`'s non-native Select is a Radix listbox: open on pointerdown, pick by option name. */
+function openSelect(trigger: HTMLElement) {
+  fireEvent.pointerDown(trigger, {
+    button: 0,
+    ctrlKey: false,
+    pageX: 0,
+    pageY: 0,
+    pointerId: 1,
+    pointerType: "mouse",
+  });
+}
+
+async function chooseSelectOption(trigger: HTMLElement, option: string) {
+  openSelect(trigger);
+  fireEvent.click(await screen.findByRole("option", { name: option }));
 }
 
 /** Waits for a Card's title to appear, then scopes queries to that Card. */
@@ -162,12 +204,14 @@ describe("OrgProfilePage", () => {
     renderPage();
 
     const profileCard = await cardOf("Профиль организации");
-    const selector = (await within(profileCard).findByLabelText(
-      "Шаблон этикетки короба по умолчанию",
-    )) as HTMLSelectElement;
-    expect(selector.value).toBe("");
-    expect(within(selector).getByRole("option", { name: "Не выбран" })).toBeDefined();
-    expect(within(selector).getByRole("option", { name: "Короб 100 × 75" })).toBeDefined();
+    const selector = await within(profileCard).findByRole("combobox", {
+      name: "Шаблон этикетки короба по умолчанию",
+    });
+    expect(selector.textContent).toContain("Не выбран");
+    openSelect(selector);
+    expect(await screen.findByRole("option", { name: "Не выбран" })).toBeDefined();
+    expect(screen.getByRole("option", { name: "Короб 100 × 75" })).toBeDefined();
+    fireEvent.keyDown(document.activeElement ?? selector, { key: "Escape" });
     expect(
       screen.getByRole("link", { name: "Открыть библиотеку шаблонов" }).getAttribute("href"),
     ).toBe("/labels");
@@ -190,9 +234,11 @@ describe("OrgProfilePage", () => {
     renderPage();
 
     const profileCard = await cardOf("Профиль организации");
-    fireEvent.change(
-      await within(profileCard).findByLabelText("Шаблон этикетки короба по умолчанию"),
-      { target: { value: selectedId } },
+    await chooseSelectOption(
+      await within(profileCard).findByRole("combobox", {
+        name: "Шаблон этикетки короба по умолчанию",
+      }),
+      LABEL_TEMPLATES[0]!.name,
     );
     fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
 
@@ -234,11 +280,11 @@ describe("OrgProfilePage", () => {
     renderPage();
 
     const profileCard = await cardOf("Профиль организации");
-    const selector = (await within(profileCard).findByLabelText(
-      "Шаблон этикетки короба по умолчанию",
-    )) as HTMLSelectElement;
-    expect(selector.value).toBe(selectedId);
-    fireEvent.change(selector, { target: { value: "" } });
+    const selector = await within(profileCard).findByRole("combobox", {
+      name: "Шаблон этикетки короба по умолчанию",
+    });
+    await waitFor(() => expect(selector.textContent).toContain(LABEL_TEMPLATES[0]!.name));
+    await chooseSelectOption(selector, "Не выбран");
     fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() =>
@@ -272,13 +318,10 @@ describe("OrgProfilePage", () => {
     renderPage();
 
     const profileCard = await cardOf("Профиль организации");
-    const selector = (await within(profileCard).findByLabelText(
-      "Шаблон этикетки короба по умолчанию",
-    )) as HTMLSelectElement;
-    expect(selector.value).toBe(staleId);
-    expect(
-      within(selector).getByRole("option", { name: "Недоступный шаблон (удалён)" }),
-    ).toBeDefined();
+    const selector = await within(profileCard).findByRole("combobox", {
+      name: "Шаблон этикетки короба по умолчанию",
+    });
+    await waitFor(() => expect(selector.textContent).toContain("Недоступный шаблон (удалён)"));
     expect(
       within(profileCard).getByText(
         "Выбранный шаблон больше недоступен. Обновите список или выберите другой шаблон.",
@@ -288,7 +331,7 @@ describe("OrgProfilePage", () => {
     expect(save).toHaveProperty("disabled", true);
     expect(within(profileCard).getByRole("button", { name: "Обновить шаблоны" })).toBeDefined();
 
-    fireEvent.change(selector, { target: { value: LABEL_TEMPLATES[0]?.id } });
+    await chooseSelectOption(selector, LABEL_TEMPLATES[0]!.name);
     expect(save).toHaveProperty("disabled", false);
   });
 
@@ -309,17 +352,14 @@ describe("OrgProfilePage", () => {
     renderPage();
 
     const profileCard = await cardOf("Профиль организации");
-    const selector = (await within(profileCard).findByLabelText(
-      "Шаблон этикетки короба по умолчанию",
-    )) as HTMLSelectElement;
+    const selector = await within(profileCard).findByRole("combobox", {
+      name: "Шаблон этикетки короба по умолчанию",
+    });
     const save = within(profileCard).getByRole("button", { name: "Сохранить" });
     fireEvent.click(within(profileCard).getByRole("button", { name: "Обновить шаблоны" }));
 
     await waitFor(() => expect(labelTemplateRequests).toBe(2));
-    expect(selector.value).toBe(staleId);
-    expect(
-      within(selector).getByRole("option", { name: "Недоступный шаблон (удалён)" }),
-    ).toBeDefined();
+    expect(selector.textContent).toContain("Недоступный шаблон (удалён)");
     expect(
       within(profileCard).getByText(
         "Выбранный шаблон больше недоступен. Обновите список или выберите другой шаблон.",
@@ -455,12 +495,12 @@ describe("OrgProfilePage", () => {
     const profileCard = await cardOf("Профиль организации");
     const inn = within(profileCard).getByLabelText("ИНН") as HTMLInputElement;
     const prefixes = within(profileCard).getByLabelText("Префиксы GS1") as HTMLInputElement;
-    const defaultTemplate = within(profileCard).getByLabelText(
-      "Шаблон этикетки короба по умолчанию",
-    ) as HTMLSelectElement;
+    const defaultTemplate = within(profileCard).getByRole("combobox", {
+      name: "Шаблон этикетки короба по умолчанию",
+    });
     fireEvent.change(inn, { target: { value: "7707654321" } });
     fireEvent.change(prefixes, { target: { value: "4600000, 4609999" } });
-    fireEvent.change(defaultTemplate, { target: { value: LABEL_TEMPLATES[0]?.id } });
+    await chooseSelectOption(defaultTemplate, LABEL_TEMPLATES[0]!.name);
 
     const logoInput = screen.getByTestId("file-drop-input") as HTMLInputElement;
     fireEvent.change(logoInput, {
@@ -469,13 +509,13 @@ describe("OrgProfilePage", () => {
     await screen.findByRole("img", { name: "Логотип организации" });
     expect(inn.value).toBe("7707654321");
     expect(prefixes.value).toBe("4600000, 4609999");
-    expect(defaultTemplate.value).toBe(LABEL_TEMPLATES[0]?.id);
+    expect(defaultTemplate.textContent).toContain(LABEL_TEMPLATES[0]!.name);
 
     fireEvent.click(screen.getByRole("button", { name: "Удалить логотип" }));
     await screen.findByLabelText("Логотип Markiro по умолчанию");
     expect(inn.value).toBe("7707654321");
     expect(prefixes.value).toBe("4600000, 4609999");
-    expect(defaultTemplate.value).toBe(LABEL_TEMPLATES[0]?.id);
+    expect(defaultTemplate.textContent).toContain(LABEL_TEMPLATES[0]!.name);
 
     const getsBeforePolicySave = profileGetCount;
     fireEvent.click(
@@ -487,7 +527,7 @@ describe("OrgProfilePage", () => {
     await waitFor(() => expect(profileGetCount).toBeGreaterThan(getsBeforePolicySave));
     expect(inn.value).toBe("7707654321");
     expect(prefixes.value).toBe("4600000, 4609999");
-    expect(defaultTemplate.value).toBe(LABEL_TEMPLATES[0]?.id);
+    expect(defaultTemplate.textContent).toContain(LABEL_TEMPLATES[0]!.name);
   });
 
   it("adopts a clean profile refetch", async () => {
@@ -890,5 +930,75 @@ describe("OrgProfilePage", () => {
     const card = await cardOf("Счётчик SSCC для коробов");
     await waitFor(() => expect(within(card).getByText(/Ещё ничего не напечатано/)).toBeDefined());
     expect(within(card).queryByText(/напечатано до 0/)).toBeNull();
+  });
+  it("offers only universal enabled templates as the organisation default", async () => {
+    vi.stubGlobal("fetch", routeFetch({}));
+    renderPage();
+    const profileCard = await cardOf("Профиль организации");
+    const select = await within(profileCard).findByRole("combobox", {
+      name: "Шаблон этикетки короба по умолчанию",
+    });
+    openSelect(select);
+    expect(await screen.findByRole("option", { name: LABEL_TEMPLATES[0]!.name })).toBeDefined();
+    expect(screen.queryByRole("option", { name: "Пиво 58×40" })).toBeNull();
+  });
+
+  it("saves a category default chosen from eligible templates", async () => {
+    let profile = { ...PROFILE, productGroupsInUse: [8, 15] };
+    const fetchMock = routeFetch({
+      profile: (init) => {
+        if (init?.method === "PUT") {
+          const body = JSON.parse(init.body as string) as {
+            categoryBoxLabelTemplateDefaults?: typeof profile.categoryBoxLabelTemplateDefaults;
+          };
+          profile = {
+            ...profile,
+            categoryBoxLabelTemplateDefaults: body.categoryBoxLabelTemplateDefaults ?? [],
+          };
+        }
+        return jsonResponse(200, profile);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const beerSelect = await within(profileCard).findByRole("combobox", { name: "Пиво" });
+    await chooseSelectOption(beerSelect, "Пиво 58×40");
+    expect(beerSelect.textContent).toContain("Пиво 58×40");
+
+    const milkSelect = within(profileCard).getByRole("combobox", { name: "Молочная продукция" });
+    openSelect(milkSelect);
+    expect(await screen.findByRole("option", { name: LABEL_TEMPLATES[0]!.name })).toBeDefined();
+    expect(screen.queryByRole("option", { name: "Пиво 58×40" })).toBeNull();
+    fireEvent.keyDown(document.activeElement ?? milkSelect, { key: "Escape" });
+
+    fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/org/profile",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({
+            gln: PROFILE.gln,
+            inn: PROFILE.inn,
+            timeZone: PROFILE.timeZone,
+            gs1Prefixes: PROFILE.gs1Prefixes,
+            categoryBoxLabelTemplateDefaults: [{ chzProductGroupCode: 15, templateId: "tpl-beer" }],
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("shows an empty hint when no catalog product carries a category", async () => {
+    vi.stubGlobal("fetch", routeFetch({}));
+    renderPage();
+    const profileCard = await cardOf("Профиль организации");
+    expect(
+      await within(profileCard).findByText(
+        "Назначьте товарам категории в каталоге, чтобы задать шаблон для категории.",
+      ),
+    ).toBeDefined();
   });
 });

@@ -59,6 +59,7 @@ const SHIFT: ShiftDto = {
 
 const PLANNING_CONFIG = {
   defaultBoxLabelTemplateId: null,
+  defaultSource: null,
 };
 
 const EXPORT_FORMAT = {
@@ -85,7 +86,7 @@ function stubDependencies(shifts = [SHIFT], createError?: string) {
       if (path === "/api/shifts" && init?.method === "POST" && createError) {
         return jsonResponse(409, { message: createError });
       }
-      if (path === "/api/shifts/planning-config") return jsonResponse(200, PLANNING_CONFIG);
+      if (path.startsWith("/api/shifts/planning-config")) return jsonResponse(200, PLANNING_CONFIG);
       if (path === "/api/shifts/s1/summary") {
         return jsonResponse(200, {
           generatedAt: "2026-09-02T09:00:00.000Z",
@@ -240,16 +241,16 @@ it("keeps the create panel open and shows the server message after a conflict", 
   expect(router.state.location.pathname).toBe("/shifts/new");
 });
 
-it("keeps the panel loading until the planning configuration and templates resolve", async () => {
-  let resolvePlanningConfig: ((response: Response) => void) | undefined;
-  const planningConfigResponse = new Promise<Response>((resolve) => {
-    resolvePlanningConfig = resolve;
+it("keeps the panel loading until the template library resolves", async () => {
+  let resolveTemplates: ((response: Response) => void) | undefined;
+  const templatesResponse = new Promise<Response>((resolve) => {
+    resolveTemplates = resolve;
   });
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
       const path = String(url);
-      if (path === "/api/shifts/planning-config") return planningConfigResponse;
+      if (path === "/api/label-templates") return templatesResponse;
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT] });
       return jsonResponse(200, { items: [] });
@@ -258,20 +259,20 @@ it("keeps the panel loading until the planning configuration and templates resol
   renderPanel(["/shifts/new"]);
 
   expect(await screen.findByRole("status")).toBeDefined();
-  expect(screen.queryByText("Использовать настройку организации — Не настроен")).toBeNull();
+  expect(screen.queryByText("Сначала выберите товар")).toBeNull();
 
-  resolvePlanningConfig?.(jsonResponse(200, PLANNING_CONFIG));
+  resolveTemplates?.(jsonResponse(200, { items: [] }));
   expect(await screen.findByLabelText("Шаблон этикетки короба")).toBeDefined();
 });
 
-it("loads shift planning for a manager without requesting the protected organisation profile", async () => {
+it("resolves the product's box-template default for a manager without requesting the protected organisation profile", async () => {
   const requests: string[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
       const path = String(url);
       requests.push(path);
-      if (path === "/api/shifts/planning-config") {
+      if (path.startsWith("/api/shifts/planning-config")) {
         return jsonResponse(200, PLANNING_CONFIG);
       }
       if (path === "/api/org/profile") {
@@ -283,10 +284,14 @@ it("loads shift planning for a manager without requesting the protected organisa
     }),
   );
 
-  renderPanel(["/shifts/new"]);
+  const { user } = renderPanel(["/shifts/new"]);
 
   expect(await screen.findByLabelText("Шаблон этикетки короба")).toBeDefined();
-  expect(requests).toContain("/api/shifts/planning-config");
+  fireEvent.click(screen.getByRole("combobox", { name: "Продукт" }));
+  await user.click(await screen.findByRole("option", { name: new RegExp(PRODUCT.name) }));
+  await waitFor(() =>
+    expect(requests).toContain(`/api/shifts/planning-config?productId=${PRODUCT.id}`),
+  );
   expect(requests).not.toContain("/api/org/profile");
 });
 

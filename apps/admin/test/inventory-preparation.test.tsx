@@ -253,13 +253,26 @@ function parameterDependency(url: string): Response | null {
           heightMm: 40,
           dpi: 203,
           language: "zpl",
+          enabled: true,
+          chzProductGroupCodes: null,
+          updatedAt: "2026-08-01T00:00:00.000Z",
+        },
+        {
+          id: "44444444-4444-4444-8444-444444444445",
+          name: "Молоко 58×40",
+          widthMm: 58,
+          heightMm: 40,
+          dpi: 203,
+          language: "zpl",
+          enabled: true,
+          chzProductGroupCodes: [8],
           updatedAt: "2026-08-01T00:00:00.000Z",
         },
       ],
     });
   }
-  if (url === "/api/shifts/planning-config") {
-    return response({ defaultBoxLabelTemplateId: ID.template });
+  if (url.startsWith("/api/shifts/planning-config")) {
+    return response({ defaultBoxLabelTemplateId: ID.template, defaultSource: "organization" });
   }
   return null;
 }
@@ -345,6 +358,33 @@ it("creates one-product parameters with inclusive dates, mode, template, and lin
   });
   await waitFor(() => expect(router.state.location.pathname).toBe(`/inventory/${ID.inventory}`));
   expect(await screen.findByText("Период применяется включительно")).toBeDefined();
+});
+
+it("prefills the product's default template and hides templates scoped to other categories", async () => {
+  const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
+  const { user } = renderRoute("/inventory/new", async (input, init) => {
+    const url = String(input);
+    requests.push({ url, init });
+    const dependency = shellDependency(url);
+    if (dependency) return dependency;
+    const parameter = parameterDependency(url);
+    if (parameter) return parameter;
+    throw new Error(`Unexpected request: ${url}`);
+  });
+
+  fireEvent.click(await screen.findByRole("combobox", { name: "Продукт" }));
+  fireEvent.click(await screen.findByRole("option", { name: /Пиво светлое/ }));
+  await user.click(screen.getByRole("radio", { name: /С переупаковкой/ }));
+
+  const trigger = screen.getByRole("combobox", { name: "Шаблон этикетки короба" });
+  await waitFor(() => expect(trigger.textContent).toContain("Короб 20 бутылок"));
+  expect(
+    requests.some(({ url }) => url === `/api/shifts/planning-config?productId=${ID.product}`),
+  ).toBe(true);
+
+  fireEvent.click(trigger);
+  expect(await screen.findByRole("option", { name: "Короб 20 бутылок" })).toBeDefined();
+  expect(screen.queryByRole("option", { name: "Молоко 58×40" })).toBeNull();
 });
 
 it("keeps six independent slots, zero-row success, replacement history, and exact snapshot ids", async () => {

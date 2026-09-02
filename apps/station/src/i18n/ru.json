@@ -157,6 +157,8 @@
     "actionFailed": "Не удалось выполнить действие. Попробуйте ещё раз.",
     "boxLabelTemplateRequired": "В админке не настроен шаблон этикетки короба. Настройте его и повторите.",
     "templateLabel": "Шаблон этикетки короба",
+    "templateSearch": "Поиск шаблона",
+    "templateSearchEmpty": "Ничего не найдено. Измените запрос.",
     "templateDefault": "По умолчанию",
     "templateMeta": "{{width}}×{{height}} мм · {{dpi}} dpi",
     "templatesEmpty": "В админке нет шаблонов этикеток. Создайте шаблон и повторите.",

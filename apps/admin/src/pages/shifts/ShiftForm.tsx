@@ -21,7 +21,10 @@ import type { ComboboxOption, SelectOption } from "@markiro/ui";
 import { errorProp } from "../../lib/form-error.js";
 import type { CounterpartyDto } from "../counterparties/api.js";
 import type { ProductDto } from "../catalog/api.js";
+import { isBoxLabelTemplateEligible } from "@markiro/domain";
+
 import type { LabelTemplateSummaryDto } from "../labels/api.js";
+import { useShiftPlanningConfig } from "./api.js";
 import type { CreateShiftInput, LineDto, ShiftStatus, UpdateShiftInput } from "./api.js";
 
 const SHIFT_MODES = ["validation", "aggregation"] as const;
@@ -69,7 +72,7 @@ const shiftFormSchema = z.object({
 export type ShiftFormValues = z.infer<typeof shiftFormSchema>;
 
 export interface ShiftFormContext {
-  defaultBoxLabelTemplateId: string | null;
+  /** Enabled templates only; the form narrows them to the selected product's category. */
   labelTemplates: LabelTemplateSummaryDto[];
 }
 
@@ -153,6 +156,7 @@ export function ShiftForm({
     reset,
     watch,
     setValue,
+    getValues,
     setError,
     clearErrors,
     formState: { errors, isDirty, dirtyFields },
@@ -169,6 +173,24 @@ export function ShiftForm({
   const boxLabelTemplateSelection = watch("boxLabelTemplateSelection");
   const palletsEnabled = watch("palletsEnabled");
   const activeEdit = formMode === "edit" && editStatus === "active";
+
+  // The box-template default and the eligible template list both depend on
+  // the selected product's ЧЗ category (see the 2026-09-02 scope design).
+  const hasProduct = productId !== "";
+  const selectedProduct = products.find((product) => product.id === productId) ?? null;
+  const productGroupCode = selectedProduct?.chzProductGroupCode ?? null;
+  const planning = useShiftPlanningConfig(hasProduct ? productId : null);
+  const resolvedDefaultId = planning.data?.defaultBoxLabelTemplateId ?? null;
+  const resolvedDefaultSource = planning.data?.defaultSource ?? null;
+  // A product the list cannot resolve (e.g. an old shift whose product is no
+  // longer listed) gets the unfiltered enabled list rather than nothing.
+  const eligibleTemplates = !hasProduct
+    ? []
+    : selectedProduct
+      ? formContext.labelTemplates.filter((template) =>
+          isBoxLabelTemplateEligible(template, productGroupCode),
+        )
+      : formContext.labelTemplates;
 
   const isDirtyRef = useRef(false);
 
@@ -243,9 +265,21 @@ export function ShiftForm({
   }, [formMode, lines, setValue]);
 
   const submit = handleSubmit(async (values) => {
+    // The default may still be resolving (or have failed) for a freshly chosen
+    // product; wait for or retry it rather than snapshotting a stale or empty
+    // answer.
+    let defaultId = resolvedDefaultId;
+    if (
+      values.boxLabelTemplateSelection === BOX_TEMPLATE_SELECTION.organization &&
+      hasProduct &&
+      (planning.isLoading || planning.isError)
+    ) {
+      const settled = await planning.refetch();
+      defaultId = settled.data?.defaultBoxLabelTemplateId ?? null;
+    }
     const resolvedBoxLabelTemplateId = resolveBoxLabelTemplateId(
       values.boxLabelTemplateSelection,
-      formContext.defaultBoxLabelTemplateId,
+      defaultId,
     );
     if (values.mode === "aggregation" && resolvedBoxLabelTemplateId === null) {
       setError("boxLabelTemplateSelection", {
@@ -311,19 +345,33 @@ export function ShiftForm({
   ];
 
   const currentDefaultTemplate = formContext.labelTemplates.find(
-    (template) => template.id === formContext.defaultBoxLabelTemplateId,
+    (template) => template.id === resolvedDefaultId,
   );
-  const organizationDefaultName =
-    formContext.defaultBoxLabelTemplateId === null
-      ? t("pages.shifts.form.boxLabelTemplateNotConfigured")
-      : (currentDefaultTemplate?.name ?? t("pages.shifts.form.boxLabelTemplateUnavailable"));
+  const currentDefaultName =
+    currentDefaultTemplate?.name ?? t("pages.shifts.form.boxLabelTemplateUnavailable");
+  const defaultOptionLabel = !hasProduct
+    ? t("pages.shifts.form.boxLabelTemplateSelectProduct")
+    : planning.isLoading
+      ? t("pages.shifts.form.boxLabelTemplateResolving")
+      : planning.isError
+        ? // A failed lookup is not "no default configured": say the template
+          // is unavailable so the operator refreshes instead of assuming.
+          t("pages.shifts.form.boxLabelTemplateOrganization", {
+            name: t("pages.shifts.form.boxLabelTemplateUnavailable"),
+          })
+        : resolvedDefaultId === null
+          ? t("pages.shifts.form.boxLabelTemplateOrganization", {
+              name: t("pages.shifts.form.boxLabelTemplateNotConfigured"),
+            })
+          : resolvedDefaultSource === "category"
+            ? t("pages.shifts.form.boxLabelTemplateCategoryDefault", {
+                // `productGroup` is the resolved group name from the catalog DTO.
+                category: selectedProduct?.productGroup ?? String(productGroupCode ?? ""),
+                name: currentDefaultName,
+              })
+            : t("pages.shifts.form.boxLabelTemplateOrganization", { name: currentDefaultName });
   const boxLabelTemplateOptions: SelectOption[] = [
-    {
-      value: BOX_TEMPLATE_SELECTION.organization,
-      label: t("pages.shifts.form.boxLabelTemplateOrganization", {
-        name: organizationDefaultName,
-      }),
-    },
+    { value: BOX_TEMPLATE_SELECTION.organization, label: defaultOptionLabel },
     ...(formMode === "edit"
       ? [
           {
@@ -332,17 +380,18 @@ export function ShiftForm({
           },
         ]
       : []),
-    ...formContext.labelTemplates.map((template) => ({
+    ...eligibleTemplates.map((template) => ({
       value: template.id,
       label: template.name,
     })),
     ...(boxLabelTemplateSelection !== BOX_TEMPLATE_SELECTION.organization &&
     boxLabelTemplateSelection !== BOX_TEMPLATE_SELECTION.none &&
-    !formContext.labelTemplates.some((template) => template.id === boxLabelTemplateSelection)
+    !eligibleTemplates.some((template) => template.id === boxLabelTemplateSelection)
       ? [
           {
             value: boxLabelTemplateSelection,
             label: t("pages.shifts.form.boxLabelTemplateUnavailable"),
+            disabled: true,
           },
         ]
       : []),
@@ -394,9 +443,30 @@ export function ShiftForm({
               emptyText={t("pages.shifts.form.productEmpty")}
               loadingText={t("common.loading")}
               {...errorProp(translateFieldError(t, errors.productId?.message))}
-              onValueChange={(value) =>
-                setValue("productId", value, { shouldDirty: true, shouldValidate: true })
-              }
+              onValueChange={(value) => {
+                setValue("productId", value, { shouldDirty: true, shouldValidate: true });
+                // A template chosen for the previous product may not cover
+                // the new product's category; fall back to the default then.
+                const nextProduct = products.find((product) => product.id === value) ?? null;
+                const current = getValues("boxLabelTemplateSelection");
+                if (
+                  current !== BOX_TEMPLATE_SELECTION.organization &&
+                  current !== BOX_TEMPLATE_SELECTION.none &&
+                  !formContext.labelTemplates.some(
+                    (template) =>
+                      template.id === current &&
+                      isBoxLabelTemplateEligible(
+                        template,
+                        nextProduct?.chzProductGroupCode ?? null,
+                      ),
+                  )
+                ) {
+                  clearErrors("boxLabelTemplateSelection");
+                  setValue("boxLabelTemplateSelection", BOX_TEMPLATE_SELECTION.organization, {
+                    shouldDirty: true,
+                  });
+                }
+              }}
             />
             <Controller
               control={control}
@@ -521,6 +591,12 @@ export function ShiftForm({
               label={t("pages.shifts.form.boxLabelTemplateLabel")}
               options={boxLabelTemplateOptions}
               value={boxLabelTemplateSelection}
+              searchable
+              searchLabel={t("pages.shifts.form.boxLabelTemplateSearch")}
+              searchPlaceholder={t("pages.shifts.form.boxLabelTemplateSearch")}
+              {...(hasProduct && eligibleTemplates.length === 0 && !planning.isLoading
+                ? { hint: t("pages.shifts.form.boxLabelTemplateNoneEligible") }
+                : {})}
               {...errorProp(translateFieldError(t, errors.boxLabelTemplateSelection?.message))}
               onValueChange={(value) => {
                 clearErrors("boxLabelTemplateSelection");
