@@ -233,7 +233,18 @@ function updateDb(current: typeof SHIFT_ROW) {
   });
   const db = {
     select: () => ({
-      from: () => chain([stored], schema.shifts, []),
+      // The template-change eligibility check reads the product and the
+      // template; everything else in updateShift reads the shift row.
+      from: (table: unknown) =>
+        chain(
+          table === schema.labelTemplates
+            ? [{ id: "box-template-2", enabled: true, chzProductGroupCodes: null }]
+            : table === schema.products
+              ? [{ chzProductGroupCode: 8 }]
+              : [stored],
+          table,
+          [],
+        ),
     }),
     update: () => ({ set }),
     transaction: async (run: (tx: Db) => Promise<unknown>) => run(db as unknown as Db),

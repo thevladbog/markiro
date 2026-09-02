@@ -46,7 +46,7 @@ export async function resolveDefaultBoxLabelTemplate(
   chzProductGroupCode: number | null,
 ): Promise<BoxLabelTemplateDefault> {
   const [profile] = await db
-    .select({ templateId: schema.orgProfiles.defaultBoxLabelTemplateId })
+    .select({ defaultBoxLabelTemplateId: schema.orgProfiles.defaultBoxLabelTemplateId })
     .from(schema.orgProfiles)
     .where(eq(schema.orgProfiles.tenantId, tenantId));
   let categoryDefaultId: string | null = null;
@@ -64,7 +64,7 @@ export async function resolveDefaultBoxLabelTemplate(
   }
   return resolveBoxLabelTemplateDefault({
     categoryDefaultId,
-    organizationDefaultId: profile?.templateId ?? null,
+    organizationDefaultId: profile?.defaultBoxLabelTemplateId ?? null,
   });
 }
 
@@ -80,7 +80,7 @@ export async function findLabelTemplateDefaultUsage(
   templateId: string,
 ): Promise<LabelTemplateDefaultUsage> {
   const [profile] = await db
-    .select({ templateId: schema.orgProfiles.defaultBoxLabelTemplateId })
+    .select({ defaultBoxLabelTemplateId: schema.orgProfiles.defaultBoxLabelTemplateId })
     .from(schema.orgProfiles)
     .where(eq(schema.orgProfiles.tenantId, tenantId));
   const rows = await db
@@ -93,7 +93,7 @@ export async function findLabelTemplateDefaultUsage(
       ),
     );
   return {
-    organizationDefault: profile?.templateId === templateId,
+    organizationDefault: profile?.defaultBoxLabelTemplateId === templateId,
     categoryDefaults: rows.map((row) => row.code).sort((a, b) => a - b),
   };
 }

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { SchemaObject } from "@nestjs/swagger";
-import type { LabelTemplateSpec } from "@markiro/domain";
+import type { BoxLabelTemplateDefaultSource, LabelTemplateSpec } from "@markiro/domain";
 import type { OperatorMirrorRecord } from "@markiro/db";
 import type { ProductDto, ProductImageDescriptor } from "../products/dto";
 
@@ -185,15 +185,24 @@ export interface ShiftSummaryDto {
   };
 }
 
+export const boxLabelTemplateProductQuerySchema = z.object({
+  /** Resolves the default (and, for the picker, the eligible list) for this product's ЧЗ category. */
+  productId: z.string().uuid().optional(),
+});
+export type BoxLabelTemplateProductQueryDto = z.infer<typeof boxLabelTemplateProductQuerySchema>;
+
 /** GET /shifts/planning-config response — the operations-readable planning subset only. */
 export interface ShiftPlanningConfigDto {
   defaultBoxLabelTemplateId: string | null;
+  /** Which default answered: the product's category, the organisation, or none. */
+  defaultSource: BoxLabelTemplateDefaultSource | null;
 }
 
 /**
  * Box-template summary exposed to station credentials. Deliberately excludes
- * the template `spec`: the station only ever receives a spec through the
- * shift bundle after the shift snapshot exists.
+ * the template `spec` and its selection metadata: the station only ever
+ * receives a spec through the shift bundle after the shift snapshot exists,
+ * and eligibility is already applied server-side.
  */
 export interface ShiftBoxLabelTemplateOptionDto {
   id: string;
@@ -205,12 +214,14 @@ export interface ShiftBoxLabelTemplateOptionDto {
 }
 
 /**
- * GET /shifts/box-label-templates response. The organisation default (when
- * set) is the first item; the rest follow ordered by name.
+ * GET /shifts/box-label-templates response. With `productId` only templates
+ * eligible for that product's category are listed. The resolved default
+ * (when set) is the first item; the rest follow ordered by name.
  */
 export interface ShiftBoxLabelTemplatesDto {
   items: ShiftBoxLabelTemplateOptionDto[];
   defaultBoxLabelTemplateId: string | null;
+  defaultSource: BoxLabelTemplateDefaultSource | null;
 }
 
 /**
@@ -340,17 +351,26 @@ export const updateShiftOpenApiSchema = {
   },
 };
 
+const defaultSourceOpenApiSchema: SchemaObject = {
+  type: "string",
+  enum: ["category", "organization"],
+  nullable: true,
+};
+
 export const shiftPlanningConfigOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["defaultBoxLabelTemplateId"],
-  properties: { defaultBoxLabelTemplateId: nullableUuidOpenApiSchema },
+  required: ["defaultBoxLabelTemplateId", "defaultSource"],
+  properties: {
+    defaultBoxLabelTemplateId: nullableUuidOpenApiSchema,
+    defaultSource: defaultSourceOpenApiSchema,
+  },
 };
 
 export const shiftBoxLabelTemplatesOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["items", "defaultBoxLabelTemplateId"],
+  required: ["items", "defaultBoxLabelTemplateId", "defaultSource"],
   properties: {
     items: {
       type: "array",
@@ -369,6 +389,7 @@ export const shiftBoxLabelTemplatesOpenApiSchema: SchemaObject = {
       },
     },
     defaultBoxLabelTemplateId: nullableUuidOpenApiSchema,
+    defaultSource: defaultSourceOpenApiSchema,
   },
 };
 

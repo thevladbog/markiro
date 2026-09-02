@@ -10,9 +10,13 @@ import {
 } from "@nestjs/common";
 import { and, desc, eq, gte, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { formatShiftNumber, shiftMonthKey } from "@markiro/domain";
+import { formatShiftNumber, isBoxLabelTemplateEligible, shiftMonthKey } from "@markiro/domain";
 import type { LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
+import {
+  findLabelTemplateEligibility,
+  resolveDefaultBoxLabelTemplate,
+} from "../label-templates/box-label-template-eligibility";
 import { OperatorsService } from "../operators/operators.service";
 import type { ProductImageDescriptor } from "../products/dto";
 import {
@@ -214,38 +218,88 @@ export class ShiftsService {
     return { items: rows.map((row) => this.mapShiftRow(row)) };
   }
 
-  /** The one organisation setting needed by operations shift planning. */
-  async getPlanningConfig(tenantId: string): Promise<ShiftPlanningConfigDto> {
-    return { defaultBoxLabelTemplateId: await this.findDefaultBoxLabelTemplateId(tenantId) };
+  /** The one organisation setting needed by operations shift planning, resolved for a product when given. */
+  async getPlanningConfig(tenantId: string, productId?: string): Promise<ShiftPlanningConfigDto> {
+    const chzProductGroupCode = await this.productGroupCodeForPicker(tenantId, productId);
+    const resolved = await resolveDefaultBoxLabelTemplate(this.db, tenantId, chzProductGroupCode);
+    return { defaultBoxLabelTemplateId: resolved.templateId, defaultSource: resolved.source };
   }
 
-  async listBoxLabelTemplates(tenantId: string): Promise<ShiftBoxLabelTemplatesDto> {
-    const defaultBoxLabelTemplateId = await this.findDefaultBoxLabelTemplateId(tenantId);
+  async listBoxLabelTemplates(
+    tenantId: string,
+    productId?: string,
+  ): Promise<ShiftBoxLabelTemplatesDto> {
+    const chzProductGroupCode = await this.productGroupCodeForPicker(tenantId, productId);
+    const resolved = await resolveDefaultBoxLabelTemplate(this.db, tenantId, chzProductGroupCode);
     const rows = await this.db
       .select({
         id: schema.labelTemplates.id,
         name: schema.labelTemplates.name,
         spec: schema.labelTemplates.spec,
+        enabled: schema.labelTemplates.enabled,
+        chzProductGroupCodes: schema.labelTemplates.chzProductGroupCodes,
       })
       .from(schema.labelTemplates)
-      .where(eq(schema.labelTemplates.tenantId, tenantId))
+      .where(
+        and(eq(schema.labelTemplates.tenantId, tenantId), eq(schema.labelTemplates.enabled, true)),
+      )
       .orderBy(schema.labelTemplates.name, schema.labelTemplates.id);
-    const items = rows.map((row): ShiftBoxLabelTemplateOptionDto => {
-      const spec = row.spec as LabelTemplateSpec;
-      return {
-        id: row.id,
-        name: row.name,
-        widthMm: spec.widthMm,
-        heightMm: spec.heightMm,
-        dpi: spec.dpi,
-        language: spec.language,
-      };
-    });
+    const items = rows
+      // Without a product every enabled template is offered (legacy stations);
+      // with one, only templates covering its category.
+      .filter(
+        (row) => productId === undefined || isBoxLabelTemplateEligible(row, chzProductGroupCode),
+      )
+      .map((row): ShiftBoxLabelTemplateOptionDto => {
+        const spec = row.spec as LabelTemplateSpec;
+        return {
+          id: row.id,
+          name: row.name,
+          widthMm: spec.widthMm,
+          heightMm: spec.heightMm,
+          dpi: spec.dpi,
+          language: spec.language,
+        };
+      });
     // Default first so the preselected option is on the station's first page.
     items.sort((a, b) =>
-      a.id === defaultBoxLabelTemplateId ? -1 : b.id === defaultBoxLabelTemplateId ? 1 : 0,
+      a.id === resolved.templateId ? -1 : b.id === resolved.templateId ? 1 : 0,
     );
-    return { items, defaultBoxLabelTemplateId };
+    return {
+      items,
+      defaultBoxLabelTemplateId: resolved.templateId,
+      defaultSource: resolved.source,
+    };
+  }
+
+  /** `null` without a product (organisation-level answer); 404 for a product outside the tenant. */
+  private async productGroupCodeForPicker(
+    tenantId: string,
+    productId: string | undefined,
+  ): Promise<number | null> {
+    if (productId === undefined) return null;
+    const product = await this.findProductRow(tenantId, productId);
+    if (!product) throw new NotFoundException("Unknown product for this organization");
+    return product.chzProductGroupCode ?? null;
+  }
+
+  private async assertBoxTemplateEligible(
+    tenantId: string,
+    templateId: string,
+    chzProductGroupCode: number | null,
+  ): Promise<void> {
+    const template = await findLabelTemplateEligibility(this.db, tenantId, templateId);
+    // Unknown (or another tenant's) template stays a 400, as the FK mapping
+    // always answered; a known template that does not fit is a 422.
+    if (!template) {
+      throw new BadRequestException("Unknown box label template for this organization");
+    }
+    if (!isBoxLabelTemplateEligible(template, chzProductGroupCode)) {
+      throw new UnprocessableEntityException({
+        code: "BOX_LABEL_TEMPLATE_NOT_ELIGIBLE",
+        message: "Box label template is disabled or does not apply to the product's category",
+      });
+    }
   }
 
   /** Get a single shift (joined), must belong to the tenant. */
@@ -477,10 +531,18 @@ export class ShiftsService {
       data.palletCapacity !== undefined ? data.palletCapacity : product.palletCapacity;
     const counterpartyId =
       data.counterpartyId !== undefined ? data.counterpartyId : product.defaultCounterpartyId;
-    const boxLabelTemplateId =
-      data.boxLabelTemplateId !== undefined
-        ? data.boxLabelTemplateId
-        : await this.findDefaultBoxLabelTemplateId(tenantId);
+    const chzProductGroupCode = product.chzProductGroupCode ?? null;
+    let boxLabelTemplateId: string | null;
+    if (data.boxLabelTemplateId === undefined) {
+      boxLabelTemplateId = (
+        await resolveDefaultBoxLabelTemplate(this.db, tenantId, chzProductGroupCode)
+      ).templateId;
+    } else {
+      boxLabelTemplateId = data.boxLabelTemplateId;
+      if (boxLabelTemplateId !== null) {
+        await this.assertBoxTemplateEligible(tenantId, boxLabelTemplateId, chzProductGroupCode);
+      }
+    }
     const palletsEnabled = data.palletsEnabled ?? false;
 
     this.assertCapacityRules(data.mode, boxCapacity, palletsEnabled, palletCapacity);
@@ -647,6 +709,21 @@ export class ShiftsService {
               },
             };
           }
+        }
+
+        // A shift keeps its snapshot even after the template is disabled or
+        // scoped away; eligibility is enforced only when the template changes.
+        if (
+          data.boxLabelTemplateId !== undefined &&
+          data.boxLabelTemplateId !== null &&
+          data.boxLabelTemplateId !== current.boxLabelTemplateId
+        ) {
+          const product = await this.findProductRow(tenantId, current.productId);
+          await this.assertBoxTemplateEligible(
+            tenantId,
+            data.boxLabelTemplateId,
+            product?.chzProductGroupCode ?? null,
+          );
         }
 
         if (current.status === "active") {
@@ -1217,14 +1294,6 @@ export class ShiftsService {
       )
       .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
     return row;
-  }
-
-  private async findDefaultBoxLabelTemplateId(tenantId: string): Promise<string | null> {
-    const [row] = await this.db
-      .select({ defaultBoxLabelTemplateId: schema.orgProfiles.defaultBoxLabelTemplateId })
-      .from(schema.orgProfiles)
-      .where(eq(schema.orgProfiles.tenantId, tenantId));
-    return row?.defaultBoxLabelTemplateId ?? null;
   }
 
   private async findProductImage(
