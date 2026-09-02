@@ -376,6 +376,7 @@ test("uses every and only the production environment example keys", async () => 
     "CHZ_TRUE_API_TOKEN_FORMAT",
     "NATIONAL_CATALOG_BASE_URL",
     "NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID",
+    "NATIONAL_CATALOG_LIVE_GTIN",
     "NATIONAL_CATALOG_REQUEST_TIMEOUT_MS",
     "LANDING_DEMO_SUBMISSION_ENABLED",
     "LANDING_ORIGIN",
@@ -394,7 +395,7 @@ test("uses every and only the production environment example keys", async () => 
     "DADATA_TOKEN",
     "DADATA_SECRET",
   ]);
-  assert.equal(inventory.length, 42);
+  assert.equal(inventory.length, 43);
   assert.deepEqual(
     runtimeInventoryKeyNames(
       inventory,

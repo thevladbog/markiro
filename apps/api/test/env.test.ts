@@ -17,11 +17,33 @@ describe("National Catalog environment", () => {
       ...requiredEnv,
       NATIONAL_CATALOG_BASE_URL: " https://catalog.example.test ",
       NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID: " tenant-1 ",
+      NATIONAL_CATALOG_LIVE_GTIN: " 04600000000015 ",
     } as never);
     expect(env.NATIONAL_CATALOG_BASE_URL).toBe("https://catalog.example.test");
     expect(env.NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID).toBe("tenant-1");
+    expect(env.NATIONAL_CATALOG_LIVE_GTIN).toBe("04600000000015");
     expect(env.NATIONAL_CATALOG_REQUEST_TIMEOUT_MS).toBe(15_000);
   });
+
+  it.each(["", "   "])("treats a blank configured live GTIN as disabled", (liveGtin) => {
+    const env = loadEnv({
+      ...requiredEnv,
+      NATIONAL_CATALOG_LIVE_GTIN: liveGtin,
+    } as never);
+    expect(env.NATIONAL_CATALOG_LIVE_GTIN).toBeUndefined();
+  });
+
+  it.each(["0460000000001x", "4600000000015", "046000000000150"])(
+    "rejects a non-14-digit configured live GTIN %s",
+    (liveGtin) => {
+      expect(() =>
+        loadEnv({
+          ...requiredEnv,
+          NATIONAL_CATALOG_LIVE_GTIN: liveGtin,
+        } as never),
+      ).toThrow();
+    },
+  );
 
   it("rejects a non-HTTPS National Catalog endpoint", () => {
     expect(() =>

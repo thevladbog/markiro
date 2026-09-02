@@ -40,26 +40,65 @@ fn tooltip_for(phase: AgentPhase, update_active: bool) -> &'static str {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BadgeGeometry {
+    center_x: i32,
+    center_y: i32,
+    outer_radius: u32,
+    inner_radius: u32,
+    core_radius: u32,
+}
+
+fn badge_geometry(width: u32, height: u32) -> BadgeGeometry {
+    let minimum = width.min(height);
+    let outer_radius = (minimum.saturating_mul(7) / 32).max(4);
+    let inner_radius = (minimum.saturating_mul(3) / 16).max(3);
+    let core_radius = (minimum.saturating_mul(5) / 32).max(2);
+    let edge_inset = (minimum / 64).max(1);
+
+    BadgeGeometry {
+        center_x: width.saturating_sub(outer_radius + edge_inset) as i32,
+        center_y: height.saturating_sub(outer_radius + edge_inset) as i32,
+        outer_radius,
+        inner_radius: inner_radius.min(outer_radius.saturating_sub(1)),
+        core_radius: core_radius.min(inner_radius.saturating_sub(1)),
+    }
+}
+
 fn paint_badge(base: &[u8], width: u32, height: u32, color: [u8; 4], radius: u32) -> Vec<u8> {
     let mut rgba = base.to_vec();
     if rgba.len() != width.saturating_mul(height).saturating_mul(4) as usize {
         return rgba;
     }
-    let minimum = width.min(height);
-    let margin = (minimum / 5).max(2);
-    let center_x = width.saturating_sub(margin) as i32;
-    let center_y = height.saturating_sub(margin) as i32;
+    let geometry = badge_geometry(width, height);
 
     paint_circle(
         &mut rgba,
         width,
         height,
-        center_x,
-        center_y,
-        radius.saturating_add(2),
+        geometry.center_x,
+        geometry.center_y,
+        geometry.outer_radius,
         [20, 22, 27, 255],
     );
-    paint_circle(&mut rgba, width, height, center_x, center_y, radius, color);
+    paint_circle(
+        &mut rgba,
+        width,
+        height,
+        geometry.center_x,
+        geometry.center_y,
+        geometry.inner_radius,
+        [248, 250, 252, 255],
+    );
+    paint_circle(
+        &mut rgba,
+        width,
+        height,
+        geometry.center_x,
+        geometry.center_y,
+        radius.min(geometry.inner_radius.saturating_sub(1)),
+        color,
+    );
     rgba
 }
 
@@ -90,14 +129,18 @@ fn paint_circle(
 
 fn badged_icon(base: &Image<'static>, state: TrayVisualState, pulse_on: bool) -> Image<'static> {
     let minimum = base.width().min(base.height());
-    let base_radius = (minimum / 10).max(3);
+    let geometry = badge_geometry(base.width(), base.height());
+    let pulse_radius = geometry
+        .core_radius
+        .saturating_add((minimum / 64).max(1))
+        .min(geometry.inner_radius.saturating_sub(1));
     let (color, radius) = match state {
-        TrayVisualState::Unpaired => ([148, 163, 184, 255], base_radius),
-        TrayVisualState::Healthy => ([34, 197, 94, 255], base_radius),
-        TrayVisualState::Reconnecting => ([245, 158, 11, 255], base_radius),
-        TrayVisualState::Unavailable => ([239, 68, 68, 255], base_radius),
-        TrayVisualState::Active if pulse_on => ([96, 165, 250, 255], base_radius.saturating_add(2)),
-        TrayVisualState::Active => ([59, 130, 246, 255], base_radius),
+        TrayVisualState::Unpaired => ([148, 163, 184, 255], geometry.core_radius),
+        TrayVisualState::Healthy => ([34, 197, 94, 255], geometry.core_radius),
+        TrayVisualState::Reconnecting => ([245, 158, 11, 255], geometry.core_radius),
+        TrayVisualState::Unavailable => ([239, 68, 68, 255], geometry.core_radius),
+        TrayVisualState::Active if pulse_on => ([96, 165, 250, 255], pulse_radius),
+        TrayVisualState::Active => ([59, 130, 246, 255], geometry.core_radius),
     };
     Image::new_owned(
         paint_badge(base.rgba(), base.width(), base.height(), color, radius),
@@ -268,6 +311,11 @@ mod tests {
     use super::*;
     use signer_core::runtime::AgentPhase;
 
+    fn assert_pixel(rgba: &[u8], width: u32, x: i32, y: i32, expected: [u8; 4]) {
+        let offset = (((y as u32 * width) + x as u32) * 4) as usize;
+        assert_eq!(&rgba[offset..offset + 4], &expected);
+    }
+
     #[test]
     fn maps_agent_and_update_activity_to_operator_states() {
         assert_eq!(
@@ -305,6 +353,54 @@ mod tests {
         assert_eq!(&painted[0..4], &[7, 7, 7, 7]);
         let center = ((26 * 32 + 26) * 4) as usize;
         assert_eq!(&painted[center..center + 4], &[34, 197, 94, 255]);
+    }
+
+    #[test]
+    fn badge_geometry_scales_to_a_visible_sixteen_pixel_badge() {
+        let geometry = badge_geometry(128, 128);
+
+        assert_eq!(geometry.outer_radius * 16 / 128, 3);
+        assert_eq!(geometry.core_radius * 16 / 128, 2);
+        assert!(geometry.outer_radius > geometry.inner_radius);
+        assert!(geometry.inner_radius > geometry.core_radius);
+        assert!(geometry.center_x + geometry.outer_radius as i32 <= 127);
+        assert!(geometry.center_y + geometry.outer_radius as i32 <= 127);
+    }
+
+    #[test]
+    fn badge_paints_dark_light_and_semantic_layers() {
+        let base = vec![7; 128 * 128 * 4];
+        let geometry = badge_geometry(128, 128);
+        let painted = paint_badge(
+            &base,
+            128,
+            128,
+            [34, 197, 94, 255],
+            geometry.core_radius,
+        );
+
+        assert_pixel(
+            &painted,
+            128,
+            geometry.center_x,
+            geometry.center_y,
+            [34, 197, 94, 255],
+        );
+        assert_pixel(
+            &painted,
+            128,
+            geometry.center_x + geometry.core_radius as i32 + 1,
+            geometry.center_y,
+            [248, 250, 252, 255],
+        );
+        assert_pixel(
+            &painted,
+            128,
+            geometry.center_x + geometry.inner_radius as i32 + 1,
+            geometry.center_y,
+            [20, 22, 27, 255],
+        );
+        assert_pixel(&painted, 128, 0, 0, [7, 7, 7, 7]);
     }
 
     #[test]

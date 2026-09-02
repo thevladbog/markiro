@@ -768,7 +768,7 @@ export function ChannelPage() {
        */}
       {channel.type === "chestny_znak" ? <SignerAgentsPanel /> : null}
 
-      <JournalList type={type} />
+      <JournalList type={type} channelState={channel.state} />
 
       {/*
        * Удаление доступно только `commerceml` (сервер отвечает 409 каналу без

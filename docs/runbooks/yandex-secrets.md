@@ -54,13 +54,17 @@ Read-only импорт использует уже зашифрованный Tr
 
 - `NATIONAL_CATALOG_BASE_URL` — подтверждённый HTTPS endpoint Национального каталога;
 - `NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID` — арендатор, чьи права проверены для чтения;
+- `NATIONAL_CATALOG_LIVE_GTIN` — известный GTIN этого арендатора для защищённой
+  read-only диагностики;
 - `NATIONAL_CATALOG_REQUEST_TIMEOUT_MS=15000`.
 
-Пустые первые два значения оставляют интеграцию выключенной. Предыдущую версию Lockbox
-не удалять. Payload, tenant token и сырые карточки не печатать. После публикации версии
-используйте только защищённый `Deploy production`: ручная материализация env и перезапуск
-API запрещены. Порядок refresh, проверки матрицы, activation и tenant smoke описан в
-`docs/runbooks/national-catalog-live-validation.md`.
+Опубликуйте новую версию Lockbox, сохранив все существующие записи и предыдущую версию,
+и добавьте в неё подтверждённый известный GTIN. Пустые `NATIONAL_CATALOG_BASE_URL`,
+`NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID` или `NATIONAL_CATALOG_LIVE_GTIN` оставляют
+диагностику выключенной. Tenant, GTIN, token, payload и сырые карточки не печатать.
+После публикации версии используйте только защищённый `Deploy production`: ручная
+материализация env и перезапуск API запрещены. Порядок refresh, проверки матрицы,
+activation и tenant smoke описан в `docs/runbooks/national-catalog-live-validation.md`.
 
 ## Evidence провайдера и локализации
 

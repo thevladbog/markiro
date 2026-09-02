@@ -1,0 +1,2 @@
+CREATE INDEX "integration_events_tenant_channel_session_direction_at_id_idx" ON "integration_events" USING btree ("tenant_id","channel_type","session_id","direction","at" DESC NULLS LAST,"id" DESC NULLS LAST);--> statement-breakpoint
+CREATE INDEX "integration_sessions_tenant_channel_started_id_idx" ON "integration_sessions" USING btree ("tenant_id","channel_type","started_at" DESC NULLS LAST,"id" DESC NULLS LAST);

@@ -1,0 +1,260 @@
+.mk-journal__controls,
+.mk-journal__content {
+  padding: var(--sp-5);
+}
+
+.mk-journal__content {
+  border-top: 1px solid var(--line);
+}
+
+.mk-journal-filters,
+.mk-journal-days {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.mk-journal-filters__secondary {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) minmax(180px, 260px) minmax(180px, 1fr);
+  gap: var(--sp-4);
+  align-items: end;
+}
+
+.mk-journal-filters__count,
+.mk-journal__refreshing,
+.mk-journal-session__truncated,
+.mk-journal-session__no-events {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.mk-journal-filters__count {
+  padding-bottom: 10px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-journal__refreshing {
+  margin-bottom: var(--sp-3);
+}
+
+.mk-journal-day h3 {
+  margin: 0 0 var(--sp-2);
+  color: var(--fg-3);
+  font: 600 12px/18px var(--font-ui);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mk-journal-day__sessions,
+.mk-journal-events {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-journal-session {
+  border-top: 1px solid var(--line);
+}
+
+.mk-journal-session:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+.mk-journal-session__toggle {
+  position: relative;
+  display: grid;
+  grid-template-columns: 92px minmax(220px, 1fr) minmax(190px, auto) auto 24px;
+  gap: var(--sp-3);
+  align-items: center;
+  width: 100%;
+  padding: var(--sp-4) var(--sp-2);
+  border: 0;
+  background: transparent;
+  color: var(--fg-1);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mk-journal-session__toggle:hover {
+  --journal-row-bg: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+}
+
+.mk-journal-session__toggle:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.mk-journal-session__time {
+  color: var(--fg-2);
+  font: var(--text-code);
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-journal-session__summary {
+  min-width: 0;
+  overflow: hidden;
+  font: var(--text-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mk-journal-session__meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-1) var(--sp-3);
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.mk-journal-session__chevron {
+  color: var(--fg-3);
+  font: 600 18px/1 var(--font-ui);
+  text-align: center;
+}
+
+.mk-journal-session__panel {
+  padding: 0 var(--sp-4) var(--sp-4) 112px;
+}
+
+.mk-journal-session__truncated {
+  margin-bottom: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 2px solid var(--warn-solid);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.mk-journal-event {
+  display: grid;
+  grid-template-columns: 92px 120px auto minmax(220px, 1fr);
+  gap: var(--sp-3);
+  align-items: start;
+  padding: var(--sp-3) 0;
+  border-top: 1px solid var(--line);
+}
+
+.mk-journal-event time,
+.mk-journal-event__direction {
+  color: var(--fg-3);
+  font: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-journal-event__message {
+  min-width: 0;
+  color: var(--fg-1);
+  font: var(--text-body);
+}
+
+.mk-journal-event__raw {
+  margin-top: var(--sp-2);
+}
+
+.mk-journal-event__raw summary {
+  color: var(--fg-3);
+  font: var(--text-caption);
+  cursor: pointer;
+}
+
+.mk-journal-event__raw pre {
+  margin: var(--sp-2) 0 0;
+  padding: var(--sp-3);
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+  color: var(--fg-2);
+  font: var(--text-code);
+  white-space: pre-wrap;
+}
+
+.mk-journal__pager {
+  margin: var(--sp-5) 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.mk-journal-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.mk-journal-skeleton span {
+  display: block;
+  height: 52px;
+  border-radius: var(--r-2);
+  background: linear-gradient(
+    90deg,
+    var(--surface-panel),
+    color-mix(in srgb, var(--surface-panel) 55%, var(--surface-card)),
+    var(--surface-panel)
+  );
+  background-size: 200% 100%;
+  animation: mk-journal-skeleton 1.2s ease-in-out infinite;
+}
+
+@keyframes mk-journal-skeleton {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .mk-journal-filters__secondary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mk-journal-filters__count {
+    grid-column: 1 / -1;
+    padding: 0;
+    text-align: left;
+  }
+
+  .mk-journal-session__toggle {
+    grid-template-columns: 84px minmax(180px, 1fr) auto 24px;
+  }
+
+  .mk-journal-session__meta {
+    grid-column: 2 / -1;
+    grid-row: 2;
+    justify-content: flex-start;
+  }
+
+  .mk-journal-session__panel {
+    padding-left: var(--sp-4);
+  }
+}
+
+@media (max-width: 640px) {
+  .mk-journal__controls,
+  .mk-journal__content {
+    padding: var(--sp-4);
+  }
+
+  .mk-journal-filters__secondary,
+  .mk-journal-session__toggle,
+  .mk-journal-event {
+    grid-template-columns: 1fr;
+  }
+
+  .mk-journal-session__meta {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .mk-journal-session__chevron {
+    position: absolute;
+    right: var(--sp-4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mk-journal-skeleton span {
+    animation: none;
+  }
+}

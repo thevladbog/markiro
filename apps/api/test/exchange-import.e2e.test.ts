@@ -362,7 +362,9 @@ describe("mode=import", () => {
 
     const fileEvent = session.events.find(
       (e: { message: string; outcome: string }) =>
-        e.message.includes("summary.xml") && e.outcome === "ok",
+        e.message.startsWith("import: файл") &&
+        e.message.includes("summary.xml") &&
+        e.outcome === "ok",
     );
     expect(fileEvent).toBeDefined();
     expect((fileEvent as { details: Record<string, unknown> }).details).toMatchObject({

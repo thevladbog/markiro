@@ -18,6 +18,8 @@ import type { NationalCatalogResult } from "../src/modules/national-catalog/nati
 const PRIVATE_TOKEN = "private-bearer-token";
 const PRIVATE_GTIN = "04601234567890";
 const PRIVATE_PROVIDER_MESSAGE = "private-provider-message";
+const PRIVATE_SOURCE_TENANT = "private-selected-tenant";
+const PRIVATE_UNRELATED_TENANT = "private-unrelated-tenant";
 const PRESENT_USAGE = {
   total: { used: 1, limit: 500 },
   method: { used: 1, limit: 10 },
@@ -408,27 +410,51 @@ describe("National Catalog diagnostic v3 collector", () => {
 });
 
 describe("National Catalog production source", () => {
-  it("resolves the product and token with the same selected tenant identity", async () => {
+  const selectedToken: NationalCatalogProductionTokenCandidate = {
+    tenantId: PRIVATE_SOURCE_TENANT,
+    encryptedToken: Buffer.from("encrypted"),
+    tokenNonce: Buffer.from("nonce"),
+    tokenTag: Buffer.from("tag"),
+  };
+
+  function expectPrivateValuesExcluded(value: unknown): void {
+    const serialized = JSON.stringify(value);
+    for (const privateValue of [
+      PRIVATE_SOURCE_TENANT,
+      PRIVATE_UNRELATED_TENANT,
+      PRIVATE_GTIN,
+      PRIVATE_TOKEN,
+      PRIVATE_PROVIDER_MESSAGE,
+    ]) {
+      expect(serialized).not.toContain(privateValue);
+    }
+  }
+
+  it("uses the configured tenant for its token and decryption identity", async () => {
     const token: NationalCatalogProductionTokenCandidate = {
-      tenantId: "tenant-a",
+      ...selectedToken,
       encryptedToken: Buffer.from("encrypted"),
       tokenNonce: Buffer.from("nonce"),
       tokenTag: Buffer.from("tag"),
     };
     const calls: string[] = [];
-    const result = await loadNationalCatalogProductionSource({
-      listActiveTokens: async () => [token],
-      findProductGtin: async (tenantId) => {
-        calls.push(`product:${tenantId}`);
-        return PRIVATE_GTIN;
+    const result = await loadNationalCatalogProductionSource(
+      {
+        findActiveToken: async (tenantId) => {
+          expect(tenantId).toBe(PRIVATE_SOURCE_TENANT);
+          calls.push("find-active-token");
+          return token;
+        },
+        decryptToken: (tenantId, candidate) => {
+          expect(tenantId).toBe(PRIVATE_SOURCE_TENANT);
+          calls.push("decrypt");
+          expect(candidate).toBe(token);
+          return PRIVATE_TOKEN;
+        },
       },
-      decryptToken: (tenantId, candidate) => {
-        calls.push(`decrypt:${tenantId}`);
-        expect(candidate).toBe(token);
-        return PRIVATE_TOKEN;
-      },
-    });
-    expect(calls).toEqual(["product:tenant-a", "decrypt:tenant-a"]);
+      { sourceTenantId: PRIVATE_SOURCE_TENANT, productGtin: PRIVATE_GTIN },
+    );
+    expect(calls).toEqual(["find-active-token", "decrypt"]);
     expect(result).toEqual({
       status: "ok",
       auth: { baseUrl: "https://апи.национальный-каталог.рф", token: PRIVATE_TOKEN },
@@ -436,102 +462,117 @@ describe("National Catalog production source", () => {
     });
   });
 
-  it("fails closed before product or crypto work for zero or ambiguous token tenants", async () => {
-    const token = {
-      tenantId: "tenant-a",
-      encryptedToken: Buffer.alloc(1),
-      tokenNonce: Buffer.alloc(1),
-      tokenTag: Buffer.alloc(1),
-    };
-    for (const [tokens, expected] of [
-      [[], "active-token-missing"],
-      [[token, { ...token, tenantId: "tenant-b" }], "active-token-ambiguous"],
-    ] as const) {
-      const calls: string[] = [];
-      const result = await loadNationalCatalogProductionSource({
-        listActiveTokens: async () => tokens,
-        findProductGtin: async () => {
-          calls.push("product");
-          return PRIVATE_GTIN;
+  it("does not consider an unrelated tenant token", async () => {
+    const calls: string[] = [];
+    const result = await loadNationalCatalogProductionSource(
+      {
+        findActiveToken: async (tenantId) => {
+          calls.push(tenantId);
+          return tenantId === PRIVATE_SOURCE_TENANT
+            ? selectedToken
+            : {
+                ...selectedToken,
+                tenantId: PRIVATE_UNRELATED_TENANT,
+              };
         },
-        decryptToken: () => {
-          calls.push("decrypt");
-          return PRIVATE_TOKEN;
-        },
-      });
-      expect(result).toEqual({ status: "unavailable", sourceStatus: expected });
-      expect(calls).toEqual([]);
-    }
+        decryptToken: () => PRIVATE_TOKEN,
+      },
+      { sourceTenantId: PRIVATE_SOURCE_TENANT, productGtin: PRIVATE_GTIN },
+    );
+    expect(calls).toEqual([PRIVATE_SOURCE_TENANT]);
+    expect(result).toMatchObject({ status: "ok", gtin: PRIVATE_GTIN });
   });
 
   it.each([
-    ["active-token-query-failed", "tokens"],
-    ["product-query-failed", "product"],
-  ] as const)("returns bounded %s evidence", async (expected, failure) => {
-    const privateError = `private-${failure}-database-detail`;
-    const token = {
-      tenantId: "tenant-a",
-      encryptedToken: Buffer.alloc(1),
-      tokenNonce: Buffer.alloc(1),
-      tokenTag: Buffer.alloc(1),
-    };
-    const result = await loadNationalCatalogProductionSource({
-      listActiveTokens: async () => {
-        if (failure === "tokens") throw new Error(privateError);
-        return [token];
-      },
-      findProductGtin: async () => {
-        throw new Error(privateError);
-      },
-      decryptToken: () => PRIVATE_TOKEN,
-    });
-    expect(result).toEqual({ status: "unavailable", sourceStatus: expected });
-    expect(JSON.stringify(result)).not.toContain(privateError);
-  });
-
-  it.each([null, "", "123", "0460123456789x"])(
-    "fails closed for missing or invalid same-tenant GTIN %s without decrypting",
-    async (gtin) => {
-      let decrypted = false;
-      const result = await loadNationalCatalogProductionSource({
-        listActiveTokens: async () => [
-          {
-            tenantId: "tenant-a",
-            encryptedToken: Buffer.alloc(1),
-            tokenNonce: Buffer.alloc(1),
-            tokenTag: Buffer.alloc(1),
+    ["blank configured tenant", " ", PRIVATE_GTIN, "active-token-missing"],
+    ["missing configured GTIN", PRIVATE_SOURCE_TENANT, " ", "product-gtin-unavailable"],
+    [
+      "non-14-digit configured GTIN",
+      PRIVATE_SOURCE_TENANT,
+      "0460123456789x",
+      "product-gtin-unavailable",
+    ],
+  ] as const)(
+    "fails closed for %s before token or crypto work",
+    async (_caseName, sourceTenantId, productGtin, sourceStatus) => {
+      let queried = false;
+      const result = await loadNationalCatalogProductionSource(
+        {
+          findActiveToken: async () => {
+            queried = true;
+            return selectedToken;
           },
-        ],
-        findProductGtin: async () => gtin,
-        decryptToken: () => {
-          decrypted = true;
-          return PRIVATE_TOKEN;
+          decryptToken: () => {
+            throw new Error(PRIVATE_PROVIDER_MESSAGE);
+          },
         },
-      });
-      expect(result).toEqual({
-        status: "unavailable",
-        sourceStatus: "product-gtin-unavailable",
-      });
-      expect(decrypted).toBe(false);
+        { sourceTenantId, productGtin },
+      );
+      expect(result).toEqual({ status: "unavailable", sourceStatus });
+      expect(queried).toBe(false);
+      expectPrivateValuesExcluded(result);
     },
   );
 
-  it("fails closed when tenant-bound token decryption fails", async () => {
-    const result = await loadNationalCatalogProductionSource({
-      listActiveTokens: async () => [
-        {
-          tenantId: "tenant-a",
-          encryptedToken: Buffer.alloc(1),
-          tokenNonce: Buffer.alloc(1),
-          tokenTag: Buffer.alloc(1),
-        },
-      ],
-      findProductGtin: async () => PRIVATE_GTIN,
-      decryptToken: () => {
-        throw new Error("private crypto detail");
+  const unavailableTokenCases: readonly [
+    string,
+    (tenantId: string) => Promise<NationalCatalogProductionTokenCandidate | null>,
+    "active-token-query-failed" | "active-token-missing",
+  ][] = [
+    [
+      "query failure",
+      async (): Promise<NationalCatalogProductionTokenCandidate | null> => {
+        throw new Error(PRIVATE_PROVIDER_MESSAGE);
       },
-    });
+      "active-token-query-failed",
+    ],
+    [
+      "missing selected-tenant token",
+      async (): Promise<NationalCatalogProductionTokenCandidate | null> => null,
+      "active-token-missing",
+    ],
+    [
+      "mismatched returned tenant",
+      async (): Promise<NationalCatalogProductionTokenCandidate | null> => ({
+        ...selectedToken,
+        tenantId: PRIVATE_UNRELATED_TENANT,
+      }),
+      "active-token-missing",
+    ],
+  ];
+
+  it.each(unavailableTokenCases)(
+    "returns bounded evidence for %s",
+    async (_caseName, findActiveToken, sourceStatus) => {
+      let decrypted = false;
+      const result = await loadNationalCatalogProductionSource(
+        {
+          findActiveToken,
+          decryptToken: () => {
+            decrypted = true;
+            return PRIVATE_TOKEN;
+          },
+        },
+        { sourceTenantId: PRIVATE_SOURCE_TENANT, productGtin: PRIVATE_GTIN },
+      );
+      expect(result).toEqual({ status: "unavailable", sourceStatus });
+      expect(decrypted).toBe(false);
+      expectPrivateValuesExcluded(result);
+    },
+  );
+
+  it("returns bounded evidence when tenant-bound token decryption fails", async () => {
+    const result = await loadNationalCatalogProductionSource(
+      {
+        findActiveToken: async () => selectedToken,
+        decryptToken: () => {
+          throw new Error(PRIVATE_PROVIDER_MESSAGE);
+        },
+      },
+      { sourceTenantId: PRIVATE_SOURCE_TENANT, productGtin: PRIVATE_GTIN },
+    );
     expect(result).toEqual({ status: "unavailable", sourceStatus: "token-decryption-failed" });
+    expectPrivateValuesExcluded(result);
   });
 });
 
