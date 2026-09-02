@@ -80,8 +80,8 @@ const productPayload = {
           attr_id: 13933,
           attr_name: "Код ТНВЭД",
           attr_value: "6202930000",
-          attr_value_id: 0,
-          value_id: 0,
+          attr_value_id: 0 as number | string | null,
+          value_id: 0 as number | string | null,
           attr_value_type: "",
           attr_group_id: 22,
           attr_group_name: "Нормативно-сопроводительная документация",
@@ -662,10 +662,11 @@ describe("NationalCatalogClient", () => {
     ]);
   });
 
-  it("normalizes provider multiplier strings for owned and published card reads", async () => {
+  it("normalizes production numeric placeholders for owned and published card reads", async () => {
     const payload = structuredClone(productPayload);
-    payload.result[0]!.identified_by[0]!.multiplier = "2";
-    payload.result[0]!.good_attrs[0]!.multiplier = "";
+    payload.result[0]!.identified_by[0]!.multiplier = "2.000";
+    payload.result[0]!.good_attrs[0]!.multiplier = "3.0";
+    payload.result[0]!.good_attrs[0]!.attr_value_id = "";
     const client = new NationalCatalogClient(
       dependencies(async () => new Response(JSON.stringify(payload), { status: 200 })),
     );
@@ -676,7 +677,7 @@ describe("NationalCatalogClient", () => {
         products: [
           {
             identifiers: [expect.objectContaining({ multiplier: 2 })],
-            attributes: [expect.objectContaining({ multiplier: null })],
+            attributes: [expect.objectContaining({ attributeValueId: null, multiplier: 3 })],
           },
         ],
       },
@@ -688,7 +689,7 @@ describe("NationalCatalogClient", () => {
     );
   });
 
-  it.each(["0", "-1", "1.5", " 1", "1 ", "one", "9007199254740992"])(
+  it.each(["0", "0.0", "-1", "1.5", " 1", "1 ", "one", "9007199254740992", "9007199254740992.0"])(
     "rejects malformed provider multiplier %j",
     async (multiplier) => {
       const payload = structuredClone(productPayload);
@@ -702,6 +703,23 @@ describe("NationalCatalogClient", () => {
       });
     },
   );
+
+  it("keeps value_id and non-empty attr_value_id strings strict", async () => {
+    for (const mutate of [
+      (payload: typeof productPayload) => (payload.result[0]!.good_attrs[0]!.value_id = ""),
+      (payload: typeof productPayload) => (payload.result[0]!.good_attrs[0]!.attr_value_id = "12"),
+    ]) {
+      const payload = structuredClone(productPayload);
+      mutate(payload);
+      const client = new NationalCatalogClient(
+        dependencies(async () => new Response(JSON.stringify(payload), { status: 200 })),
+      );
+
+      await expect(client.getFeedProducts(auth, ["0000000000001"])).resolves.toEqual({
+        status: "invalid_response",
+      });
+    }
+  });
 
   it("rejects empty, non-digit, and over-limit GTIN batches before any request", async () => {
     let calls = 0;
