@@ -42,6 +42,17 @@ vi.mock("../src/pages/shifts/api.js", async (importOriginal) => {
       writeHookMountSpy("close");
       return actual.useCloseShift();
     },
+    useShiftSummary: () => ({
+      data: {
+        generatedAt: "2026-09-02T09:00:00.000Z",
+        output: { mode: "validation", acceptedUnits: 0 },
+        participants: [],
+        unattributed: { eventCount: 0, acceptedScans: 0, closedBoxes: 0 },
+      },
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    }),
   };
 });
 
@@ -82,6 +93,7 @@ function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
             createRoutesFromElements(
               <Route path="/shifts" element={<ShiftsPage />}>
                 <Route path="new" element={<ShiftPanelRoute mode="create" />} />
+                <Route path=":shiftId" element={<ShiftPanelRoute mode="details" />} />
                 <Route path=":shiftId/edit" element={<ShiftPanelRoute mode="edit" />} />
               </Route>,
             ),
@@ -91,6 +103,20 @@ function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
       </AccessProvider>
     </QueryClientProvider>,
   );
+}
+
+async function openDetails(row?: HTMLElement) {
+  const scope = row ? within(row) : screen;
+  const button = row
+    ? scope.getByRole("button", { name: "Подробнее" })
+    : await screen.findByRole("button", { name: "Подробнее" });
+  fireEvent.click(button);
+  return screen.findByRole("dialog", { name: /Смена AUG26-/ });
+}
+
+async function openEdit(row?: HTMLElement) {
+  const panel = await openDetails(row);
+  fireEvent.click(within(panel).getByRole("button", { name: "Изменить" }));
 }
 
 async function chooseOption(
@@ -365,7 +391,7 @@ describe("ShiftsPage", () => {
     expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Удалить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Закрыть смену" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Сформировать отчет" })).toBeDefined();
+    expect(screen.getAllByRole("button", { name: "Подробнее" })).toHaveLength(3);
     expect(writeHookMountSpy).not.toHaveBeenCalled();
   });
 
@@ -402,7 +428,7 @@ describe("ShiftsPage", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/shifts", expect.any(Object));
   });
 
-  it("shows the shift number in the first table column", async () => {
+  it("uses a compact five-column table with the shift summary in the first column", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
       if (path.startsWith("/api/shifts")) {
@@ -416,12 +442,19 @@ describe("ShiftsPage", () => {
 
     await screen.findByText("AUG26-001");
     const headers = screen.getAllByRole("columnheader");
-    expect(headers[0]?.textContent).toContain("Номер");
+    expect(headers.map((header) => header.textContent)).toEqual([
+      "Смена",
+      "Продукт",
+      "Производство",
+      "План и статус",
+      "Действия",
+    ]);
     // The number lives in the FIRST data cell of each row, not merely
     // somewhere on the page.
     const rows = screen.getAllByRole("row").slice(1); // drop the header row
     const firstCells = rows.map((row) => within(row).getAllByRole("cell")[0]?.textContent);
-    expect(firstCells).toEqual(["AUG26-001", "AUG26-002/S", "AUG26-003"]);
+    expect(firstCells.map((cell) => cell?.startsWith("AUG26-"))).toEqual([true, true, true]);
+    expect(screen.getByRole("table").closest(".mk-table")?.classList).toContain("mk-shifts-table");
   });
 
   it("marks a shift that received data after it was closed", async () => {
@@ -479,7 +512,7 @@ describe("ShiftsPage", () => {
     expect(screen.queryByText("Смены не запланированы")).toBeNull();
   });
 
-  it("shows edit for planned and active rows, delete only for planned, and close only for active", async () => {
+  it("keeps every row action reachable through one details button", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
       if (path.startsWith("/api/shifts")) {
@@ -492,9 +525,11 @@ describe("ShiftsPage", () => {
     renderPage();
     const table = within(await screen.findByRole("table"));
 
-    expect(table.getAllByRole("button", { name: "Изменить" })).toHaveLength(2);
-    expect(table.getAllByRole("button", { name: "Удалить" })).toHaveLength(1);
-    expect(table.getAllByRole("button", { name: "Закрыть смену" })).toHaveLength(1);
+    expect(table.getAllByRole("button", { name: "Подробнее" })).toHaveLength(3);
+    expect(table.queryByRole("button", { name: "Изменить" })).toBeNull();
+    expect(table.queryByRole("button", { name: "Удалить" })).toBeNull();
+    expect(table.queryByRole("button", { name: "Закрыть смену" })).toBeNull();
+    expect(table.queryByRole("button", { name: "Сформировать отчет" })).toBeNull();
   });
 
   it("requires a critical confirmation before saving active-shift metadata", async () => {
@@ -520,7 +555,7 @@ describe("ShiftsPage", () => {
     renderPage();
     const row = (await screen.findByText("Сыр Российский")).closest("tr");
     expect(row).not.toBeNull();
-    await user.click(within(row!).getByRole("button", { name: "Изменить" }));
+    await openEdit(row!);
     await screen.findByText("Изменить смену · AUG26-002/S");
 
     expect((screen.getByRole("radio", { name: "Валидация" }) as HTMLButtonElement).disabled).toBe(
@@ -611,7 +646,7 @@ describe("ShiftsPage", () => {
 
     renderPage();
     const row = (await screen.findByText("Сыр Российский")).closest("tr");
-    fireEvent.click(within(row!).getByRole("button", { name: "Изменить" }));
+    await openEdit(row!);
 
     expect(
       screen.getByRole("button", { name: "Дата производства (для отчётов)" }).textContent,
@@ -637,7 +672,7 @@ describe("ShiftsPage", () => {
 
     renderPage();
     await screen.findByText("Молоко 1л");
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await openEdit();
     await user.click(
       screen.getByRole("button", { name: "Очистить дату: Дата производства (для отчётов)" }),
     );
@@ -675,7 +710,7 @@ describe("ShiftsPage", () => {
 
     renderPage();
     const row = (await screen.findByText("Сыр Российский")).closest("tr");
-    fireEvent.click(within(row!).getByRole("button", { name: "Изменить" }));
+    await openEdit(row!);
     await screen.findByText("Изменить смену · AUG26-002/S");
     expect((screen.getByRole("radio", { name: "Валидация" }) as HTMLButtonElement).disabled).toBe(
       true,
@@ -725,7 +760,7 @@ describe("ShiftsPage", () => {
 
     renderPage();
     const row = (await screen.findByText("Сыр Российский")).closest("tr");
-    fireEvent.click(within(row!).getByRole("button", { name: "Изменить" }));
+    await openEdit(row!);
     await screen.findByText("Изменить смену · AUG26-002/S");
     await chooseDate("Дата производства (для отчётов)", "25 июля 2026");
     await user.click(screen.getByRole("button", { name: "Сохранить" }));
@@ -809,7 +844,8 @@ describe("ShiftsPage", () => {
     renderPage();
     await screen.findByText("Сыр Российский");
 
-    fireEvent.click(screen.getByRole("button", { name: "Закрыть смену" }));
+    const details = await openDetails();
+    fireEvent.click(within(details).getByRole("button", { name: "Закрыть смену" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Закрыть смену" });
     fireEvent.change(within(dialog).getByLabelText("Причина закрытия"), {
       target: { value: "Плановая остановка" },
@@ -841,7 +877,8 @@ describe("ShiftsPage", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "Закрыть смену" }));
+    const details = await openDetails();
+    fireEvent.click(within(details).getByRole("button", { name: "Закрыть смену" }));
     const dialog = screen.getByRole("alertdialog", { name: "Закрыть смену" });
     fireEvent.change(within(dialog).getByLabelText("Причина закрытия"), {
       target: { value: "Переналадка линии" },
@@ -866,7 +903,8 @@ describe("ShiftsPage", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "Удалить" }));
+    const details = await openDetails();
+    fireEvent.click(within(details).getByRole("button", { name: "Удалить" }));
     const dialog = screen.getByRole("alertdialog", { name: "Удалить смену?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Удалить" }));
 
@@ -1448,7 +1486,7 @@ describe("ShiftsPage", () => {
 
     renderPage();
     await screen.findByText("Молоко 1л");
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await openEdit();
     await screen.findByText("Изменить смену · AUG26-001");
 
     await user.click(screen.getByRole("button", { name: "Очистить дату: Дата смены" }));
@@ -1480,7 +1518,7 @@ describe("ShiftsPage", () => {
     renderPage();
     await screen.findByText("Молоко 1л");
 
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await openEdit();
     await screen.findByText("Изменить смену · AUG26-001");
 
     fireEvent.change(screen.getByLabelText("Плановое количество, шт"), {
@@ -1534,7 +1572,7 @@ describe("ShiftsPage", () => {
     renderPage();
     await screen.findByText("Молоко 1л");
 
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await openEdit();
     await screen.findByText("Изменить смену · AUG26-001");
 
     // The issuer select defaults to "our own organization", not "none" --
@@ -1581,7 +1619,7 @@ describe("ShiftsPage", () => {
     renderPage();
     await screen.findByText("Молоко 1л");
 
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await openEdit();
     await screen.findByText("Изменить смену · AUG26-001");
 
     // Same "default sends null" contract counterpartyId already has its own
@@ -1625,7 +1663,7 @@ describe("ShiftsPage", () => {
     renderPage();
     await screen.findByText("Молоко 1л");
 
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await openEdit();
     await screen.findByText("Изменить смену · AUG26-001");
 
     // Same contract as above, for the box label template select: touch it
@@ -1676,7 +1714,7 @@ describe("ShiftsPage", () => {
     renderPage();
     await screen.findByText("Молоко 1л");
 
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await openEdit();
     await screen.findByText("Изменить смену · AUG26-001");
 
     expect(
@@ -1715,7 +1753,7 @@ describe("ShiftsPage", () => {
 
     renderPage();
     await screen.findByText(PLANNED_SHIFT.productName);
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await openEdit();
 
     const templateSelect = await screen.findByRole("combobox", {
       name: "Шаблон этикетки короба",
@@ -1762,7 +1800,7 @@ describe("ShiftsPage", () => {
 
     renderPage();
     await screen.findByText(PLANNED_SHIFT.productName);
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await openEdit();
     await chooseOption(
       userEvent.setup(),
       "Шаблон этикетки короба",

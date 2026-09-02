@@ -149,6 +149,14 @@ function appRouteElements() {
             }
           />
           <Route
+            path=":shiftId"
+            element={
+              <RequireCapability capability={C.OPERATIONS_READ}>
+                <ShiftPanelRoute mode="details" />
+              </RequireCapability>
+            }
+          />
+          <Route
             path=":shiftId/edit"
             element={
               <RequireCapability capability={C.OPERATIONS_WRITE}>

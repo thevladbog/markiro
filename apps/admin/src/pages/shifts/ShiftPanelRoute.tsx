@@ -19,6 +19,7 @@ import {
 } from "./api.js";
 import { BOX_TEMPLATE_SELECTION, ShiftForm, type ShiftFormValues } from "./ShiftForm.js";
 import { localCalendarDate } from "./date.js";
+import { ShiftDetailsPanel } from "./ShiftDetailsPanel.js";
 
 export interface ShiftsPanelContext {
   shifts: ShiftDto[];
@@ -45,8 +46,10 @@ export function closeShiftPanel(
   }
 }
 
-export function ShiftPanelRoute({ mode }: { mode: "create" | "edit" }) {
-  return mode === "create" ? <CreateShiftPanel /> : <EditShiftPanel />;
+export function ShiftPanelRoute({ mode }: { mode: "create" | "edit" | "details" }) {
+  if (mode === "create") return <CreateShiftPanel />;
+  if (mode === "details") return <DetailsShiftPanel />;
+  return <EditShiftPanel />;
 }
 
 function usePanelContext() {
@@ -57,11 +60,15 @@ function usePanelContext() {
   return { context, close };
 }
 
-function PanelState({ mode }: { mode: "create" | "edit" }) {
+function PanelState({ mode }: { mode: "create" | "edit" | "details" }) {
   const { t } = useTranslation();
   const { context, close } = usePanelContext();
   const title =
-    mode === "create" ? t("pages.shifts.form.createTitle") : t("pages.shifts.form.editTitle");
+    mode === "create"
+      ? t("pages.shifts.form.createTitle")
+      : mode === "edit"
+        ? t("pages.shifts.form.editTitle")
+        : t("pages.shifts.details.loadingTitle");
   return (
     <SidePanel open size="complex" title={title} closeLabel={t("common.close")} onClose={close}>
       {context.panelPending ? (
@@ -78,6 +85,28 @@ function PanelState({ mode }: { mode: "create" | "edit" }) {
       )}
     </SidePanel>
   );
+}
+
+function DetailsShiftPanel() {
+  const { shiftId } = useParams();
+  const { t } = useTranslation();
+  const { context, close } = usePanelContext();
+  if (context.panelPending || context.panelError) return <PanelState mode="details" />;
+  const shift = context.shifts.find((item) => item.id === shiftId);
+  if (!shift) {
+    return (
+      <SidePanel
+        open
+        size="complex"
+        title={t("pages.shifts.details.loadingTitle")}
+        closeLabel={t("common.close")}
+        onClose={close}
+      >
+        <Alert tone="error">{t("pages.shifts.form.notFound")}</Alert>
+      </SidePanel>
+    );
+  }
+  return <ShiftDetailsPanel shift={shift} onClose={close} />;
 }
 
 function DiscardDialog({
