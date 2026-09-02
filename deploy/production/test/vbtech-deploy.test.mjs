@@ -495,6 +495,23 @@ test("a delayed pending transition is reconciled to failed before the deployment
     settled = true;
   });
 
+  // Wait until the pending write is actually in flight before releasing it:
+  // the attempt is recorded synchronously before the deferred is awaited, so
+  // once it is visible the transition deadline timer is armed and the
+  // delay(30) below is guaranteed to expire after it. Without this poll a
+  // slow runner can spend >30ms in the earlier deploy stages, resolve the
+  // deferred before the pending stage starts, and let the deployment finish
+  // healthy (observed as a CI flake).
+  for (
+    let attempt = 0;
+    attempt < 200 && !context.stateAttempts.some(({ kind }) => kind === "pending");
+    attempt += 1
+  )
+    await delay(1);
+  assert.equal(
+    context.stateAttempts.some(({ kind }) => kind === "pending"),
+    true,
+  );
   await delay(30);
   const settledBeforePendingCompleted = settled;
   pendingDeferred.resolve();
