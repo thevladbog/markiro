@@ -77,6 +77,12 @@ export const integrationSessions = pgTable(
   (t) => [
     uniqueIndex("integration_sessions_cookie_uq").on(t.cookieHash),
     index("integration_sessions_tenant_started_idx").on(t.tenantId, t.startedAt),
+    index("integration_sessions_tenant_channel_started_id_idx").on(
+      t.tenantId,
+      t.channelType,
+      t.startedAt.desc(),
+      t.id.desc(),
+    ),
   ],
 );
 
@@ -99,7 +105,17 @@ export const integrationEvents = pgTable(
     message: text("message").notNull(),
     details: jsonb("details").$type<Record<string, unknown>>(),
   },
-  (t) => [index("integration_events_tenant_at_idx").on(t.tenantId, t.at)],
+  (t) => [
+    index("integration_events_tenant_at_idx").on(t.tenantId, t.at),
+    index("integration_events_tenant_channel_session_direction_at_id_idx").on(
+      t.tenantId,
+      t.channelType,
+      t.sessionId,
+      t.direction,
+      t.at.desc(),
+      t.id.desc(),
+    ),
+  ],
 );
 
 /** Позиция внешней системы, не сопоставленная с каталогом. */
