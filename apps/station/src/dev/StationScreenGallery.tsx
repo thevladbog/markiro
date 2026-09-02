@@ -312,7 +312,7 @@ const GALLERY_INVENTORY_DATE = "2026-08-19";
 const GALLERY_INVENTORY_SSCC = "046006820000000015";
 const GALLERY_INVENTORY_TASK = {
   inventoryId: "11111111-1111-4111-8111-111111111111",
-  inventoryNumber: "INV-00047",
+  inventoryNumber: "INVENTORY-26-0047",
   productName: "Вода питьевая 0,5 л / Drinking water 0.5 L",
   productPrintName: "Вода 0,5 л",
   mode: "check" as const,
@@ -1381,7 +1381,7 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
           <div className="work-screen__primary">
             <ScanResultInstrument
               exec={galleryProductImageExecutor}
-              productId="gallery-product-dicky-crest"
+              productId="gallery-product-berry-syrup"
               image={galleryProductImage}
               productName={ru ? "Тестовый товар А" : "Sample product A"}
               counterpartyName={ru ? "ООО «Тестовый производитель»" : "Sample Manufacturer Ltd"}

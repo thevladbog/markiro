@@ -13,18 +13,18 @@ import {
 const root = new URL("../../../", import.meta.url);
 const releasedRoot = new URL("apps/landing/public/legal/", root);
 const releasedAttestation = new URL("deploy/production/legal-artifacts-attestation.json", root);
-const releaseId = "MKR-LEGAL-2026.08-14-2026-09-02";
-const manifestSha256 = "e00dcf703b66e51a07cf85811ce9f65db4606c673ecaf3e77777571f00601ee3";
+const releaseId = "MKR-LEGAL-2026.09-15-2026-09-02";
+const manifestSha256 = "521f79154a63ecdccdb4b6d850045ddaa6ada57a689a9833ee793eeccf2673ed";
 const releasedPdfNames = [
   "markiro_mkr-brd-01_2026.08-01_en.pdf",
   "markiro_mkr-brd-01_2026.08-01_ru.pdf",
   "markiro_mkr-dpa-01_2026.08-01_en.pdf",
   "markiro_mkr-dpa-01_2026.08-01_ru.pdf",
-  "markiro_mkr-ins-01_2026.08-01_ru.pdf",
-  "markiro_mkr-ins-02_2026.08-01_ru.pdf",
-  "markiro_mkr-ins-03_2026.08-01_ru.pdf",
+  "markiro_mkr-ins-01_2026.09-01_ru.pdf",
+  "markiro_mkr-ins-02_2026.09-01_ru.pdf",
+  "markiro_mkr-ins-03_2026.09-01_ru.pdf",
   "markiro_mkr-ins-04_2026.08-02_ru.pdf",
-  "markiro_mkr-ins-05_2026.08-01_ru.pdf",
+  "markiro_mkr-ins-05_2026.09-01_ru.pdf",
   "markiro_mkr-ins-06_2026.08-03_ru.pdf",
   "markiro_mkr-ins-07_2026.08-03_ru.pdf",
   "markiro_mkr-ins-08_2026.08-01_ru.pdf",
