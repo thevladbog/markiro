@@ -300,7 +300,7 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
     case "updates":
       return <UpdateFixture variant={fixture.variant} />;
     case "inventory":
-      return <InventoryFixture variant={fixture.variant} />;
+      return <InventoryFixture variant={fixture.variant} locale={locale} />;
     case "floor-header":
       return <FloorHeaderFixture locale={locale} />;
     case "long-copy":
@@ -310,20 +310,23 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
 
 const GALLERY_INVENTORY_DATE = "2026-08-19";
 const GALLERY_INVENTORY_SSCC = "046006820000000015";
-const GALLERY_INVENTORY_TASK = {
+const galleryInventoryTask = (locale: GalleryLocale) => ({
   inventoryId: "11111111-1111-4111-8111-111111111111",
   inventoryNumber: "INVENTORY-26-0047",
-  productName: "Вода питьевая 0,5 л / Drinking water 0.5 L",
-  productPrintName: "Вода 0,5 л",
+  productName:
+    locale === "ru" ? "Вода питьевая 0,5 л / Drinking water 0.5 L" : "Drinking water 0.5 L",
+  productPrintName: locale === "ru" ? "Вода 0,5 л" : "Water 0.5 L",
   mode: "check" as const,
   lineId: "22222222-2222-4222-8222-222222222222",
-  lineName: "Тестовая линия А",
+  lineName: locale === "ru" ? "Тестовая линия А" : "Test line A",
   productionDateFrom: GALLERY_INVENTORY_DATE,
   productionDateTo: "2026-09-19",
-};
+});
 
-const GALLERY_CHECK_MANIFEST: StationInventoryBundleManifest & { mode: "check" } = {
-  ...GALLERY_INVENTORY_TASK,
+const galleryCheckManifest = (
+  locale: GalleryLocale,
+): StationInventoryBundleManifest & { mode: "check" } => ({
+  ...galleryInventoryTask(locale),
   snapshotId: "44444444-4444-4444-8444-444444444444",
   snapshotRevision: 1,
   snapshotFixedAt: "2026-08-19T10:00:00.000Z",
@@ -340,10 +343,12 @@ const GALLERY_CHECK_MANIFEST: StationInventoryBundleManifest & { mode: "check" }
   sscc: null,
   ssccRevokedFrom: [],
   ssccRevokedBlocks: [],
-};
+});
 
-const GALLERY_REPACK_MANIFEST: StationInventoryBundleManifest & { mode: "repack" } = {
-  ...GALLERY_CHECK_MANIFEST,
+const galleryRepackManifest = (
+  locale: GalleryLocale,
+): StationInventoryBundleManifest & { mode: "repack" } => ({
+  ...galleryCheckManifest(locale),
   inventoryNumber: "INV-R-00012",
   mode: "repack",
   boxLabelTemplate: {
@@ -359,13 +364,13 @@ const GALLERY_REPACK_MANIFEST: StationInventoryBundleManifest & { mode: "repack"
     toSerial: 100,
     consumedThroughSerial: null,
   },
-};
+});
 
-const galleryInventoryClient: StationClient = {
+const galleryInventoryClient = (locale: GalleryLocale): StationClient => ({
   get<T>(path: string): Promise<T> {
     if (path === "/shifts") return Promise.resolve({ items: [] } as T);
     if (path === "/station/inventory-tasks") {
-      return Promise.resolve({ items: [GALLERY_INVENTORY_TASK] } as T);
+      return Promise.resolve({ items: [galleryInventoryTask(locale)] } as T);
     }
     return Promise.reject(new Error(`gallery: unexpected inventory GET ${path}`));
   },
@@ -378,7 +383,7 @@ const galleryInventoryClient: StationClient = {
   whoami() {
     return Promise.resolve({ ok: true as const });
   },
-};
+});
 
 const galleryInventoryExecutor: SqlExecutor = {
   all<T>(): Promise<T[]> {
@@ -395,12 +400,12 @@ const galleryInventoryScanSource: ScanSource = {
   },
 };
 
-function InventoryFixture({ variant }: { variant: string }) {
+function InventoryFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   switch (variant) {
     case "task-selection":
-      return <InventoryTaskSelectionFixture />;
+      return <InventoryTaskSelectionFixture locale={locale} />;
     case "other-line-confirmation":
-      return <InventoryOtherLineConfirmationFixture />;
+      return <InventoryOtherLineConfirmationFixture locale={locale} />;
     case "simple-box-accepted":
     case "duplicate-other-terminal":
     case "known-ineligible":
@@ -409,13 +414,13 @@ function InventoryFixture({ variant }: { variant: string }) {
     case "source-date-mismatch":
     case "mixed-box":
     case "production-date-change":
-      return <SimpleInventoryFixture variant={variant} />;
+      return <SimpleInventoryFixture variant={variant} locale={locale} />;
     default:
-      return <RepackInventoryFixture variant={variant} />;
+      return <RepackInventoryFixture variant={variant} locale={locale} />;
   }
 }
 
-function InventoryTaskSelectionFixture() {
+function InventoryTaskSelectionFixture({ locale }: { locale: GalleryLocale }) {
   const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     rootRef.current?.querySelector<HTMLButtonElement>('[data-floor-category="warehouse"]')?.click();
@@ -423,11 +428,11 @@ function InventoryTaskSelectionFixture() {
   return (
     <div ref={rootRef} style={{ width: "100%", height: "100%", minHeight: 0 }}>
       <TaskSelection
-        client={galleryInventoryClient}
+        client={galleryInventoryClient(locale)}
         exec={galleryInventoryExecutor}
         source={galleryInventoryScanSource}
         operatorId="gallery-operator"
-        currentLineName="Тестовая линия А"
+        currentLineName={locale === "ru" ? "Тестовая линия А" : "Test line A"}
         onShiftSelected={() => undefined}
         onInventorySelected={() => undefined}
         onNew={() => undefined}
@@ -436,16 +441,16 @@ function InventoryTaskSelectionFixture() {
   );
 }
 
-function InventoryOtherLineConfirmationFixture() {
+function InventoryOtherLineConfirmationFixture({ locale }: { locale: GalleryLocale }) {
   const resolved: ResolvedInventoryTask = {
-    task: GALLERY_INVENTORY_TASK,
+    task: galleryInventoryTask(locale),
     deviceLineId: "33333333-3333-4333-8333-333333333333",
     requiresDifferentLineConfirmation: true,
   };
   return (
     <InventoryTaskConfirmation
       resolved={resolved}
-      currentLineName="Тестовая линия Б"
+      currentLineName={locale === "ru" ? "Тестовая линия Б" : "Test line B"}
       busy={false}
       onCancel={() => undefined}
       onConfirm={() => undefined}
@@ -453,8 +458,8 @@ function InventoryOtherLineConfirmationFixture() {
   );
 }
 
-function SimpleInventoryFixture({ variant }: { variant: string }) {
-  const result = galleryInventoryScanResult(variant);
+function SimpleInventoryFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
+  const result = galleryInventoryScanResult(variant, locale);
   const progress: InventoryProgress = {
     verified: variant === "simple-box-accepted" ? 20 : 124,
     discrepancies: variant === "known-ineligible" || variant === "not-in-snapshot" ? 1 : 3,
@@ -466,7 +471,7 @@ function SimpleInventoryFixture({ variant }: { variant: string }) {
   return (
     <InventoryWorkScreen
       exec={galleryInventoryExecutor}
-      inventory={GALLERY_CHECK_MANIFEST}
+      inventory={galleryCheckManifest(locale)}
       deviceId="gallery-terminal-a"
       operatorId="gallery-operator"
       source={galleryInventoryScanSource}
@@ -504,7 +509,10 @@ function SimpleInventoryFixture({ variant }: { variant: string }) {
   );
 }
 
-function galleryInventoryScanResult(variant: string): RecordInventoryScanResult | null {
+function galleryInventoryScanResult(
+  variant: string,
+  locale: GalleryLocale,
+): RecordInventoryScanResult | null {
   const common = {
     serialSuffix: "…0019",
     ssccSuffix: null,
@@ -531,7 +539,7 @@ function galleryInventoryScanResult(variant: string): RecordInventoryScanResult 
         firstWinning: {
           codeHash: "gallery-safe-code-hash",
           eventId: "gallery-winning-event",
-          deviceId: "ТЕРМИНАЛ-02",
+          deviceId: locale === "ru" ? "ТЕРМИНАЛ-02" : "TERMINAL-02",
           scannedAt: "2026-08-19T10:00:00.000Z",
         },
       };
@@ -564,7 +572,7 @@ function galleryInventoryScanResult(variant: string): RecordInventoryScanResult 
   }
 }
 
-function RepackInventoryFixture({ variant }: { variant: string }) {
+function RepackInventoryFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   const state = galleryRepackState(variant);
   const result = galleryRepackResult(variant);
   const corrections = variant === "repack-corrections";
@@ -575,7 +583,7 @@ function RepackInventoryFixture({ variant }: { variant: string }) {
   return (
     <InventoryWorkScreen
       exec={galleryInventoryExecutor}
-      inventory={GALLERY_REPACK_MANIFEST}
+      inventory={galleryRepackManifest(locale)}
       deviceId="gallery-terminal-a"
       operatorId="gallery-operator"
       source={galleryInventoryScanSource}
