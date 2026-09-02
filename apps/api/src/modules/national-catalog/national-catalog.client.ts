@@ -252,7 +252,8 @@ function productPath(
   if (gtins.some((gtin) => !/^\d+$/.test(gtin))) {
     throw new TypeError("National Catalog GTINs must contain digits only");
   }
-  return `${path}?${new URLSearchParams({ gtins: gtins.join(";") }).toString()}`;
+  const selector = gtins.length === 1 ? { gtin: gtins[0] as string } : { gtins: gtins.join(";") };
+  return `${path}?${new URLSearchParams(selector).toString()}`;
 }
 
 function urlFor(baseUrl: string, path: string): string {

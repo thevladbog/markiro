@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { PlatformOperationsController } from "../src/modules/platform-operations/platform-operations.controller";
 import { PlatformOperationsService } from "../src/modules/platform-operations/platform-operations.service";
+import { NationalCatalogSchemaService } from "../src/modules/national-catalog/national-catalog-schema.service";
 import {
   PLATFORM_ACCESS_POLICY,
   type PlatformCapabilityPolicy,
@@ -56,11 +57,20 @@ describe("platform operations routes", () => {
     overview: vi.fn(async () => overview),
     monitoring: vi.fn(async () => health),
   };
+  const nationalCatalogSchemas = {
+    refresh: vi.fn(),
+    activate: vi.fn(),
+    reviewGroupMapping: vi.fn(),
+    reviewAttributeMappings: vi.fn(),
+  };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [PlatformOperationsController],
-      providers: [{ provide: PlatformOperationsService, useValue: service }],
+      providers: [
+        { provide: PlatformOperationsService, useValue: service },
+        { provide: NationalCatalogSchemaService, useValue: nationalCatalogSchemas },
+      ],
     }).compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix("api");
@@ -96,7 +106,10 @@ describe("platform operations routes", () => {
   it("fails closed when the platform principal is absent", async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [PlatformOperationsController],
-      providers: [{ provide: PlatformOperationsService, useValue: service }],
+      providers: [
+        { provide: PlatformOperationsService, useValue: service },
+        { provide: NationalCatalogSchemaService, useValue: nationalCatalogSchemas },
+      ],
     }).compile();
     const appWithoutPrincipal = moduleRef.createNestApplication();
     appWithoutPrincipal.setGlobalPrefix("api");
