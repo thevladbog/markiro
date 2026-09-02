@@ -155,7 +155,7 @@ export function labelTemplateUsesField(spec: LabelTemplateSpec, field: LabelFiel
   стоит дефолтом: общий дефолт профиля и строки `org_box_label_template_defaults`. Если
   после изменения шаблон перестаёт подходить хотя бы одному месту (выключен, либо для
   общего дефолта область стала не `null`, либо для дефолта категории код выпал из
-  области), ответ 409:
+  области), ответ 409 со списком мест, которым изменение мешает:
 
   ```json
   {
@@ -168,21 +168,22 @@ export function labelTemplateUsesField(spec: LabelTemplateSpec, field: LabelFiel
 
   Проверка и запись выполняются в одной транзакции.
 
-### Профиль организации (`/org-profile`)
+### Профиль организации (`PUT /org/profile`)
 
 - DTO получает `categoryBoxLabelTemplateDefaults: Array<{ chzProductGroupCode: number;
 templateId: string }>` и `productGroupsInUse: number[]` (различные коды неархивных
   товаров тенанта с непустым кодом, отсортированы по коду).
-- PATCH принимает `categoryBoxLabelTemplateDefaults` целиком как замену списка: строки,
+- PUT принимает `categoryBoxLabelTemplateDefaults` целиком как замену списка: строки,
   которых нет в новом списке, удаляются. Дубли кодов в списке отвечают 400.
-- Валидация дефолтов при PATCH: `defaultBoxLabelTemplateId` должен указывать на
+- Валидация дефолтов при PUT: `defaultBoxLabelTemplateId` должен указывать на
   включённый шаблон с областью `null`; каждый `templateId` дефолта категории должен быть
   включён и покрывать свой код. Нарушение отвечает 400 с кодом
   `BOX_LABEL_TEMPLATE_NOT_ELIGIBLE` и полем-нарушителем. Код категории проверяется по
   справочнику. Категорию без товаров в каталоге назначать можно: `productGroupsInUse`
   только подсказка для UI.
-- Изменение дефолтов категорий пишется в тот же аудит-след, что и остальные поля
-  профиля.
+- Изменение списка дефолтов категорий пишет событие `tenantAuditEvents` с action
+  `tenant.box_label_template_defaults.updated` и полями `before`/`after` (списки
+  до и после), по образцу события `tenant.pickup_policy.updated` в том же сервисе.
 
 ### Смены (`/shifts`)
 
@@ -207,7 +208,9 @@ templateId: string }>` и `productGroupsInUse: number[]` (различные к�
 ### Инвентаризации (`/inventories`)
 
 - `create` и `update`: та же проверка пригодности явного `boxLabelTemplateId` к товару
-  инвентаризации, тот же код 422. Разрешение дефолта на сервере не добавляется:
+  инвентаризации, 422 с кодом `INVENTORY_BOX_LABEL_TEMPLATE_NOT_ELIGIBLE` (модуль
+  использует префикс `INVENTORY_`). На `update` проверка только при смене шаблона.
+  Разрешение дефолта на сервере не добавляется:
   инвентаризацию создаёт только админка, а она предзаполняет форму через
   `planning-config?productId=`.
 
@@ -252,7 +255,7 @@ templateId: string }>` и `productGroupsInUse: number[]` (различные к�
   категории шаблонами (включён, область `null` или содержит код). Если у сохранённого
   дефолта шаблон стал непригоден, показывается stale-пункт. Пустая секция при отсутствии
   товаров с кодом: подсказка «Назначьте товарам категории в каталоге».
-- Сохраняется общей кнопкой профиля: PATCH отправляет `categoryBoxLabelTemplateDefaults`
+- Сохраняется общей кнопкой профиля: PUT отправляет `categoryBoxLabelTemplateDefaults`
   только с непустыми строками.
 
 ### Форма смены
