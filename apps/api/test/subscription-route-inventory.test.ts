@@ -274,6 +274,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /products/:id/category-binding-previews (ProductRegulatoryController.previewCategoryBinding)",
       "POST /products/:id/category-change-previews (ProductRegulatoryController.previewCategoryChange)",
       "POST /products/:id/image (ProductsController.uploadImage)",
+      "POST /products/:id/national-catalog/import-previews (NationalCatalogController.previewImport)",
+      "POST /products/:id/national-catalog/lookups (NationalCatalogController.lookup)",
       "POST /products/:id/regulatory-proposals/:proposalId/apply (ProductRegulatoryController.applyProposal)",
       "POST /products/:id/regulatory-proposals/:proposalId/reject (ProductRegulatoryController.rejectProposal)",
       "POST /shifts (ShiftsController.createShift)",
@@ -527,6 +529,18 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   ),
   "PlatformCatalogController.updateVersion": platform(
     "platform catalog mutation uses the isolated platform principal and capability policy",
+  ),
+  "PlatformOperationsController.activateNationalCatalogSchema": platform(
+    "National Catalog schema activation uses the isolated platform principal and operations capability policy",
+  ),
+  "PlatformOperationsController.refreshNationalCatalogSchemas": platform(
+    "National Catalog schema refresh uses the isolated platform principal and operations capability policy",
+  ),
+  "PlatformOperationsController.reviewNationalCatalogAttributeMappings": platform(
+    "National Catalog attribute mapping review uses the isolated platform principal and operations capability policy",
+  ),
+  "PlatformOperationsController.reviewNationalCatalogGroupMapping": platform(
+    "National Catalog group mapping review uses the isolated platform principal and operations capability policy",
   ),
   "PlatformSettingsController.setDefaultDemo": platform(
     "platform setting mutation uses the isolated platform principal and capability policy",

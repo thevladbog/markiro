@@ -98,6 +98,7 @@ function fakeBoss() {
     stop: vi.fn(async () => undefined),
     createQueue: vi.fn(async () => undefined),
     schedule: vi.fn(async (_name?: string) => undefined),
+    unschedule: vi.fn(async (_name?: string) => undefined),
     work: vi.fn(
       async (
         name: string,

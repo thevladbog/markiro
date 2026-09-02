@@ -4,6 +4,7 @@ import { and, asc, eq, gt } from "drizzle-orm";
 import { loadEnv } from "./env";
 import { NationalCatalogClient } from "./modules/national-catalog/national-catalog.client";
 import type {
+  NationalCatalogAttributesRequest,
   NationalCatalogAuth,
   NationalCatalogResult,
   NationalCatalogRequestOptions,
@@ -97,6 +98,7 @@ export interface NationalCatalogDiagnosticClient {
   ): Promise<NationalCatalogResult<{ categories: readonly unknown[] }>>;
   getAttributes(
     auth: NationalCatalogAuth,
+    options: NationalCatalogAttributesRequest,
   ): Promise<NationalCatalogResult<{ attributes: readonly unknown[] }>>;
   getFeedProducts(
     auth: NationalCatalogAuth,
@@ -305,7 +307,14 @@ export async function collectNationalCatalogLiveDiagnostic(
     );
   }
 
-  const attributes = await attempt(() => dependencies.client.getAttributes(source.auth));
+  const attributeCategoryId =
+    categories.status === "ok" ? lowestUsableCategoryId(categories.value.categories) : null;
+  const attributes =
+    attributeCategoryId === null
+      ? ({ status: "unavailable" } as const)
+      : await attempt(() =>
+          dependencies.client.getAttributes(source.auth, { catId: attributeCategoryId }),
+        );
   observations.push(
     observation(
       "attributes",
@@ -348,6 +357,17 @@ export async function collectNationalCatalogLiveDiagnostic(
     );
   }
   return evaluateNationalCatalogDiagnostic("ready", observations);
+}
+
+function lowestUsableCategoryId(categories: readonly unknown[]): number | null {
+  let selected: number | null = null;
+  for (const category of categories) {
+    if (typeof category !== "object" || category === null || !("id" in category)) continue;
+    const id = category.id;
+    if (!Number.isSafeInteger(id) || (id as number) <= 0) continue;
+    if (selected === null || (id as number) < selected) selected = id as number;
+  }
+  return selected;
 }
 
 async function attempt<T>(

@@ -4,6 +4,7 @@ import {
   platformCatalogContracts,
   platformCommercialContracts,
   platformOperationsContracts,
+  platformNationalCatalogContracts,
   platformTeamContracts,
   platformTenantContracts,
 } from "@markiro/platform-contracts";
@@ -73,6 +74,33 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/operations/monitoring",
     "200",
     platformOperationsContracts.monitoring.response,
+  ),
+  route(
+    "post",
+    "/platform/operations/national-catalog/schema-refresh",
+    "200",
+    platformNationalCatalogContracts.refresh.response,
+    { body: platformNationalCatalogContracts.refresh.body },
+  ),
+  route(
+    "post",
+    "/platform/operations/national-catalog/schema-versions/{id}/activate",
+    "200",
+    platformNationalCatalogContracts.activate.response,
+  ),
+  route(
+    "post",
+    "/platform/operations/national-catalog/schema-versions/{id}/attribute-mappings/review",
+    "200",
+    platformNationalCatalogContracts.reviewAttributeMappings.response,
+    { body: platformNationalCatalogContracts.reviewAttributeMappings.body },
+  ),
+  route(
+    "post",
+    "/platform/operations/national-catalog/group-mappings/{code}/review",
+    "200",
+    platformNationalCatalogContracts.reviewGroupMapping.response,
+    { body: platformNationalCatalogContracts.reviewGroupMapping.body },
   ),
   route("get", "/platform/tenants", "200", platformTenantContracts.list.response),
   route("post", "/platform/tenants", "201", platformTenantContracts.create.response, {

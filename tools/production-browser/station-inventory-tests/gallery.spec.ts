@@ -208,7 +208,7 @@ async function verifyViewports(
           await expect(gallery.locator("button[data-floor-category='production']")).toBeVisible();
           await expect(
             page.getByRole("button", {
-              name: locale === "ru" ? "Продолжить INV-00047" : "Continue INV-00047",
+              name: locale === "ru" ? "Продолжить INVENTORY-26-0047" : "Continue INVENTORY-26-0047",
             }),
           ).toBeVisible();
         }
