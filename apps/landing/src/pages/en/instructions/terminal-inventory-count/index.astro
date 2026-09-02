@@ -1,0 +1,42 @@
+---
+import taskSelection from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/task-selection.png?url";
+import otherLine from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/other-line.png?url";
+import boxAccepted from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/box-accepted.png?url";
+import notInSnapshot from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/not-in-snapshot.png?url";
+import protectedCode from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/protected.png?url";
+import ineligible from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/ineligible.png?url";
+import duplicate from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/duplicate.png?url";
+import dateChange from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/date-change.png?url";
+import sourceDateMismatch from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/source-date-mismatch.png?url";
+import mixedBox from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/mixed-box.png?url";
+import repackSourceDate from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/repack-source-date.png?url";
+import repackOldBox from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/repack-old-box.png?url";
+import repackScanning from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/repack-scanning.png?url";
+import repackBoxReady from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/repack-box-ready.png?url";
+import printRecovery from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/print-recovery.png?url";
+import leaveOpenBox from "@markiro/legal-documents/assets/instructions/mkr-ins-05/en/leave-open-box.png?url";
+
+import { getLegalDocumentPage } from "../../../../content/legal-pages";
+import InstructionDocument from "../../../../components/InstructionDocument.astro";
+
+const images = {
+  "task-selection": taskSelection,
+  "other-line": otherLine,
+  "box-accepted": boxAccepted,
+  "not-in-snapshot": notInSnapshot,
+  protected: protectedCode,
+  ineligible,
+  duplicate,
+  "date-change": dateChange,
+  "source-date-mismatch": sourceDateMismatch,
+  "mixed-box": mixedBox,
+  "repack-source-date": repackSourceDate,
+  "repack-old-box": repackOldBox,
+  "repack-scanning": repackScanning,
+  "repack-box-ready": repackBoxReady,
+  "print-recovery": printRecovery,
+  "leave-open-box": leaveOpenBox,
+};
+---
+
+<InstructionDocument page={getLegalDocumentPage("MKR-INS-05", "en")} images={images} />

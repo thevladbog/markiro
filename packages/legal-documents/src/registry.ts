@@ -61,8 +61,20 @@ export function legalDocumentKind(code: LegalDocumentCode): LegalDocumentKind {
   return LEGAL_DOCUMENT_KIND_BY_CODE[code];
 }
 
+// Instructions publish English incrementally: a code joins this set once its
+// translated content, English frames and landing page all exist. The cabinet
+// instructions (06-09) are the next planned tranche.
+const INSTRUCTION_EN_PUBLISHED: ReadonlySet<LegalDocumentCode> = new Set([
+  "MKR-INS-01",
+  "MKR-INS-02",
+  "MKR-INS-03",
+  "MKR-INS-04",
+  "MKR-INS-05",
+]);
+
 export function legalReleaseLocales(code: LegalDocumentCode): readonly LegalLocale[] {
-  return legalDocumentKind(code) === "instruction" ? ["ru"] : ["ru", "en"];
+  if (legalDocumentKind(code) !== "instruction") return ["ru", "en"];
+  return INSTRUCTION_EN_PUBLISHED.has(code) ? ["ru", "en"] : ["ru"];
 }
 
 export function requireLegalContent(
@@ -116,7 +128,10 @@ export const LEGAL_RELEASES = [
     effectiveDate: "2026-09-02",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
-    routes: { ru: "/instruktsii/stantsiya-vkhod-i-start-smeny/" },
+    routes: {
+      ru: "/instruktsii/stantsiya-vkhod-i-start-smeny/",
+      en: "/en/instructions/station-sign-in-and-shift-start/",
+    },
   },
   {
     code: "MKR-INS-02",
@@ -124,7 +139,10 @@ export const LEGAL_RELEASES = [
     effectiveDate: "2026-09-02",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
-    routes: { ru: "/instruktsii/rabochiy-tsikl-skanirovaniya-i-agregatsii/" },
+    routes: {
+      ru: "/instruktsii/rabochiy-tsikl-skanirovaniya-i-agregatsii/",
+      en: "/en/instructions/scanning-and-aggregation-work-cycle/",
+    },
   },
   {
     code: "MKR-INS-03",
@@ -132,7 +150,10 @@ export const LEGAL_RELEASES = [
     effectiveDate: "2026-09-02",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
-    routes: { ru: "/instruktsii/isklyucheniya-i-vosstanovlenie/" },
+    routes: {
+      ru: "/instruktsii/isklyucheniya-i-vosstanovlenie/",
+      en: "/en/instructions/exceptions-and-recovery/",
+    },
   },
   {
     code: "MKR-INS-04",
@@ -140,7 +161,10 @@ export const LEGAL_RELEASES = [
     effectiveDate: "2026-09-01",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
-    routes: { ru: "/instruktsii/nastroyka-rabochego-mesta/" },
+    routes: {
+      ru: "/instruktsii/nastroyka-rabochego-mesta/",
+      en: "/en/instructions/workstation-setup/",
+    },
   },
   {
     code: "MKR-INS-05",
@@ -148,7 +172,10 @@ export const LEGAL_RELEASES = [
     effectiveDate: "2026-09-02",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
-    routes: { ru: "/instruktsii/inventarizatsiya-na-terminale/" },
+    routes: {
+      ru: "/instruktsii/inventarizatsiya-na-terminale/",
+      en: "/en/instructions/terminal-inventory-count/",
+    },
   },
   {
     code: "MKR-INS-06",

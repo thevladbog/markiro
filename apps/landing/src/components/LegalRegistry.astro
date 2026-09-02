@@ -3,6 +3,7 @@ import {
   findLegalDocument,
   formatLegalEffectiveDate,
   legalDocumentKind,
+  legalReleaseLocales,
   requireLegalContent,
 } from "@markiro/legal-documents";
 
@@ -27,10 +28,11 @@ const publishedArtifacts = await loadLegalArtifacts();
 const documentReleases = ACTIVE_LEGAL_RELEASES.filter(
   ({ code }) => legalDocumentKind(code) !== "instruction",
 );
-const instructionReleases =
-  metadata.locale === "ru"
-    ? ACTIVE_LEGAL_RELEASES.filter(({ code }) => legalDocumentKind(code) === "instruction")
-    : [];
+const instructionReleases = ACTIVE_LEGAL_RELEASES.filter(
+  ({ code }) =>
+    legalDocumentKind(code) === "instruction" &&
+    legalReleaseLocales(code).includes(metadata.locale),
+);
 ---
 
 <BaseLayout metadata={metadata} graph={graph}>
@@ -98,28 +100,32 @@ const instructionReleases =
     {instructionReleases.length > 0 && (
       <article class="container legal-registry" data-legal-document data-legal-kind="instruction-registry">
         <div class="legal-registry__heading">
-          <p class="section-index">Инструкции</p>
-          <h2>Печатные инструкции</h2>
+          <p class="section-index">{metadata.locale === "ru" ? "Инструкции" : "Instructions"}</p>
+          <h2>{metadata.locale === "ru" ? "Печатные инструкции" : "Printed instructions"}</h2>
         </div>
         <div class="legal-registry__list">
           {instructionReleases.map((release) => {
-            const content = requireLegalContent(findLegalDocument(release.code), "ru");
+            const content = requireLegalContent(findLegalDocument(release.code), metadata.locale);
+            const href =
+              metadata.locale === "en" && "en" in release.routes
+                ? release.routes.en
+                : release.routes.ru;
             return (
               <article class="legal-registry__entry" data-legal-status={release.status}>
-                <a class="legal-registry__item" href={release.routes.ru}>
+                <a class="legal-registry__item" href={href}>
                   <span class="legal-registry__code" data-registry-code data-legal-code>{release.code}</span>
                   <span class="legal-registry__title">{content.title}</span>
                   <span class="legal-registry__meta">
                     <span data-legal-revision>{release.revision}</span>
                     <span aria-hidden="true">·</span>
-                    <time datetime={release.effectiveDate} data-legal-effective-date>{formatLegalEffectiveDate(release.effectiveDate, "ru")}</time>
+                    <time datetime={release.effectiveDate} data-legal-effective-date>{formatLegalEffectiveDate(release.effectiveDate, metadata.locale)}</time>
                   </span>
                   <span class="legal-registry__arrow" aria-hidden="true">→</span>
                 </a>
                 <LegalArtifactControls
                   release={release}
-                  locale="ru"
-                  artifacts={artifactsForRelease(publishedArtifacts, release.code, release.revision, "ru")}
+                  locale={metadata.locale}
+                  artifacts={artifactsForRelease(publishedArtifacts, release.code, release.revision, metadata.locale)}
                   compact
                 />
               </article>
