@@ -2100,4 +2100,32 @@ describe("ShiftsPage", () => {
     expect(await screen.findByRole("option", { name: BOX_LABEL_TEMPLATE.name })).toBeDefined();
     expect(screen.queryByRole("option", { name: BEER_ONLY_TEMPLATE.name })).toBeNull();
   });
+  it("labels the default option as unavailable when the planning request fails", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path.startsWith("/api/shifts/planning-config")) {
+        return jsonResponse(500, { message: "Internal error" });
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await screen.findByText("Новая смена");
+
+    await chooseOption(userEvent.setup(), "Продукт", PRODUCT_A.name);
+    const trigger = screen.getByRole("combobox", { name: "Шаблон этикетки короба" });
+    await waitFor(() =>
+      expect(trigger.textContent).toContain(
+        "Использовать настройку организации — Шаблон недоступен — обновите данные",
+      ),
+    );
+    expect(trigger.textContent).not.toContain("Не настроен");
+  });
 });

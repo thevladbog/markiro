@@ -265,13 +265,14 @@ export function ShiftForm({
   }, [formMode, lines, setValue]);
 
   const submit = handleSubmit(async (values) => {
-    // The default may still be resolving for a freshly chosen product; wait
-    // for it rather than snapshotting a stale or empty answer.
+    // The default may still be resolving (or have failed) for a freshly chosen
+    // product; wait for or retry it rather than snapshotting a stale or empty
+    // answer.
     let defaultId = resolvedDefaultId;
     if (
       values.boxLabelTemplateSelection === BOX_TEMPLATE_SELECTION.organization &&
       hasProduct &&
-      planning.isLoading
+      (planning.isLoading || planning.isError)
     ) {
       const settled = await planning.refetch();
       defaultId = settled.data?.defaultBoxLabelTemplateId ?? null;
@@ -352,17 +353,23 @@ export function ShiftForm({
     ? t("pages.shifts.form.boxLabelTemplateSelectProduct")
     : planning.isLoading
       ? t("pages.shifts.form.boxLabelTemplateResolving")
-      : resolvedDefaultId === null
-        ? t("pages.shifts.form.boxLabelTemplateOrganization", {
-            name: t("pages.shifts.form.boxLabelTemplateNotConfigured"),
+      : planning.isError
+        ? // A failed lookup is not "no default configured": say the template
+          // is unavailable so the operator refreshes instead of assuming.
+          t("pages.shifts.form.boxLabelTemplateOrganization", {
+            name: t("pages.shifts.form.boxLabelTemplateUnavailable"),
           })
-        : resolvedDefaultSource === "category"
-          ? t("pages.shifts.form.boxLabelTemplateCategoryDefault", {
-              // `productGroup` is the resolved group name from the catalog DTO.
-              category: selectedProduct?.productGroup ?? String(productGroupCode ?? ""),
-              name: currentDefaultName,
+        : resolvedDefaultId === null
+          ? t("pages.shifts.form.boxLabelTemplateOrganization", {
+              name: t("pages.shifts.form.boxLabelTemplateNotConfigured"),
             })
-          : t("pages.shifts.form.boxLabelTemplateOrganization", { name: currentDefaultName });
+          : resolvedDefaultSource === "category"
+            ? t("pages.shifts.form.boxLabelTemplateCategoryDefault", {
+                // `productGroup` is the resolved group name from the catalog DTO.
+                category: selectedProduct?.productGroup ?? String(productGroupCode ?? ""),
+                name: currentDefaultName,
+              })
+            : t("pages.shifts.form.boxLabelTemplateOrganization", { name: currentDefaultName });
   const boxLabelTemplateOptions: SelectOption[] = [
     { value: BOX_TEMPLATE_SELECTION.organization, label: defaultOptionLabel },
     ...(formMode === "edit"
