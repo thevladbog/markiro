@@ -328,9 +328,11 @@ export function OrgProfilePage() {
                 {...registerProfile("gs1Prefixes")}
               />
               <Select
-                native
                 label={t("pages.settings.profile.defaultBoxLabelTemplateLabel")}
                 hint={t("pages.settings.profile.defaultBoxLabelTemplateScopeHint")}
+                searchable
+                searchLabel={t("pages.settings.profile.templateSearch")}
+                searchPlaceholder={t("pages.settings.profile.templateSearch")}
                 options={labelTemplateOptions}
                 value={defaultBoxLabelTemplateId}
                 onValueChange={(value) =>
@@ -401,8 +403,10 @@ export function OrgProfilePage() {
                             <td style={CATEGORY_CELL_STYLE}>{row.name}</td>
                             <td style={CATEGORY_CELL_STYLE}>
                               <Select
-                                native
                                 aria-label={row.name}
+                                searchable
+                                searchLabel={t("pages.settings.profile.templateSearch")}
+                                searchPlaceholder={t("pages.settings.profile.templateSearch")}
                                 options={[
                                   {
                                     value: "",

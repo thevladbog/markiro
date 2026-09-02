@@ -157,6 +157,8 @@
     "actionFailed": "Action failed. Please try again.",
     "boxLabelTemplateRequired": "A box label template is not configured in the admin panel. Configure it and try again.",
     "templateLabel": "Box label template",
+    "templateSearch": "Search templates",
+    "templateSearchEmpty": "Nothing found. Change the query.",
     "templateDefault": "Default",
     "templateMeta": "{{width}}×{{height}} mm · {{dpi}} dpi",
     "templatesEmpty": "No label templates in the admin panel. Create one and try again.",

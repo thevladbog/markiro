@@ -776,6 +776,37 @@ describe("NewShift", () => {
     expect(fetchMock.mock.calls[4]?.[0]).toBe("http://localhost:3000/shifts/s9/open");
   });
 
+  it("filters the template grid by the search field", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify(templateLibrary), { status: 200 }));
+    render(
+      <NewShift client={client} source={silentSource} onStarted={vi.fn()} onBack={() => {}} />,
+    );
+    submitGtin();
+    await screen.findByText("Cola");
+    fireEvent.click(screen.getByRole("button", { name: "Aggregation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(screen.getByTestId("new-shift-template")).toBeDefined());
+    expect(screen.getByRole("button", { name: /Box 58x40/ })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Euro pallet 100x80/ })).toBeDefined();
+
+    fireEvent.change(screen.getByLabelText("Search templates"), { target: { value: "euro" } });
+    expect(screen.queryByRole("button", { name: /Box 58x40/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Euro pallet 100x80/ })).toBeDefined();
+
+    fireEvent.change(screen.getByLabelText("Search templates"), { target: { value: "zzz" } });
+    expect(screen.getByText("Nothing found. Change the query.")).toBeDefined();
+
+    fireEvent.change(screen.getByLabelText("Search templates"), { target: { value: "" } });
+    expect(screen.getByRole("button", { name: /Box 58x40/ })).toBeDefined();
+  });
+
   it("lets the operator switch to a different template before starting", async () => {
     useTimeZone("Europe/Moscow");
     vi.useFakeTimers({ toFake: ["Date"] });

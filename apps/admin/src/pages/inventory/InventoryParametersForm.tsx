@@ -162,6 +162,9 @@ export function InventoryParametersForm({
           <Select
             label={t("pages.inventory.create.template")}
             value={templateId}
+            searchable
+            searchLabel={t("pages.inventory.create.templateSearch")}
+            searchPlaceholder={t("pages.inventory.create.templateSearch")}
             onValueChange={(value) => {
               setTemplateId(value);
               setTemplateTouched(true);

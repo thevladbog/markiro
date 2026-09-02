@@ -591,6 +591,9 @@ export function ShiftForm({
               label={t("pages.shifts.form.boxLabelTemplateLabel")}
               options={boxLabelTemplateOptions}
               value={boxLabelTemplateSelection}
+              searchable
+              searchLabel={t("pages.shifts.form.boxLabelTemplateSearch")}
+              searchPlaceholder={t("pages.shifts.form.boxLabelTemplateSearch")}
               {...(hasProduct && eligibleTemplates.length === 0 && !planning.isLoading
                 ? { hint: t("pages.shifts.form.boxLabelTemplateNoneEligible") }
                 : {})}

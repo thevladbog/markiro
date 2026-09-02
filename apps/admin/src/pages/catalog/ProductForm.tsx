@@ -574,6 +574,8 @@ export function ProductForm({
             label={t("pages.catalog.form.defaultCounterpartyLabel")}
             options={counterpartyOptions}
             value={defaultCounterpartyId ?? ""}
+            searchable
+            searchLabel={t("pages.catalog.form.defaultCounterpartySearchLabel")}
             onValueChange={(value) =>
               setValue("defaultCounterpartyId", value, { shouldDirty: true, shouldValidate: true })
             }
