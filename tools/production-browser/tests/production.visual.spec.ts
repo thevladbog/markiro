@@ -312,6 +312,296 @@ const STATION_DEVICE = {
 };
 const DEVICES_RESPONSE = { items: [STATION_DEVICE], page: 1, pageSize: 20, total: 1 };
 
+// --- MKR-INS-09 (shift monitoring, closing and reports) fixtures ----------
+
+const SCREENSHOT_DIR_09 = join(
+  import.meta.dirname,
+  "../../../packages/legal-documents/assets/instructions/mkr-ins-09",
+);
+function screenshotPath09(name: string): string {
+  return join(SCREENSHOT_DIR_09, `${name}.png`);
+}
+
+const ACTIVE_SHIFT_09_ID = "80000000-0000-4000-8000-000000000005";
+const ACTIVE_SHIFT_09 = {
+  ...ACTIVE_SHIFT,
+  id: ACTIVE_SHIFT_09_ID,
+  number: "SEP26-004",
+  plannedDate: "2026-09-02",
+  productionDate: "2026-09-02",
+  openedAt: "2026-09-02T04:10:00.000Z",
+  createdAt: "2026-09-01T14:00:00.000Z",
+};
+const CLOSED_SHIFT = {
+  ...ACTIVE_SHIFT_09,
+  id: "80000000-0000-4000-8000-000000000003",
+  number: "SEP26-003",
+  status: "closed",
+  plannedDate: "2026-09-01",
+  productionDate: "2026-09-01",
+  openedAt: "2026-09-01T04:05:00.000Z",
+  closedAt: "2026-09-01T12:40:00.000Z",
+  closeReason: "Смена завершена по плану",
+  createdAt: "2026-08-31T14:00:00.000Z",
+};
+const LATE_SHIFT = {
+  ...CLOSED_SHIFT,
+  id: "80000000-0000-4000-8000-000000000004",
+  number: "SEP26-002",
+  lateDataAt: "2026-09-01T14:05:00.000Z",
+};
+
+function dashboardWindow(
+  start: string,
+  end: string,
+  accepted: number,
+  boxes: number,
+  units: number,
+) {
+  return {
+    start,
+    end,
+    validation: { acceptedUnits: accepted, shiftHours: 8, unitsPerShiftHour: accepted / 8 },
+    aggregation: {
+      closedBoxes: boxes,
+      containedUnits: units,
+      shiftHours: 8,
+      boxesPerShiftHour: boxes / 8,
+      containedUnitsPerShiftHour: units / 8,
+    },
+  };
+}
+
+/**
+ * `/api/dashboard/overview` is parsed with a `.strict()` zod schema
+ * (apps/admin/src/pages/dashboard/api.ts:71-118), so these fixtures mirror
+ * it field for field. Verdict, quality and the shift list must AGREE — a
+ * verdict reason with no matching data on the same frame is a fabrication
+ * (the same rule the inventory close-preview fixtures follow).
+ *
+ * «Производство под контролем»: no reasons, one active shift, so the
+ * quality signal is honestly "provisional" with the active_shifts reason.
+ */
+const DASHBOARD_UNDER_CONTROL = {
+  generatedAt: "2026-09-02T05:30:00.000Z",
+  timeZone: "Europe/Moscow",
+  metricVersion: "operations-dashboard-v1",
+  setup: { productCount: 3, shiftCount: 12, hasRunShift: true },
+  verdict: { status: "under_control", reasons: [] },
+  today: {
+    validationAcceptedUnits: 1180,
+    aggregationClosedBoxes: 74,
+    aggregationContainedUnits: 888,
+    activeShiftCount: 1,
+    includedClosedShiftCount: 1,
+  },
+  dynamics: {
+    period: "today",
+    grain: "hour",
+    currentWindow: dashboardWindow(
+      "2026-09-02T00:00:00.000Z",
+      "2026-09-02T08:00:00.000Z",
+      1180,
+      74,
+      888,
+    ),
+    comparisonWindow: dashboardWindow(
+      "2026-09-01T00:00:00.000Z",
+      "2026-09-01T08:00:00.000Z",
+      1050,
+      66,
+      792,
+    ),
+    buckets: [
+      {
+        label: "04:00",
+        ...dashboardWindow("2026-09-02T04:00:00.000Z", "2026-09-02T05:00:00.000Z", 260, 16, 192),
+      },
+      {
+        label: "05:00",
+        ...dashboardWindow("2026-09-02T05:00:00.000Z", "2026-09-02T06:00:00.000Z", 300, 19, 228),
+      },
+      {
+        label: "06:00",
+        ...dashboardWindow("2026-09-02T06:00:00.000Z", "2026-09-02T07:00:00.000Z", 310, 20, 240),
+      },
+      {
+        label: "07:00",
+        ...dashboardWindow("2026-09-02T07:00:00.000Z", "2026-09-02T08:00:00.000Z", 310, 19, 228),
+      },
+    ],
+    quality: {
+      status: "provisional",
+      reasons: ["active_shifts"],
+      activeShiftCount: 1,
+      lateDataShiftCount: 0,
+      sources: ["code_registry", "boxes", "box_items"],
+    },
+  },
+  activeShifts: [
+    {
+      id: ACTIVE_SHIFT_09_ID,
+      number: "SEP26-004",
+      productName: PRODUCT.name,
+      lineName: LINE.name,
+      openedAt: "2026-09-02T04:10:00.000Z",
+      lateDataAt: null,
+      output: { mode: "aggregation", closedBoxes: 74, containedUnits: 888 },
+    },
+  ],
+};
+
+/**
+ * «Требует внимания» over late data: the reason appears in verdict.reasons,
+ * in the quality signal AND as a late-data shift count — one coherent story.
+ */
+const DASHBOARD_ATTENTION = {
+  ...DASHBOARD_UNDER_CONTROL,
+  verdict: {
+    status: "needs_attention",
+    reasons: [{ code: "late_data", severity: "needs_attention", count: 1, route: "/shifts" }],
+  },
+  dynamics: {
+    ...DASHBOARD_UNDER_CONTROL.dynamics,
+    quality: {
+      ...DASHBOARD_UNDER_CONTROL.dynamics.quality,
+      reasons: ["active_shifts", "late_data"],
+      lateDataShiftCount: 1,
+    },
+  },
+};
+
+/**
+ * The five report formats the server offers, copied VERBATIM from
+ * `SHIFT_EXPORT_FORMATS` in packages/domain/src/shift-exports.ts (this
+ * package installs with --ignore-workspace, so the domain package is not
+ * importable here). If the catalog changes, this copy must follow — the
+ * strict /api/ interception makes any shape drift visible as a blank
+ * dialog, and the document quotes these labels from the frame.
+ */
+const SHIFT_EXPORT_FORMATS_FIXTURE = [
+  {
+    id: "shift_txt_flat",
+    version: 1,
+    label: "[TXT][Без коробов] Отчет смены",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    boxMode: "flat",
+  },
+  {
+    id: "shift_txt_boxes",
+    version: 2,
+    label: "[TXT][С коробами] Отчет смены",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    boxMode: "boxes",
+  },
+  {
+    id: "shift_csv_flat",
+    version: 1,
+    label: "[CSV][Без коробов] Отчет смены",
+    extension: "csv",
+    mimeType: "text/csv; charset=utf-8",
+    boxMode: "flat",
+  },
+  {
+    id: "shift_csv_boxes",
+    version: 1,
+    label: "[CSV][С коробами] Отчет смены",
+    extension: "csv",
+    mimeType: "text/csv; charset=utf-8",
+    boxMode: "boxes",
+  },
+  {
+    id: "shift_xml_gismt_aggregation",
+    version: 1,
+    label: "[XML][ГИСМТ] Отчет об агрегации",
+    extension: "xml",
+    mimeType: "application/xml; charset=utf-8",
+    boxMode: "boxes",
+  },
+];
+
+/** Shapes follow `ShiftExportDto` (apps/admin/src/pages/shifts/shift-exports-api.ts:21-41). */
+const EXPORT_READY = {
+  id: "a0000000-0000-4000-8000-000000000001",
+  shiftId: CLOSED_SHIFT.id,
+  formatId: "shift_xml_gismt_aggregation",
+  formatVersion: 1,
+  maxLines: 1000,
+  status: "ready",
+  errorCode: null,
+  productNameSnapshot: PRODUCT.name,
+  shiftDateSnapshot: "2026-09-01",
+  totalCodeCount: 888,
+  totalBoxCount: 74,
+  createdByUserId: "browser_manager",
+  createdByName: "Игорь Волков",
+  sourceSnapshotStartedAt: "2026-09-01T12:45:00.000Z",
+  completedAt: "2026-09-01T12:45:40.000Z",
+  attemptCount: 1,
+  createdAt: "2026-09-01T12:45:00.000Z",
+  stale: false,
+  artifacts: [
+    {
+      id: "b0000000-0000-4000-8000-000000000001",
+      partNumber: 1,
+      physicalLineCount: 640,
+      codeCount: 600,
+      boxCount: 50,
+      filename: "shift-SEP26-003-aggregation-part1.xml",
+      mimeType: "application/xml; charset=utf-8",
+      byteSize: 118400,
+      sha256: "0123456789abcdef".repeat(4),
+    },
+    {
+      id: "b0000000-0000-4000-8000-000000000002",
+      partNumber: 2,
+      physicalLineCount: 322,
+      codeCount: 288,
+      boxCount: 24,
+      filename: "shift-SEP26-003-aggregation-part2.xml",
+      mimeType: "application/xml; charset=utf-8",
+      byteSize: 61240,
+      sha256: "89abcdef01234567".repeat(4),
+    },
+  ],
+};
+const EXPORT_PROCESSING = {
+  ...EXPORT_READY,
+  id: "a0000000-0000-4000-8000-000000000002",
+  formatId: "shift_csv_boxes",
+  formatVersion: 1,
+  maxLines: null,
+  status: "processing",
+  completedAt: null,
+  totalCodeCount: null,
+  totalBoxCount: null,
+  sourceSnapshotStartedAt: "2026-09-01T12:50:00.000Z",
+  createdAt: "2026-09-01T12:50:00.000Z",
+  artifacts: [],
+};
+const EXPORT_FAILED = {
+  ...EXPORT_READY,
+  id: "a0000000-0000-4000-8000-000000000003",
+  formatId: "shift_txt_boxes",
+  formatVersion: 2,
+  status: "failed",
+  errorCode: "BOX_COVERAGE_INCOMPLETE",
+  completedAt: null,
+  totalCodeCount: null,
+  totalBoxCount: null,
+  attemptCount: 2,
+  createdAt: "2026-09-01T12:47:00.000Z",
+  artifacts: [],
+};
+const EXPORT_STALE = {
+  ...EXPORT_READY,
+  id: "a0000000-0000-4000-8000-000000000004",
+  stale: true,
+  createdAt: "2026-09-01T13:20:00.000Z",
+};
+
 type Scenario =
   | "lines"
   | "linesDeleteBlocked"
@@ -320,7 +610,15 @@ type Scenario =
   | "shiftsList"
   | "shiftCreate"
   | "shiftsPlanned"
-  | "shiftActiveEdit";
+  | "shiftActiveEdit"
+  | "dashboardCalm"
+  | "dashboardAttention"
+  | "shiftsClose"
+  | "shiftsLate"
+  | "exportsCatalog"
+  | "exportsHistory"
+  | "exportsFailed"
+  | "exportsStale";
 
 /**
  * Every scenario shares the shell fetches (profile, access, pending
@@ -382,6 +680,57 @@ async function installApi(page: Page, scenario: Scenario) {
       if (path === "/api/counterparties") return json(route, { items: [COUNTERPARTY] });
       if (path === "/api/label-templates") return json(route, { items: [LABEL_TEMPLATE] });
       if (path === "/api/shifts/planning-config") return json(route, SHIFT_PLANNING_CONFIG);
+    }
+
+    if (scenario === "dashboardCalm" || scenario === "dashboardAttention") {
+      if (path === "/api/dashboard/overview") {
+        return json(
+          route,
+          scenario === "dashboardCalm" ? DASHBOARD_UNDER_CONTROL : DASHBOARD_ATTENTION,
+        );
+      }
+    }
+
+    const exportScenario =
+      scenario === "exportsCatalog" ||
+      scenario === "exportsHistory" ||
+      scenario === "exportsFailed" ||
+      scenario === "exportsStale";
+    if (scenario === "shiftsClose" || scenario === "shiftsLate" || exportScenario) {
+      if (path === "/api/shifts") {
+        return json(route, {
+          items:
+            scenario === "shiftsClose"
+              ? [ACTIVE_SHIFT_09]
+              : scenario === "shiftsLate"
+                ? [ACTIVE_SHIFT_09, LATE_SHIFT, CLOSED_SHIFT]
+                : [CLOSED_SHIFT],
+        });
+      }
+      // The shifts page loads the planning references regardless of what the
+      // frame is about -- same set the 08 scenarios serve.
+      if (path === "/api/products") {
+        return json(route, { items: [PRODUCT, DRAFT_PRODUCT, ARCHIVED_PRODUCT] });
+      }
+      if (path === "/api/lines") return json(route, { items: [LINE, SECOND_LINE, THIRD_LINE] });
+      if (path === "/api/counterparties") return json(route, { items: [COUNTERPARTY] });
+      if (path === "/api/label-templates") return json(route, { items: [LABEL_TEMPLATE] });
+      if (path === "/api/shifts/planning-config") return json(route, SHIFT_PLANNING_CONFIG);
+    }
+    if (exportScenario) {
+      if (path === "/api/shift-exports/formats") return json(route, SHIFT_EXPORT_FORMATS_FIXTURE);
+      if (path === `/api/shifts/${CLOSED_SHIFT.id}/exports`) {
+        return json(
+          route,
+          scenario === "exportsCatalog"
+            ? []
+            : scenario === "exportsHistory"
+              ? [EXPORT_PROCESSING, EXPORT_READY]
+              : scenario === "exportsFailed"
+                ? [EXPORT_FAILED]
+                : [EXPORT_STALE],
+        );
+      }
     }
 
     unexpected.push(`${route.request().method()} ${path}${url.search}`);
@@ -558,5 +907,96 @@ test("deleting a planned shift asks for confirmation", async ({ page }) => {
   await page.getByRole("button", { name: "Удалить" }).first().click();
   await expect(page.getByText("Удалить смену?")).toBeVisible();
   await screenshotFullMain(page, screenshotPath("shift-delete"));
+  expect(unexpected).toEqual([]);
+});
+
+// --- MKR-INS-09 frames -----------------------------------------------------
+
+test("dashboard: production under control", async ({ page }) => {
+  const unexpected = await installApi(page, "dashboardCalm");
+  await openHarness(page, "/");
+  await expect(page.getByText("Производство под контролем")).toBeVisible();
+  await expect(page.getByText("Активных причин для вмешательства нет.")).toBeVisible();
+  await screenshotFullMain(page, screenshotPath09("dashboard-under-control"));
+  expect(unexpected).toEqual([]);
+});
+
+test("dashboard: needs attention over late data", async ({ page }) => {
+  const unexpected = await installApi(page, "dashboardAttention");
+  await openHarness(page, "/");
+  await expect(page.getByText("Требует внимания")).toBeVisible();
+  await expect(page.getByText("Поздние данные затронули 1 смену")).toBeVisible();
+  await screenshotFullMain(page, screenshotPath09("dashboard-attention"));
+  expect(unexpected).toEqual([]);
+});
+
+test("shifts list: active shift offers the close action", async ({ page }) => {
+  const unexpected = await installApi(page, "shiftsClose");
+  await openHarness(page, "/shifts");
+  await expect(page.getByText("SEP26-004")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Закрыть смену" })).toBeVisible();
+  await screenshotFullMain(page, screenshotPath09("shifts-active"));
+  expect(unexpected).toEqual([]);
+});
+
+test("closing a shift from the cabinet asks for a reason", async ({ page }) => {
+  const unexpected = await installApi(page, "shiftsClose");
+  await openHarness(page, "/shifts");
+  await page.getByRole("button", { name: "Закрыть смену" }).click();
+  await expect(page.getByText("Причина закрытия")).toBeVisible();
+  await screenshotFullMain(page, screenshotPath09("shift-close"));
+  expect(unexpected).toEqual([]);
+});
+
+test("late data badge on a closed shift", async ({ page }) => {
+  const unexpected = await installApi(page, "shiftsLate");
+  await openHarness(page, "/shifts");
+  await expect(page.getByText("Данные после закрытия")).toBeVisible();
+  await screenshotFullMain(page, screenshotPath09("shifts-late-badge"));
+  expect(unexpected).toEqual([]);
+});
+
+/**
+ * The report dialog only exists on CLOSED shifts (`ShiftExportAction` renders
+ * for `row.status === "closed"`, apps/admin/src/pages/shifts/index.tsx:372),
+ * so every export frame starts from CLOSED_SHIFT's row.
+ */
+test("report dialog: format catalog and split controls", async ({ page }) => {
+  const unexpected = await installApi(page, "exportsCatalog");
+  await openHarness(page, "/shifts");
+  await page.getByRole("button", { name: "Сформировать отчет" }).click();
+  await expect(page.getByText("[XML][ГИСМТ] Отчет об агрегации")).toBeVisible();
+  await expect(page.getByText("Разделить отчет на части")).toBeVisible();
+  await screenshotFullMain(page, screenshotPath09("exports-catalog"));
+  expect(unexpected).toEqual([]);
+});
+
+test("report dialog: history with ready parts and a processing run", async ({ page }) => {
+  const unexpected = await installApi(page, "exportsHistory");
+  await openHarness(page, "/shifts");
+  await page.getByRole("button", { name: "Сформировать отчет" }).click();
+  await expect(page.getByText("Готов", { exact: true })).toBeVisible();
+  await expect(page.getByText("Формируется")).toBeVisible();
+  await expect(page.getByText("Часть 1")).toBeVisible();
+  await screenshotFullMain(page, screenshotPath09("exports-history"));
+  expect(unexpected).toEqual([]);
+});
+
+test("report dialog: failed run explains itself and offers a retry", async ({ page }) => {
+  const unexpected = await installApi(page, "exportsFailed");
+  await openHarness(page, "/shifts");
+  await page.getByRole("button", { name: "Сформировать отчет" }).click();
+  await expect(page.getByText("Не все коды смены распределены по коробам.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Повторить" })).toBeVisible();
+  await screenshotFullMain(page, screenshotPath09("exports-failed"));
+  expect(unexpected).toEqual([]);
+});
+
+test("report dialog: stale run warns after late data", async ({ page }) => {
+  const unexpected = await installApi(page, "exportsStale");
+  await openHarness(page, "/shifts");
+  await page.getByRole("button", { name: "Сформировать отчет" }).click();
+  await expect(page.getByText("Данные смены изменились — сформируйте новый отчет.")).toBeVisible();
+  await screenshotFullMain(page, screenshotPath09("exports-stale"));
   expect(unexpected).toEqual([]);
 });

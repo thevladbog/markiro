@@ -42,16 +42,17 @@ describe("loadLegalArtifacts", () => {
   it("loads the complete release set and verifies current bytes and hashes", async () => {
     const artifacts = await loadLegalArtifacts(publicRoot);
 
-    expect(artifacts).toHaveLength(20);
-    expect(artifacts.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(16);
+    expect(artifacts).toHaveLength(21);
+    expect(artifacts.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(17);
     expect(artifacts.filter(({ kind }) => kind === "template-docx")).toHaveLength(4);
     expect(artifacts.every(({ href }) => href.startsWith("/legal/files/"))).toBe(true);
-    // One release train (2026.08) in the current dash-separated naming scheme;
-    // the sequence varies once a document is reissued (MKR-INS-07 is on 02).
-    expect(artifacts.every(({ fileName }) => /_2026\.08-\d{2}_(?:ru|en)\./.test(fileName))).toBe(
-      true,
-    );
-    expect(artifacts.every(({ fileName }) => !/_2026\.08\.\d{2}_/.test(fileName))).toBe(true);
+    // The current dash-separated naming scheme (period-sequence); the period
+    // moves with new series (MKR-INS-09 opened 2026.09) and the sequence
+    // varies once a document is reissued, so both stay generalized.
+    expect(
+      artifacts.every(({ fileName }) => /_\d{4}\.\d{2}-\d{2}_(?:ru|en)\./.test(fileName)),
+    ).toBe(true);
+    expect(artifacts.every(({ fileName }) => !/_\d{4}\.\d{2}\.\d{2}_/.test(fileName))).toBe(true);
   });
 
   it.each([

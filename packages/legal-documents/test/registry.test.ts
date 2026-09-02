@@ -27,6 +27,7 @@ describe("legal document registry", () => {
       "MKR-INS-06",
       "MKR-INS-07",
       "MKR-INS-08",
+      "MKR-INS-09",
     ]);
     expect(OPERATOR_PROFILES["operator-2026-08-15"]).toEqual({
       name: "Богатырев Владислав Сергеевич",
@@ -54,6 +55,8 @@ describe("legal document registry", () => {
       "MKR-INS-04": "2026.08/02",
       "MKR-INS-06": "2026.08/03",
       "MKR-INS-07": "2026.08/03",
+      // Not a reissue: MKR-INS-09 simply FIRST shipped in the September series.
+      "MKR-INS-09": "2026.09/01",
     };
     expect(
       LEGAL_RELEASES.every(
@@ -70,7 +73,8 @@ describe("legal document registry", () => {
           code !== "MKR-INS-05" &&
           code !== "MKR-INS-06" &&
           code !== "MKR-INS-07" &&
-          code !== "MKR-INS-08",
+          code !== "MKR-INS-08" &&
+          code !== "MKR-INS-09",
       ).every(({ effectiveDate }) => effectiveDate === "2026-08-15"),
     ).toBe(true);
     expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-08-21");
@@ -81,7 +85,8 @@ describe("legal document registry", () => {
     expect(findLegalRelease("MKR-INS-06").effectiveDate).toBe("2026-09-01");
     expect(findLegalRelease("MKR-INS-07").effectiveDate).toBe("2026-09-01");
     expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-08-30");
-    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(16);
+    expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-09-02");
+    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(17);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
     expect(findLegalRelease("MKR-PD-02", "2026.08/01")).toBe(LEGAL_RELEASES[1]);
   });
@@ -184,6 +189,7 @@ describe("legal document registry", () => {
     expect(legalDocumentKind("MKR-INS-06")).toBe("instruction");
     expect(legalDocumentKind("MKR-INS-07")).toBe("instruction");
     expect(legalDocumentKind("MKR-INS-08")).toBe("instruction");
+    expect(legalDocumentKind("MKR-INS-09")).toBe("instruction");
     expect(legalReleaseLocales("MKR-BRD-01")).toEqual(["ru", "en"]);
     expect(legalReleaseLocales("MKR-INS-01")).toEqual(["ru"]);
     expect(legalReleaseLocales("MKR-INS-02")).toEqual(["ru"]);
@@ -193,6 +199,7 @@ describe("legal document registry", () => {
     expect(legalReleaseLocales("MKR-INS-06")).toEqual(["ru"]);
     expect(legalReleaseLocales("MKR-INS-07")).toEqual(["ru"]);
     expect(legalReleaseLocales("MKR-INS-08")).toEqual(["ru"]);
+    expect(legalReleaseLocales("MKR-INS-09")).toEqual(["ru"]);
   });
 
   it("accepts a Russian-only instruction release and rejects Russian-only legal releases", () => {
