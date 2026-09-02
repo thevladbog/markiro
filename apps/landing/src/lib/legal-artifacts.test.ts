@@ -134,11 +134,11 @@ describe("loadLegalArtifacts", () => {
     await editManifest(root, (manifest) => {
       manifest.push({
         code: "MKR-INS-01",
-        revision: "2026.08/01",
-        effectiveDate: "2026-08-21",
+        revision: "2026.09/01",
+        effectiveDate: "2026-09-02",
         locale: "en",
         kind: "pdfa-2b",
-        fileName: "markiro_mkr-ins-01_2026.08-01_en.pdf",
+        fileName: "markiro_mkr-ins-01_2026.09-01_en.pdf",
         bytes: 1,
         sha256: "0".repeat(64),
         mediaType: "application/pdf",

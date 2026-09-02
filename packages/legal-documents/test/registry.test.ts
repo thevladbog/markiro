@@ -52,7 +52,14 @@ describe("legal document registry", () => {
     // scan-event tabs and bulk selection, and voided scans stopped blocking
     // safe close).
     const reissuedRevision: Record<string, string> = {
+      // 2026-09-02: the station instruction set (01/02/03/05) was reissued in
+      // one sweep -- the floor header collapsed into status dots, the work
+      // screen got its product hero, and the demo product image was redrawn.
+      "MKR-INS-01": "2026.09/01",
+      "MKR-INS-02": "2026.09/01",
+      "MKR-INS-03": "2026.09/01",
       "MKR-INS-04": "2026.08/02",
+      "MKR-INS-05": "2026.09/01",
       "MKR-INS-06": "2026.08/03",
       "MKR-INS-07": "2026.08/03",
       // Not a reissue: MKR-INS-09 simply FIRST shipped in the September series.
@@ -77,11 +84,11 @@ describe("legal document registry", () => {
           code !== "MKR-INS-09",
       ).every(({ effectiveDate }) => effectiveDate === "2026-08-15"),
     ).toBe(true);
-    expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-08-21");
-    expect(findLegalRelease("MKR-INS-02").effectiveDate).toBe("2026-08-21");
-    expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-08-22");
+    expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-09-02");
+    expect(findLegalRelease("MKR-INS-02").effectiveDate).toBe("2026-09-02");
+    expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-09-02");
     expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-09-01");
-    expect(findLegalRelease("MKR-INS-05").effectiveDate).toBe("2026-08-30");
+    expect(findLegalRelease("MKR-INS-05").effectiveDate).toBe("2026-09-02");
     expect(findLegalRelease("MKR-INS-06").effectiveDate).toBe("2026-09-01");
     expect(findLegalRelease("MKR-INS-07").effectiveDate).toBe("2026-09-01");
     expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-08-30");
