@@ -49,6 +49,7 @@ export class NationalCatalogController {
 
   @Post("lookups")
   @HttpCode(200)
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   @ApiOperation({ summary: "Read and snapshot National Catalog cards for a tenant product" })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
