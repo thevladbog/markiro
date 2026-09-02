@@ -8,6 +8,7 @@ import {
   LEGAL_RELEASES,
   findLegalDocument,
   legalDocumentKind,
+  legalReleaseLocales,
   requireLegalContent,
 } from "../src/index.js";
 
@@ -22,20 +23,21 @@ describe("instruction assets", () => {
     expect(instructionReleases.map(({ code }) => code)).toContain("MKR-INS-01");
   });
 
-  it.each(instructionReleases.map(({ code }) => code))(
-    "keeps %s content image ids and asset files in sync",
-    (code) => {
-      const content = requireLegalContent(findLegalDocument(code), "ru");
-      const referenced = content.sections
-        .flatMap(({ blocks }) => blocks)
-        .flatMap((block) => (block.kind === "step" && block.image ? [block.image.id] : []));
-      expect(referenced.length).toBeGreaterThan(0);
-      expect(new Set(referenced).size).toBe(referenced.length);
+  it.each(
+    instructionReleases.flatMap(({ code }) =>
+      legalReleaseLocales(code).map((locale) => ({ code, locale })),
+    ),
+  )("keeps $code/$locale content image ids and asset files in sync", ({ code, locale }) => {
+    const content = requireLegalContent(findLegalDocument(code), locale);
+    const referenced = content.sections
+      .flatMap(({ blocks }) => blocks)
+      .flatMap((block) => (block.kind === "step" && block.image ? [block.image.id] : []));
+    expect(referenced.length).toBeGreaterThan(0);
+    expect(new Set(referenced).size).toBe(referenced.length);
 
-      const files = readdirSync(path.join(ASSETS_ROOT, code.toLowerCase()))
-        .filter((name) => name.endsWith(".png"))
-        .map((name) => name.slice(0, -".png".length));
-      expect([...referenced].sort()).toEqual([...files].sort());
-    },
-  );
+    const files = readdirSync(path.join(ASSETS_ROOT, code.toLowerCase(), locale))
+      .filter((name) => name.endsWith(".png"))
+      .map((name) => name.slice(0, -".png".length));
+    expect([...referenced].sort()).toEqual([...files].sort());
+  });
 });

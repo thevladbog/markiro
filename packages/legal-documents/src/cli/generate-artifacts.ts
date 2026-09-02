@@ -36,7 +36,7 @@ import {
   legalReleaseLocales,
   requireLegalContent,
 } from "../registry.js";
-import type { LegalBlock, LegalDocumentCode } from "../types.js";
+import type { LegalBlock, LegalDocumentCode, LegalLocale } from "../types.js";
 import {
   VERAPDF_RELEASE_IMAGE,
   VERAPDF_VERSION,
@@ -1004,9 +1004,10 @@ const INSTRUCTION_ASSETS_ROOT = fileURLToPath(
 
 async function loadInstructionImages(
   code: LegalDocumentCode,
+  locale: LegalLocale,
 ): Promise<ReadonlyMap<string, Uint8Array> | undefined> {
   if (legalDocumentKind(code) !== "instruction") return undefined;
-  const directory = path.join(INSTRUCTION_ASSETS_ROOT, code.toLowerCase());
+  const directory = path.join(INSTRUCTION_ASSETS_ROOT, code.toLowerCase(), locale);
   const entries = await readdir(directory, { withFileTypes: true });
   const images = new Map<string, Uint8Array>();
   for (const entry of entries) {
@@ -1018,7 +1019,9 @@ async function loadInstructionImages(
       await readFile(path.join(directory, entry.name)),
     );
   }
-  if (images.size === 0) throw new Error(`Instruction assets are missing for ${code}`);
+  if (images.size === 0) {
+    throw new Error(`Instruction assets are missing for ${code}/${locale}`);
+  }
   return images;
 }
 
@@ -1049,7 +1052,7 @@ function createDefaultDependencies(): ArtifactGenerationDependencies {
     getLibreOfficeVersion: async (sofficeBin) =>
       (await runTextCommand(sofficeBin, ["--version"])).stdout,
     renderDocx: async (request) => {
-      const images = await loadInstructionImages(request.code);
+      const images = await loadInstructionImages(request.code, request.locale);
       return renderLegalDocx(request, images ? { images } : {});
     },
     convertPdf: async ({ sofficeBin, sourcePath, outputDirectory }) => {
