@@ -359,13 +359,19 @@ export const STATION_INVENTORY_COUNT_CONTENT = {
             kind: "step",
             title: "“Code is absent from the source snapshot” — a discrepancy",
             text: "The product is in the warehouse, but it is not in the task's snapshot. The scan is saved as a discrepancy — set such products aside and continue the recount. The manager will sort the discrepancies out.",
-            image: { id: "not-in-snapshot", caption: "A discrepancy: the code is not in the task's snapshot" },
+            image: {
+              id: "not-in-snapshot",
+              caption: "A discrepancy: the code is not in the task's snapshot",
+            },
           },
           {
             kind: "step",
             title: "“Code not counted: already in shipment”",
             text: "The code is protected from counting: the product has already been shipped or withdrawn from circulation. The terminal does not count it — remove such products from the batch being recounted.",
-            image: { id: "protected", caption: "A protected code: the product is already in shipment" },
+            image: {
+              id: "protected",
+              caption: "A protected code: the product is already in shipment",
+            },
           },
           {
             kind: "step",
@@ -377,7 +383,10 @@ export const STATION_INVENTORY_COUNT_CONTENT = {
             kind: "step",
             title: "“DUPLICATE” — the code is already checked",
             text: "“Code was already checked on this terminal” or “Code was already checked on another terminal” means the item was counted earlier. Do not rescan it and do not repack it: it is already counted.",
-            image: { id: "duplicate", caption: "A duplicate: the code was already checked on another terminal" },
+            image: {
+              id: "duplicate",
+              caption: "A duplicate: the code was already checked on another terminal",
+            },
           },
           {
             kind: "callout",
@@ -489,7 +498,10 @@ export const STATION_INVENTORY_COUNT_CONTENT = {
             kind: "step",
             title: "If the label was not printed",
             text: "The terminal reports the cause: “The task has no label template”, “Printer is not configured”, “Could not prepare the label” or “The printer did not confirm printing”. Fix the cause (ribbon, cable, jam) and tap “Retry printing”; the “Configure printer” button opens the workstation setup.",
-            image: { id: "print-recovery", caption: "The label was not printed: retrying the print" },
+            image: {
+              id: "print-recovery",
+              caption: "The label was not printed: retrying the print",
+            },
           },
           {
             kind: "step",

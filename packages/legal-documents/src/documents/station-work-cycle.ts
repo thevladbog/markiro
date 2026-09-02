@@ -229,7 +229,10 @@ export const STATION_WORK_CYCLE_CONTENT = {
             kind: "step",
             title: "Scan a marking code",
             text: "Take a unit of product and point the scanner at the DataMatrix code. The station processes scans one at a time: wait for the signal for the current unit before scanning the next one.",
-            image: { id: "work-scan-wait", caption: "Work screen: the station is waiting for a scan" },
+            image: {
+              id: "work-scan-wait",
+              caption: "Work screen: the station is waiting for a scan",
+            },
             expected: "The station beeped and showed the scan result.",
           },
           {
@@ -242,7 +245,10 @@ export const STATION_WORK_CYCLE_CONTENT = {
             kind: "step",
             title: "The “DUPLICATE” signal — set the unit aside",
             text: "This code has already been scanned: the station shows the time of the first scan. Do not put the unit into a box — set it aside separately. If duplicates keep coming, stop and tell your supervisor: the product may have already passed through the station.",
-            image: { id: "scan-duplicate", caption: "The “DUPLICATE” signal with the time of the first scan" },
+            image: {
+              id: "scan-duplicate",
+              caption: "The “DUPLICATE” signal with the time of the first scan",
+            },
           },
           {
             kind: "step",

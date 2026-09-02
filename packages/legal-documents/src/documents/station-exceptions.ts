@@ -240,7 +240,10 @@ export const STATION_EXCEPTIONS_CONTENT = {
             kind: "step",
             title: "Open the “Exceptions” screen",
             text: "Tap the “Exceptions” button on the work screen. The station shows the actions available for this shift's closed boxes: “Reprint label” and “Disassemble box”. The “Back to work” button returns to scanning at any moment.",
-            image: { id: "exception-action", caption: "The “Exceptions” screen: choosing an action" },
+            image: {
+              id: "exception-action",
+              caption: "The “Exceptions” screen: choosing an action",
+            },
           },
         ],
       },
@@ -295,7 +298,8 @@ export const STATION_EXCEPTIONS_CONTENT = {
             title: "Confirm the irreversible action",
             text: "The station warns: “This cannot be undone” — the box number will be voided forever. Check that the right box is selected and tap “Disassemble permanently”.",
             image: { id: "exception-confirm", caption: "Double confirmation of the disassembly" },
-            expected: "The station showed “Action completed” and the box disappeared from the closed list.",
+            expected:
+              "The station showed “Action completed” and the box disappeared from the closed list.",
           },
           {
             kind: "step",
