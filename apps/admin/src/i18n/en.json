@@ -2932,18 +2932,72 @@
           "title": "Journal",
           "emptyTitle": "No exchanges yet",
           "emptyHint": "The exchange history will appear here after the first session.",
-          "loadError": "Could not load the journal. Refresh the page.",
+          "filteredEmptyTitle": "No sessions match these filters",
+          "filteredEmptyHint": "Change the filters or return to the latest events.",
+          "loadError": "Could not load the journal.",
+          "refreshError": "Could not refresh the journal. Showing the last loaded data.",
+          "retry": "Retry",
+          "reset": "Reset filters",
+          "refreshing": "Refreshing journal…",
+          "resultCount": "Sessions found: {{count}}",
+          "eventCount": "{{count}} events",
+          "inProgress": "In progress",
+          "durationSeconds": "{{count}} sec",
+          "durationMinutes": "{{minutes}} min {{seconds}} sec",
+          "truncated": "Events shown: {{shown}} of {{total}}",
+          "noEvents": "No detailed events.",
           "detailsSummary": "Response sent into the exchange protocol",
           "outcome": {
             "ok": "OK",
             "warn": "Has warnings",
             "error": "Error",
+            "running": "In progress",
             "unknown": "Not finished"
           },
           "direction": {
             "in": "Inbound",
             "out": "Outbound",
             "local": "Cabinet action"
+          },
+          "filters": {
+            "outcomeLabel": "Exchange result",
+            "periodLabel": "Period",
+            "directionLabel": "Direction",
+            "outcome": {
+              "all": "All",
+              "error": "Errors",
+              "warn": "Warnings",
+              "ok": "Successful",
+              "running": "In progress"
+            },
+            "period": {
+              "24h": "24 hours",
+              "7d": "7 days",
+              "30d": "30 days",
+              "90d": "90 days"
+            },
+            "direction": {
+              "all": "All directions",
+              "in": "Inbound",
+              "out": "Outbound",
+              "local": "Cabinet actions"
+            }
+          },
+          "notice": {
+            "errorTitle": "The integration currently has an error",
+            "errorBody": "The history below stays chronological. Filter errors to find the cause of the current state.",
+            "silentTitle": "The integration has not connected recently",
+            "silentBody": "The latest available history is shown without guessing why the channel is silent.",
+            "unavailableTitle": "The integration is currently unavailable",
+            "unavailableBody": "The last saved events can show when the connection was lost.",
+            "showErrors": "Show errors",
+            "showLatest": "Show latest events"
+          },
+          "pagination": {
+            "label": "Journal pages",
+            "previous": "Previous",
+            "next": "Next",
+            "page": "Page {{page}} of {{count}}"
           }
         },
         "candidates": {

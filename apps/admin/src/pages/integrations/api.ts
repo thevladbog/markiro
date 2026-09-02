@@ -91,12 +91,40 @@ export interface JournalSessionDto {
   finishedAt: string | null;
   outcome: string | null;
   summary: Record<string, unknown> | null;
+  eventCount: number;
+  eventsTruncated: boolean;
   events: JournalEventDto[];
 }
 
-interface JournalPageResponse {
-  sessions: JournalSessionDto[];
+export type JournalPeriod = "24h" | "7d" | "30d" | "90d";
+export type JournalOutcomeFilter = "all" | "ok" | "warn" | "error" | "running";
+export type JournalDirectionFilter = "all" | "in" | "out" | "local";
+
+export interface JournalQuery {
+  page: number;
+  pageSize: number;
+  outcome: JournalOutcomeFilter;
+  direction: JournalDirectionFilter;
+  period: JournalPeriod;
 }
+
+export interface JournalPageResponse {
+  timeZone: string;
+  sessions: JournalSessionDto[];
+  pageInfo: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+}
+
+const JOURNAL_PERIOD_MS: Record<JournalPeriod, number> = {
+  "24h": 86_400_000,
+  "7d": 7 * 86_400_000,
+  "30d": 30 * 86_400_000,
+  "90d": 90 * 86_400_000,
+};
 
 /**
  * Mirrors `CredentialsIssuedDto`. Returned exactly once, by
@@ -114,9 +142,9 @@ export function channelDetailQueryKey(type: string): readonly [string, string] {
   return ["integrations", type] as const;
 }
 
-/** Cache key for one channel's journal (`GET /integrations/:type/journal`). */
-export function channelJournalQueryKey(type: string): readonly [string, string, string] {
-  return ["integrations", type, "journal"] as const;
+/** Cache key for one semantic journal view; wall-clock dates do not churn the cache key. */
+export function journalQueryKey(type: string, query: JournalQuery) {
+  return ["integrations", type, "journal", query] as const;
 }
 
 async function fetchChannelDetail(type: string): Promise<ChannelDetailDto> {
@@ -131,16 +159,32 @@ export function useChannelDetail(type: string): UseQueryResult<ChannelDetailDto>
   });
 }
 
-async function fetchChannelJournal(type: string): Promise<JournalSessionDto[]> {
-  const response = await apiFetch<JournalPageResponse>(`/integrations/${type}/journal`);
-  return response.sessions;
+async function fetchChannelJournal(
+  type: string,
+  query: JournalQuery,
+): Promise<JournalPageResponse> {
+  const to = new Date(Date.now());
+  const from = new Date(to.getTime() - JOURNAL_PERIOD_MS[query.period]);
+  const params = new URLSearchParams({
+    page: String(query.page),
+    pageSize: String(query.pageSize),
+    outcome: query.outcome,
+    direction: query.direction,
+    from: from.toISOString(),
+    to: to.toISOString(),
+  });
+  return apiFetch<JournalPageResponse>(`/integrations/${type}/journal?${params.toString()}`);
 }
 
 /** `GET /integrations/:type/journal` -- feeds `JournalList`. */
-export function useChannelJournal(type: string): UseQueryResult<JournalSessionDto[]> {
+export function useChannelJournal(
+  type: string,
+  query: JournalQuery,
+): UseQueryResult<JournalPageResponse> {
   return useQuery({
-    queryKey: channelJournalQueryKey(type),
-    queryFn: () => fetchChannelJournal(type),
+    queryKey: journalQueryKey(type, query),
+    queryFn: () => fetchChannelJournal(type, query),
+    placeholderData: (previous) => previous,
   });
 }
 
