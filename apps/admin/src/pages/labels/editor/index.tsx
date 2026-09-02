@@ -29,19 +29,21 @@
  * fake for either (or both) without touching jsdom's canvas-less
  * environment at all.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router";
 
 import {
+  EGAIS_PRODUCT_GROUP_CODE,
   generateTspl,
   generateZpl,
+  labelTemplateUsesField,
   sampleLabelData,
   type LabelImportResult,
   type LabelTemplateSpec,
   type RasterizeTextFn,
 } from "@markiro/domain";
-import { Alert, Button, Input, Modal, Select, Spinner } from "@markiro/ui";
+import { Alert, Button, Checkbox, Input, Modal, RadioGroup, Select, Spinner } from "@markiro/ui";
 
 import { ApiRequestError } from "../../../api/client.js";
 import {
@@ -50,7 +52,9 @@ import {
 } from "../../../labels/fontCoverage.js";
 import { rasterizeText as realRasterizeText } from "../../../labels/rasterizer.js";
 import { toast } from "../../../lib/toast.js";
+import { useChzProductGroups } from "../../catalog/api.js";
 import { useCreateLabelTemplate, useLabelTemplate, useUpdateLabelTemplate } from "../api.js";
+import { describeDefaultConflict } from "../scope.js";
 import "./editor.css";
 import { buildTsplBlob, buildZplBlob, downloadBlob, safeFileName } from "./download.js";
 import { ImportCodeDialog } from "./ImportCodeDialog.js";
@@ -128,6 +132,8 @@ export function LabelEditorPage({
         id={id}
         initialName={templateQuery.data.name}
         initialSpec={templateQuery.data.spec}
+        initialEnabled={templateQuery.data.enabled}
+        initialProductGroupCodes={templateQuery.data.chzProductGroupCodes}
         rasterizeText={rasterizeText}
         checkFamilyCoverage={checkFamilyCoverage}
       />
@@ -140,6 +146,8 @@ export function LabelEditorPage({
       mode="create"
       initialName={t("pages.labels.editor.defaultName")}
       initialSpec={DEFAULT_SPEC}
+      initialEnabled
+      initialProductGroupCodes={null}
       rasterizeText={rasterizeText}
       checkFamilyCoverage={checkFamilyCoverage}
     />
@@ -151,6 +159,9 @@ interface LabelEditorContentProps {
   id?: string;
   initialName: string;
   initialSpec: LabelTemplateSpec;
+  initialEnabled: boolean;
+  /** `null` = every category (see `LabelTemplateDto.chzProductGroupCodes`). */
+  initialProductGroupCodes: number[] | null;
   rasterizeText: RasterizeTextFn;
   checkFamilyCoverage: (family: LabelFontFamily) => Promise<boolean>;
 }
@@ -160,6 +171,8 @@ function LabelEditorContent({
   id,
   initialName,
   initialSpec,
+  initialEnabled,
+  initialProductGroupCodes,
   rasterizeText,
   checkFamilyCoverage,
 }: LabelEditorContentProps) {
@@ -167,6 +180,18 @@ function LabelEditorContent({
   const navigate = useNavigate();
   const editor = useSpecState(initialSpec);
   const [name, setName] = useState(initialName);
+  // Selection metadata lives beside `name`, not in the spec state: like the
+  // name it is not part of the print model (see the file doc comment).
+  const [enabled, setEnabled] = useState(initialEnabled);
+  const [scopeMode, setScopeMode] = useState<"all" | "selected">(
+    initialProductGroupCodes === null ? "all" : "selected",
+  );
+  const [selectedCodes, setSelectedCodes] = useState<number[]>(initialProductGroupCodes ?? []);
+  const [scopeSearch, setScopeSearch] = useState("");
+  const [scopeError, setScopeError] = useState<string | null>(null);
+  // The dictionary is only needed once the operator narrows the scope.
+  const groupsQuery = useChzProductGroups({ enabled: scopeMode === "selected" });
+  const groups = useMemo(() => groupsQuery.data ?? [], [groupsQuery.data]);
   const [dirty, setDirty] = useState(false);
   const [showDirtyConfirm, setShowDirtyConfirm] = useState(false);
   const [customSize, setCustomSize] = useState(
@@ -201,6 +226,26 @@ function LabelEditorContent({
   const updateMutation = useUpdateLabelTemplate();
 
   const spec = editor.state.spec;
+  const egaisOutsideScope =
+    scopeMode === "selected" &&
+    !selectedCodes.includes(EGAIS_PRODUCT_GROUP_CODE) &&
+    labelTemplateUsesField(spec, "product.egais");
+  const visibleGroups = useMemo(() => {
+    const needle = scopeSearch.trim().toLocaleLowerCase("ru");
+    return needle
+      ? groups.filter((group) => group.name.toLocaleLowerCase("ru").includes(needle))
+      : groups;
+  }, [groups, scopeSearch]);
+
+  function toggleCode(code: number, checked: boolean): void {
+    setScopeError(null);
+    setDirty(true);
+    setSelectedCodes((current) =>
+      checked
+        ? [...current, code].sort((a, b) => a - b)
+        : current.filter((value) => value !== code),
+    );
+  }
 
   function markDirty(): void {
     setDirty(true);
@@ -294,18 +339,35 @@ function LabelEditorContent({
     // so saving now would silently persist the last COMMITTED size instead
     // of the one on screen. Refuse until the user fixes or clears it.
     if (hasInvalidSize) return;
+    if (scopeMode === "selected" && selectedCodes.length === 0) {
+      setScopeError(t("pages.labels.editor.scopeEmptyError"));
+      return;
+    }
+    const chzProductGroupCodes = scopeMode === "all" ? null : selectedCodes;
     try {
       if (mode === "edit" && id) {
-        await updateMutation.mutateAsync({ id, input: { name, spec } });
+        await updateMutation.mutateAsync({
+          id,
+          input: { name, spec, enabled, chzProductGroupCodes },
+        });
         toast("ok", t("pages.labels.editor.toasts.updateSuccess"));
         setDirty(false);
       } else {
-        const created = await createMutation.mutateAsync({ name, spec });
+        const created = await createMutation.mutateAsync({
+          name,
+          spec,
+          enabled,
+          chzProductGroupCodes,
+        });
         toast("ok", t("pages.labels.editor.toasts.createSuccess"));
         setDirty(false);
         void navigate(`/labels/${created.id}`, { replace: true });
       }
     } catch (error) {
+      if (error instanceof ApiRequestError && error.code === "LABEL_TEMPLATE_IS_DEFAULT") {
+        toast("error", describeDefaultConflict(error.details, groups, t), 8000);
+        return;
+      }
       const fallback =
         mode === "edit"
           ? t("pages.labels.editor.toasts.updateError")
@@ -461,6 +523,57 @@ function LabelEditorContent({
               handleReplaceSpec({ ...spec, dpi: value === "300" ? 300 : 203 })
             }
           />
+          <Checkbox
+            label={t("pages.labels.editor.enabledLabel")}
+            hint={t("pages.labels.editor.enabledHint")}
+            checked={enabled}
+            onCheckedChange={(checked) => {
+              setEnabled(checked);
+              setDirty(true);
+            }}
+          />
+          <RadioGroup
+            label={t("pages.labels.editor.scopeTitle")}
+            value={scopeMode}
+            {...(scopeError ? { error: scopeError } : {})}
+            onValueChange={(value) => {
+              setScopeMode(value === "selected" ? "selected" : "all");
+              setScopeError(null);
+              setDirty(true);
+              if (value !== "selected") setSelectedCodes([]);
+            }}
+            options={[
+              { value: "all", label: t("pages.labels.editor.scopeAll") },
+              { value: "selected", label: t("pages.labels.editor.scopeSelected") },
+            ]}
+          />
+          {scopeMode === "selected" ? (
+            <div className="label-editor__scope">
+              <Input
+                aria-label={t("pages.labels.editor.scopeSearch")}
+                placeholder={t("pages.labels.editor.scopeSearch")}
+                value={scopeSearch}
+                onChange={(event) => setScopeSearch(event.target.value)}
+              />
+              {groupsQuery.isError ? (
+                <Alert tone="error">{t("pages.labels.editor.scopeLoadError")}</Alert>
+              ) : (
+                <div className="label-editor__scope-list">
+                  {visibleGroups.map((group) => (
+                    <Checkbox
+                      key={group.code}
+                      label={group.name}
+                      checked={selectedCodes.includes(group.code)}
+                      onCheckedChange={(checked) => toggleCode(group.code, checked)}
+                    />
+                  ))}
+                </div>
+              )}
+              {egaisOutsideScope ? (
+                <Alert tone="warn">{t("pages.labels.editor.egaisScopeHint")}</Alert>
+              ) : null}
+            </div>
+          ) : null}
           <p className="label-editor__languages-note">
             {t("pages.labels.editor.bothLanguagesNote")}
           </p>

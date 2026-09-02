@@ -54,6 +54,24 @@
   min-width: 0;
 }
 
+.label-editor__scope {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.label-editor__scope-list {
+  display: flex;
+  max-height: 240px;
+  overflow: auto;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+}
+
 /* Not an Alert: this states a fact about every template, so it must read as
    information rather than as something that went wrong -- hence the info
    surface but no warning glyph and no `role="alert"` live region. */
