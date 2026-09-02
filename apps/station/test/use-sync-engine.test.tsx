@@ -78,7 +78,9 @@ describe("useSyncEngine", () => {
   it("forwards one sealed event and resumes the same pinned queue with a replacement client", async () => {
     const exec = await migratedExec();
     await seedOneRow(exec);
-    const rejectedPost = vi.fn().mockRejectedValue(new StationApiError(401, "rejected"));
+    const rejectedPost = vi
+      .fn()
+      .mockRejectedValue(new StationApiError(401, "rejected", "STATION_CREDENTIAL_REVOKED"));
     const replacementPost = vi.fn().mockResolvedValue({ applied: 1, alreadyApplied: false });
     const onCredentialRejected = vi.fn();
 
