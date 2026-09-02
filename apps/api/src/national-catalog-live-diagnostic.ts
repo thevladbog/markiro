@@ -1,5 +1,5 @@
 import { createDb, schema, type Db } from "@markiro/db";
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 
 import { loadEnv } from "./env";
 import { NationalCatalogClient } from "./modules/national-catalog/national-catalog.client";
@@ -86,9 +86,13 @@ export interface NationalCatalogProductionTokenCandidate {
 }
 
 interface NationalCatalogProductionSourceDependencies {
-  listActiveTokens: () => Promise<readonly NationalCatalogProductionTokenCandidate[]>;
-  findProductGtin: (tenantId: string) => Promise<string | null>;
+  findActiveToken: (tenantId: string) => Promise<NationalCatalogProductionTokenCandidate | null>;
   decryptToken: (tenantId: string, token: NationalCatalogProductionTokenCandidate) => string;
+}
+
+interface NationalCatalogProductionSourceConfiguration {
+  sourceTenantId: string;
+  productGtin: string;
 }
 
 export interface NationalCatalogDiagnosticClient {
@@ -382,33 +386,28 @@ async function attempt<T>(
 
 export async function loadNationalCatalogProductionSource(
   dependencies: NationalCatalogProductionSourceDependencies,
+  configuration: NationalCatalogProductionSourceConfiguration,
 ): Promise<SourceResult> {
-  let tokenRows: readonly NationalCatalogProductionTokenCandidate[];
+  const tenantId = configuration.sourceTenantId.trim();
+  if (!tenantId) return { status: "unavailable", sourceStatus: "active-token-missing" };
+  const gtin = configuration.productGtin.trim();
+  if (!/^\d{14}$/.test(gtin)) {
+    return { status: "unavailable", sourceStatus: "product-gtin-unavailable" };
+  }
+
+  let tokenRow: NationalCatalogProductionTokenCandidate | null;
   try {
-    tokenRows = await dependencies.listActiveTokens();
+    tokenRow = await dependencies.findActiveToken(tenantId);
   } catch {
     return { status: "unavailable", sourceStatus: "active-token-query-failed" };
   }
-  if (tokenRows.length === 0)
+  if (!tokenRow || tokenRow.tenantId !== tenantId) {
     return { status: "unavailable", sourceStatus: "active-token-missing" };
-  if (tokenRows.length !== 1)
-    return { status: "unavailable", sourceStatus: "active-token-ambiguous" };
-
-  const tokenRow = tokenRows[0];
-  if (!tokenRow) return { status: "unavailable", sourceStatus: "active-token-missing" };
-  let productGtin: string | null;
-  try {
-    productGtin = await dependencies.findProductGtin(tokenRow.tenantId);
-  } catch {
-    return { status: "unavailable", sourceStatus: "product-query-failed" };
   }
-  const gtin = productGtin?.trim();
-  if (!gtin || !/^\d{14}$/.test(gtin))
-    return { status: "unavailable", sourceStatus: "product-gtin-unavailable" };
 
   let token: string;
   try {
-    token = dependencies.decryptToken(tokenRow.tenantId, tokenRow);
+    token = dependencies.decryptToken(tenantId, tokenRow);
   } catch {
     return { status: "unavailable", sourceStatus: "token-decryption-failed" };
   }
@@ -426,8 +425,8 @@ function productionSourceDependencies(
 ): NationalCatalogProductionSourceDependencies {
   const crypto = new ChzCryptoService(encryptionKey);
   return {
-    listActiveTokens: () =>
-      db
+    findActiveToken: async (tenantId) => {
+      const [token] = await db
         .select({
           tenantId: schema.chzApiTokens.tenantId,
           encryptedToken: schema.chzApiTokens.encryptedToken,
@@ -435,17 +434,14 @@ function productionSourceDependencies(
           tokenTag: schema.chzApiTokens.tokenTag,
         })
         .from(schema.chzApiTokens)
-        .where(gt(schema.chzApiTokens.expiresAt, new Date()))
-        .orderBy(asc(schema.chzApiTokens.tenantId))
-        .limit(2),
-    findProductGtin: async (tenantId) => {
-      const [product] = await db
-        .select({ gtin: schema.products.gtin14 })
-        .from(schema.products)
-        .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.archived, false)))
-        .orderBy(asc(schema.products.gtin14))
+        .where(
+          and(
+            eq(schema.chzApiTokens.tenantId, tenantId),
+            gt(schema.chzApiTokens.expiresAt, new Date()),
+          ),
+        )
         .limit(1);
-      return product?.gtin ?? null;
+      return token ?? null;
     },
     decryptToken: (tenantId, token) => crypto.decrypt(tenantId, token),
   };
@@ -461,6 +457,10 @@ async function collectProductionEvidence(): Promise<NationalCatalogDiagnosticEvi
       loadSource: () =>
         loadNationalCatalogProductionSource(
           productionSourceDependencies(connection.db, encryptionKey),
+          {
+            sourceTenantId: env.NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID ?? "",
+            productGtin: env.NATIONAL_CATALOG_LIVE_GTIN ?? "",
+          },
         ),
       client: new NationalCatalogClient(undefined, env.NATIONAL_CATALOG_REQUEST_TIMEOUT_MS),
     });
