@@ -26,7 +26,36 @@ const { page, images } = Astro.props;
 const release = findLegalRelease(page.code);
 const content = requireLegalContent(findLegalDocument(page.code), page.locale);
 const operator = OPERATOR_PROFILES[release.operatorProfileId];
-const registryPath = "/legal/";
+const chrome = {
+  ru: {
+    registry: "← Реестр документов",
+    registryPath: "/legal/",
+    active: "Действует",
+    code: "Код",
+    revision: "Редакция",
+    effectiveFrom: "Действует с",
+    toc: "Содержание",
+    warning: "Важно",
+    note: "Примечание",
+    step: "Шаг",
+    expected: "Ожидаемый результат:",
+    operatorContacts: "Контакты оператора",
+  },
+  en: {
+    registry: "← Document registry",
+    registryPath: "/en/legal/",
+    active: "In force",
+    code: "Code",
+    revision: "Revision",
+    effectiveFrom: "Effective from",
+    toc: "Contents",
+    warning: "Important",
+    note: "Note",
+    step: "Step",
+    expected: "Expected result:",
+    operatorContacts: "Operator contacts",
+  },
+}[page.locale];
 const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }, page.locale);
 const artifacts = artifactsForRelease(await loadLegalArtifacts(), release.code, release.revision, page.locale);
 const graph = buildLegalPageGraph(page.metadata, {
@@ -54,7 +83,7 @@ const stepBlocks = (blocks: readonly LegalBlock[]) => {
   <main id="main" class="legal-page instruction-page">
     <header class="legal-hero">
       <div class="container legal-hero__inner">
-        <a class="legal-backlink" href={registryPath}>← Реестр документов</a>
+        <a class="legal-backlink" href={chrome.registryPath}>{chrome.registry}</a>
         <p class="section-index">{page.code}</p>
         <h1>{content.title}</h1>
         <p class="legal-hero__summary">{content.summary}</p>
@@ -64,15 +93,15 @@ const stepBlocks = (blocks: readonly LegalBlock[]) => {
     <div class="container legal-layout">
       <aside class="legal-sidebar">
         <div class="legal-release-card" data-legal-status={release.status}>
-          <span>Действует</span>
+          <span>{chrome.active}</span>
           <dl>
-            <div><dt>Код</dt><dd data-legal-code>{release.code}</dd></div>
-            <div><dt>Редакция</dt><dd data-legal-revision>{release.revision}</dd></div>
-            <div><dt>Действует с</dt><dd><time datetime={release.effectiveDate} data-legal-effective-date>{formatLegalEffectiveDate(release.effectiveDate, page.locale)}</time></dd></div>
+            <div><dt>{chrome.code}</dt><dd data-legal-code>{release.code}</dd></div>
+            <div><dt>{chrome.revision}</dt><dd data-legal-revision>{release.revision}</dd></div>
+            <div><dt>{chrome.effectiveFrom}</dt><dd><time datetime={release.effectiveDate} data-legal-effective-date>{formatLegalEffectiveDate(release.effectiveDate, page.locale)}</time></dd></div>
           </dl>
         </div>
-        <nav class="legal-toc" aria-label="Содержание">
-          <p>Содержание</p>
+        <nav class="legal-toc" aria-label={chrome.toc}>
+          <p>{chrome.toc}</p>
           {content.sections.map((section) => <a href={`#${section.id}`}>{section.heading}</a>)}
         </nav>
       </aside>
@@ -99,7 +128,7 @@ const stepBlocks = (blocks: readonly LegalBlock[]) => {
                 )}
                 {block.kind === "callout" && (
                   <aside class={`instruction-callout instruction-callout--${block.tone}`} role="note">
-                    <strong>{block.tone === "warning" ? "Важно" : "Примечание"}</strong>
+                    <strong>{block.tone === "warning" ? chrome.warning : chrome.note}</strong>
                     <p>{block.text}</p>
                   </aside>
                 )}
@@ -107,7 +136,7 @@ const stepBlocks = (blocks: readonly LegalBlock[]) => {
                   <article class="instruction-step">
                     <h3 class="instruction-step__title">
                       <span class="instruction-step__number" aria-hidden="true">{stepNumber}</span>
-                      Шаг {stepNumber}. {block.title}
+                      {chrome.step} {stepNumber}. {block.title}
                     </h3>
                     <p>{block.text}</p>
                     {block.image && (
@@ -117,7 +146,7 @@ const stepBlocks = (blocks: readonly LegalBlock[]) => {
                       </figure>
                     )}
                     {block.expected && (
-                      <p class="instruction-step__expected"><strong>Ожидаемый результат:</strong> {block.expected}</p>
+                      <p class="instruction-step__expected"><strong>{chrome.expected}</strong> {block.expected}</p>
                     )}
                   </article>
                 )}
@@ -126,8 +155,8 @@ const stepBlocks = (blocks: readonly LegalBlock[]) => {
           </section>
         ))}
 
-        <aside class="legal-contact" aria-label="Контакты оператора">
-          <h2>Контакты оператора</h2>
+        <aside class="legal-contact" aria-label={chrome.operatorContacts}>
+          <h2>{chrome.operatorContacts}</h2>
           <p>{operator.name}<br />{operator.address}</p>
           <p><a href={`mailto:${operator.email}`}>{operator.email}</a><br /><a href="tel:+79343551490">{operator.phone}</a></p>
         </aside>

@@ -1,0 +1,22 @@
+---
+import loginBadge from "@markiro/legal-documents/assets/instructions/mkr-ins-01/en/login-badge.png?url";
+import loginPin from "@markiro/legal-documents/assets/instructions/mkr-ins-01/en/login-pin.png?url";
+import loginNameSearch from "@markiro/legal-documents/assets/instructions/mkr-ins-01/en/login-name-search.png?url";
+import shiftSelect from "@markiro/legal-documents/assets/instructions/mkr-ins-01/en/shift-select.png?url";
+import newShift from "@markiro/legal-documents/assets/instructions/mkr-ins-01/en/new-shift.png?url";
+import workStart from "@markiro/legal-documents/assets/instructions/mkr-ins-01/en/work-start.png?url";
+
+import { getLegalDocumentPage } from "../../../../content/legal-pages";
+import InstructionDocument from "../../../../components/InstructionDocument.astro";
+
+const images = {
+  "login-badge": loginBadge,
+  "login-pin": loginPin,
+  "login-name-search": loginNameSearch,
+  "shift-select": shiftSelect,
+  "new-shift": newShift,
+  "work-start": workStart,
+};
+---
+
+<InstructionDocument page={getLegalDocumentPage("MKR-INS-01", "en")} images={images} />

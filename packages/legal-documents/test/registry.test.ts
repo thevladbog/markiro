@@ -93,7 +93,7 @@ describe("legal document registry", () => {
     expect(findLegalRelease("MKR-INS-07").effectiveDate).toBe("2026-09-01");
     expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-08-30");
     expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-09-02");
-    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(17);
+    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(22);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
     expect(findLegalRelease("MKR-PD-02", "2026.08/01")).toBe(LEGAL_RELEASES[1]);
   });
@@ -198,25 +198,27 @@ describe("legal document registry", () => {
     expect(legalDocumentKind("MKR-INS-08")).toBe("instruction");
     expect(legalDocumentKind("MKR-INS-09")).toBe("instruction");
     expect(legalReleaseLocales("MKR-BRD-01")).toEqual(["ru", "en"]);
-    expect(legalReleaseLocales("MKR-INS-01")).toEqual(["ru"]);
-    expect(legalReleaseLocales("MKR-INS-02")).toEqual(["ru"]);
-    expect(legalReleaseLocales("MKR-INS-03")).toEqual(["ru"]);
-    expect(legalReleaseLocales("MKR-INS-04")).toEqual(["ru"]);
-    expect(legalReleaseLocales("MKR-INS-05")).toEqual(["ru"]);
+    expect(legalReleaseLocales("MKR-INS-01")).toEqual(["ru", "en"]);
+    expect(legalReleaseLocales("MKR-INS-02")).toEqual(["ru", "en"]);
+    expect(legalReleaseLocales("MKR-INS-03")).toEqual(["ru", "en"]);
+    expect(legalReleaseLocales("MKR-INS-04")).toEqual(["ru", "en"]);
+    expect(legalReleaseLocales("MKR-INS-05")).toEqual(["ru", "en"]);
     expect(legalReleaseLocales("MKR-INS-06")).toEqual(["ru"]);
     expect(legalReleaseLocales("MKR-INS-07")).toEqual(["ru"]);
     expect(legalReleaseLocales("MKR-INS-08")).toEqual(["ru"]);
     expect(legalReleaseLocales("MKR-INS-09")).toEqual(["ru"]);
   });
 
-  it("accepts a Russian-only instruction release and rejects Russian-only legal releases", () => {
+  it("accepts a Russian-only cabinet instruction release and rejects Russian-only legal releases", () => {
+    // MKR-INS-06 is still outside INSTRUCTION_EN_PUBLISHED; the station
+    // instructions (01-05) now require paired en routes like legal documents.
     const instructionRelease = {
-      code: "MKR-INS-01",
-      revision: "2026.08/02",
-      effectiveDate: "2026-08-22",
+      code: "MKR-INS-06",
+      revision: "2026.09/01",
+      effectiveDate: "2026-09-02",
       status: "draft",
       operatorProfileId: "operator-2026-08-15",
-      routes: { ru: "/instruktsii/stantsiya-vkhod-i-start-smeny-chernovik/" },
+      routes: { ru: "/instruktsii/inventarizatsiya-podgotovka-chernovik/" },
     } as unknown as LegalDocumentRelease;
     expect(() => validateLegalRegistry([...cloneReleases(), instructionRelease])).not.toThrow();
 
@@ -224,11 +226,18 @@ describe("legal document registry", () => {
     delete (ruOnlyLegal[0] as { routes: { en?: string } }).routes.en;
     expect(() => validateLegalRegistry(ruOnlyLegal)).toThrow(/must define routes exactly for/);
 
+    const ruOnlyStationInstruction = cloneReleases();
+    const stationRelease = ruOnlyStationInstruction.find(({ code }) => code === "MKR-INS-01");
+    delete (stationRelease as unknown as { routes: { en?: string } }).routes.en;
+    expect(() => validateLegalRegistry(ruOnlyStationInstruction)).toThrow(
+      /must define routes exactly for/,
+    );
+
     const instructionWithEn = {
       ...instructionRelease,
       routes: {
-        ru: "/instruktsii/stantsiya-vkhod-i-start-smeny-chernovik/",
-        en: "/en/instructions/station-shift-start/",
+        ru: "/instruktsii/inventarizatsiya-podgotovka-chernovik/",
+        en: "/en/instructions/inventory-prep-draft/",
       },
     } as unknown as LegalDocumentRelease;
     expect(() => validateLegalRegistry([...cloneReleases(), instructionWithEn])).toThrow(
