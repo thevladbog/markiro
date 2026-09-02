@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
@@ -23,6 +24,7 @@ import {
   ApiCabinetAuth,
   ApiHttpErrors,
   ApiZodBody,
+  ApiZodQuery,
   ApiZodValidationError,
 } from "../../lib/openapi";
 import { RequirePermissions } from "../../authorization/access-policy";
@@ -36,11 +38,14 @@ import {
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import {
   createLabelTemplateSchema,
+  labelTemplateIsDefaultOpenApiSchema,
   labelTemplateOpenApiSchema,
   listLabelTemplatesOpenApiSchema,
+  listLabelTemplatesQuerySchema,
   updateLabelTemplateSchema,
   type CreateLabelTemplateDto,
   type LabelTemplateDto,
+  type ListLabelTemplatesQueryDto,
   type ListLabelTemplatesResponseDto,
   type UpdateLabelTemplateDto,
 } from "./dto";
@@ -60,12 +65,19 @@ export class LabelTemplatesController {
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   @ApiOperation({
     summary: "List label templates",
-    description: "Size/DPI/language summaries without the full spec, most recently updated first.",
+    description:
+      "Size/DPI/language summaries without the full spec, most recently updated first. " +
+      "Disabled templates are hidden unless `enabled=all` or `enabled=false` is requested.",
   })
+  @ApiZodQuery(listLabelTemplatesQuerySchema)
   @ApiOkResponse({ schema: listLabelTemplatesOpenApiSchema })
+  @ApiZodValidationError()
   @ApiHttpErrors(401, 403)
-  async listLabelTemplates(@Req() req: RequestWithTenant): Promise<ListLabelTemplatesResponseDto> {
-    return this.labelTemplatesService.listLabelTemplates(req.tenantId!);
+  async listLabelTemplates(
+    @Req() req: RequestWithTenant,
+    @Query(new ZodValidationPipe(listLabelTemplatesQuerySchema)) query: ListLabelTemplatesQueryDto,
+  ): Promise<ListLabelTemplatesResponseDto> {
+    return this.labelTemplatesService.listLabelTemplates(req.tenantId!, query);
   }
 
   @Get(":id")
@@ -111,6 +123,12 @@ export class LabelTemplatesController {
   @ApiZodBody(updateLabelTemplateSchema)
   @ApiOkResponse({ schema: labelTemplateOpenApiSchema })
   @ApiZodValidationError()
+  @ApiResponse({
+    status: 409,
+    description:
+      "The template is an organisation or category default and would stop being eligible.",
+    schema: labelTemplateIsDefaultOpenApiSchema,
+  })
   @ApiHttpErrors(401, 403, 404)
   async updateLabelTemplate(
     @Req() req: RequestWithTenant,

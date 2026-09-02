@@ -7,12 +7,17 @@ import {
 } from "@nestjs/common";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import type { LabelTemplateSpec } from "@markiro/domain";
+import { isBoxLabelTemplateEligible, type LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
+import {
+  assertKnownProductGroupCodes,
+  findLabelTemplateDefaultUsage,
+} from "./box-label-template-eligibility";
 import type {
   CreateLabelTemplateDto,
   LabelTemplateDto,
   LabelTemplateSummaryDto,
+  ListLabelTemplatesQueryDto,
   ListLabelTemplatesResponseDto,
   UpdateLabelTemplateDto,
 } from "./dto";
@@ -21,6 +26,7 @@ type LabelTemplateRow = typeof schema.labelTemplates.$inferSelect;
 
 const LABEL_TEMPLATE_REFERENCE_CONSTRAINTS = new Set([
   "org_profiles_box_label_template_tenant_fk",
+  "org_box_label_template_defaults_template_tenant_fk",
   "products_tenant_default_label_template_fk",
   "shifts_tenant_label_template_fk",
   "shifts_tenant_box_label_template_fk",
@@ -40,11 +46,17 @@ export class LabelTemplatesService {
    * contract), so the library screen's list would be free to silently
    * reshuffle between requests.
    */
-  async listLabelTemplates(tenantId: string): Promise<ListLabelTemplatesResponseDto> {
+  async listLabelTemplates(
+    tenantId: string,
+    query: ListLabelTemplatesQueryDto,
+  ): Promise<ListLabelTemplatesResponseDto> {
+    const conditions = [eq(schema.labelTemplates.tenantId, tenantId)];
+    if (query.enabled === "true") conditions.push(eq(schema.labelTemplates.enabled, true));
+    if (query.enabled === "false") conditions.push(eq(schema.labelTemplates.enabled, false));
     const rows = await this.db
       .select()
       .from(schema.labelTemplates)
-      .where(eq(schema.labelTemplates.tenantId, tenantId))
+      .where(and(...conditions))
       .orderBy(desc(schema.labelTemplates.updatedAt));
 
     return { items: rows.map((row) => this.rowToSummaryDto(row)) };
@@ -64,12 +76,17 @@ export class LabelTemplatesService {
     tenantId: string,
     data: CreateLabelTemplateDto,
   ): Promise<LabelTemplateDto> {
+    if (data.chzProductGroupCodes !== null) {
+      await assertKnownProductGroupCodes(this.db, data.chzProductGroupCodes);
+    }
     const [row] = await this.db
       .insert(schema.labelTemplates)
       .values({
         tenantId,
         name: data.name,
         spec: data.spec,
+        enabled: data.enabled,
+        chzProductGroupCodes: data.chzProductGroupCodes,
       })
       .returning();
 
@@ -80,31 +97,70 @@ export class LabelTemplatesService {
   }
 
   /**
-   * Update a label template (partial update, preserves untouched fields).
-   * `updatedAt` is bumped on every successful write, sourced from the
-   * database's own clock (`now()`) rather than the app process's -- both
-   * `created_at` and `updated_at` are DB-side defaults/writes, so comparing
-   * them is never subject to app/DB clock skew.
+   * Partial update inside one transaction. The row is locked FOR UPDATE so a
+   * concurrent org-profile write (which locks the template FOR SHARE) cannot
+   * make a default point at a template that is being disabled or narrowed.
+   * `updatedAt` is sourced from the database's own clock (`now()`).
    */
   async updateLabelTemplate(
     tenantId: string,
     id: string,
     data: UpdateLabelTemplateDto,
   ): Promise<LabelTemplateDto> {
-    const setClause: Record<string, unknown> = { updatedAt: sql`now()` };
-    if (data.name !== undefined) setClause.name = data.name;
-    if (data.spec !== undefined) setClause.spec = data.spec;
+    return this.db.transaction(async (tx) => {
+      const [current] = await tx
+        .select()
+        .from(schema.labelTemplates)
+        .where(and(eq(schema.labelTemplates.tenantId, tenantId), eq(schema.labelTemplates.id, id)))
+        .for("update");
+      if (!current) {
+        throw new NotFoundException("Label template not found or does not belong to this tenant");
+      }
+      if (data.chzProductGroupCodes) {
+        await assertKnownProductGroupCodes(tx, data.chzProductGroupCodes);
+      }
 
-    const [row] = await this.db
-      .update(schema.labelTemplates)
-      .set(setClause)
-      .where(and(eq(schema.labelTemplates.tenantId, tenantId), eq(schema.labelTemplates.id, id)))
-      .returning();
+      const nextEnabled = data.enabled ?? current.enabled;
+      const nextCodes =
+        data.chzProductGroupCodes !== undefined
+          ? data.chzProductGroupCodes
+          : current.chzProductGroupCodes;
+      if (data.enabled !== undefined || data.chzProductGroupCodes !== undefined) {
+        const usage = await findLabelTemplateDefaultUsage(tx, tenantId, id);
+        const next = { enabled: nextEnabled, chzProductGroupCodes: nextCodes };
+        const organizationDefault =
+          usage.organizationDefault && (!nextEnabled || nextCodes !== null);
+        const categoryDefaults = usage.categoryDefaults.filter(
+          (code) => !isBoxLabelTemplateEligible(next, code),
+        );
+        if (organizationDefault || categoryDefaults.length > 0) {
+          throw new ConflictException({
+            code: "LABEL_TEMPLATE_IS_DEFAULT",
+            message: "Label template is used as a default and would stop being eligible",
+            organizationDefault,
+            categoryDefaults,
+          });
+        }
+      }
 
-    if (!row) {
-      throw new NotFoundException("Label template not found or does not belong to this tenant");
-    }
-    return this.rowToDto(row);
+      const setClause: Record<string, unknown> = { updatedAt: sql`now()` };
+      if (data.name !== undefined) setClause.name = data.name;
+      if (data.spec !== undefined) setClause.spec = data.spec;
+      if (data.enabled !== undefined) setClause.enabled = data.enabled;
+      if (data.chzProductGroupCodes !== undefined) {
+        setClause.chzProductGroupCodes = data.chzProductGroupCodes;
+      }
+
+      const [row] = await tx
+        .update(schema.labelTemplates)
+        .set(setClause)
+        .where(and(eq(schema.labelTemplates.tenantId, tenantId), eq(schema.labelTemplates.id, id)))
+        .returning();
+      if (!row) {
+        throw new NotFoundException("Label template not found or does not belong to this tenant");
+      }
+      return this.rowToDto(row);
+    });
   }
 
   /**
@@ -155,6 +211,8 @@ export class LabelTemplatesService {
       id: row.id,
       name: row.name,
       spec: row.spec as LabelTemplateSpec,
+      enabled: row.enabled,
+      chzProductGroupCodes: row.chzProductGroupCodes,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -169,6 +227,8 @@ export class LabelTemplatesService {
       heightMm: spec.heightMm,
       dpi: spec.dpi,
       language: spec.language,
+      enabled: row.enabled,
+      chzProductGroupCodes: row.chzProductGroupCodes,
       updatedAt: row.updatedAt,
     };
   }

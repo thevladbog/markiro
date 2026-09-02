@@ -42,15 +42,34 @@ function parseSpecOrAddIssues(spec: unknown, ctx: z.RefinementCtx): LabelTemplat
   }
 }
 
+/** Non-empty, duplicate-free ЧЗ product-group codes; `null` means every category. */
+const productGroupCodesSchema = z
+  .array(z.number().int().positive())
+  .min(1, "chzProductGroupCodes must list at least one product group")
+  .refine((codes) => new Set(codes).size === codes.length, {
+    message: "chzProductGroupCodes must not repeat a code",
+  })
+  .nullable();
+
+export const listLabelTemplatesQuerySchema = z.object({
+  /** `true` (default) hides disabled templates so every picker is safe by default; the library asks for `all`. */
+  enabled: z.enum(["true", "false", "all"]).default("true"),
+});
+export type ListLabelTemplatesQueryDto = z.infer<typeof listLabelTemplatesQuerySchema>;
+
 /** POST /label-templates schema. `spec` is validated by @markiro/domain's parseLabelTemplate. */
 export const createLabelTemplateSchema = z
   .object({
     name: z.string().min(1).max(200),
     spec: z.unknown(),
+    enabled: z.boolean().optional(),
+    chzProductGroupCodes: productGroupCodesSchema.optional(),
   })
   .transform((data, ctx) => ({
     name: data.name,
     spec: parseSpecOrAddIssues(data.spec, ctx),
+    enabled: data.enabled ?? true,
+    chzProductGroupCodes: data.chzProductGroupCodes ?? null,
   }));
 export type CreateLabelTemplateDto = z.infer<typeof createLabelTemplateSchema>;
 
@@ -59,11 +78,22 @@ export const updateLabelTemplateSchema = z
   .object({
     name: z.string().min(1).max(200).optional(),
     spec: z.unknown().optional(),
+    enabled: z.boolean().optional(),
+    chzProductGroupCodes: productGroupCodesSchema.optional(),
   })
   .transform((data, ctx) => {
-    const result: { name?: string; spec?: LabelTemplateSpec } = {};
+    const result: {
+      name?: string;
+      spec?: LabelTemplateSpec;
+      enabled?: boolean;
+      chzProductGroupCodes?: number[] | null;
+    } = {};
     if (data.name !== undefined) result.name = data.name;
     if (data.spec !== undefined) result.spec = parseSpecOrAddIssues(data.spec, ctx);
+    if (data.enabled !== undefined) result.enabled = data.enabled;
+    if (data.chzProductGroupCodes !== undefined) {
+      result.chzProductGroupCodes = data.chzProductGroupCodes;
+    }
     return result;
   });
 export type UpdateLabelTemplateDto = z.infer<typeof updateLabelTemplateSchema>;
@@ -73,6 +103,9 @@ export interface LabelTemplateDto {
   id: string;
   name: string;
   spec: LabelTemplateSpec;
+  enabled: boolean;
+  /** `null` means every category; otherwise ЧЗ product-group codes. */
+  chzProductGroupCodes: number[] | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -85,6 +118,8 @@ export interface LabelTemplateSummaryDto {
   heightMm: number;
   dpi: 203 | 300;
   language: "zpl" | "tspl";
+  enabled: boolean;
+  chzProductGroupCodes: number[] | null;
   updatedAt: Date;
 }
 
@@ -95,6 +130,13 @@ export interface ListLabelTemplatesResponseDto {
 
 const uuidSchema = { type: "string", format: "uuid" } as const;
 const dateTimeSchema = { type: "string", format: "date-time" } as const;
+const productGroupCodesOpenApiSchema = {
+  type: "array",
+  items: { type: "integer", minimum: 1 },
+  minItems: 1,
+  nullable: true,
+  description: "ЧЗ product-group codes the template applies to; null means every category.",
+} as const;
 
 /**
  * Generated from the domain's own `labelTemplateSpecSchema`, so the full
@@ -113,11 +155,13 @@ const labelTemplateSpecOpenApiSchema: SchemaObject = {
 export const labelTemplateOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "name", "spec", "createdAt", "updatedAt"],
+  required: ["id", "name", "spec", "enabled", "chzProductGroupCodes", "createdAt", "updatedAt"],
   properties: {
     id: uuidSchema,
     name: { type: "string", minLength: 1, maxLength: 200 },
     spec: labelTemplateSpecOpenApiSchema,
+    enabled: { type: "boolean" },
+    chzProductGroupCodes: productGroupCodesOpenApiSchema,
     createdAt: dateTimeSchema,
     updatedAt: dateTimeSchema,
   },
@@ -126,7 +170,17 @@ export const labelTemplateOpenApiSchema: SchemaObject = {
 export const labelTemplateSummaryOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "name", "widthMm", "heightMm", "dpi", "language", "updatedAt"],
+  required: [
+    "id",
+    "name",
+    "widthMm",
+    "heightMm",
+    "dpi",
+    "language",
+    "enabled",
+    "chzProductGroupCodes",
+    "updatedAt",
+  ],
   properties: {
     id: uuidSchema,
     name: { type: "string", minLength: 1, maxLength: 200 },
@@ -134,7 +188,21 @@ export const labelTemplateSummaryOpenApiSchema: SchemaObject = {
     heightMm: { type: "number", minimum: 10, maximum: 300 },
     dpi: { type: "integer", enum: [203, 300] },
     language: { type: "string", enum: ["zpl", "tspl"] },
+    enabled: { type: "boolean" },
+    chzProductGroupCodes: productGroupCodesOpenApiSchema,
     updatedAt: dateTimeSchema,
+  },
+};
+
+export const labelTemplateIsDefaultOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["code", "message", "organizationDefault", "categoryDefaults"],
+  properties: {
+    code: { type: "string", enum: ["LABEL_TEMPLATE_IS_DEFAULT"] },
+    message: { type: "string" },
+    organizationDefault: { type: "boolean" },
+    categoryDefaults: { type: "array", items: { type: "integer" } },
   },
 };
 
