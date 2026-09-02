@@ -1,6 +1,7 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import {
+  copyFile,
   lstat,
   link,
   mkdir,
@@ -15,6 +16,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -175,6 +177,74 @@ export function libreOfficeProfileDirectory(outputDirectory: string, sourcePath:
     "libreoffice-home",
     path.basename(sourcePath, ".docx"),
   );
+}
+
+// dist/cli/../../fonts and src/cli/../../fonts both resolve to the package
+// root, mirroring INSTRUCTION_ASSETS_ROOT below.
+const VENDORED_FONTS_ROOT = fileURLToPath(new URL("../../fonts/", import.meta.url));
+
+// <UserInstallation>/user/fonts is honoured by LibreOffice on Linux, where
+// the profile is anchored by XDG_CONFIG_HOME (libreOfficeEnvironment). The
+// macOS build enumerates fonts through CoreText only and ignores profile
+// fonts entirely (as well as SAL_FONTPATH and fonts embedded in the DOCX),
+// so on macOS the pinned faces must be installed system-wide — enforced by
+// assertPinnedFontsInstalled below. Staging under both roots is harmless
+// and keeps the Linux path hermetic.
+export const LIBREOFFICE_PROFILE_FONT_DIRECTORIES: readonly string[] = [
+  path.join("Library", "Application Support", "LibreOffice", "4", "user", "fonts"),
+  path.join("xdg-config", "libreoffice", "4", "user", "fonts"),
+];
+
+async function vendoredFontNames(): Promise<readonly string[]> {
+  const entries = await readdir(VENDORED_FONTS_ROOT, { withFileTypes: true });
+  const fonts = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".ttf"))
+    .map(({ name }) => name);
+  if (fonts.length === 0) {
+    throw new Error(`Vendored IBM Plex fonts are missing at ${VENDORED_FONTS_ROOT}`);
+  }
+  return fonts;
+}
+
+export async function stageLibreOfficeFonts(profileDirectory: string): Promise<void> {
+  const fonts = await vendoredFontNames();
+  for (const directory of LIBREOFFICE_PROFILE_FONT_DIRECTORIES) {
+    const target = path.join(profileDirectory, directory);
+    await mkdir(target, { recursive: true });
+    for (const name of fonts) {
+      await copyFile(path.join(VENDORED_FONTS_ROOT, name), path.join(target, name));
+    }
+  }
+}
+
+export function systemFontDirectories(): readonly string[] {
+  return [path.join(homedir(), "Library", "Fonts"), "/Library/Fonts"];
+}
+
+export async function assertPinnedFontsInstalled(
+  directories: readonly string[] = systemFontDirectories(),
+  platform: NodeJS.Platform = process.platform,
+): Promise<void> {
+  if (platform !== "darwin") return;
+  const installHint = `install them with: cp packages/legal-documents/fonts/*.ttf ${path.join(homedir(), "Library", "Fonts")}/`;
+  for (const name of await vendoredFontNames()) {
+    const pinned = await readFile(path.join(VENDORED_FONTS_ROOT, name));
+    let installed: Uint8Array | undefined;
+    for (const directory of directories) {
+      try {
+        installed = await readFile(path.join(directory, name));
+        break;
+      } catch {
+        // Missing in this directory; try the next one.
+      }
+    }
+    if (!installed) {
+      throw new Error(`Pinned font ${name} is not installed for LibreOffice; ${installHint}`);
+    }
+    if (Buffer.compare(pinned, installed) !== 0) {
+      throw new Error(`Installed font ${name} does not match the vendored pin; re-${installHint}`);
+    }
+  }
 }
 
 export function assertReleaseLibreOfficeVersion(versionOutput: string, preview: boolean): void {
@@ -983,6 +1053,7 @@ function createDefaultDependencies(): ArtifactGenerationDependencies {
       return renderLegalDocx(request, images ? { images } : {});
     },
     convertPdf: async ({ sofficeBin, sourcePath, outputDirectory }) => {
+      await assertPinnedFontsInstalled();
       const profileDirectory = libreOfficeProfileDirectory(outputDirectory, sourcePath);
       await mkdir(profileDirectory, { recursive: true });
       await Promise.all([
@@ -990,6 +1061,7 @@ function createDefaultDependencies(): ArtifactGenerationDependencies {
         mkdir(path.join(profileDirectory, "xdg-cache"), { recursive: true }),
         mkdir(path.join(profileDirectory, "xdg-config"), { recursive: true }),
       ]);
+      await stageLibreOfficeFonts(profileDirectory);
       return runTextCommand(
         sofficeBin,
         libreOfficePdfExportArguments(outputDirectory, sourcePath),
