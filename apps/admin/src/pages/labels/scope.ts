@@ -2,7 +2,12 @@ import type { TFunction } from "i18next";
 
 import type { ChzProductGroupDto } from "../catalog/api.js";
 
-/** Human label for a template's product-group scope; `title` carries the full list when it is abbreviated. */
+/**
+ * Human label for a template's product-group scope. ЧЗ group names run long
+ * («Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки»),
+ * so a single category is named (the card ellipsizes it) and two or more are
+ * counted; `title` carries the full list whenever the label is not the list.
+ */
 export function describeTemplateScope(
   codes: readonly number[] | null,
   groups: readonly ChzProductGroupDto[],
@@ -13,7 +18,7 @@ export function describeTemplateScope(
     (code) => groups.find((group) => group.code === code)?.name ?? String(code),
   );
   const full = names.join(", ");
-  if (names.length <= 2) return { label: full, title: null };
+  if (names.length === 1) return { label: full, title: full };
   return { label: t("pages.labels.scopeCount", { count: names.length }), title: full };
 }
 

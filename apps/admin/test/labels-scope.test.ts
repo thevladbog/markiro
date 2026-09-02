@@ -10,12 +10,13 @@ const GROUPS = [
 ];
 
 describe("describeTemplateScope", () => {
-  it("names universal scope, lists up to two categories, counts three or more", () => {
+  it("names universal scope, names a single category, counts two or more", () => {
     const t = i18n.getFixedT("ru");
     expect(describeTemplateScope(null, GROUPS, t)).toEqual({ label: "Все категории", title: null });
+    expect(describeTemplateScope([15], GROUPS, t)).toEqual({ label: "Пиво", title: "Пиво" });
     expect(describeTemplateScope([15, 8], GROUPS, t)).toEqual({
-      label: "Пиво, Молочная продукция",
-      title: null,
+      label: "Категорий: 2",
+      title: "Пиво, Молочная продукция",
     });
     expect(describeTemplateScope([15, 8, 22], GROUPS, t)).toEqual({
       label: "Категорий: 3",

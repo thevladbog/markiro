@@ -145,7 +145,17 @@ function TemplateCard({
           })}
         </Badge>
         <Badge>{t("pages.labels.dpiBadge", { dpi: item.dpi })}</Badge>
-        <Badge {...(scope.title ? { title: scope.title } : {})}>{scope.label}</Badge>
+        <Badge
+          {...(scope.title ? { title: scope.title } : {})}
+          style={{
+            maxWidth: "100%",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {scope.label}
+        </Badge>
         {item.enabled ? null : <Badge tone="neutral">{t("pages.labels.disabledBadge")}</Badge>}
       </div>
       {canWrite ? (
