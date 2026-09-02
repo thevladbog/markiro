@@ -2,6 +2,11 @@ body {
   margin: 0;
 }
 
+.mk-app-shell {
+  position: fixed;
+  inset: 0;
+}
+
 .mk-app-header__profile-link {
   box-sizing: border-box;
   display: none;

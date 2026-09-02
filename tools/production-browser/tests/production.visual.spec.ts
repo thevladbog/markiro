@@ -921,6 +921,46 @@ test("dashboard: production under control", async ({ page }) => {
   expect(unexpected).toEqual([]);
 });
 
+test("dashboard: keeps the content scroll rail inside the viewport", async ({ page }) => {
+  const unexpected = await installApi(page, "dashboardCalm");
+  await openHarness(page, "/");
+  await page.setViewportSize({ width: 1512, height: 809 });
+  await expect(page.getByText("Производство под контролем")).toBeVisible();
+
+  const layout = await page.evaluate(() => {
+    const shell = document.querySelector<HTMLElement>(".mk-app-shell");
+    const content = document.querySelector<HTMLElement>(".mk-app-shell__content");
+    const main = content?.querySelector<HTMLElement>("main");
+    const scrollingElement = document.scrollingElement;
+    if (!shell || !content || !main || !scrollingElement) {
+      throw new Error("Expected the complete admin shell");
+    }
+
+    main.scrollTop = main.scrollHeight;
+
+    return {
+      documentOverflow: scrollingElement.scrollHeight - scrollingElement.clientHeight,
+      shellBottom: Math.round(shell.getBoundingClientRect().bottom),
+      contentBottom: Math.round(content.getBoundingClientRect().bottom),
+      mainBottom: Math.round(main.getBoundingClientRect().bottom),
+      mainScrolled: main.scrollTop > 0,
+      viewportHeight: window.innerHeight,
+      windowScrollY: window.scrollY,
+    };
+  });
+
+  expect(layout).toEqual({
+    documentOverflow: 0,
+    shellBottom: 809,
+    contentBottom: 809,
+    mainBottom: 809,
+    mainScrolled: true,
+    viewportHeight: 809,
+    windowScrollY: 0,
+  });
+  expect(unexpected).toEqual([]);
+});
+
 test("dashboard: needs attention over late data", async ({ page }) => {
   const unexpected = await installApi(page, "dashboardAttention");
   await openHarness(page, "/");
