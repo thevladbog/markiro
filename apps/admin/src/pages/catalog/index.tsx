@@ -302,16 +302,19 @@ export function CatalogPage() {
 
   const columns: TableColumn<ProductDto>[] = useMemo(
     () => [
-      { key: "gtin14", title: t("pages.catalog.table.gtin"), mono: true },
+      { key: "gtin14", title: t("pages.catalog.table.gtin"), mono: true, width: "170px" },
       {
         key: "image",
         title: t("pages.catalog.table.image"),
+        width: "84px",
         render: (row) => <ProductThumbnail product={row} />,
       },
-      { key: "name", title: t("pages.catalog.table.name"), wrap: true },
+      { key: "name", title: t("pages.catalog.table.name"), wrap: true, width: "26%" },
       {
         key: "productGroup",
         title: t("pages.catalog.table.productGroup"),
+        wrap: true,
+        width: "34%",
         render: (row) => row.productGroup ?? "—",
       },
       {
@@ -403,7 +406,7 @@ export function CatalogPage() {
         />
       ) : (
         <>
-          <Table columns={columns} rows={pageItems} />
+          <Table className="mk-catalog-table" columns={columns} rows={pageItems} />
           {pageCount > 1 ? (
             <CatalogPager
               page={currentPage}
