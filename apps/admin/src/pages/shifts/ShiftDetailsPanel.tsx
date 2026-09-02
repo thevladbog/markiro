@@ -111,7 +111,9 @@ function ShiftOutput({ shift }: { shift: ShiftDto }) {
           </>
         )}
         <div className="mk-shift-details__metric">
-          <strong>{formatNumber(shift.plannedQty ?? 0, i18n.language)}</strong>
+          <strong>
+            {shift.plannedQty === null ? "—" : formatNumber(shift.plannedQty, i18n.language)}
+          </strong>
           <span>{t("pages.shifts.details.plannedUnits")}</span>
         </div>
       </div>
@@ -218,7 +220,10 @@ function AuthorizedShiftActions({ shift, onDeleted }: { shift: ShiftDto; onDelet
           confirmLabel={t("pages.shifts.deleteConfirmAction")}
           tone="destructive"
           busy={deleteMutation.isPending}
-          onCancel={() => setDialog(null)}
+          onCancel={() => {
+            setDialog(null);
+            setError(null);
+          }}
           onConfirm={() => void deleteShift()}
         />
       ) : null}

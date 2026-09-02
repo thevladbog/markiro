@@ -913,6 +913,12 @@ describe("ShiftsPage", () => {
       "/api/shifts/s1",
       expect.objectContaining({ method: "DELETE" }),
     );
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Отмена" }));
+    fireEvent.click(within(details).getByRole("button", { name: "Удалить" }));
+
+    const reopenedDialog = screen.getByRole("alertdialog", { name: "Удалить смену?" });
+    expect(within(reopenedDialog).queryByText("Shift has production data")).toBeNull();
   });
 
   it("disables draft products in the shift form's product select and shows a hint", async () => {

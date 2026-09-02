@@ -172,6 +172,22 @@ it("opens route-backed shift details with output, factual employees, and unattri
   expect(within(panel).getByRole("button", { name: "Изменить" })).toBeDefined();
 });
 
+it("shows an em dash when a shift has no planned quantity", async () => {
+  stubDependencies([{ ...SHIFT, plannedQty: null }]);
+  const { user } = renderPanel(["/shifts"]);
+
+  await user.click(await screen.findByRole("button", { name: "Подробнее" }));
+
+  const panel = screen.getByRole("dialog", { name: "Смена AUG26-001" });
+  const metrics = panel.querySelector(".mk-shift-details__metrics");
+  const plannedMetric = metrics
+    ? within(metrics as HTMLElement)
+        .getByText("План, шт")
+        .closest(".mk-shift-details__metric")
+    : null;
+  expect(plannedMetric?.querySelector("strong")?.textContent).toBe("—");
+});
+
 it("shows report ordering and history inside a closed shift drawer", async () => {
   stubDependencies([
     {
