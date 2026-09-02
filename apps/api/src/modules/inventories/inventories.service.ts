@@ -444,6 +444,7 @@ export class InventoriesService {
       this.assertDateRange(desired.productionDateFrom, desired.productionDateTo);
       const resolved = await this.resolveParameters(tx, tenantId, desired, {
         currentBoxLabelTemplateId: current.boxLabelTemplateId,
+        currentProductId: current.productId,
       });
       const updatedAt = new Date();
       await tx
@@ -746,7 +747,10 @@ export class InventoriesService {
       productionDateTo: string;
       boxLabelTemplateId: string | null;
     },
-    options: { currentBoxLabelTemplateId: string | null } = { currentBoxLabelTemplateId: null },
+    options: { currentBoxLabelTemplateId: string | null; currentProductId: string | null } = {
+      currentBoxLabelTemplateId: null,
+      currentProductId: null,
+    },
   ) {
     const [product] = await tx
       .select({
@@ -794,8 +798,11 @@ export class InventoriesService {
         });
       }
       // An inventory keeps its snapshot even after the template is disabled or
-      // scoped away; eligibility is enforced only when the template changes.
-      const changed = input.boxLabelTemplateId !== options.currentBoxLabelTemplateId;
+      // scoped away; eligibility is enforced only when the template or the
+      // product changes (a retained template must fit the new category).
+      const changed =
+        input.boxLabelTemplateId !== options.currentBoxLabelTemplateId ||
+        input.productId !== options.currentProductId;
       if (changed && !isBoxLabelTemplateEligible(template, product.chzProductGroupCode ?? null)) {
         throw new UnprocessableEntityException({
           code: "INVENTORY_BOX_LABEL_TEMPLATE_NOT_ELIGIBLE",

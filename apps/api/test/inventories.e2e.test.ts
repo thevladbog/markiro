@@ -1734,4 +1734,30 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       .expect(422);
     expect(blocked.body.code).toBe("INVENTORY_BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
   });
+  it("re-validates a retained category-scoped template when the inventory's product changes", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId } = await seedPreparation(agent);
+    await db
+      .update(schema.products)
+      .set({ chzProductGroupCode: 15 })
+      .where(eq(schema.products.id, productId));
+    const beerOnly = await seedScopedTemplate(tenantId, { chzProductGroupCodes: [15] });
+    const universal = await seedScopedTemplate(tenantId, {});
+    const milk = await seedProduct(tenantId, { gtin14: "04600000000022", chzProductGroupCode: 8 });
+    const inventory = await createInventory(agent, productId, lineId, "repack", beerOnly);
+
+    // Same template, new product outside its scope: the retained template is
+    // checked against the new category.
+    const blocked = await agent
+      .patch(`/inventories/${inventory.id}`)
+      .send({ productId: milk })
+      .expect(422);
+    expect(blocked.body.code).toBe("INVENTORY_BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
+
+    const moved = await agent
+      .patch(`/inventories/${inventory.id}`)
+      .send({ productId: milk, boxLabelTemplateId: universal })
+      .expect(200);
+    expect(moved.body.boxLabelTemplateId).toBe(universal);
+  });
 });
