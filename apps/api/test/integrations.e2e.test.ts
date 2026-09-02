@@ -10,7 +10,6 @@ import { AppModule } from "../src/app.module";
 import { loadEnv } from "../src/env";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { SILENT_AFTER_HOURS_MAX } from "../src/modules/integrations/dto";
-import { JOURNAL_EVENTS_LIMIT } from "../src/modules/integrations/integrations.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 
@@ -19,6 +18,18 @@ describe("integrations (cabinet)", () => {
   let agent: ReturnType<typeof request.agent>;
   let db: Db;
   let tenantId: string;
+  let journalFrom: Date;
+  let journalTo: Date;
+  let journalTieAt: Date;
+  const journalIdSuffix = randomUUID().slice(8);
+  const journalIds = {
+    orphan: `ffffffff${journalIdSuffix}`,
+    newestOk: `eeeeeeee${journalIdSuffix}`,
+    tieHigh: `dddddddd${journalIdSuffix}`,
+    tieLow: `cccccccc${journalIdSuffix}`,
+    running: `bbbbbbbb${journalIdSuffix}`,
+    outside: `aaaaaaaa${journalIdSuffix}`,
+  };
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -35,6 +46,136 @@ describe("integrations (cabinet)", () => {
     await listenOnLoopback(app);
     agent = request.agent(app.getHttpServer());
     tenantId = await signUpAndActivate(agent);
+
+    const anchor = new Date();
+    journalFrom = new Date(anchor.getTime() - 86_400_000);
+    journalTo = new Date(anchor.getTime() + 86_400_000);
+    journalTieAt = new Date(anchor.getTime() + 120_000);
+    const otherAgent = request.agent(app.getHttpServer());
+    const otherTenantId = await signUpAndActivate(otherAgent);
+
+    await db
+      .insert(schema.orgProfiles)
+      .values({ tenantId, timeZone: "Asia/Irkutsk" })
+      .onConflictDoUpdate({
+        target: schema.orgProfiles.tenantId,
+        set: { timeZone: "Asia/Irkutsk" },
+      });
+
+    await db.insert(schema.integrationSessions).values([
+      {
+        id: journalIds.newestOk,
+        tenantId,
+        channelType: "public_api",
+        startedAt: new Date(anchor.getTime() + 180_000),
+        finishedAt: new Date(anchor.getTime() + 181_000),
+        outcome: "ok",
+        cookieHash: `journal-ok-${randomUUID()}`,
+        expiresAt: journalTo,
+        summary: { message: "newest successful" },
+      },
+      {
+        id: journalIds.tieHigh,
+        tenantId,
+        channelType: "public_api",
+        startedAt: journalTieAt,
+        finishedAt: new Date(journalTieAt.getTime() + 1_000),
+        outcome: "error",
+        cookieHash: `journal-error-${randomUUID()}`,
+        expiresAt: journalTo,
+      },
+      {
+        id: journalIds.tieLow,
+        tenantId,
+        channelType: "public_api",
+        startedAt: journalTieAt,
+        finishedAt: new Date(journalTieAt.getTime() + 1_000),
+        outcome: "warn",
+        cookieHash: `journal-warn-${randomUUID()}`,
+        expiresAt: journalTo,
+      },
+      {
+        id: journalIds.running,
+        tenantId,
+        channelType: "public_api",
+        startedAt: new Date(anchor.getTime() + 60_000),
+        outcome: null,
+        cookieHash: `journal-running-${randomUUID()}`,
+        expiresAt: journalTo,
+      },
+      {
+        id: journalIds.outside,
+        tenantId,
+        channelType: "public_api",
+        startedAt: new Date(anchor.getTime() - 2 * 86_400_000),
+        outcome: "ok",
+        cookieHash: `journal-outside-${randomUUID()}`,
+        expiresAt: journalTo,
+      },
+      {
+        tenantId: otherTenantId,
+        channelType: "public_api",
+        startedAt: new Date(anchor.getTime() + 300_000),
+        outcome: "error",
+        cookieHash: `journal-other-tenant-${randomUUID()}`,
+        expiresAt: journalTo,
+      },
+    ]);
+
+    await db.insert(schema.integrationEvents).values([
+      {
+        id: journalIds.orphan,
+        tenantId,
+        channelType: "public_api",
+        sessionId: null,
+        at: new Date(anchor.getTime() + 240_000),
+        direction: "in",
+        outcome: "error",
+        grain: "session",
+        message: "orphan failure",
+      },
+      {
+        tenantId,
+        channelType: "public_api",
+        sessionId: journalIds.newestOk,
+        at: new Date(anchor.getTime() + 180_500),
+        direction: "local",
+        outcome: "ok",
+        grain: "session",
+        message: "session summary",
+        details: { raw: "exact protocol payload" },
+      },
+      ...Array.from({ length: 25 }, (_, index) => ({
+        tenantId,
+        channelType: "public_api" as const,
+        sessionId: journalIds.newestOk,
+        at: new Date(anchor.getTime() + 181_000 + index),
+        direction: "out" as const,
+        outcome: "ok" as const,
+        grain: "item" as const,
+        message: `item-${index}`,
+      })),
+      {
+        tenantId,
+        channelType: "public_api",
+        sessionId: journalIds.tieHigh,
+        at: journalTieAt,
+        direction: "out",
+        outcome: "error",
+        grain: "session",
+        message: "failed session",
+      },
+      {
+        tenantId,
+        channelType: "public_api",
+        sessionId: journalIds.tieLow,
+        at: journalTieAt,
+        direction: "in",
+        outcome: "warn",
+        grain: "session",
+        message: "warning session",
+      },
+    ]);
   });
 
   afterAll(async () => {
@@ -245,60 +386,133 @@ describe("integrations (cabinet)", () => {
     expect(row.body.credentialLogin).toBeNull();
   });
 
-  it("отдаёт журнал сеансами, неуспешный — первым", async () => {
-    const res = await agent.get("/integrations/commerceml/journal").expect(200);
-    expect(Array.isArray(res.body.sessions)).toBe(true);
-  });
-
-  // Review fix (PR #32, item 6): the events query behind this route used to
-  // carry no `.limit()` at all -- a big import journals one `grain: "item"`
-  // event per skipped/unmatched offer, so a single event-heavy session could
-  // make one page load fetch tens of thousands of rows. This pins two things
-  // at once: the query is actually bounded (`JOURNAL_EVENTS_LIMIT`), and the
-  // events that DO come back are still grouped onto the RIGHT session (the
-  // O(sessions × events) `.filter()` this replaced could otherwise have hidden
-  // a grouping bug behind a small fixture that happened to work either way).
-  it("журнал ограничивает число событий и не путает их между сеансами", async () => {
-    const [session] = await db
-      .insert(schema.integrationSessions)
-      .values({
-        tenantId,
-        channelType: "commerceml",
-        cookieHash: `bulk-events-${randomUUID()}`,
-        expiresAt: new Date(Date.now() + 3_600_000),
+  it("пагинирует общую хронологию сеансов и одиночных событий без error-first", async () => {
+    const first = await agent
+      .get("/integrations/public_api/journal")
+      .query({
+        page: 1,
+        pageSize: 2,
+        from: journalFrom.toISOString(),
+        to: journalTo.toISOString(),
       })
-      .returning({ id: schema.integrationSessions.id });
+      .expect(200);
 
-    const eventCount = JOURNAL_EVENTS_LIMIT + 50;
-    const rows = Array.from({ length: eventCount }, (_, i) => ({
-      tenantId,
-      channelType: "commerceml" as const,
-      sessionId: session!.id,
-      direction: "in" as const,
-      outcome: "warn" as const,
-      grain: "item" as const,
-      message: `bulk-event-${i}`,
-    }));
-    await db.insert(schema.integrationEvents).values(rows);
+    expect(first.body.timeZone).toBe("Asia/Irkutsk");
+    expect(first.body.pageInfo).toEqual({
+      page: 1,
+      pageSize: 2,
+      totalItems: 5,
+      totalPages: 3,
+    });
+    expect(first.body.sessions.map((session: { id: string }) => session.id)).toEqual([
+      journalIds.orphan,
+      journalIds.newestOk,
+    ]);
+    expect(first.body.sessions[0]).toMatchObject({ eventCount: 1, eventsTruncated: false });
 
-    const res = await agent.get("/integrations/commerceml/journal").expect(200);
-    const thisSession = res.body.sessions.find((s: { id: string }) => s.id === session!.id);
-    expect(thisSession).toBeDefined();
-    // Bounded to EXACTLY the limit, not just "no more than" it: this session
-    // alone contributes more rows than the limit, all with the same (latest)
-    // insert timestamp, so the global events query's top JOURNAL_EVENTS_LIMIT
-    // rows can only come from here -- a weaker "some smaller number came
-    // back" bound would also pass if the query silently dropped rows, leaked
-    // rows from elsewhere, or applied the limit somewhere it shouldn't.
-    expect(thisSession.events.length).toBe(JOURNAL_EVENTS_LIMIT);
-    // Every event handed back for THIS session really does belong to it --
-    // proof the grouping didn't leak another session's rows in, or this
-    // session's rows out, while redistributing `events` into buckets.
-    for (const event of thisSession.events) {
-      expect(typeof event.message).toBe("string");
-      expect((event.message as string).startsWith("bulk-event-")).toBe(true);
-    }
+    const second = await agent
+      .get("/integrations/public_api/journal")
+      .query({
+        page: 2,
+        pageSize: 2,
+        from: journalFrom.toISOString(),
+        to: journalTo.toISOString(),
+      })
+      .expect(200);
+    expect(second.body.sessions.map((session: { id: string }) => session.id)).toEqual([
+      journalIds.tieHigh,
+      journalIds.tieLow,
+    ]);
+
+    const beyond = await agent
+      .get("/integrations/public_api/journal")
+      .query({
+        page: 4,
+        pageSize: 2,
+        from: journalFrom.toISOString(),
+        to: journalTo.toISOString(),
+      })
+      .expect(200);
+    expect(beyond.body.sessions).toEqual([]);
+    expect(beyond.body.pageInfo.totalItems).toBe(5);
   });
+
+  it("фильтрует выбранные сеансы и сохраняет диагностический контекст", async () => {
+    const baseQuery = {
+      page: 1,
+      pageSize: 20,
+      from: journalFrom.toISOString(),
+      to: journalTo.toISOString(),
+    };
+
+    const errors = await agent
+      .get("/integrations/public_api/journal")
+      .query({ ...baseQuery, outcome: "error" })
+      .expect(200);
+    expect(errors.body.sessions.map((session: { id: string }) => session.id)).toEqual([
+      journalIds.orphan,
+      journalIds.tieHigh,
+    ]);
+
+    const running = await agent
+      .get("/integrations/public_api/journal")
+      .query({ ...baseQuery, outcome: "running" })
+      .expect(200);
+    expect(running.body.sessions.map((session: { id: string }) => session.id)).toEqual([
+      journalIds.running,
+    ]);
+
+    const local = await agent
+      .get("/integrations/public_api/journal")
+      .query({ ...baseQuery, direction: "local" })
+      .expect(200);
+    expect(local.body.sessions).toHaveLength(1);
+    expect(local.body.sessions[0]).toMatchObject({
+      id: journalIds.newestOk,
+      eventCount: 26,
+      eventsTruncated: true,
+    });
+    expect(local.body.sessions[0].events).toHaveLength(21);
+    expect(local.body.sessions[0].events[0]).toMatchObject({
+      message: "session summary",
+      details: { raw: "exact protocol payload" },
+    });
+    expect(
+      local.body.sessions[0].events
+        .filter((event: { message: string }) => event.message.startsWith("item-"))
+        .map((event: { message: string }) => event.message),
+    ).toEqual(Array.from({ length: 20 }, (_, index) => `item-${index + 5}`));
+  });
+
+  it("включает границы временного окна", async () => {
+    const result = await agent
+      .get("/integrations/public_api/journal")
+      .query({
+        from: journalTieAt.toISOString(),
+        to: journalTieAt.toISOString(),
+      })
+      .expect(200);
+
+    expect(result.body.sessions.map((session: { id: string }) => session.id)).toEqual([
+      journalIds.tieHigh,
+      journalIds.tieLow,
+    ]);
+  });
+
+  it.each([
+    { page: 0 },
+    { pageSize: 51 },
+    { outcome: "failed" },
+    { direction: "sideways" },
+    { from: "not-a-date" },
+    { from: "2026-09-02T00:00:00.000Z", to: "2026-09-01T00:00:00.000Z" },
+    { from: "2026-05-01T00:00:00.000Z", to: "2026-09-02T00:00:00.000Z" },
+  ])(
+    "отвергает неверные параметры журнала: $page$pageSize$outcome$direction$from",
+    async (query) => {
+      await agent.get("/integrations/public_api/journal").query(query).expect(400);
+    },
+  );
 
   // `getChannel`/`updateChannel` уже гоняли тип через `safeDescribeChannel`;
   // `readJournal` брал строку из пути как есть и фильтровал по ней запрос —

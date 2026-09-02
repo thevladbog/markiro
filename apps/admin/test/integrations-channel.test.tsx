@@ -73,8 +73,15 @@ const deleteSpy = vi.fn();
 let journalSessions: JournalSessionDto[] = [];
 
 /** `stubJournal([...])` -- overrides the journal fixture for one test. */
-function stubJournal(sessions: JournalSessionDto[]): void {
-  journalSessions = sessions;
+function stubJournal(
+  sessions: (Omit<JournalSessionDto, "eventCount" | "eventsTruncated"> &
+    Partial<Pick<JournalSessionDto, "eventCount" | "eventsTruncated">>)[],
+): void {
+  journalSessions = sessions.map((session) => ({
+    ...session,
+    eventCount: session.eventCount ?? session.events.length,
+    eventsTruncated: session.eventsTruncated ?? false,
+  }));
 }
 
 /**
@@ -143,10 +150,19 @@ function createFetchMock(options: FetchMockOptions = {}) {
       return jsonResponse(204, null);
     }
 
-    if (method === "GET" && /\/journal$/.test(path)) {
+    if (method === "GET" && /\/journal(?:\?|$)/.test(path)) {
       if (journalMode === "pending") return new Promise<Response>(() => {});
       if (journalMode === "error") return jsonResponse(500, { message: "Internal error" });
-      return jsonResponse(200, { sessions: journalSessions });
+      return jsonResponse(200, {
+        timeZone: "Europe/Moscow",
+        sessions: journalSessions,
+        pageInfo: {
+          page: 1,
+          pageSize: 20,
+          totalItems: journalSessions.length,
+          totalPages: journalSessions.length === 0 ? 0 : 1,
+        },
+      });
     }
     if (method === "POST" && /\/credentials$/.test(path)) {
       if (issueMode === "network-error") throw new Error("network down");
@@ -292,26 +308,6 @@ describe("ChannelPage", () => {
     expect(screen.getByText(/больше он показан не будет/i)).toBeDefined();
   });
 
-  it("поднимает неуспешный сеанс наверх журнала", async () => {
-    stubJournal([
-      { id: "s2", startedAt: iso(-1), finishedAt: iso(-1), outcome: "ok", summary: {}, events: [] },
-      {
-        id: "s1",
-        startedAt: iso(-2),
-        finishedAt: iso(-2),
-        outcome: "error",
-        summary: {},
-        events: [],
-      },
-    ]);
-    renderChannel("commerceml");
-    const sessions = await screen.findAllByTestId("journal-session");
-    // No `@testing-library/jest-dom` in this repo (see
-    // `apps/admin/test/pickup.test.tsx`'s plain `toHaveProperty` uses for the
-    // same reason) -- assert the raw attribute instead of `toHaveAttribute`.
-    expect(sessions[0]?.getAttribute("data-outcome")).toBe("error");
-  });
-
   it("показывает ответ протокола дословно — его читает специалист по 1С", async () => {
     stubJournal([
       {
@@ -332,7 +328,8 @@ describe("ChannelPage", () => {
       },
     ]);
     renderChannel("commerceml");
-    await userEvent.click(await screen.findByTestId("journal-session"));
+    const session = await screen.findByTestId("journal-session");
+    await userEvent.click(within(session).getByRole("button"));
     expect(await screen.findByText(/unexpected token at 12/)).toBeDefined();
   });
 
@@ -362,12 +359,13 @@ describe("ChannelPage", () => {
     ]);
     renderChannel("commerceml");
     const session = await screen.findByTestId("journal-session");
-    await userEvent.click(session);
-    expect(session.getAttribute("aria-expanded")).toBe("true");
+    const toggle = within(session).getByRole("button");
+    await userEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
 
     await userEvent.click(screen.getByText("Ответ в протокол обмена"));
 
-    expect(session.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText(/unexpected token at 12/)).toBeDefined();
   });
 

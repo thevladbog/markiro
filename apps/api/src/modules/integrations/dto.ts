@@ -34,12 +34,34 @@ export interface JournalSessionDto {
   finishedAt: string | null;
   outcome: string | null;
   summary: Record<string, unknown> | null;
+  eventCount: number;
+  eventsTruncated: boolean;
   events: JournalEventDto[];
 }
 
 export interface JournalPageDto {
+  timeZone: string;
   sessions: JournalSessionDto[];
+  pageInfo: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
 }
+
+export const journalOutcomes = ["all", "ok", "warn", "error", "running"] as const;
+export const journalDirections = ["all", "in", "out", "local"] as const;
+
+export const listJournalQuerySchema = z.strictObject({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+  outcome: z.enum(journalOutcomes).default("all"),
+  direction: z.enum(journalDirections).default("all"),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+});
+export type ListJournalQueryDto = z.infer<typeof listJournalQuerySchema>;
 
 /** Выпускается ровно один раз при `POST /integrations/:type/credentials`; в базе живёт только хэш секрета. */
 export interface CredentialsIssuedDto {
@@ -191,13 +213,24 @@ const journalEventOpenApiSchema: SchemaObject = {
 const journalSessionOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "startedAt", "finishedAt", "outcome", "summary", "events"],
+  required: [
+    "id",
+    "startedAt",
+    "finishedAt",
+    "outcome",
+    "summary",
+    "eventCount",
+    "eventsTruncated",
+    "events",
+  ],
   properties: {
     id: uuidSchema,
     startedAt: dateTimeSchema,
     finishedAt: { ...dateTimeSchema, nullable: true },
     outcome: { type: "string", nullable: true },
     summary: { type: "object", nullable: true, additionalProperties: true },
+    eventCount: { type: "integer", minimum: 0 },
+    eventsTruncated: { type: "boolean" },
     events: { type: "array", items: journalEventOpenApiSchema },
   },
 };
@@ -205,8 +238,22 @@ const journalSessionOpenApiSchema: SchemaObject = {
 export const journalPageOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["sessions"],
-  properties: { sessions: { type: "array", items: journalSessionOpenApiSchema } },
+  required: ["timeZone", "sessions", "pageInfo"],
+  properties: {
+    timeZone: { type: "string" },
+    sessions: { type: "array", items: journalSessionOpenApiSchema },
+    pageInfo: {
+      type: "object",
+      additionalProperties: false,
+      required: ["page", "pageSize", "totalItems", "totalPages"],
+      properties: {
+        page: { type: "integer", minimum: 1 },
+        pageSize: { type: "integer", minimum: 1, maximum: 50 },
+        totalItems: { type: "integer", minimum: 0 },
+        totalPages: { type: "integer", minimum: 0 },
+      },
+    },
+  },
 };
 
 export const credentialsIssuedOpenApiSchema: SchemaObject = {
