@@ -88,9 +88,29 @@ export interface ShiftPlanningConfigDto {
   defaultBoxLabelTemplateId: string | null;
 }
 
+export interface ShiftParticipantDto {
+  employeeId: string;
+  fullName: string;
+  role: string | null;
+  firstActivityAt: string;
+  lastActivityAt: string;
+  acceptedScans: number;
+  closedBoxes: number;
+}
+
+export interface ShiftSummaryDto {
+  generatedAt: string;
+  output:
+    | { mode: "validation"; acceptedUnits: number }
+    | { mode: "aggregation"; closedBoxes: number; containedUnits: number };
+  participants: ShiftParticipantDto[];
+  unattributed: { eventCount: number; acceptedScans: number; closedBoxes: number };
+}
+
 /** Shared TanStack Query cache key prefix for the shifts list (all filter variants). */
 export const SHIFTS_QUERY_KEY = ["shifts"] as const;
 export const SHIFT_PLANNING_CONFIG_QUERY_KEY = ["shift-planning-config"] as const;
+export const SHIFT_SUMMARY_QUERY_KEY = ["shift-summary"] as const;
 
 function shiftsQueryKey(params: ListShiftsParams) {
   return [...SHIFTS_QUERY_KEY, params] as const;
@@ -115,6 +135,10 @@ async function fetchShifts(params: ListShiftsParams): Promise<ShiftDto[]> {
 
 function fetchShiftPlanningConfig(): Promise<ShiftPlanningConfigDto> {
   return apiFetch<ShiftPlanningConfigDto>("/shifts/planning-config");
+}
+
+function fetchShiftSummary(id: string): Promise<ShiftSummaryDto> {
+  return apiFetch<ShiftSummaryDto>(`/shifts/${id}/summary`);
 }
 
 function postShift(input: CreateShiftInput): Promise<ShiftDto> {
@@ -155,6 +179,14 @@ export function useShiftPlanningConfig(): UseQueryResult<ShiftPlanningConfigDto>
   return useQuery({
     queryKey: SHIFT_PLANNING_CONFIG_QUERY_KEY,
     queryFn: fetchShiftPlanningConfig,
+  });
+}
+
+export function useShiftSummary(id: string, enabled = true): UseQueryResult<ShiftSummaryDto> {
+  return useQuery({
+    queryKey: [...SHIFT_SUMMARY_QUERY_KEY, id],
+    queryFn: () => fetchShiftSummary(id),
+    enabled,
   });
 }
 

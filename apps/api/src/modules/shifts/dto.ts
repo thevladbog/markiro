@@ -159,6 +159,32 @@ export interface ListShiftsResponseDto {
   items: ShiftDto[];
 }
 
+export interface ShiftParticipantDto {
+  employeeId: string;
+  fullName: string;
+  role: string | null;
+  firstActivityAt: string;
+  lastActivityAt: string;
+  acceptedScans: number;
+  closedBoxes: number;
+}
+
+export type ShiftOutputDto =
+  | { mode: "validation"; acceptedUnits: number }
+  | { mode: "aggregation"; closedBoxes: number; containedUnits: number };
+
+/** GET /shifts/:id/summary response, computed from factual production events. */
+export interface ShiftSummaryDto {
+  generatedAt: string;
+  output: ShiftOutputDto;
+  participants: ShiftParticipantDto[];
+  unattributed: {
+    eventCount: number;
+    acceptedScans: number;
+    closedBoxes: number;
+  };
+}
+
 /** GET /shifts/planning-config response — the operations-readable planning subset only. */
 export interface ShiftPlanningConfigDto {
   defaultBoxLabelTemplateId: string | null;
@@ -439,6 +465,72 @@ export const shiftOpenApiSchema = {
     lateDataAt: nullableDateTimeOpenApiSchema,
     createdAt: { type: "string", format: "date-time" },
     stationCloseAccess: stationCloseAccessOpenApiSchema,
+  },
+};
+
+const shiftParticipantOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "employeeId",
+    "fullName",
+    "role",
+    "firstActivityAt",
+    "lastActivityAt",
+    "acceptedScans",
+    "closedBoxes",
+  ],
+  properties: {
+    employeeId: { type: "string", format: "uuid" },
+    fullName: { type: "string" },
+    role: { type: "string", nullable: true },
+    firstActivityAt: { type: "string", format: "date-time" },
+    lastActivityAt: { type: "string", format: "date-time" },
+    acceptedScans: { type: "integer", minimum: 0 },
+    closedBoxes: { type: "integer", minimum: 0 },
+  },
+};
+
+export const shiftSummaryOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["generatedAt", "output", "participants", "unattributed"],
+  properties: {
+    generatedAt: { type: "string", format: "date-time" },
+    output: {
+      oneOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["mode", "acceptedUnits"],
+          properties: {
+            mode: { type: "string", enum: ["validation"] },
+            acceptedUnits: { type: "integer", minimum: 0 },
+          },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["mode", "closedBoxes", "containedUnits"],
+          properties: {
+            mode: { type: "string", enum: ["aggregation"] },
+            closedBoxes: { type: "integer", minimum: 0 },
+            containedUnits: { type: "integer", minimum: 0 },
+          },
+        },
+      ],
+    },
+    participants: { type: "array", items: shiftParticipantOpenApiSchema },
+    unattributed: {
+      type: "object",
+      additionalProperties: false,
+      required: ["eventCount", "acceptedScans", "closedBoxes"],
+      properties: {
+        eventCount: { type: "integer", minimum: 0 },
+        acceptedScans: { type: "integer", minimum: 0 },
+        closedBoxes: { type: "integer", minimum: 0 },
+      },
+    },
   },
 };
 

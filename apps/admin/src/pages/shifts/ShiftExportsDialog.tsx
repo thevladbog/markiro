@@ -34,6 +34,12 @@ export interface ShiftExportsDialogProps {
   onClose: () => void;
 }
 
+export interface ShiftExportsContentProps {
+  shift: ShiftDto;
+  enabled?: boolean;
+  onBusyChange?: (busy: boolean) => void;
+}
+
 const MIN_LINES_PER_PART = 2;
 const MAX_LINES_PER_PART = 1_000_000;
 const DEFAULT_LINES_PER_PART = 2_000;
@@ -285,16 +291,24 @@ function HistoryRow({
   );
 }
 
-export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogProps) {
+export function ShiftExportsContent({
+  shift,
+  enabled = true,
+  onBusyChange,
+}: ShiftExportsContentProps) {
   const { t, i18n } = useTranslation();
   const formats = useShiftExportFormats();
-  const exportsQuery = useShiftExports(shift.id, open);
+  const exportsQuery = useShiftExports(shift.id, enabled);
   const create = useCreateShiftExport();
   const idempotencyKey = useRef<string | null>(null);
   const [formatId, setFormatId] = useState<ShiftExportFormatId | "">("");
   const [split, setSplit] = useState(false);
   const [lineLimit, setLineLimit] = useState(String(DEFAULT_LINES_PER_PART));
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    onBusyChange?.(create.isPending);
+  }, [create.isPending, onBusyChange]);
 
   useEffect(() => {
     const firstFormat = formats.data?.[0];
@@ -327,12 +341,6 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
     [formats.data],
   );
 
-  const close = () => {
-    if (create.isPending) return;
-    setError(null);
-    onClose();
-  };
-
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canSubmit || !formatId) return;
@@ -361,29 +369,7 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
   };
 
   return (
-    <Modal
-      open={open}
-      title={t("pages.shifts.exports.title")}
-      closeLabel={t("common.close")}
-      {...(create.isPending ? {} : { onClose: close })}
-      width="min(760px, calc(100vw - 32px))"
-      className="mk-shift-exports"
-      footer={
-        <>
-          <Button type="button" variant="secondary" disabled={create.isPending} onClick={close}>
-            {t("pages.shifts.cancel")}
-          </Button>
-          <Button
-            type="submit"
-            form="shift-export-form"
-            disabled={!canSubmit}
-            loading={create.isPending}
-          >
-            {t("pages.shifts.exports.create")}
-          </Button>
-        </>
-      }
-    >
+    <div className="mk-shift-exports">
       <form
         id="shift-export-form"
         className="mk-shift-exports__form"
@@ -438,6 +424,9 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
             }}
           />
         ) : null}
+        <Button type="submit" disabled={!canSubmit} loading={create.isPending}>
+          {t("pages.shifts.exports.create")}
+        </Button>
       </form>
       <section
         className="mk-shift-exports__history"
@@ -464,6 +453,29 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
           />
         ))}
       </section>
+    </div>
+  );
+}
+
+export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogProps) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <Modal
+      open={open}
+      title={t("pages.shifts.exports.title")}
+      closeLabel={t("common.close")}
+      {...(busy ? {} : { onClose })}
+      width="min(760px, calc(100vw - 32px))"
+      className="mk-shift-exports-modal"
+      footer={
+        <Button type="button" variant="secondary" disabled={busy} onClick={onClose}>
+          {t("pages.shifts.cancel")}
+        </Button>
+      }
+    >
+      <ShiftExportsContent shift={shift} enabled={open} onBusyChange={setBusy} />
     </Modal>
   );
 }

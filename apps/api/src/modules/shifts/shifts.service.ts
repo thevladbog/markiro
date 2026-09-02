@@ -34,6 +34,7 @@ import type {
   ShiftOrigin,
   ShiftPlanningConfigDto,
   ShiftReferenceBundleDto,
+  ShiftSummaryDto,
   UpdateShiftDto,
 } from "./dto";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
@@ -71,6 +72,25 @@ type ShiftUpdateTransactionResult =
       kind: "conflict";
       response: string | { code: "PRODUCTION_DATE_LOCKED"; message: string };
     };
+
+interface ShiftSummaryOutputRow {
+  mode: ShiftMode;
+  generatedAt: Date | string;
+  validationAcceptedUnits: number;
+  aggregationClosedBoxes: number;
+  aggregationContainedUnits: number;
+}
+
+interface ShiftParticipantRow {
+  employeeId: string | null;
+  fullName: string | null;
+  role: string | null;
+  firstActivityAt: Date | string;
+  lastActivityAt: Date | string;
+  eventCount: number;
+  acceptedScans: number;
+  closedBoxes: number;
+}
 
 const CURRENT_SHIFT_STORAGE_SELECTION = {
   id: schema.shifts.id,
@@ -257,6 +277,175 @@ export class ShiftsService {
       throw new NotFoundException();
     }
     return this.mapShiftRow(row);
+  }
+
+  async getShiftSummary(tenantId: string, id: string): Promise<ShiftSummaryDto> {
+    return this.db.transaction(
+      async (tx) => {
+        const outputResult = await tx.execute(sql<ShiftSummaryOutputRow>`
+          with target_shift as (
+            select shift.tenant_id, shift.id, shift.mode
+            from shifts shift
+            where shift.tenant_id = ${tenantId}
+              and shift.id = ${id}
+          )
+          select
+            target.mode as "mode",
+            transaction_timestamp() as "generatedAt",
+            (
+              select count(*)::int
+              from code_registry registry
+              where registry.tenant_id = target.tenant_id
+                and registry.tenant_id = ${tenantId}
+                and registry.shift_id = target.id
+                and registry.shift_id = ${id}
+                and target.mode = 'validation'
+            ) as "validationAcceptedUnits",
+            (
+              select count(*)::int
+              from boxes box
+              where box.tenant_id = target.tenant_id
+                and box.tenant_id = ${tenantId}
+                and box.shift_id = target.id
+                and box.shift_id = ${id}
+                and target.mode = 'aggregation'
+                and box.closed_at is not null
+                and box.disassembled_at is null
+            ) as "aggregationClosedBoxes",
+            (
+              select count(*)::int
+              from box_items item
+              inner join boxes box
+                on box.tenant_id = item.tenant_id
+                and box.id = item.box_id
+              where item.tenant_id = target.tenant_id
+                and item.tenant_id = ${tenantId}
+                and box.tenant_id = target.tenant_id
+                and box.tenant_id = ${tenantId}
+                and box.shift_id = target.id
+                and box.shift_id = ${id}
+                and target.mode = 'aggregation'
+                and box.closed_at is not null
+                and box.disassembled_at is null
+                and item.displaced_at is null
+                and item.removed_at is null
+            ) as "aggregationContainedUnits"
+          from target_shift target
+        `);
+        const rawOutputRow = outputResult.rows[0];
+        if (!rawOutputRow) throw new NotFoundException();
+        const outputRow = parseShiftSummaryOutputRow(rawOutputRow);
+
+        const participantsResult = await tx.execute(sql<ShiftParticipantRow>`
+          with activity as (
+            select
+              event.operator_id,
+              event.scanned_at as activity_at,
+              1::int as event_count,
+              case when event.verdict = 'ok' then 1 else 0 end::int as accepted_scans,
+              0::int as closed_boxes
+            from scan_events event
+            where event.tenant_id = ${tenantId}
+              and event.shift_id = ${id}
+
+            union all
+
+            select
+              box.operator_id,
+              coalesce(box.closed_at, box.opened_at) as activity_at,
+              1::int as event_count,
+              0::int as accepted_scans,
+              case when box.closed_at is not null then 1 else 0 end::int as closed_boxes
+            from boxes box
+            where box.tenant_id = ${tenantId}
+              and box.shift_id = ${id}
+              and coalesce(box.closed_at, box.opened_at) is not null
+
+            union all
+
+            select
+              box_event.operator_id,
+              box_event.occurred_at as activity_at,
+              1::int as event_count,
+              0::int as accepted_scans,
+              0::int as closed_boxes
+            from box_exceptions box_event
+            where box_event.tenant_id = ${tenantId}
+              and box_event.shift_id = ${id}
+              and box_event.disaggregation_document_id is null
+
+            union all
+
+            select
+              closing.operator_id,
+              closing.closed_at as activity_at,
+              1::int as event_count,
+              0::int as accepted_scans,
+              0::int as closed_boxes
+            from station_shift_close_events closing
+            where closing.tenant_id = ${tenantId}
+              and closing.shift_id = ${id}
+              and closing.outcome = 'accepted'
+          )
+          select
+            employee.id as "employeeId",
+            employee.full_name as "fullName",
+            employee.role as "role",
+            min(activity.activity_at) as "firstActivityAt",
+            max(activity.activity_at) as "lastActivityAt",
+            sum(activity.event_count)::int as "eventCount",
+            sum(activity.accepted_scans)::int as "acceptedScans",
+            sum(activity.closed_boxes)::int as "closedBoxes"
+          from activity
+          left join employees employee
+            on employee.tenant_id = ${tenantId}
+            and employee.id = activity.operator_id
+          group by activity.operator_id, employee.id, employee.full_name, employee.role
+          order by min(activity.activity_at), employee.full_name nulls last
+        `);
+
+        const participants: ShiftSummaryDto["participants"] = [];
+        const unattributed = { eventCount: 0, acceptedScans: 0, closedBoxes: 0 };
+        for (const rawRow of participantsResult.rows) {
+          const row = parseShiftParticipantRow(rawRow);
+          const { eventCount, acceptedScans, closedBoxes } = row;
+          if (!row.employeeId || !row.fullName) {
+            unattributed.eventCount += eventCount;
+            unattributed.acceptedScans += acceptedScans;
+            unattributed.closedBoxes += closedBoxes;
+            continue;
+          }
+          participants.push({
+            employeeId: row.employeeId,
+            fullName: row.fullName,
+            role: row.role,
+            firstActivityAt: toIsoTimestamp(row.firstActivityAt, "first activity"),
+            lastActivityAt: toIsoTimestamp(row.lastActivityAt, "last activity"),
+            acceptedScans: row.acceptedScans,
+            closedBoxes: row.closedBoxes,
+          });
+        }
+
+        const mode = outputRow.mode;
+        return {
+          generatedAt: toIsoTimestamp(outputRow.generatedAt, "summary generated-at"),
+          output:
+            mode === "validation"
+              ? {
+                  mode,
+                  acceptedUnits: outputRow.validationAcceptedUnits,
+                }
+              : {
+                  mode,
+                  closedBoxes: outputRow.aggregationClosedBoxes,
+                  containedUnits: outputRow.aggregationContainedUnits,
+                },
+          participants,
+          unattributed,
+        };
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
   }
 
   /**
@@ -1248,4 +1437,62 @@ export class ShiftsService {
     }
     throw error;
   }
+}
+
+function toDatabaseNumber(value: unknown, label: string): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error(`Invalid ${label}`);
+  }
+  return parsed;
+}
+
+function toIsoTimestamp(value: unknown, label: string): string {
+  if (!(value instanceof Date) && typeof value !== "string") {
+    throw new Error(`Invalid ${label}`);
+  }
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) throw new Error(`Invalid ${label}`);
+  return parsed.toISOString();
+}
+
+function nullableString(value: unknown, label: string): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string") throw new Error(`Invalid ${label}`);
+  return value;
+}
+
+function parseShiftSummaryOutputRow(row: Record<string, unknown>): ShiftSummaryOutputRow {
+  if (row.mode !== "validation" && row.mode !== "aggregation") {
+    throw new Error("Invalid shift summary mode");
+  }
+  return {
+    mode: row.mode,
+    generatedAt: toIsoTimestamp(row.generatedAt, "summary generated-at"),
+    validationAcceptedUnits: toDatabaseNumber(
+      row.validationAcceptedUnits,
+      "validation accepted units",
+    ),
+    aggregationClosedBoxes: toDatabaseNumber(
+      row.aggregationClosedBoxes,
+      "aggregation closed boxes",
+    ),
+    aggregationContainedUnits: toDatabaseNumber(
+      row.aggregationContainedUnits,
+      "aggregation contained units",
+    ),
+  };
+}
+
+function parseShiftParticipantRow(row: Record<string, unknown>): ShiftParticipantRow {
+  return {
+    employeeId: nullableString(row.employeeId, "participant employee id"),
+    fullName: nullableString(row.fullName, "participant full name"),
+    role: nullableString(row.role, "participant role"),
+    firstActivityAt: toIsoTimestamp(row.firstActivityAt, "first activity"),
+    lastActivityAt: toIsoTimestamp(row.lastActivityAt, "last activity"),
+    eventCount: toDatabaseNumber(row.eventCount, "participant event count"),
+    acceptedScans: toDatabaseNumber(row.acceptedScans, "participant accepted scans"),
+    closedBoxes: toDatabaseNumber(row.closedBoxes, "participant closed boxes"),
+  };
 }
