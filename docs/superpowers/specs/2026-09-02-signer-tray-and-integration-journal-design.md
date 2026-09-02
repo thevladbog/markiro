@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-02
 
-**Status:** approved in chat, awaiting written-spec review
+**Status:** approved 2026-09-02; implementation plans prepared
 
 **Scope:** `apps/signer`, `apps/admin`, `apps/api`, integration journal DTOs and database indexes
 
@@ -48,8 +48,9 @@ hide this limitation rather than fix it.
 2. The default journal order is strictly newest first.
 3. Errors stay easy to find through the current-state notice and outcome
    filters. They are not permanently promoted above newer activity.
-4. Filters select sessions. Expanding a matching session shows its complete
-   event sequence so diagnostic context is not removed.
+4. Filters select sessions. Expanding a matching session shows every retained
+   session-level event plus a bounded, explicitly labelled set of item-level
+   events so diagnostic context is not silently removed or misrepresented.
 5. Pagination is performed by the API. The admin never paginates a truncated
    in-memory response.
 6. Orphan events continue to appear as one-event synthetic sessions.
@@ -160,10 +161,12 @@ The row header is a real button with `aria-expanded`. The expanded panel is a
 sibling region, not an interactive `li`, so nested protocol details do not
 need event-propagation workarounds.
 
-Expanded content shows the complete event sequence in chronological order.
-Each event includes time, direction, outcome, and message. Raw protocol output
-remains collapsed in a native `details` element and preserves the exact server
-text.
+Expanded content shows every retained session-level event and the latest 20
+retained item-level events in chronological order. Each event includes time,
+direction, outcome, and message. Raw protocol output remains collapsed in a
+native `details` element and preserves the exact server text. If older
+item-level events were omitted, the panel says exactly how many events exist
+and how many are shown; it never presents a truncated sequence as complete.
 
 ### Pagination
 
@@ -198,6 +201,7 @@ The response becomes:
 
 ```ts
 interface JournalPageDto {
+  timeZone: string;
   sessions: JournalSessionDto[];
   pageInfo: {
     page: number;
@@ -205,6 +209,12 @@ interface JournalPageDto {
     totalItems: number;
     totalPages: number;
   };
+}
+
+interface JournalSessionDto {
+  // Existing identity, time, outcome, summary, and events fields remain.
+  eventCount: number;
+  eventsTruncated: boolean;
 }
 ```
 
@@ -215,8 +225,9 @@ Filtering semantics:
 - direction filtering matches sessions containing at least one event with the
   requested direction;
 - time filtering uses session start time or orphan-event time;
-- returned sessions contain all their retained events, not only events that
-  matched the direction predicate.
+- direction matching never removes context from the returned detail subset:
+  it still contains every retained session-grain event and the same bounded
+  item-grain sequence, not only events with the requested direction.
 
 Ordering is stable: `startedAt DESC, id DESC`. The server removes all
 error-first reordering. The admin does not re-sort the response.
@@ -235,8 +246,13 @@ is fetched:
 2. Apply period, outcome, and direction predicates.
 3. Count matching projection rows.
 4. Order and page the projection.
-5. Fetch retained events only for the real session IDs on that page.
-6. Map real and synthetic sessions to the existing shared DTO shape.
+5. Count all retained events for the real session IDs on that page.
+6. Fetch every session-grain event plus the latest 20 item-grain events per
+   real session. Keep the returned subset in chronological order.
+7. Read the organisation timezone, falling back to `Europe/Moscow` when the
+   tenant has no profile row.
+8. Map real and synthetic sessions to the shared DTO shape, including exact
+   `eventCount` and `eventsTruncated` values.
 
 This prevents the current two-source `limit`, merge, and re-slice behaviour
 from producing incomplete later pages.
@@ -285,7 +301,10 @@ existing journal records.
 - stable tie-breaking by ID;
 - tenant and channel isolation for every filter;
 - outcome, direction, and period filtering;
-- complete session events after a direction match;
+- complete session-grain context and the same bounded item-grain detail after
+  a direction match;
+- complete session-grain events, bounded item-grain events, and honest
+  truncation metadata;
 - page boundaries, totals, and last-page handling;
 - invalid query values return 400;
 - the 90-day maximum span is enforced;
@@ -323,3 +342,4 @@ packaged and deployed to a safe environment.
 - Changing Signer's agent-state machine, polling, notification grace period,
   or updater behaviour.
 - Exporting the admin integration journal in this iteration.
+- Per-session pagination of item-level journal detail.
