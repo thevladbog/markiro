@@ -34,11 +34,20 @@ export interface JournalSessionDto {
   finishedAt: string | null;
   outcome: string | null;
   summary: Record<string, unknown> | null;
+  eventCount: number;
+  eventsTruncated: boolean;
   events: JournalEventDto[];
 }
 
 export interface JournalPageDto {
+  timeZone: string;
   sessions: JournalSessionDto[];
+  pageInfo: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
 }
 
 export const journalOutcomes = ["all", "ok", "warn", "error", "running"] as const;
@@ -204,13 +213,24 @@ const journalEventOpenApiSchema: SchemaObject = {
 const journalSessionOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "startedAt", "finishedAt", "outcome", "summary", "events"],
+  required: [
+    "id",
+    "startedAt",
+    "finishedAt",
+    "outcome",
+    "summary",
+    "eventCount",
+    "eventsTruncated",
+    "events",
+  ],
   properties: {
     id: uuidSchema,
     startedAt: dateTimeSchema,
     finishedAt: { ...dateTimeSchema, nullable: true },
     outcome: { type: "string", nullable: true },
     summary: { type: "object", nullable: true, additionalProperties: true },
+    eventCount: { type: "integer", minimum: 0 },
+    eventsTruncated: { type: "boolean" },
     events: { type: "array", items: journalEventOpenApiSchema },
   },
 };
@@ -218,8 +238,22 @@ const journalSessionOpenApiSchema: SchemaObject = {
 export const journalPageOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["sessions"],
-  properties: { sessions: { type: "array", items: journalSessionOpenApiSchema } },
+  required: ["timeZone", "sessions", "pageInfo"],
+  properties: {
+    timeZone: { type: "string" },
+    sessions: { type: "array", items: journalSessionOpenApiSchema },
+    pageInfo: {
+      type: "object",
+      additionalProperties: false,
+      required: ["page", "pageSize", "totalItems", "totalPages"],
+      properties: {
+        page: { type: "integer", minimum: 1 },
+        pageSize: { type: "integer", minimum: 1, maximum: 50 },
+        totalItems: { type: "integer", minimum: 0 },
+        totalPages: { type: "integer", minimum: 0 },
+      },
+    },
+  },
 };
 
 export const credentialsIssuedOpenApiSchema: SchemaObject = {

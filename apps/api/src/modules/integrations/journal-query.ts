@@ -15,12 +15,11 @@ export interface ResolvedJournalQuery {
   direction: ListJournalQueryDto["direction"];
   from: Date;
   to: Date;
+  toIsImplicit: boolean;
 }
 
-export function resolveJournalQuery(
-  query: ListJournalQueryDto,
-  now: Date,
-): ResolvedJournalQuery {
+export function resolveJournalQuery(query: ListJournalQueryDto, now: Date): ResolvedJournalQuery {
+  const toIsImplicit = query.to === undefined;
   const to = query.to ?? now;
   const from = query.from ?? new Date(to.getTime() - 30 * DAY_MS);
 
@@ -35,5 +34,6 @@ export function resolveJournalQuery(
     direction: query.direction,
     from,
     to,
+    toIsImplicit,
   };
 }

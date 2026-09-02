@@ -17,6 +17,9 @@ describe("integration journal query", () => {
       direction: "all",
       from: new Date("2026-08-03T12:00:00.000Z"),
       to: NOW,
+      // The repository uses the database clock for this upper bound so
+      // process/database clock skew cannot hide a just-committed event.
+      toIsImplicit: true,
     });
   });
 
@@ -37,6 +40,7 @@ describe("integration journal query", () => {
       direction: "local",
       from: new Date("2026-08-26T12:00:00.000Z"),
       to: new Date("2026-09-02T12:00:00.000Z"),
+      toIsImplicit: false,
     });
   });
 

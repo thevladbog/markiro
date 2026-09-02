@@ -19,7 +19,10 @@ import type {
   ChannelSummaryDto,
   CredentialsIssuedDto,
   JournalPageDto,
+  ListJournalQueryDto,
 } from "./dto";
+import { resolveJournalQuery } from "./journal-query";
+import { readJournalPage } from "./journal-read.repository";
 import { JournalService } from "./journal.service";
 
 /**
@@ -28,37 +31,6 @@ import { JournalService } from "./journal.service";
  * issuance -- mirrors `MINT_ATTEMPTS` in `pairing.service.ts`'s `issueCode`.
  */
 const ISSUE_ATTEMPTS = 5;
-
-/**
- * Page size for `readJournal`. Sessions and orphan events are fetched from
- * two separate queries (real sessions vs. session-less events, see
- * `readJournal` below) and each is capped at this same limit -- but the two
- * are then merged into one combined, re-sorted feed. Without re-slicing
- * AFTER the merge, the route could return up to twice this many records
- * (50 sessions + 50 orphan events) instead of one page of this size; the
- * cap has to apply to the merged result, not to each source independently.
- */
-const JOURNAL_PAGE_SIZE = 50;
-
-/**
- * Review fix (PR #32, item 6): the events query below used to carry no
- * `.limit()` at all -- every `integration_events` row belonging to any of
- * this page's (up to `JOURNAL_PAGE_SIZE`) sessions, full stop. A single
- * `mode=import` round journals one `grain: "item"` event per skipped/
- * unmatched offer (`exchange.controller.ts`'s `import()`), so one big
- * catalog can leave a session with thousands of events -- fifty such
- * sessions turn one channel-page load into a tens-of-thousands-of-rows
- * fetch. This caps the events query itself; `JOURNAL_PAGE_SIZE * 20` is
- * generous per session (twenty is already more than a human reads on one
- * page) while keeping the worst case bounded regardless of import size.
- * Accepted limitation: the cap applies to the query as a whole, ordered by
- * recency, not evenly per session -- one very event-heavy recent session can
- * still crowd out an older session's events within this window. That is
- * still a fixed, bounded cost instead of an unbounded one, and the sessions
- * list itself (which is what a channel page actually starts from) is
- * unaffected either way.
- */
-export const JOURNAL_EVENTS_LIMIT = JOURNAL_PAGE_SIZE * 20;
 
 /**
  * Review fix (PR #32, item 7): `listCandidates`'s two queries (the queue
@@ -422,137 +394,14 @@ export class IntegrationsService {
     });
   }
 
-  async readJournal(tenantId: string, type: IntegrationChannelType): Promise<JournalPageDto> {
+  async readJournal(
+    tenantId: string,
+    type: IntegrationChannelType,
+    query: ListJournalQueryDto,
+    now: Date,
+  ): Promise<JournalPageDto> {
     safeDescribeChannel(type);
-    const sessions = await this.db
-      .select()
-      .from(schema.integrationSessions)
-      .where(
-        and(
-          eq(schema.integrationSessions.tenantId, tenantId),
-          eq(schema.integrationSessions.channelType, type),
-        ),
-      )
-      .orderBy(desc(schema.integrationSessions.startedAt))
-      .limit(JOURNAL_PAGE_SIZE);
-
-    const events = sessions.length
-      ? await this.db
-          .select()
-          .from(schema.integrationEvents)
-          .where(
-            inArray(
-              schema.integrationEvents.sessionId,
-              sessions.map((s) => s.id),
-            ),
-          )
-          .orderBy(desc(schema.integrationEvents.at))
-          // Review fix (PR #32, item 6): see `JOURNAL_EVENTS_LIMIT`'s own
-          // comment -- a large import can journal thousands of `grain: "item"`
-          // events against one session; this bounds the query regardless.
-          .limit(JOURNAL_EVENTS_LIMIT)
-      : [];
-
-    // Review fix (PR #32, item 6): grouped once, here, instead of each
-    // session below re-`filter()`ing the whole `events` array
-    // (O(sessions × events) -- fifty sessions against thousands of events
-    // was fifty full passes over that array on every channel-page load).
-    // One pass over `events` distributes every row into its session's own
-    // bucket; each session then just reads its own bucket back out.
-    const eventsBySessionId = new Map<string, (typeof schema.integrationEvents.$inferSelect)[]>();
-    for (const event of events) {
-      if (event.sessionId === null) continue;
-      const bucket = eventsBySessionId.get(event.sessionId);
-      if (bucket) {
-        bucket.push(event);
-      } else {
-        eventsBySessionId.set(event.sessionId, [event]);
-      }
-    }
-
-    // Действия человека вне обмена (разрыв связи — Task 10; "checkauth:
-    // неверный пароль" до открытия сеанса — see exchange.controller.ts)
-    // пишутся с `sessionId: null`, потому что сеанса на этот момент попросту
-    // нет. Без этого блока такое событие осело бы в базе, но было бы
-    // невидимо в кабинетном журнале: `events` выше собирает только то, что
-    // привязано к одному из уже найденных `sessions`. Каждое такое событие
-    // становится собственной записью-сеансом из одного события.
-    const orphanEvents = await this.db
-      .select()
-      .from(schema.integrationEvents)
-      .where(
-        and(
-          eq(schema.integrationEvents.tenantId, tenantId),
-          eq(schema.integrationEvents.channelType, type),
-          isNull(schema.integrationEvents.sessionId),
-        ),
-      )
-      .orderBy(desc(schema.integrationEvents.at))
-      .limit(JOURNAL_PAGE_SIZE);
-
-    type SessionLike = {
-      id: string;
-      startedAt: Date;
-      finishedAt: Date | null;
-      outcome: string | null;
-      summary: Record<string, unknown> | null;
-      events: (typeof schema.integrationEvents.$inferSelect)[];
-    };
-
-    const realSessions: SessionLike[] = sessions.map((s) => ({
-      id: s.id,
-      startedAt: s.startedAt,
-      finishedAt: s.finishedAt,
-      outcome: s.outcome,
-      summary: s.summary ?? null,
-      events: eventsBySessionId.get(s.id) ?? [],
-    }));
-
-    const orphanSessions: SessionLike[] = orphanEvents.map((e) => ({
-      id: e.id,
-      startedAt: e.at,
-      finishedAt: e.at,
-      outcome: e.outcome,
-      summary: null,
-      events: [e],
-    }));
-
-    // Сначала — по давности через оба источника вместе, иначе сеансы и
-    // одиночные события легли бы двумя раздельными, не перемешанными
-    // блоками вместо одной ленты по времени.
-    const merged = [...realSessions, ...orphanSessions].sort(
-      (a, b) => b.startedAt.getTime() - a.startedAt.getTime(),
-    );
-
-    // Неуспешный сеанс наверх: его ищут первым, когда обмен сломался
-    // (бриф 08, «Channel page»).
-    const ordered = [
-      ...merged.filter((s) => s.outcome === "error"),
-      ...merged.filter((s) => s.outcome !== "error"),
-    ];
-
-    // Re-slice AFTER merging both sources (see JOURNAL_PAGE_SIZE above):
-    // each query above is already capped at JOURNAL_PAGE_SIZE on its own, but
-    // `ordered` combines both, so without this the route could hand back up
-    // to twice one page.
-    const page = ordered.slice(0, JOURNAL_PAGE_SIZE);
-
-    return {
-      sessions: page.map((s) => ({
-        id: s.id,
-        startedAt: s.startedAt.toISOString(),
-        finishedAt: s.finishedAt?.toISOString() ?? null,
-        outcome: s.outcome,
-        summary: s.summary,
-        events: s.events.map((e) => ({
-          at: e.at.toISOString(),
-          direction: e.direction,
-          outcome: e.outcome,
-          message: e.message,
-          details: e.details ?? null,
-        })),
-      })),
-    };
+    return readJournalPage(this.db, tenantId, type, resolveJournalQuery(query, now));
   }
 
   /**

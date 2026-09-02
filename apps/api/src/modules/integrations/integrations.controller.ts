@@ -17,6 +17,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger";
@@ -53,6 +54,7 @@ import {
   linkCandidateSchema,
   listCandidatesQuerySchema,
   listChannelsOpenApiSchema,
+  listJournalQuerySchema,
   updateChannelSchema,
   type CandidatesPageDto,
   type ChannelDetailDto,
@@ -61,6 +63,7 @@ import {
   type JournalPageDto,
   type LinkCandidateDto,
   type ListCandidatesQueryDto,
+  type ListJournalQueryDto,
   type UpdateChannelDto,
 } from "./dto";
 import { IntegrationsService } from "./integrations.service";
@@ -150,13 +153,25 @@ export class IntegrationsController {
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_READ)
   @ApiOperation({ summary: "Read integration channel journal" })
   @ApiParam({ name: "type", enum: INTEGRATION_CHANNEL_TYPES })
+  @ApiQuery({ name: "page", required: false, schema: { type: "integer", minimum: 1, default: 1 } })
+  @ApiQuery({
+    name: "pageSize",
+    required: false,
+    schema: { type: "integer", minimum: 1, maximum: 50, default: 20 },
+  })
+  @ApiQuery({ name: "outcome", required: false, enum: ["all", "ok", "warn", "error", "running"] })
+  @ApiQuery({ name: "direction", required: false, enum: ["all", "in", "out", "local"] })
+  @ApiQuery({ name: "from", required: false, schema: { type: "string", format: "date-time" } })
+  @ApiQuery({ name: "to", required: false, schema: { type: "string", format: "date-time" } })
   @ApiOkResponse({ schema: journalPageOpenApiSchema })
+  @ApiZodValidationError()
   @ApiHttpErrors(401, 403, 404)
   async journal(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
+    @Query(new ZodValidationPipe(listJournalQuerySchema)) query: ListJournalQueryDto,
   ): Promise<JournalPageDto> {
-    return this.integrations.readJournal(req.tenantId!, type);
+    return this.integrations.readJournal(req.tenantId!, type, query, new Date());
   }
 
   @Get(":type/code-statuses")
