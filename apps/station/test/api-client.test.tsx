@@ -273,6 +273,28 @@ describe("createStationClient", () => {
     expect(onCredentialRejected).not.toHaveBeenCalled();
   });
 
+  it("seals the credential when an image download returns explicit revocation", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ message: "revoked", code: "STATION_CREDENTIAL_REVOKED" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const generation = createCredentialGeneration();
+    const onCredentialRejected = vi.fn();
+    const client = createStationClient(
+      { machineId: "m1", apiKey: "revoked", serverUrl: "http://localhost:3000" },
+      { credentialBoundary: { machineId: "m1", generation, onCredentialRejected } },
+    );
+
+    await expect(client.download("/station/products/p1/image/checksum")).rejects.toEqual(
+      new StationApiError(401, "revoked", "STATION_CREDENTIAL_REVOKED"),
+    );
+
+    expect(generation.phase).toBe("sealed");
+    expect(onCredentialRejected).toHaveBeenCalledTimes(1);
+  });
+
   it("publishes one rejection when concurrent authenticated requests receive 401", async () => {
     let resolveFirst!: (value: Response) => void;
     let resolveSecond!: (value: Response) => void;

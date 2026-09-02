@@ -126,6 +126,17 @@ export function createStationClient(
   const credentialBoundary = options.credentialBoundary;
   let latestRequestSequence = 0;
 
+  async function rejectCredentialIfExplicit(error: unknown): Promise<void> {
+    if (!credentialBoundary || !isStationCredentialRejection(error)) return;
+    await rejectCredentialGeneration(
+      {
+        machineId: credentialBoundary.machineId,
+        generation: credentialBoundary.generation,
+      },
+      credentialBoundary.onCredentialRejected,
+    );
+  }
+
   async function request<T>(
     method: "GET" | "POST",
     path: string,
@@ -172,15 +183,7 @@ export function createStationClient(
       return (await res.json()) as T;
     } catch (error) {
       if (!receivedResponse) reportReachability("unreachable");
-      if (credentialBoundary && isStationCredentialRejection(error)) {
-        await rejectCredentialGeneration(
-          {
-            machineId: credentialBoundary.machineId,
-            generation: credentialBoundary.generation,
-          },
-          credentialBoundary.onCredentialRejected,
-        );
-      }
+      await rejectCredentialIfExplicit(error);
       throw error;
     } finally {
       clearTimeout(timer);
@@ -190,9 +193,10 @@ export function createStationClient(
 
   return {
     get: (path) => request("GET", path),
-    // Binary media is an optional display enhancement. Its failure must not
-    // seal the line's credential generation: a CDN/proxy/media fault may hide
-    // a picture, but must not abandon queued production facts or the floor.
+    // Binary media is an optional display enhancement. Generic image/CDN
+    // failures must not seal the line's credential generation, but an explicit
+    // server revocation code still crosses the same credential boundary as any
+    // other authenticated Station request.
     download: async (path) => {
       if (credentialBoundary?.generation.sealed)
         throw new Error("station credential generation is sealed");
@@ -211,6 +215,9 @@ export function createStationClient(
           throw new StationApiError(res.status, error.message, error.code);
         }
         return await res.blob();
+      } catch (error) {
+        await rejectCredentialIfExplicit(error);
+        throw error;
       } finally {
         clearTimeout(timer);
       }
