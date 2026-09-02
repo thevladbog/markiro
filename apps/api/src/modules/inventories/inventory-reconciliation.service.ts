@@ -26,8 +26,10 @@ import {
   type InventoryEvidenceAction,
 } from "./inventory-evidence-query";
 import {
+  formatInventoryBoxIdentity,
   formatInventoryEventCopyIdentity,
   formatInventoryEventIdentity,
+  formatKmHri,
   type InventoryEventKind,
 } from "./inventory-event-display";
 
@@ -471,7 +473,7 @@ export class InventoryReconciliationService {
         discrepancy."categoryRank",
         coalesce(discrepancy.sscc, ''),
         coalesce(discrepancy."codeHash", ''),
-        discrepancy."displayIdentity"
+        discrepancy."identityFallback"
       limit ${query.pageSize}
       offset ${offset}
     `);
@@ -511,7 +513,11 @@ function discrepancyRows(tenantId: string, inventoryId: string, snapshotId: stri
     select
       'missing'::text as category,
       1::int as "categoryRank",
-      concat('01', sc.gtin14, '21', sc.serial) as "displayIdentity",
+      sc.gtin14 as "identityGtin14",
+      sc.serial as "identitySerial",
+      null::text as "identityKind",
+      null::text as "identityRawPayload",
+      concat('01', sc.gtin14, '21', sc.serial) as "identityFallback",
       sc.code_hash as "codeHash",
       sc.parent_sscc as sscc,
       false as found,
@@ -537,6 +543,10 @@ function discrepancyRows(tenantId: string, inventoryId: string, snapshotId: stri
     select
       'protected'::text,
       2::int,
+      sc.gtin14,
+      sc.serial,
+      null::text,
+      null::text,
       concat('01', sc.gtin14, '21', sc.serial),
       sc.code_hash,
       sc.parent_sscc,
@@ -565,6 +575,10 @@ function discrepancyRows(tenantId: string, inventoryId: string, snapshotId: stri
     select
       'ineligible'::text,
       3::int,
+      sc.gtin14,
+      sc.serial,
+      null::text,
+      null::text,
       concat('01', sc.gtin14, '21', sc.serial),
       r.code_hash,
       sc.parent_sscc,
@@ -592,6 +606,10 @@ function discrepancyRows(tenantId: string, inventoryId: string, snapshotId: stri
     select
       'unknown'::text,
       4::int,
+      null::char(14),
+      null::text,
+      e.kind::text,
+      e.raw_payload,
       e.normalized_identity,
       r.code_hash,
       null::char(18),
@@ -619,6 +637,10 @@ function discrepancyRows(tenantId: string, inventoryId: string, snapshotId: stri
     select
       'date_mismatch'::text,
       5::int,
+      sc.gtin14,
+      sc.serial,
+      null::text,
+      null::text,
       concat('01', sc.gtin14, '21', sc.serial),
       r.code_hash,
       sc.parent_sscc,
@@ -649,6 +671,10 @@ function discrepancyRows(tenantId: string, inventoryId: string, snapshotId: stri
     select
       'voided'::text,
       6::int,
+      sc.gtin14,
+      sc.serial,
+      e.kind::text,
+      e.raw_payload,
       case
         when sc.code_hash is null then e.normalized_identity
         else concat('01', sc.gtin14, '21', sc.serial)
@@ -683,6 +709,10 @@ function discrepancyRows(tenantId: string, inventoryId: string, snapshotId: stri
     select
       'invalidated_box'::text,
       7::int,
+      null::char(14),
+      null::text,
+      'new_box'::text,
+      b.new_sscc,
       concat('new_box:', b.new_sscc),
       null::char(64),
       b.new_sscc,
@@ -867,6 +897,31 @@ function parseEvidenceAggregateRow(value: unknown): EvidenceAggregateRow {
   };
 }
 
+/**
+ * Names a discrepancy in the same vocabulary the event endpoints publish, so
+ * the cabinet's two lists agree. A code the snapshot knows carries its own
+ * GTIN and serial; a row that exists only as a scan (`unknown`, and `voided`
+ * for a code outside the snapshot) is read back from the retained raw payload
+ * exactly like an event; an invalidated repack box is its own SSCC.
+ * `identityFallback` is the internal identity, kept only for rows whose
+ * evidence can no longer be parsed.
+ */
+function discrepancyDisplayIdentity(record: Record<string, unknown>): string {
+  const fallback = readString(record, "identityFallback");
+  const gtin14 = readNullableString(record, "identityGtin14");
+  const serial = readNullableString(record, "identitySerial");
+  if (gtin14 !== null && serial !== null) return formatKmHri(gtin14, serial);
+  const rawPayload = readNullableString(record, "identityRawPayload");
+  const kind = readNullableString(record, "identityKind");
+  if (kind === "new_box") {
+    return rawPayload === null ? fallback : formatInventoryBoxIdentity(rawPayload, fallback);
+  }
+  if (kind === "item" || kind === "known_box" || kind === "old_box") {
+    return formatInventoryEventIdentity(kind, rawPayload, fallback);
+  }
+  return fallback;
+}
+
 function evidenceAggregateActions(row: EvidenceAggregateRow): InventoryEvidenceAction[] {
   if (row.total === 0) return [];
   const actions: InventoryEvidenceAction[] = [];
@@ -907,7 +962,7 @@ function parseDiscrepancyRow(value: unknown): DiscrepancyRow {
   return {
     category: category as InventoryDiscrepancyCategory,
     categoryRank: readInteger(record, "categoryRank"),
-    displayIdentity: readString(record, "displayIdentity"),
+    displayIdentity: discrepancyDisplayIdentity(record),
     codeHash: readNullableString(record, "codeHash"),
     sscc: readNullableString(record, "sscc"),
     found: readBoolean(record, "found"),

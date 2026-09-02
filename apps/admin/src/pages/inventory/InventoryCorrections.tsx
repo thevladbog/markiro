@@ -741,7 +741,7 @@ function CorrectionBox({
   return (
     <li>
       <span>
-        <strong className="mk-inventory-mono">{box.sscc}</strong>
+        <strong className="mk-inventory-mono mk-inventory-mono--sscc">{box.sscc}</strong>
         <small>{box.terminalName}</small>
         {box.invalidationSource === null ? null : (
           <small>{t(`pages.inventory.live.boxInvalidation.${box.invalidationSource}`)}</small>

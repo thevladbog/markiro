@@ -171,7 +171,9 @@ export function InventoryLivePage({
                 {data.verifiedBoxes.map((box) => (
                   <li key={box.eventId}>
                     <span>
-                      <strong className="mk-inventory-mono">{box.sscc}</strong>
+                      <strong className="mk-inventory-mono mk-inventory-mono--sscc">
+                        {box.sscc}
+                      </strong>
                       <small>
                         {box.terminalName} · {formatDateTime(box.scannedAt, i18n.language)}
                       </small>
@@ -201,7 +203,9 @@ export function InventoryLivePage({
                 {data.boxes.map((box) => (
                   <li key={box.id}>
                     <span>
-                      <strong className="mk-inventory-mono">{box.sscc}</strong>
+                      <strong className="mk-inventory-mono mk-inventory-mono--sscc">
+                        {box.sscc}
+                      </strong>
                       <small>{box.terminalName}</small>
                     </span>
                     <span className="mk-inventory-evidence-list__state">

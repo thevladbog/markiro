@@ -759,7 +759,7 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
       ["ineligible", ineligibleHash],
     ]);
     expect(first.body.items[1]).toMatchObject({
-      displayIdentity: `01${GTIN}21PROTECTED-FOUND`,
+      displayIdentity: `(01)${GTIN} (21)PROTECTED-FOUND`,
       found: true,
       winner: {
         terminalId: terminalAId,
@@ -783,6 +783,51 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
         observedProductionDate: "2026-08-09",
       }),
     ]);
+  });
+
+  it("names every discrepancy the way the event lists do, whatever backs the row", async () => {
+    // The three categories that have no snapshot code to read GTIN/serial from
+    // used to leak the internal identity (`item:<64 hex>`, `new_box:<sscc>`)
+    // straight into the cabinet.
+    const unknown = await agent
+      .get(`/inventories/${inventoryId}/discrepancies?category=unknown`)
+      .expect(200);
+    expect(unknown.body.items).toEqual([
+      expect.objectContaining({
+        category: "unknown",
+        // Same event, same string as `GET /progress`'s `recentEvents` row.
+        displayIdentity: `(01)${GTIN} (21)FOUND-6`,
+      }),
+    ]);
+
+    const invalidatedBox = await agent
+      .get(`/inventories/${inventoryId}/discrepancies?category=invalidated_box`)
+      .expect(200);
+    expect(invalidatedBox.body.items).toEqual([
+      expect.objectContaining({
+        category: "invalidated_box",
+        displayIdentity: `(00)${invalidatedSscc}`,
+        sscc: invalidatedSscc,
+      }),
+    ]);
+
+    const voided = await agent
+      .get(`/inventories/${inventoryId}/discrepancies?category=voided`)
+      .expect(200);
+    expect(voided.body.items).toEqual([
+      expect.objectContaining({
+        category: "voided",
+        displayIdentity: `(01)${GTIN} (21)VOIDED`,
+      }),
+    ]);
+
+    const everyIdentity = [unknown, invalidatedBox, voided].flatMap(
+      (response) => response.body.items as { displayIdentity: string }[],
+    );
+    expect(everyIdentity).toHaveLength(3);
+    for (const item of everyIdentity) {
+      expect(item.displayIdentity).not.toMatch(/^(item|known_box|old_box|new_box):/);
+    }
   });
 
   it("returns one discrepancy snapshot when a row commits between count and page reads", async () => {

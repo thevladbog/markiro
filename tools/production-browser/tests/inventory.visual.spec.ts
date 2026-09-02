@@ -265,8 +265,16 @@ const CODE_RESULT_ID_2 = "b0000000-0000-4000-8000-000000000002";
 const CODE_RESULT_ID_3 = "b0000000-0000-4000-8000-000000000003";
 
 /**
- * Human-readable identities and canonical clipboard values produced from the
- * retained raw scan payload by `inventory-event-display.ts`.
+ * Human-readable identities and canonical clipboard values, both produced from
+ * the retained raw scan payload by `inventory-event-display.ts`. The event
+ * endpoints answer with the GS1 pair, never the stored `normalized_identity`
+ * (`item:<64 hex>` / `old_box:<sscc>`) that the column still holds for
+ * matching, and the cabinet prints it verbatim inside `.mk-inventory-mono`.
+ *
+ * The KMs behind them are the three of «Сироп «Клюква», 0.5 л» this document's
+ * frames follow -- `010460000000000621000123` / `...000512` / `...000456` --
+ * split by `canonicalizeKm` into AI 01 (GTIN-14) and AI 21 (serial) exactly as
+ * `(01)<gtin14> (21)<serial>`.
  */
 const ITEM_IDENTITY_1 = "(01)04600000000006 (21)000123";
 const ITEM_IDENTITY_2 = "(01)04600000000006 (21)000512";
@@ -278,9 +286,10 @@ const ITEM_COPY_IDENTITY_3 = "010460000000000621000456";
  * The old box Терминал 2 opened to start repacking. An `old_box` event carries
  * the *source* box's SSCC (`applyRepackMutation` stores it as the new box's
  * `old_sscc_context`), which is a different physical box from the repack box
- * the cabinet lists under «Короба» -- that panel shows `new_sscc`. Valid GS1
- * check digit, since a scan with a bad one never becomes an event
- * (`parseScannedSscc` -> `isValidSscc`).
+ * the cabinet lists under «Новые короба» -- that panel shows `new_sscc`. Valid
+ * GS1 check digit, since a scan with a bad one never becomes an event
+ * (`parseScannedSscc` -> `isValidSscc`), and rendered through `formatSsccHri`
+ * like every other SSCC the API hands out.
  */
 const OLD_BOX_IDENTITY = "(00)046012345600000016";
 const OLD_BOX_COPY_IDENTITY = "00046012345600000016";
@@ -1390,6 +1399,9 @@ test("renders the corrections list with its filters", async ({ page }) => {
   // `pages.inventory.corrections.events` verbatim (ru.json) -- renamed from
   // "События и коды" by 5dff4fcf2 (#383).
   await expect(page.getByRole("heading", { level: 2, name: "События сканирования" })).toBeVisible();
+  // Same commit split the repack box panel out under its own heading, which
+  // this frame is the only one to show.
+  await expect(page.getByRole("heading", { level: 2, name: "Новые короба" })).toBeVisible();
   await expect(page.getByLabel("Тип события")).toBeVisible();
   await expect(page.getByLabel("Классификация")).toBeVisible();
   await expect(page.getByText(ITEM_IDENTITY_1)).toBeVisible();

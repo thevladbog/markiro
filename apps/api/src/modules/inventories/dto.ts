@@ -1570,8 +1570,16 @@ const inventoryRecentEventOpenApiSchema: SchemaObject = {
     eventId: uuidSchema,
     codeResultId: { ...uuidSchema, nullable: true },
     kind: { type: "string", enum: ["item", "known_box", "old_box"] },
-    displayIdentity: { type: "string" },
-    authoritativeVerdict: { type: "string" },
+    displayIdentity: {
+      type: "string",
+      description:
+        "Human-readable GS1 identity of the scan: `(01)<gtin14> (21)<serial>` for an item, `(00)<sscc>` for a box. Falls back to the internal `item:<code hash>` / `<kind>:<sscc>` identity when the raw payload was not retained. Not a stable key — match on `eventId` or `codeResultId`.",
+    },
+    authoritativeVerdict: {
+      type: "string",
+      description:
+        "Server-side outcome of the scan: `pending`, `applied`, `duplicate` or `rejected`.",
+    },
     terminalId: uuidSchema,
     terminalName: { type: "string" },
     scannedAt: dateTimeSchema,
@@ -1716,7 +1724,11 @@ const inventoryDiscrepancyOpenApiSchema: SchemaObject = {
   ],
   properties: {
     category: { type: "string", enum: [...INVENTORY_DISCREPANCY_CATEGORIES] },
-    displayIdentity: { type: "string" },
+    displayIdentity: {
+      type: "string",
+      description:
+        "Human-readable GS1 identity of the discrepancy: `(01)<gtin14> (21)<serial>` for a marking code, `(00)<sscc>` for an invalidated repack box. Falls back to the internal `item:<code hash>` / `<kind>:<sscc>` / `new_box:<sscc>` identity when the underlying scan's raw payload was not retained. Not a stable key — match on `codeHash` or `sscc`.",
+    },
     codeHash: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true },
     sscc: { type: "string", pattern: "^[0-9]{18}$", nullable: true },
     found: { type: "boolean" },

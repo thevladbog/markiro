@@ -500,6 +500,7 @@
           "failed": "Print failed"
         },
         "verdict": {
+          "pending": "Pending",
           "applied": "Applied",
           "duplicate": "Repeated scan",
           "replay": "Reprocessed",
