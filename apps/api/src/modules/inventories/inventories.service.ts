@@ -13,6 +13,8 @@ import {
 import { and, desc, eq, sql } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
+import { isBoxLabelTemplateEligible } from "@markiro/domain";
+import { findLabelTemplateEligibility } from "../label-templates/box-label-template-eligibility";
 import { INVENTORY_CHZ_STATUSES, type InventoryChzStatus } from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
@@ -440,7 +442,9 @@ export class InventoriesService {
               : current.boxLabelTemplateId,
       };
       this.assertDateRange(desired.productionDateFrom, desired.productionDateTo);
-      const resolved = await this.resolveParameters(tx, tenantId, desired);
+      const resolved = await this.resolveParameters(tx, tenantId, desired, {
+        currentBoxLabelTemplateId: current.boxLabelTemplateId,
+      });
       const updatedAt = new Date();
       await tx
         .update(schema.inventories)
@@ -742,9 +746,14 @@ export class InventoriesService {
       productionDateTo: string;
       boxLabelTemplateId: string | null;
     },
+    options: { currentBoxLabelTemplateId: string | null } = { currentBoxLabelTemplateId: null },
   ) {
     const [product] = await tx
-      .select({ gtin14: schema.products.gtin14, status: schema.products.status })
+      .select({
+        gtin14: schema.products.gtin14,
+        status: schema.products.status,
+        chzProductGroupCode: schema.products.chzProductGroupCode,
+      })
       .from(schema.products)
       .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, input.productId)))
       .for("share");
@@ -773,19 +782,23 @@ export class InventoriesService {
     }
 
     if (input.boxLabelTemplateId !== null) {
-      const [template] = await tx
-        .select({ id: schema.labelTemplates.id })
-        .from(schema.labelTemplates)
-        .where(
-          and(
-            eq(schema.labelTemplates.tenantId, tenantId),
-            eq(schema.labelTemplates.id, input.boxLabelTemplateId),
-          ),
-        )
-        .for("share");
+      const template = await findLabelTemplateEligibility(
+        tx,
+        tenantId,
+        input.boxLabelTemplateId,
+        "share",
+      );
       if (!template) {
         throw new UnprocessableEntityException({
           code: "INVENTORY_BOX_LABEL_TEMPLATE_INVALID",
+        });
+      }
+      // An inventory keeps its snapshot even after the template is disabled or
+      // scoped away; eligibility is enforced only when the template changes.
+      const changed = input.boxLabelTemplateId !== options.currentBoxLabelTemplateId;
+      if (changed && !isBoxLabelTemplateEligible(template, product.chzProductGroupCode ?? null)) {
+        throw new UnprocessableEntityException({
+          code: "INVENTORY_BOX_LABEL_TEMPLATE_NOT_ELIGIBLE",
         });
       }
     }
