@@ -5,7 +5,7 @@ import { and, asc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
 import { ChzTokenService } from "../chz-exports/chz-token.service";
 import { CISES_INFO_BATCH_LIMIT, TrueApiClient } from "../chz-exports/true-api.client";
-import type { CisInfo, TrueApiAuth } from "../chz-exports/true-api.types";
+import type { CisInfo, CisInfoError, TrueApiAuth } from "../chz-exports/true-api.types";
 import { JournalService, type AppendEventInput } from "../integrations/journal.service";
 import { CHZ_CHANNEL_TYPE } from "../signer-agents/chz-constants";
 
@@ -40,6 +40,14 @@ function intervalFor(status: string): number {
   return CHZ_STATUS_IN_CIRCULATION_INTERVAL_MS;
 }
 
+function journalSafeErrorMessage(message: string, rawCodes: Iterable<string>): string {
+  let safe = message;
+  for (const raw of rawCodes) {
+    if (raw.length > 0) safe = safe.replaceAll(raw, "[КМ скрыт]");
+  }
+  return safe;
+}
+
 export interface ChzCodeStatusRefreshResult {
   /**
    * How many `cises/info` calls this pass made and kept the result of. A
@@ -60,6 +68,11 @@ interface FoundRow {
   info: CisInfo;
 }
 
+interface DueProductGroup {
+  code: number;
+  alias: string;
+}
+
 /**
  * Why a batch asked the pass to stop. Carried out of `refreshBatch` rather
  * than collapsed to a boolean so the end-of-pass summary can say the pass
@@ -67,6 +80,27 @@ interface FoundRow {
  * no rows.
  */
 type StopReason = "unavailable" | "unauthorized";
+
+type RefreshWarning =
+  | {
+      kind: "rejected";
+      productGroupCode: number;
+      code: string;
+      message: string;
+      codes: number;
+    }
+  | {
+      kind: "unauthorized";
+      productGroupCode: number;
+      tokenStatus: "unauthorized";
+      message: string;
+    }
+  | {
+      kind: "unexpected";
+      productGroupCode: number;
+      message: string;
+      unexpected: number;
+    };
 
 interface BatchOutcome {
   updated: number;
@@ -79,6 +113,7 @@ interface BatchOutcome {
    * there).
    */
   rejected: boolean;
+  warnings: RefreshWarning[];
   /** Set when the next batch would fail for the same reason; null otherwise. */
   stopReason: StopReason | null;
 }
@@ -132,17 +167,18 @@ export class ChzCodeStatusRefreshService {
     let unknown = 0;
     let unresolved = 0;
     let rejectedGroups = 0;
+    const warnings: RefreshWarning[] = [];
     let caughtUp = false;
     let stopReason: StopReason | null = null;
 
     for (let iteration = 0; iteration < CHZ_STATUS_MAX_BATCHES_PER_PASS; iteration += 1) {
-      const productGroupCode = await this.nextDueProductGroup(tenantId);
-      if (productGroupCode === null) {
+      const productGroup = await this.nextDueProductGroup(tenantId);
+      if (productGroup === null) {
         caughtUp = true;
         break;
       }
 
-      const hashes = await this.dueHashes(tenantId, productGroupCode);
+      const hashes = await this.dueHashes(tenantId, productGroup.code);
       const { hashByRaw, unresolvable } = await this.resolveRaws(tenantId, hashes);
       if (unresolvable.length > 0) {
         // Unrefreshable whatever ЧЗ would have said, so this is settled
@@ -152,7 +188,14 @@ export class ChzCodeStatusRefreshService {
       }
       if (hashByRaw.size === 0) continue;
 
-      const outcome = await this.refreshBatch(tenantId, token.auth, productGroupCode, hashByRaw);
+      const outcome = await this.refreshBatch(
+        tenantId,
+        token.auth,
+        productGroup.code,
+        productGroup.alias,
+        hashByRaw,
+      );
+      warnings.push(...outcome.warnings);
       if (outcome.stopReason !== null) {
         // The batch touched no rows -- it does not belong in `batches`,
         // which counts calls that did work.
@@ -181,7 +224,7 @@ export class ChzCodeStatusRefreshService {
     // leaving the channel card claiming everything worked.
     if (batches > 0 || unresolved > 0 || stopReason !== null) {
       await this.append(tenantId, {
-        outcome: stopReason !== null || rejectedGroups > 0 ? "warn" : "ok",
+        outcome: stopReason !== null || warnings.length > 0 ? "warn" : "ok",
         direction: "out",
         grain: "session",
         message:
@@ -190,7 +233,15 @@ export class ChzCodeStatusRefreshService {
             : rejectedGroups > 0
               ? "Статусы кодов Честного Знака обновлены не полностью"
               : "Обновлены статусы кодов Честного Знака",
-        details: { batches, updated, unknown, unresolved, rejectedGroups, stopReason },
+        details: {
+          batches,
+          updated,
+          unknown,
+          unresolved,
+          rejectedGroups,
+          stopReason,
+          warnings,
+        },
       });
     }
     return { batches, updated, caughtUp };
@@ -204,16 +255,23 @@ export class ChzCodeStatusRefreshService {
    * `CHZ_STATUS_BATCH_SIZE` window down to its first group would leave most
    * calls carrying a handful of codes each.
    */
-  private async nextDueProductGroup(tenantId: string): Promise<number | null> {
+  private async nextDueProductGroup(tenantId: string): Promise<DueProductGroup | null> {
     const [head] = await this.db
-      .select({ chzProductGroupCode: schema.chzCodeStatuses.chzProductGroupCode })
+      .select({
+        code: schema.chzCodeStatuses.chzProductGroupCode,
+        alias: schema.chzProductGroups.alias,
+      })
       .from(schema.chzCodeStatuses)
+      .innerJoin(
+        schema.chzProductGroups,
+        eq(schema.chzProductGroups.code, schema.chzCodeStatuses.chzProductGroupCode),
+      )
       .where(this.dueCondition(tenantId))
       .orderBy(asc(schema.chzCodeStatuses.nextRefreshAt))
       .limit(1);
-    // The `is not null` in `dueCondition` is what makes the null branch
-    // unreachable; drizzle types the column nullable regardless.
-    return head?.chzProductGroupCode ?? null;
+    return head?.code === null || head === undefined
+      ? null
+      : { code: head.code, alias: head.alias };
   }
 
   private async dueHashes(tenantId: string, productGroupCode: number): Promise<string[]> {
@@ -302,54 +360,80 @@ export class ChzCodeStatusRefreshService {
     tenantId: string,
     auth: TrueApiAuth,
     productGroupCode: number,
+    productGroupAlias: string,
     hashByRaw: Map<string, string>,
   ): Promise<BatchOutcome> {
-    const result = await this.client.cisesInfo(auth, productGroupCode, [...hashByRaw.keys()]);
+    const result = await this.client.cisesInfo(auth, productGroupAlias, [...hashByRaw.keys()]);
 
     if (result.status === "unavailable") {
       // Not one row of this batch is touched, and the pass stops rather than
       // walking the remaining groups into the same unreachable ЧЗ. The
       // end-of-pass summary is what tells the operator this happened -- see
       // `stopReason` there -- so no item/session entry is duplicated here.
-      return { updated: 0, unknown: 0, rejected: false, stopReason: "unavailable" };
+      return {
+        updated: 0,
+        unknown: 0,
+        rejected: false,
+        warnings: [],
+        stopReason: "unavailable",
+      };
     }
     if (result.status === "unauthorized") {
       // The same condition as a token we could not load: the tenant's agent
       // has to sign in again before anything else can move. The batch stays
       // due and untouched.
-      await this.append(tenantId, {
-        outcome: "warn",
-        direction: "out",
-        grain: "session",
-        message: "Статусы кодов Честного Знака не обновлены: нет токена",
-        details: { tokenStatus: "unauthorized", productGroupCode },
-      });
-      return { updated: 0, unknown: 0, rejected: false, stopReason: "unauthorized" };
+      return {
+        updated: 0,
+        unknown: 0,
+        rejected: false,
+        warnings: [
+          {
+            kind: "unauthorized",
+            tokenStatus: "unauthorized",
+            productGroupCode,
+            message: "Токен True API недействителен, запрошено обновление",
+          },
+        ],
+        stopReason: "unauthorized",
+      };
     }
     if (result.status === "rejected") {
       // Terminal for this group -- a missing contract is not fixed by asking
       // again -- so its rows go far out and the pass moves to the next group.
       await this.pushOut(tenantId, [...hashByRaw.values()]);
-      await this.append(tenantId, {
-        outcome: "warn",
-        direction: "out",
-        grain: "item",
-        message: "Честный Знак отказал в запросе статусов кодов",
-        // ЧЗ's own words, verbatim: the refusal is the operator's to act on.
-        details: {
-          productGroupCode,
-          code: result.code,
-          message: result.message,
-          codes: hashByRaw.size,
-        },
-      });
-      return { updated: 0, unknown: 0, rejected: true, stopReason: null };
+      return {
+        updated: 0,
+        unknown: 0,
+        rejected: true,
+        warnings: [
+          {
+            kind: "rejected",
+            productGroupCode,
+            code: result.code,
+            message: journalSafeErrorMessage(result.message, hashByRaw.keys()),
+            codes: hashByRaw.size,
+          },
+        ],
+        stopReason: null,
+      };
     }
 
-    const infoByCis = new Map(result.value.map((info) => [info.cis, info]));
+    const infoByCis = new Map(result.value.values.map((info) => [info.cis, info]));
+    const rejectedByHash = new Map<string, CisInfoError>();
+    let unexpected = result.value.values.filter((info) => !hashByRaw.has(info.cis)).length;
+    for (const error of result.value.errors) {
+      const codeHash = error.cis === null ? undefined : hashByRaw.get(error.cis);
+      if (codeHash === undefined) {
+        unexpected += 1;
+      } else {
+        rejectedByHash.set(codeHash, error);
+      }
+    }
+
     const found: FoundRow[] = [];
     const unknownHashes: string[] = [];
     for (const [raw, codeHash] of hashByRaw) {
+      if (rejectedByHash.has(codeHash)) continue;
       const info = infoByCis.get(raw);
       if (info === undefined) unknownHashes.push(codeHash);
       else found.push({ codeHash, info });
@@ -357,24 +441,41 @@ export class ChzCodeStatusRefreshService {
     // A `cis` we did not ask about cannot be attributed to a row, so it is
     // dropped -- but not silently: it means the request and the answer
     // disagree about what was asked.
-    const unexpected = result.value.filter((info) => !hashByRaw.has(info.cis)).length;
+    const warningGroups = new Map<string, { code: string; message: string; codes: number }>();
+    for (const error of rejectedByHash.values()) {
+      const message = journalSafeErrorMessage(error.message, error.cis === null ? [] : [error.cis]);
+      const key = JSON.stringify([error.code, message]);
+      const group = warningGroups.get(key);
+      if (group === undefined) warningGroups.set(key, { code: error.code, message, codes: 1 });
+      else group.codes += 1;
+    }
+    const warnings: RefreshWarning[] = [...warningGroups.values()].map(
+      ({ code, message, codes }) => ({
+        kind: "rejected",
+        productGroupCode,
+        code,
+        message,
+        codes,
+      }),
+    );
     if (unexpected > 0) {
-      await this.append(tenantId, {
-        outcome: "warn",
-        direction: "in",
-        grain: "item",
+      warnings.push({
+        kind: "unexpected",
+        productGroupCode,
         message: "Честный Знак ответил о кодах, о которых не спрашивали",
-        details: { productGroupCode, unexpected },
+        unexpected,
       });
     }
 
     const now = new Date();
     if (found.length > 0) await this.writeFacts(tenantId, productGroupCode, found, now);
+    if (rejectedByHash.size > 0) await this.pushOut(tenantId, [...rejectedByHash.keys()]);
     if (unknownHashes.length > 0) await this.countUnknown(tenantId, unknownHashes, now);
     return {
       updated: found.length,
       unknown: unknownHashes.length,
-      rejected: false,
+      rejected: rejectedByHash.size > 0,
+      warnings,
       stopReason: null,
     };
   }

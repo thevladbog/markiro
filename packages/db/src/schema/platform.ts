@@ -61,8 +61,9 @@ export const counterparties = pgTable(
 /**
  * Chestny ZNAK product groups — global reference data, not tenant-scoped.
  *
- * `code` is what the ЧЗ APIs take as `productGroupCode` (dispenser tasks) and
- * `pg` (most True API methods); `alias` is the latin slug used in СУЗ URLs.
+ * `code` is what dispenser tasks take as `productGroupCode`; `alias` is the
+ * latin identifier used by `pg` in methods such as True API `cises/info` and
+ * by СУЗ URLs. The two values are not interchangeable.
  * Seeded by migration 0090 from the two published dictionaries — see the plan
  * and spec for their exact locations, which is where a future group will be
  * found too.

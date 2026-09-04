@@ -50,17 +50,52 @@ function sessionSummary(session: JournalSessionDto): string {
   return session.events.at(-1)?.message ?? "—";
 }
 
+interface JournalWarning {
+  kind: string | null;
+  message: string | null;
+  productGroupCode: number | null;
+  code: string | null;
+  codes: number | null;
+  unexpected: number | null;
+}
+
+function journalWarnings(details: Record<string, unknown> | null): JournalWarning[] {
+  const warnings = details?.["warnings"];
+  if (!Array.isArray(warnings)) return [];
+  return warnings.flatMap((warning) => {
+    if (warning === null || typeof warning !== "object") return [];
+    const record = warning as Record<string, unknown>;
+    return [
+      {
+        kind: typeof record["kind"] === "string" ? record["kind"] : null,
+        message:
+          typeof record["message"] === "string" && record["message"].trim().length > 0
+            ? record["message"]
+            : null,
+        productGroupCode:
+          typeof record["productGroupCode"] === "number" ? record["productGroupCode"] : null,
+        code: typeof record["code"] === "string" ? record["code"] : null,
+        codes: typeof record["codes"] === "number" ? record["codes"] : null,
+        unexpected: typeof record["unexpected"] === "number" ? record["unexpected"] : null,
+      },
+    ];
+  });
+}
+
 function EventRow({
   event,
   locale,
   timeZone,
+  hideMessage,
 }: {
   event: JournalEventDto;
   locale: string;
   timeZone: string;
+  hideMessage: boolean;
 }) {
   const { t } = useTranslation();
   const raw = typeof event.details?.["raw"] === "string" ? event.details["raw"] : null;
+  const warnings = journalWarnings(event.details);
   const status = OUTCOME_STATUS[outcomeKey(event.outcome)] ?? "neutral";
 
   return (
@@ -78,7 +113,44 @@ function EventRow({
         })}
       />
       <div className="mk-journal-event__message">
-        <span>{event.message}</span>
+        {hideMessage ? null : <span>{event.message}</span>}
+        {warnings.length > 0 ? (
+          <ul className="mk-journal-event__warnings">
+            {warnings.map((warning, index) => {
+              const message =
+                warning.message ??
+                (warning.kind === "unauthorized"
+                  ? t("pages.integrations.channel.journal.warningUnauthorized")
+                  : warning.kind === "rejected"
+                    ? t("pages.integrations.channel.journal.warningRejected")
+                    : t("pages.integrations.channel.journal.warningUnknown"));
+              const meta = [
+                warning.productGroupCode === null
+                  ? null
+                  : t("pages.integrations.channel.journal.warningProductGroup", {
+                      value: warning.productGroupCode,
+                    }),
+                warning.code === null ? null : `HTTP ${warning.code}`,
+                warning.codes === null
+                  ? null
+                  : t("pages.integrations.channel.journal.warningCodeCount", {
+                      count: warning.codes,
+                    }),
+                warning.unexpected === null
+                  ? null
+                  : t("pages.integrations.channel.journal.warningUnexpectedCount", {
+                      count: warning.unexpected,
+                    }),
+              ].filter((part): part is string => part !== null);
+              return (
+                <li key={`${warning.kind ?? "warning"}-${message}-${index}`}>
+                  <span>{message}</span>
+                  {meta.length > 0 ? <small>{meta.join(" · ")}</small> : null}
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
         {raw ? (
           <details className="mk-journal-event__raw">
             <summary>{t("pages.integrations.channel.journal.detailsSummary")}</summary>
@@ -184,6 +256,7 @@ export function JournalSessionRow({
                   event={event}
                   locale={locale}
                   timeZone={timeZone}
+                  hideMessage={session.events.length === 1 && event.message === summary}
                 />
               ))}
             </ol>

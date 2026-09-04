@@ -13,7 +13,12 @@ import {
 } from "../src/modules/chz-code-statuses/chz-code-status-refresh.service";
 import type { ChzTokenService } from "../src/modules/chz-exports/chz-token.service";
 import type { TrueApiClient } from "../src/modules/chz-exports/true-api.client";
-import type { CisInfo, TrueApiResult } from "../src/modules/chz-exports/true-api.types";
+import type {
+  CisesInfoBatch,
+  CisInfo,
+  CisInfoError,
+  TrueApiResult,
+} from "../src/modules/chz-exports/true-api.types";
 import type { JournalService } from "../src/modules/integrations/journal.service";
 
 const ready = Boolean(process.env.DATABASE_URL);
@@ -67,7 +72,7 @@ function hash(index: number): string {
 }
 
 interface CisesInfoCall {
-  productGroupCode: number;
+  productGroupAlias: string;
   cises: string[];
 }
 
@@ -75,7 +80,8 @@ interface FakeClient {
   api: TrueApiClient;
   calls: CisesInfoCall[];
   answer: (rows: CisInfo[]) => void;
-  fail: (result: Exclude<TrueApiResult<CisInfo[]>, { status: "ok" }>) => void;
+  answerMixed: (rows: CisInfo[], errors: CisInfoError[]) => void;
+  fail: (result: Exclude<TrueApiResult<CisesInfoBatch>, { status: "ok" }>) => void;
 }
 
 /**
@@ -86,11 +92,11 @@ interface FakeClient {
  */
 function fakeClient(): FakeClient {
   const calls: CisesInfoCall[] = [];
-  let answer: CisInfo[] = [];
-  let failure: Exclude<TrueApiResult<CisInfo[]>, { status: "ok" }> | null = null;
+  let answer: CisesInfoBatch = { values: [], errors: [] };
+  let failure: Exclude<TrueApiResult<CisesInfoBatch>, { status: "ok" }> | null = null;
   const api = {
-    cisesInfo: vi.fn(async (_auth: unknown, productGroupCode: number, cises: string[]) => {
-      calls.push({ productGroupCode, cises: [...cises] });
+    cisesInfo: vi.fn(async (_auth: unknown, productGroupAlias: string, cises: string[]) => {
+      calls.push({ productGroupAlias, cises: [...cises] });
       return failure ?? { status: "ok" as const, value: answer };
     }),
   };
@@ -98,7 +104,10 @@ function fakeClient(): FakeClient {
     api: api as unknown as TrueApiClient,
     calls,
     answer: (rows) => {
-      answer = rows;
+      answer = { values: rows, errors: [] };
+    },
+    answerMixed: (rows, errors) => {
+      answer = { values: rows, errors };
     },
     fail: (result) => {
       failure = result;
@@ -319,15 +328,13 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
     expect(client.calls[0]!.cises).toEqual([RAW_A, RAW_B]);
   });
 
-  it("splits a batch per product group, because pg is a query parameter", async () => {
+  it("sends the True API alias for each product group's pg parameter", async () => {
     await seedStatus({ codeHash: HASH_A, group: 8, nextRefreshAt: past(1) });
     await seedStatus({ codeHash: HASH_B, group: 15, nextRefreshAt: past(1) });
 
     await service.run(tenantId);
 
-    expect(client.calls.map((call) => call.productGroupCode).sort((a, b) => a - b)).toEqual([
-      8, 15,
-    ]);
+    expect(client.calls.map((call) => call.productGroupAlias).sort()).toEqual(["beer", "milk"]);
     for (const call of client.calls) expect(call.cises).toHaveLength(1);
   });
 
@@ -477,14 +484,83 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
 
   it("backs a rejected product group off instead of retrying the refusal forever", async () => {
     await seedStatus({ codeHash: HASH_A, group: 8, nextRefreshAt: past(1) });
-    client.fail({ status: "rejected", code: "400", message: "no active contract" });
+    client.fail({ status: "rejected", code: "400", message: `no active contract for ${RAW_A}` });
 
     await service.run(tenantId);
 
     const [row] = await rowsFor(tenantId);
     expect(daysUntil(row!.nextRefreshAt)).toBeCloseTo(30, 0);
-    // The refusal is the operator's to act on, so ЧЗ's own words reach the journal.
-    expect(JSON.stringify(journal.append.mock.calls)).toContain("no active contract");
+    // One refresh pass is one journal row. The refusal remains available as
+    // structured detail inside that summary rather than becoming a second,
+    // adjacent pseudo-session.
+    expect(journal.append).toHaveBeenCalledTimes(1);
+    expect(journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "warn",
+        details: expect.objectContaining({
+          warnings: [
+            {
+              kind: "rejected",
+              productGroupCode: 8,
+              code: "400",
+              message: "no active contract for [КМ скрыт]",
+              codes: 1,
+            },
+          ],
+        }),
+      }),
+    );
+    expect(JSON.stringify(journal.append.mock.calls)).not.toContain(RAW_A);
+  });
+
+  it("writes valid facts and pushes out only refused codes from a mixed response", async () => {
+    await seedStatus({ codeHash: HASH_A, group: 8, nextRefreshAt: past(1) });
+    await seedStatus({ codeHash: HASH_B, group: 8, nextRefreshAt: past(1) });
+    client.answerMixed(
+      [
+        {
+          cis: RAW_A,
+          status: "INTRODUCED",
+          statusEx: null,
+          ownerInn: "7700000000",
+          withdrawReason: null,
+        },
+      ],
+      [{ cis: RAW_B, code: "403", message: `Нет доступа к коду ${RAW_B}` }],
+    );
+
+    const result = await service.run(tenantId);
+
+    const rows = await rowsFor(tenantId);
+    expect(rows[0]).toMatchObject({
+      codeHash: HASH_A,
+      status: "INTRODUCED",
+      ownerInn: "7700000000",
+      unknownAttempts: 0,
+    });
+    expect(hoursUntil(rows[0]!.nextRefreshAt)).toBeCloseTo(24, 0);
+    expect(rows[1]).toMatchObject({ codeHash: HASH_B, status: null, unknownAttempts: 0 });
+    expect(daysUntil(rows[1]!.nextRefreshAt)).toBeCloseTo(30, 0);
+    expect(result).toMatchObject({ batches: 1, updated: 1, caughtUp: true });
+    expect(journal.append).toHaveBeenCalledTimes(1);
+    expect(journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "warn",
+        details: expect.objectContaining({
+          rejectedGroups: 1,
+          warnings: [
+            {
+              kind: "rejected",
+              productGroupCode: 8,
+              code: "403",
+              message: "Нет доступа к коду [КМ скрыт]",
+              codes: 1,
+            },
+          ],
+        }),
+      }),
+    );
+    expect(JSON.stringify(journal.append.mock.calls)).not.toContain(RAW_B);
   });
 
   it("carries on with the next product group after one is rejected", async () => {
@@ -518,8 +594,16 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
     );
     expect(summaryCall?.[0]).toMatchObject({
       outcome: "warn",
-      details: expect.objectContaining({ rejectedGroups: 2, stopReason: null }),
+      details: expect.objectContaining({
+        rejectedGroups: 2,
+        stopReason: null,
+        warnings: [
+          expect.objectContaining({ kind: "rejected", productGroupCode: 8 }),
+          expect.objectContaining({ kind: "rejected", productGroupCode: 15 }),
+        ],
+      }),
     });
+    expect(journal.append).toHaveBeenCalledTimes(1);
   });
 
   it("does nothing and reports not caught up when no token is available", async () => {
@@ -546,20 +630,21 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
     const [row] = await rowsFor(tenantId);
     expect(row).toMatchObject({ status: "INTRODUCED", checkedAt: null, unknownAttempts: 0 });
     expect(row!.nextRefreshAt.getTime()).toBeLessThanOrEqual(Date.now());
-    // Its own warn, distinct from the pass summary: the tenant's agent has to
-    // sign in again, and that is the operator's to act on.
+    // The token failure belongs to the same pass summary, not a second row.
+    expect(journal.append).toHaveBeenCalledTimes(1);
     expect(journal.append).toHaveBeenCalledWith(
       expect.objectContaining({
         outcome: "warn",
-        message: "Статусы кодов Честного Знака не обновлены: нет токена",
-        details: expect.objectContaining({ tokenStatus: "unauthorized" }),
-      }),
-    );
-    // And the pass summary itself must not paper over the stoppage with `ok`.
-    expect(journal.append).toHaveBeenCalledWith(
-      expect.objectContaining({
-        outcome: "warn",
-        details: expect.objectContaining({ stopReason: "unauthorized" }),
+        details: expect.objectContaining({
+          stopReason: "unauthorized",
+          warnings: [
+            expect.objectContaining({
+              kind: "unauthorized",
+              productGroupCode: 8,
+              tokenStatus: "unauthorized",
+            }),
+          ],
+        }),
       }),
     );
   });
@@ -629,11 +714,18 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
     expect(rows[1]).toMatchObject({ codeHash: HASH_B, status: null, checkedAt: null });
     // The mismatch is journalled, not silently dropped: the request and the
     // answer disagreeing about what was asked is the operator's to notice.
+    expect(journal.append).toHaveBeenCalledTimes(1);
     expect(journal.append).toHaveBeenCalledWith(
       expect.objectContaining({
-        outcome: "warn",
-        message: "Честный Знак ответил о кодах, о которых не спрашивали",
-        details: expect.objectContaining({ productGroupCode: 8, unexpected: 1 }),
+        details: expect.objectContaining({
+          warnings: [
+            expect.objectContaining({
+              kind: "unexpected",
+              productGroupCode: 8,
+              unexpected: 1,
+            }),
+          ],
+        }),
       }),
     );
   });
