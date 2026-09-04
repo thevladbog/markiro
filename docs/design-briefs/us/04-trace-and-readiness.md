@@ -102,7 +102,8 @@ off by default, never in case-ready views). A metric strip — nodes, edges, exc
 above the **Graph | Table** tabs and reads the same on both.
 
 **Graph** — a hand-drawn layered SVG, no graph library, sized for small graphs: layers by depth
-from the root, nodes ordered by TLC within a layer, straight edges. Lot nodes are rounded
+from the root, nodes ordered deterministically within a layer — lot nodes by TLC then id,
+location nodes by kind, then name, then id — straight edges. Lot nodes are rounded
 rectangles (TLC mono, product short name, status chip); location nodes are outlined hexagons
 with a pin glyph (business name, city, state). Edge labels: quantity + unit and the event
 number. Excluded events (void, superseded) are drawn greyed and dashed with the reason in a
@@ -179,7 +180,12 @@ table and in the lot card findings panel.
 - **Performance shapes loading.** Exact lookup shows no skeleton; the graph shows a progress
   line with a message; a refetch keeps the previous result on screen (dashboard pattern).
 - **Read-only surface.** The only mutations are Change status and Link / Unlink cases on the
-  lot card, both with a reason and a confirm dialog. No edit affordances on events here.
+  lot card, both with a reason and a confirm dialog. They are explicit exceptions owned by other
+  slices: Change status is US-02 `POST /traceability/lots/:id/status` (`traceability.qa.manage`,
+  audit `traceability.lot.status_changed`); Link / Unlink cases is US-04
+  `POST /traceability/lots/:lotId/boxes` and `/boxes/unlink` (`traceability.transformation.write`,
+  `unlink_reason` recorded, rows never deleted). Users without the capability see the affordance
+  disabled with the reason. No edit affordances on events here.
 - **Wording.** "Data readiness", "data completeness", "required elements", "gaps"; nothing
   from the not-allowed column of `docs/us/limitations.md`. Generic-profile screens carry the
   Scenario B statement ("not classified as FTR-covered; general lot traceability only").

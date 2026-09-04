@@ -153,15 +153,15 @@ conditionally required fields and "No" for optional ones.
 
 ### 7.3 Receiving KDE mapping
 
-| Group              | Fields                                                                    |
-| ------------------ | ------------------------------------------------------------------------- |
-| Lot                | TLC; TLC source location or source reference.                             |
-| Quantity           | quantity; unit_of_measure.                                                |
-| Product            | product_name; brand; commodity; variety; packaging_size; packaging_style. |
-| Previous source    | full Location Description for immediate previous source.                  |
-| Receiving location | full Location Description where food was received.                        |
-| Date               | date_received.                                                            |
-| References         | reference_document_type + reference_document_number; multiple allowed.    |
+| Group              | Fields                                                                         |
+| ------------------ | ------------------------------------------------------------------------------ |
+| Lot                | TLC; TLC source location or source reference.                                  |
+| Quantity           | quantity; unit_of_measure.                                                     |
+| Product            | product_name; brand_name; commodity; variety; packaging_size; packaging_style. |
+| Previous source    | full Location Description for immediate previous source.                       |
+| Receiving location | full Location Description where food was received.                             |
+| Date               | date_received.                                                                 |
+| References         | reference_document_type + reference_document_number; multiple allowed.         |
 
 ### 7.4 Transformation KDE mapping
 

@@ -12,7 +12,7 @@
 
 - `docs/superpowers/specs/2026-09-03-us-traceability-design.md` — founding ADR; schema conflict 1 (GTIN) is resolved here.
 - `docs/superpowers/specs/2026-09-03-us-00-regulatory-profile-design.md` — `RequireTraceabilityProfile`, `profileFeatures`, the seven `traceability.*` capabilities, `ProfileOnly` and `shell.sections.traceability`.
-- `docs/superpowers/specs/2026-09-03-us-01-parties-locations-design.md` — `traceability_locations` (TLC source) and `buildLocationSnapshot`.
+- `docs/superpowers/specs/2026-09-03-us-01-parties-locations-design.md` — `traceability_locations` (TLC source) and `buildLocationDescriptionSnapshot`.
 - `docs/superpowers/specs/2026-09-03-us-03-receiving-and-documents-design.md` — first consumer of `buildProductSnapshot`, `origin_event_id` and the lot service.
 - `docs/superpowers/specs/2026-09-03-us-04-transformation-design.md` — consumer of lots and genealogy edges; owns `trace_lot_boxes`.
 - `docs/superpowers/specs/2026-08-28-product-archived-flag-design.md` — "hide, do not delete" idiom and the partial GTIN unique index.
@@ -41,7 +41,7 @@ The catalog knows a product as a GTIN, a name, capacities and a Chestny ZNAK pro
 
 ### Data model
 
-All tables go into new `packages/db/src/schema/traceability.ts` (exported from `packages/db/src/schema.ts`), one additive migration (`0112_us_traceability_products_and_lots.sql`, renumber to the next free slot at implementation time). Nothing existing is renamed; the only change to an existing table is the optional GTIN relaxation below (OQ-US02-1).
+All tables go into new `packages/db/src/schema/traceability.ts` (exported from `packages/db/src/schema.ts`), one additive migration (`0114_us_traceability_products_and_lots.sql` — after US-00 `0112` and US-01 `0113`; renumber at implementation time to the next free number). Nothing existing is renamed; the only change to an existing table is the optional GTIN relaxation below (OQ-US02-1).
 
 Enums (`pgEnum`):
 
@@ -106,6 +106,18 @@ Cycle prevention: an edge whose `output_lot_id` is already an ancestor of `input
 
 GTIN (OQ-US02-1, recommended option): `ALTER TABLE products ALTER COLUMN gtin14 DROP NOT NULL`. The existing partial unique index already tolerates NULLs. The API keeps `gtin` mandatory for `RU_CHZ` tenants (server rule, so RU behaviour is unchanged) and optional for U.S. profiles.
 
+Consumer changes required before the migration is enabled (if OQ-US02-1 is decided as (a); each item ships in the same PR as the DDL, ordered so the column is never NULL for a consumer that cannot handle it):
+
+1. `apps/api/src/modules/products/dto.ts` — `createProductSchema.gtin` / update DTO become optional; the OpenAPI schema marks `gtin14` nullable.
+2. `apps/api/src/modules/products/products.service.ts` — `normalizeOrThrow` is called only when `gtin` is present; when absent the service reads the tenant profile and answers 400 `GTIN_REQUIRED` for `RU_CHZ`, `NULL` otherwise; `GET /products?search=` keeps matching on `gtin14` with a NULL-safe `ilike`.
+3. `apps/api/src/modules/shifts/shifts.service.ts` — `createShift` rejects a GTIN-less product with the same 422 path it already uses for `draft` and `archived` products (the draft/archived checks stay as they are).
+4. `apps/api/src/modules/kiosks/kiosks.service.ts` — `setProducts` rejects GTIN-less products the same way, so no kiosk product list ever carries `NULL`.
+5. Station mirror — `packages/db/src/sqlite/schema.ts` keeps `product_mirror.gtin14 text NOT NULL`; because 3 and 4 stop GTIN-less products before any shift bundle, the mirror (`apps/station/src/lib/mirror.ts`) needs no schema change, and a test asserts that a GTIN-less product never appears in a station shift payload.
+6. Label engine — `packages/domain/src/labels/model.ts` `product.gtin` becomes `string | null`; the renderer skips GTIN-bound barcode elements for `NULL` instead of throwing (U.S. labels are a US-10 concern, but the type must compile).
+7. The remaining direct readers of `schema.products.gtin14` listed in Codebase facts (`boxes`, `pickup-orders`, `inventories`, `chz-exports`, `chz-code-statuses`, `national-catalog`, `exchange`) only need the type widened to `string | null`; they are RU-only paths that never see a U.S. product.
+
+A `products.e2e` test then proves the RU tenant still gets 400 `GTIN_REQUIRED` and the existing RU suites stay unchanged.
+
 ### Domain rules
 
 New pure files under `packages/domain/src/traceability/` (sub-folders `products/` and `lots/`, next to US-03's `events/`, `documents/`, `receiving/`; no imports from CommerceML, CHZ or national-catalog code, INT-004):
@@ -113,7 +125,7 @@ New pure files under `packages/domain/src/traceability/` (sub-folders `products/
 - `products/coverage.ts` — `COVERAGE_STATUSES`, `EXPORT_BLOCKING_COVERAGE = ["unknown", "exemption_review_required"]`, `validateCoverageReview(profile, tenantProfileCode)` returning `{ field, code }[]` (rationale, category, source URL, reviewer required for `covered`/`contains_ftl_same_form` under `US_FSMA204_PROCESSOR`; nothing enforced under `US_GENERIC_LOT_TRACEABILITY`).
 - `products/snapshot.ts` — `ProductDescriptionSnapshot` (`productName`, `brandName`, `commodity`, `variety`, `packagingSize: { value, uom } | null`, `packagingStyle`, `gtin: string | null`, `sourceProductId`, `snapshotVersion: 1`) and `buildProductSnapshot(product, profile)`; deterministic key order, strings trimmed, no defaults invented. US-03/US-04/US-05 call it at finalization.
 - `lots/tlc.ts` — `normalizeTlc(raw)` (trim, reject control characters, length 1..120, otherwise keep opaque), `formatDemoTlc({ prefix, date, suffix })` producing `NRF-260915-APL01` style codes for seed and the "Suggest TLC" button; `P0_ASSIGNMENT_BASES`.
-- `lots/status.ts` — transition table: `active → consumed | shipped | quarantined | recalled | archived`; `quarantined → active | recalled | archived`; `consumed | shipped → recalled | archived`; `recalled → archived`; `archived` terminal. `assertLotTransition(from, to)`.
+- `lots/status.ts` — transition table: `active → consumed | shipped | quarantined | recalled | archived`; `quarantined → active | recalled | archived`; `consumed | shipped → recalled | archived`; `recalled → archived`; `archived` terminal. `assertLotTransition(from, to, context?)`. Pending OQ-US05-5: US-05 requires an additional `shipped → active` transition allowed only in operation context `system:shipping_recalculation` (void/amendment of a shipping event restores the balance), never through `POST /traceability/lots/:id/status`; audit semantics are defined in the US-05 spec.
 - `lots/completeness.ts` — `assertLotFinalizable(lot)` requires product, TLC and exactly the LOT-003 rule (`sourceLocationId` or `sourceReference`), returns structured gaps for the completeness report.
 - `lots/genealogy.ts` — `wouldCreateCycle(edges, candidate)`, `ancestorsOf`, `descendantsOf` (reused by US-06).
 - `uom.ts` — versioned vocabulary `UOM_CODES_V1` (`lb`, `oz`, `kg`, `g`, `each`, `case`, `bag`, `cup`, `gal`, `l`) with no conversion functions (PRD-008); US-03's `quantity.ts` suggestions must read this list rather than declare its own (OQ-US02-4).
@@ -170,7 +182,7 @@ Not touched. The station keeps resolving products by GTIN; a GTIN-less U.S. prod
 ## Testing
 
 - Unit (`packages/domain`): coverage validator matrix per profile; snapshot builder determinism and trimming; `normalizeTlc` edge cases (whitespace, control chars, 120 limit, unicode kept); `formatDemoTlc` golden strings `OSS-260914-A1`, `NRF-260915-APL01`; lot transitions incl. rejected ones; `wouldCreateCycle` on chains and diamonds; `assertLotFinalizable` gaps.
-- DB (`packages/db/test`): `traceability-schema.test.ts` via `getTableConfig` (PKs, composite FK names, the three partial indexes, checks); migration-content test asserting the products change is exactly one `ALTER COLUMN gtin14 DROP NOT NULL` with no `UPDATE`/`DELETE`; fresh migrate and upgrade-from-0111 through `runtime-migrate.test.ts` pattern; `tenant-isolation.test.ts` extended: lot pointing at tenant B's product or location → `23503`; same TLC + same source → `23505`; same TLC + different source location → accepted.
+- DB (`packages/db/test`): `traceability-schema.test.ts` via `getTableConfig` (PKs, composite FK names, the three partial indexes, checks); migration-content test asserting the products change is exactly one `ALTER COLUMN gtin14 DROP NOT NULL` with no `UPDATE`/`DELETE`; fresh migrate and upgrade-from-0113 (US-01) through `runtime-migrate.test.ts` pattern; `tenant-isolation.test.ts` extended: lot pointing at tenant B's product or location → `23503`; same TLC + same source → `23505`; same TLC + different source location → accepted.
 - API e2e (`apps/api/test/traceability-products.e2e.test.ts`, `traceability-lots.e2e.test.ts`): RU tenant → 403; product of another tenant → 404; PUT idempotent; coverage change writes the audit row with actor; `unknown` reported as export-blocking flag on GET; POST lot duplicate → 409 with existing id; reserved basis → 422; status transitions and reasons; U.S. tenant creates a product without `gtin` (201) while RU tenant gets 400 `GTIN_REQUIRED`.
 - Admin (`apps/admin/test`): card renders per profile, prohibited-phrase content test on new i18n keys (REG-002), keyboard flow for the review form.
 - Negative cases from `docs/us/acceptance.md` §2.4 covered here: "TLC without source → error" (finalization validator), "Cross-tenant ID supplied → denied", "Covered product has unknown FTL status → blocked" (flag surfaced; the block itself is asserted in US-03/US-04/US-07 finalization and export tests).

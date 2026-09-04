@@ -37,7 +37,7 @@ FSMA 204 KDEs describe **physical locations** (Location Description: business na
 
 ### Data model
 
-Additions to `packages/db/src/schema/traceability.ts`; migration `packages/db/migrations/0113_traceability_parties_locations.sql` (next free number after US-00). Names follow data-dictionary §9.
+Additions to `packages/db/src/schema/traceability.ts`; migration `packages/db/migrations/0113_traceability_parties_locations.sql` (next free number after US-00; renumber at implementation time to the next free number). Names follow data-dictionary §9.
 
 ```sql
 CREATE TYPE traceability_location_role AS ENUM (
@@ -179,7 +179,7 @@ export function isSyntheticContact(value: {
 
 ### Contracts and API
 
-Contracts in `packages/platform-contracts/src/traceability/parties.ts` and `locations.ts` (`.strict()`, per OQ-US00-1): `createTraceabilityPartySchema`, `updateTraceabilityPartySchema` (partial, `archived?: boolean`), `traceabilityPartySchema`; `createTraceabilityLocationSchema`, `updateTraceabilityLocationSchema`, `traceabilityLocationSchema`, `listTraceabilityLocationsQuerySchema` (`partyId?`, `role?`, `archived?: "true" | "false" | "all"` default `"false"`, `search?`, `sameAddressAs?: uuid`), `listTraceabilityPartiesQuerySchema` (`archived`, `search`). Location responses include the computed `descriptionStatus: { caseReady: boolean; issues: LocationDescriptionIssue[] }` so every picker can show readiness without a second call.
+Contracts in `packages/platform-contracts/src/traceability/parties.ts` and `locations.ts` (`.strict()`, per OQ-US00-1): `createTraceabilityPartySchema`, `updateTraceabilityPartySchema` (partial, `archived?: boolean`), `traceabilityPartySchema`; `createTraceabilityLocationSchema`, `updateTraceabilityLocationSchema`, `traceabilityLocationSchema`, `listTraceabilityLocationsQuerySchema` (`partyId?`, `roles?: TraceabilityLocationRole[]` — repeated `roles=` query params, optional; a location matches when it carries every listed role, i.e. the `roles @> ARRAY[...]` filter above, so the multi-select chips of the list page need one request; `archived?: "true" | "false" | "all"` default `"false"`, `search?`, `sameAddressAs?: uuid`), `listTraceabilityPartiesQuerySchema` (`archived`, `search`). Location responses include the computed `descriptionStatus: { caseReady: boolean; issues: LocationDescriptionIssue[] }` so every picker can show readiness without a second call.
 
 Module `apps/api/src/modules/traceability/parties/` and `.../locations/` registered by `TraceabilityModule` in `apps/api/src/app.module.ts`; both controllers carry `@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard, TraceabilityProfileGuard)`, `@RequireTraceabilityProfile("US_FSMA204_PROCESSOR", "US_GENERIC_LOT_TRACEABILITY")`, `@AllowSubscriptionReadOnly("read")`, `@ApiCabinetAuth()`, `@ApiTags("traceability")`, and are added to `authorization-metadata.test.ts`.
 

@@ -10,6 +10,10 @@ Figure 1. Architecture scope of the U.S. adaptation as a bounded context inside 
 
 This plan breaks the U.S. adaptation into slices US-00..US-12, schedules them over 8 weeks, and states the sufficiency boundary and the risk register. Slice status is maintained here; per-requirement status is maintained in [requirements-traceability.md](requirements-traceability.md). Requirements themselves are in [requirements.md](requirements.md), acceptance gates and the case-ready checklist in [acceptance.md](acceptance.md), the demo dataset in [demo-scenario.md](demo-scenario.md), the regulatory reasoning in [regulatory-basis.md](regulatory-basis.md), non-goals in [limitations.md](limitations.md), and the working protocol for coding agents in [agent-master-prompt.md](agent-master-prompt.md).
 
+Capacity check: the slice estimates sum to 115–156 hours, while 8 weeks at 12–15 hours per week give 96–120 hours. The lower bound fits only if US-10 and US-12 slip to the P1 tail; the upper bound does not fit. How to reconcile (cut scope, add capacity, extend the schedule) is GQ-32 in [open-questions.md](open-questions.md).
+
+STN-001 (preserve existing station invariants) is P0 even though the rest of US-10 is P1: it is satisfied by the full repository gates that every slice must keep green, and US-10's own work is the P1 enhancement on top of it.
+
 The requirement ranges in the slice table are copied from spec section 11. Where [requirements-traceability.md](requirements-traceability.md) assigns additional IDs to a slice (marked `*`), the matrix is normative and the slice spec claims those IDs; see GQ-18 in [open-questions.md](open-questions.md).
 
 ## 1. Slices

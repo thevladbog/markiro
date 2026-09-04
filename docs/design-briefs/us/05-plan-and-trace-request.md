@@ -160,8 +160,11 @@ Four `DataTabs` steps; the request row is created after step 1 so a reload never
 
 **Step 1 — Requester and timing.** Request number (user-entered, unique per tenant; the demo uses
 `REQ-2026-APPLE-001`), requester name, organization, contact (as given, not normalized),
-**Received at** (defaults to now in tenant timezone), **Due at** pre-filled +24 h and shown as a
-live countdown beside the field. Editing Due at reveals the mandatory **Agreed alternate deadline
+**Received at** (defaults to now, entered and shown in tenant timezone), **Due at** pre-filled
++24 h and shown as a live countdown beside the field. Both are stored as instants (`timestamptz`);
+Due at = Received at + exactly 24 elapsed hours, no calendar arithmetic, so a DST day still yields
+24 h (US-09 `defaultDueAt`). Conversion to tenant time happens only for display — the pre-filled
+value, the countdown and an edited Due at are all shown in tenant time and saved as instants. Editing Due at reveals the mandatory **Agreed alternate deadline
 reason** (free text in P0, OQ-US09-12). Due must be after received.
 
 **Step 2 — Scope.** Product (combobox), date range, TLC list (chips, paste several), locations.

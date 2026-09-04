@@ -111,12 +111,12 @@ device, operator, linked at, verdict, override reason, outcome).
 Every closed box in the station history (brief 04 §6 exceptions and the recent-boxes list) shows
 its print state as **text + glyph**, never a dot:
 
-| Row state | Meaning                                                               |
-| --------- | --------------------------------------------------------------------- |
-| Requested | bytes were sent to the printer; nobody has confirmed a physical label |
-| Confirmed | scan-back verification succeeded, or the operator confirmed visually  |
-| Skipped   | operator chose to skip the label (existing recovery path)             |
-| Failed    | transport error with its code (`printer_offline`, `out_of_paper`)     |
+| Row state | Meaning                                                                                                                                                                                                                                                                                                               |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Requested | bytes were sent to the printer; nobody has confirmed a physical label                                                                                                                                                                                                                                                 |
+| Confirmed | scan-back verification succeeded, or the operator confirmed visually                                                                                                                                                                                                                                                  |
+| Skipped   | operator chose to skip the label (existing recovery path)                                                                                                                                                                                                                                                             |
+| Failed    | print error with its code — the existing `print_error_code` set `template_missing`, `printer_unconfigured`, `render_failed`, `transport_failed` (`apps/station/src/lib/boxes.ts` `BoxPrintErrorCode`), reused as `trace_print_log.error_code`; no finer codes such as `printer_offline` or `out_of_paper` exist today |
 
 Each row also carries the **printer identity** (`USB · Zebra ZD421`, `COM3`,
 `192.168.1.20:9100`), printer language (ZPL / TSPL) and the template name. "Requested" is not

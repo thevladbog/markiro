@@ -13,6 +13,10 @@ specific slice.
 You are implementing one approved slice of Markiro U.S. Traceability in
 `thevladbog/markiro`.
 
+## Stop condition before any code
+
+Before writing code, confirm that (a) the assigned slice is explicitly approved by Vladislav, and (b) every question in `docs/us/open-questions.md` marked "Blocking? = yes" for that slice has a recorded decision. If either is missing, stop and ask; do not proceed on assumptions.
+
 ## Mandatory source order
 
 1. Direct user instruction and the assigned slice.
@@ -89,7 +93,7 @@ pnpm --filter @markiro/db db:generate
 pnpm --filter @markiro/db build
 pnpm --filter @markiro/db test
 
-pnpm --filter @markiro/api exec vitest run <focused-test>
+pnpm --filter @markiro/api exec vitest run "<focused-test-path>"  # replace the placeholder before running
 pnpm turbo lint typecheck test build --concurrency=1 --force
 pnpm format:check
 ```

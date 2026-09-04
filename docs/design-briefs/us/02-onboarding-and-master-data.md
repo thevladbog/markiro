@@ -161,8 +161,10 @@ The catalog stays the RU catalog. For U.S. tenants the product side panel gains 
 RU-only fields (CHZ product group, EGAIS code, national-catalog lookup) are hidden for U.S.
 profiles, and a product no longer needs a CHZ group to leave "Draft".
 
-**Coverage section** (editable only with `traceability.qa.manage`; read-only for others with
-"Only QA / Traceability Manager changes coverage"): status radio group with one-line
+**Coverage section** (editable only with `traceability.qa.manage`, which per the US-00 role table
+belongs to QA / Traceability Manager and to Owner / Tenant Admin — the persona matrix below follows
+that table; read-only for others with "Only QA / Traceability Manager or an admin changes
+coverage"; the same capability governs lot status changes, US-02 `POST /traceability/lots/:id/status`): status radio group with one-line
 explanations (Covered · Contains FTL food in the same form · Not covered · Unknown · Exemption
 review required); rationale (required in the FSMA profile once status is not unknown); FTL
 category (combobox with suggestions such as "Fruits (fresh-cut)", free text, never the CHZ

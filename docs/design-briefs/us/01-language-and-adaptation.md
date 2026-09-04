@@ -43,12 +43,12 @@ RU brief 01 set the tone: plain, businesslike, concrete, "the line keeps
 running, no fines, reports in two minutes". The English mirror keeps the
 plainness and swaps the promise for the deliverable:
 
-| RU register (brief 01)            | U.S. register                                                  |
-| --------------------------------- | -------------------------------------------------------------- |
-| "No fines"                        | "Records ready in 24 hours"                                    |
-| "Reports in two minutes"          | "Package prepared in under a minute, with hashes"              |
-| "The line keeps running"          | "Nothing rewritten, nothing lost — every change is a revision" |
-| Imperative, friendly to operators | Same; sentence case; no exclamation marks; no legalese         |
+| RU register (brief 01)            | U.S. register                                                                                                                                                                                    |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| "No fines"                        | "Built for the 24-hour trace request" (capability wording; the measured criterion is a trained operator completing a mock request in under 15 minutes of human time, `docs/us/acceptance.md` §1) |
+| "Reports in two minutes"          | "Package generation measured under 60 seconds on the demo dataset, with hashes" (`docs/us/acceptance.md` C-014; never an unqualified "under a minute")                                           |
+| "The line keeps running"          | "Finalized records are never overwritten — every change is a revision" (a design fact, not a durability promise; no "nothing lost")                                                              |
+| Imperative, friendly to operators | Same; sentence case; no exclamation marks; no legalese                                                                                                                                           |
 
 Rules:
 
@@ -113,19 +113,19 @@ optional identifiers on locations and in Settings; the copy says "optional".
 
 ## 4. U.S. formats
 
-| Item        | Rule                                                                                                                                                                | Example                                            |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| Date        | `MM/DD/YYYY`, tenant timezone. Stored ISO; the UI never shows ISO except in monospace hash/metadata blocks. Date pickers open on U.S. week (Sunday first).          | 09/15/2026                                         |
-| Date + time | `MM/DD/YYYY h:mm AM/PM` with the zone abbreviation when a deadline is involved; 24 h clock nowhere on U.S. screens.                                                 | 09/17/2026 9:14 AM PDT                             |
-| Timezone    | One operational zone per tenant, chosen from the U.S. list (Eastern to Hawaii, Puerto Rico). Show the IANA name in settings, the abbreviation next to times.        | America/Los_Angeles → PDT / PST                    |
-| DST         | The 24-hour due time is absolute (received + 24 h), so on 11/01/2026 it lands at 1:14 AM PST the next day. Draw one screen state that shows this without comment.   | Received 11/01 2:14 AM PDT → Due 11/02 1:14 AM PST |
-| Decimal     | Up to 3 fraction digits, `.` separator, `,` thousands in display only; no exponent; never rounded silently.                                                         | 1,000.5 lb                                         |
-| Unit        | Always explicit, from the closed list: lb, oz, kg, g, each, case, bag, cup, gal, l. Two fields (quantity + unit), never a combined string in a form. No conversion. | 50 bag · 500 lb                                    |
-| Phone       | Stored and displayed as typed (extensions preserved). Input placeholder `+1 (509) 555-0101`; validation is loose (digits, `+ - ( ) . x ext`).                       | +1 509-555-0101 x12                                |
-| Address     | Street, City, State (two-letter code, uppercase), ZIP (text, 5 or 5+4), Country (ISO code, display name). Coordinates variant: latitude / longitude, 6 decimals.    | 500 Example River Pkwy, Portland, OR 97203, US     |
-| Country     | Default `US`; select with ISO codes and display names.                                                                                                              | US · United States                                 |
-| Identifiers | TLC, SSCC, hashes, event numbers in tabular/monospace figures.                                                                                                      | NRF-260915-APL01                                   |
-| Label sizes | Inches for U.S. stock templates (4×6 in); millimeters remain for RU templates.                                                                                      | Case 4×6 in (203 dpi) — TLC                        |
+| Item        | Rule                                                                                                                                                                                                  | Example                                                      |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Date        | `MM/DD/YYYY`, tenant timezone. Stored ISO; the UI never shows ISO except in monospace hash/metadata blocks. Date pickers open on U.S. week (Sunday first).                                            | 09/15/2026                                                   |
+| Date + time | `MM/DD/YYYY h:mm AM/PM` with the zone abbreviation when a deadline is involved; 24 h clock nowhere on U.S. screens.                                                                                   | 09/17/2026 9:14 AM PDT                                       |
+| Timezone    | One operational zone per tenant, chosen from the U.S. list (Eastern to Hawaii, Puerto Rico). Show the IANA name in settings, the abbreviation next to times.                                          | America/Los_Angeles → PDT / PST                              |
+| DST         | The 24-hour due time is absolute (received + 24 elapsed hours), so across the fall-back on 11/01/2026 it displays one wall-clock hour earlier. Draw one screen state that shows this without comment. | Received 10/31/2026 3:14 PM PDT → due 11/01/2026 2:14 PM PST |
+| Decimal     | Up to 3 fraction digits, `.` separator, `,` thousands in display only; no exponent; never rounded silently.                                                                                           | 1,000.5 lb                                                   |
+| Unit        | Always explicit, from the closed list: lb, oz, kg, g, each, case, bag, cup, gal, l. Two fields (quantity + unit), never a combined string in a form. No conversion.                                   | 50 bag · 500 lb                                              |
+| Phone       | Stored and displayed as typed (extensions preserved). Input placeholder `+1 (509) 555-0101`; validation is loose (digits, `+ - ( ) . x ext`).                                                         | +1 509-555-0101 x12                                          |
+| Address     | Street, City, State (two-letter code, uppercase), ZIP (text, 5 or 5+4), Country (ISO code, display name). Coordinates variant: latitude / longitude, 6 decimals.                                      | 500 Example River Pkwy, Portland, OR 97203, US               |
+| Country     | Default `US`; select with ISO codes and display names.                                                                                                                                                | US · United States                                           |
+| Identifiers | TLC, SSCC, hashes, event numbers in tabular/monospace figures.                                                                                                                                        | NRF-260915-APL01                                             |
+| Label sizes | Inches for U.S. stock templates (4×6 in); millimeters remain for RU templates.                                                                                                                        | Case 4×6 in (203 dpi) — TLC                                  |
 
 Note for the designer: the FDA-aligned workbook writes typed date cells as
 `yyyy-mm-dd` (sortable, per the export spec), while every screen shows

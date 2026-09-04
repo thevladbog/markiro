@@ -32,13 +32,22 @@ The FTR establishes additional recordkeeping requirements for persons who
 manufacture, process, pack or hold foods on the Food Traceability List (FTL).
 FDA states that records must contain the Key Data Elements (KDE) associated
 with the relevant Critical Tracking Events (CTE) and must be made available on
-request within 24 hours. As of the date of this document, FDA also states that
-it will not enforce the rule before July 20, 2028. For every release the
-regulatory information must be re-verified against the official sources.
-[FDA-01]
+request within 24 hours. The timeline, as stated on FDA-01 on 2026-09-03, has
+three distinct parts that must not be collapsed into one date:
 
-Practical meaning for the product: the window until July 20, 2028 is not a
-reason to postpone development. It allows P0 to be positioned as a readiness
+- The original compliance date for all persons subject to the rule was
+  January 20, 2026.
+- FDA has proposed extending the compliance date by 30 months to July 20, 2028. This is a proposed rule, not a finalized change to the compliance date.
+- The Continuing Appropriations, Agriculture, Legislative Branch, Military
+  Construction and Veterans Affairs, and Extensions Act of 2026 directed FDA
+  not to enforce the rule before July 20, 2028, and FDA states it intends to
+  comply with that directive.
+
+For every release the regulatory information must be re-verified against the
+official sources. [FDA-01]
+
+Practical meaning for the product: the non-enforcement window until July 20,
+2028 is not a reason to postpone development. It allows P0 to be positioned as a readiness
 platform and to run pilots before enforcement starts, while keeping cautious
 wording.
 
@@ -154,6 +163,8 @@ tagged release. The links below are a source register, not a legal opinion.
 | MKR-01 | Markiro README                                         | Current product capabilities and public architecture overview.                                                                  | https://github.com/thevladbog/markiro/blob/main/README.md                                                                              |
 | MKR-02 | Markiro Architecture                                   | Current monorepo, station, offline/sync, data retention, public API and tenant boundaries.                                      | https://github.com/thevladbog/markiro/blob/main/docs/architecture.md                                                                   |
 | MKR-03 | Markiro AGENTS.md                                      | Repository-specific source-of-truth order, TDD workflow, migration rules and verification commands.                             | https://github.com/thevladbog/markiro/blob/main/AGENTS.md                                                                              |
+
+The MKR-01…MKR-03 links point at `main`; the revision checked for this baseline is commit `4e3a7380eb169cf4cb56a5333fc96fd1ac0447c7` (main, 2026-09-03). Cite that SHA when a reader needs the exact text.
 
 ## Review log
 

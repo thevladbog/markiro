@@ -43,10 +43,12 @@ The following items are deliberately excluded from the filing-ready P0 scope
 
 ## Language rules
 
-Every UI string, document, demo narration and public claim must use only the
-wording in the "Allowed" column (REG-002). The "Not allowed" column lists
-prohibited claims; they are reproduced here only so that reviewers and
-negative tests can recognise them (MUS-001 section 4.5).
+Wherever the UI, documentation, demo narration or public copy makes a
+regulatory or compliance statement, it uses the wording in the "Allowed"
+column (REG-002). Ordinary UI strings are not restricted; what is banned
+everywhere is the "Not allowed" column, which lists prohibited claims. They
+are reproduced here only so that reviewers and negative tests can recognise
+them (MUS-001 section 4.5).
 
 | Allowed                                                             | Not allowed                      |
 | ------------------------------------------------------------------- | -------------------------------- |

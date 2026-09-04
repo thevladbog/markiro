@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-03
 
-**Status:** Approved baseline; nothing implemented. Opens slice US-00.
+**Status:** Draft for review; nothing implemented and no slice approved. Opens slice US-00 once the blocking questions in `docs/us/open-questions.md` are settled.
 
 **Scope:** Records the founding decisions for the U.S. adaptation described in MUS-001 v0.1 and now mirrored in `docs/us/`: where the work lives, how U.S. behavior is gated from the existing Russian product, what the current schema already conflicts with, and what slice US-00 must deliver. It does not design the traceability entities themselves; that is US-01…US-09 and each gets its own spec.
 
@@ -91,7 +91,7 @@ These were verified in source on 2026-09-03 and are inputs to US-00 and US-02, n
 - Tenant regulatory profile schema, migration with `RU_CHZ` backfill, contract in `packages/platform-contracts`, API read/update, admin visibility.
 - Feature gating helper used by admin navigation and API guards; RU test suite unchanged and green.
 - U.S. capability set with denial tests.
-- Its own design spec before code (`2026-09-XX-us-00-regulatory-profile-design.md`) resolving conflicts 2 and 3 above.
+- Its own design spec before code (`2026-09-03-us-00-regulatory-profile-design.md`) resolving conflicts 2 and 3 above.
 - `docs/us/requirements-traceability.md` rows REG-001…REG-012, PRO-001…PRO-003, PRO-005, PRO-006, INT-004, INT-007 updated.
 
 ## Testing expectations set by this spec

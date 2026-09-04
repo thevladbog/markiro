@@ -198,8 +198,16 @@ in text: "3 required elements missing" / "Complete — ready to finalize". The s
 refuse (`409 event_incomplete` with the same issue list, e.g. a colleague changed a location
 card meanwhile): draw it as the panel refreshing with "Re-checked just now: 1 new issue".
 
+Shipping adds a fourth kind of issue (P1, US-05): the same-address and non-standard-flow
+warnings require acknowledgement. They do not disable Finalize, but the confirm dialog carries a
+required checkbox ("I confirm this flow is intended"); without it the server answers
+`409 flow_warning_unacknowledged` and the panel shows the warning with an "Acknowledgement
+required" marker until the box is ticked (stored as `flow_warning_acknowledged_at / _by`). Ordinary
+warnings stay non-blocking and need no acknowledgement.
+
 States to draw: complete; errors only; errors + warnings; warnings only (Finalize enabled,
-warnings restated in the confirm dialog); stale after 409; the generic-profile variant where
+warnings restated in the confirm dialog); warnings requiring acknowledgement (shipping, checkbox
+in the dialog, 409 after an unticked attempt); stale after 409; the generic-profile variant where
 the document rule is a warning.
 
 ### 6. Finalize confirmation
@@ -207,7 +215,9 @@ the document rule is a warning.
 A confirm dialog restating what will be frozen: type, number, date, line count and total
 quantity per unit, documents, and the consequence per type — Receiving: "2 lots will be
 created"; Transformation: "1 lot will be created, 2 lots marked consumed, 100 cases linked";
-Shipping: "lot NRF-260915-APL01 will be marked shipped". Warnings are listed again. The primary
+Shipping depends on the balance (OQ-US05-1 (a)): when the shipped quantity takes the balance to
+zero, "lot NRF-260915-APL01 will be marked shipped"; for a partial shipment, "lot NRF-260915-APL01
+balance 100 → 40 case; the lot stays active". Warnings are listed again. The primary
 button reads "Finalize" — never "Submit"; nothing is sent anywhere. States to draw: default;
 with warnings; in progress; failure (409 issue list inside the dialog, "Back to form").
 

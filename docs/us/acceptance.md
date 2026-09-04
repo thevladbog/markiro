@@ -93,7 +93,7 @@ pnpm --filter @markiro/db db:generate
 pnpm --filter @markiro/db build
 pnpm --filter @markiro/db test
 
-pnpm --filter @markiro/api exec vitest run <focused-test>
+pnpm --filter @markiro/api exec vitest run "<focused-test-path>"  # replace the placeholder before running
 pnpm turbo lint typecheck test build --concurrency=1 --force
 pnpm format:check
 
