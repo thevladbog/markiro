@@ -92,6 +92,7 @@ describe("TrueApiClient", () => {
       status: "rejected",
       code: "403",
       message: "no active contract for the product group",
+      source: "http",
     });
   });
 
@@ -112,6 +113,7 @@ describe("TrueApiClient", () => {
       status: "rejected",
       code: "400",
       message: "no active contract",
+      source: "http",
     });
   });
 
@@ -415,6 +417,7 @@ describe("TrueApiClient", () => {
       status: "rejected",
       code: "403",
       message: "Нет доступа к товарной группе",
+      source: "element",
     });
   });
 

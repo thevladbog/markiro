@@ -55,6 +55,7 @@ interface JournalWarning {
   message: string | null;
   productGroupCode: number | null;
   code: string | null;
+  codeSource: "http" | "chz" | null;
   codes: number | null;
   unexpected: number | null;
 }
@@ -75,6 +76,10 @@ function journalWarnings(details: Record<string, unknown> | null): JournalWarnin
         productGroupCode:
           typeof record["productGroupCode"] === "number" ? record["productGroupCode"] : null,
         code: typeof record["code"] === "string" ? record["code"] : null,
+        codeSource:
+          record["codeSource"] === "http" || record["codeSource"] === "chz"
+            ? record["codeSource"]
+            : null,
         codes: typeof record["codes"] === "number" ? record["codes"] : null,
         unexpected: typeof record["unexpected"] === "number" ? record["unexpected"] : null,
       },
@@ -130,7 +135,13 @@ function EventRow({
                   : t("pages.integrations.channel.journal.warningProductGroup", {
                       value: warning.productGroupCode,
                     }),
-                warning.code === null ? null : `HTTP ${warning.code}`,
+                warning.code === null
+                  ? null
+                  : warning.codeSource === "http"
+                    ? `HTTP ${warning.code}`
+                    : t("pages.integrations.channel.journal.warningChzCode", {
+                        code: warning.code,
+                      }),
                 warning.codes === null
                   ? null
                   : t("pages.integrations.channel.journal.warningCodeCount", {

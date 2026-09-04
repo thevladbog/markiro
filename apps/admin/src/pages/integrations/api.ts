@@ -126,6 +126,31 @@ const JOURNAL_PERIOD_MS: Record<JournalPeriod, number> = {
   "90d": 90 * 86_400_000,
 };
 
+const JOURNAL_EXPORT_PAGE_SIZE = 50;
+const JOURNAL_EXPORT_MAX_PAGES = 200;
+const JOURNAL_SECRET_KEY_PATTERN =
+  /(password|passphrase|secret|cookie|authorization|credential|api.?key|private.?key|backup.?codes?)/i;
+const JOURNAL_KM_CANDIDATE_PATTERN = /(?:\]d2)?01\d{14}21/;
+
+function journalRequestUrl(
+  type: string,
+  query: JournalQuery,
+  page: number,
+  pageSize: number,
+  to: Date,
+): string {
+  const from = new Date(to.getTime() - JOURNAL_PERIOD_MS[query.period]);
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+    outcome: query.outcome,
+    direction: query.direction,
+    from: from.toISOString(),
+    to: to.toISOString(),
+  });
+  return `/integrations/${type}/journal?${params.toString()}`;
+}
+
 /**
  * Mirrors `CredentialsIssuedDto`. Returned exactly once, by
  * `useIssueCredentials` below -- the caller must hold it only in local
@@ -164,16 +189,94 @@ async function fetchChannelJournal(
   query: JournalQuery,
 ): Promise<JournalPageResponse> {
   const to = new Date(Date.now());
-  const from = new Date(to.getTime() - JOURNAL_PERIOD_MS[query.period]);
-  const params = new URLSearchParams({
-    page: String(query.page),
-    pageSize: String(query.pageSize),
-    outcome: query.outcome,
-    direction: query.direction,
-    from: from.toISOString(),
-    to: to.toISOString(),
+  return apiFetch<JournalPageResponse>(
+    journalRequestUrl(type, query, query.page, query.pageSize, to),
+  );
+}
+
+function scrubJournalExport(value: unknown, key = ""): unknown {
+  const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (
+    JOURNAL_SECRET_KEY_PATTERN.test(key) ||
+    normalizedKey.endsWith("token") ||
+    normalizedKey.endsWith("tokens")
+  ) {
+    return "[redacted]";
+  }
+  if (Array.isArray(value)) return value.map((item) => scrubJournalExport(item));
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([childKey, childValue]) => [
+        childKey,
+        scrubJournalExport(childValue, childKey),
+      ]),
+    );
+  }
+  if (typeof value !== "string") return value;
+  // A KM's serial and crypto fields may legally contain spaces, commas and
+  // other printable characters, so a delimiter-based replacement can leak
+  // the remainder. Redact the whole diagnostic string once a KM prefix is
+  // present; surrounding prose is less important than never exporting a
+  // recoverable marking code.
+  if (JOURNAL_KM_CANDIDATE_PATTERN.test(value)) return "[КМ скрыт]";
+  return value
+    .replace(/Bearer\s+[A-Za-z0-9._+/=-]+/gi, "Bearer [redacted]")
+    .replace(/Basic\s+[A-Za-z0-9+/=]+/gi, "Basic [redacted]")
+    .replace(/[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "[redacted]");
+}
+
+function journalExportFilename(type: string, generatedAt: Date): string {
+  const stamp = generatedAt.toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+  const safeType = type.toLowerCase().replace(/[^a-z0-9-]+/g, "-");
+  return `markiro-${safeType}-journal-${stamp}.json`;
+}
+
+/** Downloads every available page for the current semantic journal filters. */
+export async function exportChannelJournal(type: string, query: JournalQuery): Promise<void> {
+  const generatedAt = new Date(Date.now());
+  const from = new Date(generatedAt.getTime() - JOURNAL_PERIOD_MS[query.period]);
+  const sessions: JournalSessionDto[] = [];
+  let page = 1;
+  let totalPages = 1;
+  let totalItems = 0;
+  let timeZone = "Europe/Moscow";
+
+  while (page <= totalPages && page <= JOURNAL_EXPORT_MAX_PAGES) {
+    const response = await apiFetch<JournalPageResponse>(
+      journalRequestUrl(type, query, page, JOURNAL_EXPORT_PAGE_SIZE, generatedAt),
+    );
+    sessions.push(...response.sessions);
+    totalPages = response.pageInfo.totalPages;
+    totalItems = response.pageInfo.totalItems;
+    timeZone = response.timeZone;
+    page += 1;
+  }
+
+  const payload = scrubJournalExport({
+    schemaVersion: 1,
+    generatedAt: generatedAt.toISOString(),
+    channelType: type,
+    timeZone,
+    filters: {
+      period: query.period,
+      outcome: query.outcome,
+      direction: query.direction,
+      from: from.toISOString(),
+      to: generatedAt.toISOString(),
+    },
+    totalItems,
+    truncated: totalPages > JOURNAL_EXPORT_MAX_PAGES,
+    sessions,
   });
-  return apiFetch<JournalPageResponse>(`/integrations/${type}/journal?${params.toString()}`);
+  const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], {
+    type: "application/json;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = journalExportFilename(type, generatedAt);
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 /** `GET /integrations/:type/journal` -- feeds `JournalList`. */
