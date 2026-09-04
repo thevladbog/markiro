@@ -1,0 +1,40 @@
+
+digraph G {
+  graph [rankdir=LR, bgcolor="white", pad=0.2, nodesep=0.45, ranksep=0.55, fontname="Arial"];
+  node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10, color="#15324B", fillcolor="#EEF6FA", margin="0.14,0.08"];
+  edge [color="#5B6570", penwidth=1.2, arrowsize=0.7, fontname="Arial", fontsize=9];
+
+  subgraph cluster_current {
+    label="Existing Markiro foundation"; color="#B8C5CE"; style="rounded";
+    Station [label="Station\nTauri + SQLite\nscanner / printer / offline"];
+    Admin [label="Admin panel\nReact / Vite"];
+    API [label="NestJS API\nOpenAPI / tenant boundary"];
+    PG [label="PostgreSQL\ncurrent products, shifts, boxes"];
+    Domain [label="Shared domain\nGTIN / SSCC / labels"];
+    Station -> API [label="idempotent sync"];
+    Admin -> API;
+    API -> PG;
+    Domain -> Station;
+    Domain -> API;
+  }
+
+  subgraph cluster_us {
+    label="New U.S. traceability bounded context"; color="#1D5D89"; style="rounded";
+    Profiles [label="U.S. profile\nprocessor / generic lot"];
+    Master [label="Parties, locations,\nproduct FTL profiles"];
+    Events [label="Receiving → Transformation → Shipping"];
+    Lots [label="Traceability lots\nTLC + source + genealogy"];
+    Request [label="Trace request\n24-hour readiness drill"];
+    Export [label="FDA-aligned XLSX\nPlan PDF + manifest"];
+    Profiles -> Master -> Events -> Lots -> Request -> Export;
+  }
+
+  API -> Profiles [label="new modules"];
+  PG -> Lots [label="new tables"];
+  Station -> Events [label="optional lot/case link", style=dashed];
+  Domain -> Lots [label="reuse identifiers", style=dashed];
+
+  External [shape=box, fillcolor="#FFF4CE", color="#9A6700", label="Supplier / processor / buyer\nsynthetic or pilot data"];
+  External -> Events [label="business records"];
+  Export -> FDA [shape=box, fillcolor="#EAF5EF", color="#2F6B4F", label="FDA-like request package\n(no direct submission in P0)"];
+}
