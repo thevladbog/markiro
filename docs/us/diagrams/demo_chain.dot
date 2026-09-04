@@ -1,0 +1,21 @@
+
+digraph G {
+  graph [rankdir=LR, bgcolor="white", pad=0.2, nodesep=0.35, ranksep=0.45, fontname="Arial"];
+  node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10, color="#15324B", fillcolor="#EEF6FA", margin="0.13,0.08"];
+  edge [color="#1D5D89", penwidth=1.25, arrowsize=0.75, fontname="Arial", fontsize=9];
+
+  S [label="Orchard Slice Supply LLC\n2 inbound TLCs\nFresh-cut apple slices"];
+  R [label="RECEIVING\n09/14/2026\nBOL + ASN"];
+  T [label="TRANSFORMATION\n09/15/2026\ncommingle / repack"];
+  O [label="New output TLC\nFresh-cut apple snack cups\n100 cases"];
+  H [label="SHIPPING\n09/16/2026\nBOL + invoice"];
+  B [label="Harbor Market DC\nimmediate recipient"];
+  Q [shape=diamond, fillcolor="#FFF4CE", color="#9A6700", label="Trace request\nproduct + date + TLC"];
+  X [label="Package\nXLSX + plan PDF\nvalidation + SHA-256", fillcolor="#EAF5EF", color="#2F6B4F"];
+
+  S -> R -> T -> O -> H -> B;
+  Q -> O [label="trace back"];
+  O -> X [label="export"];
+  S -> X [style=dashed, label="genealogy"];
+  B -> X [style=dashed, label="trace forward"];
+}
