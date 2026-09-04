@@ -1,0 +1,33 @@
+
+digraph G {
+  graph [rankdir=LR, bgcolor="white", pad=0.2, nodesep=0.42, ranksep=0.6, fontname="Arial"];
+  node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10, color="#15324B", fillcolor="#EEF6FA", margin="0.14,0.08"];
+  edge [color="#5B6570", penwidth=1.2, arrowsize=0.7, fontname="Arial", fontsize=9];
+
+  Shared [label="Shared monorepo\nUI · API · domain · migrations", fillcolor="#F2F4F5", color="#66717A"];
+
+  subgraph cluster_ru {
+    label="Existing RU deployment"; color="#B8C5CE"; style="rounded";
+    RUApps [label="RU applications\nRU_CHZ edition"];
+    RUData [label="RU data plane\nseparate database and storage"];
+    RUApps -> RUData;
+  }
+
+  subgraph cluster_us {
+    label="Dedicated U.S. MVP deployment · outside RF"; color="#1D5D89"; style="rounded"; penwidth=1.6;
+    USApps [label="Admin + API\nU.S. edition only"];
+    Profiles [label="U.S. profile\nprocessor / generic lot"];
+    Flow [label="Receiving → Transformation → Shipping\nlot trace · request · exports"];
+    USData [label="U.S. data plane\nDB · objects · logs · backups · secrets", fillcolor="#EAF5EF", color="#2F6B4F"];
+    USApps -> Profiles -> Flow;
+    USApps -> USData [label="tenant-scoped records"];
+    Flow -> USData [label="artifacts + audit"];
+  }
+
+  Shared -> RUApps [label="build RU edition"];
+  Shared -> USApps [label="build U.S. edition"];
+  RUData -> USData [label="no replication or shared persistence", style=dashed, color="#A23B3B", fontcolor="#A23B3B", dir=none];
+
+  Team [label="Remote team access from RF\nMFA · least privilege · audit", fillcolor="#FFF4CE", color="#9A6700"];
+  Team -> USApps [label="administration only"];
+}
