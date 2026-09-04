@@ -150,6 +150,26 @@
   font: var(--text-body);
 }
 
+.mk-journal-event__warnings {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-journal-event__warnings li {
+  display: grid;
+  gap: var(--sp-1);
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--warn-solid);
+}
+
+.mk-journal-event__warnings small {
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
 .mk-journal-event__raw {
   margin-top: var(--sp-2);
 }

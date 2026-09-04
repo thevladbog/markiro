@@ -57,3 +57,14 @@ export interface CisInfo {
   ownerInn: string | null;
   withdrawReason: string | null;
 }
+
+export interface CisInfoError {
+  cis: string | null;
+  code: string;
+  message: string;
+}
+
+export interface CisesInfoBatch {
+  values: CisInfo[];
+  errors: CisInfoError[];
+}

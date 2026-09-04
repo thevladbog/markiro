@@ -3013,6 +3013,12 @@
           "truncated": "Показано событий: {{shown}} из {{total}}",
           "noEvents": "Подробных событий нет.",
           "detailsSummary": "Ответ в протокол обмена",
+          "warningProductGroup": "Группа {{value}}",
+          "warningCodeCount": "Кодов: {{count}}",
+          "warningUnexpectedCount": "Лишних кодов в ответе: {{count}}",
+          "warningUnauthorized": "Токен True API недействителен, запрошено обновление",
+          "warningRejected": "Честный Знак отклонил запрос статусов",
+          "warningUnknown": "Запрос статусов завершён с замечанием",
           "outcome": {
             "ok": "Успешно",
             "warn": "Есть замечания",
