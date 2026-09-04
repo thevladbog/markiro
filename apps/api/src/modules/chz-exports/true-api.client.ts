@@ -167,7 +167,7 @@ export class TrueApiClient {
 
   async cisesInfo(
     auth: TrueApiAuth,
-    productGroupCode: number,
+    productGroupAlias: string,
     cises: string[],
   ): Promise<TrueApiResult<CisInfo[]>> {
     // A RangeError rather than a silent slice: the caller batches, and a
@@ -176,7 +176,7 @@ export class TrueApiClient {
     if (cises.length > CISES_INFO_BATCH_LIMIT) {
       throw new RangeError(`cises/info accepts at most ${CISES_INFO_BATCH_LIMIT} codes`);
     }
-    const query = new URLSearchParams({ pg: String(productGroupCode) });
+    const query = new URLSearchParams({ pg: productGroupAlias });
     return this.request(
       auth,
       `/cises/info?${query.toString()}`,
@@ -190,14 +190,52 @@ export class TrueApiClient {
         if (!Array.isArray(payload)) {
           return null;
         }
-        return payload.flatMap((row) => {
-          // A `null`/`undefined`/non-object row cannot carry a `cis` at all --
-          // reading `.cis` off it would throw, and `request()` turns any
+        const elementErrors = payload.flatMap((row) => {
+          if (row === null || typeof row !== "object") return [];
+          const record = row as Record<string, unknown>;
+          const rawCode = record.errorCode;
+          const code =
+            typeof rawCode === "string"
+              ? rawCode
+              : typeof rawCode === "number"
+                ? String(rawCode)
+                : "";
+          if (code.length === 0) return [];
+          return [
+            {
+              code,
+              message:
+                typeof record.errorMessage === "string" ? record.errorMessage.slice(0, 500) : "",
+            },
+          ];
+        });
+        // Some cises/info deployments answer HTTP 200 but repeat an auth
+        // failure inside every array element. It is still a bearer failure:
+        // letting it look like an empty success would back off every code and
+        // never ask the signer to refresh the token.
+        if (elementErrors.some((error) => error.code === "401")) {
+          throw new TrueApiUnauthorizedResponse();
+        }
+
+        const values = payload.flatMap((row) => {
+          // True API wraps each successful answer in `cisInfo`; rows carrying
+          // only `errorCode`/`errorMessage` have no status fact to persist.
+          // A `null`/undefined/non-object row cannot carry `cisInfo` at all --
+          // reading through it would throw, and `request()` turns any
           // throw from `parse` into `unavailable` for the WHOLE batch, losing
           // the answers for every other code in it over one malformed row.
           if (row === null || typeof row !== "object") return [];
-          const record = row as Record<string, unknown>;
-          const cis = typeof record.cis === "string" ? record.cis : "";
+          const cisInfo = (row as Record<string, unknown>).cisInfo;
+          if (cisInfo === null || typeof cisInfo !== "object") return [];
+          const record = cisInfo as Record<string, unknown>;
+          // `requestedCis` is the stable correlation key for the request.
+          // Fall back to `cis` for groups/responses that omit it.
+          const cis =
+            typeof record.requestedCis === "string" && record.requestedCis.length > 0
+              ? record.requestedCis
+              : typeof record.cis === "string"
+                ? record.cis
+                : "";
           // A row we cannot attribute to a code we asked about is worse than
           // absent: the caller matches on `cis`, and an empty string would
           // match nothing while looking like an answer.
@@ -223,6 +261,15 @@ export class TrueApiClient {
             },
           ];
         });
+        // A response made exclusively of element-level errors is a terminal
+        // refusal, not a valid empty result. Mixed batches keep their valid
+        // facts; errored rows remain absent and follow the existing bounded
+        // unknown-code retry path.
+        if (values.length === 0 && elementErrors.length > 0) {
+          const [error] = elementErrors;
+          throw new TrueApiResponseRejection(error!.code, error!.message);
+        }
+        return values;
       },
     );
   }
@@ -272,8 +319,11 @@ export class TrueApiClient {
       const value = await parse(response);
       return value === null ? { status: "unavailable" } : { status: "ok", value };
     } catch (error) {
+      if (error instanceof TrueApiUnauthorizedResponse) {
+        return { status: "unauthorized" };
+      }
       if (error instanceof TrueApiResponseRejection) {
-        return { status: "rejected", code: error.code, message: "" };
+        return { status: "rejected", code: error.code, message: error.message };
       }
       return { status: "unavailable" };
     } finally {
@@ -293,10 +343,15 @@ export class TrueApiClient {
 }
 
 class TrueApiResponseRejection extends Error {
-  constructor(readonly code: string) {
-    super(code);
+  constructor(
+    readonly code: string,
+    message = "",
+  ) {
+    super(message);
   }
 }
+
+class TrueApiUnauthorizedResponse extends Error {}
 
 async function readBoundedBytes(response: Response, maxBytes: number): Promise<Uint8Array> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new RangeError("Invalid byte limit");

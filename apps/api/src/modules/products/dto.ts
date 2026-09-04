@@ -89,7 +89,7 @@ export interface ProductDto {
   printName: string | null;
   /** Resolved name of `chzProductGroupCode`; null when no group is selected. */
   productGroup: string | null;
-  /** Chestny ZNAK product group code — what the ЧЗ APIs take as `productGroupCode`/`pg`. */
+  /** Chestny ZNAK numeric product group code; API clients resolve its alias when `pg` requires one. */
   chzProductGroupCode: number | null;
   boxCapacity: number | null;
   palletCapacity: number | null;

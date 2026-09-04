@@ -3013,6 +3013,12 @@
           "truncated": "Events shown: {{shown}} of {{total}}",
           "noEvents": "No detailed events.",
           "detailsSummary": "Response sent into the exchange protocol",
+          "warningProductGroup": "Group {{value}}",
+          "warningCodeCount": "Codes: {{count}}",
+          "warningUnexpectedCount": "Unexpected codes in response: {{count}}",
+          "warningUnauthorized": "The True API token is invalid; a refresh was requested",
+          "warningRejected": "Chestny ZNAK rejected the status request",
+          "warningUnknown": "The status request completed with a warning",
           "outcome": {
             "ok": "OK",
             "warn": "Has warnings",

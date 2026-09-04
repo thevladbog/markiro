@@ -194,6 +194,78 @@ describe("integration journal interface", () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("shows a True API refusal inside its single pass without repeating the summary", async () => {
+    const summary = "Статусы кодов Честного Знака обновлены не полностью";
+    const row = session("chz-refresh", "2026-09-04T11:50:24.000Z", "warn", {
+      finishedAt: "2026-09-04T11:50:24.000Z",
+      eventCount: 1,
+      events: [
+        {
+          at: "2026-09-04T11:50:24.000Z",
+          direction: "out",
+          outcome: "warn",
+          message: summary,
+          details: {
+            warnings: [
+              {
+                kind: "rejected",
+                productGroupCode: 15,
+                code: "400",
+                message: "В запросе указана недопустимая товарная группа",
+                codes: 12,
+              },
+            ],
+          },
+        },
+      ],
+    });
+    renderJournal(() => journalPage([row]));
+
+    await userEvent.click(await screen.findByRole("button", { name: new RegExp(summary, "i") }));
+
+    expect(screen.getAllByText(summary)).toHaveLength(1);
+    expect(screen.getByText("В запросе указана недопустимая товарная группа")).toBeDefined();
+    expect(screen.getByText(/группа 15/i)).toBeDefined();
+  });
+
+  it("shows useful fallback details for token and empty-message True API warnings", async () => {
+    const summary = "Статусы кодов Честного Знака обновлены не полностью";
+    const row = session("chz-warning-fallbacks", "2026-09-04T11:50:24.000Z", "warn", {
+      eventCount: 1,
+      events: [
+        {
+          at: "2026-09-04T11:50:24.000Z",
+          direction: "out",
+          outcome: "warn",
+          message: summary,
+          details: {
+            warnings: [
+              {
+                kind: "unauthorized",
+                productGroupCode: 8,
+                tokenStatus: "unauthorized",
+              },
+              {
+                kind: "rejected",
+                productGroupCode: 15,
+                code: "403",
+                message: "",
+                codes: 4,
+              },
+            ],
+          },
+        },
+      ],
+    });
+    renderJournal(() => journalPage([row]));
+
+    await userEvent.click(await screen.findByRole("button", { name: new RegExp(summary, "i") }));
+
+    expect(screen.getByText("Токен True API недействителен, запрошено обновление")).toBeDefined();
+    expect(screen.getByText("Честный Знак отклонил запрос статусов")).toBeDefined();
+    expect(screen.getByText(/HTTP 403/)).toBeDefined();
+  });
+
   it("turns a current error notice into the Errors filter", async () => {
     renderJournal(() => journalPage([]), "error");
 

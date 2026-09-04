@@ -336,10 +336,13 @@ describe("TrueApiClient", () => {
         return new Response(
           JSON.stringify([
             {
-              cis: "01046000000000172150",
-              status: "INTRODUCED",
-              statusEx: "MOVING_BY_UD",
-              ownerInn: "7700000000",
+              cisInfo: {
+                requestedCis: "01046000000000172150",
+                cis: "01046000000000172150-normalized",
+                status: "INTRODUCED",
+                statusEx: "MOVING_BY_UD",
+                ownerInn: "7700000000",
+              },
             },
           ]),
           { status: 200 },
@@ -347,9 +350,9 @@ describe("TrueApiClient", () => {
       }),
     );
 
-    const result = await client.cisesInfo(auth, 8, ["01046000000000172150"]);
+    const result = await client.cisesInfo(auth, "milk", ["01046000000000172150"]);
 
-    expect(calls[0]!.url).toBe(`${auth.baseUrl}/cises/info?pg=8`);
+    expect(calls[0]!.url).toBe(`${auth.baseUrl}/cises/info?pg=milk`);
     expect(calls[0]!.init.method).toBe("POST");
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual(["01046000000000172150"]);
     expect(result).toEqual({
@@ -366,14 +369,63 @@ describe("TrueApiClient", () => {
     });
   });
 
+  it("maps an element-level 401 response to unauthorized", async () => {
+    const client = new TrueApiClient(
+      deps(
+        async () =>
+          new Response(
+            JSON.stringify([
+              {
+                cisInfo: { requestedCis: "01046000000000172150" },
+                errorCode: "401",
+                errorMessage: "Авторизация не пройдена",
+              },
+            ]),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    await expect(client.cisesInfo(auth, "milk", ["01046000000000172150"])).resolves.toEqual({
+      status: "unauthorized",
+    });
+  });
+
+  it("maps an element-level terminal error to a rejection with its message", async () => {
+    const client = new TrueApiClient(
+      deps(
+        async () =>
+          new Response(
+            JSON.stringify([
+              {
+                cisInfo: { requestedCis: "01046000000000172150" },
+                errorCode: "403",
+                errorMessage: "Нет доступа к товарной группе",
+              },
+            ]),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    await expect(client.cisesInfo(auth, "milk", ["01046000000000172150"])).resolves.toEqual({
+      status: "rejected",
+      code: "403",
+      message: "Нет доступа к товарной группе",
+    });
+  });
+
   it("drops a row with no usable cis rather than inventing one", async () => {
     const client = new TrueApiClient(
-      deps(async () => new Response(JSON.stringify([{ status: "INTRODUCED" }]), { status: 200 })),
+      deps(
+        async () =>
+          new Response(JSON.stringify([{ cisInfo: { status: "INTRODUCED" } }]), { status: 200 }),
+      ),
     );
     // A row we cannot attribute to a code we asked about is worse than absent:
     // the caller matches on `cis`, and an empty string would match nothing
     // while looking like an answer.
-    await expect(client.cisesInfo(auth, 8, ["01046000000000172150"])).resolves.toEqual({
+    await expect(client.cisesInfo(auth, "milk", ["01046000000000172150"])).resolves.toEqual({
       status: "ok",
       value: [],
     });
@@ -388,12 +440,20 @@ describe("TrueApiClient", () => {
       deps(
         async () =>
           new Response(
-            JSON.stringify([null, { cis: "01046000000000172150", status: "INTRODUCED" }]),
+            JSON.stringify([
+              null,
+              {
+                cisInfo: {
+                  requestedCis: "01046000000000172150",
+                  status: "INTRODUCED",
+                },
+              },
+            ]),
             { status: 200 },
           ),
       ),
     );
-    await expect(client.cisesInfo(auth, 8, ["01046000000000172150"])).resolves.toEqual({
+    await expect(client.cisesInfo(auth, "milk", ["01046000000000172150"])).resolves.toEqual({
       status: "ok",
       value: [
         {
@@ -415,10 +475,12 @@ describe("TrueApiClient", () => {
     const client = new TrueApiClient(
       deps(
         async () =>
-          new Response(JSON.stringify([{ cis: "01046000000000172150" }]), { status: 200 }),
+          new Response(JSON.stringify([{ cisInfo: { requestedCis: "01046000000000172150" } }]), {
+            status: 200,
+          }),
       ),
     );
-    await expect(client.cisesInfo(auth, 8, ["01046000000000172150"])).resolves.toEqual({
+    await expect(client.cisesInfo(auth, "milk", ["01046000000000172150"])).resolves.toEqual({
       status: "ok",
       value: [],
     });
@@ -433,7 +495,7 @@ describe("TrueApiClient", () => {
       const client = new TrueApiClient(
         deps(async () => new Response(JSON.stringify(payload), { status: 200 })),
       );
-      await expect(client.cisesInfo(auth, 8, ["01046000000000172150"])).resolves.toEqual({
+      await expect(client.cisesInfo(auth, "milk", ["01046000000000172150"])).resolves.toEqual({
         status: "unavailable",
       });
     }
@@ -444,7 +506,7 @@ describe("TrueApiClient", () => {
     await expect(
       client.cisesInfo(
         auth,
-        8,
+        "milk",
         Array.from({ length: 1001 }, (_, index) => `cis-${index}`),
       ),
     ).rejects.toThrow(RangeError);
@@ -458,7 +520,7 @@ describe("TrueApiClient", () => {
         return new Response("[]", { status: 200 });
       }),
     );
-    await client.cisesInfo(auth, 8, ["01046000000000172150"]);
+    await client.cisesInfo(auth, "milk", ["01046000000000172150"]);
     expect(seen.join("|")).not.toContain("t0ken");
   });
 });
