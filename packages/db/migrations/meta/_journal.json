@@ -785,6 +785,13 @@
       "when": 1788375196067,
       "tag": "0111_label_template_scope_and_defaults",
       "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1788542179456,
+      "tag": "0112_requeue_beer_statuses_after_cis_fix",
+      "breakpoints": true
     }
   ]
 }

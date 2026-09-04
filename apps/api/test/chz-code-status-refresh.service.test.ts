@@ -32,20 +32,19 @@ const HASH_D = "d".repeat(64);
 
 /** What the Station scanned. */
 function scannedRaw(codeHash: string): string {
-  return `01${PRODUCT_GTIN}21${codeHash.slice(0, 20)}`;
+  return `${exportedRaw(codeHash)}\u001d93ABCD`;
 }
 
 /**
- * What an ordered export delivered. Deliberately distinct from `scannedRaw`
- * so a test can tell which of the two sources a raw came from -- in
- * production both sources carry the same string for one hash.
+ * What an ordered export delivered: the CIS identity without the scanner's
+ * crypto tail. Both representations deliberately share one storage hash.
  */
 function exportedRaw(codeHash: string): string {
-  return `01${PRODUCT_GTIN}21${codeHash.slice(0, 20)}EXPORTED`;
+  return `01${PRODUCT_GTIN}21${codeHash.slice(0, 20)}`;
 }
 
-const RAW_A = scannedRaw(HASH_A);
-const RAW_B = scannedRaw(HASH_B);
+const CIS_A = exportedRaw(HASH_A);
+const CIS_B = exportedRaw(HASH_B);
 
 // All scanned test data lives on this one day, well inside a single monthly
 // partition, so one `ensurePartitions` call up front covers every test here.
@@ -325,7 +324,7 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
     await service.run(tenantId);
 
     expect(client.calls).toHaveLength(1);
-    expect(client.calls[0]!.cises).toEqual([RAW_A, RAW_B]);
+    expect(client.calls[0]!.cises).toEqual([CIS_A, CIS_B]);
   });
 
   it("sends the True API alias for each product group's pg parameter", async () => {
@@ -342,7 +341,7 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
     await seedStatus({ codeHash: HASH_A, group: 8, nextRefreshAt: past(1) });
     client.answer([
       {
-        cis: RAW_A,
+        cis: CIS_A,
         status: "INTRODUCED",
         statusEx: "MOVING_BY_UD",
         ownerInn: "7700000000",
@@ -367,7 +366,7 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
   it("gives a withdrawn code the monthly interval without retiring it", async () => {
     await seedStatus({ codeHash: HASH_A, group: 8, nextRefreshAt: past(1) });
     client.answer([
-      { cis: RAW_A, status: "RETIRED", statusEx: null, ownerInn: null, withdrawReason: "SOLD" },
+      { cis: CIS_A, status: "RETIRED", statusEx: null, ownerInn: null, withdrawReason: "SOLD" },
     ]);
 
     await service.run(tenantId);
@@ -390,7 +389,7 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
       nextRefreshAt: past(1),
     });
     client.answer([
-      { cis: RAW_A, status: "INTRODUCED", statusEx: null, ownerInn: null, withdrawReason: null },
+      { cis: CIS_A, status: "INTRODUCED", statusEx: null, ownerInn: null, withdrawReason: null },
     ]);
 
     await service.run(tenantId);
@@ -405,7 +404,7 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
   it("treats an unrecognised status as in circulation", async () => {
     await seedStatus({ codeHash: HASH_A, group: 8, nextRefreshAt: past(1) });
     client.answer([
-      { cis: RAW_A, status: "SOMETHING_NEW", statusEx: null, ownerInn: null, withdrawReason: null },
+      { cis: CIS_A, status: "SOMETHING_NEW", statusEx: null, ownerInn: null, withdrawReason: null },
     ]);
 
     await service.run(tenantId);
@@ -484,7 +483,12 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
 
   it("backs a rejected product group off instead of retrying the refusal forever", async () => {
     await seedStatus({ codeHash: HASH_A, group: 8, nextRefreshAt: past(1) });
-    client.fail({ status: "rejected", code: "400", message: `no active contract for ${RAW_A}` });
+    client.fail({
+      status: "rejected",
+      code: "400",
+      message: `no active contract for ${CIS_A}`,
+      source: "http",
+    });
 
     await service.run(tenantId);
 
@@ -503,6 +507,7 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
               kind: "rejected",
               productGroupCode: 8,
               code: "400",
+              codeSource: "http",
               message: "no active contract for [КМ скрыт]",
               codes: 1,
             },
@@ -510,7 +515,7 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
         }),
       }),
     );
-    expect(JSON.stringify(journal.append.mock.calls)).not.toContain(RAW_A);
+    expect(JSON.stringify(journal.append.mock.calls)).not.toContain(CIS_A);
   });
 
   it("writes valid facts and pushes out only refused codes from a mixed response", async () => {
@@ -519,14 +524,14 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
     client.answerMixed(
       [
         {
-          cis: RAW_A,
+          cis: CIS_A,
           status: "INTRODUCED",
           statusEx: null,
           ownerInn: "7700000000",
           withdrawReason: null,
         },
       ],
-      [{ cis: RAW_B, code: "403", message: `Нет доступа к коду ${RAW_B}` }],
+      [{ cis: CIS_B, code: "403", message: `Нет доступа к коду ${CIS_B}` }],
     );
 
     const result = await service.run(tenantId);
@@ -553,6 +558,7 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
               kind: "rejected",
               productGroupCode: 8,
               code: "403",
+              codeSource: "chz",
               message: "Нет доступа к коду [КМ скрыт]",
               codes: 1,
             },
@@ -560,7 +566,7 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
         }),
       }),
     );
-    expect(JSON.stringify(journal.append.mock.calls)).not.toContain(RAW_B);
+    expect(JSON.stringify(journal.append.mock.calls)).not.toContain(CIS_B);
   });
 
   it("carries on with the next product group after one is rejected", async () => {
@@ -666,12 +672,12 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
     expect(client.calls[0]!.cises).toEqual([exportedRaw(HASH_A)]);
   });
 
-  it("prefers the scanned raw when both sources hold the code", async () => {
+  it("asks True API with the tail-less CIS identity when a full scan and an export share a hash", async () => {
     await seedStatus({ codeHash: HASH_A, group: 8, nextRefreshAt: past(1), source: "both" });
 
     await service.run(tenantId);
 
-    expect(client.calls[0]!.cises).toEqual([RAW_A]);
+    expect(client.calls[0]!.cises).toEqual([exportedRaw(HASH_A)]);
   });
 
   it("skips a code no source can resolve and pushes it out instead of failing it", async () => {
@@ -695,15 +701,15 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
 
     await service.run(tenantId);
 
-    expect(client.calls[0]!.cises).toEqual([RAW_B]);
+    expect(client.calls[0]!.cises).toEqual([CIS_B]);
   });
 
   it("ignores an answer about a code it did not ask about", async () => {
     await seedStatus({ codeHash: HASH_A, group: 8, nextRefreshAt: past(1) });
     await seedStatus({ codeHash: HASH_B, group: 8, nextRefreshAt: future(1) });
     client.answer([
-      { cis: RAW_A, status: "INTRODUCED", statusEx: null, ownerInn: null, withdrawReason: null },
-      { cis: RAW_B, status: "RETIRED", statusEx: null, ownerInn: null, withdrawReason: "SOLD" },
+      { cis: CIS_A, status: "INTRODUCED", statusEx: null, ownerInn: null, withdrawReason: null },
+      { cis: CIS_B, status: "RETIRED", statusEx: null, ownerInn: null, withdrawReason: "SOLD" },
     ]);
 
     await service.run(tenantId);
@@ -750,7 +756,7 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
     });
     client.answer([
       {
-        cis: RAW_A,
+        cis: CIS_A,
         status: "INTRODUCED",
         statusEx: "MOVING_BY_UD",
         ownerInn: null,
@@ -761,7 +767,7 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
     await service.run(tenantId);
 
     expect(client.calls).toHaveLength(1);
-    expect(client.calls[0]!.cises).toEqual([RAW_A, RAW_B]);
+    expect(client.calls[0]!.cises).toEqual([CIS_A, CIS_B]);
 
     const rows = await rowsFor(tenantId);
     const rowA = rows.find((row) => row.codeHash === HASH_A);
@@ -827,7 +833,7 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
 
     await service.run(tenantId);
 
-    expect(client.calls[0]!.cises).toEqual([RAW_B]);
+    expect(client.calls[0]!.cises).toEqual([CIS_B]);
     const [row] = await rowsFor(otherTenantId);
     expect(row).toMatchObject({ unknownAttempts: 0, checkedAt: null });
     expect(row!.nextRefreshAt.getTime()).toBeLessThanOrEqual(Date.now());
@@ -836,7 +842,7 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
   it("finishes the pass when the journal write fails", async () => {
     await seedStatus({ codeHash: HASH_A, group: 8, nextRefreshAt: past(1) });
     client.answer([
-      { cis: RAW_A, status: "INTRODUCED", statusEx: null, ownerInn: null, withdrawReason: null },
+      { cis: CIS_A, status: "INTRODUCED", statusEx: null, ownerInn: null, withdrawReason: null },
     ]);
     journal.append.mockRejectedValue(new Error("journal is down"));
     const logged = vi.spyOn(Logger.prototype, "error").mockImplementation(() => undefined);

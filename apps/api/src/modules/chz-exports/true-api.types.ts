@@ -24,7 +24,13 @@ export interface TrueApiAuth {
 export type TrueApiResult<T> =
   | { status: "ok"; value: T }
   | { status: "unauthorized" }
-  | { status: "rejected"; code: string; message: string }
+  | {
+      status: "rejected";
+      code: string;
+      message: string;
+      /** Present when the refusal came from ЧЗ rather than local response validation. */
+      source?: "http" | "element";
+    }
   | { status: "unavailable" };
 
 export interface CreateDispenserTaskInput {

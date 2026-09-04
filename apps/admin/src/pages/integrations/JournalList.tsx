@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, EmptyState, Pager } from "@markiro/ui";
 
 import {
+  exportChannelJournal,
   useChannelJournal,
   type ChannelState,
   type JournalPageResponse,
@@ -58,6 +59,7 @@ export function JournalList({ type, channelState }: { type: string; channelState
   const [lastSuccess, setLastSuccess] = useState<
     { type: string; data: JournalPageResponse } | undefined
   >();
+  const [exportState, setExportState] = useState<"idle" | "loading" | "error">("idle");
   const journal = useChannelJournal(type, query);
   const data = journal.data;
   const displayData = data ?? (lastSuccess?.type === type ? lastSuccess.data : undefined);
@@ -85,10 +87,36 @@ export function JournalList({ type, channelState }: { type: string; channelState
   const changeFilters = (patch: Partial<JournalQuery>) => {
     setQuery((current) => ({ ...current, ...patch, page: 1 }));
   };
+  const exportJournal = async () => {
+    setExportState("loading");
+    try {
+      await exportChannelJournal(type, query);
+      setExportState("idle");
+    } catch {
+      setExportState("error");
+    }
+  };
 
   return (
     <Card title={t("pages.integrations.channel.journal.title")} className="mk-journal" padding={0}>
       <div className="mk-journal__controls">
+        <div className="mk-journal__toolbar">
+          <Button
+            type="button"
+            variant="secondary"
+            size="compact"
+            loading={exportState === "loading"}
+            disabled={totalItems === 0 || journal.isFetching || exportState === "loading"}
+            onClick={() => void exportJournal()}
+          >
+            {exportState === "loading"
+              ? t("pages.integrations.channel.journal.exporting")
+              : t("pages.integrations.channel.journal.export")}
+          </Button>
+        </div>
+        {exportState === "error" ? (
+          <Alert tone="error">{t("pages.integrations.channel.journal.exportError")}</Alert>
+        ) : null}
         <JournalFilters
           channelState={channelState}
           value={query}

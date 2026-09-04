@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
+import { canonicalizeKm, kmKey } from "@markiro/domain";
 import { and, asc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 
 import { DB } from "../../auth/auth.module";
@@ -86,6 +87,7 @@ type RefreshWarning =
       kind: "rejected";
       productGroupCode: number;
       code: string;
+      codeSource: "http" | "chz";
       message: string;
       codes: number;
     }
@@ -302,9 +304,11 @@ export class ChzCodeStatusRefreshService {
    * Raw codes come from two places: `codes` holds what the Station scanned,
    * `inventory_snapshot_codes` holds what an ordered export delivered, and a
    * tenant bootstrapped from an export has its codes only in the second. Any
-   * one row per hash will do — a hash is a hash of its raw, so every row that
-   * carries it carries the same string — and `codes` is preferred as the
-   * tenant's own record.
+   * one row per hash will do, but the strings are not interchangeable: scans
+   * retain the crypto tail while ordered exports contain the shorter CIS
+   * identity. `kmHash` deliberately excludes that tail. True API's status
+   * endpoint is therefore always asked with `kmKey`, never the acquisition
+   * representation selected from either table.
    *
    * The returned map is keyed by raw and valued by hash: the batch is sent as
    * raws and comes back keyed by `cis`, and this is what matches an answer to
@@ -350,8 +354,15 @@ export class ChzCodeStatusRefreshService {
     const unresolvable: string[] = [];
     for (const codeHash of hashes) {
       const raw = rawByHash.get(codeHash);
-      if (raw === undefined) unresolvable.push(codeHash);
-      else hashByRaw.set(raw, codeHash);
+      if (raw === undefined) {
+        unresolvable.push(codeHash);
+        continue;
+      }
+      try {
+        hashByRaw.set(kmKey(canonicalizeKm(raw)), codeHash);
+      } catch {
+        unresolvable.push(codeHash);
+      }
     }
     return { hashByRaw, unresolvable };
   }
@@ -410,6 +421,7 @@ export class ChzCodeStatusRefreshService {
             kind: "rejected",
             productGroupCode,
             code: result.code,
+            codeSource: result.source === "http" ? "http" : "chz",
             message: journalSafeErrorMessage(result.message, hashByRaw.keys()),
             codes: hashByRaw.size,
           },
@@ -454,6 +466,7 @@ export class ChzCodeStatusRefreshService {
         kind: "rejected",
         productGroupCode,
         code,
+        codeSource: "chz",
         message,
         codes,
       }),

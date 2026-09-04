@@ -211,6 +211,7 @@ describe("integration journal interface", () => {
                 kind: "rejected",
                 productGroupCode: 15,
                 code: "400",
+                codeSource: "chz",
                 message: "В запросе указана недопустимая товарная группа",
                 codes: 12,
               },
@@ -226,6 +227,7 @@ describe("integration journal interface", () => {
     expect(screen.getAllByText(summary)).toHaveLength(1);
     expect(screen.getByText("В запросе указана недопустимая товарная группа")).toBeDefined();
     expect(screen.getByText(/группа 15/i)).toBeDefined();
+    expect(screen.getByText(/код чз 400/i)).toBeDefined();
   });
 
   it("shows useful fallback details for token and empty-message True API warnings", async () => {
@@ -249,6 +251,7 @@ describe("integration journal interface", () => {
                 kind: "rejected",
                 productGroupCode: 15,
                 code: "403",
+                codeSource: "http",
                 message: "",
                 codes: 4,
               },
@@ -264,6 +267,90 @@ describe("integration journal interface", () => {
     expect(screen.getByText("Токен True API недействителен, запрошено обновление")).toBeDefined();
     expect(screen.getByText("Честный Знак отклонил запрос статусов")).toBeDefined();
     expect(screen.getByText(/HTTP 403/)).toBeDefined();
+  });
+
+  it("downloads every filtered journal page as one redacted diagnostic file", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(new Date("2026-09-04T15:00:00.000Z").getTime());
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:journal");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const anchors: HTMLAnchorElement[] = [];
+    const createElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
+      const element = createElement(tagName);
+      if (tagName === "a") anchors.push(element as HTMLAnchorElement);
+      return element;
+    });
+
+    const first = session("first", "2026-09-04T12:00:00.000Z", "warn", {
+      summary: {
+        accessToken: "must-not-leak",
+        tokenStatus: "unauthorized",
+        apiKey: "opaque-api-key",
+        credentials: { password: "nested-password" },
+        basicAuth: "Basic dXNlcjpwYXNz",
+      },
+      events: [
+        {
+          at: "2026-09-04T12:00:01.000Z",
+          direction: "out",
+          outcome: "warn",
+          message: "Diagnostic event",
+          details: { raw: "prefix ]d2010460123456789021SER, IAL\u001d93CRYPTO suffix" },
+        },
+      ],
+    });
+    const second = session("second", "2026-09-03T12:00:00.000Z", "ok");
+    const fetchMock = vi.fn(async (url: string) => {
+      const params = new URL(url, "http://local").searchParams;
+      if (params.get("pageSize") === "50") {
+        return jsonResponse(
+          params.get("page") === "1"
+            ? journalPage([first], {
+                page: 1,
+                pageSize: 50,
+                totalItems: 2,
+                totalPages: 2,
+              })
+            : journalPage([second], {
+                page: 2,
+                pageSize: 50,
+                totalItems: 2,
+                totalPages: 2,
+              }),
+        );
+      }
+      return jsonResponse(journalPage([first]));
+    });
+    renderJournalWithFetch(fetchMock);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Скачать журнал" }));
+
+    await vi.waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("page=1&pageSize=50"),
+        expect.stringContaining("page=2&pageSize=50"),
+      ]),
+    );
+    const blob = createObjectURL.mock.calls[0]?.[0];
+    expect(blob).toBeInstanceOf(Blob);
+    const exported = JSON.parse(await (blob as Blob).text()) as {
+      sessions: JournalSessionDto[];
+      filters: { outcome: string };
+    };
+    expect(exported.sessions.map((item) => item.id)).toEqual(["first", "second"]);
+    expect(exported.filters.outcome).toBe("all");
+    expect(JSON.stringify(exported)).not.toContain("must-not-leak");
+    expect(JSON.stringify(exported)).not.toContain("opaque-api-key");
+    expect(JSON.stringify(exported)).not.toContain("nested-password");
+    expect(JSON.stringify(exported)).not.toContain("dXNlcjpwYXNz");
+    expect(exported.sessions[0]?.summary?.["tokenStatus"]).toBe("unauthorized");
+    expect(JSON.stringify(exported)).not.toContain("CRYPTO");
+    expect(JSON.stringify(exported)).toContain("[КМ скрыт]");
+    expect(anchors.find((anchor) => anchor.download)?.download).toBe(
+      "markiro-commerceml-journal-20260904-150000.json",
+    );
   });
 
   it("turns a current error notice into the Errors filter", async () => {

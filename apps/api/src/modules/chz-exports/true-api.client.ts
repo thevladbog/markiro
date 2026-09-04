@@ -272,7 +272,7 @@ export class TrueApiClient {
         // unknown-code retry path.
         if (values.length === 0 && elementErrors.length > 0) {
           const [error] = elementErrors;
-          throw new TrueApiResponseRejection(error!.code, error!.message);
+          throw new TrueApiResponseRejection(error!.code, error!.message, "element");
         }
         return { values, errors: elementErrors };
       },
@@ -318,6 +318,7 @@ export class TrueApiClient {
           status: "rejected",
           code: String(response.status),
           message: await this.rejectionMessage(response),
+          source: "http",
         };
       }
       if (!response.ok) return { status: "unavailable" };
@@ -328,7 +329,12 @@ export class TrueApiClient {
         return { status: "unauthorized" };
       }
       if (error instanceof TrueApiResponseRejection) {
-        return { status: "rejected", code: error.code, message: error.message };
+        return {
+          status: "rejected",
+          code: error.code,
+          message: error.message,
+          ...(error.source === undefined ? {} : { source: error.source }),
+        };
       }
       return { status: "unavailable" };
     } finally {
@@ -351,6 +357,7 @@ class TrueApiResponseRejection extends Error {
   constructor(
     readonly code: string,
     message = "",
+    readonly source?: "element",
   ) {
     super(message);
   }

@@ -14,6 +14,16 @@
   gap: var(--sp-5);
 }
 
+.mk-journal__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--sp-3);
+}
+
+.mk-journal__toolbar + [role="alert"] {
+  margin-bottom: var(--sp-3);
+}
+
 .mk-journal-filters__secondary {
   display: grid;
   grid-template-columns: minmax(150px, 220px) minmax(180px, 260px) minmax(180px, 1fr);
