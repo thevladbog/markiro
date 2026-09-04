@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 
 import {
   productionTrueApiClientDependencies,
-  type CisInfo,
+  type CisesInfoBatch,
   type CreateDispenserTaskInput,
   type DispenserResult,
   type DispenserTaskSummary,
@@ -169,7 +169,7 @@ export class TrueApiClient {
     auth: TrueApiAuth,
     productGroupAlias: string,
     cises: string[],
-  ): Promise<TrueApiResult<CisInfo[]>> {
+  ): Promise<TrueApiResult<CisesInfoBatch>> {
     // A RangeError rather than a silent slice: the caller batches, and a
     // truncated request would look like ЧЗ having no opinion about the codes
     // that were dropped.
@@ -201,8 +201,14 @@ export class TrueApiClient {
                 ? String(rawCode)
                 : "";
           if (code.length === 0) return [];
+          const cisInfo = record.cisInfo;
+          const infoRecord =
+            cisInfo !== null && typeof cisInfo === "object"
+              ? (cisInfo as Record<string, unknown>)
+              : null;
           return [
             {
+              cis: infoRecord === null ? null : requestedCis(infoRecord),
               code,
               message:
                 typeof record.errorMessage === "string" ? record.errorMessage.slice(0, 500) : "",
@@ -225,17 +231,16 @@ export class TrueApiClient {
           // throw from `parse` into `unavailable` for the WHOLE batch, losing
           // the answers for every other code in it over one malformed row.
           if (row === null || typeof row !== "object") return [];
-          const cisInfo = (row as Record<string, unknown>).cisInfo;
+          const rowRecord = row as Record<string, unknown>;
+          if (typeof rowRecord.errorCode === "string" || typeof rowRecord.errorCode === "number") {
+            return [];
+          }
+          const cisInfo = rowRecord.cisInfo;
           if (cisInfo === null || typeof cisInfo !== "object") return [];
           const record = cisInfo as Record<string, unknown>;
           // `requestedCis` is the stable correlation key for the request.
           // Fall back to `cis` for groups/responses that omit it.
-          const cis =
-            typeof record.requestedCis === "string" && record.requestedCis.length > 0
-              ? record.requestedCis
-              : typeof record.cis === "string"
-                ? record.cis
-                : "";
+          const cis = requestedCis(record) ?? "";
           // A row we cannot attribute to a code we asked about is worse than
           // absent: the caller matches on `cis`, and an empty string would
           // match nothing while looking like an answer.
@@ -269,7 +274,7 @@ export class TrueApiClient {
           const [error] = elementErrors;
           throw new TrueApiResponseRejection(error!.code, error!.message);
         }
-        return values;
+        return { values, errors: elementErrors };
       },
     );
   }
@@ -468,4 +473,11 @@ function nonnegativeNumberOrNull(value: unknown): number | null {
   const number =
     typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
   return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+
+function requestedCis(record: Record<string, unknown>): string | null {
+  if (typeof record.requestedCis === "string" && record.requestedCis.length > 0) {
+    return record.requestedCis;
+  }
+  return typeof record.cis === "string" && record.cis.length > 0 ? record.cis : null;
 }

@@ -13,7 +13,12 @@ import {
 } from "../src/modules/chz-code-statuses/chz-code-status-refresh.service";
 import type { ChzTokenService } from "../src/modules/chz-exports/chz-token.service";
 import type { TrueApiClient } from "../src/modules/chz-exports/true-api.client";
-import type { CisInfo, TrueApiResult } from "../src/modules/chz-exports/true-api.types";
+import type {
+  CisesInfoBatch,
+  CisInfo,
+  CisInfoError,
+  TrueApiResult,
+} from "../src/modules/chz-exports/true-api.types";
 import type { JournalService } from "../src/modules/integrations/journal.service";
 
 const ready = Boolean(process.env.DATABASE_URL);
@@ -75,7 +80,8 @@ interface FakeClient {
   api: TrueApiClient;
   calls: CisesInfoCall[];
   answer: (rows: CisInfo[]) => void;
-  fail: (result: Exclude<TrueApiResult<CisInfo[]>, { status: "ok" }>) => void;
+  answerMixed: (rows: CisInfo[], errors: CisInfoError[]) => void;
+  fail: (result: Exclude<TrueApiResult<CisesInfoBatch>, { status: "ok" }>) => void;
 }
 
 /**
@@ -86,8 +92,8 @@ interface FakeClient {
  */
 function fakeClient(): FakeClient {
   const calls: CisesInfoCall[] = [];
-  let answer: CisInfo[] = [];
-  let failure: Exclude<TrueApiResult<CisInfo[]>, { status: "ok" }> | null = null;
+  let answer: CisesInfoBatch = { values: [], errors: [] };
+  let failure: Exclude<TrueApiResult<CisesInfoBatch>, { status: "ok" }> | null = null;
   const api = {
     cisesInfo: vi.fn(async (_auth: unknown, productGroupAlias: string, cises: string[]) => {
       calls.push({ productGroupAlias, cises: [...cises] });
@@ -98,7 +104,10 @@ function fakeClient(): FakeClient {
     api: api as unknown as TrueApiClient,
     calls,
     answer: (rows) => {
-      answer = rows;
+      answer = { values: rows, errors: [] };
+    },
+    answerMixed: (rows, errors) => {
+      answer = { values: rows, errors };
     },
     fail: (result) => {
       failure = result;
@@ -475,7 +484,7 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
 
   it("backs a rejected product group off instead of retrying the refusal forever", async () => {
     await seedStatus({ codeHash: HASH_A, group: 8, nextRefreshAt: past(1) });
-    client.fail({ status: "rejected", code: "400", message: "no active contract" });
+    client.fail({ status: "rejected", code: "400", message: `no active contract for ${RAW_A}` });
 
     await service.run(tenantId);
 
@@ -494,13 +503,64 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
               kind: "rejected",
               productGroupCode: 8,
               code: "400",
-              message: "no active contract",
+              message: "no active contract for [КМ скрыт]",
               codes: 1,
             },
           ],
         }),
       }),
     );
+    expect(JSON.stringify(journal.append.mock.calls)).not.toContain(RAW_A);
+  });
+
+  it("writes valid facts and pushes out only refused codes from a mixed response", async () => {
+    await seedStatus({ codeHash: HASH_A, group: 8, nextRefreshAt: past(1) });
+    await seedStatus({ codeHash: HASH_B, group: 8, nextRefreshAt: past(1) });
+    client.answerMixed(
+      [
+        {
+          cis: RAW_A,
+          status: "INTRODUCED",
+          statusEx: null,
+          ownerInn: "7700000000",
+          withdrawReason: null,
+        },
+      ],
+      [{ cis: RAW_B, code: "403", message: `Нет доступа к коду ${RAW_B}` }],
+    );
+
+    const result = await service.run(tenantId);
+
+    const rows = await rowsFor(tenantId);
+    expect(rows[0]).toMatchObject({
+      codeHash: HASH_A,
+      status: "INTRODUCED",
+      ownerInn: "7700000000",
+      unknownAttempts: 0,
+    });
+    expect(hoursUntil(rows[0]!.nextRefreshAt)).toBeCloseTo(24, 0);
+    expect(rows[1]).toMatchObject({ codeHash: HASH_B, status: null, unknownAttempts: 0 });
+    expect(daysUntil(rows[1]!.nextRefreshAt)).toBeCloseTo(30, 0);
+    expect(result).toMatchObject({ batches: 1, updated: 1, caughtUp: true });
+    expect(journal.append).toHaveBeenCalledTimes(1);
+    expect(journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "warn",
+        details: expect.objectContaining({
+          rejectedGroups: 1,
+          warnings: [
+            {
+              kind: "rejected",
+              productGroupCode: 8,
+              code: "403",
+              message: "Нет доступа к коду [КМ скрыт]",
+              codes: 1,
+            },
+          ],
+        }),
+      }),
+    );
+    expect(JSON.stringify(journal.append.mock.calls)).not.toContain(RAW_B);
   });
 
   it("carries on with the next product group after one is rejected", async () => {

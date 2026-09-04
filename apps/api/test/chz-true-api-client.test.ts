@@ -357,15 +357,18 @@ describe("TrueApiClient", () => {
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual(["01046000000000172150"]);
     expect(result).toEqual({
       status: "ok",
-      value: [
-        {
-          cis: "01046000000000172150",
-          status: "INTRODUCED",
-          statusEx: "MOVING_BY_UD",
-          ownerInn: "7700000000",
-          withdrawReason: null,
-        },
-      ],
+      value: {
+        values: [
+          {
+            cis: "01046000000000172150",
+            status: "INTRODUCED",
+            statusEx: "MOVING_BY_UD",
+            ownerInn: "7700000000",
+            withdrawReason: null,
+          },
+        ],
+        errors: [],
+      },
     });
   });
 
@@ -415,6 +418,54 @@ describe("TrueApiClient", () => {
     });
   });
 
+  it("preserves refused codes alongside valid facts in a mixed response", async () => {
+    const client = new TrueApiClient(
+      deps(
+        async () =>
+          new Response(
+            JSON.stringify([
+              {
+                cisInfo: {
+                  requestedCis: "01046000000000172150",
+                  status: "INTRODUCED",
+                },
+              },
+              {
+                cisInfo: { requestedCis: "01046000000000172151" },
+                errorCode: "403",
+                errorMessage: "Нет доступа к коду",
+              },
+            ]),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    await expect(
+      client.cisesInfo(auth, "milk", ["01046000000000172150", "01046000000000172151"]),
+    ).resolves.toEqual({
+      status: "ok",
+      value: {
+        values: [
+          {
+            cis: "01046000000000172150",
+            status: "INTRODUCED",
+            statusEx: null,
+            ownerInn: null,
+            withdrawReason: null,
+          },
+        ],
+        errors: [
+          {
+            cis: "01046000000000172151",
+            code: "403",
+            message: "Нет доступа к коду",
+          },
+        ],
+      },
+    });
+  });
+
   it("drops a row with no usable cis rather than inventing one", async () => {
     const client = new TrueApiClient(
       deps(
@@ -427,7 +478,7 @@ describe("TrueApiClient", () => {
     // while looking like an answer.
     await expect(client.cisesInfo(auth, "milk", ["01046000000000172150"])).resolves.toEqual({
       status: "ok",
-      value: [],
+      value: { values: [], errors: [] },
     });
   });
 
@@ -455,15 +506,18 @@ describe("TrueApiClient", () => {
     );
     await expect(client.cisesInfo(auth, "milk", ["01046000000000172150"])).resolves.toEqual({
       status: "ok",
-      value: [
-        {
-          cis: "01046000000000172150",
-          status: "INTRODUCED",
-          statusEx: null,
-          ownerInn: null,
-          withdrawReason: null,
-        },
-      ],
+      value: {
+        values: [
+          {
+            cis: "01046000000000172150",
+            status: "INTRODUCED",
+            statusEx: null,
+            ownerInn: null,
+            withdrawReason: null,
+          },
+        ],
+        errors: [],
+      },
     });
   });
 
@@ -482,7 +536,7 @@ describe("TrueApiClient", () => {
     );
     await expect(client.cisesInfo(auth, "milk", ["01046000000000172150"])).resolves.toEqual({
       status: "ok",
-      value: [],
+      value: { values: [], errors: [] },
     });
   });
 

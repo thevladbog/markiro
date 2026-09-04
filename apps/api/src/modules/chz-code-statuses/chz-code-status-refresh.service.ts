@@ -5,7 +5,7 @@ import { and, asc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
 import { ChzTokenService } from "../chz-exports/chz-token.service";
 import { CISES_INFO_BATCH_LIMIT, TrueApiClient } from "../chz-exports/true-api.client";
-import type { CisInfo, TrueApiAuth } from "../chz-exports/true-api.types";
+import type { CisInfo, CisInfoError, TrueApiAuth } from "../chz-exports/true-api.types";
 import { JournalService, type AppendEventInput } from "../integrations/journal.service";
 import { CHZ_CHANNEL_TYPE } from "../signer-agents/chz-constants";
 
@@ -38,6 +38,14 @@ export const CHZ_STATUS_WITHDRAWN_INTERVAL_MS = 30 * 24 * 60 * 60_000;
 function intervalFor(status: string): number {
   if (WITHDRAWN_STATUSES.has(status)) return CHZ_STATUS_WITHDRAWN_INTERVAL_MS;
   return CHZ_STATUS_IN_CIRCULATION_INTERVAL_MS;
+}
+
+function journalSafeErrorMessage(message: string, rawCodes: Iterable<string>): string {
+  let safe = message;
+  for (const raw of rawCodes) {
+    if (raw.length > 0) safe = safe.replaceAll(raw, "[КМ скрыт]");
+  }
+  return safe;
 }
 
 export interface ChzCodeStatusRefreshResult {
@@ -402,7 +410,7 @@ export class ChzCodeStatusRefreshService {
             kind: "rejected",
             productGroupCode,
             code: result.code,
-            message: result.message,
+            message: journalSafeErrorMessage(result.message, hashByRaw.keys()),
             codes: hashByRaw.size,
           },
         ],
@@ -410,10 +418,22 @@ export class ChzCodeStatusRefreshService {
       };
     }
 
-    const infoByCis = new Map(result.value.map((info) => [info.cis, info]));
+    const infoByCis = new Map(result.value.values.map((info) => [info.cis, info]));
+    const rejectedByHash = new Map<string, CisInfoError>();
+    let unexpected = result.value.values.filter((info) => !hashByRaw.has(info.cis)).length;
+    for (const error of result.value.errors) {
+      const codeHash = error.cis === null ? undefined : hashByRaw.get(error.cis);
+      if (codeHash === undefined) {
+        unexpected += 1;
+      } else {
+        rejectedByHash.set(codeHash, error);
+      }
+    }
+
     const found: FoundRow[] = [];
     const unknownHashes: string[] = [];
     for (const [raw, codeHash] of hashByRaw) {
+      if (rejectedByHash.has(codeHash)) continue;
       const info = infoByCis.get(raw);
       if (info === undefined) unknownHashes.push(codeHash);
       else found.push({ codeHash, info });
@@ -421,26 +441,40 @@ export class ChzCodeStatusRefreshService {
     // A `cis` we did not ask about cannot be attributed to a row, so it is
     // dropped -- but not silently: it means the request and the answer
     // disagree about what was asked.
-    const unexpected = result.value.filter((info) => !hashByRaw.has(info.cis)).length;
-    const warnings: RefreshWarning[] =
-      unexpected > 0
-        ? [
-            {
-              kind: "unexpected",
-              productGroupCode,
-              message: "Честный Знак ответил о кодах, о которых не спрашивали",
-              unexpected,
-            },
-          ]
-        : [];
+    const warningGroups = new Map<string, { code: string; message: string; codes: number }>();
+    for (const error of rejectedByHash.values()) {
+      const message = journalSafeErrorMessage(error.message, error.cis === null ? [] : [error.cis]);
+      const key = JSON.stringify([error.code, message]);
+      const group = warningGroups.get(key);
+      if (group === undefined) warningGroups.set(key, { code: error.code, message, codes: 1 });
+      else group.codes += 1;
+    }
+    const warnings: RefreshWarning[] = [...warningGroups.values()].map(
+      ({ code, message, codes }) => ({
+        kind: "rejected",
+        productGroupCode,
+        code,
+        message,
+        codes,
+      }),
+    );
+    if (unexpected > 0) {
+      warnings.push({
+        kind: "unexpected",
+        productGroupCode,
+        message: "Честный Знак ответил о кодах, о которых не спрашивали",
+        unexpected,
+      });
+    }
 
     const now = new Date();
     if (found.length > 0) await this.writeFacts(tenantId, productGroupCode, found, now);
+    if (rejectedByHash.size > 0) await this.pushOut(tenantId, [...rejectedByHash.keys()]);
     if (unknownHashes.length > 0) await this.countUnknown(tenantId, unknownHashes, now);
     return {
       updated: found.length,
       unknown: unknownHashes.length,
-      rejected: false,
+      rejected: rejectedByHash.size > 0,
       warnings,
       stopReason: null,
     };
