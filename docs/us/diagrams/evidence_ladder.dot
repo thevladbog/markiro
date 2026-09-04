@@ -1,0 +1,14 @@
+
+digraph G {
+  graph [rankdir=LR, bgcolor="white", pad=0.15, nodesep=0.22, ranksep=0.3, fontname="Arial"];
+  node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10, color="#15324B", fillcolor="#EEF6FA", margin="0.12,0.07", width=1.55, height=0.72];
+  edge [color="#5B6570", penwidth=1.2, arrowsize=0.65];
+  A [label="1. Requirements\n+ source register"];
+  B [label="2. Tested build\n+ tagged release"];
+  C [label="3. Repeatable demo\nseed + reset"];
+  D [label="4. Artifacts\nXLSX + plan + trace"];
+  E [label="5. Evidence\nscreens + video + hashes"];
+  F [label="6. External review\n+ letters of interest", fillcolor="#FFF4CE", color="#9A6700"];
+  G [label="Case-ready exhibit\nnot certification", fillcolor="#EAF5EF", color="#2F6B4F"];
+  A -> B -> C -> D -> E -> F -> G;
+}
