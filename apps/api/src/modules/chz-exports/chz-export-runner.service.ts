@@ -628,7 +628,13 @@ export class ChzExportRunnerService {
       .where(
         and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
       );
-    if (!row || row.inn === null || row.inn.length === 0 || row.productGroupCode === null) {
+    if (
+      !row ||
+      row.inn === null ||
+      row.inn.length === 0 ||
+      row.productGroupCode === null ||
+      row.gtin14 === null
+    ) {
       return null;
     }
     return {

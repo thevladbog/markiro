@@ -16,6 +16,7 @@ import {
   exists,
   gte,
   inArray,
+  isNotNull,
   isNull,
   lte,
   max,
@@ -612,6 +613,7 @@ export class PickupOrdersService {
           // An assignment may predate archiving; the join (not the allowlist
           // table) is where an archived product drops off the kiosk.
           eq(schema.products.archived, false),
+          isNotNull(schema.products.gtin14),
         ),
       )
       .leftJoin(
@@ -676,26 +678,30 @@ export class PickupOrdersService {
       },
       badgeSalt,
       reasons,
-      products: products.map((product) => ({
-        id: product.id,
-        gtin14: product.gtin14,
-        name: product.name,
-        unitPrice: product.unitPrice,
-        egaisCode: product.egaisCode,
-        image:
-          product.imageChecksum &&
-          product.imageByteSize !== null &&
-          product.imageWidth !== null &&
-          product.imageHeight !== null
-            ? ({
-                checksum: product.imageChecksum,
-                contentType: "image/webp",
-                byteSize: product.imageByteSize,
-                width: product.imageWidth,
-                height: product.imageHeight,
-              } satisfies ProductImageDescriptor)
-            : null,
-      })),
+      products: products
+        .filter(
+          (product): product is typeof product & { gtin14: string } => product.gtin14 !== null,
+        )
+        .map((product) => ({
+          id: product.id,
+          gtin14: product.gtin14,
+          name: product.name,
+          unitPrice: product.unitPrice,
+          egaisCode: product.egaisCode,
+          image:
+            product.imageChecksum &&
+            product.imageByteSize !== null &&
+            product.imageWidth !== null &&
+            product.imageHeight !== null
+              ? ({
+                  checksum: product.imageChecksum,
+                  contentType: "image/webp",
+                  byteSize: product.imageByteSize,
+                  width: product.imageWidth,
+                  height: product.imageHeight,
+                } satisfies ProductImageDescriptor)
+              : null,
+        })),
       employees: employeeRows.map(({ employee, pickupPolicy: employeePolicy }) => {
         if (!employeePolicy) {
           throw new InternalServerErrorException("Employee pickup policy is not configured");
@@ -1911,13 +1917,18 @@ export class PickupOrdersService {
           // product must stop being admitted into orders, not just vanish
           // from the product list.
           eq(schema.products.archived, false),
+          isNotNull(schema.products.gtin14),
         ),
       )
       .where(
         and(eq(schema.kioskProducts.tenantId, tenantId), eq(schema.kioskProducts.kioskId, kioskId)),
       );
     const map = new Map<string, { productId: string; unitPrice: string | null }>();
-    for (const r of rows) map.set(r.gtin14, { productId: r.productId, unitPrice: r.unitPrice });
+    for (const row of rows) {
+      if (row.gtin14 !== null) {
+        map.set(row.gtin14, { productId: row.productId, unitPrice: row.unitPrice });
+      }
+    }
     return map;
   }
 
@@ -1926,8 +1937,14 @@ export class PickupOrdersService {
     const rows = await this.db
       .select({ gtin14: schema.products.gtin14 })
       .from(schema.products)
-      .where(and(eq(schema.products.tenantId, tenantId), inArray(schema.products.gtin14, gtins)));
-    return new Set(rows.map((r) => r.gtin14));
+      .where(
+        and(
+          eq(schema.products.tenantId, tenantId),
+          isNotNull(schema.products.gtin14),
+          inArray(schema.products.gtin14, gtins),
+        ),
+      );
+    return new Set(rows.flatMap((row) => (row.gtin14 === null ? [] : [row.gtin14])));
   }
 
   /**

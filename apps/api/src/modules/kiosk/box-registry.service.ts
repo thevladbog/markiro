@@ -27,7 +27,7 @@ export interface BoxRegistryCandidate {
   terminalId: string | null;
   sscc: string | null;
   productId: string;
-  productGtin14: string;
+  productGtin14: string | null;
   closedAt: Date | null;
   closureReceivedAt: Date | null;
   disassembledAt: Date | null;
@@ -219,6 +219,7 @@ export function evaluateBoxRegistryCandidate(
 ): KioskBoxRegistryChange | null {
   if (
     candidate.sscc === null ||
+    candidate.productGtin14 === null ||
     !isValidSscc(candidate.sscc) ||
     candidate.closedAt === null ||
     candidate.closureReceivedAt === null ||

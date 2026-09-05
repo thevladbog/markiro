@@ -18,6 +18,7 @@ import {
 } from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
+import { requireProductGtin } from "../products/require-product-gtin";
 import type { InventorySnapshotCountsDto } from "./dto";
 import {
   STATION_INVENTORY_LIMITS,
@@ -356,6 +357,7 @@ export class InventoryLifecycleService {
     if (product.gtin14 !== inventory.gtin14Snapshot) {
       throw new ConflictException({ code: "INVENTORY_PRODUCT_GTIN_CHANGED" });
     }
+    const gtin14 = requireProductGtin(product.gtin14);
     if (
       !Number.isInteger(snapshot.boxCapacity) ||
       snapshot.boxCapacity === null ||
@@ -390,7 +392,7 @@ export class InventoryLifecycleService {
         id: product.id,
         name: snapshot.productName,
         printName: product.printName,
-        gtin14: product.gtin14,
+        gtin14,
         egaisCode: product.egaisCode,
         shelfLifeDays: product.shelfLifeDays,
         boxCapacity: snapshot.boxCapacity,

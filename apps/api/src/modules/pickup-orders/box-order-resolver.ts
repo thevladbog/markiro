@@ -50,6 +50,7 @@ function ineligibleReason(
   candidate: OrderBoxCandidate,
   facts: readonly BoxRegistryMemberFact[],
 ): BoxConflict["reason"] {
+  if (candidate.productGtin14 === null) return "mixed_product_box";
   if (candidate.closedAt === null || candidate.closureReceivedAt === null) return "box_not_closed";
   if (candidate.disassembledAt !== null) return "box_disassembled";
   const active = facts.filter((fact) => fact.removedAt === null && fact.displacedAt === null);

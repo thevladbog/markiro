@@ -1,5 +1,10 @@
+import { catalogCopy } from "../catalog/copy.js";
+import { productProfileCopy } from "../catalog/profile-copy.js";
+
 export const masterDataCopy = {
   "en-US": {
+    productProfile: productProfileCopy["en-US"],
+    catalog: catalogCopy["en-US"],
     md: {
       profile: "Profile",
       referenceData: "Reference data",
@@ -117,6 +122,8 @@ export const masterDataCopy = {
     },
   },
   "es-US": {
+    productProfile: productProfileCopy["es-US"],
+    catalog: catalogCopy["es-US"],
     md: {
       profile: "Perfil",
       referenceData: "Datos de referencia",

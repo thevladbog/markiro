@@ -307,6 +307,12 @@
   overflow-wrap: anywhere;
 }
 
+.us-catalog-identifier {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
 .us-md-detail-heading {
   display: flex;
   align-items: center;
@@ -334,7 +340,7 @@
   }
 
   .us-md-sidebar nav {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .us-md-main {

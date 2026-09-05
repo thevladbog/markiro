@@ -85,7 +85,7 @@ export const products = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: tenantId(),
-    gtin14: char("gtin14", { length: 14 }).notNull(),
+    gtin14: char("gtin14", { length: 14 }),
     name: text("name").notNull(),
     // Short operator-facing name for the station shift card and, in a
     // follow-up slice, label rendering. Null = use the full `name` everywhere.
@@ -107,6 +107,7 @@ export const products = pgTable(
     shelfLifeDays: integer("shelf_life_days"),
     externalRef: text("external_ref"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     // A retired card keeps its GTIN for history, but no longer reserves it:

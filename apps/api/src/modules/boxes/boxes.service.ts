@@ -3,7 +3,12 @@ import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { canonicalizeKm, formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
-import { resolveBoxRegistryFacts, type BoxRegistryCandidate } from "../kiosk/box-registry.service";
+import {
+  evaluateBoxRegistryCandidate,
+  resolveBoxRegistryFacts,
+  type BoxRegistryCandidate,
+} from "../kiosk/box-registry.service";
+import { requireProductGtin } from "../products/require-product-gtin";
 import type { BoxDto, BoxSellCodesDto, ListBoxesQueryDto, ListBoxesResponseDto } from "./dto";
 
 interface BoxRow {
@@ -168,18 +173,29 @@ export class BoxesService {
     if (candidate.closedAt === null) throw new ConflictException({ code: "box_not_closed" });
     if (candidate.disassembledAt !== null)
       throw new ConflictException({ code: "box_disassembled" });
+    requireProductGtin(candidate.productGtin14);
 
     const facts = await resolveBoxRegistryFacts(this.db, tenantId, [candidate]);
-    const items = (facts.get(candidate.id) ?? [])
+    const memberFacts = facts.get(candidate.id) ?? [];
+    if (memberFacts.length === 0) throw new ConflictException({ code: "box_empty" });
+    const evaluated = evaluateBoxRegistryCandidate(candidate, memberFacts, false);
+    if (!evaluated || evaluated.kind !== "upsert") {
+      throw new ConflictException({ code: "box_contents_changed" });
+    }
+    const items = memberFacts
       .filter(
         (fact) =>
           fact.removedAt === null && fact.displacedAt === null && fact.canonicalRaw !== null,
       )
       .map((fact) => {
-        const parsed = canonicalizeKm(fact.canonicalRaw!);
+        const rawKm = fact.canonicalRaw;
+        if (rawKm === null) {
+          throw new ConflictException({ code: "box_contents_changed" });
+        }
+        const parsed = canonicalizeKm(rawKm);
         return {
           codeHash: fact.codeHash,
-          rawKm: fact.canonicalRaw!,
+          rawKm,
           gtin14: parsed.gtin14,
           serial: parsed.serial,
         };

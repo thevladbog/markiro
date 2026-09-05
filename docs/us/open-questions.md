@@ -1,6 +1,6 @@
 # Markiro U.S. Traceability — Open Questions Register
 
-> Revised 2026-09-04: read the [shared MVP contract](mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+> Revised 2026-09-05: read the [shared MVP contract](mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Decisions do not imply completion; dated implementation evidence and remaining gaps are recorded in [implementation progress](implementation-plan.md).
 
 - Source: baseline review of MUS-001 v0.1 against the codebase (2026-09-03) and the slice design specs US-00…US-12
 - Status: revised decision register; resolved entries are not implementation blockers
@@ -11,6 +11,8 @@ Every contestable point found while establishing the documentation set is listed
 Columns: **Blocking?** = the owning slice cannot start without an answer. **Recommendation** is the author's proposal, not a decision.
 
 ## Part A — Cross-cutting questions
+
+Questions below preserve the original codebase observations. GQ-1 is resolved by the owner-approved shared catalog decision OQ-US02-1: migration0116 permits null GTIN and preserves the existing partial unique index, with strict RU/operational guards. [Local storage/API verification](implementation-plan.md#us-02-catalog-persistence-increment--2026-09-05) and the subsequent [catalog browser increment](catalog-browser.md) are separate from unfinished FTL and lot-level acceptance. No synthetic GTIN or second catalog is introduced.
 
 | ID    | Question                                                                                                                                                                                                                                                                                    | Options                                                                                                                                                     | Recommendation                                                                                                                                                                            | Blocking? | Decision                                                                                                                          |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------- |

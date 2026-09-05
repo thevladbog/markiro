@@ -9,6 +9,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { AppModule } from "../src/app.module";
+import { requireProductGtin } from "../src/modules/products/require-product-gtin";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
@@ -664,7 +665,7 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
       id: snapshotId,
       tenantId: tenant.tenantId,
       productId: seeded.productId,
-      gtin14: product!.gtin14,
+      gtin14: requireProductGtin(product!.gtin14),
       cardId: "different-schema-card",
       cardStatus: "published",
       sourceMethod: "product",
@@ -743,7 +744,7 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
       id: snapshotId,
       tenantId: tenant.tenantId,
       productId: seeded.productId,
-      gtin14: product!.gtin14,
+      gtin14: requireProductGtin(product!.gtin14),
       cardId: "720679",
       cardStatus: "published",
       sourceMethod: "product",

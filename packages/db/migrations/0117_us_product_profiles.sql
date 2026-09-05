@@ -1,0 +1,35 @@
+CREATE TYPE "public"."traceability_coverage_status" AS ENUM('covered', 'contains_ftl_same_form', 'not_covered', 'unknown', 'exemption_review_required');--> statement-breakpoint
+CREATE TABLE "product_traceability_profiles" (
+	"tenant_id" text NOT NULL,
+	"product_id" uuid NOT NULL,
+	"revision" integer DEFAULT 1 NOT NULL,
+	"product_name" text NOT NULL,
+	"brand_name" text,
+	"commodity" text,
+	"variety" text,
+	"packaging_size_value" numeric(12, 3),
+	"packaging_size_uom" text,
+	"packaging_style" text,
+	"default_quantity_uom" text,
+	"coverage_status" "traceability_coverage_status" DEFAULT 'unknown' NOT NULL,
+	"coverage_rationale" text,
+	"ftl_category" text,
+	"ftl_source_url" text,
+	"ftl_source_version" text,
+	"reviewed_by" text,
+	"reviewed_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "product_traceability_profiles_tenant_id_product_id_pk" PRIMARY KEY("tenant_id","product_id"),
+	CONSTRAINT "product_traceability_profiles_revision_positive" CHECK ("product_traceability_profiles"."revision" > 0),
+	CONSTRAINT "product_traceability_profiles_name_nonempty" CHECK (length(btrim("product_traceability_profiles"."product_name")) BETWEEN 1 AND 200),
+	CONSTRAINT "product_traceability_profiles_size_pair" CHECK (("product_traceability_profiles"."packaging_size_value" IS NULL) = ("product_traceability_profiles"."packaging_size_uom" IS NULL)),
+	CONSTRAINT "product_traceability_profiles_size_positive" CHECK ("product_traceability_profiles"."packaging_size_value" > 0 AND "product_traceability_profiles"."packaging_size_value" <= 999999999.999),
+	CONSTRAINT "product_traceability_profiles_size_uom" CHECK ("product_traceability_profiles"."packaging_size_uom" IN ('lb', 'oz', 'kg', 'g', 'each', 'case', 'bag', 'cup', 'gal', 'l')),
+	CONSTRAINT "product_traceability_profiles_default_uom" CHECK ("product_traceability_profiles"."default_quantity_uom" IN ('lb', 'oz', 'kg', 'g', 'each', 'case', 'bag', 'cup', 'gal', 'l')),
+	CONSTRAINT "product_traceability_profiles_review_pair" CHECK (("product_traceability_profiles"."reviewed_by" IS NULL) = ("product_traceability_profiles"."reviewed_at" IS NULL)),
+	CONSTRAINT "product_traceability_profiles_reviewer_nonempty" CHECK (length(btrim("product_traceability_profiles"."reviewed_by")) BETWEEN 1 AND 128),
+	CONSTRAINT "product_traceability_profiles_review_required" CHECK ("product_traceability_profiles"."coverage_status" = 'unknown' OR "product_traceability_profiles"."reviewed_by" IS NOT NULL)
+);
+--> statement-breakpoint
+ALTER TABLE "product_traceability_profiles" ADD CONSTRAINT "product_traceability_profiles_tenant_product_fk" FOREIGN KEY ("tenant_id","product_id") REFERENCES "public"."products"("tenant_id","id") ON DELETE no action ON UPDATE no action;

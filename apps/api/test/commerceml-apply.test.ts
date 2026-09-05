@@ -5,7 +5,12 @@ import { decideApplication } from "../src/modules/exchange/commerceml/apply";
 // already linked to a 1С <Ид>. The GTIN value itself does not matter to any
 // of these tests (none of them exercise GTIN matching), but it must still be
 // a real, checksum-valid GTIN-14 -- `CatalogProduct.gtin14` is not optional.
-const product = (id: string, gtin14: string, externalRef: string | null, archived = false) => ({
+const product = (
+  id: string,
+  gtin14: string | null,
+  externalRef: string | null,
+  archived = false,
+) => ({
   id,
   gtin14,
   externalRef,
@@ -448,6 +453,42 @@ describe("автосвязь по GTIN", () => {
     unit: null,
     barcode,
     images,
+  });
+
+  it("не использует карточку без GTIN для автосвязи по штрихкоду", () => {
+    const plan = decideApplication({
+      products: [product("without-gtin", null, null)],
+      items: [item("new-ref", "4680089900253")],
+      offers: [],
+    });
+
+    expect(plan.links).toEqual([]);
+    expect(plan.candidates).toEqual([
+      {
+        externalRef: "new-ref",
+        name: "Товар",
+        article: null,
+        unit: null,
+        gtin: "04680089900253",
+      },
+    ]);
+  });
+
+  it("сохраняет обновление цены и фото по externalRef для карточки без GTIN", () => {
+    const plan = decideApplication({
+      products: [product("linked", null, "known-ref")],
+      items: [item("known-ref", null, ["import_files/known.png"])],
+      offers: [
+        {
+          externalRef: "known-ref",
+          barcode: null,
+          prices: [{ type: "Базовая", value: "120.00", currency: "руб" }],
+        },
+      ],
+    });
+
+    expect(plan.priceUpdates).toEqual([{ productId: "linked", unitPrice: "120.00" }]);
+    expect(plan.images).toEqual([{ productId: "linked", source: "import_files/known.png" }]);
   });
 
   it("связывает несвязанную карточку по EAN-13 и применяет цену этим же раундом", () => {

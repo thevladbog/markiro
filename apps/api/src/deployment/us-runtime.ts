@@ -6,6 +6,9 @@ import {
 import type { createDb } from "@markiro/db";
 import type { Env } from "../env";
 import { createUsAuth, type UsAuth } from "../modules/traceability/auth/us-auth";
+import { UsCatalogStore } from "../modules/traceability/catalog/us-catalog-store";
+import { UsLotStore } from "../modules/traceability/lots/us-lot-store";
+import { UsProductProfileStore } from "../modules/traceability/products/us-product-profile-store";
 import { UsProfileStore } from "../modules/traceability/profile/us-profile-store";
 import { UsMasterDataStore } from "../modules/traceability/master-data/us-master-data-store";
 
@@ -14,6 +17,9 @@ export class UsRuntime implements OnApplicationShutdown {
   readonly auth: UsAuth;
   readonly profiles: UsProfileStore;
   readonly masterData: UsMasterDataStore;
+  readonly catalog: UsCatalogStore;
+  readonly lots: UsLotStore;
+  readonly productProfiles: UsProductProfileStore;
 
   constructor(
     readonly env: Env,
@@ -26,6 +32,9 @@ export class UsRuntime implements OnApplicationShutdown {
     });
     this.profiles = new UsProfileStore(connection.db);
     this.masterData = new UsMasterDataStore(connection.db);
+    this.catalog = new UsCatalogStore(connection.db);
+    this.lots = new UsLotStore(connection.db);
+    this.productProfiles = new UsProductProfileStore(connection.db);
     // Idle-pool failures must not crash the metadata/liveness process or log SQL.
     connection.pool.on("error", () => {});
   }

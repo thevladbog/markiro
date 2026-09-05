@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Button, Checkbox, Input, Select, useTheme } from "@markiro/ui";
 import i18next from "i18next";
 import { I18nextProvider, useTranslation } from "react-i18next";
@@ -214,7 +214,7 @@ function UsApplication({ client }: { client: UsBrowserClient }) {
   const activeOperation = useRef<Promise<void> | null>(null);
   const logoutOperation = useRef<Promise<void> | null>(null);
 
-  function clearAccountState() {
+  const clearAccountState = useCallback(() => {
     setEmail("");
     setPassword("");
     setEnrollPassword("");
@@ -228,15 +228,15 @@ function UsApplication({ client }: { client: UsBrowserClient }) {
     setProfileCode("");
     setTimeZone("");
     setRetention("5");
-  }
-  function sessionLost() {
+  }, []);
+  const sessionLost = useCallback(() => {
     generation.current += 1;
     inFlight.current = false;
     clearAccountState();
     setPending(false);
     setNotice("sessionExpired");
     setStage("signin");
-  }
+  }, [clearAccountState]);
 
   async function establish(run: number) {
     const session = await client.session();

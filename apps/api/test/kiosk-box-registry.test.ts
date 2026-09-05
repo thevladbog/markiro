@@ -151,6 +151,16 @@ describe("box registry cursor", () => {
 });
 
 describe("box registry eligibility", () => {
+  it("removes a formerly eligible delta when its product loses GTIN", () => {
+    const box = candidate({ productGtin14: null });
+    expect(evaluateBoxRegistryCandidate(box, [], false)).toBeNull();
+    expect(evaluateBoxRegistryCandidate(box, [], true)).toEqual({
+      kind: "remove",
+      sscc: SSCC,
+      updatedAt: UPDATED.toISOString(),
+    });
+  });
+
   it("returns a sorted, unique 12-bottle upsert without raw KM material", () => {
     const box = candidate();
     const facts = Array.from({ length: 12 }, (_, index) =>

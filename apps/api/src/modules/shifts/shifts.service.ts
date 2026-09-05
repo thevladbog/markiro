@@ -19,6 +19,7 @@ import {
 } from "../label-templates/box-label-template-eligibility";
 import { OperatorsService } from "../operators/operators.service";
 import type { ProductImageDescriptor } from "../products/dto";
+import { requireProductGtin } from "../products/require-product-gtin";
 import {
   BOX_EXTENSION_DIGIT,
   SsccCapacityExhaustedException,
@@ -46,7 +47,10 @@ import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-
 
 type ShiftRow = typeof schema.shifts.$inferSelect;
 type CurrentShiftRow = Omit<ShiftRow, "labelTemplateId">;
-type ProductRow = Omit<typeof schema.products.$inferSelect, "defaultLabelTemplateId"> & {
+type ProductRow = Omit<
+  typeof schema.products.$inferSelect,
+  "defaultLabelTemplateId" | "updatedAt"
+> & {
   productGroupName: string | null;
 };
 type JoinedShiftRow = Omit<ShiftDto, "image" | "number"> & {
@@ -525,6 +529,7 @@ export class ShiftsService {
     if (product.archived) {
       throw new UnprocessableEntityException("Product is marked as not in use");
     }
+    requireProductGtin(product.gtin14);
 
     const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : product.boxCapacity;
     const palletCapacity =
@@ -1070,7 +1075,7 @@ export class ShiftsService {
     const image = await this.findProductImage(tenantId, shift.productId);
     const product: ShiftBundleDto["product"] = {
       id: productRow.id,
-      gtin14: productRow.gtin14,
+      gtin14: requireProductGtin(productRow.gtin14),
       name: productRow.name,
       productGroup: productRow.productGroupName,
       boxCapacity: productRow.boxCapacity,

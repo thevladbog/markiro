@@ -19,6 +19,7 @@ import { INVENTORY_CHZ_STATUSES, type InventoryChzStatus } from "@markiro/domain
 
 import { DB } from "../../auth/auth.module";
 import { ObjectStorageService } from "../storage/object-storage.service";
+import { requireProductGtin } from "../products/require-product-gtin";
 import { ChzImportError, parseChzImport } from "./chz-import-parser";
 import type { ChzContainerKind } from "./chz-tabular-reader";
 import type {
@@ -542,6 +543,7 @@ export class InventoriesService {
       if (!preflightProduct || preflightProduct.status !== "active") {
         throw new UnprocessableEntityException({ code: "INVENTORY_PRODUCT_INACTIVE" });
       }
+      const preflightGtin14 = requireProductGtin(preflightProduct.gtin14);
 
       const objectKey = this.importObjectKey(
         tenantId,
@@ -566,7 +568,7 @@ export class InventoriesService {
           mimeType: file.mimeType,
           bytes: file.bytes,
           expectedStatus: declaredStatus,
-          expectedGtin14: preflightProduct.gtin14,
+          expectedGtin14: preflightGtin14,
         });
         parsedStatus = parsed.filter.status;
         includedGtin14 = parsed.filter.includedGtin14;
@@ -618,9 +620,10 @@ export class InventoriesService {
         if (!product || product.status !== "active") {
           throw new UnprocessableEntityException({ code: "INVENTORY_PRODUCT_INACTIVE" });
         }
-        if (product.gtin14 !== preflightProduct.gtin14) {
+        if (product.gtin14 !== preflightGtin14) {
           throw new ConflictException({ code: "INVENTORY_PRODUCT_GTIN_CHANGED" });
         }
+        requireProductGtin(product.gtin14);
 
         await tx.insert(schema.inventoryImports).values({
           id: importId,
@@ -765,6 +768,7 @@ export class InventoriesService {
     if (product.status !== "active") {
       throw new UnprocessableEntityException({ code: "INVENTORY_PRODUCT_INACTIVE" });
     }
+    const gtin14 = requireProductGtin(product.gtin14);
 
     const [line] = await tx
       .select({ id: schema.lines.id })
@@ -812,7 +816,7 @@ export class InventoriesService {
 
     return {
       ...input,
-      gtin14: product.gtin14,
+      gtin14,
     };
   }
 

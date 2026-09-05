@@ -71,7 +71,13 @@ The clean child environment prevents inherited primary credentials, Node preload
 
 The subsequent [master-data foundation](master-data-foundation.md) also registers GET/POST collections and GET/PATCH UUID items for `/traceability/parties` and `/traceability/locations`. These require a verified US session, current capability and a valid persisted profile. There are no DELETE routes. The presentation-only `GET /traceability/access` returns the fresh principal's capability list after session/MFA verification; it may be read before profile setup and neither authorizes a business operation nor signals that setup is required. The local browser proxy permits only that exact route and the exact master-data paths in addition to the access/profile routes above; other business paths remain closed.
 
-Only the US auth/profile/master-data composition and its owned database pool are registered; no RU auth factory, scheduler or outbound client is loaded. Business requests enforce the configured Host, trusted mutation Origin, JSON-only bodies up to 16 KiB and `Cache-Control: no-store`. Forwarding headers are not trusted. Missing/incompatible database tables fail closed with a sanitized 503; no automatic repair runs. The pool uses server-side statement cancellation and closes with the application.
+The catalog increment additionally registers GET/POST `/traceability/catalog/products` and GET/PATCH `/traceability/catalog/products/:id` in the US API. These routes require the same current session, membership and valid US profile; no DELETE route exists. The subsequent [catalog browser increment](catalog-browser.md) permits only these exact collection/UUID item paths in the local browser proxy and adds the connected Products workspace.
+
+The [product-profile persistence increment](../superpowers/plans/2026-09-05-us-02-product-profile-persistence.md) registers GET/PUT `/traceability/products/:productId` in the US API only. Reads return revision 0 defaults until the first explicit save; PUT requires the full editable document and `expectedRevision`. Master-data writers can edit descriptions; actual coverage changes additionally require QA permission and stamp the trusted reviewer/time. Divergent stale saves return 409 `product_profile_conflict`; unchanged current saves and identical immediate retries do not create audit entries. Both changes and their full audit snapshots commit atomically. The [2026-09-06 profile UI](catalog-browser.md#product-profile-increment--2026-09-06) opens only the exact UUID item path in the local browser proxy, without query parameters. Profile collections/deletion, nested paths and lot routes remain closed.
+
+The [lot persistence increment](../superpowers/plans/2026-09-06-us-02-lot-persistence.md) adds GET/POST `/traceability/lots`, GET `/traceability/lots/:id` and POST `/traceability/lots/:id/status` to the US API only. Manual creation allows imported assignment, including an incomplete missing source, with tenant/source/TLC duplicate protection. QA status actions require a revision and reason, commit exact before/after audit atomically and recognize only an identical same-actor immediate previous-revision retry. Lot identity changes, deletion, events and all browser lot proxy paths remain unavailable. Storage is added by migration0118; startup still never migrates it.
+
+Only the US auth/profile/master-data/catalog/product-profile/lot composition and its owned database pool are registered; no RU auth factory, scheduler or outbound client is loaded. Business requests enforce the configured Host, trusted mutation Origin, JSON-only bodies up to 16 KiB and `Cache-Control: no-store`. Forwarding headers are not trusted. Missing/incompatible database tables fail closed with a sanitized 503; no automatic repair runs. The pool uses server-side statement cancellation and closes with the application.
 
 Readiness deliberately remains unavailable while other business modules are unfinished. The [separate US browser entry](browser-entry.md) now adds an isolated build and server edition attestation; matching environment values alone are not proof of frontend isolation. Local synthetic-owner provisioning is explicit, never automatic. Recovery remains unavailable. Do not connect the RU admin to this API.
 
@@ -123,6 +129,19 @@ The browser interface and explicit local synthetic-user provisioning were added 
 - Docker Compose configuration validation passed before startup. The later profile/session increments started only US PostgreSQL, as recorded above. Caddy validation used temporary read-only test config, not a deployed application.
 - Independent review found no blocking issues; its main-selected SHA caveat is documented above. Main-checkout workflow diffs are empty; existing CI, dependency-review workflow and dependency manifests/lockfile are unchanged.
 - No commit, push, release, cloud configuration or production operation was performed. Migration tests apply SQL only to their own disposable local databases; the base US database is not migrated. Remote enforcement and live workflow execution are not verified.
+
+## Catalog persistence verification — 2026-09-05
+
+The [catalog persistence increment](../superpowers/plans/2026-09-05-us-02-catalog-persistence.md) tests migration0116 and strict legacy GTIN boundaries on disposable US databases. It does not migrate the base development database or primary database. Run the focused checks with the same explicit US test variable described above, after rebuilding `@markiro/db`:
+
+```sh
+export US_TEST_DATABASE_URL=postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+pnpm --filter @markiro/db exec vitest run test/us-catalog-schema.test.ts test/us-catalog-migration.e2e.test.ts
+pnpm --filter @markiro/api exec vitest run test/us-catalog-operational-boundaries.e2e.test.ts
+pnpm --filter @markiro/api exec vitest run test/us-catalog.e2e.test.ts test/us-catalog-http.e2e.test.ts
+```
+
+The local checks pass six DB cases, nine operational cases and real store/HTTP catalog cases; current totals and review status are in the [implementation progress](implementation-plan.md#us-02-catalog-persistence-increment--2026-09-05). The shared column permits null, but RU DTOs, Station payloads/mirrors and GTIN-dependent operations retain strict boundaries. The new update timestamp dates pre-existing products to the migration baseline; it is not reconstructed historical activity. No browser, hardware, provider or hosted acceptance is established by these tests. Broader package-test infrastructure limits remain separate from the successful US-specific checks.
 
 ## Before release enablement
 

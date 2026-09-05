@@ -7,6 +7,9 @@ import {
   type DynamicModule,
 } from "@nestjs/common";
 import { allowedInterfaceLocales } from "@markiro/domain";
+import { UsCatalogController } from "./us-catalog.controller";
+import { UsLotController } from "./us-lot.controller";
+import { UsProductProfileController } from "./us-product-profile.controller";
 import { UsRuntime } from "./us-runtime";
 import { UsProfileController, UsSessionGuard } from "./us-profile.controller";
 import { UsMasterDataController } from "./us-master-data.controller";
@@ -44,7 +47,14 @@ export class UsDevelopmentModule {
   static register(runtime: UsRuntime): DynamicModule {
     return {
       module: UsDevelopmentModule,
-      controllers: [UsDevelopmentController, UsProfileController, UsMasterDataController],
+      controllers: [
+        UsDevelopmentController,
+        UsProfileController,
+        UsMasterDataController,
+        UsCatalogController,
+        UsLotController,
+        UsProductProfileController,
+      ],
       providers: [{ provide: UsRuntime, useValue: runtime }, UsSessionGuard],
     };
   }

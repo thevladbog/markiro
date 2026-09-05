@@ -33,7 +33,7 @@ function isHomeCurrency(currency: string): boolean {
  */
 export interface CatalogProduct {
   id: string;
-  gtin14: string;
+  gtin14: string | null;
   externalRef: string | null;
   /** Archived cards keep established 1C links, but cannot win a new GTIN auto-link. */
   archived: boolean;
@@ -344,7 +344,12 @@ export function decideApplication(input: DecideApplicationInput): ApplicationPla
     if (product.externalRef !== null) knownByRef.set(product.externalRef, product);
   }
   const productsByGtin = new Map(
-    products.filter((product) => !product.archived).map((product) => [product.gtin14, product]),
+    products
+      .filter(
+        (product): product is CatalogProduct & { gtin14: string } =>
+          !product.archived && product.gtin14 !== null,
+      )
+      .map((product) => [product.gtin14, product]),
   );
 
   // Штрихкод предложения — запасной источник: некоторые конфигурации кладут

@@ -6,6 +6,7 @@ import { and, desc, eq, isNotNull, notInArray } from "drizzle-orm";
 
 import { DB } from "../../auth/auth.module";
 import type { ChzTokenService } from "../chz-exports/chz-token.service";
+import { requireProductGtin } from "../products/require-product-gtin";
 import type { NationalCatalogClient } from "./national-catalog.client";
 import type { NationalCatalogProduct, NationalCatalogResult } from "./national-catalog.types";
 
@@ -28,7 +29,10 @@ export interface NationalCatalogStoredCard {
 }
 
 export interface NationalCatalogProductsRepository {
-  findProduct(tenantId: string, productId: string): Promise<{ id: string; gtin14: string } | null>;
+  findProduct(
+    tenantId: string,
+    productId: string,
+  ): Promise<{ id: string; gtin14: string | null } | null>;
   findProviderEtag(
     tenantId: string,
     productId: string,
@@ -80,7 +84,7 @@ export class DrizzleNationalCatalogProductsRepository implements NationalCatalog
         ),
       )
       .limit(1);
-    return product?.gtin14 ? { id: product.id, gtin14: product.gtin14 } : null;
+    return product ? { id: product.id, gtin14: product.gtin14 } : null;
   }
 
   async findProviderEtag(
@@ -343,6 +347,7 @@ export class NationalCatalogProductsService {
   }> {
     const product = await this.repository.findProduct(tenantId, productId);
     if (!product) throw new NotFoundException();
+    const gtin14 = requireProductGtin(product.gtin14);
     if (!this.baseUrl) return { outcome: "token_unconfigured", cards: [] };
 
     const token = await this.tokens.getActiveToken(tenantId);
@@ -350,9 +355,9 @@ export class NationalCatalogProductsService {
     const auth = { baseUrl: this.baseUrl, token: token.auth.token };
     const feedEtag = await this.repository.findProviderEtag(tenantId, productId, "feed_product");
     const feed = feedEtag
-      ? await this.client.getFeedProducts(auth, [product.gtin14], { ifNoneMatch: feedEtag })
-      : await this.client.getFeedProducts(auth, [product.gtin14]);
-    const selected = await this.selectCardRead(tenantId, productId, auth, product.gtin14, feed);
+      ? await this.client.getFeedProducts(auth, [gtin14], { ifNoneMatch: feedEtag })
+      : await this.client.getFeedProducts(auth, [gtin14]);
+    const selected = await this.selectCardRead(tenantId, productId, auth, gtin14, feed);
     if (selected.result.status === "not_modified") {
       const cards = await this.repository.markNotModified(
         tenantId,
@@ -380,7 +385,7 @@ export class NationalCatalogProductsService {
       return { outcome: providerOutcome(selected.result.status), cards: [] };
     }
     const cards = selected.result.value.products
-      .filter((card) => cardIdentifiesGtin(card, product.gtin14))
+      .filter((card) => cardIdentifiesGtin(card, gtin14))
       .sort((left, right) => left.id - right.id)
       .map((card): NationalCatalogCardToStore => ({
         cardId: String(card.id),
@@ -417,7 +422,7 @@ export class NationalCatalogProductsService {
     const stored = await this.repository.storeCards(
       tenantId,
       productId,
-      product.gtin14,
+      gtin14,
       selected.sourceMethod,
       cards,
       this.now(),

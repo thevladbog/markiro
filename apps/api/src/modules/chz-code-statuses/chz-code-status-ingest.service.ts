@@ -545,7 +545,10 @@ export class ChzCodeStatusIngestService {
       .select({ gtin14: schema.products.gtin14, code: schema.products.chzProductGroupCode })
       .from(schema.products)
       .where(and(eq(schema.products.tenantId, tenantId), inArray(schema.products.gtin14, gtins)));
-    const groupByGtin = new Map(productRows.map((row) => [row.gtin14, row.code]));
+    const groupByGtin = new Map<string, number | null>();
+    for (const row of productRows) {
+      if (row.gtin14 !== null) groupByGtin.set(row.gtin14, row.code);
+    }
 
     const nextRefreshAt = new Date();
     const values = [...gtinByHash.entries()].map(([codeHash, gtin14]) => ({

@@ -107,6 +107,22 @@ describe("NationalCatalogProductsService", () => {
     expect(subject.tokens.getActiveToken).not.toHaveBeenCalled();
   });
 
+  it("rejects a product without GTIN before token or provider access", async () => {
+    const subject = service({
+      repository: repository({
+        findProduct: vi.fn(async () => ({ id: productId, gtin14: null })),
+      }),
+    });
+
+    await expect(subject.service.lookup(tenantId, productId)).rejects.toMatchObject({
+      status: 422,
+      response: { code: "GTIN_REQUIRED" },
+    });
+    expect(subject.tokens.getActiveToken).not.toHaveBeenCalled();
+    expect(subject.client.getFeedProducts).not.toHaveBeenCalled();
+    expect(subject.client.getPublishedProducts).not.toHaveBeenCalled();
+  });
+
   it("uses feed-product first and stores every returned card independently", async () => {
     const subject = service({
       feed: {

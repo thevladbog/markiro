@@ -1,5 +1,12 @@
 import { z } from "zod";
 import {
+  productTraceabilityProfileSchema,
+  putProductTraceabilityProfileSchema,
+  createUsProductSchema,
+  updateUsProductSchema,
+  listUsProductsQuerySchema,
+  usProductSchema,
+  usProductListSchema,
   createUsLocationSchema,
   createUsPartySchema,
   listUsLocationsQuerySchema,
@@ -23,6 +30,8 @@ export type UsClientErrorCode =
   | "session_required"
   | "forbidden"
   | "party_archived"
+  | "product_gtin_taken"
+  | "product_gtin_locked"
   | "conflict"
   | "rate_limited"
   | "profile_not_provisioned"
@@ -81,6 +90,7 @@ const profilePath = "/api/us/traceability/profile";
 const accessPath = "/api/us/traceability/access";
 const partiesPath = "/api/us/traceability/parties";
 const locationsPath = "/api/us/traceability/locations";
+const productsPath = "/api/us/traceability/catalog/products";
 const deploymentSchema = z
   .object({
     edition: z.literal("US"),
@@ -147,6 +157,15 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
       }
       if (!response.ok) {
         if (
+          response.status === 409 &&
+          (path === productsPath || path.startsWith(`${productsPath}/`))
+        ) {
+          const conflict = z
+            .object({ code: z.enum(["product_gtin_taken", "product_gtin_locked"]) })
+            .safeParse(value);
+          if (conflict.success) throw new UsClientError(conflict.data.code);
+        }
+        if (
           response.status === 503 &&
           path === profilePath &&
           method === "GET" &&
@@ -178,6 +197,52 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
     }
   }
   return {
+    async getProductProfile(id: unknown) {
+      const productId = checked(platformUuidSchema, id, "invalid_input");
+      const result = await request(
+        `/api/us/traceability/products/${productId}`,
+        productTraceabilityProfileSchema,
+      );
+      if (result.productId !== productId) throw new UsClientError("invalid_response");
+      return result;
+    },
+    async putProductProfile(id: unknown, input: unknown) {
+      const productId = checked(platformUuidSchema, id, "invalid_input");
+      const result = await request(
+        `/api/us/traceability/products/${productId}`,
+        productTraceabilityProfileSchema,
+        "PUT",
+        checked(putProductTraceabilityProfileSchema, input, "invalid_input"),
+      );
+      if (result.productId !== productId) throw new UsClientError("invalid_response");
+      return result;
+    },
+    async listProducts(input: unknown = {}) {
+      const query = checked(listUsProductsQuerySchema, input, "invalid_input");
+      return request(`${productsPath}?${masterDataQuery(query)}`, usProductListSchema);
+    },
+    async getProduct(id: unknown) {
+      return request(
+        `${productsPath}/${checked(platformUuidSchema, id, "invalid_input")}`,
+        usProductSchema,
+      );
+    },
+    async createProduct(input: unknown) {
+      return request(
+        productsPath,
+        usProductSchema,
+        "POST",
+        checked(createUsProductSchema, input, "invalid_input"),
+      );
+    },
+    async updateProduct(id: unknown, input: unknown) {
+      return request(
+        `${productsPath}/${checked(platformUuidSchema, id, "invalid_input")}`,
+        usProductSchema,
+        "PATCH",
+        checked(updateUsProductSchema, input, "invalid_input"),
+      );
+    },
     deployment: () => request("/api/us/deployment", deploymentSchema),
     async session() {
       const data = await request("/api/us-auth/get-session", sessionSchema);

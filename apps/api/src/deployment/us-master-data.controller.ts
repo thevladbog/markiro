@@ -11,14 +11,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from "@nestjs/common";
-import {
-  ApiCookieAuth,
-  ApiOperation,
-  ApiParam,
-  ApiResponse,
-  ApiTags,
-  type SchemaObject,
-} from "@nestjs/swagger";
+import { ApiCookieAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from "@nestjs/swagger";
 import {
   createUsLocationSchema,
   createUsPartySchema,
@@ -32,50 +25,10 @@ import {
   usPartySchema,
   usTraceabilityAccessSchema,
 } from "@markiro/platform-contracts";
-import { ApiZodBody, ApiZodQuery, ApiZodResponse, httpErrorSchema } from "../lib/openapi";
+import { ApiZodBody, ApiZodQuery, ApiZodResponse } from "../lib/openapi";
+import { usMasterDataBadRequestSchema, usMasterDataErrorSchema } from "./us-master-data-openapi";
 import { UsRuntime } from "./us-runtime";
 import { UsSessionGuard, type UsRequest } from "./us-profile.controller";
-
-const errorSchema: SchemaObject = {
-  oneOf: [
-    httpErrorSchema,
-    { type: "object", required: ["code"], properties: { code: { type: "string" } } },
-  ],
-};
-
-const masterDataValidationErrorSchema: SchemaObject = {
-  type: "object",
-  required: ["code", "issues"],
-  additionalProperties: false,
-  properties: {
-    code: { type: "string", enum: ["invalid_master_data"] },
-    issues: {
-      type: "array",
-      items: {
-        type: "object",
-        required: ["path", "message"],
-        additionalProperties: false,
-        properties: {
-          path: { type: "string" },
-          message: { type: "string" },
-        },
-      },
-    },
-  },
-};
-
-const badRequestSchema: SchemaObject = {
-  oneOf: [
-    httpErrorSchema,
-    masterDataValidationErrorSchema,
-    {
-      type: "object",
-      required: ["code"],
-      additionalProperties: false,
-      properties: { code: { type: "string", enum: ["us_invalid_body"] } },
-    },
-  ],
-};
 
 @Controller("traceability")
 @UseGuards(UsSessionGuard)
@@ -84,29 +37,37 @@ const badRequestSchema: SchemaObject = {
 @ApiResponse({
   status: 400,
   description: "Malformed JSON or strict request validation failed.",
-  schema: badRequestSchema,
+  schema: usMasterDataBadRequestSchema,
 })
-@ApiResponse({ status: 401, description: "A US session is required.", schema: errorSchema })
+@ApiResponse({
+  status: 401,
+  description: "A US session is required.",
+  schema: usMasterDataErrorSchema,
+})
 @ApiResponse({
   status: 403,
   description: "The current US role is not permitted.",
-  schema: errorSchema,
+  schema: usMasterDataErrorSchema,
 })
 @ApiResponse({
   status: 404,
   description: "The tenant-scoped resource was not found.",
-  schema: errorSchema,
+  schema: usMasterDataErrorSchema,
 })
-@ApiResponse({ status: 413, description: "JSON body exceeds 16 KiB.", schema: errorSchema })
+@ApiResponse({
+  status: 413,
+  description: "JSON body exceeds 16 KiB.",
+  schema: usMasterDataErrorSchema,
+})
 @ApiResponse({
   status: 415,
   description: "An uncompressed application/json body is required.",
-  schema: errorSchema,
+  schema: usMasterDataErrorSchema,
 })
 @ApiResponse({
   status: 503,
   description: "The US profile or database is unavailable.",
-  schema: errorSchema,
+  schema: usMasterDataErrorSchema,
 })
 export class UsMasterDataController {
   constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
@@ -140,7 +101,7 @@ export class UsMasterDataController {
   @ApiResponse({
     status: 409,
     description: "The requested active party name is taken.",
-    schema: errorSchema,
+    schema: usMasterDataErrorSchema,
   })
   createParty(@Req() request: UsRequest, @Body() body: unknown) {
     const principal = this.principal(request);
@@ -173,7 +134,7 @@ export class UsMasterDataController {
   @ApiResponse({
     status: 409,
     description: "The requested active party name is taken.",
-    schema: errorSchema,
+    schema: usMasterDataErrorSchema,
   })
   updateParty(@Req() request: UsRequest, @Param("id") id: unknown, @Body() body: unknown) {
     const principal = this.principal(request);

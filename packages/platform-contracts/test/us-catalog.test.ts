@@ -2,10 +2,18 @@ import { describe, expect, it } from "vitest";
 import * as contractPackage from "../src/index.js";
 import {
   createUsProductSchema,
+  listUsProductsQuerySchema,
   updateUsProductSchema,
+  usProductListSchema,
   usProductSchema,
 } from "../src/traceability/catalog.js";
-import type { CreateUsProductInput, UpdateUsProductInput, UsProduct } from "../src/index.js";
+import type {
+  CreateUsProductInput,
+  ListUsProductsQuery,
+  UpdateUsProductInput,
+  UsProduct,
+  UsProductList,
+} from "../src/index.js";
 
 const productId = "123e4567-e89b-12d3-a456-426614174000";
 const timestamps = {
@@ -24,6 +32,15 @@ const createInput = { name: "Synthetic cereal", gtin: "96385074" } satisfies Cre
 const updateInput = { gtin: null, archived: false } satisfies UpdateUsProductInput;
 void createInput;
 void updateInput;
+const listQuery = {
+  archived: "all",
+  search: "cereal",
+  limit: 25,
+  offset: 50,
+} satisfies ListUsProductsQuery;
+const productList = { items: [product], limit: 25, offset: 50 } satisfies UsProductList;
+void listQuery;
+void productList;
 
 describe("US catalog create contract", () => {
   it("trims a bounded name and defaults an omitted GTIN to null", () => {
@@ -116,6 +133,56 @@ describe("US catalog response contract", () => {
   });
 });
 
+describe("US catalog list contracts", () => {
+  it("uses canonical strict list parsing with bounded defaults", () => {
+    expect(listUsProductsQuerySchema.parse({})).toEqual({
+      archived: "false",
+      limit: 50,
+      offset: 0,
+    });
+    expect(
+      listUsProductsQuerySchema.parse({
+        archived: "all",
+        search: "  cereal  ",
+        limit: "100",
+        offset: "100000",
+      }),
+    ).toEqual({ archived: "all", search: "cereal", limit: 100, offset: 100000 });
+  });
+
+  it.each([
+    { forged: "field" },
+    { archived: true },
+    { archived: "yes" },
+    { search: "x".repeat(201) },
+    { limit: 0 },
+    { limit: 101 },
+    { limit: "01" },
+    { offset: -1 },
+    { offset: 100001 },
+    { offset: "1.5" },
+  ])("rejects invalid list query %j", (input) => {
+    expect(listUsProductsQuerySchema.safeParse(input).success).toBe(false);
+  });
+
+  it("requires a strict bounded response whose item count does not exceed limit", () => {
+    expect(usProductListSchema.parse({ items: [product], limit: 1, offset: 0 })).toEqual({
+      items: [product],
+      limit: 1,
+      offset: 0,
+    });
+    expect(
+      usProductListSchema.safeParse({ items: [product], limit: 1, offset: 0, extra: true }).success,
+    ).toBe(false);
+    expect(usProductListSchema.safeParse({ items: [product], limit: 0, offset: 0 }).success).toBe(
+      false,
+    );
+    expect(
+      usProductListSchema.safeParse({ items: [product, product], limit: 1, offset: 0 }).success,
+    ).toBe(false);
+  });
+});
+
 describe("US catalog boundary and public exports", () => {
   const unsupportedFields = [
     "tenantId",
@@ -137,7 +204,9 @@ describe("US catalog boundary and public exports", () => {
 
   it("exports all catalog schemas from the public package entry", () => {
     expect(contractPackage.createUsProductSchema).toBe(createUsProductSchema);
+    expect(contractPackage.listUsProductsQuerySchema).toBe(listUsProductsQuerySchema);
     expect(contractPackage.updateUsProductSchema).toBe(updateUsProductSchema);
+    expect(contractPackage.usProductListSchema).toBe(usProductListSchema);
     expect(contractPackage.usProductSchema).toBe(usProductSchema);
   });
 });

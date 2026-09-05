@@ -5,7 +5,7 @@ import { allocateBoxRegistryVersion } from "../boxes/box-registry-version";
 export interface ProductGtinVersion {
   tenantId: string;
   productId: string;
-  gtin14: string;
+  gtin14: string | null;
 }
 
 export function productGtinActuallyChanged(

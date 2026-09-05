@@ -18,6 +18,7 @@ export type MasterDataViewProps = {
   onForbidden: () => Promise<void>;
   onClientFailure: (error: unknown, fallbackKey: string) => void;
   onSessionLost: () => void;
+  accessRecovery?: { pending: boolean; retry: () => Promise<void> };
 };
 
 export const roleKeys = {

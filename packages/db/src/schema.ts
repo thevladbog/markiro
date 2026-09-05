@@ -19,4 +19,6 @@ export * from "./schema/chz.js";
 export * from "./schema/product-regulatory.js";
 export * from "./schema/traceability.js";
 export * from "./schema/traceability-master-data.js";
+export * from "./schema/traceability-products.js";
+export * from "./schema/traceability-lots.js";
 export * from "./schema/us-auth.js";

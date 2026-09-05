@@ -4,6 +4,7 @@ import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { generateDeviceToken, hashDeviceToken } from "../../pickup/device-token";
+import { requireProductGtin } from "../products/require-product-gtin";
 import type {
   CreateKioskDto,
   EnrollKioskResponseDto,
@@ -120,28 +121,22 @@ export class KiosksService {
     // a client error. Dedupe before insert to avoid tripping kiosk_products_uq (23505).
     const uniqueIds = Array.from(new Set(dto.productIds));
 
-    // Archived ("do not use") products must not be offered on a kiosk. The
-    // admin UI already hides them from the section; this keeps a stale or
-    // hand-crafted payload from re-listing one. Unknown ids still surface as
-    // the FK violation handled in handleWriteError below.
-    if (uniqueIds.length > 0) {
-      const archivedRows = await this.db
-        .select({ id: schema.products.id })
-        .from(schema.products)
-        .where(
-          and(
-            eq(schema.products.tenantId, tenantId),
-            inArray(schema.products.id, uniqueIds),
-            eq(schema.products.archived, true),
-          ),
-        );
-      if (archivedRows.length > 0) {
-        throw new BadRequestException("Archived products cannot be assigned to a kiosk");
-      }
-    }
-
     try {
       await this.db.transaction(async (tx) => {
+        // Validate inside the same transaction as replacement so a null-GTIN
+        // US card can never leak into the legacy kiosk allowlist.
+        if (uniqueIds.length > 0) {
+          const products = await tx
+            .select({ gtin14: schema.products.gtin14, archived: schema.products.archived })
+            .from(schema.products)
+            .where(
+              and(eq(schema.products.tenantId, tenantId), inArray(schema.products.id, uniqueIds)),
+            );
+          if (products.some((product) => product.archived)) {
+            throw new BadRequestException("Archived products cannot be assigned to a kiosk");
+          }
+          for (const product of products) requireProductGtin(product.gtin14);
+        }
         await tx
           .delete(schema.kioskProducts)
           .where(

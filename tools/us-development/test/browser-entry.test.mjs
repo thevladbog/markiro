@@ -105,6 +105,14 @@ test("US proxy never forwards RU routes and preserves configured API Host", asyn
     "/api/us/traceability/parties/%2e%2e/profile",
     "/api/us/traceability/parties/a0000000-0000-4000-8000-000000000001/exports",
     "/api/us/traceability/lots",
+    "/api/us/traceability/products",
+    "/api/us/traceability/products/invalid-id",
+    "/api/us/traceability/products/a0000000-0000-4000-8000-000000000001/exports",
+    "/api/us/traceability/products/a0000000-0000-4000-8000-000000000001?tenantId=x",
+    "/api/us/traceability/catalog/products-extra",
+    "/api/us/traceability/catalog/products/invalid-id",
+    "/api/us/traceability/catalog/products/a0000000-0000-4000-8000-000000000001/traceability",
+    "/api/us/traceability/catalog/products/%2e%2e/profile",
   ])
     assert.equal(
       routes.some(([pattern]) => new RegExp(pattern.slice(1)).test(path)),
@@ -115,6 +123,15 @@ test("US proxy never forwards RU routes and preserves configured API Host", asyn
     ["/api/us/deployment", "/deployment"],
     ["/api/us/traceability/profile", "/traceability/profile"],
     ["/api/us/traceability/access", "/traceability/access"],
+    [
+      "/api/us/traceability/products/a0000000-0000-4000-8000-000000000001",
+      "/traceability/products/a0000000-0000-4000-8000-000000000001",
+    ],
+    ["/api/us/traceability/catalog/products?limit=50", "/traceability/catalog/products?limit=50"],
+    [
+      "/api/us/traceability/catalog/products/a0000000-0000-4000-8000-000000000001",
+      "/traceability/catalog/products/a0000000-0000-4000-8000-000000000001",
+    ],
     ["/api/us/traceability/parties?limit=20", "/traceability/parties?limit=20"],
     [
       "/api/us/traceability/locations?roles=supplier&roles=receive_at",

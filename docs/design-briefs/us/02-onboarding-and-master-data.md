@@ -4,6 +4,10 @@
 
 > Implementation alignment, 2026-09-05: the isolated Profile, Parties and Locations office UI is implemented and reviewed locally, including the subsequent parent-picker recovery correction; see [implementation evidence](../../us/master-data-foundation.md). Broader navigation, products/lots and history panels below remain design targets, not available features. Current navigation exposes only implemented destinations. The profile comes from the dedicated US profile endpoint; `/traceability/access` supplies presentation capabilities only.
 
+> Subsequent catalog alignment, 2026-09-05: the [connected Products workspace](../../us/catalog-browser.md) adds basic product identity, optional GTIN and archive/restore in the same isolated shell. FTL review, extended description, lots and history below remain design targets; they are not shown as available controls. This scoped implementation reuses shared tokens/components and does not claim full canvas parity.
+
+> Product-profile alignment, 2026-09-06: the [connected profile](../../us/catalog-browser.md#product-profile-increment--2026-09-06) now implements Product Description, Packaging and Coverage Review as grouped sections in the existing Products workspace. Saved reviewer ID/time and revision are server-owned; dirty drafts, concurrent edits and permission recovery are explicit. Generic applicability is not assessed. The isolated implementation uses a full-width form instead of the future RU-router side panel; lots, history, table-wide coverage aggregation and source suggestions remain design targets. No unavailable tabs or compliance-ready claims are introduced.
+
 > Second brief of the U.S. series. Office mode, desktop-first 1440px, adaptive to 1024/768.
 > Users: Owner / Tenant Admin, QA / Traceability Manager, three operator roles, Auditor (cabinet
 > sign-in, never the station). EN primary, U.S. Spanish secondary. Light + dark. **Delta to

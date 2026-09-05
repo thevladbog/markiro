@@ -33,9 +33,10 @@ import {
   invalidateProductGtinRegistry,
   productGtinActuallyChanged,
 } from "./product-registry-invalidation";
+import { requireProductGtin } from "./require-product-gtin";
 
 type ProductRow = typeof schema.products.$inferSelect;
-type CurrentProductRow = Omit<ProductRow, "defaultLabelTemplateId">;
+type CurrentProductRow = Omit<ProductRow, "defaultLabelTemplateId" | "updatedAt">;
 type ProductWithImageRow = CurrentProductRow & {
   productGroupName: string | null;
   imageChecksum: string | null;
@@ -856,7 +857,7 @@ export class ProductsService {
   private rowToDto(row: ProductWithImageRow): ProductDto {
     return {
       id: row.id,
-      gtin14: row.gtin14,
+      gtin14: requireProductGtin(row.gtin14),
       name: row.name,
       printName: row.printName,
       productGroup: row.productGroupName,

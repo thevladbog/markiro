@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { startUsBrowserFixture } from "../browser-fixture.mjs";
 import { exerciseUsMasterData } from "./master-data-flow.mjs";
+import { exerciseUsCatalog } from "./catalog-flow.mjs";
 
 // Use the separately pinned browser tool workspace. No browser dependency enters
 // the product bundle. NODE_PATH can supply an already installed read-only runtime.
@@ -115,6 +116,7 @@ test(
       ).toBeVisible();
       await expect(page.getByText("America/Chicago", { exact: true })).toBeVisible();
       await exerciseUsMasterData({ page, expect, screenshots, fixture });
+      await exerciseUsCatalog({ page, expect, screenshots, fixture });
       await page.screenshot({ path: join(screenshots, "profile-en.png"), fullPage: true });
       await page.getByRole("button", { name: "Change theme", exact: true }).click();
       await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");

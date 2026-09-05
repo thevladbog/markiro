@@ -12,6 +12,7 @@ import {
 import { schema, type Db } from "@markiro/db";
 import {
   provisionUsTraceabilityProfileSchema,
+  type ProvisionUsTraceabilityProfileInput,
   type UsLocation,
   type UsParty,
 } from "@markiro/platform-contracts";
@@ -60,7 +61,8 @@ export function canonicalCoordinate(value: string | null): string | null {
   return `${sign}${integer}.${fraction}`;
 }
 
-export function isPartyNameConflict(error: unknown): boolean {
+export function isUniqueConstraintViolation(error: unknown, constraint: string): boolean {
+  if (error === null || typeof error !== "object") return false;
   const candidate = error as {
     code?: string;
     constraint?: string;
@@ -68,8 +70,12 @@ export function isPartyNameConflict(error: unknown): boolean {
   };
   return (
     (candidate.code ?? candidate.cause?.code) === "23505" &&
-    (candidate.constraint ?? candidate.cause?.constraint) === "traceability_parties_active_name_uq"
+    (candidate.constraint ?? candidate.cause?.constraint) === constraint
   );
+}
+
+export function isPartyNameConflict(error: unknown): boolean {
+  return isUniqueConstraintViolation(error, "traceability_parties_active_name_uq");
 }
 
 export function partyResponse(row: PartyRow): UsParty {
@@ -138,7 +144,7 @@ export async function authorizeUsMasterData(
   tenantId: string,
   actorUserId: string,
   required: UsCapability,
-): Promise<void> {
+): Promise<ProvisionUsTraceabilityProfileInput["code"]> {
   const [membership] = await tx
     .select({ role: schema.member.role })
     .from(schema.member)
@@ -178,4 +184,5 @@ export async function authorizeUsMasterData(
   if (!valid.success || profile.baselineVersion !== BASELINE_VERSION) {
     throw new ServiceUnavailableException({ code: "traceability_profile_invalid" });
   }
+  return valid.data.code;
 }

@@ -19,6 +19,19 @@ describe("product GTIN registry invalidation", () => {
     expect(productGtinActuallyChanged(before, { ...before })).toBe(false);
   });
 
+  it.each([
+    [null, "04600682000020", true],
+    ["04600682000013", null, true],
+    [null, null, false],
+  ] as const)("compares nullable GTIN identity %j to %j", (beforeGtin, afterGtin, changed) => {
+    const before: ProductGtinVersion = {
+      tenantId: "tenant-a",
+      productId: "product-a",
+      gtin14: beforeGtin,
+    };
+    expect(productGtinActuallyChanged(before, { ...before, gtin14: afterGtin })).toBe(changed);
+  });
+
   it("never treats another tenant or product as the updated identity", () => {
     const before: ProductGtinVersion = {
       tenantId: "tenant-a",

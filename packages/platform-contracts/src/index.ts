@@ -402,12 +402,52 @@ export type {
 export { usTraceabilityAccessSchema } from "./traceability/access.js";
 export type { UsTraceabilityAccess } from "./traceability/access.js";
 export {
+  tlcSchema,
+  preservedTlcSchema,
+  tlcAssignmentBasisSchema,
+  p0TlcAssignmentBasisSchema,
+  traceabilityLotStatusSchema,
+  changeLotStatusSchema,
+} from "./traceability/lots.js";
+export type { ChangeLotStatusInput } from "./traceability/lots.js";
+export {
+  traceabilityLotSourceSchema,
+  createTraceabilityLotSchema,
+  traceabilityLotSchema,
+  postLotStatusSchema,
+  listTraceabilityLotsQuerySchema,
+  traceabilityLotListSchema,
+} from "./traceability/lot-records.js";
+export type {
+  TraceabilityLotSource,
+  TraceabilityLot,
+  TraceabilityLotList,
+  CreateTraceabilityLotInput,
+  PostLotStatusInput,
+  ListTraceabilityLotsQuery,
+} from "./traceability/lot-records.js";
+export {
+  upsertProductTraceabilityProfileSchema,
+  putProductTraceabilityProfileSchema,
+  productTraceabilityProfileSchema,
+  productDescriptionSnapshotSchema,
+} from "./traceability/products.js";
+export type {
+  UpsertProductTraceabilityProfile,
+  PutProductTraceabilityProfile,
+  ProductTraceabilityProfile,
+} from "./traceability/products.js";
+export {
   createUsProductSchema,
+  listUsProductsQuerySchema,
   updateUsProductSchema,
+  usProductListSchema,
   usProductSchema,
 } from "./traceability/catalog.js";
 export type {
   CreateUsProductInput,
+  ListUsProductsQuery,
   UpdateUsProductInput,
   UsProduct,
+  UsProductList,
 } from "./traceability/catalog.js";

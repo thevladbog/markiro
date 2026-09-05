@@ -14,6 +14,45 @@ export type {
   TraceabilityLocationRole,
 } from "./traceability/location-description.js";
 export { normalizeCatalogGtin } from "./traceability/products/gtin.js";
+export { normalizeTlc, formatDemoTlc } from "./traceability/lots/tlc.js";
+export { isTlcSourceReferenceUrl } from "./traceability/lots/source.js";
+export {
+  TLC_ASSIGNMENT_BASES,
+  P0_ASSIGNMENT_BASES,
+  assertLotAssignmentBasis,
+} from "./traceability/lots/assignment.js";
+export type {
+  TlcAssignmentBasis,
+  P0TlcAssignmentBasis,
+  LotAssignmentContext,
+} from "./traceability/lots/assignment.js";
+export { TRACEABILITY_LOT_STATUSES, assertLotTransition } from "./traceability/lots/status.js";
+export type { TraceabilityLotStatus } from "./traceability/lots/status.js";
+export { ancestorsOf, descendantsOf, wouldCreateCycle } from "./traceability/lots/genealogy.js";
+export type { LotGenealogyEdge } from "./traceability/lots/genealogy.js";
+export { UOM_CODES_V1 } from "./traceability/uom.js";
+export type { TraceabilityUom } from "./traceability/uom.js";
+export { validateProductDescription } from "./traceability/products/description.js";
+export type {
+  ProductDescriptionInput,
+  ProductDescriptionIssue,
+} from "./traceability/products/description.js";
+export {
+  COVERAGE_STATUSES,
+  validateCoverageReview,
+  assessCoverageReview,
+} from "./traceability/products/coverage.js";
+export type {
+  CoverageStatus,
+  CoverageReviewInput,
+  CoverageReviewRecord,
+  CoverageReviewIssue,
+} from "./traceability/products/coverage.js";
+export { buildProductSnapshot } from "./traceability/products/snapshot.js";
+export type {
+  ProductDescriptionSnapshot,
+  ProductSnapshotIssue,
+} from "./traceability/products/snapshot.js";
 export {
   allowedProfiles,
   assertProfileAllowed,
