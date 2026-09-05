@@ -2,6 +2,8 @@
 
 > Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
 
+> Implementation alignment, 2026-09-05: the isolated Profile, Parties and Locations office UI is implemented and reviewed locally, including the subsequent parent-picker recovery correction; see [implementation evidence](../../us/master-data-foundation.md). Broader navigation, products/lots and history panels below remain design targets, not available features. Current navigation exposes only implemented destinations. The profile comes from the dedicated US profile endpoint; `/traceability/access` supplies presentation capabilities only.
+
 > Second brief of the U.S. series. Office mode, desktop-first 1440px, adaptive to 1024/768.
 > Users: Owner / Tenant Admin, QA / Traceability Manager, three operator roles, Auditor (cabinet
 > sign-in, never the station). EN primary, U.S. Spanish secondary. Light + dark. **Delta to
@@ -111,14 +113,13 @@ subscription; error.
 Two entities, deliberately separate (LOC-001): a **party** is who you deal with; a
 **location** is where food physically is — one supplier ships from several packhouses.
 
-**Party list.** Columns: name, legal name, contact, locations count, identifiers text chip
-("GLN · FFRN"), optional bridge chip "linked to counterparty"; search, archived filter
+**Party list.** Columns: name, legal name and contact; the party card shows its locations.
+No RU counterparty link or P1 identifier chip. Search, archived filter
 (`active | all`), "Add party" only with `master_data.write`; row actions edit, archive /
 restore with confirm. No delete anywhere. **Party form** (side panel, as counterparties today):
 name (unique among active parties — `party_name_taken` is a field error), legal name, contact
-name / phone / e-mail, notes; collapsed "Identifiers": GLN (check-digit error), FDA Food
-Facility Registration Number (11 digits), URL; optional link to a RU counterparty. **Party
-card**: header, the party's locations table, "Add location" preset to it, History panel.
+name / phone / e-mail, notes. Identifiers remain P1. US parties are separate from RU counterparties. **Party
+card**: header, all saved contact fields and notes, the party's locations table, and "Add location" preset to it. A History panel is deferred until its read API exists; do not show an empty or fabricated history panel in the current UI.
 
 **Location list.** Role filter chips (six roles, multi-select, `aria-pressed`), party filter,
 archived filter, search. Columns: name, business name, party, city / state, roles as text
@@ -126,16 +127,16 @@ chips, readiness.
 
 **Location form**, grouped as the regulation reads:
 
-| Group                                            | Fields                                                                                                                                                                             |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Location                                         | Party (searchable, active only); internal name ("Portland plant"); roles checkbox group: supplier, processor, ship-from, receive-at, recipient, TLC source                         |
-| Location Description (required for export-ready) | Business name (prefilled from party, editable); phone; address kind radio: street address **or** coordinates (lat / long); city; state code; ZIP; country (ISO select, default US) |
-| Identifiers (optional, collapsed)                | GLN; FDA Food Facility Registration Number; source reference URL                                                                                                                   |
+| Group                                            | Fields                                                                                                                                                                                      |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Location                                         | Party (searchable, active only on creation; read-only afterward); internal name ("Portland plant"); roles checkbox group: supplier, processor, ship-from, receive-at, recipient, TLC source |
+| Location Description (required for export-ready) | Business name (prefilled from party, editable); phone; address kind radio: street address **or** coordinates (lat / long); city; state code; ZIP; country (ISO select, default US)          |
 
 Phone is stored as typed (an extension `x123` survives); placeholder `+1 (503) 555-0120`. ZIP is
-text. In the FSMA profile the seven description fields carry "Required for export-ready" and API
-`issues[]` map to field errors; in the generic profile they are optional with the hint
-"Required before this location can be used in a finalized event". **Readiness indicator** in
+text. Both US profiles allow incomplete drafts; internal name, business name and party remain
+required. Supplied format errors map to field errors. Description fields carry the hint
+"Required before this location can be used in a finalized event"; missing fields explain
+readiness without blocking draft save. **Readiness indicator** in
 list, card and picker: "Export-ready" (check icon) or "Incomplete — missing: phone, ZIP" (warning).
 
 **Same-address warning (P1).** When another active location shares the normalized address, a
@@ -150,9 +151,11 @@ Market Distribution Center, 200 Example Harbor Ave, Seattle, WA 98134 (recipient
 
 States to draw: party list empty ("Add the processor, its suppliers and recipients"), loading,
 error, stale, archived view; party card with zero locations; location list filtered by role;
-form FSMA (required markers) vs generic (hints); API errors on phone and ZIP; coordinates
+form drafts in both profiles (finalized-use hints); supplied-value format errors; coordinates
 variant; incomplete vs export-ready in list and picker; same-address alert; archive confirm;
-`party_name_taken`; Auditor read-only.
+`party_name_taken`; Auditor read-only; archived parent blocking location edit/restore but
+allowing archive. Archiving a party never cascades to locations. Identifier controls and the
+same-address warning stay P1; the current increment implements server contracts, not these screens.
 
 ### 4. Product traceability profile on the product card
 
@@ -257,8 +260,10 @@ not coverage or lot status. Hidden actions are removed; "disabled" means allowed
   style, TLC + source) and "Optional" (identifiers, brand / commodity / variety, dates).
 - **Snapshot note** under every description group: "Finalized events keep a copy of this
   description at finalization; editing here does not change history."
-- **Audit trail panel.** Every card ends with a collapsed "History": time (MM/DD/YYYY hh:mm,
-  tenant timezone), actor, action, before → after, reason when required. Brief 03 reuses it.
+- **Audit trail panel (future connected UI).** Once the history read API exists, cards can end
+  with a collapsed "History": time (MM/DD/YYYY hh:mm, tenant timezone), actor, action,
+  before → after, reason when required. Brief 03 reuses it. Current Parties/Locations cards
+  omit this panel; server audit writes do not imply a browser history view is available.
 - **Formats and wording.** Dates MM/DD/YYYY in the tenant timezone; quantities decimal + unit
   ("500 lb", "100 case"); phone as entered; ZIP as text; state code; ISO country with display
   name. Only the allowed column of `docs/us/limitations.md`; "Data readiness", never a

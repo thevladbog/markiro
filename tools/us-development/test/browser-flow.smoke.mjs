@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { startUsBrowserFixture } from "../browser-fixture.mjs";
+import { exerciseUsMasterData } from "./master-data-flow.mjs";
 
 // Use the separately pinned browser tool workspace. No browser dependency enters
 // the product bundle. NODE_PATH can supply an already installed read-only runtime.
@@ -18,7 +19,7 @@ const { createOTP } = authRequire("@better-auth/utils/otp");
 const { base32 } = authRequire("@better-auth/utils/base32");
 
 test(
-  "US browser: real MFA, organization, profile persistence, EN/ES and mobile",
+  "US browser: real MFA, profile and reference data, EN/ES and mobile",
   { timeout: 90000 },
   async () => {
     const fixture = await startUsBrowserFixture(process.env.US_TEST_DATABASE_URL);
@@ -43,6 +44,7 @@ test(
         }
       });
       const screenshots = await mkdtemp(join(tmpdir(), "markiro-us-browser-"));
+      console.log(`US browser screenshots directory (safe states only): ${screenshots}`);
       await page.goto("http://localhost:5174");
       await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
       await expect(page.getByRole("link", { name: /register|sign up|forgot/i })).toHaveCount(0);
@@ -112,6 +114,7 @@ test(
         page.getByRole("heading", { name: "Traceability profile", exact: true }),
       ).toBeVisible();
       await expect(page.getByText("America/Chicago", { exact: true })).toBeVisible();
+      await exerciseUsMasterData({ page, expect, screenshots, fixture });
       await page.screenshot({ path: join(screenshots, "profile-en.png"), fullPage: true });
       await page.getByRole("button", { name: "Change theme", exact: true }).click();
       await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");

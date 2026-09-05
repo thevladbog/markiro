@@ -6,7 +6,7 @@ Status: implemented and verified locally on 2026-09-05; development-only, releas
 
 The separate admin entry supports English (`en-US`) and Spanish (`es-US`), light/dark themes and narrow mobile layouts. It uses the approved Pencil access/profile layouts and shared Markiro UI components and tokens.
 
-The reachable flow is server edition attestation → password sign-in → authenticator enrollment or fresh MFA challenge → organization selection → initial traceability profile setup → stored, read-only profile summary. A one-use backup code can satisfy the login challenge. Profile and IANA time zone require explicit choices; retention defaults to five calendar years with a minimum of two. Server authorization, baseline, timestamps and persisted retention remain authoritative.
+The reachable flow is server edition attestation → password sign-in → authenticator enrollment or fresh MFA challenge → organization selection → initial traceability profile setup → stored, read-only profile summary → reference data. Reference data contains connected Parties and Locations lists, forms and archive/restore actions, controlled by fresh server capabilities. A one-use backup code can satisfy the login challenge. Profile and IANA time zone require explicit choices; retention defaults to five calendar years with a minimum of two. Server authorization, baseline, timestamps and persisted retention remain authoritative.
 
 Public signup, password recovery, factor replacement, organization creation, profile editing and operational modules are absent. A profile summary explicitly states that receiving, transformation, shipping, plan, request and export workflows are not implemented. It is not an operational dashboard or regulatory-compliance claim.
 
@@ -16,7 +16,9 @@ Enrollment keys, backup codes and passwords stay in transient component state. E
 
 `apps/admin/vite.us.config.ts` uses `apps/admin/us` as its own HTML root and writes only `apps/admin/dist-us`. It does not load primary environment files or copy the RU public directory. The entry rejects imports of other admin application modules, except bundled assets. The ordinary RU entry, router, translations and Vite configuration remain unchanged.
 
-Explicit US configuration and development/test mode are mandatory. Dev and preview bind only to `localhost:5174` with a strict port. The proxy targets the separate local US API on port 3100 and forwards only US auth, deployment metadata and the traceability profile. Unknown `/api` requests return 404; there is no primary API fallback. Client requests have a 15-second deadline covering headers and response-body parsing, no automatic retry, no stored bearer tokens and no redirect following.
+Explicit US configuration and development/test mode are mandatory. Dev and preview bind only to `localhost:5174` with a strict port. The proxy targets the separate local US API on port 3100 and forwards only US auth, deployment metadata, the traceability profile and exact party/location collection or UUID item paths. Unknown `/api` requests return 404; there is no primary API fallback. Client requests have a 15-second deadline covering headers and response-body parsing, no automatic retry, no stored bearer tokens and no redirect following.
+
+The subsequent [master-data increment](master-data-foundation.md) adds typed party/location operations, their narrowly scoped proxy routes and navigable EN/ES lists/forms. The exact `/traceability/access` route exposes presentation-only capability metadata; the server still authorizes every business operation independently. Users return to Profile for sign-out, and cannot leave while a mutation is settling. The initial-flow verification below remains historical evidence; the master-data record contains current UI/browser checks and remaining acceptance limits.
 
 After building the existing shared UI and contracts packages, run from the US worktree:
 

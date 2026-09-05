@@ -59,21 +59,23 @@ env -i "$(command -v node)" --env-file=deploy/us-development/local.env.example a
 
 The clean child environment prevents inherited primary credentials, Node preload options or shell settings from overriding the synthetic example. Do not load the primary `.env`. Metadata and liveness start without dependency containers; auth and profile operations require the isolated PostgreSQL schema. Startup never migrates or seeds it. The process binds to `127.0.0.1:3100`; stop it with Ctrl-C. Use the configured `BETTER_AUTH_URL` hostname for auth/profile requests: `localhost` and `127.0.0.1` are not interchangeable authorities or cookie scopes.
 
-| Endpoint                                            | Result                                                             |
-| --------------------------------------------------- | ------------------------------------------------------------------ |
-| `GET /deployment`                                   | US edition, release disabled, `en-US` / `es-US` locale metadata    |
-| `GET /health/live`                                  | 200, process alive                                                 |
-| `GET /health/ready`                                 | 503, `us_business_modules_not_ready`                               |
-| Allowed `/api/us-auth/*` methods                    | US session/MFA and organization selection; no public signup        |
-| `GET /traceability/profile`                         | MFA and settings capability required; absent profile returns 503   |
-| `PUT /traceability/profile`                         | Initial profile provisioning; identical retry returns the original |
-| RU business, auth and not-yet-implemented US routes | 404                                                                |
+| Endpoint                                            | Result                                                                                                |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `GET /deployment`                                   | US edition, release disabled, `en-US` / `es-US` locale metadata                                       |
+| `GET /health/live`                                  | 200, process alive                                                                                    |
+| `GET /health/ready`                                 | 503, `us_business_modules_not_ready`                                                                  |
+| Allowed `/api/us-auth/*` methods                    | US session/MFA and organization selection; no public signup                                           |
+| `GET /traceability/profile`                         | MFA and US read capability; absent profile returns 503 only to settings administrators, otherwise 403 |
+| `PUT /traceability/profile`                         | Initial profile provisioning; identical retry returns the original                                    |
+| RU business, auth and not-yet-implemented US routes | 404                                                                                                   |
 
-Only the US auth/profile composition and its owned database pool are registered; no RU auth factory, scheduler or outbound client is loaded. Business requests enforce the configured Host, trusted mutation Origin, JSON-only bodies up to 16 KiB and `Cache-Control: no-store`. Forwarding headers are not trusted. Missing/incompatible database tables fail closed with a sanitized 503; no automatic repair runs. The pool uses server-side statement cancellation and closes with the application.
+The subsequent [master-data foundation](master-data-foundation.md) also registers GET/POST collections and GET/PATCH UUID items for `/traceability/parties` and `/traceability/locations`. These require a verified US session, current capability and a valid persisted profile. There are no DELETE routes. The presentation-only `GET /traceability/access` returns the fresh principal's capability list after session/MFA verification; it may be read before profile setup and neither authorizes a business operation nor signals that setup is required. The local browser proxy permits only that exact route and the exact master-data paths in addition to the access/profile routes above; other business paths remain closed.
+
+Only the US auth/profile/master-data composition and its owned database pool are registered; no RU auth factory, scheduler or outbound client is loaded. Business requests enforce the configured Host, trusted mutation Origin, JSON-only bodies up to 16 KiB and `Cache-Control: no-store`. Forwarding headers are not trusted. Missing/incompatible database tables fail closed with a sanitized 503; no automatic repair runs. The pool uses server-side statement cancellation and closes with the application.
 
 Readiness deliberately remains unavailable while other business modules are unfinished. The [separate US browser entry](browser-entry.md) now adds an isolated build and server edition attestation; matching environment values alone are not proof of frontend isolation. Local synthetic-owner provisioning is explicit, never automatic. Recovery remains unavailable. Do not connect the RU admin to this API.
 
-Profile tenant and actor are derived from the verified session, never client IDs. Every request reloads membership; the store checks settings capability within its transaction. `PUT` accepts only `code`, explicit IANA `timeZone` and optional `retentionYears` (default 5). The server fixes the baseline and timestamps. Identical retries create no extra audit event; a different configuration returns 409. This is initial provisioning, not profile switching or settings editing. Every HTTP request gets a fresh server-generated request ID; profile creation records that ID in its atomic audit event.
+Profile tenant and actor are derived from the verified session, never client IDs. Every request reloads membership and resolves the [isolated US capabilities](access-foundation.md); the store checks read/settings capability inside its transaction while locking the membership row. `PUT` accepts only `code`, explicit IANA `timeZone` and optional `retentionYears` (default 5). The server fixes the baseline and timestamps. Identical retries still require settings permission and create no extra audit event; a different configuration returns 409. This is initial provisioning, not profile switching or settings editing. Every HTTP request gets a fresh server-generated request ID; profile creation records that ID in its atomic audit event.
 
 After building, `node --test tools/us-development/test/runtime-entry.smoke.mjs` exercises the actual executables, including rejection and graceful shutdown. It temporarily reserves port 3100; stop a manually running US API before this check.
 

@@ -15,11 +15,28 @@ test("actual US Vite proxy reaches only the independent API with its configured 
       interfaceLocales: ["en-US", "es-US"],
       defaultInterfaceLocale: "en-US",
     });
-    const profile = await fetch("http://localhost:5174/api/us/traceability/profile");
-    assert.equal(profile.status, 401);
-    assert.equal(profile.headers.get("cache-control"), "no-store");
-    await profile.arrayBuffer();
-    for (const route of ["/api/auth/get-session", "/api/boxes", "/api/us/boxes"]) {
+    for (const route of [
+      "/api/us/traceability/profile",
+      "/api/us/traceability/access",
+      "/api/us/traceability/parties?archived=false&limit=50&offset=0",
+      "/api/us/traceability/locations?roles=supplier&roles=receive_at",
+      "/api/us/traceability/parties/a0000000-0000-4000-8000-000000000001",
+      "/api/us/traceability/locations/b0000000-0000-4000-8000-000000000002",
+    ]) {
+      const response = await fetch(`http://localhost:5174${route}`);
+      assert.equal(response.status, 401, `US route must reach session guard: ${route}`);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      await response.arrayBuffer();
+    }
+    for (const route of [
+      "/api/auth/get-session",
+      "/api/boxes",
+      "/api/us/boxes",
+      "/api/us/traceability/parties-extra",
+      "/api/us/traceability/locations/invalid-id",
+      "/api/us/traceability/parties/a0000000-0000-4000-8000-000000000001/exports",
+      "/api/us/traceability/lots",
+    ]) {
       const response = await fetch(`http://localhost:5174${route}`);
       assert.equal(response.status, 404);
       await response.arrayBuffer();

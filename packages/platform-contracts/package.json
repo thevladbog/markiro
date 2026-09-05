@@ -23,6 +23,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@markiro/domain": "workspace:*"
+  },
   "peerDependencies": {
     "zod": "4.4.3"
   },

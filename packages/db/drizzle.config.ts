@@ -6,6 +6,7 @@ export default defineConfig({
   // generate; see src/schema/codes.ts
   schema: [
     "./src/schema/traceability.ts",
+    "./src/schema/traceability-master-data.ts",
     "./src/schema/us-auth.ts",
     "./src/schema/auth.ts",
     "./src/schema/platform.ts",

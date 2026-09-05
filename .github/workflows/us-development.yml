@@ -51,17 +51,18 @@ jobs:
       - name: Build shared browser components
         run: pnpm --filter @markiro/ui build
       - name: Verify US browser flow and contracts
-        run: pnpm --filter @markiro/admin exec vitest run test/us-client.test.ts test/us-app.test.tsx
+        run: pnpm --filter @markiro/admin exec vitest run test/us-client.test.ts test/us-master-data-client.test.ts test/us-master-data-forms.test.ts test/us-master-data-ui.test.tsx test/us-app.test.tsx
       - name: Build local-only US browser entry
         env:
           VITE_DEPLOYMENT_EDITION: US
         run: pnpm --filter @markiro/admin build:us
       - name: Verify compiled local-only runtime
         run: node --test tools/us-development/test/runtime-entry.smoke.mjs tools/us-development/test/owner-command.smoke.mjs
-      - name: Verify US profile and session persistence on disposable databases
+      - name: Verify US profile, session and master-data persistence on disposable databases
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: |
-          pnpm --filter @markiro/platform-contracts exec vitest run test/us-profile.test.ts
-          pnpm --filter @markiro/db exec vitest run test/traceability-profile-schema.test.ts test/traceability-profile-migration.e2e.test.ts test/us-auth-schema.test.ts test/us-auth-migration.e2e.test.ts
-          pnpm --filter @markiro/api exec vitest run test/us-profile-store.e2e.test.ts test/us-auth.e2e.test.ts test/us-http.e2e.test.ts test/us-owner-command.test.ts test/us-development-owner.e2e.test.ts
+          pnpm --filter @markiro/domain exec vitest run test/traceability-location-description.test.ts test/us-access.test.ts
+          pnpm --filter @markiro/platform-contracts exec vitest run test/us-profile.test.ts test/us-access.test.ts test/us-master-data.test.ts
+          pnpm --filter @markiro/db exec vitest run test/traceability-profile-schema.test.ts test/traceability-profile-migration.e2e.test.ts test/us-auth-schema.test.ts test/us-auth-migration.e2e.test.ts test/traceability-master-data-schema.test.ts test/traceability-master-data-migration.e2e.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-profile-store.e2e.test.ts test/us-auth.e2e.test.ts test/us-http.e2e.test.ts test/us-master-data.e2e.test.ts test/us-master-data-http.e2e.test.ts test/us-owner-command.test.ts test/us-development-owner.e2e.test.ts

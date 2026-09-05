@@ -1,5 +1,19 @@
 export { gs1CheckDigit, hasValidCheckDigit } from "./gs1/check-digit.js";
 export { DomainError } from "./errors.js";
+export { US_CAPABILITY, resolveUsAccess, hasUsCapabilities } from "./traceability/access.js";
+export type { UsCapability, UsRole, UsAccess } from "./traceability/access.js";
+export {
+  TRACEABILITY_LOCATION_ROLES,
+  buildLocationDescriptionSnapshot,
+  validateLocationDescription,
+} from "./traceability/location-description.js";
+export type {
+  LocationDescriptionInput,
+  LocationDescriptionIssue,
+  LocationDescriptionSnapshot,
+  TraceabilityLocationRole,
+} from "./traceability/location-description.js";
+export { normalizeCatalogGtin } from "./traceability/products/gtin.js";
 export {
   allowedProfiles,
   assertProfileAllowed,

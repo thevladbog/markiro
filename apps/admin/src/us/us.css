@@ -9,6 +9,14 @@ body {
   color: var(--fg-1);
   font-family: var(--font-ui);
 }
+.us-app--workspace {
+  display: block;
+  position: relative;
+}
+.us-tools--workspace {
+  position: fixed;
+  z-index: 20;
+}
 .us-brand {
   background: var(--surface-inverse);
   color: #f4f8f5;

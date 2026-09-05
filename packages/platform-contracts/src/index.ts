@@ -377,3 +377,37 @@ export type {
   ProvisionUsTraceabilityProfileInput,
   UsTraceabilityProfileSummary,
 } from "./traceability/profile.js";
+export {
+  createUsLocationSchema,
+  createUsPartySchema,
+  listUsLocationsQuerySchema,
+  listUsPartiesQuerySchema,
+  updateUsLocationSchema,
+  updateUsPartySchema,
+  usLocationListSchema,
+  usLocationSchema,
+  usPartyListSchema,
+  usPartySchema,
+} from "./traceability/master-data.js";
+export type {
+  CreateUsLocation,
+  CreateUsParty,
+  ListUsLocationsQuery,
+  ListUsPartiesQuery,
+  UpdateUsLocation,
+  UpdateUsParty,
+  UsLocation,
+  UsParty,
+} from "./traceability/master-data.js";
+export { usTraceabilityAccessSchema } from "./traceability/access.js";
+export type { UsTraceabilityAccess } from "./traceability/access.js";
+export {
+  createUsProductSchema,
+  updateUsProductSchema,
+  usProductSchema,
+} from "./traceability/catalog.js";
+export type {
+  CreateUsProductInput,
+  UpdateUsProductInput,
+  UsProduct,
+} from "./traceability/catalog.js";

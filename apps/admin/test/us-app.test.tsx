@@ -174,6 +174,38 @@ describe("US access and profile application", () => {
     expect(send.mock.calls.map(([path]) => path)).toContain("/api/us/traceability/profile");
   });
 
+  it("enters connected reference data from the profile and always returns to the profile", async () => {
+    const profile = {
+      code: "US_FSMA204_PROCESSOR",
+      timeZone: "America/Chicago",
+      retentionYears: 5,
+      baselineVersion: "US-REG-2026-09-03",
+      effectiveAt: "2026-09-05T00:00:00.000Z",
+    };
+    const { send } = renderWith((path) => {
+      if (path === "/api/us/deployment") return json(metadata);
+      if (path.endsWith("get-session"))
+        return json({
+          user: { ...user, twoFactorEnabled: true },
+          session: { activeOrganizationId: "org-1" },
+        });
+      if (path.endsWith("organization/list"))
+        return json([{ id: "org-1", name: "Synthetic Foods", slug: "synthetic" }]);
+      if (path === "/api/us/traceability/profile") return json(profile);
+      if (path === "/api/us/traceability/access")
+        return json({ capabilities: ["traceability.read"] });
+      if (path.startsWith("/api/us/traceability/parties?"))
+        return json({ items: [], limit: 50, offset: 0 });
+      return json({}, 404);
+    });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Open reference data" }));
+    expect(await screen.findByRole("heading", { name: "Parties" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /Profile/ }));
+    expect(await screen.findByRole("heading", { name: "Traceability profile" })).toBeTruthy();
+    expect(send.mock.calls.map(([path]) => path)).toContain("/api/us/traceability/access");
+  });
+
   it("clears enrollment password when signing out before another account", async () => {
     renderWith((path) => {
       if (path === "/api/us/deployment") return json(metadata);

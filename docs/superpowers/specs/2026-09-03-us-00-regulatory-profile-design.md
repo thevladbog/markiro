@@ -4,7 +4,7 @@
 
 **Date:** 2026-09-03
 
-**Status:** Partially implemented, 2026-09-05. Domain helpers, local runtime boundary, profile persistence and the independent US HTTP/session/MFA integration exist. Frontend, explicit user provisioning, recovery, remaining US-00 acceptance and hosted acceptance remain open. See the current [implementation plan](../../us/implementation-plan.md). The sections below remain the target design, not a completion report.
+**Status:** Partially implemented, 2026-09-05. Domain helpers, local runtime boundary, profile persistence, independent US HTTP/session/MFA, local browser access/profile screens and explicit synthetic-owner provisioning exist. The [isolated US access policy](../../us/access-foundation.md) adds role resolution and profile authorization. Recovery, auth-event audit, role administration, remaining US-00 acceptance and hosted acceptance remain open. See the current [implementation plan](../../us/implementation-plan.md). The sections below remain the target design, not a completion report.
 
 **Slice:** US-00 from docs/us/implementation-plan.md; depends on nothing (opens the U.S. series)
 
@@ -100,19 +100,19 @@ Capability set (PRO-006), added to `CABINET_CAPABILITY`:
 | `traceability.qa.manage`            | Finalize/amend/void, FTL review, plan approve, trace request |
 | `traceability.export.read`          | Download export runs, plan PDFs, request packages            |
 
-New Better Auth organization roles (registered in `organization-access.ts` with `memberAc.statements` and `apiKey: []`, exactly like `manager`) and their capabilities in `ROLE_CAPABILITIES`:
+Owner decision, 2026-09-05: keep the US role/capability resolver separate in `packages/domain/src/traceability/access.ts`. Do not expand the RU `CABINET_CAPABILITY`, `ROLE_CAPABILITIES`, or shared Better Auth role registration. The isolated US principal reloads membership and resolves the matrix below. Future US-only role-assignment routes must register their own allowed roles without exposing the RU Team/API-key surface; those routes are not implemented by the access foundation.
 
-| Role                        | Capabilities                                                                             |
-| --------------------------- | ---------------------------------------------------------------------------------------- |
-| `traceability_receiving`    | read, receiving.write                                                                    |
-| `traceability_production`   | read, transformation.write                                                               |
-| `traceability_shipping`     | read, shipping.write                                                                     |
-| `traceability_qa`           | read, master_data.write, receiving/transformation/shipping.write, qa.manage, export.read |
-| `traceability_auditor`      | read, export.read                                                                        |
-| `manager` (existing)        | existing + read, master_data.write, receiving/transformation/shipping.write              |
-| `admin`, `owner` (existing) | existing + all seven                                                                     |
+| Role                             | Capabilities                                                                             |
+| -------------------------------- | ---------------------------------------------------------------------------------------- |
+| `traceability_receiving`         | read, receiving.write                                                                    |
+| `traceability_production`        | read, transformation.write                                                               |
+| `traceability_shipping`          | read, shipping.write                                                                     |
+| `traceability_qa`                | read, master_data.write, receiving/transformation/shipping.write, qa.manage, export.read |
+| `traceability_auditor`           | read, export.read                                                                        |
+| `manager` (US resolution)        | read, master_data.write, receiving/transformation/shipping.write                         |
+| `admin`, `owner` (US resolution) | all seven + tenant.settings.manage, members.manage                                       |
 
-Multi-role memberships (`manager,traceability_qa`) already union. The five roles are cabinet users (Better Auth), never station operators (NFR-002). Profile PUT reuses the existing `tenant.settings.manage`; no new settings capability.
+Multi-role memberships (`manager,traceability_qa`) union within the US resolver. Unknown roles grant nothing. US resolution does not grant RU operations, integration, billing or credential capabilities. The five roles are cabinet users (Better Auth), never station operators (NFR-002). Profile PUT uses the existing capability name `tenant.settings.manage`; only US owner/admin receive it. Profile GET requires `traceability.read`; when the profile is absent, only settings administrators receive the setup signal and other readers receive 403.
 
 ### Contracts and API
 

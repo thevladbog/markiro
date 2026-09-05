@@ -290,6 +290,23 @@ describe.skipIf(!url)("US session and MFA boundary on isolated PostgreSQL", () =
     await expect(principal()).rejects.toMatchObject({ status: 403 });
   });
 
+  it("resolves US permissions from current membership, never cached session role", async () => {
+    await fixture.db
+      .update(schema.member)
+      .set({ role: "traceability_auditor" })
+      .where(eq(schema.member.userId, userId));
+    await enroll();
+    const sessionId = (await principal()).sessionId;
+    for (const [role, capabilities] of [
+      ["traceability_auditor", ["traceability.read", "traceability.export.read"]],
+      ["traceability_receiving", ["traceability.read", "traceability.receiving.write"]],
+      ["unknown", []],
+    ] as const) {
+      await fixture.db.update(schema.member).set({ role }).where(eq(schema.member.userId, userId));
+      expect(await principal()).toMatchObject({ userId, tenantId, sessionId, capabilities });
+    }
+  });
+
   it("revokes access immediately and cascades assurance when the session is deleted", async () => {
     await enroll();
     const current = await principal();

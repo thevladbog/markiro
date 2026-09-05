@@ -4,7 +4,12 @@ import {
   ForbiddenException,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { CABINET_CAPABILITY, resolveCabinetAccess } from "@markiro/domain";
+import {
+  US_CAPABILITY,
+  resolveUsAccess,
+  hasUsCapabilities,
+  type UsCapability,
+} from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import {
   provisionUsTraceabilityProfileSchema,
@@ -25,21 +30,23 @@ export interface UsProfileSummary extends ProvisionUsTraceabilityProfileInput {
 export class UsProfileStore {
   constructor(private readonly db: Db) {}
 
-  private async authorize(tx: Transaction, tenantId: string, actorUserId: string) {
+  private async authorize(
+    tx: Transaction,
+    tenantId: string,
+    actorUserId: string,
+    required: UsCapability,
+  ) {
     const [membership] = await tx
       .select({ role: schema.member.role })
       .from(schema.member)
       .where(and(eq(schema.member.organizationId, tenantId), eq(schema.member.userId, actorUserId)))
       .limit(1)
       .for("share");
-    if (
-      !membership ||
-      !resolveCabinetAccess(membership.role).capabilities.includes(
-        CABINET_CAPABILITY.TENANT_SETTINGS_MANAGE,
-      )
-    ) {
+    const access = resolveUsAccess(membership?.role ?? "");
+    if (!membership || !hasUsCapabilities(access.capabilities, [required])) {
       throw new ForbiddenException({ code: "insufficient_permission" });
     }
+    return access;
   }
 
   private async stored(tx: Transaction, tenantId: string): Promise<UsProfileSummary | undefined> {
@@ -76,10 +83,15 @@ export class UsProfileStore {
 
   async read(tenantId: string, actorUserId: string): Promise<UsProfileSummary> {
     return this.db.transaction(async (tx) => {
-      await this.authorize(tx, tenantId, actorUserId);
+      const access = await this.authorize(tx, tenantId, actorUserId, US_CAPABILITY.READ);
       const profile = await this.stored(tx, tenantId);
-      if (!profile)
+      if (!profile) {
+        // Only settings administrators may enter initial setup. Other readers
+        // must not receive the special missing-profile signal used by the UI.
+        if (!hasUsCapabilities(access.capabilities, [US_CAPABILITY.SETTINGS_MANAGE]))
+          throw new ForbiddenException({ code: "insufficient_permission" });
         throw new ServiceUnavailableException({ code: "traceability_profile_not_provisioned" });
+      }
       return profile;
     });
   }
@@ -91,7 +103,7 @@ export class UsProfileStore {
     requestId: string,
   ): Promise<UsProfileSummary> {
     return this.db.transaction(async (tx) => {
-      await this.authorize(tx, tenantId, actorUserId);
+      await this.authorize(tx, tenantId, actorUserId, US_CAPABILITY.SETTINGS_MANAGE);
       const parsed = provisionUsTraceabilityProfileSchema.safeParse(input);
       if (!parsed.success) throw new BadRequestException({ code: "invalid_traceability_profile" });
       const value = parsed.data;

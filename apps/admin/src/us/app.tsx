@@ -3,10 +3,13 @@ import { Button, Checkbox, Input, Select, useTheme } from "@markiro/ui";
 import i18next from "i18next";
 import { I18nextProvider, useTranslation } from "react-i18next";
 import { createUsBrowserClient, UsClientError, type UsBrowserClient } from "./client.js";
+import { masterDataCopy } from "./master-data/copy.js";
+import { MasterDataWorkspace } from "./master-data/workspace.js";
 
 const copy = {
   "en-US": {
     translation: {
+      ...masterDataCopy["en-US"],
       brandTitle: "Lot records, from receipt to shipment.",
       brandBody: "Traceability built for daily operations.",
       signIn: "Sign in",
@@ -67,10 +70,12 @@ const copy = {
       organization: "Organization",
       staleLogoutFailed:
         "Your password session is no longer MFA-verified. Sign in again. Server sign-out failed. Your session may still be active.",
+      openReferenceData: "Open reference data",
     },
   },
   "es-US": {
     translation: {
+      ...masterDataCopy["es-US"],
       brandTitle: "Registros de lotes, desde la recepción hasta el envío.",
       brandBody: "Trazabilidad creada para las operaciones diarias.",
       signIn: "Iniciar sesión",
@@ -131,6 +136,7 @@ const copy = {
       organization: "Organización",
       staleLogoutFailed:
         "Su sesión de contraseña ya no está verificada con MFA. Inicie sesión de nuevo. El cierre de sesión del servidor falló. Su sesión puede seguir activa.",
+      openReferenceData: "Abrir datos de referencia",
     },
   },
 } as const;
@@ -154,6 +160,7 @@ type Stage =
   | "organizations"
   | "profile-setup"
   | "profile"
+  | "master-data"
   | "profile-error"
   | "access-error";
 type Org = Awaited<ReturnType<UsBrowserClient["organizations"]>>[number];
@@ -456,6 +463,38 @@ function UsApplication({ client }: { client: UsBrowserClient }) {
   }
   const secret = enrollment ? new URL(enrollment.totpURI).searchParams.get("secret") : null;
 
+  if (stage === "master-data" && profile && selectedOrganization) {
+    return (
+      <main className="us-app us-app--workspace">
+        <div className="us-tools us-tools--workspace">
+          <Button
+            size="compact"
+            variant="secondary"
+            aria-label={t("language")}
+            onClick={() => void i18n.changeLanguage(i18n.language === "es-US" ? "en-US" : "es-US")}
+          >
+            {i18n.language === "es-US" ? t("english") : t("spanish")}
+          </Button>
+          <Button
+            size="compact"
+            variant="secondary"
+            aria-label={t("theme")}
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          >
+            {theme === "dark" ? "☀" : "☾"}
+          </Button>
+        </div>
+        <MasterDataWorkspace
+          client={client}
+          organization={selectedOrganization}
+          profile={profile}
+          onBack={() => setStage("profile")}
+          onSessionLost={sessionLost}
+        />
+      </main>
+    );
+  }
+
   return (
     <main className="us-app">
       <aside className="us-brand">
@@ -679,6 +718,7 @@ function UsApplication({ client }: { client: UsBrowserClient }) {
                 </dd>
               </dl>
               <p className="us-notice">{t("unfinished")}</p>
+              <Button onClick={() => setStage("master-data")}>{t("openReferenceData")}</Button>
               <Button variant="secondary" disabled={logoutPending} onClick={() => void logout()}>
                 {t("signOut")}
               </Button>

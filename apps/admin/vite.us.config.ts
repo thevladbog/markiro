@@ -18,6 +18,17 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
       changeOrigin: true,
       rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
     },
+    "^/api/us/traceability/access$": {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    "^/api/us/traceability/(parties|locations)(/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})?(\\?.*)?$":
+      {
+        target: "http://localhost:3100",
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+      },
   };
   function rejectUnknownApi(server: Pick<ViteDevServer, "middlewares">) {
     server.middlewares.use((request, response, next) => {

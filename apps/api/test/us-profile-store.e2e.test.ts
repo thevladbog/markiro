@@ -141,6 +141,50 @@ describe.skipIf(!url)("US profile store with real isolated PostgreSQL", () => {
   });
 
   it.each([
+    "manager",
+    "traceability_receiving",
+    "traceability_production",
+    "traceability_shipping",
+    "traceability_qa",
+    "traceability_auditor",
+  ])("lets %s read a stored profile without settings access", async (role) => {
+    const original = await store.provision(tenantId, actorUserId, input, "owner-created");
+    await fixture.db.update(schema.member).set({ role }).where(eq(schema.member.id, memberId));
+    expect(await store.read(tenantId, actorUserId)).toEqual(original);
+    await expect(
+      store.provision(tenantId, actorUserId, input, "reader-retry"),
+    ).rejects.toMatchObject({ status: 403 });
+    await fixture.db
+      .update(schema.member)
+      .set({ role: "unknown" })
+      .where(eq(schema.member.id, memberId));
+    await expect(store.read(tenantId, actorUserId)).rejects.toMatchObject({ status: 403 });
+    const audits = await fixture.db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(eq(schema.tenantAuditEvents.organizationId, tenantId));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      actorUserId,
+      action: "traceability.profile.updated",
+      outcome: "success",
+      requestId: "owner-created",
+      after: original,
+    });
+  });
+
+  it.each(["traceability_receiving", "traceability_qa", "traceability_auditor"])(
+    "does not offer initial provisioning to %s when a profile is absent",
+    async (role) => {
+      await fixture.db.update(schema.member).set({ role }).where(eq(schema.member.id, memberId));
+      await expect(store.read(tenantId, actorUserId)).rejects.toMatchObject({ status: 403 });
+      await expect(
+        store.provision(tenantId, actorUserId, input, "reader-create"),
+      ).rejects.toMatchObject({ status: 403 });
+    },
+  );
+
+  it.each([
     { code: "RU_CHZ", timeZone: "America/Chicago" },
     { code: "US_FSMA204_PROCESSOR" },
     { ...input, retentionYears: 1 },

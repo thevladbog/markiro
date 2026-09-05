@@ -97,6 +97,14 @@ test("US proxy never forwards RU routes and preserves configured API Host", asyn
     "/api/boxes",
     "/api/us/boxes",
     "/api/us/deployment-evil",
+    "/api/us/traceability/parties-extra",
+    "/api/us/traceability/access?forged=1",
+    "/api/us/traceability/access/",
+    "/api/us/traceability/locations/invalid-id",
+    "/api/us/traceability/parties/../profile",
+    "/api/us/traceability/parties/%2e%2e/profile",
+    "/api/us/traceability/parties/a0000000-0000-4000-8000-000000000001/exports",
+    "/api/us/traceability/lots",
   ])
     assert.equal(
       routes.some(([pattern]) => new RegExp(pattern.slice(1)).test(path)),
@@ -106,6 +114,20 @@ test("US proxy never forwards RU routes and preserves configured API Host", asyn
     ["/api/us-auth/get-session", "/api/us-auth/get-session"],
     ["/api/us/deployment", "/deployment"],
     ["/api/us/traceability/profile", "/traceability/profile"],
+    ["/api/us/traceability/access", "/traceability/access"],
+    ["/api/us/traceability/parties?limit=20", "/traceability/parties?limit=20"],
+    [
+      "/api/us/traceability/locations?roles=supplier&roles=receive_at",
+      "/traceability/locations?roles=supplier&roles=receive_at",
+    ],
+    [
+      "/api/us/traceability/parties/a0000000-0000-4000-8000-000000000001",
+      "/traceability/parties/a0000000-0000-4000-8000-000000000001",
+    ],
+    [
+      "/api/us/traceability/locations/b0000000-0000-4000-8000-000000000002",
+      "/traceability/locations/b0000000-0000-4000-8000-000000000002",
+    ],
   ]) {
     const match = routes.find(([pattern]) => new RegExp(pattern.slice(1)).test(input));
     assert.ok(match);

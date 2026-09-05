@@ -1,7 +1,20 @@
 import { z } from "zod";
 import {
+  createUsLocationSchema,
+  createUsPartySchema,
+  listUsLocationsQuerySchema,
+  listUsPartiesQuerySchema,
+  platformUuidSchema,
   provisionUsTraceabilityProfileSchema,
+  updateUsLocationSchema,
+  updateUsPartySchema,
+  usLocationListSchema,
+  usLocationSchema,
+  usPartyListSchema,
+  usPartySchema,
+  usTraceabilityAccessSchema,
   usTraceabilityProfileSummarySchema,
+  type ListUsLocationsQuery,
 } from "@markiro/platform-contracts";
 
 export type UsClientErrorCode =
@@ -9,6 +22,7 @@ export type UsClientErrorCode =
   | "invalid_response"
   | "session_required"
   | "forbidden"
+  | "party_archived"
   | "conflict"
   | "rate_limited"
   | "profile_not_provisioned"
@@ -64,6 +78,9 @@ const enrollmentSchema = z.object({
 });
 const passwordSchema = z.string().min(1).max(128);
 const profilePath = "/api/us/traceability/profile";
+const accessPath = "/api/us/traceability/access";
+const partiesPath = "/api/us/traceability/parties";
+const locationsPath = "/api/us/traceability/locations";
 const deploymentSchema = z
   .object({
     edition: z.literal("US"),
@@ -81,6 +98,19 @@ function checked<S extends z.ZodType>(
   const result = schema.safeParse(value);
   if (!result.success) throw new UsClientError(code);
   return result.data;
+}
+
+/** Serialize validated fields only; repeated roles retain the server's AND semantics. */
+function masterDataQuery(query: ListUsLocationsQuery): string {
+  const params = new URLSearchParams({
+    archived: query.archived,
+    limit: String(query.limit),
+    offset: String(query.offset),
+  });
+  if (query.search !== undefined) params.set("search", query.search);
+  if (query.partyId !== undefined) params.set("partyId", query.partyId);
+  for (const role of query.roles ?? []) params.append("roles", role);
+  return params.toString();
 }
 
 /** Only fixed same-origin US routes; no RU client imports, retries or persistence.
@@ -124,6 +154,11 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
             .success
         )
           throw new UsClientError("profile_not_provisioned");
+        if (
+          response.status === 403 &&
+          z.object({ code: z.literal("party_archived") }).safeParse(value).success
+        )
+          throw new UsClientError("party_archived");
         const errors: Record<number, UsClientErrorCode> = {
           401: "session_required",
           403: "forbidden",
@@ -196,12 +231,65 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
       await request("/api/us-auth/sign-out", z.object({ success: z.literal(true) }), "POST", {});
     },
     profile: () => request(profilePath, usTraceabilityProfileSummarySchema),
+    access: () => request(accessPath, usTraceabilityAccessSchema),
     async provisionProfile(input: unknown) {
       return request(
         profilePath,
         usTraceabilityProfileSummarySchema,
         "PUT",
         checked(provisionUsTraceabilityProfileSchema, input, "invalid_input"),
+      );
+    },
+    async listParties(input: unknown = {}) {
+      const query = checked(listUsPartiesQuerySchema, input, "invalid_input");
+      return request(`${partiesPath}?${masterDataQuery(query)}`, usPartyListSchema);
+    },
+    async getParty(id: unknown) {
+      return request(
+        `${partiesPath}/${checked(platformUuidSchema, id, "invalid_input")}`,
+        usPartySchema,
+      );
+    },
+    async createParty(input: unknown) {
+      return request(
+        partiesPath,
+        usPartySchema,
+        "POST",
+        checked(createUsPartySchema, input, "invalid_input"),
+      );
+    },
+    async updateParty(id: unknown, input: unknown) {
+      return request(
+        `${partiesPath}/${checked(platformUuidSchema, id, "invalid_input")}`,
+        usPartySchema,
+        "PATCH",
+        checked(updateUsPartySchema, input, "invalid_input"),
+      );
+    },
+    async listLocations(input: unknown = {}) {
+      const query = checked(listUsLocationsQuerySchema, input, "invalid_input");
+      return request(`${locationsPath}?${masterDataQuery(query)}`, usLocationListSchema);
+    },
+    async getLocation(id: unknown) {
+      return request(
+        `${locationsPath}/${checked(platformUuidSchema, id, "invalid_input")}`,
+        usLocationSchema,
+      );
+    },
+    async createLocation(input: unknown) {
+      return request(
+        locationsPath,
+        usLocationSchema,
+        "POST",
+        checked(createUsLocationSchema, input, "invalid_input"),
+      );
+    },
+    async updateLocation(id: unknown, input: unknown) {
+      return request(
+        `${locationsPath}/${checked(platformUuidSchema, id, "invalid_input")}`,
+        usLocationSchema,
+        "PATCH",
+        checked(updateUsLocationSchema, input, "invalid_input"),
       );
     },
   };

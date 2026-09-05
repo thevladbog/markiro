@@ -9,6 +9,7 @@ import {
 import { allowedInterfaceLocales } from "@markiro/domain";
 import { UsRuntime } from "./us-runtime";
 import { UsProfileController, UsSessionGuard } from "./us-profile.controller";
+import { UsMasterDataController } from "./us-master-data.controller";
 
 @Controller()
 class UsDevelopmentController {
@@ -43,7 +44,7 @@ export class UsDevelopmentModule {
   static register(runtime: UsRuntime): DynamicModule {
     return {
       module: UsDevelopmentModule,
-      controllers: [UsDevelopmentController, UsProfileController],
+      controllers: [UsDevelopmentController, UsProfileController, UsMasterDataController],
       providers: [{ provide: UsRuntime, useValue: runtime }, UsSessionGuard],
     };
   }

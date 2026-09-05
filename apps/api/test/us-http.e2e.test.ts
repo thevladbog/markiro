@@ -324,6 +324,24 @@ describe.skipIf(!base)("US HTTP auth and profile composition", () => {
     expect((await profileRequest()).status).toBe(403);
   });
 
+  it("allows an MFA-verified US auditor to read but never provision a profile", async () => {
+    await login();
+    expect((await profileRequest("PUT", profile)).status).toBe(200);
+    await fixture.db
+      .update(schema.member)
+      .set({ role: "traceability_auditor" })
+      .where(eq(schema.member.userId, userId));
+    const response = await profileRequest();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject(profile);
+    expect((await profileRequest("PUT", profile)).status).toBe(403);
+    await fixture.db
+      .update(schema.member)
+      .set({ role: "member" })
+      .where(eq(schema.member.userId, userId));
+    expect((await profileRequest()).status).toBe(403);
+  });
+
   it("rejects selecting a tenant outside the current membership", async () => {
     await login();
     const other = randomUUID();

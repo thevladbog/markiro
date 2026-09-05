@@ -7,11 +7,13 @@ import type { createDb } from "@markiro/db";
 import type { Env } from "../env";
 import { createUsAuth, type UsAuth } from "../modules/traceability/auth/us-auth";
 import { UsProfileStore } from "../modules/traceability/profile/us-profile-store";
+import { UsMasterDataStore } from "../modules/traceability/master-data/us-master-data-store";
 
 /** Owns only the explicitly supplied US pool; never imports RU application providers. */
 export class UsRuntime implements OnApplicationShutdown {
   readonly auth: UsAuth;
   readonly profiles: UsProfileStore;
+  readonly masterData: UsMasterDataStore;
 
   constructor(
     readonly env: Env,
@@ -23,6 +25,7 @@ export class UsRuntime implements OnApplicationShutdown {
       trustedOrigins: [env.ADMIN_ORIGIN],
     });
     this.profiles = new UsProfileStore(connection.db);
+    this.masterData = new UsMasterDataStore(connection.db);
     // Idle-pool failures must not crash the metadata/liveness process or log SQL.
     connection.pool.on("error", () => {});
   }

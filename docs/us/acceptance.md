@@ -59,17 +59,17 @@ This document defines how the U.S. adaptation is accepted: performance targets, 
 
 ### 2.4 Negative and overclaim tests
 
-| Case                                                         | Expected                                  |
-| ------------------------------------------------------------ | ----------------------------------------- |
-| Shipping tries to create new TLC                             | Rejected.                                 |
-| Product coverage is unknown or exemption review pending      | Export-ready finalization/export blocked. |
-| TLC without source                                           | Error.                                    |
-| Location missing phone/ZIP/country                           | Error in compliance profile.              |
-| Master data edited after finalization                        | Historical export unchanged.              |
-| Duplicate import retry                                       | No duplicate event/lot.                   |
-| Cross-tenant ID supplied                                     | Denied.                                   |
-| UI/public copy contains the prohibited phrase "FDA-approved" | Content test/review fails.                |
-| EPCIS adapter absent                                         | P0 remains functional.                    |
+| Case                                                         | Expected                                                                                                      |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Shipping tries to create new TLC                             | Rejected.                                                                                                     |
+| Product coverage is unknown or exemption review pending      | Export-ready finalization/export blocked.                                                                     |
+| TLC without source                                           | Error.                                                                                                        |
+| Location missing phone/ZIP/country                           | Draft save allowed in both US profiles; description snapshot/finalized use blocked with missing-field issues. |
+| Master data edited after finalization                        | Historical export unchanged.                                                                                  |
+| Duplicate import retry                                       | No duplicate event/lot.                                                                                       |
+| Cross-tenant ID supplied                                     | Denied.                                                                                                       |
+| UI/public copy contains the prohibited phrase "FDA-approved" | Content test/review fails.                                                                                    |
+| EPCIS adapter absent                                         | P0 remains functional.                                                                                        |
 
 ### 2.5 Evidence QA
 

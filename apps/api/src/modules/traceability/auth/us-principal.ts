@@ -1,9 +1,10 @@
 import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import { and, eq, gt } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import { resolveUsAccess, type UsAccess } from "@markiro/domain";
 import type { UsAuth } from "./us-auth";
 
-export interface UsPrincipal {
+export interface UsPrincipal extends UsAccess {
   userId: string;
   tenantId: string;
   sessionId: string;
@@ -56,6 +57,7 @@ export async function resolveUsPrincipal(
       userId: schema.user.id,
       tenantId: schema.member.organizationId,
       sessionId: schema.session.id,
+      role: schema.member.role,
     })
     .from(schema.session)
     .innerJoin(schema.user, eq(schema.user.id, schema.session.userId))
@@ -88,5 +90,6 @@ export async function resolveUsPrincipal(
     )
     .limit(1);
   if (!principal) throw new ForbiddenException("us_mfa_and_membership_required");
-  return principal;
+  const { role, ...identity } = principal;
+  return { ...identity, ...resolveUsAccess(role) };
 }

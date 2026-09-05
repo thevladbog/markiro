@@ -35,7 +35,7 @@ const errorSchema: SchemaObject = {
   ],
 };
 
-interface UsRequest extends Request {
+export interface UsRequest extends Request {
   usPrincipal?: UsPrincipal;
   usRequestId?: string;
 }
@@ -66,7 +66,7 @@ export class UsSessionGuard implements CanActivate {
 @ApiResponse({ status: 401, description: "A US session is required.", schema: errorSchema })
 @ApiResponse({
   status: 403,
-  description: "Trusted host/origin, verified MFA and tenant settings capability are required.",
+  description: "Trusted host/origin, verified MFA and an authorized US tenant role are required.",
   schema: errorSchema,
 })
 @ApiResponse({
@@ -78,7 +78,11 @@ export class UsProfileController {
   constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
 
   @Get()
-  @ApiOperation({ summary: "Read the active US tenant's initial traceability profile" })
+  @ApiOperation({
+    summary: "Read the active US tenant's initial traceability profile",
+    description:
+      "Requires traceability.read. Only a settings administrator receives the initial-setup signal when the profile is absent; other readers receive 403.",
+  })
   @ApiZodResponse({ status: 200, schema: summarySchema })
   read(@Req() request: UsRequest) {
     const principal = this.principal(request);
@@ -91,7 +95,7 @@ export class UsProfileController {
   @ApiOperation({
     summary: "Provision the active US tenant's initial traceability profile",
     description:
-      "Initial provisioning only. Identical retries return the original profile without another audit event. Tenant, actor, request ID, baseline and timestamps are server-owned. Profile switching is not supported.",
+      "Requires tenant.settings.manage (US owner/admin). Initial provisioning only. Identical retries return the original profile without another audit event. Tenant, actor, request ID, baseline and timestamps are server-owned. Profile switching is not supported.",
   })
   @ApiZodBody(provisionUsTraceabilityProfileSchema)
   @ApiZodResponse({ status: 200, schema: summarySchema })
