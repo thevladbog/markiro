@@ -7,6 +7,7 @@ import { AppModule } from "./app.module";
 import { mountAuth, setupAuth } from "./auth/auth.setup";
 import { corsDelegate } from "./cors";
 import { loadEnv } from "./env";
+import { assertRuEntryEdition } from "./deployment/entry-policy";
 import {
   CABINET_SESSION_SECURITY,
   KIOSK_TOKEN_SECURITY,
@@ -21,6 +22,7 @@ import { addPlatformSessionSecurity } from "./platform-http/platform-openapi";
 const logger = new Logger("bootstrap");
 
 async function bootstrap() {
+  assertRuEntryEdition(process.env.MARKIRO_DEPLOYMENT_EDITION);
   const env = loadEnv();
   const setup = setupAuth(env);
   const platformSetup = setupPlatformAuth(env, setup.db);

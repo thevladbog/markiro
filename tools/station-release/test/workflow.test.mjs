@@ -48,7 +48,10 @@ test("station beta build and dual-origin publication use separate exact protecte
     "next-major-beta",
   ]);
   assert.equal(workflow.on.workflow_dispatch.inputs.repair_tag.default, "");
-  assert.equal(workflow.concurrency.group, "station-beta-release");
+  assert.equal(
+    workflow.concurrency.group,
+    "us-development-locked-${{ github.workflow }}-${{ github.ref }}",
+  );
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
   assert.deepEqual(Object.keys(workflow.jobs), ["authorize", "build", "release"]);
   assert.equal(workflow.jobs.build.needs, "authorize");
@@ -155,7 +158,7 @@ test("beta publication requires the repository owner, main, and the exact confir
   assert.equal(input.type, "string");
   assert.equal(authorize.environment, undefined);
   assert.deepEqual(authorize.permissions, {});
-  assert.equal(authorize.if, "github.ref == 'refs/heads/main'");
+  assert.equal(authorize.if, "${{ false }}");
   assert.equal(authorize["runs-on"], "ubuntu-latest");
   assert.equal(authorize["timeout-minutes"], 5);
   assert.ok(step);

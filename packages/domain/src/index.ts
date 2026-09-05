@@ -1,5 +1,24 @@
 export { gs1CheckDigit, hasValidCheckDigit } from "./gs1/check-digit.js";
 export { DomainError } from "./errors.js";
+export {
+  allowedProfiles,
+  assertProfileAllowed,
+  parseDeploymentEdition,
+} from "./traceability/deployment-edition.js";
+export type { DeploymentEdition } from "./traceability/deployment-edition.js";
+export { profileFeatures, TRACEABILITY_PROFILE_CODE } from "./traceability/profile.js";
+export type {
+  TraceabilityCte,
+  TraceabilityProfileCode,
+  TraceabilityProfileFeatures,
+} from "./traceability/profile.js";
+export { allowedInterfaceLocales, resolveInterfaceLocale } from "./traceability/locale.js";
+export type { InterfaceLocale } from "./traceability/locale.js";
+export { traceabilityRetention } from "./traceability/retention.js";
+export type {
+  TraceabilityRetentionInput,
+  TraceabilityRetentionDecision,
+} from "./traceability/retention.js";
 export * from "./product-attributes/index.js";
 export { gtinMatchesPrefix, isValidGtin, normalizeToGtin14 } from "./gs1/gtin.js";
 export { canonicalizeKm, kmHash, kmKey, MAX_KM_UTF8_BYTES, parseKm } from "./gs1/km.js";

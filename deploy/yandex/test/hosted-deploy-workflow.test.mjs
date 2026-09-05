@@ -278,7 +278,7 @@ async function assertPrivateVbtechDeployWorkflow(source, { executePrograms = tru
   assert.equal(inputs.confirm_enable.type, "boolean");
   assert.deepEqual(workflow.permissions, {});
   assert.deepEqual(workflow.concurrency, {
-    group: "markiro-production-deployment",
+    group: "us-development-locked-${{ github.workflow }}-${{ github.ref }}",
     "cancel-in-progress": false,
   });
   assert.deepEqual(Object.keys(workflow.jobs), ["deploy"]);
@@ -585,7 +585,11 @@ test("private v-b deploy rejects trust, evidence, and mutation-boundary regressi
     ],
     [
       "different concurrency",
-      (value) => value.replace("group: markiro-production-deployment", "group: vbtech-deployment"),
+      (value) =>
+        value.replace(
+          "group: us-development-locked-${{ github.workflow }}-${{ github.ref }}",
+          "group: vbtech-deployment",
+        ),
     ],
     [
       "cancellable deployment",

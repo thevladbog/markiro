@@ -368,3 +368,12 @@ export type {
   ChzSignerTaskFail,
   ChzTrueApiAuthPayload,
 } from "./chz-signer.js";
+export {
+  provisionUsTraceabilityProfileSchema,
+  usTraceabilityProfileCodeSchema,
+  usTraceabilityProfileSummarySchema,
+} from "./traceability/profile.js";
+export type {
+  ProvisionUsTraceabilityProfileInput,
+  UsTraceabilityProfileSummary,
+} from "./traceability/profile.js";

@@ -1,5 +1,7 @@
 # Markiro U.S. Traceability: demo scenarios and synthetic dataset
 
+> Revised 2026-09-04: read the [shared MVP contract](mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+
 - Source: MUS-001 v0.1 (2026-09-03), sections 4.1–4.4 and 8.1–8.5
 - Status: baseline, not yet implemented
 - Owner: Vladislav Bogatyrev
@@ -27,17 +29,17 @@ This document describes the product profiles, personas and the two demo scenario
 
 ## 3. Scenario A: FSMA 204-aligned processor demo
 
-A synthetic processor receives two lots of fresh-cut apple slices, commingles/repackages them into fresh-cut apple snack cups, assigns a new TLC, forms 100 cases, ships them to the buyer and responds to a mock request. Fresh-cut fruits are on the FTL, so the scenario is suitable for demonstrating the three-CTE chain. [FDA-02]
+A synthetic processor receives two lots of fresh-cut apple slices, commingles/repackages them into fresh-cut apple snack cups, assigns a new TLC, records an output quantity of 100 cases, ships them to the buyer and responds to a mock request. Fresh-cut fruits are on the FTL, so the scenario is suitable for demonstrating the three-CTE chain. [FDA-02]
 
 This scenario runs under the US_FSMA204_PROCESSOR profile and is the MVP demo. The regulatory reasoning behind it is documented in [regulatory-basis.md](regulatory-basis.md).
 
 ## 4. Scenario B: generic beverage bridge
 
-A separate optional demo shows a craft cider/juice lot, production date, cases/SSCC, offline Station and recall search. The screen must state that the product is not classified as FTR-covered and that the demo shows general lot traceability/production control.
+A separate optional demo shows a craft cider/juice lot, production date, cases/SSCC, offline Station and recall search. The screen must state that FTR applicability is not assessed in this profile and that the demo shows general lot traceability/production control.
 
-This scenario runs under the US_GENERIC_LOT_TRACEABILITY profile.
+This optional P1 scenario runs under the US_GENERIC_LOT_TRACEABILITY profile. It is not required by PRO-002.
 
-> Note: every Scenario B screen must explicitly state that the product is not classified as FTR-covered. Scenario B demonstrates general lot traceability and production control only; it makes no FTR compliance claim.
+> Note: every Scenario B screen must explicitly state that FTR applicability is not assessed in this profile. Scenario B demonstrates general lot traceability and production control only; it makes no FTR compliance claim.
 
 ## 5. Synthetic end-to-end demo
 
@@ -76,7 +78,7 @@ Figure 2. P0 synthetic event chain for the fresh-cut apple processor.
 1. Show the U.S. processor tenant, regulatory baseline and readiness dashboard.
 2. Open the product classification and the "Fruits (fresh-cut)" basis.
 3. Open the two Receiving lines with TLC/source, quantities, locations and ASN/BOL.
-4. Open Transformation: two input lots, new output TLC, source location, 100 cases and genealogy.
+4. Open Transformation: two input lots, new output TLC, source location, 100-case quantity and genealogy; inspect 100 linked synthetic Cases and resolve one SSCC to the output lot.
 5. Open Shipping: output TLC, 100 cases, recipient, BOL/invoice.
 6. Run a backward trace from the output lot and a forward trace to the recipient.
 7. Create a mock Trace Request, show the 24-hour due_at and the zero/missing-field validation.
@@ -106,3 +108,7 @@ Figure 2. P0 synthetic event chain for the fresh-cut apple processor.
 - NFR-006: data minimization and no real PII/secrets in the public demo/evidence. An automated fixture scan and a manual checklist must pass.
 - PRO-004: a reproducible synthetic demo tenant and reset. One command creates an identical dataset; a repeated run is idempotent or performs a controlled reset.
 - The operational loss row (100 lb) is demo context only and is not an FDA KDE; it must not appear as a required field in any export.
+
+## P0 fixture boundaries
+
+Receipts and consumption use exactly 500 lb for each inbound lot. Output and shipment use exactly 100 case. Bags, cups and the 900 lb equivalent describe packaging; they do not invoke an implicit conversion. The core CTE chain requires no Station, KM or operational shift. The P0 demo additionally seeds 100 synthetic `boxes`/SSCC records and any isolated supporting rows required by the schema, and links them server-side to the output lot. These rows do not prove scanning, physical closure or printing. The three company names and addresses are fictional fixtures, not verified businesses or deliverable destinations. The fixed event dates do not authorize changing the machine clock.

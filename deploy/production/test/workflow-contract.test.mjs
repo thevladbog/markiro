@@ -267,7 +267,7 @@ test("v-b deploy is a protected manual digest-bound private executor", async () 
   assert.equal(workflow.on.workflow_dispatch.inputs.confirm_private_deploy.type, "boolean");
   assert.deepEqual(workflow.permissions, {});
   assert.deepEqual(workflow.concurrency, {
-    group: "markiro-production-deployment",
+    group: "us-development-locked-${{ github.workflow }}-${{ github.ref }}",
     "cancel-in-progress": false,
   });
   assert.deepEqual(Object.keys(workflow.jobs), ["deploy"]);

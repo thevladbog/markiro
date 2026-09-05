@@ -6,7 +6,9 @@
   "scripts": {
     "build": "nest build",
     "dev": "nest start --watch",
+    "dev:us": "nest start --entryFile main.us --watch",
     "start": "node dist/main.js",
+    "start:us": "node dist/main.us.js",
     "provision:tenant-owner": "node scripts/provision-tenant-owner.mjs",
     "provision:platform-admin": "node scripts/provision-platform-admin.mjs",
     "report:unmanaged-tenants": "node scripts/report-unmanaged-tenants.mjs",

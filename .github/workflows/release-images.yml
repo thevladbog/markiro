@@ -34,6 +34,8 @@ permissions:
 
 jobs:
   production-bundle:
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -236,6 +238,8 @@ jobs:
           -f deploy/production/compose.ci.yml down --volumes --remove-orphans
 
   publish:
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
     needs: production-bundle
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -34,12 +34,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: station-beta-release
+  group: us-development-locked-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   authorize:
-    if: github.ref == 'refs/heads/main'
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
+    # Before US release lock: if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -57,7 +59,9 @@ jobs:
           test "$OWNER_CONFIRMATION" = "PUBLISH-STATION-BETA"
 
   build:
-    if: github.ref == 'refs/heads/main'
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
+    # Before US release lock: if: github.ref == 'refs/heads/main'
     needs: authorize
     runs-on: windows-latest
     timeout-minutes: 60
@@ -249,7 +253,9 @@ jobs:
           retention-days: 1
 
   release:
-    if: github.ref == 'refs/heads/main'
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
+    # Before US release lock: if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: windows-latest
     timeout-minutes: 60

@@ -12,12 +12,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: signer-stable-release
+  group: us-development-locked-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   authorize:
-    if: github.ref == 'refs/heads/main'
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
+    # Before US release lock: if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -35,7 +37,9 @@ jobs:
           test "$OWNER_CONFIRMATION" = "REPAIR-SIGNER-DOWNLOAD"
 
   repair:
-    if: github.ref == 'refs/heads/main'
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
+    # Before US release lock: if: github.ref == 'refs/heads/main'
     needs: authorize
     runs-on: ubuntu-latest
     timeout-minutes: 10

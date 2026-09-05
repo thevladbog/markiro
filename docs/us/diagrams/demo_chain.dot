@@ -7,7 +7,7 @@ digraph G {
   S [label="Orchard Slice Supply LLC\n2 inbound TLCs\nFresh-cut apple slices"];
   R [label="RECEIVING\n09/14/2026\nBOL + ASN"];
   T [label="TRANSFORMATION\n09/15/2026\ncommingle / repack"];
-  O [label="New output TLC\nFresh-cut apple snack cups\n100 cases"];
+  O [label="New output TLC\nFresh-cut apple snack cups\nQuantity: 100 case (no SSCC required)"];
   H [label="SHIPPING\n09/16/2026\nBOL + invoice"];
   B [label="Harbor Market DC\nimmediate recipient"];
   Q [shape=diamond, fillcolor="#FFF4CE", color="#9A6700", label="Trace request\nproduct + date + TLC"];

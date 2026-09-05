@@ -1,7 +1,9 @@
 # Markiro U.S. Traceability: implementation plan
 
+> Read the [shared MVP contract](mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Target design is not a completion claim; dated increment records below describe verified implementation scope.
+
 - Source: MUS-001 v0.1 (2026-09-03), sections 11, 11.1, 11.2 and 15
-- Status: baseline, not yet implemented
+- Status: US-00 in progress as of 2026-09-05; no slice complete
 - Owner: Vladislav Bogatyrev
 
 ![Architecture scope](diagrams/architecture_scope.png)
@@ -10,46 +12,75 @@ Figure 1. Architecture scope of the U.S. adaptation as a bounded context inside 
 
 This plan breaks the U.S. adaptation into slices US-00..US-12 and defines an intentionally bounded MVP. Slice status is maintained here; per-requirement status is maintained in [requirements-traceability.md](requirements-traceability.md). Requirements themselves are in [requirements.md](requirements.md), acceptance gates and the MVP checklist in [acceptance.md](acceptance.md), the demo dataset in [demo-scenario.md](demo-scenario.md), the regulatory reasoning in [regulatory-basis.md](regulatory-basis.md), non-goals in [limitations.md](limitations.md), and the working protocol for coding agents in [agent-master-prompt.md](agent-master-prompt.md).
 
-Capacity check: the slice estimates sum to 115–156 hours, while 8 weeks at 12–15 hours per week give 96–120 hours. The lower bound fits only if US-10 and US-12 slip to the P1 tail; the upper bound does not fit. How to reconcile (cut scope, add capacity, extend the schedule) is GQ-32 in [open-questions.md](open-questions.md).
+The original 115–156-hour estimate is unvalidated and does not include a proven deployment boundary. Re-estimate after US-00; eight weeks is not a commitment. Deliver the office workflow first. LOT-010/TRN-010 server-side links and synthetic cases are P0 under MUS-CR-001; all new Station behavior remains P1. US-11 owns required screenshots and video; US-12 owns optional landing and supplementary assets.
 
-STN-001 (preserve existing station invariants) is P0 even though the rest of US-10 is P1: it is satisfied by the full repository gates that every slice must keep green, and US-10's own work is the P1 enhancement on top of it.
-
-The requirement ranges in the slice table are copied from spec section 11. Where [requirements-traceability.md](requirements-traceability.md) assigns additional IDs to a slice (marked `*`), the matrix is normative and the slice spec claims those IDs; see GQ-18 in [open-questions.md](open-questions.md).
+The requirement matrix owns per-requirement status and slice assignments. A boundary requirement assigned to US-00 is not evidenced until its implementing consumer passes the corresponding test.
 
 ## 1. Slices
 
 | Slice | Result                                   | Requirements                        | Hours | Depends     | Status      |
 | ----- | ---------------------------------------- | ----------------------------------- | ----- | ----------- | ----------- |
-| US-00 | Deployment boundary + baseline + profile | REG-001..012, PRO-001..003, NFR-016 | 5–7   | -           | Not started |
+| US-00 | Deployment boundary + baseline + profile | REG-001..012, PRO-001..003, NFR-016 | 5–7   | -           | In progress |
 | US-01 | Parties and locations                    | LOC-001..008                        | 8–10  | US-00       | Not started |
 | US-02 | Product FTL profiles and TLC lots        | PRD-001..010, LOT-001..009          | 12–15 | US-01       | Not started |
 | US-03 | Receiving CTE                            | REC-001..008, DOC-001..002          | 8–10  | US-02       | Not started |
-| US-04 | Transformation + shift/box bridge        | TRN-001..014, LOT-010               | 14–18 | US-02/03    | Not started |
+| US-04 | Transformation and P0 server case bridge | TRN-001..014, LOT-010               | 14–18 | US-02/03    | Not started |
 | US-05 | Shipping CTE                             | SHP-001..010                        | 8–11  | US-04       | Not started |
 | US-06 | Trace graph, search, completeness        | TRC-001..010                        | 9–12  | US-03/04/05 | Not started |
 | US-07 | FDA-aligned XLSX adapter                 | EXP-001..012                        | 12–16 | US-06       | Not started |
 | US-08 | Traceability Plan                        | PLN-001..010                        | 7–10  | US-00/02    | Not started |
 | US-09 | Trace request / mock recall              | RQ-001..008                         | 8–11  | US-06/07/08 | Not started |
 | US-10 | Station/label lot link                   | STN-001..009                        | 8–12  | US-02/04    | Not started |
-| US-11 | Demo seed, evidence mode, release        | EVD-001..012                        | 10–14 | US-09       | Not started |
-| US-12 | Landing and demo assets                  | demo assets                         | 6–10  | US-11       | Not started |
+| US-11 | Demo seed, screenshots/video, release    | EVD-001..012                        | 10–14 | US-09       | Not started |
+| US-12 | Optional landing and extra assets (P1)   | demo assets                         | 6–10  | US-11       | Not started |
 
 Slice status values: Not started, In progress, Done. A slice is Done only when its Definition of Done from MUS-001 §10.2 is met and its verification report (see [acceptance.md](acceptance.md)) is filed.
 
-## 2. Initial sequencing estimate
+### US-00 first increment — 2026-09-05
 
-| Week | Focus                  | Exit criterion                                     |
-| ---- | ---------------------- | -------------------------------------------------- |
-| 1    | US-00 + US-01          | Profile, ADR, source registry, locations.          |
-| 2    | US-02                  | Product classifications, lots/TLC/source.          |
-| 3    | US-03                  | Receiving event complete.                          |
-| 4    | US-04                  | Transformation and genealogy complete.             |
-| 5    | US-05 + US-06          | Shipping and full trace.                           |
-| 6    | US-07 + US-08          | XLSX and plan PDF.                                 |
-| 7    | US-09 + selected US-10 | Mock request; optional Station link.               |
-| 8    | US-11 + US-12          | Tagged release, evidence, landing and demo assets. |
+The [domain foundation plan](../superpowers/plans/2026-09-05-us-00-domain-foundation.md) implements explicit edition parsing, immutable profile allow-lists and feature policies, and edition-specific interface locale selection in `@markiro/domain`. Its 47 focused tests and the full 532-test domain suite pass, along with both domain typechecks and the build. The [design baseline](../design-briefs/us/08-design-baseline.md) contains 128 screens in 18 sections.
 
-This table is a sequencing estimate, not a committed delivery date. The slice estimates total 115–156 hours, so the work must be reduced, resourced differently or extended before implementation starts.
+The separate US development API now consumes edition parsing and locale policy. Its validated entry rejects unsafe local configuration and production mode; the RU entry rejects explicit US configuration before auth/database setup. Metadata and liveness work, while business readiness deliberately remains unavailable. This is a metadata-only boundary, not an implemented office application. Persistent profiles, provisioning, authorization, frontend/build attestation and infrastructure verification remain open. No deployment or publication is included.
+
+The [development isolation boundary](development-isolation.md) is now prepared locally on `codex/us-mvp`: inherited operational workflows are locked, check-only US CI is defined, and a separate synthetic dependency stack is configured. The [runtime entry plan](../superpowers/plans/2026-09-05-us-00-runtime-entry.md) records this runnable API increment and its limits. It does not complete end-to-end edition isolation or establish hosted infrastructure. US-00 remains In progress.
+
+### US-00 profile persistence increment — 2026-09-05
+
+The [profile persistence plan](../superpowers/plans/2026-09-05-us-00-profile-persistence.md) adds the profile table, a strict initial-provisioning contract and an internal transactional US settings store. It requires a current tenant-settings membership, an explicit US profile and an IANA timezone. The store serializes concurrent initial requests and writes profile, timezone and audit together. Identical retries do not create another audit event; different initial settings conflict. Profile switching and edits are not exposed by this provisioning operation.
+
+Migration and store tests use randomly named disposable databases on the separate local US PostgreSQL. Existing RU defaults remain unchanged. At that increment the US HTTP composition had no profile endpoint or session adapter; the later increment below adds that integration. Requirement rows are not marked complete by storage-only proof.
+
+### US-00 session and HTTP increment — 2026-09-05
+
+The [session foundation](../superpowers/plans/2026-09-05-us-00-session-foundation.md) and [HTTP integration record](../superpowers/plans/2026-09-05-us-00-http-integration.md) add independent US cookies, mandatory per-session MFA, guarded organization selection and initial profile provisioning over the local US API. Real HTTP tests verify fresh membership/capability enforcement, exact profile audit, retry behavior, request boundaries, unavailable schema and safe database cancellation/shutdown.
+
+The server never migrates or provisions users at startup. Overall business readiness stays unavailable; browser integration, recovery and remaining US-00 acceptance are still open. Explicit local synthetic-user provisioning is covered by the increment below. Release locks remain active. This is not completion of the slice or proof of hosted data-location requirements.
+
+## 2. Dependency sequence
+
+### Local owner increment — 2026-09-05
+
+The [local synthetic-owner command](local-owner-provisioning.md) supplies explicit local identity bootstrap with atomic audit, collision/retry safeguards and no MFA bypass. It does not migrate or seed on startup, provision a profile or enable public signup. Tests use disposable US databases. The next US-00 integration surface is the edition-specific browser login/MFA/profile workflow; recovery, auth-event audit and hosted safeguards remain open.
+
+### Browser client increment — 2026-09-05
+
+The [US browser client foundation](browser-client-foundation.md) adds the isolated typed transport for login/MFA, organization selection and initial profile setup, with a shared strict response contract and real HTTP integration coverage. It is not imported by the RU entry. The subsequent browser increment below supplies the separate entry/build, proxy wiring and EN/ES screens; the current RU admin must not be pointed at the US API.
+
+### Browser entry increment — 2026-09-05
+
+The [local US browser flow](browser-entry.md) now supports password login, authenticator enrollment/challenge, backup-code login, organization selection and initial profile provisioning/readback. An independent Vite root outputs `dist-us`, imports no RU screens or translations, refuses non-US configuration, and attests the server before login. Real Chromium checks use the actual Vite proxy and disposable PostgreSQL, including cookie-safe logout during a held MFA request. English and Spanish, desktop/mobile and light/dark states were inspected. This is local access/profile functionality, not completion of US-00 or the operational MVP.
+
+MUS-CR-001 confirms fixed-template Receiving CSV import/output (US-03), two response outcomes (US-07/09), and P0 server case links (US-04/06/11). Implement through the prerequisites below; do not build an isolated substitute pipeline. Retention calculation is implemented in the domain helper (36 tests); storage/hold enforcement and destructive-path checks remain tracked separately. Remaining US-00 acceptance includes recovery, auth-event audit and hosted safeguards. The explicit local owner command has not been applied to the base development database. Business work next follows US-01/02 without enabling deployment or declaring those remaining gates complete.
+
+1. US-00: edition, provisioning, authorization, data-location inventory and deployment design.
+2. US-01/02: parties, locations, product profiles and lots.
+3. US-03/04/05: receiving, standalone transformation and shipping.
+4. US-06: trace and completeness; US-08 plan can proceed after master data.
+5. US-07/09: workbook mapping, immutable request snapshot and package.
+6. US-11: reproducible seed, screenshots/video, deployed smoke checks and release evidence.
+7. P1: US-10 Station/hardware integration and US-12 landing/extra assets.
+
+Slice hour ranges below are historical planning inputs, not delivery promises. Infrastructure purchase and publication require separate approval.
 
 ## 3. Critical path
 
@@ -106,7 +137,7 @@ P/I = probability / impact.
 | R-08 | Synthetic demo looks artificial    | Medium/Medium | Coherent quantities/docs; external reviewer; show real Markiro foundation separately. |
 | R-09 | Evidence claims exceed tests       | Medium/High   | Verification report separates automated/browser/hardware/external.                    |
 | R-10 | Personal/confidential data leak    | Low/High      | U.S.-hosted data plane, synthetic demo, privacy scan, redaction and access audit.     |
-| R-11 | 8-week schedule slips              | Medium/Medium | Station/EPCIS/EDI are P1/P2; protect critical path.                                   |
+| R-11 | Estimate does not cover scope      | Medium/Medium | Station/EPCIS/EDI are P1/P2; protect critical path.                                   |
 | R-12 | Product presented as legal advice  | Medium/High   | Claim language matrix and clear product limitations.                                  |
 
 ## 6. Final rule

@@ -1,0 +1,67 @@
+name: US development isolation
+
+on:
+  push:
+    branches: [codex/us-mvp]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: us-development-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      us-postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: markiro_us
+          POSTGRES_PASSWORD: markiro-us-development-only
+          POSTGRES_DB: markiro_us_dev
+        ports:
+          - 127.0.0.1:55432:5432
+        options: >-
+          --health-cmd "pg_isready -U markiro_us -d markiro_us_dev"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Reject release capabilities and merges into main
+        run: node tools/us-development/check-isolation.mjs
+      - run: node --test tools/us-development/test/*.test.mjs
+      - name: Verify shared domain foundation
+        run: pnpm --filter @markiro/domain test && pnpm --filter @markiro/domain typecheck && pnpm --filter @markiro/domain lint && pnpm --filter @markiro/domain build
+      - name: Build isolated API dependencies and entry points
+        run: pnpm turbo build --filter '@markiro/api...'
+      - name: Verify API entry boundaries
+        run: pnpm --filter @markiro/api exec vitest run test/deployment-entry.test.ts test/us-development.e2e.test.ts test/env.test.ts test/health.e2e.test.ts
+      - name: Build shared browser components
+        run: pnpm --filter @markiro/ui build
+      - name: Verify US browser flow and contracts
+        run: pnpm --filter @markiro/admin exec vitest run test/us-client.test.ts test/us-app.test.tsx
+      - name: Build local-only US browser entry
+        env:
+          VITE_DEPLOYMENT_EDITION: US
+        run: pnpm --filter @markiro/admin build:us
+      - name: Verify compiled local-only runtime
+        run: node --test tools/us-development/test/runtime-entry.smoke.mjs tools/us-development/test/owner-command.smoke.mjs
+      - name: Verify US profile and session persistence on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: |
+          pnpm --filter @markiro/platform-contracts exec vitest run test/us-profile.test.ts
+          pnpm --filter @markiro/db exec vitest run test/traceability-profile-schema.test.ts test/traceability-profile-migration.e2e.test.ts test/us-auth-schema.test.ts test/us-auth-migration.e2e.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-profile-store.e2e.test.ts test/us-auth.e2e.test.ts test/us-http.e2e.test.ts test/us-owner-command.test.ts test/us-development-owner.e2e.test.ts

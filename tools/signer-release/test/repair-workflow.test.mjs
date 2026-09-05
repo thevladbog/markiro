@@ -9,7 +9,10 @@ const workflow = load(source);
 
 test("repair is manual, owner-gated, and serialized with stable releases", () => {
   assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
-  assert.equal(workflow.concurrency.group, "signer-stable-release");
+  assert.equal(
+    workflow.concurrency.group,
+    "us-development-locked-${{ github.workflow }}-${{ github.ref }}",
+  );
   assert.equal(workflow.jobs.authorize.permissions.constructor, Object);
   assert.equal(Object.keys(workflow.jobs.authorize.permissions).length, 0);
   assert.match(source, /REPAIR-SIGNER-DOWNLOAD/);

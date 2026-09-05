@@ -1,0 +1,131 @@
+body {
+  margin: 0;
+}
+.us-app {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(280px, 30.5%) 1fr;
+  background: var(--surface-page);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+}
+.us-brand {
+  background: var(--surface-inverse);
+  color: #f4f8f5;
+  padding: 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: var(--fg-on-inverse);
+}
+.us-wordmark {
+  font-family: var(--font-mono);
+  font-size: 32px;
+  font-weight: 600;
+}
+.us-brand h2 {
+  font-size: 34px;
+  line-height: 1.12;
+  max-width: 360px;
+  margin: 0 0 16px;
+}
+.us-brand p {
+  color: var(--fg-on-inverse);
+  opacity: 0.72;
+  max-width: 320px;
+}
+.us-pane {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 80px 32px 40px;
+}
+.us-tools {
+  position: absolute;
+  right: 24px;
+  top: 20px;
+  display: flex;
+  gap: 8px;
+}
+.us-card {
+  width: min(420px, 100%);
+}
+.us-card h1 {
+  font-size: 30px;
+  line-height: 1.2;
+  margin: 0 0 10px;
+}
+.us-card > p {
+  color: var(--fg-2);
+  margin: 0 0 24px;
+}
+.us-card form,
+.us-stack {
+  display: grid;
+  gap: 16px;
+}
+.us-notice {
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  margin-bottom: 18px;
+}
+.us-secret {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+  margin: 5px 0 14px;
+}
+.us-check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 16px 0;
+}
+.us-summary {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+}
+.us-summary dt {
+  color: var(--fg-2);
+}
+.us-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 720px) {
+  .us-app {
+    display: block;
+  }
+  .us-brand {
+    min-height: 170px;
+    padding: 24px;
+  }
+  .us-brand h2 {
+    font-size: 24px;
+    margin-top: 28px;
+  }
+  .us-brand p {
+    display: none;
+  }
+  .us-pane {
+    padding: 76px 20px 32px;
+    place-items: start center;
+  }
+  .us-tools {
+    right: 20px;
+    top: 18px;
+  }
+  .us-summary {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+  .us-summary dt {
+    font-size: 12px;
+    margin-top: 12px;
+  }
+  .us-summary dd {
+    width: 100%;
+  }
+}

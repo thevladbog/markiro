@@ -1,7 +1,9 @@
 # Markiro U.S. Traceability — Documentation Index
 
+> Revised 2026-09-05: read the [shared MVP contract](mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. The design baseline is ready for implementation; US-00 includes domain, isolated local runtime, profile persistence and session/MFA foundations; business modules and hosted enforcement remain unfinished.
+
 - Source: MUS-001 v0.1 "Product & Technical Specification for Agent-Assisted U.S. Adaptation" (2026-09-03)
-- Status: baseline established 2026-09-03; no slice implemented yet
+- Status: design baseline revised by [MUS-CR-001](p0-change-decision.md) and [MUS-CLAR-001](development-clarifications.md), 2026-09-05; US-00 in progress, no slice complete
 - Owner: Vladislav Bogatyrev
 
 Markiro U.S. Traceability is an intentionally bounded minimum viable product (MVP) for U.S. food-processor traceability. It proves one synthetic end-to-end processor workflow inside a dedicated U.S. deployment while reusing the current Markiro codebase. It is designed to support applicable FSMA 204 (FDA Food Traceability Rule) recordkeeping and recall-readiness workflows for small and medium-sized food manufacturers. It is not a production-ready service, a legal opinion, an FDA certification, or a guarantee of compliance. See [limitations.md](limitations.md).
@@ -11,6 +13,8 @@ The U.S. product uses the same monorepo as the Russian product but runs as a sep
 This directory is the canonical, agent-readable form of MUS-001. The original package (PDF, DOCX, condensed Markdown, master prompt, checklist CSV, diagram sources) stays outside the repository; when the two disagree, fix this directory and record the change in the review log of [regulatory-basis.md](regulatory-basis.md).
 
 ## Documents
+
+Development is isolated on `codex/us-mvp` with publication disabled. Read [development-isolation.md](development-isolation.md) before running, synchronizing or publishing US work.
 
 | File                                                         | What it holds                                                                                                                                | Spec sections      |
 | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
@@ -26,7 +30,7 @@ This directory is the canonical, agent-readable form of MUS-001. The original pa
 | [open-questions.md](open-questions.md)                       | Register of every contested point: cross-cutting questions, per-slice questions copied from the design specs, documentation-vs-code findings | all                |
 | [diagrams/](diagrams/)                                       | Architecture scope, demo chain and evidence ladder as PNG plus Graphviz `.dot` sources                                                       | figures 1–3        |
 
-The design decision that opens the work (bounded context, tenant profile mechanism, schema conflicts) is recorded in `docs/superpowers/specs/2026-09-03-us-traceability-design.md`. Each slice has a draft design spec in the same directory, grounded in the current code and not yet approved:
+The design decision that opens the work (bounded context, tenant profile mechanism, schema conflicts) is recorded in `docs/superpowers/specs/2026-09-03-us-traceability-design.md`. Each slice has a draft design spec in the same directory, originally drafted against the code and revised by the shared MVP contract; implementation approval is separate:
 
 | Slice | Spec                                                    |
 | ----- | ------------------------------------------------------- |
@@ -48,16 +52,17 @@ Every contested point from these specs is collected in [open-questions.md](open-
 
 Design briefs for external designers live in `docs/design-briefs/us/` as a delta series to the existing Markiro briefs (same brand and design system; new screens, states, U.S. language and formats):
 
-| Brief | File                               | Covers                                                                    |
-| ----- | ---------------------------------- | ------------------------------------------------------------------------- |
-| 00    | `00-overview.md`                   | Read first: scope, profiles, personas, hard requirements, glossary        |
-| 01    | `01-language-and-adaptation.md`    | EN-first copy, claims matrix, terminology, U.S. formats, status chips     |
-| 02    | `02-onboarding-and-master-data.md` | Traceability area, profile settings, parties/locations, product FTL, lots |
-| 03    | `03-cte-events.md`                 | Receiving, Transformation, Shipping forms; completeness; amend/void       |
-| 04    | `04-trace-and-readiness.md`        | Search, lot card, trace graph/table, readiness dashboard                  |
-| 05    | `05-plan-and-trace-request.md`     | Traceability Plan versions and PDF; trace request wizard and package      |
-| 06    | `06-station-lot-link.md`           | Floor-mode delta (P1): lot link, policies, print log, English locale      |
-| 07    | `07-landing-and-demo-assets.md`    | U.S. landing page, video plan, demo kit                                   |
+| Brief | File                                                               | Covers                                                                       |
+| ----- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| 00    | `00-overview.md`                                                   | Read first: scope, profiles, personas, hard requirements, glossary           |
+| 01    | `01-language-and-adaptation.md`                                    | EN-first copy, claims matrix, terminology, U.S. formats, status chips        |
+| 02    | `02-onboarding-and-master-data.md`                                 | Traceability area, profile settings, parties/locations, product FTL, lots    |
+| 03    | `03-cte-events.md`                                                 | Receiving, Transformation, Shipping forms; completeness; amend/void          |
+| 04    | `04-trace-and-readiness.md`                                        | Search, lot card, trace graph/table, readiness dashboard                     |
+| 05    | `05-plan-and-trace-request.md`                                     | Traceability Plan versions and PDF; trace request wizard and package         |
+| 06    | `06-station-lot-link.md`                                           | Floor-mode delta (P1): lot link, policies, print log, English locale         |
+| 07    | `07-landing-and-demo-assets.md`                                    | U.S. landing page, video plan, demo kit                                      |
+| 08    | [08-design-baseline.md](../design-briefs/us/08-design-baseline.md) | Finalized 128-screen atlas, implementation decisions and verification limits |
 
 Designer questions from the briefs are collected in Part D of [open-questions.md](open-questions.md).
 
@@ -69,18 +74,19 @@ Designer questions from the briefs are collected in Part D of [open-questions.md
 | P1   | Product hardening | Valuable for a pilot or production continuation; does not block the MVP. |
 | P2   | Future            | Deferred until a concrete product or partner need appears.               |
 
-Current totals: 133 P0, 36 P1, 3 P2. These are detailed acceptance rules, not 172 separate features. The MVP remains bounded to one processor scenario, three critical tracking events, trace, plan and export; P1 and P2 describe continuation paths.
+Current totals: 131 P0, 38 P1, 3 P2. These are detailed acceptance rules, not 172 separate features. The MVP remains bounded to one processor scenario, three critical tracking events, trace, plan and export; P1 and P2 describe continuation paths.
 
 ## Source order for agents
 
-1. Direct instruction from Vladislav and the assigned approved slice.
+1. Direct user instructions and assigned acceptance criteria.
 2. The nearest applicable `AGENTS.md`.
-3. This directory, starting with [requirements.md](requirements.md).
-4. Current code, tests, migrations, package manifests and runtime configuration.
-5. `README.md` and `docs/architecture.md`.
-6. Historical plans and specs, only after checking current behavior.
+3. Current code, tests, migrations, manifests and runtime configuration.
+4. `README.md` and `docs/architecture.md`.
+5. The [shared MVP contract](mvp-contract.md), requirements and relevant approved design.
 
-Agents must not extend the regulatory scope from memory, decide exemptions automatically, require item-level serialization, make EPCIS mandatory, change `RU_CHZ` behavior without a separate assignment, or state in any interface that the product guarantees FDA compliance.
+The code describes existing behavior; this documentation describes the target. Do not infer an implemented feature from a design or an authorization from a document. The original archive is supporting input and is not edited.
+
+The [shared MVP contract](mvp-contract.md) reconciles deployment, P0/P1, dates, retention, event revisions, export validation and artifact safety.
 
 ## Definition of Done for a slice
 

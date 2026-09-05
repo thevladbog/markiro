@@ -1,5 +1,7 @@
 # Regulatory basis: FDA Food Traceability Rule (FSMA 204)
 
+> Revised 2026-09-04: read the [shared MVP contract](mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+
 - Source: MUS-001 v0.1 (2026-09-03), sections 2.1-2.9 and 16
 - Status: baseline, not yet implemented
 - Owner: Vladislav Bogatyrev
@@ -32,7 +34,7 @@ The FTR establishes additional recordkeeping requirements for persons who
 manufacture, process, pack or hold foods on the Food Traceability List (FTL).
 FDA states that records must contain the Key Data Elements (KDE) associated
 with the relevant Critical Tracking Events (CTE) and must be made available on
-request within 24 hours. The timeline, as stated on FDA-01 on 2026-09-03, has
+request within 24 hours. The timeline, as stated on FDA-01 on 2026-09-04, has
 three distinct parts that must not be collapsed into one date:
 
 - The original compliance date for all persons subject to the rule was
@@ -183,3 +185,28 @@ The MKR-01…MKR-03 links point at `main`; the revision checked for this baselin
 - [data-dictionary.md](data-dictionary.md) - KDE and CTE field dictionary
 - [limitations.md](limitations.md) - limitations, non-goals and language rules
 - [implementation-plan.md](implementation-plan.md) - slices US-00 to US-12
+
+## Retention and field interpretation
+
+Additional source-register entries used by this review:
+
+| ID     | Source        | Purpose                                       | URL                                                  |
+| ------ | ------------- | --------------------------------------------- | ---------------------------------------------------- |
+| CFR-01 | 21 CFR 1.1310 | Location, product and TLC-source definitions  | https://www.ecfr.gov/current/title-21/section-1.1310 |
+| CFR-02 | 21 CFR 1.1455 | Record retention and availability             | https://www.ecfr.gov/current/title-21/section-1.1455 |
+| CFR-03 | 21 CFR 1.1315 | Traceability Plan and prior-version retention | https://www.ecfr.gov/current/title-21/section-1.1315 |
+
+Reviewed online on 2026-09-04 by Codex for this document audit; this is not an independent specialist review or a full release source refresh. The baseline ID remains unchanged.
+
+- [CFR-01: definitions, 21 CFR 1.1310](https://www.ecfr.gov/current/title-21/section-1.1310): location information uses domestic or comparable foreign address fields. A profile selection is not an applicability finding.
+- [CFR-02: records, 21 CFR 1.1455](https://www.ecfr.gov/current/title-21/section-1.1455): required records and interpretive information have a two-year retention minimum. Calendar-year calculations, not a fixed 730-day approximation, are the product policy.
+- [CFR-03: plan, 21 CFR 1.1315](https://www.ecfr.gov/current/title-21/section-1.1315): a previous plan must be kept for two years after updating it. The configured default must not shorten this floor.
+- [FDA rule overview](https://www.fda.gov/food/food-safety-modernization-act-fsma/fsma-final-rule-requirements-additional-traceability-records-certain-foods): the page still distinguishes the proposed compliance-date extension from the stated non-enforcement direction. No stronger timeline claim is added.
+
+The five-year default, no-P0-purge policy and non-RF deployment boundary are product choices, not extra requirements attributed to FDA. The original source-register checks remain historical; refresh the complete register, including the actual workbook, before an implementation release.
+
+### Documentation review log
+
+| Date       | Reviewer | Scope                                                                                                                           | Result                                                                                                                                                                                 |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-09-04 | Codex    | Main revision `b5478b16b`; US requirements, slice specs and design briefs; FDA overview/FTL and eCFR definitions/retention/plan | Reconciled bounded MVP, non-RF deployment, P1 case/Station bridge, calendar-year retention, revision/export safety and static landing. No implementation or specialist review claimed. |

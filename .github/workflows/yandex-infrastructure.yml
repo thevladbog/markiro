@@ -88,7 +88,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('markiro-yandex-pr-{0}', github.event.pull_request.number) || 'markiro-yandex-production-state' }}
+  group: us-development-locked-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -96,7 +96,9 @@ env:
 
 jobs:
   validate:
-    if: github.event_name == 'pull_request'
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
+    # Before US release lock: if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -143,7 +145,9 @@ jobs:
           node --test deploy/yandex/test/remote-deploy.test.mjs deploy/yandex/test/hosted-deploy-workflow.test.mjs
 
   authorize-apply:
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'apply'
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
+    # Before US release lock: if: github.event_name == 'workflow_dispatch' && inputs.mode == 'apply'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -160,7 +164,9 @@ jobs:
           test "$OWNER_CONFIRMATION" = "APPLY-YANDEX-INFRASTRUCTURE"
 
   plan:
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'plan'
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
+    # Before US release lock: if: github.event_name == 'workflow_dispatch' && inputs.mode == 'plan'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     environment: production-infrastructure
@@ -386,7 +392,9 @@ jobs:
             "$plan_json_key" "$plan_json_sha256" "$plan_json_version_id"
 
   apply:
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'apply'
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
+    # Before US release lock: if: github.event_name == 'workflow_dispatch' && inputs.mode == 'apply'
     needs: authorize-apply
     runs-on: ubuntu-latest
     timeout-minutes: 40

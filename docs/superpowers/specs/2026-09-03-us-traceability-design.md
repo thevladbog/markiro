@@ -1,16 +1,18 @@
 # Markiro U.S. Traceability — isolated deployment and bounded context — Design Spec
 
+> Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+
 **Date:** 2026-09-03
 
-**Status:** Draft for review; nothing implemented and no slice approved. Opens slice US-00 once the blocking questions in `docs/us/open-questions.md` are settled.
+**Status:** Draft for review; not implemented. Read the shared MVP contract and resolve only outstanding choices material to the authorized slice.
 
 **Scope:** Records the founding decisions for the U.S. adaptation described in MUS-001 v0.1 and now mirrored in `docs/us/`: where the work lives, how the dedicated U.S. deployment stays isolated from the existing Russian deployment, what the current schema already conflicts with, and what slice US-00 must deliver. It does not design the traceability entities themselves; that is US-01…US-09 and each gets its own spec.
 
 **Related:**
 
 - `docs/us/README.md` — index of the canonical U.S. documentation set.
-- `docs/us/requirements.md` — 172 normative requirements (133 P0).
-- `docs/us/implementation-plan.md` — slices US-00…US-12 and the 8-week schedule.
+- `docs/us/requirements.md` — 172 normative requirements (131 P0).
+- `docs/us/implementation-plan.md` — slices US-00…US-12 and the dependency sequence and unvalidated estimates.
 - `docs/us/data-dictionary.md` — entities, KDE dictionary, proposed tables and endpoints.
 - `docs/superpowers/specs/2026-08-29-chz-product-groups-design.md` — the CHZ product group reference that must not be reused as an FTL category (PRD-009).
 - `docs/superpowers/specs/2026-08-28-product-archived-flag-design.md` — the "hide, do not delete" idiom reused for lot and event lifecycles.
@@ -73,7 +75,7 @@ Design constraints for US-00 (details belong to its own slice spec):
 
 ## Decision 3: `docs/us/` is the canonical specification
 
-The MUS-001 package ships a condensed English Markdown (sections 1–7 only) and a full Russian PDF/DOCX. Neither is suitable as an agent source of truth on its own. `docs/us/` now carries the full content in English, split by concern, with one status-bearing file (`requirements-traceability.md`). The original package stays outside the repository. Changes to regulatory content go through the review log in `docs/us/regulatory-basis.md` and, when data semantics change, a new spec here (spec §2.9).
+The MUS-001 package ships a condensed English Markdown (sections 1–7 only) and a full Russian PDF/DOCX. Neither is suitable as an agent source of truth on its own. `docs/us/` now carries the full content in English, split by concern, with one per-requirement status file (`requirements-traceability.md`). The original package stays outside the repository. Changes to regulatory content go through the review log in `docs/us/regulatory-basis.md` and, when data semantics change, a new spec here (spec §2.9).
 
 ## Conflicts found in the current schema
 

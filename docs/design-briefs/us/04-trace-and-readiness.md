@@ -1,9 +1,11 @@
 # U.S. Design Brief 04 — Search, Lot Card, Trace Graph and Readiness
 
+> Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+
 > Fourth brief of the U.S. series. Office mode, desktop-first 1440px, adaptive down to 1024.
 > Users: the QA / Traceability Manager (runs traces, watches readiness), the Auditor / Read-only
 > user (reviews history), the Owner / Tenant Admin (readiness on the dashboard) and the three
-> operators (look up a lot before recording an event). English primary, Russian secondary;
+> operators (look up a lot before recording an event). English primary, U.S. Spanish secondary;
 > light + dark. This is a **delta to RU brief 03 §5 (History & codes)**: the U.S. equivalent of
 > the code page and the aggregation tree, drawn for lots and events instead of marking codes
 > and boxes. Do not redesign the RU code search; reuse its lookup box, card and left-border
@@ -16,10 +18,10 @@ After brief 03 the tenant holds lots, three kinds of finalized events and geneal
 recall, an auditor or a mock trace request asks four questions: where did this output lot come
 from, where did this input lot go, which lot carries TLC X / BOL-0916-H / this SSCC, and what
 is still missing before we can answer. The 24-hour trace request workflow (brief 05) starts
-from a search on these screens, and the acceptance targets are hard: a trace graph in under
+from a search on these screens, and the P1 performance targets, measured but not gating P0, are: a trace graph in under
 2 s, an exact lookup in under 1 s. Everything here is read-only over brief 03's data.
 
-## The core idea: one trace result
+## Design principle: one trace result
 
 A trace is **one query result** — nodes (lots and locations), edges (received from, genealogy,
 shipped to, each with quantity and unit), the events behind them, the events **excluded** with a
@@ -70,7 +72,7 @@ the derived "Partially shipped" label), assignment basis (Imported / Transformat
 supplier receipt), product description snapshot, TLC source (location card or reference),
 origin event link, balance ("0.000 of 100.000 case remaining"; "balance unknown" for manual
 lots), production / expiry dates marked operational. Actions: **Trace backward**, **Trace
-forward**, Change status (reason required), Link cases (P1).
+forward**, Change status (reason required), Link cases (P0 server-side only).
 
 **Panels**, each with a provenance column (event number + revision, linked):
 
@@ -78,7 +80,7 @@ forward**, Change status (reason required), Link cases (P1).
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | CTE timeline | Left-border list as on the RU code page: date, type, event number, revision, status, location, quantity; amended chains collapsed under the current revision; void events greyed with reason |
 | Documents    | Type, number as snapshotted, event, link                                                                                                                                                     |
-| Cases        | Count, first / last SSCC, list with link source (shift link / manual), unlink with reason (P1)                                                                                               |
+| Cases        | Count, first / last SSCC, list with link source (shift link / manual), unlink with reason (P0 server-side; no Station action)                                                                |
 | Findings     | Completeness findings for this lot: severity chip with text, field, message, deep link; "No gaps found" when clean                                                                           |
 | Genealogy    | Inputs and outputs as lot links (2 inputs for the demo output; 1 output for each input)                                                                                                      |
 
@@ -188,11 +190,11 @@ table and in the lot card findings panel.
   disabled with the reason. No edit affordances on events here.
 - **Wording.** "Data readiness", "data completeness", "required elements", "gaps"; nothing
   from the not-allowed column of `docs/us/limitations.md`. Generic-profile screens carry the
-  Scenario B statement ("not classified as FTR-covered; general lot traceability only").
+  Scenario B statement ("FTR applicability not assessed in this profile; general lot traceability only").
 - **Formats.** Dates MM/DD/YYYY in tenant time; quantities decimal + explicit unit; TLC and
   SSCC always monospace.
-- **RU strings.** Check "Готовность данных", "Трассировка назад / вперёд", "Исключено:
-  аннулировано", "Недостающие обязательные элементы данных" in the strip, the segmented
+- **Spanish strings.** Check "Estado de los datos", "Rastrear hacia atrás / adelante", "Excluido:
+  anulado", "Faltan datos obligatorios" in the strip, the segmented
   control and the finding card at 1024.
 - **Dark mode.** Graph edges, edge labels and greyed excluded nodes need dedicated tokens; the
   SVG must use the same chip tokens as the rest of the page.
@@ -229,3 +231,11 @@ table and in the lot card findings panel.
    the relevant KDE group?
 8. Screen 1: rich lot cards or dense rows as the default result layout, and is a toggle worth
    it?
+
+## Incomplete trace state
+
+A depth-limited result shows “Trace incomplete: traversal limit reached” with the returned counts; graph and table show the same warning. It cannot seed an export-ready package until the full requested scope is available. TLC search can return several source-qualified matches. SSCC search and Cases panels are P0 under MUS-CR-001. Show synthetic linkage provenance and audited link/unlink history; no scan/print success is implied. Zero case links is not a missing KDE, but fails the separate 100-case demo acceptance.
+
+## Available-records handoff — 2026-09-05
+
+Readiness errors and incomplete traversal prevent an Export-ready badge, not authorized retrieval of available records. Link to Requests → Download available records, labelled Incomplete with scope/returned counts, source-linked gaps and frozen revision. Do not imply complete traversal or hide missing origins. No coverage-review or event-finalization bypass. See [CLAR-03](../../us/development-clarifications.md); the actual export action remains in Requests.

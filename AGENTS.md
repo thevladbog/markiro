@@ -1,5 +1,18 @@
 # AGENTS.md
 
+## US development branch boundary
+
+This checkout is the unreleased US development line, `codex/us-mvp`. Read
+`docs/us/development-isolation.md` before running or integrating changes.
+Keep all US implementation in this worktree, not the primary checkout. Preserve
+the unconditional operational-workflow locks. Do not merge into `main`, publish
+images/installers, create release tags, or run production/infra/release scripts
+until the owner separately approves release enablement after development.
+Do not dispatch a workflow from `main` with a US commit as its target SHA.
+Use synthetic data and the standalone `deploy/us-development/compose.yml`;
+never copy production or primary-development env files, databases or volumes.
+The US lock must not be removed as part of synchronizing updates from `main`.
+
 ## Purpose and scope
 
 These instructions apply to the entire repository unless a closer `AGENTS.md`

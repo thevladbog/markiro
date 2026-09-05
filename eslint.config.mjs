@@ -5,7 +5,7 @@ import tseslint from "typescript-eslint";
 import globals from "globals";
 
 export default tseslint.config(
-  { ignores: ["**/dist/**", "**/coverage/**", "**/.turbo/**", "docs/**"] },
+  { ignores: ["**/dist/**", "**/dist-us/**", "**/coverage/**", "**/.turbo/**", "docs/**"] },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {

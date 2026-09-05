@@ -1,5 +1,7 @@
 # US-05 — Shipping CTE — Design Spec
 
+> Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+
 **Date:** 2026-09-03
 
 **Status:** Draft for review (not implemented)
@@ -146,7 +148,7 @@ Rejection cases (tested): payload with `tlc`, `productId`, `createLot` → 400 (
 - `CaseSelector` (P1): SSCC input reusing the code-search classify call and `formatSsccHri`; scanned boxes listed with remove buttons; counter "N of M cases in lot"; a "set quantity from cases" button.
 - Detail: KDE groups as data-dictionary §7.5, completeness panel, finalize/amend/void dialogs with mandatory reason fields, revision banner, warnings panel with the classification select (P1) and explicit acknowledgement checkbox whose label says the classification is the user's own.
 - Lot card link (US-06) shows shipments and the derived "partially shipped" label.
-- i18n keys `pages.traceability.shipping.*` in `en.json` and `ru.json`; allowed wording only. Accessibility as US-03 (labels, focus trap, text statuses, keyboard-only pass).
+- i18n keys `pages.traceability.shipping.*` in `en.json` and `es.json`; allowed wording only. Accessibility as US-03 (labels, focus trap, text statuses, keyboard-only pass).
 
 ### Station
 
@@ -192,3 +194,7 @@ Transporter records and carrier integrations; ASN/EDI providers (INT-006, P2); E
 | OQ-US05-9  | Where do `traceability_import_runs` for shipping live in the P0 interface (SHP-009)?                                                    | reuse US-03 table with `kind = shipping_csv`; separate table                                                                                                                                                                                | reuse; one audit shape for all import runs (INT-008)                                                                                                                                        | no        |
 | OQ-US05-10 | Under `US_GENERIC_LOT_TRACEABILITY`, is BOL/invoice/ASN mandatory for finalization?                                                     | mandatory; warning only                                                                                                                                                                                                                     | warning only, consistent with OQ-US03-7                                                                                                                                                     | no        |
 | OQ-US05-11 | A shipping line whose UOM differs from the lot's origin UOM makes the balance unknown; should P0 block finalization instead of warning? | (a) warning + unknown balance in P0, acknowledgement gate in P1 (as drafted); (b) reviewer proposal: error `uom_mismatch` until the user re-enters the quantity in the origin UOM or an explicit conversion rule exists; (c) tenant setting | (a): consistent with OQ-US05-3 (balance is operational, not a KDE) and with OQ-US05-4 ("a converted quantity" is the user's own entry); revisit with (b) if demo users ship in a second UOM | no        |
+
+## Balance and correction boundary
+
+The P0 workflow does not depend on `trace_lot_boxes`. Case selection and its consistency scan are P1. Compare a candidate shipment with the balance excluding the preceding revision when amending; aggregate repeated lines for a lot before checking the balance. Lock all affected lots in a deterministic order. Never clear a quarantine/recall or change an unknown mixed-unit balance to zero. Product coverage checks include both unknown and exemption-review-required.

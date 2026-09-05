@@ -3,6 +3,8 @@ import pg from "pg";
 
 export interface DbPoolOptions {
   max?: number;
+  connectionTimeoutMillis?: number;
+  statement_timeout?: number;
 }
 
 export function createDb(url: string, poolOptions: DbPoolOptions = {}) {

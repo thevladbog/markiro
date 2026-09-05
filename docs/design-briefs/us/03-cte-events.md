@@ -1,9 +1,11 @@
 # U.S. Design Brief 03 — Critical Tracking Events: Receiving, Transformation, Shipping
 
+> Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+
 > Third brief of the U.S. series. Office mode of the existing design system, desktop-first
 > 1440px, adaptive down to 1024. Users: the Receiving, Production and Shipping Operators who
 > record events, the QA / Traceability Manager who finalizes, amends and voids them, and the
-> Auditor who reads. English primary, Russian secondary; light + dark. This is a **delta to
+> Auditor who reads. English primary, U.S. Spanish secondary; light + dark. This is a **delta to
 > RU brief 03** (admin panel): it adds three event forms, one event list and one detail page to
 > the cabinet's `Traceability` section. Do not redesign the catalog, shifts, boxes or the RU
 > history screens — the U.S. forms reuse the office components (tables, side panels, status
@@ -23,7 +25,7 @@ Three forms drawn as three unrelated screens would be three products: trace (bri
 XLSX export and the trace request (brief 05) read events as one shape, and the QA Manager
 reviews all three in one sitting. The job is one component family, three configurations.
 
-## The core idea: one event anatomy
+## Design principle: one event anatomy
 
 Every event, regardless of type, is drawn from the same five regions, top to bottom:
 
@@ -47,12 +49,12 @@ record: "which revision is this and who signed it" needs no click.
 Events get a per-type number kept across revisions: `REC-26-0001`, `TRN-26-0001`,
 `SHP-26-0001`. The status chip carries text and an icon, never color alone:
 
-| Status    | Chip text (EN / RU)                    | Meaning for the UI                                                                  |
-| --------- | -------------------------------------- | ----------------------------------------------------------------------------------- |
-| Draft     | Draft / Черновик                       | Editable; excluded from trace, exports and readiness.                               |
-| Finalized | Finalized / Финализировано             | Read-only; snapshots frozen; included everywhere.                                   |
-| Amended   | Amended, rev 1 of 2 / Изменено, ред. 1 | A later revision supersedes it; viewable; excluded from trace by default.           |
-| Void      | Void / Аннулировано                    | Not deleted; reason and actor shown; excluded from exports with the reason as note. |
+| Status    | Chip text (EN / ES)                              | Meaning for the UI                                                                                  |
+| --------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Draft     | Draft / Borrador                                 | Editable; excluded from regulated trace/export rows; draft gaps can appear separately in readiness. |
+| Finalized | Finalized / Finalizado                           | Read-only; snapshots frozen; included everywhere.                                                   |
+| Amended   | Amended, rev 1 of 2 / Corregido, revisión 1 de 2 | A later revision supersedes it; viewable; excluded from trace by default.                           |
+| Void      | Void / Anulado                                   | Not deleted; reason and actor shown; excluded from exports with the reason as note.                 |
 
 The chip shows the revision above 1 ("Finalized, rev 2"). A draft created by an amendment
 reads "Draft, rev 2 — amending REC-26-0001 rev 1" so nobody mistakes it for a new event.
@@ -92,14 +94,14 @@ source per event; a mixed delivery is two events (OQ-US03-11).
 
 **Lines** — a table where each row is a lot:
 
-| Column          | Control                                                                                                                                                  |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Product         | Combobox with search; below it the **product description snapshot** preview: name, brand, commodity, variety, packaging size + style                     |
-| TLC             | Monospace input; opaque string, no format hint                                                                                                           |
-| TLC source      | Toggle: **Source location** (combobox) or **Source reference** (text); one of the two is required                                                        |
-| Quantity        | Decimal input + unit select from the closed list (lb, oz, kg, g, each, case, bag, cup, gal, l)                                                           |
-| Exempt supplier | Checkbox; reveals `Reason` (required) and `Supplier lot reference`; TLC source locks to the receiving location: "You assign the TLC; source = this site" |
-| Link            | "Create lot on finalize" (default) or "Link existing lot" (picker filtered to product; TLC must match)                                                   |
+| Column          | Control                                                                                                                                                              |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Product         | Combobox with search; below it the **product description snapshot** preview: name, brand, commodity, variety, packaging size + style                                 |
+| TLC             | Monospace input; opaque string, no format hint                                                                                                                       |
+| TLC source      | Toggle: **Source location** (combobox) or **Source reference** (text); one of the two is required                                                                    |
+| Quantity        | Decimal input + unit select from the closed list (lb, oz, kg, g, each, case, bag, cup, gal, l)                                                                       |
+| Exempt supplier | Checkbox; reveals `Reason` (required) and `Supplier lot reference`; Assign a TLC only if none exists; show the reviewed receiving basis and applicable source fields |
+| Link            | "Create lot on finalize" (default) or "Link existing lot" (picker filtered to product; TLC must match)                                                               |
 
 Demo: line 1 `OSS-260914-A1`, Fresh-Cut Red Delicious Apple Slices, Orchard Slice, 10 lb bag,
 500.000 lb, source Orchard Slice Supply LLC (Yakima, WA); line 2 `OSS-260914-A2`, same
@@ -121,7 +123,7 @@ void and re-enter to change it").
 **Header** (Production Operator, then QA; groups of data-dictionary §7.4) — `Reason` select
 (Commingling and repacking, Repacking, Relabeling, Processing, Other + note), `Completion
 date` with the tenant timezone as text, `Transformation location` (becomes the TLC source of
-every output — say so in a helper line), `Closed shift` (optional combobox over closed shifts:
+every output — say so in a helper line), `Closed shift` (P1 only; optional combobox over closed shifts:
 number, product, production date, linkable cases; "100 cases will be linked at finalization").
 
 **Inputs** — rows pick existing lots (combobox by TLC or product; option shows product, TLC,
@@ -145,7 +147,7 @@ documents** — at least one of work order, batch log, production log. Demo:
 States to draw: empty; draft with two inputs, one output and the preview; shift selected with
 the cases hint; a quarantined input lot disabled in the picker with the reason; completeness
 row "output product coverage status unknown — review the product first" linking to the FTL
-card; finalized view with the Cases panel (100 linked, first/last SSCC, link to boxes);
+card; finalized P0 view with output quantity 100 case and separate 100 synthetic linked SSCC records;
 multi-output draft with the "cases must be linked manually" hint.
 
 ### 4. Shipping form
@@ -238,8 +240,7 @@ A. Reyes — reason: quantity corrected after recount", with link).
 Void applies to drafts and finalized events; reason required. The event stays in the list and
 on lot cards, greyed with the Void chip; its detail page opens with a banner: reason, actor,
 time, "Excluded from trace results and exports; the exclusion is recorded with this reason".
-Consequences differ by type and the dialog must say so: Receiving — lots it created stay and
-appear on the readiness dashboard as "created by a void event"; Transformation — refused while
+Consequences differ by type and the dialog must say so: Receiving — refuse while finalized downstream events depend on the received lot; show those records. After allowed void, the lot is unavailable for new use; Transformation — refused while
 a finalized shipment uses the output lot (409 naming the shipment, with link), otherwise
 output lots are archived; Shipping — the lot balance is restored, status may return to Active.
 States to draw: void dialog per type; refusal for transformation; voided detail; voided row.
@@ -269,9 +270,9 @@ view; void view; "master data changed since" note; loading; not found.
 - **Wording.** Only the allowed wording of `docs/us/limitations.md`. Statuses are Draft /
   Finalized / Amended / Void; the completeness panel speaks of "required elements" and "data
   completeness", never of compliance.
-- **RU strings.** Layouts must survive "Финализировано, ред. 2", "Аннулировано",
-  "Недостающие обязательные элементы: 3" and long location names; check the line table at
-  1024 with RU headers. **Dark mode.** Locked cells, snapshot notes and the greyed void state
+- **Spanish strings.** Layouts must survive "Finalizado, revisión 2", "Anulado",
+  "Faltan 3 datos obligatorios" and long location names; check the line table at
+  1024 with ES headers. **Dark mode.** Locked cells, snapshot notes and the greyed void state
   need their own dark tokens — grey-on-grey locks vanish on the laptop next to the dock door.
 - **Accessibility (NFR-012).** Every status is text + icon; dialogs trap and return focus;
   completeness rows are real links; the genealogy preview has an `aria-label` and a text list.
@@ -279,10 +280,7 @@ view; void view; "master data changed since" note; loading; not found.
 
 ## How this grows
 
-- **CSV import preview (P1).** "Import lines from CSV" on receiving and shipping opens a
-  preview with the line editor's columns plus a per-row status (accepted / rejected with the
-  issue) and an error report download; "Apply accepted rows" creates one draft event. The
-  preview is the line editor read-only with a status column, not a new screen.
+- **Fixed-template receiving CSV (P0, INT-002).** “Import supplier CSV” uses the read-only line editor with a row status/error column and totals. “Create draft” is disabled while any row is invalid; confirmation applies all rows atomically and repeated apply cannot create a duplicate. Header/date/site/reference fields may be entered manually; finalization is separate. Provide “Export receiving CSV” with safe round-trip handling. Expanded receiving formats (REC-007), partner mapping and shipping imports remain P1. See [CLAR-04](../../us/development-clarifications.md).
 - **Station offline receiving / shipping (P2).** Events with `source = station` show a
   "recorded on station" badge like "from shift"; drafts synced later land in the same list.
 - **Partner mapping profiles (P1).** A partner's CSV column names map to the same line fields;
@@ -307,4 +305,10 @@ view; void view; "master data changed since" note; loading; not found.
 7. Screen 8: void consequences differ per type — one dialog with a per-type consequence
    paragraph, or three dialogs?
 8. Under `US_GENERIC_LOT_TRACEABILITY` the same forms run with the document rule relaxed, no
-   FTL wording, and the Scenario B statement "not classified as FTR-covered" — banner or sub-line?
+   FTL wording, and the Scenario B statement "FTR applicability not assessed in this profile" — banner or sub-line?
+
+## P0 flow corrections
+
+Closed-shift selection and Station operations are P1. Server-side case counters and link/unlink controls are P0 under MUS-CR-001. Transformation confirmation says “1 output lot; 100 case; 2 input lots”; only a verified bridge query may additionally show “100 synthetic cases linked”. Never infer linkage from quantity. Imported-lot identity is never regenerated by an exempt-supplier toggle. The “regulated” input flag cannot override the product coverage review.
+
+Amendments preserve stable output lots and revalidate with the old revision effects removed. Receiving and transformation voids/corrections both check finalized downstream dependencies and show blocking records. Show one `409 event_incomplete` issue-panel pattern for all CTEs. No generic-profile error acknowledgement can create an FDA-labelled package.

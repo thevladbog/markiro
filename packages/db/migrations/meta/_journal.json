@@ -792,6 +792,20 @@
       "when": 1788542179456,
       "tag": "0112_requeue_beer_statuses_after_cis_fix",
       "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1788562886118,
+      "tag": "0113_traceability_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1788564697325,
+      "tag": "0114_us_session_assurance",
+      "breakpoints": true
     }
   ]
 }

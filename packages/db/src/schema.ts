@@ -17,3 +17,5 @@ export * from "./schema/disaggregation.js";
 export * from "./schema/inventory.js";
 export * from "./schema/chz.js";
 export * from "./schema/product-regulatory.js";
+export * from "./schema/traceability.js";
+export * from "./schema/us-auth.js";

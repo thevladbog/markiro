@@ -1,9 +1,11 @@
 # U.S. Design Brief 05 — Traceability Plan and Trace Request (24-hour readiness drill)
 
+> Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+
 > U.S. series, office mode of the design system (brief 02). Web admin, desktop-first 1440px,
 > adaptive down to 1024. Users: the **QA / Traceability Manager** (owns the plan, runs the drill),
 > the **Owner / Tenant Admin** (approves, downloads) and the **Auditor** (read-only). EN primary,
-> RU secondary; light + dark. This is a **delta to RU brief 03 (admin panel)**: it adds two items,
+> U.S. Spanish secondary; light + dark. This is a **delta to RU brief 03 (admin panel)**: it adds two items,
 > **Plan** and **Trace requests**, to the Traceability sidebar group introduced by the earlier U.S.
 > briefs, plus one tile on the Traceability overview. Do not redesign the shell, tables, dialogs,
 > chips or the PDF viewer chrome; reuse them. Grounded in slice specs US-08 (plan), US-09 (trace
@@ -19,10 +21,10 @@ Two records answer it: the **Traceability Plan** (a versioned, approved PDF deri
 configuration) and the **trace request** (a due-at clock, a dry-run validation, a frozen
 hash-verified package). The demo (docs/us/demo-scenario.md §5.4 steps 7–8) ends on these screens.
 
-## The core idea: frozen records on a visible clock
+## Design principle: frozen records on a visible clock
 
 Every artifact here is **frozen the moment it matters** and never silently rewritten. A plan version
-is approved once and keeps its PDF, configuration snapshot and SHA-256 forever; a superseding version
+is approved once and keeps its PDF, configuration snapshot and SHA-256 for the required retention period; a superseding version
 sits next to it, it does not replace it. A package run pins the exact event revisions it was built
 from; regenerating creates revision 2 and revision 1 stays downloadable byte-for-byte. The UI never
 shows a "current" document that could quietly change under an auditor's eyes — it shows versions and
@@ -30,7 +32,7 @@ revisions, each with a date, an actor and a hash.
 
 The second half: **the clock is never blocked by tooling.** Validation can flag missing data and
 refuse the _export-ready_ badge, but the 24-hour countdown keeps running and the operator can always
-prepare _some_ package. Time is shown plainly — received, due, started, completed, elapsed — because
+download a diagnostic validation report. Time is shown plainly — received, due, started, completed, elapsed — because
 the elapsed time _is_ the evidence (C-013, C-014).
 
 Wording rule binding every string: the product **prepares** a package; it never "submits", "sends"
@@ -46,8 +48,8 @@ Route `/traceability/plans`. Table, newest first: **Version** (`v2`), **Status**
 **Change summary** (one line, tooltip for the rest), actions (View; Download PDF; Edit for the
 draft). Primary action **New draft**, disabled with a hint when a draft exists ("v3 is open").
 
-Below the table a quiet **retention note**: "Prior versions are retained for at least 1,825 days
-(tenant setting; minimum 730)". The number is data from the profile, not copy.
+Below the table a quiet **retention note**: "Prior versions are retained for at least 5 calendar years
+(tenant setting; minimum 2)". The number is data from the profile, not copy.
 
 Two banners may appear above the table (warning tone, icon + text):
 
@@ -64,14 +66,14 @@ one superseded row; effective + configuration-changed banner; loading; error; st
 Route `/traceability/plans/:id` for the draft. `DataTabs`, one tab per section in the fixed order
 of the domain model:
 
-| Tab                | Derived from configuration (read-only block)                                                 | User-editable             |
-| ------------------ | -------------------------------------------------------------------------------------------- | ------------------------- |
-| Record maintenance | system of record, export formats, storage class, backup statement, retention days, timezone  | narrative paragraphs      |
-| FTL identification | classification workflow: coverage statuses in use, review cadence, count of covered products | narrative paragraphs      |
-| TLC assignment     | rule "Transformation assigns; shipping never assigns", TLC source locations (name, city/ST)  | narrative paragraphs      |
-| Point of contact   | —                                                                                            | name, title, phone, email |
-| Farm map           | fixed "Not applicable to the processor profile"                                              | explanation paragraph     |
-| Review and update  | review cadence default (365 days)                                                            | narrative paragraphs      |
+| Tab                | Derived from configuration (read-only block)                                                          | User-editable             |
+| ------------------ | ----------------------------------------------------------------------------------------------------- | ------------------------- |
+| Record maintenance | system of record, export formats, storage class, backup statement, retention calendar years, timezone | narrative paragraphs      |
+| FTL identification | classification workflow: coverage statuses in use, review cadence, count of covered products          | narrative paragraphs      |
+| TLC assignment     | rule "Transformation assigns; shipping never assigns", TLC source locations (name, city/ST)           | narrative paragraphs      |
+| Point of contact   | —                                                                                                     | name, title, phone, email |
+| Farm map           | fixed "Not applicable to the processor profile"                                                       | explanation paragraph     |
+| Review and update  | review cadence default (365 days)                                                                     | narrative paragraphs      |
 
 Every derived block is labelled "Derived from configuration" and links to the screen that owns the
 fact (profile, locations, products) — the plan is edited _there_, not here. Narrative is plain-text
@@ -91,7 +93,7 @@ States to draw: new draft prefilled from the effective version; draft with valid
 (missing contact phone, a prohibited phrase, no TLC source location configured — the last links to
 Locations); clean draft ready to approve; saving / save error; the configuration-changed banner
 inside the editor pointing at the affected tabs; read-only view of an effective or superseded
-version (same tabs, no inputs, header "v1 — superseded on 09/10/2026 by v2"); RU tab bar.
+version (same tabs, no inputs, header "v1 — superseded on 09/10/2026 by v2"); ES tab bar.
 
 ### 3. Plan preview and PDF
 
@@ -124,16 +126,15 @@ the SHA-256 (mono, copy button); viewer loading; "link expired, reopen" (downloa
 - Idempotent: pressing twice yields one effective version; show a neutral "Already approved"
   outcome, not an error.
 
-States to draw: blocked (issues listed, Approve disabled); ready; in progress (sub-second, inline
-progress, no modal spinner); success (back on the list: v2 effective, v1 superseded, toast with
+States to draw: blocked (issues listed, Approve disabled); ready; in progress (inline status, duration not promised); success (back on the list: v2 effective, v1 superseded, toast with
 Download PDF); failure ("Approval rejected" with issue codes).
 
 ### 5. Trace request list
 
 Route `/traceability/requests`. Columns: **Request** (`REQ-2026-APPLE-001`), **Requester** (name,
 organization), **Received** (`09/17/2026 9:02 AM PDT`), **Due** — date plus the **countdown chip**,
-**Status** (Open / Validated / Package ready / Request ready / Closed), **Latest revision** (`r1`),
-**Request ready** (yes/no with icon), actions. Filters: status, "due before". Primary action **New
+**Status** (Open / Validated / Package ready / Export-ready / Closed), **Latest revision** (`r1`),
+**Export-ready** (yes/no with icon), actions. Filters: status, "due before". Primary action **New
 trace request**.
 
 The countdown chip is the signature element of the section and must read without color:
@@ -149,7 +150,7 @@ The countdown chip is the signature element of the section and must read without
 An alternate deadline shows its recorded reason on hover and in the detail header.
 
 States to draw: empty (explains the drill in allowed wording: "Log a trace request, validate data
-readiness, prepare the package — all local; nothing is sent anywhere"); populated with one row in
+readiness, prepare the package — prepared in this instance; nothing is submitted to FDA"); populated with one row in
 each countdown situation; loading; error; stale/offline ("Countdowns may be behind; last update
 12 s ago").
 
@@ -176,7 +177,7 @@ preview line shows matched counts ("2 lots · 3 events · 3 locations"). At leas
 
 States to draw: step 1 default and with the alternate-deadline reason revealed; step 2 empty,
 prefilled-from-search, and "no records match this scope" (warning, not error — a drill may
-legitimately find nothing); saving between steps; RU step bar.
+legitimately find nothing); saving between steps; ES step bar.
 
 ### 7. Dry-run validation results
 
@@ -186,35 +187,22 @@ field (data-dictionary grouping: Lot, Quantity, Product, Previous source, Receiv
 References), message, and a provenance link to the event or lot (`Receiving · rev 2 ·
 OSS-260914-A2`).
 
-Errors block the _export-ready_ badge. **Acknowledge and continue** appears only when errors exist,
-requires a reason and records who/when. The acknowledgement is tied to a data digest: if any record
-changes afterwards a **stale banner** appears ("Data changed since this validation — run it again")
-and the acknowledgement no longer counts.
+Errors block **Prepare export-ready package** and the **Export-ready** badge. Keep a separate authorized **Download available records** action with an **Incomplete** label, findings, unavailable artifacts and the frozen request revision. Acknowledgement never waives errors; downloading does not fulfil the request. The diagnostic report remains available and the due clock continues. Both paths enforce tenant/export permissions.
 
-**Two variants to draw (OQ-US09-2, not decided):**
+A changed input digest shows “Data changed since validation: run it again”. Revalidate a changed snapshot for either mode. For export-ready, resolve errors, obtain a nonempty complete scope and an effective plan; incomplete mode records these gaps without bypassing permissions or profile restrictions.
 
-- **Variant A — allowed.** Prepare package is enabled even with unacknowledged errors; a warning
-  says "The package will be prepared but not marked export-ready". The run then carries an `Export
-ready: no` chip with the reason.
-- **Variant B — blocked.** Prepare package is disabled until every error is resolved or
-  acknowledged; the disabled button carries the reason inline.
-
-The spec recommends A ("the 24 h clock must not be blocked by tooling"); draw both.
-
-States to draw: not validated yet; running; **zero findings** ("0 missing required KDEs" with a
-positive icon — the demo money shot, C-013); errors unacknowledged (A and B); errors acknowledged
-(reason, actor, time); warnings only; stale.
+States: not validated; running; zero errors; errors with source links; warning acknowledgement; stale validation; incomplete traversal; no effective plan; successful empty retrieval with scope shown; failed retrieval/storage/rendering. Technical failures must never use the successful Incomplete state. Download initiation is not proof of human review.
 
 ### 8. Package generation
 
-Single primary button **Prepare package** (never "Generate and submit", never "Send").
+Primary button **Prepare export-ready package** (never "Generate and submit", never "Send"). The secondary **Download available records** path generates a labelled incomplete revision, with available records, validation and manifest; absent plan/artifacts are explicit. Reuse the progress/history layout with mode and completeness shown in list, detail and downloads. See [CLAR-03](../../us/development-clarifications.md).
 Preconditions surface _before_ the click: no effective plan → blocked with "An effective
 Traceability Plan is required" and a link to the plan list; empty scope → blocked.
 
 While running: Queued → Processing with a **live elapsed timer** (`00:41`). On **Ready**:
 
 - **Timing panel** (`DefinitionGrid`): Started (operator pressed the button), Generation started,
-  Completed, **Elapsed 00:52**, Operator; and **Operator time** since the request was created
+  Completed, **Elapsed 00:52**, Operator; and **Session elapsed** since the request was created
   (`11 min 40 s`). Both numbers are evidence — plain, tabular numerals, never in a tooltip.
 - **Artifacts table**, keyed by kind, in this order: workbook `.xlsx` (FDA-aligned electronic
   sortable spreadsheet), Traceability Plan PDF (v2, same hash as on the plan list), validation
@@ -222,7 +210,7 @@ While running: Queued → Processing with a **live elapsed timer** (`00:41`). On
   `SHA256SUMS` inside). Columns: name, size, **SHA-256** (mono, copy button, full hash on hover),
   Download. P1 adds CSV ZIP and canonical JSON rows with no layout change.
 - **Download package (ZIP)** as the primary action; the link lives 300 s — "link expires in 4:59".
-- **Request ready** chip (yes / no with the reason).
+- **Export-ready** chip (yes / no with the reason).
 - **Prepare new revision** with the explainer "Freezes current data as r2; r1 stays unchanged".
 
 States to draw: blocked (no effective plan); queued; processing with timer; ready and export-ready;
@@ -244,7 +232,7 @@ States to draw: no runs yet; r1 ready; closed; auditor view (downloads only).
 A PDF inside the package; draw its first page like the plan: requester and scope, received and
 due in tenant timezone **and** UTC, timing (started, generation started, completed, elapsed),
 operator time, validation summary, artifact table with SHA-256, baseline ID, the allowed-wording
-disclaimer and the fixed sentence "Package prepared locally; delivery to the requester is performed
+disclaimer and the fixed sentence "Package prepared in the U.S. instance; delivery to the requester is performed
 by the covered entity". No logo other than the Markiro mark used on billing documents.
 
 ### 11. QA sign-off (P1 — must not block the P0 screens)
@@ -267,8 +255,8 @@ layout is complete without it.
 - **Formats.** Dates `MM/DD/YYYY`, times `h:mm AM/PM TZ`; the workbook stores ISO dates
   (`yyyy-mm-dd` typed cells, US-07) but the UI never shows ISO. Quantities decimal + unit
   (`100 case`, `900 lb`). Hashes mono, lower-case hex, 64 chars, copy button wherever shown.
-- **RU strings.** Every screen gets an RU pass (status words 1.3–1.5× longer: "Пакет подготовлен",
-  "Просрочено на 40 мин"); the countdown chip must not truncate in RU.
+- **Spanish strings.** Every screen gets an ES pass with expanded status text ("Paquete preparado",
+  "Vencido hace 40 min"); the countdown chip must not truncate in Spanish.
 - **Dark mode.** Attention and error tones must hold AA on dark; the DRAFT watermark and the PDF
   viewer are light documents inside a dark shell.
 - **Wording gate.** Every string is scanned by the prohibited-wording test; put the exact allowed
@@ -291,13 +279,16 @@ layout is complete without it.
 
 ## Questions for the designer
 
-1. OQ-US09-2: draw both variants of screen 7 (allowed vs blocked); which reads more honest to a
-   first-time QA manager under time pressure?
+1. Resolved by CLAR-03: diagnostic report and authorized available-records download remain visible beside blocked export-ready preparation. Errors cannot be waived.
 2. Should the countdown chip change tone at 4 h or at a tenant-set threshold? The spec fixes none;
    propose one and note it on the mockup.
 3. Self-approval of the plan is allowed in P0 (OQ-US08-8): should the approve dialog show a soft
    "four-eyes recommended" hint, or stay silent?
 4. Prohibited-wording check: inline underline in the textarea, a side panel, or both? It must work
-   for RU narrative too.
+   for Spanish narrative too.
 5. Is the superseded marker in the viewer header enough, or should the versions list also badge the
    download as "historical"?
+
+## Artifact display boundary
+
+The report cannot list its own hash or the later manifest/ZIP hashes. The completed run page can list all artifacts after publication. Use the shared-contract hash order and distinguish report-preparation timing from run completion. Plan approval has no unmeasured sub-second promise; show a cancellable wait state only if cancellation is actually supported.

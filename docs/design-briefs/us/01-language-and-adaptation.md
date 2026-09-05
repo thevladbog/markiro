@@ -1,11 +1,13 @@
 # U.S. Design Brief 01 — Language, Formats and Adaptation Rules
 
+> Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+
 > First stage of the U.S. series. This brief takes the slot that "Brand &
 > naming" (RU brief 01) held: the brand, logo, palette and typography **stay
 > exactly as approved**. What changes for the U.S. product is language, formats,
 > terminology and — above all — what we are allowed to claim. Every later U.S.
 > brief (02–07) and every string in a mockup must obey this document. Office
-> and floor modes, light + dark, EN primary with RU strings kept alive. Delta to
+> and floor modes, light + dark, EN primary and U.S. Spanish secondary. Delta to
 > RU briefs 01 and 02; do not touch tokens or components — add vocabulary and
 > patterns on top of them.
 
@@ -20,7 +22,7 @@ state without a lawyer in the room — and gives the format rules (dates,
 units, phones, addresses) that make a U.S. plant manager trust the screen at a
 glance.
 
-## The core idea: show the record, never the verdict
+## Design principle: show the record, never the verdict
 
 Every string in the U.S. area answers one of two questions: _what has been
 recorded_ and _what is still missing_. It never answers _are we compliant_.
@@ -64,30 +66,30 @@ Rules:
 - Errors name the field and the fix: "Phone is required for an export-ready
   location." Not "Invalid location".
 - Numbers carry units; dates carry the zone when the zone matters.
-- Do not translate RU strings literally into EN; write EN first, then RU.
+- Write English first, then natural U.S. Spanish (`es-US`), using the same product glossary. Do not translate legacy Russian copy literally.
 
 ## 2. Claims matrix in microcopy
 
 The binding matrix is in brief 00 and `docs/us/limitations.md`. Applied to
 real UI elements:
 
-| Element                      | Write this                                                                                                  | Never this                                 |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| Overview footer              | Designed to support applicable FSMA 204 recordkeeping requirements. Traceability readiness demonstrator.    | FDA-compliant traceability. FDA certified. |
-| Readiness metric label       | Data readiness — 14 of 16 checks; explanatory only, not a compliance score                                  | Compliance score 87 %                      |
-| Coverage chip                | Covered · reviewed 09/10/2026                                                                               | FDA covered / Approved                     |
-| Coverage banner (unknown)    | Coverage not yet reviewed — blocks an export-ready package until a reviewer sets a status and rationale     | Non-compliant product                      |
-| Generic-profile statement    | Not classified as FTR-covered; general lot traceability only                                                | Exempt from FDA rule                       |
-| Trace request wizard button  | Prepare package                                                                                             | Submit to FDA / Send / Upload              |
-| Package ready panel          | Package prepared locally; delivery to the requester is performed by the covered entity                      | Sent to FDA / Filed                        |
-| Export-ready chip            | Export-ready · 0 errors                                                                                     | Compliant / Certified                      |
-| Export disclaimer (Metadata) | Prepared locally; not submitted to FDA. Coverage and exemption status are manual, reviewed classifications. | Official FDA export                        |
-| Cases / SSCC hint            | Case scanning is an operational aid, not a regulatory requirement                                           | FDA requires SSCC on every case            |
-| EPCIS mention (landing)      | EPCIS-ready architecture (future)                                                                           | EPCIS required by FDA / EPCIS certified    |
-| Empty lots list              | Lots are created by Receiving and Transformation events. You can also add an imported lot.                  | No compliant lots yet                      |
-| Empty trace requests         | Run a mock request to check how fast records can be prepared. Nothing leaves this system.                   | Practice your FDA submission               |
-| Landing hero                 | Markiro U.S. Traceability — a traceability readiness demonstrator for small and mid-sized food processors   | FSMA 204 compliance, guaranteed            |
-| Video / deck headline        | Three events, one lot code, a package in under a minute                                                     | FDA-approved recall software               |
+| Element                      | Write this                                                                                                               | Never this                                 |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ |
+| Overview footer              | Designed to support applicable FSMA 204 recordkeeping requirements. Traceability readiness demonstrator.                 | FDA-compliant traceability. FDA certified. |
+| Readiness metric label       | Data readiness — 14 of 16 checks; explanatory only, not a compliance score                                               | Compliance score 87 %                      |
+| Coverage chip                | Covered · reviewed 09/10/2026                                                                                            | FDA covered / Approved                     |
+| Coverage banner (unknown)    | Coverage not yet reviewed — blocks an export-ready package until a reviewer sets a status and rationale                  | Non-compliant product                      |
+| Generic-profile statement    | FTR applicability not assessed in this profile; general lot traceability only                                            | Exempt from FDA rule                       |
+| Trace request wizard button  | Prepare package                                                                                                          | Submit to FDA / Send / Upload              |
+| Package ready panel          | Package prepared in the U.S. instance; delivery to the requester is performed by the covered entity                      | Sent to FDA / Filed                        |
+| Export-ready chip            | Export-ready · 0 errors                                                                                                  | Compliant / Certified                      |
+| Export disclaimer (Metadata) | Prepared in the U.S. instance; not submitted to FDA. Coverage and exemption status are manual, reviewed classifications. | Official FDA export                        |
+| Cases / SSCC hint            | Case scanning is an operational aid, not a regulatory requirement                                                        | FDA requires SSCC on every case            |
+| EPCIS mention (landing)      | EPCIS integration is outside the MVP scope                                                                               | EPCIS required by FDA / EPCIS certified    |
+| Empty lots list              | Lots are created by Receiving and Transformation events. You can also add an imported lot.                               | No compliant lots yet                      |
+| Empty trace requests         | Run a mock request to check how fast records can be prepared. Nothing leaves this system.                                | Practice your FDA submission               |
+| Landing hero                 | Markiro U.S. Traceability — a traceability readiness demonstrator for small and mid-sized food processors                | FSMA 204 compliance, guaranteed            |
+| Video / deck headline        | Three events, linked lots, one request package                                                                           | FDA-approved recall software               |
 
 ## 3. Terminology: RU product concept → U.S. screen label
 
@@ -204,16 +206,15 @@ text "Complete data first — 3 errors" next to it, linking to the panel.
 | unknown                   | warn    | Not reviewed                        | Inline alert: blocks an export-ready package |
 | exemption_review_required | warn    | Exemption review required           | Inline alert: blocks an export-ready package |
 
-Under the generic profile the chip is replaced by the fixed text "Not
-classified as FTR-covered".
+Under the generic profile the chip is replaced by the fixed text "FTR applicability not assessed in this profile".
 
 ### Readiness and validation severities
 
-| Severity | Chip  | Text    | Meaning                                                    |
-| -------- | ----- | ------- | ---------------------------------------------------------- |
-| error    | error | Error   | Blocks Finalize / export-ready until fixed or acknowledged |
-| warning  | warn  | Warning | Does not block; some require an explicit acknowledgement   |
-| info     | info  | Info    | Provenance notes (superseded, excluded void row)           |
+| Severity | Chip  | Text    | Meaning                                                  |
+| -------- | ----- | ------- | -------------------------------------------------------- |
+| error    | error | Error   | Blocks Finalize / export-ready until fixed               |
+| warning  | warn  | Warning | Does not block; some require an explicit acknowledgement |
+| info     | info  | Info    | Provenance notes (superseded, excluded void row)         |
 
 ### Other chips used across the series
 
@@ -240,19 +241,19 @@ regular text otherwise. Never colored as a status; it is metadata.
 overview and the plan editor and inside the package-ready panel:
 
 > Designed to support applicable FSMA 204 recordkeeping requirements.
-> Traceability readiness demonstrator. Prepared locally; not submitted to FDA.
+> Traceability readiness demonstrator. Prepared in the U.S. instance; not submitted to FDA.
 > Coverage and exemption status are manual, reviewed classifications.
 
-The generic profile appends "Product(s) not classified as FTR-covered; general
+The generic profile appends "FTR applicability is not assessed in this profile; general
 lot traceability record." The block is never a dismissible banner.
 
-## 9. RU-string resilience
+## 9. English and U.S. Spanish
 
-Every U.S. key has an RU string for the lockstep test even though U.S. tenants
-run in English. Layouts must survive it (brief 02 rule): chip labels
-"Exemption review required" and its RU equivalent both fit without
-truncation; KDE group headers wrap to two lines gracefully; date columns are
-sized for `MM/DD/YYYY` and `DD.MM.YYYY` alike.
+The U.S. locale allow-list is `en-US` (default) and `es-US`; Russian is not offered. Use `English` and `Español` in the language selector. US-only translation-key checks compare English and Spanish, without changing the separate RU edition's locale support.
+
+Spanish copy must fit without truncation: `Guardar borrador`, `Finalizar`, `Datos obligatorios completos`, `Revisión de exención requerida`. KDE headers may wrap to two lines. Preserve the shared U.S. date/number conventions, explicit units and tenant timezone in both languages; language switching does not translate TLCs, references or record values. English artifact templates remain the default independently of UI language.
+
+Use `Recepción`, `Transformación`, `Envío`, `Lote` and `Ubicación` consistently. Draft and finalized states are `Borrador` and `Finalizado`; `Anular` is an action, while `Anulado` is a state. Have a fluent Spanish reviewer validate regulatory and floor-safety copy before real use.
 
 ## 10. Dark mode notes
 
@@ -263,12 +264,12 @@ sized for `MM/DD/YYYY` and `DD.MM.YYYY` alike.
   plain text; no tinted background.
 - Floor mode (brief 06): the "Traceability lot" card uses the same dark-first
   surfaces as the box-fill visual; the warn/block full-screen states reuse the
-  amber/red signal screens of RU brief 04 with English copy.
+  amber/red signal screens of RU brief 04 with English and Spanish copy.
 
 ## Cross-cutting notes
 
 - Copy is data: designers hand over strings in a sheet keyed by screen and
-  element so they can be pasted into `en.json` and pass the content test.
+  element with English and Spanish columns so they can populate `en.json` / `es.json` and pass edition-aware content tests.
 - Any new status word must be added to section 7 before it appears in a
   mockup — a chip with an unmapped word is a design defect.
 - Where a slice spec leaves a choice open (event number format `REC-26-0007`
@@ -279,8 +280,8 @@ sized for `MM/DD/YYYY` and `DD.MM.YYYY` alike.
 
 More profiles (a distributor or a farm profile) add rows to the terminology
 table and possibly new CTEs; they do not add a second tone or a second chip
-family. More languages (Spanish for the shop floor is the obvious next one)
-add a column to the copy sheet. New claims allowed after a specialist review
+family. English and U.S. Spanish are the supported U.S. languages; any further language
+needs a separate scope decision. New claims allowed after a specialist review
 ("compliance-ready") are added to the matrix by change control, never by a
 designer's judgement.
 
@@ -290,9 +291,14 @@ designer's judgement.
    section marker? Decide together with brief 00 question 1.
 2. The existing `warn` glyph reads as "duplicate" (⧉). Propose a
    generic attention glyph for both products or a per-product glyph override.
-3. Due-time chip: should the amber "Due in under 1 hour" threshold be fixed at
-   60 minutes, or configurable per tenant? Draw the fixed version.
+3. Due-time chip: how should the fixed attention threshold below 4 hours and the overdue state remain readable in both themes?
 4. Phone display: we render as typed. Should the input offer a formatting
    helper (auto-inserting parentheses) or stay a plain text field?
 5. Where the master-data-changed note and a revision banner both apply, do
    they merge into one line or stay separate?
+
+## Copy corrections for the MVP
+
+Use “Export-ready” only for a zero-error package revision. The generic statement is “General lot traceability only; FTR applicability is not assessed in this profile.” Do not infer exemption from a profile. Dates are civil event dates; timestamps show the relevant recorded zone. Use “5 calendar years by default; minimum 2” for retention, not fixed-day equivalents.
+
+Do not claim a measured speed before a timed run exists. “Prepare package” means server-side preparation in the U.S. instance, not storage on the operator computer. Words such as “Approve version”, “Upload attachment” or negated limitations are not blanket-prohibited; tests target affirmative regulatory claims and explicitly allow the approved disclaimer/negative-test corpus. Use one fixed countdown threshold in P0: attention below 4 hours, error after the deadline.

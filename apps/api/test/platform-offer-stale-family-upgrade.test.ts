@@ -92,14 +92,18 @@ describe.skipIf(!databaseUrl)("stale commercial family after a real 0094 to 0096
       role: actor.role,
       status: "active",
     });
-    await connection.db.insert(schema.user).values({
-      id: tenantUserId,
-      name: "Stale family tenant user",
-      email: "stale-family-runtime-user@example.invalid",
-      emailVerified: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    // This fixture is still at 0094. Keep it independent of later user fields
+    // such as 0114's two_factor_enabled while retaining the historical row.
+    await connection.pool.query(
+      `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
+       VALUES ($1, $2, $3, true, $4, $4)`,
+      [
+        tenantUserId,
+        "Stale family tenant user",
+        "stale-family-runtime-user@example.invalid",
+        new Date(),
+      ],
+    );
     await connection.db.insert(schema.commercialOffers).values([
       {
         id: staleOfferId,

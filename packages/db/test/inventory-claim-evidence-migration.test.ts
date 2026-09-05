@@ -61,12 +61,12 @@ describe.skipIf(!databaseUrl)("inventory claim evidence migration", () => {
       slug: `${tenantId}-${randomUUID()}`,
       createdAt: new Date(),
     });
-    await db.insert(schema.user).values({
-      id: userId,
-      name: "Claim migration",
-      email: `${randomUUID()}@example.invalid`,
-      emailVerified: false,
-    });
+    // This fixture intentionally stops at 0073: do not insert fields from the
+    // current user model (0114 adds two_factor_enabled).
+    await pool.query(
+      `INSERT INTO "user" (id, name, email, email_verified) VALUES ($1, $2, $3, false)`,
+      [userId, "Claim migration", `${randomUUID()}@example.invalid`],
+    );
     // Raw SQL, not `schema.products`: this scratch DB is pinned at migration
     // 73, while the live schema object keeps gaining columns (e.g. 0085's
     // `archived`) that drizzle would list in the INSERT but do not exist here.

@@ -24,7 +24,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: signer-stable-release
+  group: us-development-locked-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -32,7 +32,9 @@ env:
 
 jobs:
   authorize:
-    if: github.ref == 'refs/heads/main'
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
+    # Before US release lock: if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -54,7 +56,9 @@ jobs:
           test "$RELEASE_BUMP" = "patch" -o "$RELEASE_BUMP" = "minor" -o "$RELEASE_BUMP" = "major"
 
   state:
-    if: github.ref == 'refs/heads/main'
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
+    # Before US release lock: if: github.ref == 'refs/heads/main'
     needs: authorize
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -113,7 +117,9 @@ jobs:
           NODE
 
   release:
-    if: inputs.mode == 'publish'
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
+    # Before US release lock: if: inputs.mode == 'publish'
     needs: [authorize, state]
     runs-on: windows-latest
     timeout-minutes: 60
@@ -263,7 +269,9 @@ jobs:
             --repo "$SIGNER_RELEASE_REPOSITORY"
 
   repair:
-    if: inputs.mode == 'repair'
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
+    # Before US release lock: if: inputs.mode == 'repair'
     needs: [authorize, state]
     runs-on: ubuntu-latest
     timeout-minutes: 20

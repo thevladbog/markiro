@@ -1,5 +1,7 @@
 # US-03 — Receiving CTE, common event shell and reference documents — Design Spec
 
+> Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+
 **Date:** 2026-09-03
 
 **Status:** Draft for review (not implemented)
@@ -21,7 +23,7 @@
 
 ## Problem
 
-Receiving is the first critical tracking event of the P0 chain and the first slice that needs an event record with a regulated lifecycle: draft, finalized, amended, void. Transformation (US-04) and Shipping (US-05) need the same lifecycle, revision chain, snapshot discipline, actor and audit semantics, and the same "reference document" concept. If each slice invented its own, trace (US-06), export (US-07) and trace requests (US-09) would have to handle three shapes. This spec therefore owns three things: the common event shell `traceability_events`, the reference document tables, and the Receiving CTE itself, including the CSV import contract (interface in P0, implementation in P1).
+Receiving is the first critical tracking event of the P0 chain and the first slice that needs an event record with a regulated lifecycle: draft, finalized, amended, void. Transformation (US-04) and Shipping (US-05) need the same lifecycle, revision chain, snapshot discipline, actor and audit semantics, and the same "reference document" concept. If each slice invented its own, trace (US-06), export (US-07) and trace requests (US-09) would have to handle three shapes. This spec therefore owns three things: the common event shell `traceability_events`, the reference document tables, and the Receiving CTE itself, including the fixed-template receiving CSV import/export (P0), with expanded import formats deferred to P1.
 
 ## Key facts of the codebase
 
@@ -38,14 +40,14 @@ Receiving is the first critical tracking event of the P0 chain and the first sli
 - Admin conventions: pages under `apps/admin/src/pages/<area>/` with `api.ts` (TanStack Query over `apiFetch`, `apps/admin/src/api/client.ts`), `@markiro/ui` components (`PageHeader, Table, StatusChip, Alert, EmptyState, Combobox, DatePicker`), i18n in `apps/admin/src/i18n/{en,ru}.json`; a missing key throws in tests (`i18n/index.ts`).
 - Decimal precedent: `numeric(precision, scale)` is used for money (`billing.ts`, `products.unit_price`); no decimal quantity column exists yet.
 - Tests: API e2e in `apps/api/test/*.e2e.test.ts` (`describe.skipIf(!ready)`, `signUpAndActivate` from `test/support/auth`); migration runtime tests in `packages/db/test/*-migration.test.ts` use `copyMigrationsThroughIndex` to prove the upgrade path; domain unit tests in `packages/domain/test/*.test.ts`.
-- Latest migration is `0111_label_template_scope_and_defaults.sql`; the traceability schema file `packages/db/src/schema/traceability.ts` does not exist yet (US-00 creates it).
+- Latest migration in the reviewed main revision is `0112_requeue_beer_statuses_after_cis_fix.sql`; the traceability schema file `packages/db/src/schema/traceability.ts` does not exist yet (US-00 creates it).
 - Sibling specs already drafted: US-00 defines the capabilities `traceability.read`, `traceability.receiving.write`, `traceability.shipping.write`, `traceability.qa.manage` (finalize/amend/void) and the `RequireTraceabilityProfile(...)` decorator + `TraceabilityProfileGuard` answering 403 `traceability_profile_required`; US-02 defines `traceability_lots.origin_event_id` as a reserved column whose composite FK to `traceability_events` is added by this slice's migration, `buildProductSnapshot(product, profile)`, `normalizeTlc`, `assertLotTransition` and the closed UOM vocabulary `UOM_CODES_V1`; US-06 expects the shell to carry `event_date` and an `amendment_reason` on amended revisions.
 
 ## Design
 
 ### Data model
 
-All tables go into `packages/db/src/schema/traceability.ts`, one additive migration `0115_us_03_receiving_events_and_documents.sql` (after US-00 `0112`, US-01 `0113`, US-02 `0114`; renumber at implementation time to the next free number). Names follow data-dictionary §9. Every table has `tenant_id`, `unique(tenant_id, id)`, `created_at/updated_at timestamptz`.
+All tables go into `packages/db/src/schema/traceability.ts`, one additive migration `NNNN_us_03_receiving_events_and_documents.sql` (after US-00, US-01 and US-02; choose the next free migration number at implementation). Names follow data-dictionary §9. Every table has `tenant_id`, `unique(tenant_id, id)`, `created_at/updated_at timestamptz`.
 
 Enums:
 
@@ -55,7 +57,7 @@ Enums:
 - `reference_document_type`: `bol`, `po`, `asn`, `work_order`, `invoice`, `database_record`, `batch_log`, `production_log`, `other`.
 - `reference_document_confidentiality` (P1): `public_demo`, `internal`, `confidential`.
 - `traceability_lot_link_mode`: `create_on_finalize`, `link_existing`.
-- `traceability_import_run_status` (P1): `preview`, `applied`, `rejected`, `expired`.
+- `traceability_import_run_status` (P0 fixed-template path): `preview`, `applied`, `rejected`, `expired`.
 
 `traceability_events` (common shell; owned here, reused by US-04/US-05):
 
@@ -151,7 +153,7 @@ Uniqueness (data-dictionary §5: unique within type/party): partial unique index
 
 A reference document linked to any finalized event becomes frozen: `PATCH` of `type`, `type_other_label`, `number`, `party_id` answers 409 `document_frozen`. Deleting is not offered; archiving keeps links.
 
-`traceability_import_runs` (P1 implementation, P0 shape; INT-002, INT-008, REC-007):
+`traceability_import_runs` (P0 fixed template for INT-002; expanded INT-008/REC-007 behavior remains P1):
 
 | Column                                                                       | Type / rule                                                                                                                   |
 | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -165,7 +167,7 @@ A reference document linked to any finalized event becomes frozen: `PATCH` of `t
 | result_event_id                                                              | uuid NULL; composite FK → `traceability_events`                                                                               |
 | created_by_user_id, created_at, applied_at, terminal_reason                  |                                                                                                                               |
 
-Partial unique index `(tenant_id, kind, file_sha256) WHERE status IN ('preview', 'applied')` (tenant-scoped, so the same file uploaded by a colleague is the same import): a duplicate upload returns the existing `preview` run (200) or, once that run is `applied`, 409 `import_already_applied` with `resultEventId`; only a `rejected` or `expired` run releases the hash. `apply` is idempotent: a run is applied once (`result_event_id` set under `FOR UPDATE` on the run row) and a retried `apply` returns the same `resultEventId` instead of creating a second draft event (acceptance §2.4 "Duplicate import retry").
+MUS-CR-001: use tenant-scoped command/operation identity, not a unique file hash. Store `operation_key` and `input_digest` covering template version, file content and creation payload; unique `(tenant_id, kind, operation_key)`. Same key/digest replays the original run/draft; changed digest conflicts. A new explicit operation may reuse identical file bytes for a separate delivery. Keep `file_sha256` as nonunique audit metadata. Lock the import run for atomic apply; no partial draft on blocking row errors and no duplicate draft under concurrent retries. Missing header fields allowed by the draft model remain visible and block finalization where required.
 
 ### Domain rules
 
@@ -176,7 +178,7 @@ New module `packages/domain/src/traceability/` (pure, no DB):
 - `quantity.ts`: `parseQuantity(string)` → decimal string with at most 3 fraction digits, > 0, no exponent; `isUomCode(value)` delegates to US-02 `UOM_CODES_V1` (OQ-US03-6).
 - `receiving/completeness.ts`: `validateReceivingCompleteness(input): CompletenessIssue[]` where `input` is a plain object (header, items, resolved locations, product profiles, linked documents, profile code). Issues carry `{ path, code, severity: "error" | "warning", requirementId }`. Errors: `event_date` (date received) missing; `location` (receive-at) missing or its description invalid per US-01 validator (`business_name, phone, street_or_coordinates, city, state, zip, country`); `previous_source_location` missing or invalid; no items; per item: product missing, product description incomplete per US-02 rules, `tlc` blank, neither `tlc_source_location_id` nor `tlc_source_reference`, exempt without reason, exempt with a TLC source other than the receiving site, quantity/UOM invalid, link mode `link_existing` with a lot whose product or TLC differs; no reference document when profile is `US_FSMA204_PROCESSOR` (REC-006; warning only under `US_GENERIC_LOT_TRACEABILITY`). Warnings: same TLC on two lines with the same source, previous source equals receive-at.
 - `receiving/snapshot.ts`: `buildReceivingFinalizationPlan(input)` returns the exact writes (lot creates, snapshots, document snapshots) so the service is a thin transaction and tests compare plans deterministically.
-- `imports/receiving-csv.ts` (P1 implementation, contract now): `RECEIVING_CSV_COLUMNS` (`tlc, product, quantity, unit_of_measure, tlc_source, tlc_source_reference, exempt_supplier, exempt_reason, supplier_lot_reference, notes`), `parseReceivingCsv(text, mapping?)` → rows with per-row issues; `product` resolves by GTIN-14, then `products.external_ref`, then exact name; `tlc_source` resolves by the US-01 location code or GLN. Column keys are the receiving keys of the US-07 field registry; until US-07 exists they are declared here and US-07 must adopt them (OQ-US03-9).
+- `imports/receiving-csv.ts` (P0 fixed-template implementation; mapping profiles P1): `RECEIVING_CSV_COLUMNS` (`tlc, product, quantity, unit_of_measure, tlc_source, tlc_source_reference, exempt_supplier, exempt_reason, supplier_lot_reference, notes`), `parseReceivingCsv(text, mapping?)` → rows with per-row issues; `product` resolves by GTIN-14, then `products.external_ref`, then exact name; `tlc_source` resolves by the US-01 location code or GLN. Column keys are the receiving keys of the US-07 field registry; until US-07 exists they are declared here and US-07 must adopt them (OQ-US03-9).
 
 ### Contracts and API
 
@@ -201,9 +203,9 @@ Controller `apps/api/src/modules/traceability/receiving/receiving.controller.ts`
 | GET/PATCH         | `/traceability/reference-documents/:id`              | as above                                                                              | 409 `document_frozen` after a finalized link                                                                                                                                 |
 | POST              | `/traceability/reference-documents/:id/archive`      | write                                                                                 |                                                                                                                                                                              |
 | POST/DELETE       | `/traceability/reference-documents/:id/attachment`   | write (P1)                                                                            | `FileInterceptor` + `memoryStorage`, sha256 computed server-side, `ObjectStorageService.putObject`                                                                           |
-| POST              | `/traceability/receivings/imports`                   | `traceability.receiving.write` (P1 impl)                                              | multipart CSV + header JSON → preview run                                                                                                                                    |
-| GET               | `/traceability/receivings/imports/:runId`            | read (P1)                                                                             | rows with per-row status                                                                                                                                                     |
-| POST              | `/traceability/receivings/imports/:runId/apply`      | write (P1)                                                                            | Body `{ acceptPartial: boolean }`; creates one draft event from accepted rows                                                                                                |
+| POST              | `/traceability/receivings/imports`                   | `traceability.receiving.write` (P0 fixed template)                                    | multipart CSV + header JSON → preview run                                                                                                                                    |
+| GET               | `/traceability/receivings/imports/:runId`            | read (P0 fixed template)                                                              | rows with per-row status                                                                                                                                                     |
+| POST              | `/traceability/receivings/imports/:runId/apply`      | write (P0 fixed template)                                                             | P0: no partial-acceptance flag; all rows must validate, then explicit confirmation creates one draft atomically; retries return the same event                               |
 | POST              | `/traceability/receivings/imports/:runId/reject`     | write (P1)                                                                            |                                                                                                                                                                              |
 | GET               | `/traceability/receivings/imports/:runId/errors.csv` | read (P1)                                                                             | downloadable error report (INT-008)                                                                                                                                          |
 
@@ -229,7 +231,7 @@ New area `apps/admin/src/pages/traceability/` with `receiving/` (`index.tsx` lis
 - Form (draft): header block (date, receive-at location, previous source), line editor (product combobox with search, TLC, TLC source location or reference toggle, exempt checkbox revealing reason and supplier reference, quantity + UOM), documents picker with inline "create document" (type, other label, number, party). Autosave is not used; explicit Save.
 - Detail: read-only KDE view grouped as in data-dictionary §7.3, `CompletenessPanel` listing issues by line with links to the offending field, Finalize (disabled while errors exist, with the reason shown), Amend, Void; a void or amended card shows a banner with reason, actor and links to previous/next revision.
 - Empty state: "No receiving events yet" with the create action; error states via `Alert`.
-- i18n keys `pages.traceability.receiving.*`, `pages.traceability.documents.*`, `pages.traceability.common.status.*`, `nav.traceability.*`, in both `en.json` and `ru.json` (the test harness throws on missing keys). Strings use only the allowed wording of `docs/us/limitations.md`.
+- i18n keys `pages.traceability.receiving.*`, `pages.traceability.documents.*`, `pages.traceability.common.status.*`, `nav.traceability.*`, in both `en.json` and `es.json` (the test harness throws on missing keys). Strings use only the allowed wording of `docs/us/limitations.md`.
 - Accessibility (NFR-012): all inputs labelled, dialogs trap focus and return it, status conveyed by text, keyboard-only walk-through recorded in the verification report.
 
 ### Station
@@ -244,11 +246,11 @@ Not touched. REC-008 ADR note: the shell carries `source = station` (reserved) a
 
 ## Testing
 
-- Domain (`packages/domain/test/traceability-*.test.ts`): lifecycle transition table; `parseQuantity` (`"0"`, `"1e3"`, `"1.2345"`, `" 500 "` cases); completeness validator per issue code incl. "TLC without source → error", "location missing phone/ZIP/country → error", exempt supplier paths, profile-dependent document rule; finalization plan determinism (two runs → deep-equal); CSV parser per-row issues (P1).
+- Domain (`packages/domain/test/traceability-*.test.ts`): lifecycle transition table; `parseQuantity` (`"0"`, `"1e3"`, `"1.2345"`, `" 500 "` cases); completeness validator per issue code incl. "TLC without source → error", "location missing phone/ZIP/country → error", exempt supplier paths, profile-dependent document rule; finalization plan determinism (two runs → deep-equal); CSV parser per-row issues and safe fixed-template CSV export (P0).
 - DB (`packages/db/test/traceability-receiving-schema.test.ts`, `...-migration.test.ts`): Drizzle metadata (enums, CHECKs, composite FKs, partial unique indexes); fresh migration and upgrade via `copyMigrationsThroughIndex`; trigger rejects `UPDATE` of `date_received` and `DELETE` on a finalized event; `void_reason` blank rejected.
 - API e2e (`apps/api/test/traceability-receiving.e2e.test.ts`): draft → finalize → amend → finalize successor (previous becomes `amended`) → void successor; master data (location phone, product name) edited after finalization leaves the DTO and snapshots unchanged (REC-005/LOC-004); idempotent create; cross-tenant: location, product, lot, document ids of tenant B → 404 and no row created; capability denial for `member` role and for a `traceability_receiving` user calling `finalize`/`amend`; document frozen after link; exempt line requires reason; `RU_CHZ` tenant denied; audit rows asserted by fields (`action`, `target_id`, `after.revision`).
 - Admin (`apps/admin/test/traceability-receiving.test.tsx`): form validation messages, finalize disabled while issues exist, revision banner, missing-key guard; browser evidence from a clean seed per acceptance §2.3 ("three CTE forms with missing-field guidance").
-- Negative cases from acceptance §2.4 that apply: TLC without source; location missing phone/ZIP/country; master data edited after finalization; duplicate import retry (P1); cross-tenant ID.
+- Negative cases from acceptance §2.4 that apply: TLC without source; location missing phone/ZIP/country; master data edited after finalization; duplicate fixed-template import retry (P0); cross-tenant ID.
 
 ## Evidence
 
@@ -278,3 +280,11 @@ Transformation and shipping subtypes (US-04/US-05); lot search and graph (US-06)
 | OQ-US03-12 | Should `traceability_events` keep a nullable `operator_id` for future station actors now (NFR-002)?                               | add now, unused; add in US-10                                                                                                                        | add in US-10 (additive); keep the shell minimal                                                                  | no        |
 | OQ-US03-13 | Event numbering format and per-type counters                                                                                      | `REC-YY-NNNN`/`TRN-`/`SHP-` per-type counters; one shared counter; no number                                                                         | per-type counters like `DSG-YY-NNNN` in `doc-number.ts`; number kept across revisions                            | no        |
 | OQ-US03-14 | US-06 names the predecessor link `supersedes_event_id`; this spec uses `previous_revision_id` + `superseded_by_event_id`          | US-06 adopts this spec's names; rename here                                                                                                          | US-06 adopts `previous_revision_id`/`superseded_by_event_id` (both directions are needed for chain queries)      | no        |
+
+## Revision safety
+
+Use the shared contract: current means finalized and not superseded; amendment drafts keep the previous revision active. Freeze the TLC-source description/reference kind/value and coverage rationale as well as the event location and product. Reject a void or identity/quantity correction when finalized downstream records depend on its receipt. Do not leave usable lots with a void origin. For exempt suppliers, do not regenerate an already assigned TLC merely because the checkbox is set.
+
+## Approved CSV boundary — 2026-09-05
+
+[CLAR-04](../../us/development-clarifications.md) supersedes earlier blanket P1 import annotations. P0 supplies one fixed supplier template, preview/errors, all-or-nothing confirmed apply to a draft, retry idempotency and a safe receiving-record CSV download (`GET /traceability/receivings/:id/csv`, existing fresh read/export capability checks). Manual header entry and separate QA finalization remain. Expanded mappings, shipping adapters and multi-CTE CSV ZIP/JSON remain P1. Require malformed-file zero writes, duplicate retry, tenant/role denial, exact audit and spreadsheet-injection/round-trip tests. Proposed routes/contracts here are not implemented.

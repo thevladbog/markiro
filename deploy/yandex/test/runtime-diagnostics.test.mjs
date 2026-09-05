@@ -791,7 +791,7 @@ test("production diagnostics workflow is protected, serialized, read only and cl
   });
   assert.deepEqual(Object.keys(workflow.jobs), ["diagnose"]);
   assert.deepEqual(workflow.concurrency, {
-    group: "markiro-production-deployment",
+    group: "us-development-locked-${{ github.workflow }}-${{ github.ref }}",
     "cancel-in-progress": false,
   });
   const job = workflow.jobs.diagnose;

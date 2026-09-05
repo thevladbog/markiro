@@ -1,5 +1,7 @@
 # Limitations and non-goals
 
+> Revised 2026-09-04: read the [shared MVP contract](mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+
 - Source: MUS-001 v0.1 (2026-09-03), sections 1.4, 4.5 and 14
 - Status: baseline, not yet implemented
 - Owner: Vladislav Bogatyrev
@@ -22,7 +24,7 @@ other regulation. It does not automatically decide whether a product, a
 supplier or a transaction is covered by, or exempt from, the FTR: coverage and
 exemptions remain a manual, reviewed classification whose final assessment
 stays with the user or their consultant (REG-003, REG-011). It does not submit
-records to FDA; trace request packages are prepared locally and delivered by
+records to FDA; trace request packages are prepared in the U.S. instance and delivered by
 the covered entity (REG-008). This document is not legal or food-safety advice.
 
 ## What is not in P0
@@ -55,9 +57,9 @@ them (MUS-001 section 4.5).
 | FDA-aligned electronic sortable spreadsheet.                        | Official FDA integration.        |
 | Traceability readiness demonstrator.                                | Guarantees compliance.           |
 | Lot-level workflow with optional case scanning.                     | FDA requires serialization/SSCC. |
-| EPCIS-ready architecture (future).                                  | EPCIS is required by FDA.        |
+| EPCIS integration is outside the MVP scope.                         | EPCIS is required by FDA.        |
 
-The wording "compliance-ready" may be used only after a review by a U.S.
+The wording "compliance-ready" requires a separately approved, scope-specific wording decision after a review by a U.S.
 food-safety specialist (see the change-control procedure in
 [regulatory-basis.md](regulatory-basis.md)).
 
@@ -110,3 +112,7 @@ it is an illustration of the workflow, not a record of any real supply chain
 - [requirements.md](requirements.md) - requirement register
 - [acceptance.md](acceptance.md) - acceptance and negative/overclaim tests
 - [implementation-plan.md](implementation-plan.md) - slices US-00 to US-12
+
+## MVP publication boundary
+
+A generic profile does not assess FTR applicability. Station-side case links, physical closure/printing, a second full scenario and acquisition materials are P1. Server-side case/SSCC links and 100 synthetic case records are P0; synthetic records do not prove physical operation. Any public landing is static until separate hosting and a non-RF contact-processing route are approved. No existing RU form, mail fallback or analytics path is reused. Synthetic data labelling is always visible. External review does not certify the product or automatically authorize stronger claims.

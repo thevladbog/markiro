@@ -5,6 +5,8 @@ export default defineConfig({
   // codes/scan_events are hand-migrated partitioned tables — excluded from
   // generate; see src/schema/codes.ts
   schema: [
+    "./src/schema/traceability.ts",
+    "./src/schema/us-auth.ts",
     "./src/schema/auth.ts",
     "./src/schema/platform.ts",
     "./src/schema/org-profile.ts",

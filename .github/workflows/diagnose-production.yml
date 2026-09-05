@@ -12,11 +12,13 @@ on:
 permissions: {}
 
 concurrency:
-  group: markiro-production-deployment
+  group: us-development-locked-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   diagnose:
+    # US development is not releasable. Re-enable only through an approved change.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: production-deploy

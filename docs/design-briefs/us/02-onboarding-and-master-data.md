@@ -1,8 +1,10 @@
 # U.S. Design Brief 02 — Onboarding, Profile, Master Data and Lots
 
+> Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+
 > Second brief of the U.S. series. Office mode, desktop-first 1440px, adaptive to 1024/768.
 > Users: Owner / Tenant Admin, QA / Traceability Manager, three operator roles, Auditor (cabinet
-> sign-in, never the station). EN primary, RU strings must still fit. Light + dark. **Delta to
+> sign-in, never the station). EN primary, U.S. Spanish secondary. Light + dark. **Delta to
 > RU brief 03 (admin panel)**: adds a Traceability sidebar section, one Settings card, one
 > product-card tab and three page families (parties, locations, lots); nothing else is
 > redesigned. Wording follows `docs/us/limitations.md`: readiness, data completeness, "designed
@@ -17,7 +19,7 @@ which products are on the Food Traceability List, and hold lots with Traceabilit
 This brief is that foundation, grounded in slice specs US-00, US-01, US-02
 (`docs/superpowers/specs/2026-09-03-us-0{0,1,2}-*.md`) and `docs/us/data-dictionary.md` §5–7.
 
-## The core idea: master data written to be frozen
+## Design principle: master data written to be frozen
 
 In the RU product a counterparty or product card is a convenience that labels and exports read
 live. Here a location or product description is a **Key Data Element**: when a Receiving,
@@ -26,7 +28,7 @@ day into the event, and that copy — not the master record — is what a trace-
 prints (data dictionary §4). Editing the master record later does not rewrite history;
 archiving it does not destroy the copy. Three consequences shape every screen:
 
-- **Readiness is a property of the record.** A location is "export-ready" (all seven Location
+- **Readiness is a property of the record.** A location is "export-ready" (the applicable Location
   Description fields present) or "incomplete" with the missing fields named; a product's
   coverage is reviewed or "unknown". Shown on the record, in lists and pickers as text plus
   icon, never color alone.
@@ -43,13 +45,13 @@ archiving it does not destroy the copy. Three consequences shape every screen:
 **Sidebar.** The profile is one server fact (`/access/me` carries it) and it reshapes the
 sidebar without a switch. For `US_FSMA204_PROCESSOR` and `US_GENERIC_LOT_TRACEABILITY`:
 
-| Section      | Stays                                      | Disappears (RU only)                     | New                                                                                          |
-| ------------ | ------------------------------------------ | ---------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Production   | Dashboard, Shifts, Lines, Inventory        | Codes, Conflicts, Pickup, Disaggregation | —                                                                                            |
-| Reference    | Catalog, Counterparties, Employees, Labels | —                                        | —                                                                                            |
-| Equipment    | Devices                                    | Integrations                             | —                                                                                            |
-| Traceability | —                                          | —                                        | Overview, Parties, Locations, Lots; events, search, readiness, plan, requests (briefs 03–04) |
-| Organization | Team, Billing, Settings                    | —                                        | —                                                                                            |
+| Section      | P0 navigation                                                                  |
+| ------------ | ------------------------------------------------------------------------------ |
+| Traceability | Overview, Events, Lots, Search, Readiness, Plan, Requests (last two FSMA only) |
+| Reference    | Products, Parties, Locations                                                   |
+| Organization | Team and Settings, capability-gated                                            |
+
+Billing and legacy operational menus are absent from the U.S. P0. Station/shift/device pages return only with a separately verified P1 capability.
 
 A user whose only capability is `traceability.read` (a Receiving Operator) lands on
 `/traceability`, never on a forbidden page. No country or Russian-profile switch appears in the
@@ -60,14 +62,14 @@ colored dot — the PRO-005 reminder of the regime on every screen.
 
 **Overview page (`/traceability`).** Three regions. (1) _Regulatory baseline stamp_: profile
 code with plain-language name, effective date (MM/DD/YYYY), baseline ID `US-REG-2026-09-03`,
-verified date, dated source list (`FDA-01 …`) as links, retention days, timezone
+verified date, dated source list (`FDA-01 …`) as links, retention calendar years, timezone
 (`America/Los_Angeles`), and the fixed footer "Designed to support applicable FSMA 204
 recordkeeping requirements. Traceability readiness demonstrator."; under the generic profile
 the card reads "Generic lot traceability — no FTR coverage claims". (2) _CTE scope_: Receiving,
 Transformation, Shipping in scope; harvesting, cooling, initial packing, first land-based
 receiving stated as out of scope; hidden for the generic profile. (3) _Readiness tiles_: "Data
 readiness — explanatory, not a compliance score", missing KDEs, lots, open requests — numbers
-from brief 04, drawn now with an "arrives with readiness" placeholder.
+from the readiness API once US-06 is implemented; omit unavailable tiles.
 
 _Quick actions_: Add party, Add location, Review product coverage, Add imported lot; later
 "Record receiving". For a fresh tenant the list doubles as an onboarding checklist (profile with
@@ -82,10 +84,10 @@ numbers); generic (statement, no CTE block); loading; profile failed to load (re
 A **Regulatory profile** card at the top of Settings: profile select with two one-line descriptions
 (`US_FSMA204_PROCESSOR` "U.S. processor — FTL foods, Receiving / Transformation / Shipping";
 `US_GENERIC_LOT_TRACEABILITY` "U.S. generic lot
-traceability — not classified as FTR-covered"); baseline ID and verified date, read-only, set
+traceability — FTR applicability not assessed in this profile"); baseline ID and verified date, read-only, set
 by the server; required U.S. timezone select (New York, Chicago, Denver, Phoenix, Los Angeles,
 Anchorage, Honolulu, Puerto Rico), with the hint that every date on every record is shown in this
-zone; retention days, default 1825, floor 730 explained ("kept at least 2 years; default 5"),
+zone; retention calendar years, default 5 calendar years, floor 2 explained ("kept at least 2 years; default 5"),
 `retention_below_minimum` as a field error; a confirm dialog for switching between the two U.S.
 profiles.
 
@@ -94,11 +96,11 @@ are gone; GLN, GS1 prefixes, logo and SSCC counters stay (SSCC is the optional c
 
 **Refused state.** Once U.S. records exist the server refuses a code change
 (`profile_has_traceability_records`): draw the select disabled with the inline explanation
-"Profile is locked: 12 parties and 3 lots exist. Contact support to migrate.", not a toast after
+"Profile is locked because traceability records exist. A migration is not available in this MVP.", not a toast after
 the fact. Whether generic → FSMA stays allowed as the upgrade path is pending (OQ-US00-7).
 
 **Generic statement.** Under `US_GENERIC_LOT_TRACEABILITY` the card carries the fixed sentence
-"Products in this tenant are not classified as FTR-covered. The system provides general lot
+"FTR applicability is not assessed in this profile. The system provides general lot
 traceability and production control.", which recurs on the product tab and lot card.
 
 States to draw: FSMA active; generic active; choosing the other U.S. profile; locked; read-only
@@ -154,8 +156,8 @@ variant; incomplete vs export-ready in list and picker; same-address alert; arch
 
 ### 4. Product traceability profile on the product card
 
-The catalog stays the RU catalog. For U.S. tenants the product side panel gains a
-**Traceability** tab beside the edit form (and beside the RU regulatory tab once that ships);
+Reuse the catalog shell and shared product model; exclude RU-specific controls and actions. For U.S. tenants the product side panel gains a
+**Traceability** tab beside the edit form (with no RU regulatory tab in the U.S. edition);
 RU-only fields (CHZ product group, EGAIS code, national-catalog lookup) are hidden for U.S.
 profiles, and a product no longer needs a CHZ group to leave "Draft".
 
@@ -171,7 +173,7 @@ stamped by the server); review due date, FTL ingredient note, evidence link (P1)
 
 **Blocking communication.** Unknown (the default) and Exemption review required block the
 trace-request package: a persistent inline alert at the top of the tab, "Coverage not reviewed
-— this product blocks the export package until a QA reviewer sets its status", and a
+— this product blocks export-ready until a QA reviewer sets its status; available-records export remains explicitly incomplete", and a
 "Coverage: unknown" chip in the catalog list. The alert asks for a review and suggests no
 answer; the system never decides coverage.
 
@@ -184,8 +186,7 @@ size value + unit (`lb, oz, kg, g, each, case, bag, cup, gal, l`), packaging sty
 FTR-covered; general lot traceability only."; only the description section is editable.
 
 **GTIN becomes optional.** For U.S. profiles the edit form labels it "GTIN (optional)" with the
-hint "Products without GTIN cannot be selected on the station until the station lot link
-ships"; the catalog list shows an em dash plus a text chip "No GTIN". RU tenants see no change.
+hint "GTIN is not required for the office workflow. Station support is outside this MVP"; the catalog list shows an em dash plus a text chip "No GTIN". RU tenants see no change.
 
 Demo: "Fresh-Cut Apple Snack Cups" — covered, Fruits (fresh-cut), source FDA-02 /
 `US-REG-2026-09-03`, reviewed 09/10/2026, brand North River, variety Red Delicious, 6 oz cup,
@@ -216,16 +217,14 @@ archived is terminal. The dialog offers allowed targets only and a mandatory rea
 characters) that lands in History.
 
 **Manual lot creation** (rare, for imports; visually secondary): product picker, TLC text with
-"Suggest TLC" producing an `NRF-260915-APL01`-style code, basis select (`imported`,
-`exempt_supplier_receipt`, `transformation` enabled; `initial_packing`, `first_land_receiving`
-disabled as "reserved"), source as a segmented choice — TLC source location (picker filtered to
+no TLC generation button and basis fixed to `imported`; new transformation/exempt-receipt TLCs are assigned only by the appropriate event, source as a segmented choice — TLC source location (picker filtered to
 the "TLC source" role, readiness shown) **or** source reference text — and production / expiry
 dates. A duplicate per tenant + source + TLC returns `LOT_DUPLICATE`: inline error linking to
 the existing lot. The same TLC from two different sources is allowed and must not look wrong.
 
 **Identity-locked state.** Once a finalized event references the lot, TLC, source and product
 become read-only with a lock icon and "Identity locked — referenced by Receiving 09/14/2026. To
-correct it, void that event and record a new one"; status and dates stay editable.
+correct it, check downstream dependencies, then correct the event chain"; status and dates stay editable.
 
 Demo lots: `OSS-260914-A1`, `OSS-260914-A2` — imported, source Yakima packhouse, 50 bags =
 500 lb each, origin Receiving 09/14/2026, consumed; `NRF-260915-APL01` — transformation, source
@@ -257,14 +256,14 @@ not coverage or lot status. Hidden actions are removed; "disabled" means allowed
   with two textual markers: "Required for export-ready" (seven location fields, packaging size /
   style, TLC + source) and "Optional" (identifiers, brand / commodity / variety, dates).
 - **Snapshot note** under every description group: "Finalized events keep a copy of this
-  description as it was on that day; editing here does not change history."
+  description at finalization; editing here does not change history."
 - **Audit trail panel.** Every card ends with a collapsed "History": time (MM/DD/YYYY hh:mm,
   tenant timezone), actor, action, before → after, reason when required. Brief 03 reuses it.
 - **Formats and wording.** Dates MM/DD/YYYY in the tenant timezone; quantities decimal + unit
   ("500 lb", "100 case"); phone as entered; ZIP as text; state code; ISO country with display
   name. Only the allowed column of `docs/us/limitations.md`; "Data readiness", never a
   compliance score. Archive, not delete.
-- **Accessibility (NFR-012) and RU resilience.** Keyboard-only flow, visible focus, labelled
+- **Accessibility (NFR-012) and Spanish expansion.** Keyboard-only flow, visible focus, labelled
   inputs, roles as a `fieldset` with legend, radio groups for address kind and coverage, status
   never by color alone, WCAG AA in both themes; chips and the badge survive 1.4× string length.
   Standard list states from brief 03 apply.
@@ -295,5 +294,9 @@ not coverage or lot status. Hidden actions are removed; "disabled" means allowed
    dialog explains the refusal?
 7. Same-address warning: alert above the form or under the address field? Identity lock: icon
    per field or one banner on the Lot group?
-8. Under the generic profile, is the "not classified as FTR-covered" sentence a banner on every
+8. Under the generic profile, is the "FTR applicability not assessed in this profile" sentence a banner on every
    Traceability page, or only on the settings card, product tab and lot card?
+
+## P0 screen corrections
+
+The shared-contract navigation replaces the broad legacy navigation table above: hide Billing, Shifts, Lines, Inventory, Employees and Devices in P0. Do not render readiness/case placeholders as implemented UI. Quick actions follow capabilities; receiving users cannot create master data by opening a picker. For foreign locations collect comparable regional/postal fields, not mandatory U.S. state/ZIP formats. The identity-lock correction dialog must first check finalized downstream dependencies.

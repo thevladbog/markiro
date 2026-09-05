@@ -1,12 +1,16 @@
 # U.S. Design Brief 00 — Project Overview
 
+The [2026-09-05 design baseline](08-design-baseline.md) maps the finalized 128-screen Pencil atlas to these briefs and records implementation decisions and verification limits. US-00 development has started with shared domain rules; runtime integration is not yet implemented.
+
+> Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+
 > Read this first. It opens a **new series** under `docs/design-briefs/us/`
 > for the U.S. adaptation of Markiro. The series is a **delta** to the RU
 > briefs 00–09 and to the accepted Figma design system: same brand, same
 > tokens, same office and floor modes, same components. What is new is a
 > bounded area of the admin panel ("Traceability"), a small floor-mode delta on
 > the line station, U.S. language, U.S. formats and a strict claims vocabulary.
-> EN primary, RU secondary; light + dark; office mode desktop-first 1440
+> EN primary, U.S. Spanish secondary; light + dark; office mode desktop-first 1440
 > (adaptive to 1024/768), floor mode 1280×800 tablet. Do not redesign anything
 > that already exists — extend it.
 
@@ -23,10 +27,10 @@ approval, certification or guaranteed compliance (see the wording matrix below
 A tenant runs under exactly one **regulatory profile**, and the profile decides
 what the interface shows:
 
-| Profile                       | Who                                                        | Shows                                                                                                                 | Hides                                                                                                                             |
-| ----------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `US_FSMA204_PROCESSOR`        | A processor handling foods on the Food Traceability List   | Traceability area with three CTEs, FTL coverage review, TLC, Traceability Plan, trace requests, FDA-aligned workbook. | Chestny ZNAK, GIS MT, EGAIS, 1C sections; RU-only settings (INN, CHZ product group defaults, pickup policy).                      |
-| `US_GENERIC_LOT_TRACEABILITY` | Any other food or beverage maker (Scenario B: craft cider) | The same lot, event, search and readiness screens with generic labels ("Lot", "lot source"), optional case identity.  | Everything FTR-specific: coverage review, Traceability Plan, trace requests; every screen states "not classified as FTR-covered". |
+| Profile                       | Who                                                        | Shows                                                                                                                 | Hides                                                                                                                                              |
+| ----------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `US_FSMA204_PROCESSOR`        | A processor handling foods on the Food Traceability List   | Traceability area with three CTEs, FTL coverage review, TLC, Traceability Plan, trace requests, FDA-aligned workbook. | Chestny ZNAK, GIS MT, EGAIS, 1C sections; RU-only settings (INN, CHZ product group defaults, pickup policy).                                       |
+| `US_GENERIC_LOT_TRACEABILITY` | Any other food or beverage maker (Scenario B: craft cider) | The same lot, event, search and readiness screens with generic labels ("Lot", "lot source"), optional case identity.  | Everything FTR-specific: coverage review, Traceability Plan, trace requests; every screen states "FTR applicability not assessed in this profile". |
 
 The U.S. deployment allows only these two profiles. The active profile is
 visible on every screen as a text badge in the header (`US · FSMA 204` or
@@ -55,7 +59,7 @@ visible on every screen as a text badge in the header (`US · FSMA 204` or
 7. **Trace request:** requester, received time, a **24-hour due time** with
    live countdown, scope, dry-run validation, then "Prepare package" — an
    FDA-aligned sortable workbook, the plan PDF, a validation report and a
-   manifest, prepared locally.
+   manifest, prepared in the U.S. instance.
 
 ### Explicitly out of scope — must not appear in the UI as if it existed
 
@@ -64,7 +68,7 @@ visible on every screen as a text badge in the header (`US · FSMA 204` or
 - An exemptions or waivers engine; automatic coverage decisions.
 - Direct FDA submission, Safety Reporting Portal integration, any "Send to
   FDA" button. The verb is always "Prepare".
-- EPCIS/CBV adapter (allowed mention: "EPCIS-ready architecture (future)").
+- EPCIS/CBV adapter (allowed mention: "EPCIS integration is outside the MVP scope").
 - Mandatory item-level serialization, RFID or case-by-case scanning.
 - Commercial billing, payment and self-service sign-up; SOC 2 badges.
 - A receiving or shipping mode on the station (P2).
@@ -93,8 +97,7 @@ tool that makes that a routine, not a crisis.
    **Traceability** with an overview page and the screens listed in briefs
    02–05. It also gets a "Regulatory profile" block in Settings and a header
    badge. Five RU items disappear for U.S. profiles: Codes, Conflicts, Pickup,
-   Disaggregation, Integrations. Shifts, lines, inventory, labels and devices
-   stay — they are generic.
+   Disaggregation, Integrations. Shared operational pages do not automatically carry over: the P0 navigation allow-list is in the shared MVP contract.
 2. **Line station (floor mode)** gets a small P1 delta (brief 06): a
    "Traceability lot" card on the aggregation work screen, a warn/block
    full-screen state when a case cannot be linked to the lot, a "Not linked"
@@ -103,9 +106,9 @@ tool that makes that a routine, not a crisis.
 
 ## Hard requirements (apply to every U.S. screen)
 
-- **Language:** English primary. Every key screen is checked in EN first; RU
-  strings exist for all keys and layouts must still survive them (brief 02
-  rule, 1.3–1.5× length). No transliterated RU terms.
+- **Language:** English (`en-US`) primary, U.S. Spanish (`es-US`) secondary.
+  Every U.S. key has EN/ES copy; check Spanish expansion on key screens at 1024 px.
+  No Russian U.S. interface or transliterated legacy terms. See brief 01.
 - **Themes:** light and dark from day one, office and floor.
 - **U.S. formats:** dates `MM/DD/YYYY` in the tenant timezone (with the zone
   shown where it matters); quantities as decimal + explicit unit (`500 lb`,
@@ -121,12 +124,9 @@ tool that makes that a routine, not a crisis.
 | FDA-aligned electronic sortable spreadsheet.                        | Official FDA integration.        |
 | Traceability readiness demonstrator.                                | Guarantees compliance.           |
 | Lot-level workflow with optional case scanning.                     | FDA requires serialization/SSCC. |
-| EPCIS-ready architecture (future).                                  | EPCIS is required by FDA.        |
+| EPCIS integration is outside the MVP scope.                         | EPCIS is required by FDA.        |
 
-"Compliance-ready" is blocked on every public surface until a specialist
-memo exists; "compliant", "certified", "approved", "guarantee", "required by
-FDA", "submit", "upload" never appear in a label. A content test fails the
-build on the right-hand column, in EN and RU.
+Public regulatory claims remain within the limitations matrix. A specialist review does not automatically unlock stronger claims. Content tests distinguish affirmative claims from the exact approved negated disclaimer, negative-test examples and ordinary actions such as “Approve version”.
 
 - **Accessibility (NFR-012):** keyboard operation for every flow, visible
   focus, every input labelled, status never by color alone (icon or shape +
@@ -144,20 +144,20 @@ build on the right-hand column, in EN and RU.
 
 ## Regulatory vocabulary designers must get right
 
-| Term                | Plain-English meaning for the screen                                                                                    |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| FTR                 | The FDA Food Traceability Rule (21 CFR Part 1 Subpart S). Never abbreviated as "the FDA rule" in UI.                    |
-| FTL                 | Food Traceability List — the FDA list of foods the rule covers. Fresh-cut apples are on it; craft cider is not.         |
-| CTE                 | Critical Tracking Event — a moment that must be recorded. P0 has three: Receiving, Transformation, Shipping.            |
-| KDE                 | Key Data Element — a field that must be recorded for a CTE. Forms group fields by KDE group.                            |
-| TLC                 | Traceability Lot Code — the lot identifier. An opaque string; we never impose a format or assume global uniqueness.     |
-| TLC source          | The physical location where the TLC was assigned (or a reference that lets FDA find it). Every lot must have one.       |
-| Lot                 | A traceability lot: product + TLC + source + basis + status. Not a shift, not a box.                                    |
-| Case / SSCC         | Optional case identity from the existing Markiro box layer. Never mandatory; wording is "optional case scanning".       |
-| Traceability Plan   | A versioned document describing how the processor keeps records, identifies FTL foods and assigns TLCs, with a contact. |
-| Trace request       | A mock (or real) request for records; has a received time and a 24-hour due time; ends in a locally prepared package.   |
-| Regulatory baseline | The dated set of FDA sources the product was built against (`US-REG-2026-09-03`); stamped on profile, plan and exports. |
-| Data readiness      | The completeness sweep and its score. Never "compliance score".                                                         |
+| Term                | Plain-English meaning for the screen                                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FTR                 | The FDA Food Traceability Rule (21 CFR Part 1 Subpart S). Never abbreviated as "the FDA rule" in UI.                                                  |
+| FTL                 | Food Traceability List — the FDA list of foods the rule covers. Fresh-cut fruits are included; the generic profile makes no applicability assessment. |
+| CTE                 | Critical Tracking Event — a moment that must be recorded. P0 has three: Receiving, Transformation, Shipping.                                          |
+| KDE                 | Key Data Element — a field that must be recorded for a CTE. Forms group fields by KDE group.                                                          |
+| TLC                 | Traceability Lot Code — the lot identifier. An opaque string; we never impose a format or assume global uniqueness.                                   |
+| TLC source          | The physical location where the TLC was assigned (or a reference that lets FDA find it). Every lot must have one.                                     |
+| Lot                 | A traceability lot: product + TLC + source + basis + status. Not a shift, not a box.                                                                  |
+| Case / SSCC         | Optional case identity from the existing Markiro box layer. Never mandatory; wording is "optional case scanning".                                     |
+| Traceability Plan   | A versioned document describing how the processor keeps records, identifies FTL foods and assigns TLCs, with a contact.                               |
+| Trace request       | A mock (or real) request for records; has a received time and a 24-hour due time; ends in a package prepared in the U.S. instance.                    |
+| Regulatory baseline | The dated set of FDA sources the product was built against (`US-REG-2026-09-03`); stamped on profile, plan and exports.                               |
+| Data readiness      | The completeness sweep and its score. Never "compliance score".                                                                                       |
 
 ## Deliverables for the U.S. series
 
@@ -227,3 +227,7 @@ Do not draw new primitives for any of these; instance the library:
    variant in the library, or a neutral attention glyph for both products?
 3. The evidence ribbon plus billing banners plus a revision banner could stack
    three bars on one page. Propose a stacking order and a collapse rule.
+
+## P0 handoff corrections
+
+Use the navigation and capability matrix in the shared contract. No Billing, acquisition form or Station controls in P0. Server-side case-link controls, Cases panel and SSCC lookup are P0. Show the 100-case quantity separately from 100 synthetic linked records; do not imply scans or physical closure. `packages/ui` is the token/component source of truth; Figma and historical HTML are references. The synthetic-data badge is permanent. Every shown action must map to an authorized API, not merely a role label.

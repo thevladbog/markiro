@@ -1,12 +1,14 @@
 .DS_Store
 node_modules/
 dist/
+dist-us/
 .astro/
 .turbo/
 coverage/
 install.log
 .env
 .env.production
+.env.us-development
 .markiro-releases/
 deploy/production/.caddy-data/
 deploy/production/.caddy-config/

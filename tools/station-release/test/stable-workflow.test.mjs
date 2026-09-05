@@ -4,7 +4,6 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { load } from "js-yaml";
 
@@ -64,7 +63,10 @@ test("stable signing and dual-origin publication use separate protected environm
     "seed-baseline",
   ]);
   assert.equal(workflow.on.workflow_dispatch.inputs.acceptance_confirmed.default, false);
-  assert.equal(workflow.concurrency.group, "station-stable-release");
+  assert.equal(
+    workflow.concurrency.group,
+    "us-development-locked-${{ github.workflow }}-${{ github.ref }}",
+  );
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
   assert.deepEqual(Object.keys(workflow.jobs), ["authorize", "build", "release"]);
   assert.equal(workflow.jobs.build.needs, "authorize");
@@ -133,7 +135,7 @@ test("stable publication requires the repository owner, main, and the exact conf
   assert.equal(input.type, "string");
   assert.equal(authorize.environment, undefined);
   assert.deepEqual(authorize.permissions, {});
-  assert.equal(authorize.if, "github.ref == 'refs/heads/main'");
+  assert.equal(authorize.if, "${{ false }}");
   assert.equal(authorize["runs-on"], "ubuntu-latest");
   assert.equal(authorize["timeout-minutes"], 5);
   assert.ok(step);

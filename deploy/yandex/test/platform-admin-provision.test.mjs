@@ -159,7 +159,7 @@ test("production provisioning workflow is protected, serialized and cleans its S
   assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), ["email"]);
   assert.deepEqual(workflow.concurrency, {
-    group: "markiro-production-deployment",
+    group: "us-development-locked-${{ github.workflow }}-${{ github.ref }}",
     "cancel-in-progress": false,
   });
   assert.deepEqual(Object.keys(workflow.jobs), ["provision"]);

@@ -22,6 +22,7 @@ test("every repository workflow has an explicit reviewed event scope", () => {
     "station-beta-release.yml": ["workflow_dispatch"],
     "station-stable-release.yml": ["workflow_dispatch"],
     "yandex-infrastructure.yml": ["pull_request", "workflow_dispatch"],
+    "us-development.yml": ["pull_request", "push", "workflow_dispatch"],
   };
   const workflowFiles = readdirSync(".github/workflows")
     .filter((name) => name.endsWith(".yml"))
@@ -119,8 +120,7 @@ test("Yandex pull-request validation runs only for infrastructure contract chang
     ],
   });
   assert.deepEqual(value.concurrency, {
-    group:
-      "${{ github.event_name == 'pull_request' && format('markiro-yandex-pr-{0}', github.event.pull_request.number) || 'markiro-yandex-production-state' }}",
+    group: "us-development-locked-${{ github.workflow }}-${{ github.ref }}",
     "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
   });
 });

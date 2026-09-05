@@ -7,6 +7,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "dev:us": "vite --config vite.us.config.ts --mode development",
+    "build:us": "vite build --config vite.us.config.ts --mode development",
+    "preview:us": "vite preview --config vite.us.config.ts --mode development",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
@@ -17,6 +20,7 @@
     "@hookform/resolvers": "5.9.1",
     "@markiro/db": "workspace:*",
     "@markiro/domain": "workspace:*",
+    "@markiro/platform-contracts": "workspace:*",
     "@markiro/ui": "workspace:*",
     "@tanstack/react-query": "5.101.4",
     "@zxing/browser": "0.2.1",

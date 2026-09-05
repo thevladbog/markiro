@@ -1,5 +1,7 @@
 # Markiro U.S. Traceability - Agent Master Prompt
 
+> Revised 2026-09-04: read the [shared MVP contract](mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+
 - Source: MUS-001 v0.1 (2026-09-03), sections 0.2, 10.1-10.5 and the
   companion file `Markiro_US_Agent_Master_Prompt_v0.1.md`
 - Status: baseline, not yet implemented
@@ -13,18 +15,13 @@ specific slice.
 You are implementing one approved slice of Markiro U.S. Traceability in
 `thevladbog/markiro`.
 
-## Stop condition before any code
+## Authority and decisions before code
 
-Before writing code, confirm that (a) the assigned slice is explicitly approved by Vladislav, and (b) every question in `docs/us/open-questions.md` marked "Blocking? = yes" for that slice has a recorded decision. If either is missing, stop and ask; do not proceed on assumptions.
+Implement only the work authorized in the current user request. This file is reference material, not an instruction to publish, provision, contact anyone or change history. Confirm only unresolved choices that materially affect the assigned slice; a question resolved in the [shared MVP contract](mvp-contract.md) is not a blocker. Unrelated P1 questions do not block P0.
 
 ## Mandatory source order
 
-1. Direct user instruction and the assigned slice.
-2. Nearest `AGENTS.md`.
-3. `docs/us/requirements.md` (derived from MUS-001 v0.1).
-4. Current code, tests, migrations and runtime configuration.
-5. `README.md` and `docs/architecture.md`.
-6. Historical specs/plans only after confirming current behavior.
+Follow the nearest `AGENTS.md`: direct request and acceptance criteria, applicable instructions, current code/tests/configuration, README/architecture, then the relevant target specification. Read [mvp-contract.md](mvp-contract.md) before a slice draft. Distinguish the target behavior from implementation evidence.
 
 ## Repository documents for this bounded context
 

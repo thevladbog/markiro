@@ -1,5 +1,7 @@
 # Markiro U.S. Traceability — Data Dictionary
 
+> Revised 2026-09-04: read the [shared MVP contract](mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+
 - Source: MUS-001 v0.1 (2026-09-03), sections 5, 7, appendices A, B, D
 - Status: baseline, not yet implemented
 - Owner: Vladislav Bogatyrev
@@ -286,17 +288,23 @@ carried over into `packages/db/src/schema/traceability.ts`:
 
 Appendix D of MUS-001.
 
-| Term                 | Meaning in this specification                                                                                |
-| -------------------- | ------------------------------------------------------------------------------------------------------------ |
-| FTR                  | FDA Food Traceability Rule, 21 CFR Part 1 Subpart S.                                                         |
-| FTL                  | Food Traceability List.                                                                                      |
-| CTE                  | Critical Tracking Event.                                                                                     |
-| KDE                  | Key Data Element.                                                                                            |
-| TLC                  | Traceability Lot Code.                                                                                       |
-| TLC source           | Physical location where TLC was assigned.                                                                    |
-| TLC source reference | Alternative reference allowing FDA access to TLC source location description.                                |
-| Lot genealogy        | Directed relation from input lots through transformation to output lots/shipments.                           |
-| Export-ready         | Sufficiently implemented and evidenced for inclusion in the working MVP release package; not legal approval. |
-| MVP release freeze   | Point at which tagged release and evidence artifacts are locked for independent review.                      |
-| Synthetic demo       | Fictional, reproducible dataset containing no real confidential data.                                        |
-| P0/P1/P2             | MVP / product hardening / future.                                                                            |
+| Term                 | Meaning in this specification                                                                                                      |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| FTR                  | FDA Food Traceability Rule, 21 CFR Part 1 Subpart S.                                                                               |
+| FTL                  | Food Traceability List.                                                                                                            |
+| CTE                  | Critical Tracking Event.                                                                                                           |
+| KDE                  | Key Data Element.                                                                                                                  |
+| TLC                  | Traceability Lot Code.                                                                                                             |
+| TLC source           | Physical location where TLC was assigned.                                                                                          |
+| TLC source reference | Alternative reference allowing FDA access to TLC source location description.                                                      |
+| Lot genealogy        | Directed relation from input lots through transformation to output lots/shipments.                                                 |
+| Export-ready         | A particular package revision has zero blocking findings for its pinned scope. This is not legal compliance or MVP release status. |
+| MVP release freeze   | Point at which tagged release and evidence artifacts are locked for independent review.                                            |
+| Synthetic demo       | Fictional, reproducible dataset containing no real confidential data.                                                              |
+| P0/P1/P2             | MVP / product hardening / future.                                                                                                  |
+
+## Shared model corrections
+
+The [MVP contract](mvp-contract.md) defines civil event dates plus IANA timezone snapshots, calendar-year retention, the current-finalized-revision predicate, revision-safe lot identity, full request snapshots and acyclic artifact hashing. Product traceability profiles are optional on the existing RU catalog (`0..1`), required before relevant U.S. finalization. `trace_lot_boxes` is P0 after MUS-CR-001; new Station journals remain P1. Core event finalization accepts quantities without boxes, but the P0 demo separately requires 100 synthetic server-side case links. A source reference includes its kind and value; arbitrary text is not automatically a valid regulatory source reference.
+
+Location descriptions use domestic city/state/ZIP or comparable foreign fields and country, not forced U.S. formats for foreign suppliers. Optional GLN/FFRN/URL identifiers do not replace required descriptions unless they meet the TLC-source-reference rule. The API table above is an overview, not an exhaustive route inventory.

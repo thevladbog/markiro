@@ -1,9 +1,11 @@
 # U.S. Design Brief 06 — Line Station: Lot Link and English Floor Mode
 
+> Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+
 > U.S. series, floor mode of the design system (brief 02). Touch-first station app on a 10–12″
 > tablet (landscape, 1280×800 base) or a desktop by the line; gloves, noise, 0.5–2 m viewing
 > distance. User: the **Production Operator**; the QA / Traceability Manager sees the results in the
-> cabinet. **Dark theme is the default**; light supported. EN primary on U.S. devices, RU mirrors
+> cabinet. **Dark theme is the default**; light supported. EN primary on U.S. devices, ES variants
 > for string-length checks. This is a **delta to RU brief 04 (line station)**: the same sign-in,
 > shift selection, work screen, exceptions, setup and degradation screens gain a thin lot layer.
 > Do not redesign the signal system, the box-fill visual, the PIN pad, recovery screens or the
@@ -11,8 +13,7 @@
 > lot-to-box bridge on the server).
 >
 > **Priority: P1.** The office workflow (U.S. briefs 01–05) is the MVP and does not
-> depend on this brief. If station work has to be dropped, the cabinet links cases to lots by
-> itself. Nothing here may delay or reshape the office screens.
+> depend on this brief. The P0 cabinet records case quantities without individual case links. Nothing here may delay or reshape the office screens.
 
 ## Purpose
 
@@ -24,7 +25,7 @@ linked to it locally, the case label carries a human-readable TLC, and the print
 truth about what was actually printed. Everything rides on the existing close-box sequence; nothing
 in it is allowed to stop the line.
 
-## The core idea: a thin layer on the box pipeline
+## Design principle: a thin layer on the box pipeline
 
 The lot link is **one more fact recorded after a box closes**, not a new mode. The box still
 closes, the SSCC is still assigned, the label still prints and the sync still replays exactly
@@ -68,7 +69,7 @@ Aggregation-mode work screen (brief 04 §5) with two additions:
 
 States to draw: normal; no snapshot (card shows the "will be linked in the cabinet" line, no
 counters); offline with pending links (`3 links queued`, blue sync tone, alongside the existing
-"Working offline — N scans queued" banner, not replacing it); English and Russian variants.
+"Working offline — N scans queued" banner, not replacing it); English and U.S. Spanish variants.
 
 ### 3. Box-closed moment
 
@@ -128,16 +129,16 @@ confirm the printed text" with a 64 px **Confirm** that logs a visual confirmati
 States to draw: history list with all four states; the no-barcode confirmation screen; a row whose
 log rows are still queued for sync.
 
-### 6. English floor mode
+### 6. English and Spanish floor mode
 
-The same screens in English (`en-US`): `MM/DD/YYYY` dates, `24 ea`, `100 cases`, `lb` — decimal
+The same screens in English (`en-US`, default) and U.S. Spanish (`es-US`): `MM/DD/YYYY` dates, `24 ea`, `100 cases`, `lb` — decimal
 plus explicit unit, no conversion. The signal words follow the existing pattern: `INVALID CODE`,
-`WRONG GTIN`, `DUPLICATE`, `TLC MISMATCH`, `LOT EXPIRED`. English strings are shorter than Russian,
-so draw the **Russian worst case** on every new element (e.g. `НЕСОВПАДЕНИЕ TLC`, `СРОК ЛОТА
-ИСТЁК`) to prove the layout holds. The locale arrives with the first U.S. shift bundle and can be
+`WRONG GTIN`, `DUPLICATE`, `TLC MISMATCH`, `LOT EXPIRED`. Check **Spanish expansion**
+on every new element (e.g. `EL TLC NO COINCIDE`, `LOTE VENCIDO`) to prove the layout holds.
+The locale arrives with the first U.S. shift bundle and can be
 overridden per device (screen 7).
 
-States to draw: work screen EN; warn screen EN and RU; status bar EN with a long RU teammate name.
+States to draw: work screen EN; warn screen EN and ES; status bar with a long teammate name.
 
 ### 7. Label template preview and workstation setup
 
@@ -149,9 +150,9 @@ editor and is absent from the TLC-only template — a barcode is an operational 
 requirement (STN-006, docs/us/limitations.md). In the admin label editor the new fields live in a
 "Traceability (U.S.)" group shown only for U.S. profiles; sample data is the demo lot.
 
-**Workstation setup (brief 04 §7)** gains a **Language** control (Русский / English) beside sound
-volume, with the note "Set from the shift by default". RU devices keep the control but it does
-nothing new for them.
+**Workstation setup (brief 04 §7)** gains a **Language** control (English / Español) beside sound
+volume, with the note "Set from the shift by default". The separate RU edition keeps its existing
+language behavior; Russian is not a locale option in the U.S. edition.
 
 States to draw: TLC-only template preview; TLC + SSCC preview; editor field picker with the U.S.
 group; setup screen with the language row in both locales.
@@ -206,3 +207,7 @@ States to draw: list with two lot-link conflicts under the heading; empty headin
    or is the lot-card counter enough?
 4. Language override (OQ-US10-8): a row in Workstation setup only, or also a quick toggle on the
    sign-in screen for mixed crews?
+
+## Implementation prerequisite
+
+The current marking-code-driven closure is not a U.S. case-only mode. Design and verify case-only closure, restart/replay and print-recovery first; until then these screens are P1 references, not production-ready flows. Lot linkage after an offline restart is retry-safe, not a claim that delivery happens exactly once. A blocked link does not justify silently printing a false lot identity.
