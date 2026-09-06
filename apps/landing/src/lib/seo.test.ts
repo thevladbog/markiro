@@ -59,7 +59,7 @@ describe("SEO generators", () => {
 
     expect(sitemap).toContain("<loc>https://markiro.app/</loc>");
     expect(sitemap).toMatch(
-      /<loc>https:\/\/markiro\.app\/oflayn-rabota\/<\/loc>[\s\S]*?<lastmod>2026-08-14<\/lastmod>/,
+      /<loc>https:\/\/markiro\.app\/oflayn-rabota\/<\/loc>[\s\S]*?<lastmod>2026-09-06<\/lastmod>/,
     );
     expect(sitemap).toContain("<loc>https://markiro.app/en/offline-production/</loc>");
     expect(sitemap).toMatch(
@@ -439,7 +439,7 @@ describe("SEO generators", () => {
     const graph = buildPageGraph(findSeoPage("/oflayn-rabota/"));
     const webPage = graph["@graph"].find((entry) => entry["@type"] === "WebPage");
 
-    expect(webPage).toMatchObject({ dateModified: "2026-08-14" });
+    expect(webPage).toMatchObject({ dateModified: "2026-09-06" });
   });
 
   it("describes the software with visible facts only", () => {

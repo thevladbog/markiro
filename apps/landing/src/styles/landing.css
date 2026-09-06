@@ -3279,3 +3279,44 @@ input:focus-visible {
     grid-column: 2;
   }
 }
+
+/* Topic pages: review date, summary, FAQ kicker, CTA with phone */
+.seo-hero__reviewed {
+  margin: 2rem 0 0;
+  color: var(--fg-3);
+  font: 500 0.75rem / 1.4 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.seo-summary {
+  border-top: 1px solid var(--line);
+}
+
+.seo-summary li {
+  color: var(--fg-2);
+  line-height: 1.6;
+}
+
+.faq-list__kicker {
+  padding-top: 3.5rem;
+}
+
+.seo-cta__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-5);
+}
+
+.seo-cta__phone {
+  color: var(--fg-1);
+  font: 500 1.125rem / 1.2 var(--font-display);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.seo-cta__phone:hover,
+.seo-cta__phone:focus-visible {
+  color: var(--accent);
+}

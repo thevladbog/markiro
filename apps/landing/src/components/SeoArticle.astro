@@ -1,4 +1,6 @@
 ---
+import { formatLegalEffectiveDate } from "@markiro/legal-documents";
+
 import type { PublicPhone } from "../lib/site-config";
 import type { SeoPageDefinition } from "../content/pages";
 import { getUiCopy } from "../content/ui";
@@ -32,10 +34,23 @@ const stationDownloadUrl = "https://releases.markiro.app/station/download";
         <a class="button" href={`${homePath}#demo`} data-analytics="landing_demo_click" data-placement="seo-hero">
           {copy.discussTask} <span aria-hidden="true">→</span>
         </a>
+        <p class="seo-hero__reviewed">
+          {copy.reviewedLabel}: <time datetime={page.reviewedAt} data-reviewed-at>{formatLegalEffectiveDate(page.reviewedAt, page.locale)}</time>
+        </p>
       </div>
     </header>
 
     <article class="container seo-article">
+      {page.summary.length > 0 && (
+        <aside class="article-summary seo-summary" data-page-summary aria-labelledby="page-summary-title">
+          <p class="section-index">{copy.summaryKicker}</p>
+          <h2 id="page-summary-title">{copy.summaryHeading}</h2>
+          <ul>
+            {page.summary.map((item) => <li>{item}</li>)}
+          </ul>
+        </aside>
+      )}
+
       {page.sections.map((section, index) => (
         <section aria-labelledby={`section-${index}`}>
           <p class="section-index">{String(index + 1).padStart(2, "0")}</p>
@@ -46,7 +61,8 @@ const stationDownloadUrl = "https://releases.markiro.app/station/download";
       ))}
 
       {page.faq && (
-        <div class="faq-list">
+        <div class="faq-list" data-faq-list>
+          <p class="section-index faq-list__kicker">{copy.faqKicker}</p>
           {page.faq.map((entry) => (
             <section data-faq-item>
               <h2>{entry.question}</h2>
@@ -86,7 +102,12 @@ const stationDownloadUrl = "https://releases.markiro.app/station/download";
           <p class="section-index">{copy.seoCtaKicker}</p>
           <h2 id="seo-cta-title">{copy.seoCtaHeading}</h2>
         </div>
-        <a class="button" href={`${homePath}#demo`}>{copy.requestDemo} <span aria-hidden="true">→</span></a>
+        <div class="seo-cta__actions">
+          <a class="button" href={`${homePath}#demo`} data-analytics="landing_demo_click" data-placement="seo-cta">{copy.requestDemo} <span aria-hidden="true">→</span></a>
+          {phone && (
+            <a class="seo-cta__phone" href={phone.href} data-analytics="landing_phone_click" data-placement="seo-cta">{phone.display}</a>
+          )}
+        </div>
       </div>
     </section>
   </main>

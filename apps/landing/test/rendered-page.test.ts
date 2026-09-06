@@ -1398,27 +1398,68 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("keeps FAQ structured answers identical to visible answers", () => {
-    const faqDocument = documents.get("/faq/") as Document;
-    const graph = JSON.parse(
-      faqDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
-    ) as {
-      "@graph": Array<Record<string, unknown>>;
-    };
-    const faq = graph["@graph"].find((entry) => entry["@type"] === "FAQPage") as {
-      mainEntity: Array<{ name: string; acceptedAnswer: { text: string } }>;
-    };
+  it("keeps FAQ structured answers identical to visible answers on every page with FAQ", () => {
+    let pagesWithFaq = 0;
+    for (const [route, routeDocument] of documents) {
+      const visible = [...routeDocument.querySelectorAll("[data-faq-item]")].map((item) => ({
+        name: item.querySelector("h2")?.textContent?.trim(),
+        text: item.querySelector("p")?.textContent?.trim(),
+      }));
+      const graph = JSON.parse(
+        routeDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
+      ) as { "@graph": Array<Record<string, unknown>> };
+      const faq = graph["@graph"].find((entry) => entry["@type"] === "FAQPage") as
+        | { mainEntity: Array<{ name: string; acceptedAnswer: { text: string } }> }
+        | undefined;
 
-    const visible = [...faqDocument.querySelectorAll("[data-faq-item]")].map((item) => ({
-      name: item.querySelector("h2")?.textContent?.trim(),
-      text: item.querySelector("p")?.textContent?.trim(),
-    }));
-    expect(visible).toEqual(
-      faq.mainEntity.map((entry) => ({
-        name: entry.name,
-        text: entry.acceptedAnswer.text,
-      })),
-    );
+      if (visible.length === 0) {
+        expect(faq, route).toBeUndefined();
+        continue;
+      }
+      pagesWithFaq += 1;
+      expect(faq, route).toBeDefined();
+      expect(visible, route).toEqual(
+        faq?.mainEntity.map((entry) => ({ name: entry.name, text: entry.acceptedAnswer.text })),
+      );
+    }
+    expect(pagesWithFaq).toBeGreaterThanOrEqual(14);
+  });
+
+  it("gives topic pages a summary, a visible review date and enough substance", () => {
+    for (const route of EXPECTED_ROUTES.filter((path) => path !== "/" && path !== "/en/")) {
+      const routeDocument = documents.get(route) as Document;
+      expect(
+        routeDocument.querySelectorAll("[data-page-summary] li").length,
+        route,
+      ).toBeGreaterThanOrEqual(3);
+      const reviewed = routeDocument.querySelector<HTMLTimeElement>("time[data-reviewed-at]");
+      expect(reviewed?.getAttribute("datetime"), route).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(reviewed?.textContent?.trim().length, route).toBeGreaterThan(0);
+      const words =
+        routeDocument
+          .querySelector("main")
+          ?.textContent?.replace(/\s+/g, " ")
+          .trim()
+          .split(" ")
+          .filter(Boolean).length ?? 0;
+      expect(words, route).toBeGreaterThanOrEqual(450);
+    }
+  });
+
+  it("offers the public phone next to the demo call to action on topic pages", () => {
+    const routeDocument = documents.get("/markirovka-chestny-znak/") as Document;
+    expect(routeDocument.querySelector('.seo-cta a[href$="#demo"]')).not.toBeNull();
+    expect(routeDocument.querySelector('.seo-cta a[href^="tel:"]')).toBeNull();
+  });
+
+  it("describes the kiosk as a disposal flow for employees, not a customer pickup point", () => {
+    const ru = documents.get("/kiosk-samovydachi/")?.body.textContent ?? "";
+    expect(ru).toContain("выбыти");
+    expect(ru).toContain("бейдж");
+    expect(ru).not.toContain("покупатель получает подготовленный заказ");
+    const en = documents.get("/en/self-service-pickup-kiosk/")?.body.textContent ?? "";
+    expect(en.toLowerCase()).toContain("disposal");
+    expect(en.toLowerCase()).toContain("badge");
   });
 
   it("links every specialist page to at least two canonical related pages", () => {
