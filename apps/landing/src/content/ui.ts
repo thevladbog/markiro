@@ -345,7 +345,8 @@ const EN = {
     minutes: "min read",
     otherGroup: "Other instructions",
     registryLink: "public document registry",
-    registryNote: "Codes, revisions, dates and PDF/A files of every instruction are also published in the",
+    registryNote:
+      "Codes, revisions, dates and PDF/A files of every instruction are also published in the",
   },
 } as const;
 

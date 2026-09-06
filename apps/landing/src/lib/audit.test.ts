@@ -122,7 +122,9 @@ describe("auditBuiltSite", () => {
 
     const listedNoindex = await fixture({
       ...brandAssets(),
-      "index.html": html({ body: '<h1>Heading</h1><img src="/image.svg"><a href="/hidden/">Hidden</a>' }),
+      "index.html": html({
+        body: '<h1>Heading</h1><img src="/image.svg"><a href="/hidden/">Hidden</a>',
+      }),
       "hidden/index.html": html({
         route: "/hidden/",
         title: "Hidden title",

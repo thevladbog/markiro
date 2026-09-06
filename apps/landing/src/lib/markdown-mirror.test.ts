@@ -56,7 +56,7 @@ describe("markdown mirrors", () => {
       description: "Answers",
       body:
         '<nav aria-label="Хлебные крошки"><ol><li><a href="/">Markiro</a></li></ol></nav>' +
-        "<h1>Вопросы</h1><p>Абзац с <a href=\"/faq/\">ссылкой</a> и <strong>акцентом</strong>.</p>" +
+        '<h1>Вопросы</h1><p>Абзац с <a href="/faq/">ссылкой</a> и <strong>акцентом</strong>.</p>' +
         '<div aria-hidden="true">скрытый текст</div>' +
         "<h2>Раздел</h2><ul><li>первый</li><li>второй</li></ul><ol><li>шаг</li></ol>" +
         '<figure><img alt="Схема" src="/images/schema.svg"><figcaption>Подпись</figcaption></figure>' +
@@ -144,7 +144,9 @@ describe("markdown mirrors", () => {
     expect(await readFile(path.join(root, "en.md"), "utf8")).toContain("lang: en");
     const full = await readFile(path.join(root, "llms-full.txt"), "utf8");
     expect(full.startsWith("# Markiro\n")).toBe(true);
-    expect(full.indexOf("url: https://markiro.app/")).toBeLessThan(full.indexOf("url: https://markiro.app/faq/"));
+    expect(full.indexOf("url: https://markiro.app/")).toBeLessThan(
+      full.indexOf("url: https://markiro.app/faq/"),
+    );
     expect(full.indexOf("url: https://markiro.app/faq/")).toBeLessThan(
       full.indexOf("url: https://markiro.app/en/"),
     );

@@ -1409,8 +1409,7 @@ describe("rendered landing page", () => {
         routeDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       const faq = graph["@graph"].find((entry) => entry["@type"] === "FAQPage") as
-        | { mainEntity: Array<{ name: string; acceptedAnswer: { text: string } }> }
-        | undefined;
+        { mainEntity: Array<{ name: string; acceptedAnswer: { text: string } }> } | undefined;
 
       if (visible.length === 0) {
         expect(faq, route).toBeUndefined();
@@ -1456,9 +1455,8 @@ describe("rendered landing page", () => {
       const expected = route === "/" ? "/index.md" : `${route.slice(0, -1)}.md`;
       expect(markdown?.getAttribute("href"), route).toBe(expected);
     }
-    const notFound = new JSDOM(
-      readFileSync(path.join(outputDirectory, "404.html"), "utf8"),
-    ).window.document;
+    const notFound = new JSDOM(readFileSync(path.join(outputDirectory, "404.html"), "utf8")).window
+      .document;
     expect(notFound.querySelector('link[rel="alternate"][type="text/markdown"]')).toBeNull();
     const verification = new JSDOM(
       readFileSync(

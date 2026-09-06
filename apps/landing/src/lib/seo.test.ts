@@ -347,9 +347,7 @@ describe("SEO generators", () => {
 
     expect(newest).toBe("2026-09-02");
     expect(sitemap).toMatch(
-      new RegExp(
-        `<loc>https://markiro\\.app/legal/</loc>[\\s\\S]*?<lastmod>${newest}</lastmod>`,
-      ),
+      new RegExp(`<loc>https://markiro\\.app/legal/</loc>[\\s\\S]*?<lastmod>${newest}</lastmod>`),
     );
     expect(sitemap).toMatch(
       new RegExp(
@@ -467,9 +465,9 @@ describe("SEO generators", () => {
       telephone: "+7 934 355-14-90",
       contactPoint: [expect.objectContaining({ telephone: "+7 934 355-14-90" })],
     });
-    expect(
-      graph["@graph"].find((entry) => entry["@type"] === "Organization"),
-    ).not.toHaveProperty("telephone");
+    expect(graph["@graph"].find((entry) => entry["@type"] === "Organization")).not.toHaveProperty(
+      "telephone",
+    );
   });
 
   it("dates topic pages by their real review date", () => {
