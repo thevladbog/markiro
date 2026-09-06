@@ -1,8 +1,10 @@
+import { LEGAL_RELEASES } from "@markiro/legal-documents";
 import { describe, expect, it } from "vitest";
 
 import { findSeoPage } from "../content/pages";
 import { getLegalDocumentPage } from "../content/legal-pages";
 import {
+  attachOrganizationContact,
   buildPageGraph,
   buildLegalPageGraph,
   renderLlmsTxt,
@@ -22,6 +24,30 @@ describe("SEO generators", () => {
     expect(robots).toContain("User-agent: GPTBot\nDisallow: /");
     expect(robots).toContain("User-agent: ClaudeBot\nDisallow: /");
     expect(robots).toContain("Sitemap: https://markiro.app/sitemap.xml");
+  });
+
+  it("applies the training-crawler policy to every known training agent", () => {
+    const robots = renderRobotsTxt();
+
+    for (const agent of [
+      "Google-Extended",
+      "Applebot-Extended",
+      "CCBot",
+      "Bytespider",
+      "Meta-ExternalAgent",
+    ]) {
+      expect(robots).toContain(`User-agent: ${agent}\nDisallow: /`);
+    }
+    expect(robots).not.toContain("User-agent: Googlebot\nDisallow");
+    expect(robots).not.toContain("User-agent: YandexBot\nDisallow");
+  });
+
+  it("tells Yandex which tracking parameters never change a page", () => {
+    const robots = renderRobotsTxt();
+
+    expect(robots).toContain(
+      "User-agent: Yandex\nAllow: /\nClean-param: utm_source&utm_medium&utm_campaign&utm_content&utm_term&yclid&ysclid&gclid&fbclid&_openstat /",
+    );
   });
 
   it("lists every canonical route with a real review date", () => {
@@ -81,7 +107,7 @@ describe("SEO generators", () => {
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(71);
+    expect(sitemap.match(/<url>/g)).toHaveLength(58);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
@@ -141,21 +167,47 @@ describe("SEO generators", () => {
         llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
       ).toHaveLength(1);
     }
-    expect(sitemap.match(/<url>/g)).toHaveLength(71);
+    expect(sitemap.match(/<url>/g)).toHaveLength(58);
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
     );
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/en\/privacy\/<\/loc>[\s\S]*?hreflang="ru" href="https:\/\/markiro\.app\/privacy\/"/,
     );
-    for (const code of ["MKR-PD-01", "MKR-PD-02", "MKR-DPA-01", "MKR-BRD-01"]) {
-      expect(
-        sitemap.match(
-          new RegExp(`<loc>https://markiro\\.app/d/${code}/2026\\.08/01/15\\.08\\.2026</loc>`, "g"),
-        ),
-      ).toHaveLength(1);
-    }
+    expect(sitemap).not.toContain("<loc>https://markiro.app/d/");
     expect(llms).not.toContain("/d/");
+  });
+
+  it("dates the legal registry by its newest active release", () => {
+    const sitemap = renderSitemapXml();
+    const newest = LEGAL_RELEASES.filter(({ status }) => status === "active")
+      .map(({ effectiveDate }) => effectiveDate)
+      .sort()
+      .at(-1);
+
+    expect(newest).toBe("2026-09-02");
+    expect(sitemap).toMatch(
+      new RegExp(
+        `<loc>https://markiro\\.app/legal/</loc>[\\s\\S]*?<lastmod>${newest}</lastmod>`,
+      ),
+    );
+    expect(sitemap).toMatch(
+      new RegExp(
+        `<loc>https://markiro\\.app/en/legal/</loc>[\\s\\S]*?<lastmod>${newest}</lastmod>`,
+      ),
+    );
+  });
+
+  it("never points two hreflang alternates of one sitemap entry at the same URL", () => {
+    const sitemap = renderSitemapXml();
+    const entries = sitemap.match(/<url>[\s\S]*?<\/url>/g) ?? [];
+
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
+      const ru = entry.match(/hreflang="ru" href="([^"]+)"/)?.[1];
+      const en = entry.match(/hreflang="en" href="([^"]+)"/)?.[1];
+      if (ru !== undefined && en !== undefined) expect(ru).not.toBe(en);
+    }
   });
 
   it("links English legal structured data to the authoritative Russian revision", () => {
@@ -215,6 +267,92 @@ describe("SEO generators", () => {
         },
       ],
     });
+  });
+
+  it("publishes verifiable organization contacts and brand assets", () => {
+    const graph = buildPageGraph(findSeoPage("/"));
+    const organization = graph["@graph"].find((entry) => entry["@type"] === "Organization");
+
+    expect(organization).toMatchObject({
+      "@id": "https://markiro.app/#organization",
+      name: "Markiro",
+      url: "https://markiro.app/",
+      email: "hello@v-b.tech",
+      logo: { "@type": "ImageObject", url: "https://markiro.app/brand/markiro-logo.svg" },
+      areaServed: "RU",
+      contactPoint: [
+        {
+          "@type": "ContactPoint",
+          contactType: "sales",
+          email: "hello@v-b.tech",
+          availableLanguage: ["Russian", "English"],
+        },
+      ],
+    });
+    expect(organization).not.toHaveProperty("telephone");
+    expect(organization).not.toHaveProperty("address");
+  });
+
+  it("attaches the public phone to the organization only when it is configured", () => {
+    const graph = buildPageGraph(findSeoPage("/"));
+
+    const untouched = attachOrganizationContact(graph, { telephone: null });
+    expect(
+      untouched["@graph"].find((entry) => entry["@type"] === "Organization"),
+    ).not.toHaveProperty("telephone");
+
+    const withPhone = attachOrganizationContact(graph, { telephone: "+7 934 355-14-90" });
+    const organization = withPhone["@graph"].find((entry) => entry["@type"] === "Organization");
+    expect(organization).toMatchObject({
+      telephone: "+7 934 355-14-90",
+      contactPoint: [expect.objectContaining({ telephone: "+7 934 355-14-90" })],
+    });
+    expect(
+      graph["@graph"].find((entry) => entry["@type"] === "Organization"),
+    ).not.toHaveProperty("telephone");
+  });
+
+  it("dates topic pages by their real review date", () => {
+    const graph = buildPageGraph(findSeoPage("/oflayn-rabota/"));
+    const webPage = graph["@graph"].find((entry) => entry["@type"] === "WebPage");
+
+    expect(webPage).toMatchObject({ dateModified: "2026-08-14" });
+  });
+
+  it("describes the software with visible facts only", () => {
+    const ru = buildPageGraph(findSeoPage("/"))["@graph"].find(
+      (entry) => entry["@type"] === "SoftwareApplication",
+    );
+    const en = buildPageGraph(findSeoPage("/en/"))["@graph"].find(
+      (entry) => entry["@type"] === "SoftwareApplication",
+    );
+
+    expect(ru).toMatchObject({
+      url: "https://markiro.app/",
+      operatingSystem: "Windows, Web",
+      softwareHelp: { "@type": "CreativeWork", url: "https://markiro.app/instruktsii/" },
+    });
+    expect(ru?.featureList).toEqual([
+      "Проверка кодов маркировки Data Matrix на линии",
+      "Агрегация единиц в короба с SSCC",
+      "Печать этикеток ZPL и TSPL",
+      "Офлайн-работа станции с локальным журналом",
+      "Обмен с 1С по CommerceML",
+      "Выгрузки отчётов смены для ГИС МТ",
+    ]);
+    expect(en).toMatchObject({
+      softwareHelp: { "@type": "CreativeWork", url: "https://markiro.app/en/instructions/" },
+    });
+    expect(en?.featureList).toEqual([
+      "Data Matrix code verification on the line",
+      "Item-to-case aggregation with SSCC",
+      "ZPL and TSPL label printing",
+      "Offline station with a local journal",
+      "1C exchange over CommerceML",
+      "Shift report exports for GIS MT",
+    ]);
+    expect(ru).not.toHaveProperty("offers");
+    expect(ru).not.toHaveProperty("aggregateRating");
   });
 
   it("escapes characters that can break an inline JSON script", () => {

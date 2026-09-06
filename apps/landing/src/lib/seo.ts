@@ -1,3 +1,5 @@
+import { OPERATOR_PROFILES } from "@markiro/legal-documents";
+
 import { LEGAL_SEARCH_PAGES } from "../content/legal-pages";
 import { ARTICLE_SEARCH_PAGES, type ArticlePageDefinition } from "../content/articles";
 import {
@@ -8,13 +10,43 @@ import {
 } from "../content/pages";
 
 const SITE_URL = "https://markiro.app";
+const ORGANIZATION_EMAIL = OPERATOR_PROFILES["operator-2026-08-15"].email;
+const ORGANIZATION_LOGO_PATH = "/brand/markiro-logo.svg";
 const INDEXABLE_PAGES: readonly SearchPageRecord[] = [
   ...MARKETING_SEARCH_PAGES,
   ...ARTICLE_SEARCH_PAGES,
   ...LEGAL_SEARCH_PAGES,
 ];
+const SOFTWARE_FACTS = {
+  ru: {
+    helpPath: "/instruktsii/",
+    features: [
+      "Проверка кодов маркировки Data Matrix на линии",
+      "Агрегация единиц в короба с SSCC",
+      "Печать этикеток ZPL и TSPL",
+      "Офлайн-работа станции с локальным журналом",
+      "Обмен с 1С по CommerceML",
+      "Выгрузки отчётов смены для ГИС МТ",
+    ],
+  },
+  en: {
+    helpPath: "/en/instructions/",
+    features: [
+      "Data Matrix code verification on the line",
+      "Item-to-case aggregation with SSCC",
+      "ZPL and TSPL label printing",
+      "Offline station with a local journal",
+      "1C exchange over CommerceML",
+      "Shift report exports for GIS MT",
+    ],
+  },
+} as const;
 
 type JsonLdObject = Record<string, unknown>;
+
+export interface OrganizationContact {
+  telephone: string | null;
+}
 
 export interface PageMetadata {
   path: string;
@@ -38,24 +70,74 @@ function absoluteUrl(path: string): string {
   return new URL(path, SITE_URL).toString();
 }
 
+function websiteNode(): JsonLdObject {
+  return {
+    "@type": "WebSite",
+    "@id": `${SITE_URL}/#website`,
+    url: `${SITE_URL}/`,
+    name: "Markiro",
+    inLanguage: ["ru", "en"],
+    publisher: { "@id": `${SITE_URL}/#organization` },
+  };
+}
+
+/**
+ * The organization publishes only contacts that are already public elsewhere on
+ * the site: the operator e-mail from the legal profile and the brand logo. The
+ * phone is attached separately because it exists only in configured builds.
+ */
+function organizationNode(): JsonLdObject {
+  return {
+    "@type": "Organization",
+    "@id": `${SITE_URL}/#organization`,
+    name: "Markiro",
+    url: `${SITE_URL}/`,
+    logo: { "@type": "ImageObject", url: absoluteUrl(ORGANIZATION_LOGO_PATH) },
+    email: ORGANIZATION_EMAIL,
+    areaServed: "RU",
+    contactPoint: [
+      {
+        "@type": "ContactPoint",
+        contactType: "sales",
+        email: ORGANIZATION_EMAIL,
+        availableLanguage: ["Russian", "English"],
+      },
+    ],
+  };
+}
+
+export function attachOrganizationContact(
+  graph: PageGraph,
+  contact: OrganizationContact,
+): PageGraph {
+  if (contact.telephone === null) return graph;
+  return {
+    ...graph,
+    "@graph": graph["@graph"].map((entry) => {
+      if (entry["@type"] !== "Organization") return entry;
+      const contactPoints: readonly unknown[] = Array.isArray(entry.contactPoint)
+        ? (entry.contactPoint as readonly unknown[])
+        : [];
+      return {
+        ...entry,
+        telephone: contact.telephone,
+        contactPoint: contactPoints.map((point) =>
+          point !== null && typeof point === "object"
+            ? { ...(point as JsonLdObject), telephone: contact.telephone }
+            : point,
+        ),
+      };
+    }),
+  };
+}
+
 export function buildPageGraph(page: SeoPageDefinition): PageGraph {
   const homePath = page.locale === "ru" ? "/" : "/en/";
   const homePage = SEO_PAGES.find((candidate) => candidate.path === homePath);
+  const facts = SOFTWARE_FACTS[page.locale];
   const graph: JsonLdObject[] = [
-    {
-      "@type": "WebSite",
-      "@id": `${SITE_URL}/#website`,
-      url: `${SITE_URL}/`,
-      name: "Markiro",
-      inLanguage: ["ru", "en"],
-      publisher: { "@id": `${SITE_URL}/#organization` },
-    },
-    {
-      "@type": "Organization",
-      "@id": `${SITE_URL}/#organization`,
-      name: "Markiro",
-      url: `${SITE_URL}/`,
-    },
+    websiteNode(),
+    organizationNode(),
     {
       "@type": "WebPage",
       "@id": `${absoluteUrl(page.path)}#webpage`,
@@ -63,15 +145,20 @@ export function buildPageGraph(page: SeoPageDefinition): PageGraph {
       name: page.title,
       description: page.description,
       inLanguage: page.locale,
+      dateModified: page.reviewedAt,
       isPartOf: { "@id": `${SITE_URL}/#website` },
     },
     {
       "@type": "SoftwareApplication",
       "@id": `${SITE_URL}/#software`,
       name: "Markiro",
+      url: `${SITE_URL}/`,
       applicationCategory: "BusinessApplication",
+      operatingSystem: "Windows, Web",
       description: homePage?.description,
       inLanguage: page.locale,
+      featureList: [...facts.features],
+      softwareHelp: { "@type": "CreativeWork", url: absoluteUrl(facts.helpPath) },
       provider: { "@id": `${SITE_URL}/#organization` },
     },
   ];
@@ -111,20 +198,8 @@ export function buildArticlePageGraph(page: ArticlePageDefinition): PageGraph {
   return {
     "@context": "https://schema.org",
     "@graph": [
-      {
-        "@type": "WebSite",
-        "@id": `${SITE_URL}/#website`,
-        url: `${SITE_URL}/`,
-        name: "Markiro",
-        inLanguage: ["ru", "en"],
-        publisher: { "@id": `${SITE_URL}/#organization` },
-      },
-      {
-        "@type": "Organization",
-        "@id": `${SITE_URL}/#organization`,
-        name: "Markiro",
-        url: `${SITE_URL}/`,
-      },
+      websiteNode(),
+      organizationNode(),
       {
         "@type": "WebPage",
         "@id": `${pageUrl}#webpage`,
@@ -179,23 +254,7 @@ export function buildLegalPageGraph(
 
   return {
     "@context": "https://schema.org",
-    "@graph": [
-      {
-        "@type": "WebSite",
-        "@id": `${SITE_URL}/#website`,
-        url: `${SITE_URL}/`,
-        name: "Markiro",
-        inLanguage: ["ru", "en"],
-        publisher: { "@id": `${SITE_URL}/#organization` },
-      },
-      {
-        "@type": "Organization",
-        "@id": `${SITE_URL}/#organization`,
-        name: "Markiro",
-        url: `${SITE_URL}/`,
-      },
-      webPage,
-    ],
+    "@graph": [websiteNode(), organizationNode(), webPage],
   };
 }
 
@@ -211,6 +270,10 @@ export function serializeJsonLd(value: unknown): string {
 export function renderRobotsTxt(): string {
   return `User-agent: *
 Allow: /
+
+User-agent: Yandex
+Allow: /
+Clean-param: utm_source&utm_medium&utm_campaign&utm_content&utm_term&yclid&ysclid&gclid&fbclid&_openstat /
 
 User-agent: OAI-SearchBot
 Allow: /
@@ -230,6 +293,21 @@ Disallow: /
 User-agent: ClaudeBot
 Disallow: /
 
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: Applebot-Extended
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: Meta-ExternalAgent
+Disallow: /
+
 Sitemap: ${SITE_URL}/sitemap.xml
 `;
 }
@@ -237,7 +315,7 @@ Sitemap: ${SITE_URL}/sitemap.xml
 export function renderSitemapXml(): string {
   const urls = INDEXABLE_PAGES.map((page) => {
     const alternateLinks =
-      page.alternatePath === undefined
+      page.alternatePath === undefined || page.alternatePath === page.path
         ? `    <xhtml:link rel="alternate" hreflang="${page.locale}" href="${absoluteUrl(page.path)}" />`
         : `    <xhtml:link rel="alternate" hreflang="${page.locale}" href="${absoluteUrl(page.path)}" />
     <xhtml:link rel="alternate" hreflang="${page.locale === "ru" ? "en" : "ru"}" href="${absoluteUrl(page.alternatePath)}" />

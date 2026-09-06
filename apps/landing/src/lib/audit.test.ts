@@ -41,14 +41,16 @@ function html({
   description = "Unique description",
   body = '<h1>Heading</h1><img src="/image.svg"><a href="/faq/">FAQ</a>',
   jsonLd = '{"@context":"https://schema.org","@type":"WebPage"}',
+  robots = "index,follow",
 }: {
   route?: string;
   title?: string;
   description?: string;
   body?: string;
   jsonLd?: string;
+  robots?: string;
 } = {}): string {
-  return `<!doctype html><html><head><title>${title}</title><meta name="description" content="${description}"><link rel="canonical" href="https://markiro.app${route}"><script type="application/ld+json">${jsonLd}</script></head><body>${body}</body></html>`;
+  return `<!doctype html><html><head><title>${title}</title><meta name="description" content="${description}"><meta name="robots" content="${robots}"><link rel="canonical" href="https://markiro.app${route}"><script type="application/ld+json">${jsonLd}</script></head><body>${body}</body></html>`;
 }
 
 function brandAssets({
@@ -92,6 +94,54 @@ describe("auditBuiltSite", () => {
     });
 
     await expect(auditBuiltSite(root)).resolves.toEqual([]);
+  });
+
+  it("lets a noindex page stay out of the sitemap while indexable pages must be listed", async () => {
+    const root = await fixture({
+      ...brandAssets(),
+      "index.html": html(),
+      "faq/index.html": html({
+        route: "/faq/",
+        title: "FAQ title",
+        description: "FAQ description",
+        body: '<h1>FAQ</h1><a href="/">Home</a>',
+      }),
+      "d/MKR-PD-01/2026.08/01/15.08.2026/index.html": html({
+        route: "/d/MKR-PD-01/2026.08/01/15.08.2026",
+        title: "Verification title",
+        description: "Verification description",
+        body: '<h1>Verification</h1><a href="/">Home</a>',
+        robots: "noindex,follow",
+      }),
+      "image.svg": '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+      "sitemap.xml":
+        '<?xml version="1.0"?><urlset><url><loc>https://markiro.app/</loc></url><url><loc>https://markiro.app/faq/</loc></url></urlset>',
+    });
+
+    await expect(auditBuiltSite(root)).resolves.toEqual([]);
+
+    const listedNoindex = await fixture({
+      ...brandAssets(),
+      "index.html": html({ body: '<h1>Heading</h1><img src="/image.svg"><a href="/hidden/">Hidden</a>' }),
+      "hidden/index.html": html({
+        route: "/hidden/",
+        title: "Hidden title",
+        description: "Hidden description",
+        body: '<h1>Hidden</h1><a href="/">Home</a>',
+        robots: "noindex,follow",
+      }),
+      "image.svg": '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+      "sitemap.xml":
+        '<?xml version="1.0"?><urlset><url><loc>https://markiro.app/</loc></url><url><loc>https://markiro.app/hidden/</loc></url></urlset>',
+    });
+
+    await expect(auditBuiltSite(listedNoindex)).resolves.toEqual([
+      {
+        code: "SITEMAP_ROUTE_MISMATCH",
+        route: "/sitemap.xml",
+        detail: "sitemap and HTML routes differ",
+      },
+    ]);
   });
 
   it("reports every deterministic SEO integrity failure code", async () => {
