@@ -11,6 +11,7 @@ import {
   type PageMetadata,
 } from "../lib/seo";
 import { findHubPage, hubPath } from "../content/hubs";
+import { fontPreloads } from "../lib/font-preloads";
 import { readPublicSiteConfig } from "../lib/site-config";
 import { socialImageDimensions } from "../lib/social-image";
 import ConsentPanel from "../components/ConsentPanel.astro";
@@ -46,6 +47,9 @@ const jsonLd = serializeJsonLd(
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    {fontPreloads(page.locale).map((href) => (
+      <link rel="preload" as="font" type="font/woff2" href={href} crossorigin />
+    ))}
     <meta name="description" content={page.description} />
     <meta name="robots" content={noindex ? "noindex,follow" : "index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1"} />
     <meta name="theme-color" content="#131216" />

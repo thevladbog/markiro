@@ -1476,6 +1476,49 @@ describe("rendered landing page", () => {
     expect(routeDocument.querySelector('.seo-cta a[href^="tel:"]')).toBeNull();
   });
 
+  it("preloads the above-the-fold font subsets that the stylesheet actually uses", () => {
+    for (const [route, expectedSubsets, forbiddenSubset] of [
+      ["/", ["cyrillic", "latin"], null],
+      ["/stati/markirovka-piva-2026/", ["cyrillic", "latin"], null],
+      ["/en/", ["latin"], "cyrillic"],
+    ] as const) {
+      const routeDocument = documents.get(route) as Document;
+      const preloads = [...routeDocument.querySelectorAll('link[rel="preload"][as="font"]')].map(
+        (link) => link.getAttribute("href") ?? "",
+      );
+      expect(preloads.length, route).toBeGreaterThanOrEqual(3);
+      expect(preloads.length, route).toBeLessThanOrEqual(6);
+      const stylesheetHref =
+        routeDocument.querySelector('link[rel="stylesheet"]')?.getAttribute("href") ?? "";
+      const stylesheet = readFileSync(path.join(outputDirectory, stylesheetHref.slice(1)), "utf8");
+      for (const href of preloads) {
+        expect(href, route).toMatch(
+          /^\/assets\/ibm-plex-(?:sans|mono)-[a-z-]+-(?:400|500|600)-normal\..+\.woff2$/,
+        );
+        expect(existsSync(path.join(outputDirectory, href.slice(1))), `${route} ${href}`).toBe(
+          true,
+        );
+        expect(stylesheet.includes(href.slice("/assets/".length)), `${route} ${href}`).toBe(true);
+      }
+      for (const subset of expectedSubsets) {
+        expect(
+          preloads.some((href) => href.includes(`-${subset}-`)),
+          `${route} ${subset}`,
+        ).toBe(true);
+      }
+      if (forbiddenSubset !== null) {
+        expect(
+          preloads.some((href) => href.includes(`-${forbiddenSubset}-`)),
+          route,
+        ).toBe(false);
+      }
+      for (const link of routeDocument.querySelectorAll('link[rel="preload"][as="font"]')) {
+        expect(link.hasAttribute("crossorigin"), route).toBe(true);
+        expect(link.getAttribute("type"), route).toBe("font/woff2");
+      }
+    }
+  });
+
   it("publishes the IndexNow key file only when the key is configured", () => {
     const keyFile = "markiro-indexnow-render-key.txt";
     expect(existsSync(path.join(outputDirectory, keyFile))).toBe(false);
