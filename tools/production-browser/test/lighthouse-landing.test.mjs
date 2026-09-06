@@ -6,6 +6,7 @@ import {
   lighthouseArguments,
   LIGHTHOUSE_ROUTES,
   LIGHTHOUSE_RUN_COUNT,
+  lighthouseBuildEnvironment,
   LIGHTHOUSE_THRESHOLDS,
   lighthouseScoreSummary,
   representativeLighthouseReport,
@@ -45,6 +46,22 @@ test("gates on the run with the median performance score, not Lighthouse's metri
   const best = report({ performance: 0.95 }, { fcp: 1200, interactive: 3300 });
   assert.equal(representativeLighthouseReport([cpuNoise, medianScore, best]), medianScore);
   assert.equal(representativeLighthouseReport([best, cpuNoise, medianScore]), medianScore);
+});
+
+test("builds the production-like enabled landing for the gate unless the caller overrides it", () => {
+  const environment = lighthouseBuildEnvironment({ PATH: "/usr/bin" });
+  assert.equal(environment.PATH, "/usr/bin");
+  assert.equal(environment.ASTRO_TELEMETRY_DISABLED, "1");
+  assert.equal(environment.PUBLIC_DEMO_SUBMISSION_ENABLED, "true");
+  assert.match(environment.PUBLIC_SMARTCAPTCHA_CLIENT_KEY, /^ysc1_.+/);
+  assert.equal(environment.PUBLIC_PHONE, "+7 934 355-14-90");
+
+  const overridden = lighthouseBuildEnvironment({
+    PUBLIC_DEMO_SUBMISSION_ENABLED: "false",
+    PUBLIC_PHONE: "",
+  });
+  assert.equal(overridden.PUBLIC_DEMO_SUBMISSION_ENABLED, "false");
+  assert.equal(overridden.PUBLIC_PHONE, "");
 });
 
 test("gates the home page, a commercial topic page and an article", () => {

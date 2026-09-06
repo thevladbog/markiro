@@ -28,10 +28,19 @@ export interface DemoResponse {
 export interface DemoFormRuntime {
   readonly createRequestId: () => string;
   readonly currentPath: () => string;
+  /** Injects the SmartCaptcha runtime once; a no-op when it is already present. */
+  readonly loadCaptcha: () => void;
   readonly request: (endpoint: string, payload: DemoRequestPayload) => Promise<DemoResponse>;
   readonly resetCaptcha: (form: HTMLFormElement) => void;
   readonly track: (eventName: string, properties: Readonly<Record<string, string>>) => void;
+  /** Calls `callback` once when `element` approaches the viewport; returns a disconnect. */
+  readonly whenNear: (element: Element, callback: () => void) => () => void;
 }
+
+export const SMART_CAPTCHA_SCRIPT_URL = "https://smartcaptcha.cloud.yandex.ru/captcha.js";
+const SMART_CAPTCHA_SCRIPT_MARKER = "data-smart-captcha";
+/** How far below the fold the form may be before its captcha starts loading. */
+const CAPTCHA_ROOT_MARGIN = "400px 0px";
 
 type FieldName = "company" | "email" | "name" | "phone";
 type InputName = FieldName | "consent" | "smart-token" | "website";
@@ -296,9 +305,30 @@ export function initDemoForm(form: HTMLFormElement, runtime: DemoFormRuntime): (
   form.addEventListener("input", onInput, { once: true });
   form.addEventListener("submit", handleSubmit);
 
+  // The captcha runtime costs more main-thread time than the whole page, so it
+  // is fetched only when the visitor gets near the form or starts using it.
+  let stopWatching: () => void = () => undefined;
+  let captchaRequested = false;
+  const requestCaptcha = (): void => {
+    if (captchaRequested) return;
+    captchaRequested = true;
+    stopWatching();
+    form.removeEventListener("focusin", requestCaptcha);
+    form.removeEventListener("pointerdown", requestCaptcha);
+    runtime.loadCaptcha();
+  };
+  if (form.querySelector(".smart-captcha") !== null) {
+    form.addEventListener("focusin", requestCaptcha);
+    form.addEventListener("pointerdown", requestCaptcha);
+    stopWatching = runtime.whenNear(form, requestCaptcha);
+  }
+
   return () => {
     form.removeEventListener("input", onInput);
     form.removeEventListener("submit", handleSubmit);
+    form.removeEventListener("focusin", requestCaptcha);
+    form.removeEventListener("pointerdown", requestCaptcha);
+    stopWatching();
   };
 }
 
@@ -333,6 +363,21 @@ export function browserDemoFormRuntime(browserWindow: Window & typeof globalThis
         ? { ok: false, status: response.status }
         : { code, ok: false, status: response.status };
     },
+    loadCaptcha: () => {
+      const captchaWindow = browserWindow as typeof browserWindow & { smartCaptcha?: unknown };
+      const root = browserWindow.document;
+      if (
+        captchaWindow.smartCaptcha !== undefined ||
+        root.querySelector(`script[${SMART_CAPTCHA_SCRIPT_MARKER}]`) !== null
+      )
+        return;
+      const script = root.createElement("script");
+      script.src = SMART_CAPTCHA_SCRIPT_URL;
+      script.async = true;
+      script.setAttribute("async", "");
+      script.setAttribute(SMART_CAPTCHA_SCRIPT_MARKER, "");
+      root.head.append(script);
+    },
     resetCaptcha: () => {
       const captchaWindow = browserWindow as typeof browserWindow & {
         smartCaptcha?: { reset: () => void };
@@ -346,6 +391,22 @@ export function browserDemoFormRuntime(browserWindow: Window & typeof globalThis
           detail: { eventName, properties },
         }),
       );
+    },
+    whenNear: (element, callback) => {
+      if (typeof browserWindow.IntersectionObserver !== "function") {
+        callback();
+        return () => undefined;
+      }
+      const observer = new browserWindow.IntersectionObserver(
+        (entries) => {
+          if (!entries.some((entry) => entry.isIntersecting)) return;
+          observer.disconnect();
+          callback();
+        },
+        { rootMargin: CAPTCHA_ROOT_MARGIN },
+      );
+      observer.observe(element);
+      return () => observer.disconnect();
     },
   };
 }
