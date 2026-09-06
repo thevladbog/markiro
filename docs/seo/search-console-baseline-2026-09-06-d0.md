@@ -102,7 +102,8 @@
 ## Performance evidence
 
 - Lighthouse mobile/desktop commit and lab scores: `251be66cf` (ветка PR #449, локальный прогон `pnpm test:landing:lighthouse`): mobile `/` 0.94, `/markirovka-chestny-znak/` 0.96, `/stati/markirovka-piva-2026/` 0.95; desktop 1.00 на всех трёх; SEO, accessibility, best-practices 1.00 везде. До правок мобильная статья давала 0.88 из-за сдвига макета от веб-шрифтов.
-- Field Core Web Vitals source, population and period: нет данных.
+- PageSpeed Insights по production (2026-09-06 23:04 МСК, Lighthouse 13.4.1, релиз `656f13bfe`): mobile 74, desktop 69; FCP 1,7 с / 0,6 с; LCP 3,2 с / 0,9 с; TBT 780 мс / 1110 мс; CLS 0,001; SEO 100, accessibility 100, best-practices 73, agent view 3/3. Почти всё блокирующее время даёт Yandex SmartCaptcha, которую форма демо подключала на каждой загрузке (около 670 КБ JS, вложенная Метрика, React-полифиллы с ошибками гидратации, три сторонних cookie). Локальный Lighthouse-гейт этого не видел, потому что собирал лендинг с выключенной формой; исправление и ленивая загрузка капчи — PR #453.
+- Field Core Web Vitals source, population and period: нет данных (PSI: «Определяйте фактическую производительность сайта — нет данных»).
 - Field data status: `отсутствуют`.
 
 Лабораторные Lighthouse scores не подставляются в field Core Web Vitals.
