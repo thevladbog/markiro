@@ -10,11 +10,14 @@ const RU = {
     menuOpen: "Открыть меню",
     nav: {
       aggregation: "Агрегация",
+      articles: "Статьи",
       faq: "Вопросы",
       offline: "Офлайн",
       serialization: "Маркировка",
     },
     navigationLabel: "Основная навигация",
+    relatedArticlesHeading: "Статьи по теме",
+    relatedArticlesKicker: "Разобрано подробнее",
     relatedHeading: "Связанные производственные сценарии",
     relatedKicker: "Следующий шаг",
     requestDemo: "Запросить демонстрацию",
@@ -52,7 +55,7 @@ const RU = {
       contactNote: "Контактный телефон появится после подключения публичной линии.",
       email: "Email",
       heading: "Покажем Markiro на вашей линии.",
-      kicker: "07 / ДЕМО НА ВАШЕЙ ЛИНИИ",
+      kicker: "08 / ДЕМО НА ВАШЕЙ ЛИНИИ",
       lead: "Разберём ваш процесс и покажем рабочий сценарий без абстрактной презентации.",
       legal: {
         consent: "согласия",
@@ -88,6 +91,13 @@ const RU = {
           "Работаем вместе с оператором и проверяем восстановление после ошибок.",
         ],
       ],
+    },
+    materials: {
+      allArticles: "Все статьи",
+      allInstructions: "Инструкции для станции и кабинета",
+      heading: ["Разборы с линии.", "Без общих обещаний."],
+      kicker: "07 / МАТЕРИАЛЫ",
+      lead: "Статьи о реальных задачах маркировки пива и печатные инструкции для операторов, наладчиков и менеджеров.",
     },
     lineConsole: {
       accepted: "Код принят",
@@ -146,6 +156,15 @@ const RU = {
       toolbar: "ИСТОРИЯ КОРОБА 24",
     },
   },
+  hub: {
+    articlesHeading: "Все статьи",
+    articlesKicker: "01 / Практика",
+    instructionsKicker: "Инструкции",
+    minutes: "мин чтения",
+    otherGroup: "Другие инструкции",
+    registryLink: "публичном реестре документов",
+    registryNote: "Коды, редакции, даты и PDF/A всех инструкций также опубликованы в",
+  },
 } as const;
 
 const EN = {
@@ -158,11 +177,14 @@ const EN = {
     menuOpen: "Open menu",
     nav: {
       aggregation: "Aggregation",
+      articles: "Articles",
       faq: "Questions",
       offline: "Offline",
       serialization: "Serialization",
     },
     navigationLabel: "Primary navigation",
+    relatedArticlesHeading: "Related articles",
+    relatedArticlesKicker: "Covered in depth",
     relatedHeading: "Related production workflows",
     relatedKicker: "Next step",
     requestDemo: "Request a demonstration",
@@ -212,7 +234,7 @@ const EN = {
       contactNote: "A contact number will appear when the public phone line is connected.",
       email: "Email",
       heading: "See Markiro on your production line.",
-      kicker: "07 / DEMO ON YOUR LINE",
+      kicker: "08 / DEMO ON YOUR LINE",
       lead: "We will examine your process and demonstrate a working scenario instead of an abstract presentation.",
       legal: {
         consent: "personal-data consent",
@@ -245,6 +267,13 @@ const EN = {
         ["Launch one workflow", "Configure the workstation for the actual product and case."],
         ["Validate during a shift", "Work with an operator and test recovery from real errors."],
       ],
+    },
+    materials: {
+      allArticles: "All articles",
+      allInstructions: "Station and cabinet instructions",
+      heading: ["Notes from the line.", "No vague promises."],
+      kicker: "07 / MATERIALS",
+      lead: "Articles on real beer-marking problems and printable instructions for operators, technicians, and managers.",
     },
     lineConsole: {
       accepted: "Code accepted",
@@ -300,6 +329,15 @@ const EN = {
       station: "STATION 03",
       toolbar: "CASE 24 HISTORY",
     },
+  },
+  hub: {
+    articlesHeading: "All articles",
+    articlesKicker: "01 / Practice",
+    instructionsKicker: "Instructions",
+    minutes: "min read",
+    otherGroup: "Other instructions",
+    registryLink: "public document registry",
+    registryNote: "Codes, revisions, dates and PDF/A files of every instruction are also published in the",
   },
 } as const;
 

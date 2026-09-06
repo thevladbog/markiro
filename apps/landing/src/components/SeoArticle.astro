@@ -25,7 +25,7 @@ const stationDownloadUrl = "https://releases.markiro.app/station/download";
   <main id="main" class="seo-page">
     <header class="seo-hero">
       <div class="container seo-hero__inner">
-        <Breadcrumbs page={page} />
+        <Breadcrumbs locale={page.locale} current={page.navigationLabel} />
         <p class="section-index">{page.eyebrow}</p>
         <h1>{page.heading}</h1>
         <p class="seo-hero__lead">{page.introduction}</p>

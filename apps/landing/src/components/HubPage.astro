@@ -1,0 +1,154 @@
+---
+import {
+  findLegalDocument,
+  formatLegalEffectiveDate,
+  legalDocumentKind,
+  legalReleaseLocales,
+  requireLegalContent,
+} from "@markiro/legal-documents";
+
+import { articlesForLocale } from "../content/articles";
+import type { HubPageDefinition } from "../content/hubs";
+import { ACTIVE_LEGAL_RELEASES, getLegalDocumentPage } from "../content/legal-pages";
+import { getUiCopy } from "../content/ui";
+import { buildHubPageGraph, type HubItem } from "../lib/seo";
+import type { PublicPhone } from "../lib/site-config";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import Breadcrumbs from "./Breadcrumbs.astro";
+import LandingFooter from "./LandingFooter.astro";
+import LandingHeader from "./LandingHeader.astro";
+
+interface Props {
+  hub: HubPageDefinition;
+  phone: PublicPhone | null;
+}
+
+interface HubEntry extends HubItem {
+  code: string;
+  description: string;
+  date: string;
+  dateLabel: string;
+  meta: string;
+}
+
+interface HubGroup {
+  kicker: string;
+  heading: string;
+  entries: HubEntry[];
+}
+
+const { hub, phone } = Astro.props;
+const copy = getUiCopy(hub.locale);
+const homePath = hub.locale === "ru" ? "/" : "/en/";
+
+const groups: HubGroup[] = [];
+if (hub.kind === "articles") {
+  groups.push({
+    kicker: copy.hub.articlesKicker,
+    heading: copy.hub.articlesHeading,
+    entries: articlesForLocale(hub.locale).map((article) => ({
+      name: article.navigationLabel,
+      path: article.path,
+      code: `${article.readingTimeMinutes} ${copy.hub.minutes}`,
+      description: article.description,
+      date: article.publishedAt,
+      dateLabel: formatLegalEffectiveDate(article.publishedAt, hub.locale),
+      meta: "",
+    })),
+  });
+} else {
+  for (const release of ACTIVE_LEGAL_RELEASES) {
+    if (legalDocumentKind(release.code) !== "instruction") continue;
+    if (!legalReleaseLocales(release.code).includes(hub.locale)) continue;
+    const content = requireLegalContent(findLegalDocument(release.code), hub.locale);
+    const page = getLegalDocumentPage(release.code, hub.locale);
+    const [prefix, ...rest] = content.title.split(":");
+    const groupHeading = rest.length > 0 && prefix !== undefined ? prefix.trim() : copy.hub.otherGroup;
+    let group = groups.find((candidate) => candidate.heading === groupHeading);
+    if (group === undefined) {
+      group = {
+        kicker: `${String(groups.length + 1).padStart(2, "0")} / ${copy.hub.instructionsKicker}`,
+        heading: groupHeading,
+        entries: [],
+      };
+      groups.push(group);
+    }
+    group.entries.push({
+      name: content.title,
+      path: page.metadata.path,
+      code: release.code,
+      description: page.metadata.description,
+      date: release.effectiveDate,
+      dateLabel: formatLegalEffectiveDate(release.effectiveDate, hub.locale),
+      meta: release.revision,
+    });
+  }
+}
+
+const graph = buildHubPageGraph(
+  hub,
+  groups.flatMap((group) => group.entries.map(({ name, path }) => ({ name, path }))),
+);
+---
+
+<BaseLayout metadata={hub} graph={graph}>
+  <LandingHeader page={hub} phone={phone} />
+  <main id="main" class="seo-page hub-page">
+    <header class="seo-hero">
+      <div class="container seo-hero__inner">
+        <Breadcrumbs locale={hub.locale} current={hub.navigationLabel} />
+        <p class="section-index">{hub.eyebrow}</p>
+        <h1>{hub.heading}</h1>
+        <p class="seo-hero__lead">{hub.introduction}</p>
+      </div>
+    </header>
+
+    {groups.map((group) => (
+      <section class="container legal-registry" aria-labelledby={`hub-group-${group.heading}`}>
+        <div class="legal-registry__heading">
+          <p class="section-index">{group.kicker}</p>
+          <h2 id={`hub-group-${group.heading}`}>{group.heading}</h2>
+        </div>
+        <div class="legal-registry__list">
+          {group.entries.map((entry) => (
+            <article class="legal-registry__entry" data-hub-item>
+              <a class="legal-registry__item" href={entry.path}>
+                <span class="legal-registry__code">{entry.code}</span>
+                <span class="legal-registry__title">{entry.name}</span>
+                <span class="legal-registry__meta">
+                  <time datetime={entry.date}>{entry.dateLabel}</time>
+                  {entry.meta.length > 0 && <span>{" · "}{entry.meta}</span>}
+                </span>
+                <span class="legal-registry__arrow" aria-hidden="true">→</span>
+                <span class="hub-item__description">{entry.description}</span>
+              </a>
+            </article>
+          ))}
+        </div>
+      </section>
+    ))}
+
+    {hub.kind === "instructions" && (
+      <p class="container legal-registry__note hub-page__note">
+        {copy.hub.registryNote} <a href={hub.locale === "ru" ? "/legal/" : "/en/legal/"}>{copy.hub.registryLink}</a>.
+      </p>
+    )}
+
+    <section class="seo-cta" aria-labelledby="seo-cta-title">
+      <div class="container seo-cta__inner">
+        <div>
+          <p class="section-index">{copy.common.seoCtaKicker}</p>
+          <h2 id="seo-cta-title">{copy.common.seoCtaHeading}</h2>
+        </div>
+        <a class="button" href={`${homePath}#demo`} data-analytics="landing_demo_click" data-placement="hub-cta">{copy.common.requestDemo} <span aria-hidden="true">→</span></a>
+      </div>
+    </section>
+  </main>
+  <LandingFooter page={hub} />
+
+  <script>
+    import { browserLandingRuntime, initLanding } from "../scripts/site";
+
+    initLanding(document, browserLandingRuntime(window));
+  </script>
+</BaseLayout>

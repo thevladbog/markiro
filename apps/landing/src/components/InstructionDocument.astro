@@ -8,11 +8,13 @@ import {
   type LegalBlock,
 } from "@markiro/legal-documents";
 
+import { findHubPage, hubPath } from "../content/hubs";
 import type { LegalDocumentPageDefinition } from "../content/legal-pages";
 import { buildLegalPageGraph } from "../lib/seo";
 import { readPublicSiteConfig } from "../lib/site-config";
 import { artifactsForRelease, loadLegalArtifacts } from "../lib/legal-artifacts";
 import BaseLayout from "../layouts/BaseLayout.astro";
+import Breadcrumbs from "./Breadcrumbs.astro";
 import LandingFooter from "./LandingFooter.astro";
 import LandingHeader from "./LandingHeader.astro";
 import LegalArtifactControls from "./LegalArtifactControls.astro";
@@ -58,10 +60,12 @@ const chrome = {
 }[page.locale];
 const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }, page.locale);
 const artifacts = artifactsForRelease(await loadLegalArtifacts(), release.code, release.revision, page.locale);
-const graph = buildLegalPageGraph(page.metadata, {
-  published: release.effectiveDate,
-  modified: release.effectiveDate,
-});
+const hub = findHubPage(hubPath(page.locale, "instructions"));
+const graph = buildLegalPageGraph(
+  page.metadata,
+  { published: release.effectiveDate, modified: release.effectiveDate },
+  { breadcrumbs: [{ name: hub.navigationLabel, path: hub.path }] },
+);
 
 const imageUrl = (id: string): string => {
   const url = images[id];
@@ -83,10 +87,15 @@ const stepBlocks = (blocks: readonly LegalBlock[]) => {
   <main id="main" class="legal-page instruction-page">
     <header class="legal-hero">
       <div class="container legal-hero__inner">
-        <a class="legal-backlink" href={chrome.registryPath}>{chrome.registry}</a>
+        <Breadcrumbs
+          locale={page.locale}
+          current={content.title}
+          trail={[{ label: hub.navigationLabel, path: hub.path }]}
+        />
         <p class="section-index">{page.code}</p>
         <h1>{content.title}</h1>
         <p class="legal-hero__summary">{content.summary}</p>
+        <a class="legal-backlink legal-backlink--inline" href={chrome.registryPath}>{chrome.registry}</a>
       </div>
     </header>
 

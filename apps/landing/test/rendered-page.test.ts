@@ -32,6 +32,11 @@ const EXPECTED_ROUTES = [
   "/en/offline-production/",
   "/en/faq/",
 ] as const;
+const HUB_ROUTES = ["/stati/", "/instruktsii/", "/en/articles/", "/en/instructions/"] as const;
+const SAMPLE_CLUSTER_ROUTES = [
+  "/stati/markirovka-piva-2026/",
+  "/instruktsii/stantsiya-vkhod-i-start-smeny/",
+] as const;
 
 beforeAll(() => {
   execFileSync(
@@ -72,7 +77,7 @@ beforeAll(() => {
     },
   );
 
-  for (const route of EXPECTED_ROUTES) {
+  for (const route of [...EXPECTED_ROUTES, ...HUB_ROUTES, ...SAMPLE_CLUSTER_ROUTES]) {
     const outputPath =
       route === "/"
         ? path.join(outputDirectory, "index.html")
@@ -172,7 +177,7 @@ describe("rendered landing page", () => {
     expect(
       documents
         .get("/sscc-i-agregatsiya/")
-        ?.querySelector('[data-related-pages] a[href="/stati/agregatsiya-piva-v-koroba/"]'),
+        ?.querySelector('[data-related-articles] a[href="/stati/agregatsiya-piva-v-koroba/"]'),
     ).not.toBeNull();
   });
 
@@ -1259,8 +1264,93 @@ describe("rendered landing page", () => {
       descriptions.add(description as string);
     }
 
-    expect(titles.size).toBe(EXPECTED_ROUTES.length);
-    expect(descriptions.size).toBe(EXPECTED_ROUTES.length);
+    expect(titles.size).toBe(documents.size);
+    expect(descriptions.size).toBe(documents.size);
+  });
+
+  it("publishes hubs that list every article and instruction of their locale", () => {
+    const ruArticles = documents.get("/stati/") as Document;
+    const enArticles = documents.get("/en/articles/") as Document;
+    const ruInstructions = documents.get("/instruktsii/") as Document;
+    const enInstructions = documents.get("/en/instructions/") as Document;
+
+    const ruArticleLinks = [...ruArticles.querySelectorAll("[data-hub-item] a[href]")].map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(ruArticleLinks).toEqual(
+      expect.arrayContaining([
+        "/stati/markirovka-piva-2026/",
+        "/stati/agregatsiya-piva-v-koroba/",
+        "/stati/otchet-o-nanesenii-kodov-pivo/",
+      ]),
+    );
+    expect(ruArticleLinks).toHaveLength(9);
+    expect(ruArticleLinks.every((href) => href?.startsWith("/stati/"))).toBe(true);
+    expect([...enArticles.querySelectorAll("[data-hub-item] a[href]")]).toHaveLength(9);
+
+    const ruInstructionLinks = [...ruInstructions.querySelectorAll("[data-hub-item] a[href]")].map(
+      (a) => a.getAttribute("href"),
+    );
+    expect(ruInstructionLinks).toHaveLength(9);
+    expect(ruInstructionLinks.every((href) => href?.startsWith("/instruktsii/"))).toBe(true);
+    expect([...enInstructions.querySelectorAll("[data-hub-item] a[href]")]).toHaveLength(5);
+
+    for (const hub of [ruArticles, enArticles, ruInstructions, enInstructions]) {
+      expect(hub.querySelectorAll("h1")).toHaveLength(1);
+      expect(hub.querySelector('a[href$="#demo"]')).not.toBeNull();
+    }
+  });
+
+  it("links the cluster from the header, footer and a home materials section", () => {
+    expect(document.querySelector("section#materials[aria-labelledby]")).not.toBeNull();
+    const materialLinks = [...document.querySelectorAll("#materials a[href]")].map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(
+      materialLinks.filter((href) => href?.startsWith("/stati/") && href !== "/stati/"),
+    ).toHaveLength(3);
+    expect(materialLinks).toContain("/stati/");
+    expect(materialLinks).toContain("/instruktsii/");
+    expect(document.querySelector('header nav a[href="/stati/"]')).not.toBeNull();
+    expect(document.querySelector('footer nav a[href="/stati/"]')).not.toBeNull();
+    expect(document.querySelector('footer nav a[href="/instruktsii/"]')).not.toBeNull();
+
+    const english = documents.get("/en/") as Document;
+    expect(english.querySelector('header nav a[href="/en/articles/"]')).not.toBeNull();
+    expect(english.querySelector('footer nav a[href="/en/instructions/"]')).not.toBeNull();
+  });
+
+  it("routes article and instruction breadcrumbs through their hubs", () => {
+    const article = documents.get("/stati/markirovka-piva-2026/") as Document;
+    const crumbs = [...article.querySelectorAll('nav[aria-label="Хлебные крошки"] li')].map(
+      (item) => item.textContent?.trim(),
+    );
+    expect(crumbs).toEqual(["Markiro", "Статьи", "Маркировка пива в 2026 году"]);
+    expect(
+      article.querySelector('nav[aria-label="Хлебные крошки"] a[href="/stati/"]'),
+    ).not.toBeNull();
+
+    const instruction = documents.get("/instruktsii/stantsiya-vkhod-i-start-smeny/") as Document;
+    const instructionCrumbs = [
+      ...instruction.querySelectorAll('nav[aria-label="Хлебные крошки"] li'),
+    ].map((item) => item.textContent?.trim());
+    expect(instructionCrumbs.slice(0, 2)).toEqual(["Markiro", "Инструкции"]);
+    expect(instructionCrumbs).toHaveLength(3);
+  });
+
+  it("links topic pages to related articles of the same locale", () => {
+    for (const route of EXPECTED_ROUTES.filter((path) => path !== "/" && path !== "/en/")) {
+      const routeDocument = documents.get(route) as Document;
+      const articleLinks = [
+        ...routeDocument.querySelectorAll('[data-related-articles] a[href^="/"]'),
+      ].map((a) => a.getAttribute("href") ?? "");
+      expect(articleLinks.length, route).toBeGreaterThanOrEqual(2);
+      const prefix = route.startsWith("/en/") ? "/en/articles/" : "/stati/";
+      expect(
+        articleLinks.every((href) => href.startsWith(prefix)),
+        route,
+      ).toBe(true);
+    }
   });
 
   it("renders English pages without Russian interface copy", () => {
@@ -1286,9 +1376,19 @@ describe("rendered landing page", () => {
       };
 
       expect(graph["@graph"].some((entry) => entry["@type"] === "WebSite")).toBe(true);
-      expect(graph["@graph"].some((entry) => entry["@type"] === "WebPage")).toBe(true);
+      expect(
+        graph["@graph"].some(
+          (entry) => entry["@type"] === "WebPage" || entry["@type"] === "CollectionPage",
+        ),
+      ).toBe(true);
       expect(graph["@graph"].some((entry) => entry["@type"] === "Organization")).toBe(true);
-      expect(graph["@graph"].some((entry) => entry["@type"] === "SoftwareApplication")).toBe(true);
+      // The product entity belongs to the topic cluster; hubs, articles and
+      // instructions describe their own content instead of repeating it.
+      if ((EXPECTED_ROUTES as readonly string[]).includes(route)) {
+        expect(graph["@graph"].some((entry) => entry["@type"] === "SoftwareApplication")).toBe(
+          true,
+        );
+      }
 
       if (route !== "/" && route !== "/en/") {
         const breadcrumbsLabel = route.startsWith("/en/") ? "Breadcrumbs" : "Хлебные крошки";

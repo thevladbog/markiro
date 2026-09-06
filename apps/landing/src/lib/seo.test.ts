@@ -1,10 +1,14 @@
 import { LEGAL_RELEASES } from "@markiro/legal-documents";
 import { describe, expect, it } from "vitest";
 
+import { BEER_MARKING_2026_ARTICLE, BEER_MARKING_2026_ARTICLE_EN } from "../content/articles";
+import { findHubPage } from "../content/hubs";
 import { findSeoPage } from "../content/pages";
 import { getLegalDocumentPage } from "../content/legal-pages";
 import {
   attachOrganizationContact,
+  buildArticlePageGraph,
+  buildHubPageGraph,
   buildPageGraph,
   buildLegalPageGraph,
   renderLlmsTxt,
@@ -107,7 +111,7 @@ describe("SEO generators", () => {
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(58);
+    expect(sitemap.match(/<url>/g)).toHaveLength(62);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
@@ -167,7 +171,7 @@ describe("SEO generators", () => {
         llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
       ).toHaveLength(1);
     }
-    expect(sitemap.match(/<url>/g)).toHaveLength(58);
+    expect(sitemap.match(/<url>/g)).toHaveLength(62);
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
     );
@@ -176,6 +180,125 @@ describe("SEO generators", () => {
     );
     expect(sitemap).not.toContain("<loc>https://markiro.app/d/");
     expect(llms).not.toContain("/d/");
+  });
+
+  it("lists the article and instruction hubs with their locale pairs", () => {
+    const sitemap = renderSitemapXml();
+    const llms = renderLlmsTxt();
+
+    expect(sitemap).toMatch(
+      /<loc>https:\/\/markiro\.app\/stati\/<\/loc>[\s\S]*?hreflang="en" href="https:\/\/markiro\.app\/en\/articles\/"/,
+    );
+    expect(sitemap).toMatch(
+      /<loc>https:\/\/markiro\.app\/instruktsii\/<\/loc>[\s\S]*?hreflang="en" href="https:\/\/markiro\.app\/en\/instructions\/"/,
+    );
+    expect(sitemap).toContain("<loc>https://markiro.app/en/articles/</loc>");
+    expect(sitemap).toContain("<loc>https://markiro.app/en/instructions/</loc>");
+    expect(llms).toContain("](https://markiro.app/stati/):");
+    expect(llms).toContain("](https://markiro.app/en/instructions/):");
+  });
+
+  it("routes article breadcrumbs through the localized hub", () => {
+    const ru = buildArticlePageGraph(BEER_MARKING_2026_ARTICLE)["@graph"].find(
+      (entry) => entry["@type"] === "BreadcrumbList",
+    );
+    const en = buildArticlePageGraph(BEER_MARKING_2026_ARTICLE_EN)["@graph"].find(
+      (entry) => entry["@type"] === "BreadcrumbList",
+    );
+
+    expect(ru).toEqual({
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "Markiro", item: "https://markiro.app/" },
+        { "@type": "ListItem", position: 2, name: "Статьи", item: "https://markiro.app/stati/" },
+        {
+          "@type": "ListItem",
+          position: 3,
+          name: "Маркировка пива в 2026 году",
+          item: "https://markiro.app/stati/markirovka-piva-2026/",
+        },
+      ],
+    });
+    expect(en).toMatchObject({
+      itemListElement: [
+        { position: 1, item: "https://markiro.app/en/" },
+        { position: 2, name: "Articles", item: "https://markiro.app/en/articles/" },
+        { position: 3, item: "https://markiro.app/en/articles/beer-marking-2026/" },
+      ],
+    });
+  });
+
+  it("describes a hub as a collection with its visible items", () => {
+    const graph = buildHubPageGraph(findHubPage("/stati/"), [
+      { name: "Маркировка пива в 2026 году", path: "/stati/markirovka-piva-2026/" },
+      { name: "Агрегация пива в короба", path: "/stati/agregatsiya-piva-v-koroba/" },
+    ]);
+    const types = graph["@graph"].map((entry) => entry["@type"]);
+
+    expect(types).toEqual([
+      "WebSite",
+      "Organization",
+      "CollectionPage",
+      "BreadcrumbList",
+      "ItemList",
+    ]);
+    expect(graph["@graph"].find((entry) => entry["@type"] === "CollectionPage")).toMatchObject({
+      url: "https://markiro.app/stati/",
+      inLanguage: "ru",
+      dateModified: findHubPage("/stati/").reviewedAt,
+    });
+    expect(graph["@graph"].find((entry) => entry["@type"] === "ItemList")).toEqual({
+      "@type": "ItemList",
+      itemListElement: [
+        {
+          "@type": "ListItem",
+          position: 1,
+          name: "Маркировка пива в 2026 году",
+          url: "https://markiro.app/stati/markirovka-piva-2026/",
+        },
+        {
+          "@type": "ListItem",
+          position: 2,
+          name: "Агрегация пива в короба",
+          url: "https://markiro.app/stati/agregatsiya-piva-v-koroba/",
+        },
+      ],
+    });
+    expect(graph["@graph"].find((entry) => entry["@type"] === "BreadcrumbList")).toEqual({
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "Markiro", item: "https://markiro.app/" },
+        { "@type": "ListItem", position: 2, name: "Статьи", item: "https://markiro.app/stati/" },
+      ],
+    });
+  });
+
+  it("adds an instruction breadcrumb trail to legal structured data on request", () => {
+    const page = getLegalDocumentPage("MKR-INS-01", "ru");
+    const graph = buildLegalPageGraph(
+      page.metadata,
+      { published: "2026-09-02", modified: "2026-09-02" },
+      { breadcrumbs: [{ name: "Инструкции", path: "/instruktsii/" }] },
+    );
+
+    expect(graph["@graph"].find((entry) => entry["@type"] === "BreadcrumbList")).toEqual({
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "Markiro", item: "https://markiro.app/" },
+        {
+          "@type": "ListItem",
+          position: 2,
+          name: "Инструкции",
+          item: "https://markiro.app/instruktsii/",
+        },
+        {
+          "@type": "ListItem",
+          position: 3,
+          name: page.metadata.title.replace(/ — Маркиро$/, ""),
+          item: "https://markiro.app/instruktsii/stantsiya-vkhod-i-start-smeny/",
+        },
+      ],
+    });
   });
 
   it("dates the legal registry by its newest active release", () => {

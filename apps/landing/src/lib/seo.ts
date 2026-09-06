@@ -2,6 +2,7 @@ import { OPERATOR_PROFILES } from "@markiro/legal-documents";
 
 import { LEGAL_SEARCH_PAGES } from "../content/legal-pages";
 import { ARTICLE_SEARCH_PAGES, type ArticlePageDefinition } from "../content/articles";
+import { HUB_SEARCH_PAGES, findHubPage, hubPath, type HubPageDefinition } from "../content/hubs";
 import {
   MARKETING_SEARCH_PAGES,
   SEO_PAGES,
@@ -14,6 +15,7 @@ const ORGANIZATION_EMAIL = OPERATOR_PROFILES["operator-2026-08-15"].email;
 const ORGANIZATION_LOGO_PATH = "/brand/markiro-logo.svg";
 const INDEXABLE_PAGES: readonly SearchPageRecord[] = [
   ...MARKETING_SEARCH_PAGES,
+  ...HUB_SEARCH_PAGES,
   ...ARTICLE_SEARCH_PAGES,
   ...LEGAL_SEARCH_PAGES,
 ];
@@ -46,6 +48,20 @@ type JsonLdObject = Record<string, unknown>;
 
 export interface OrganizationContact {
   telephone: string | null;
+}
+
+export interface BreadcrumbTrailItem {
+  name: string;
+  path: string;
+}
+
+export interface HubItem {
+  name: string;
+  path: string;
+}
+
+export interface LegalGraphOptions {
+  breadcrumbs?: readonly BreadcrumbTrailItem[];
 }
 
 export interface PageMetadata {
@@ -103,6 +119,19 @@ function organizationNode(): JsonLdObject {
         availableLanguage: ["Russian", "English"],
       },
     ],
+  };
+}
+
+function breadcrumbList(locale: "ru" | "en", items: readonly BreadcrumbTrailItem[]): JsonLdObject {
+  const homePath = locale === "ru" ? "/" : "/en/";
+  return {
+    "@type": "BreadcrumbList",
+    itemListElement: [{ name: "Markiro", path: homePath }, ...items].map((item, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: item.name,
+      item: absoluteUrl(item.path),
+    })),
   };
 }
 
@@ -194,7 +223,7 @@ export function buildPageGraph(page: SeoPageDefinition): PageGraph {
 
 export function buildArticlePageGraph(page: ArticlePageDefinition): PageGraph {
   const pageUrl = absoluteUrl(page.path);
-  const homeUrl = page.locale === "ru" ? `${SITE_URL}/` : `${SITE_URL}/en/`;
+  const hub = findHubPage(hubPath(page.locale, "articles"));
   return {
     "@context": "https://schema.org",
     "@graph": [
@@ -222,12 +251,39 @@ export function buildArticlePageGraph(page: ArticlePageDefinition): PageGraph {
         author: { "@id": `${SITE_URL}/#organization` },
         publisher: { "@id": `${SITE_URL}/#organization` },
       },
+      breadcrumbList(page.locale, [
+        { name: hub.navigationLabel, path: hub.path },
+        { name: page.navigationLabel, path: page.path },
+      ]),
+    ],
+  };
+}
+
+export function buildHubPageGraph(hub: HubPageDefinition, items: readonly HubItem[]): PageGraph {
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      websiteNode(),
+      organizationNode(),
       {
-        "@type": "BreadcrumbList",
-        itemListElement: [
-          { "@type": "ListItem", position: 1, name: "Markiro", item: homeUrl },
-          { "@type": "ListItem", position: 2, name: page.navigationLabel, item: pageUrl },
-        ],
+        "@type": "CollectionPage",
+        "@id": `${absoluteUrl(hub.path)}#webpage`,
+        url: absoluteUrl(hub.path),
+        name: hub.title,
+        description: hub.description,
+        inLanguage: hub.locale,
+        dateModified: hub.reviewedAt,
+        isPartOf: { "@id": `${SITE_URL}/#website` },
+      },
+      breadcrumbList(hub.locale, [{ name: hub.navigationLabel, path: hub.path }]),
+      {
+        "@type": "ItemList",
+        itemListElement: items.map((item, index) => ({
+          "@type": "ListItem",
+          position: index + 1,
+          name: item.name,
+          url: absoluteUrl(item.path),
+        })),
       },
     ],
   };
@@ -236,6 +292,7 @@ export function buildArticlePageGraph(page: ArticlePageDefinition): PageGraph {
 export function buildLegalPageGraph(
   page: PageMetadata,
   dates?: { readonly published: string; readonly modified: string; readonly basedOn?: string },
+  options: LegalGraphOptions = {},
 ): PageGraph {
   const webPage: JsonLdObject = {
     "@type": "WebPage",
@@ -254,7 +311,19 @@ export function buildLegalPageGraph(
 
   return {
     "@context": "https://schema.org",
-    "@graph": [websiteNode(), organizationNode(), webPage],
+    "@graph": [
+      websiteNode(),
+      organizationNode(),
+      webPage,
+      ...(options.breadcrumbs === undefined
+        ? []
+        : [
+            breadcrumbList(page.locale, [
+              ...options.breadcrumbs,
+              { name: page.title.replace(/ — (?:Маркиро|Markiro)$/, ""), path: page.path },
+            ]),
+          ]),
+    ],
   };
 }
 

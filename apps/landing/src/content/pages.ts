@@ -60,6 +60,8 @@ export interface SeoPageDefinition {
   socialImageAlt: string;
   reviewedAt: `${number}-${number}-${number}`;
   relatedPaths: readonly CanonicalPath[];
+  /** Article paths from the article registry that deepen this topic; validated in tests. */
+  relatedArticlePaths: readonly string[];
   sections: readonly ContentSection[];
   faq?: readonly FaqEntry[];
   stationDownload?: StationDownloadContent;
@@ -85,6 +87,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     socialImageAlt: SHARED_IMAGE_ALT,
     reviewedAt: "2026-08-26",
     relatedPaths: ["/markirovka-chestny-znak/", "/sscc-i-agregatsiya/", "/oflayn-rabota/"],
+    relatedArticlePaths: [],
     sections: [],
   },
   {
@@ -103,6 +106,11 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     socialImageAlt: SHARED_IMAGE_ALT,
     reviewedAt: "2026-08-14",
     relatedPaths: ["/rabochee-mesto-upakovki/", "/sscc-i-agregatsiya/", "/integratsiya-1c/"],
+    relatedArticlePaths: [
+      "/stati/nanesenie-data-matrix-na-pivo/",
+      "/stati/otchet-o-nanesenii-kodov-pivo/",
+      "/stati/markirovka-piva-2026/",
+    ],
     sections: [
       {
         heading: "Где начинается контроль",
@@ -147,6 +155,11 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     socialImageAlt: SHARED_IMAGE_ALT,
     reviewedAt: "2026-08-26",
     relatedPaths: ["/markirovka-chestny-znak/", "/rabochee-mesto-upakovki/", "/oflayn-rabota/"],
+    relatedArticlePaths: [
+      "/stati/agregatsiya-piva-v-koroba/",
+      "/stati/dubl-koda-markirovki-pivo/",
+      "/stati/otchet-o-nanesenii-kodov-pivo/",
+    ],
     sections: [
       {
         heading: "Что такое SSCC в агрегации",
@@ -234,6 +247,11 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     socialImageAlt: SHARED_IMAGE_ALT,
     reviewedAt: "2026-08-28",
     relatedPaths: ["/oflayn-rabota/", "/sscc-i-agregatsiya/", "/markirovka-chestny-znak/"],
+    relatedArticlePaths: [
+      "/stati/oborudovanie-dlya-markirovki-piva/",
+      "/stati/data-matrix-pivo-ne-schityvaetsya/",
+      "/stati/agregatsiya-piva-v-koroba/",
+    ],
     stationDownload: {
       eyebrow: "Приложение для рабочего места",
       title: "Station для Windows",
@@ -279,6 +297,10 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     socialImageAlt: SHARED_IMAGE_ALT,
     reviewedAt: "2026-08-14",
     relatedPaths: ["/oflayn-rabota/", "/markirovka-chestny-znak/", "/faq/"],
+    relatedArticlePaths: [
+      "/stati/markirovka-piva-bez-interneta/",
+      "/stati/dubl-koda-markirovki-pivo/",
+    ],
     sections: [
       {
         heading: "Как проходит выдача",
@@ -316,6 +338,11 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     socialImageAlt: SHARED_IMAGE_ALT,
     reviewedAt: "2026-08-14",
     relatedPaths: ["/markirovka-chestny-znak/", "/sscc-i-agregatsiya/", "/faq/"],
+    relatedArticlePaths: [
+      "/stati/otchet-o-nanesenii-kodov-pivo/",
+      "/stati/markirovka-piva-2026/",
+      "/stati/stoimost-markirovki-piva/",
+    ],
     sections: [
       {
         heading: "Контракт вместо ручного переноса",
@@ -353,6 +380,11 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     socialImageAlt: SHARED_IMAGE_ALT,
     reviewedAt: "2026-08-14",
     relatedPaths: ["/rabochee-mesto-upakovki/", "/sscc-i-agregatsiya/", "/kiosk-samovydachi/"],
+    relatedArticlePaths: [
+      "/stati/markirovka-piva-bez-interneta/",
+      "/stati/agregatsiya-piva-v-koroba/",
+      "/stati/dubl-koda-markirovki-pivo/",
+    ],
     sections: [
       {
         heading: "Что остаётся на устройстве",
@@ -390,6 +422,11 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     socialImageAlt: SHARED_IMAGE_ALT,
     reviewedAt: "2026-08-14",
     relatedPaths: ["/markirovka-chestny-znak/", "/sscc-i-agregatsiya/", "/oflayn-rabota/"],
+    relatedArticlePaths: [
+      "/stati/markirovka-piva-2026/",
+      "/stati/stoimost-markirovki-piva/",
+      "/stati/oborudovanie-dlya-markirovki-piva/",
+    ],
     sections: [],
     faq: [
       {
@@ -444,6 +481,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "/en/sscc-and-aggregation/",
       "/en/offline-production/",
     ],
+    relatedArticlePaths: [],
     sections: [],
   },
   {
@@ -462,6 +500,11 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     socialImageAlt: "Markiro — production serialization, aggregation, and traceability",
     reviewedAt: "2026-08-14",
     relatedPaths: ["/en/packing-workstation/", "/en/sscc-and-aggregation/", "/en/1c-integration/"],
+    relatedArticlePaths: [
+      "/en/articles/beer-data-matrix-application-methods/",
+      "/en/articles/beer-code-application-report-russia/",
+      "/en/articles/beer-marking-2026/",
+    ],
     sections: [
       {
         heading: "Where control begins",
@@ -509,6 +552,11 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "/en/chestny-znak-serialization/",
       "/en/packing-workstation/",
       "/en/offline-production/",
+    ],
+    relatedArticlePaths: [
+      "/en/articles/beer-case-aggregation/",
+      "/en/articles/duplicate-beer-marking-code-russia/",
+      "/en/articles/beer-code-application-report-russia/",
     ],
     sections: [
       {
@@ -601,6 +649,11 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "/en/sscc-and-aggregation/",
       "/en/chestny-znak-serialization/",
     ],
+    relatedArticlePaths: [
+      "/en/articles/beer-marking-line-equipment/",
+      "/en/articles/beer-data-matrix-not-scanning/",
+      "/en/articles/beer-case-aggregation/",
+    ],
     stationDownload: {
       eyebrow: "Workstation application",
       title: "Station for Windows",
@@ -646,6 +699,10 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     socialImageAlt: "Markiro — production serialization, aggregation, and traceability",
     reviewedAt: "2026-08-14",
     relatedPaths: ["/en/offline-production/", "/en/chestny-znak-serialization/", "/en/faq/"],
+    relatedArticlePaths: [
+      "/en/articles/offline-beer-marking-russia/",
+      "/en/articles/duplicate-beer-marking-code-russia/",
+    ],
     sections: [
       {
         heading: "How pickup works",
@@ -683,6 +740,11 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     socialImageAlt: "Markiro — production serialization, aggregation, and traceability",
     reviewedAt: "2026-08-14",
     relatedPaths: ["/en/chestny-znak-serialization/", "/en/sscc-and-aggregation/", "/en/faq/"],
+    relatedArticlePaths: [
+      "/en/articles/beer-code-application-report-russia/",
+      "/en/articles/beer-marking-2026/",
+      "/en/articles/beer-marking-cost-russia/",
+    ],
     sections: [
       {
         heading: "A contract instead of manual transfer",
@@ -724,6 +786,11 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "/en/sscc-and-aggregation/",
       "/en/self-service-pickup-kiosk/",
     ],
+    relatedArticlePaths: [
+      "/en/articles/offline-beer-marking-russia/",
+      "/en/articles/beer-case-aggregation/",
+      "/en/articles/duplicate-beer-marking-code-russia/",
+    ],
     sections: [
       {
         heading: "What remains on the device",
@@ -764,6 +831,11 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "/en/chestny-znak-serialization/",
       "/en/sscc-and-aggregation/",
       "/en/offline-production/",
+    ],
+    relatedArticlePaths: [
+      "/en/articles/beer-marking-2026/",
+      "/en/articles/beer-marking-cost-russia/",
+      "/en/articles/beer-marking-line-equipment/",
     ],
     sections: [],
     faq: [

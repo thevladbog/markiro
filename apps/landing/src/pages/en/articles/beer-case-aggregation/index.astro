@@ -4,12 +4,15 @@ import { Picture } from "astro:assets";
 import articleHero from "../../../../assets/beer-case-aggregation-hero.png";
 import LandingFooter from "../../../../components/LandingFooter.astro";
 import LandingHeader from "../../../../components/LandingHeader.astro";
+import Breadcrumbs from "../../../../components/Breadcrumbs.astro";
+import { findHubPage, hubPath } from "../../../../content/hubs";
 import { BEER_CASE_AGGREGATION_ARTICLE_EN } from "../../../../content/articles";
 import { buildArticlePageGraph } from "../../../../lib/seo";
 import { readPublicSiteConfig } from "../../../../lib/site-config";
 import BaseLayout from "../../../../layouts/BaseLayout.astro";
 
 const article = BEER_CASE_AGGREGATION_ARTICLE_EN;
+const articleHub = findHubPage(hubPath(article.locale, "articles"));
 const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
 ---
 
@@ -18,9 +21,7 @@ const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE
   <main id="main" class="article-page">
     <header class="article-hero">
       <div class="container article-hero__inner">
-        <nav class="breadcrumbs" aria-label="Breadcrumbs">
-          <ol><li><a href="/en/">Markiro</a></li><li aria-current="page">{article.navigationLabel}</li></ol>
-        </nav>
+        <Breadcrumbs locale={article.locale} current={article.navigationLabel} trail={[{ label: articleHub.navigationLabel, path: articleHub.path }]} />
         <div class="article-hero__layout">
           <div class="article-hero__copy">
             <p class="section-index">{article.eyebrow}</p>

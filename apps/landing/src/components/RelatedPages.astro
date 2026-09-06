@@ -1,7 +1,7 @@
 ---
 import type { SeoPageDefinition } from "../content/pages";
 import { findSeoPage } from "../content/pages";
-import { BEER_CASE_AGGREGATION_ARTICLE } from "../content/articles";
+import { findArticlePage } from "../content/articles";
 import { getUiCopy } from "../content/ui";
 
 interface Props {
@@ -10,15 +10,7 @@ interface Props {
 
 const { page } = Astro.props;
 const relatedPages = page.relatedPaths.map(findSeoPage);
-const relatedLinks: Array<{ navigationLabel: string; path: string }> = relatedPages.map(
-  ({ navigationLabel, path }) => ({ navigationLabel, path }),
-);
-if (page.path === "/sscc-i-agregatsiya/") {
-  relatedLinks.push({
-    navigationLabel: BEER_CASE_AGGREGATION_ARTICLE.navigationLabel,
-    path: BEER_CASE_AGGREGATION_ARTICLE.path,
-  });
-}
+const relatedArticles = page.relatedArticlePaths.map(findArticlePage);
 const copy = getUiCopy(page.locale).common;
 ---
 
@@ -26,7 +18,7 @@ const copy = getUiCopy(page.locale).common;
   <p class="section-index">{copy.relatedKicker}</p>
   <h2 id="related-title">{copy.relatedHeading}</h2>
   <div class="seo-related__grid">
-    {relatedLinks.map((relatedPage) => (
+    {relatedPages.map((relatedPage) => (
       <a href={relatedPage.path}>
         <span>{relatedPage.navigationLabel}</span>
         <span aria-hidden="true">→</span>
@@ -34,3 +26,18 @@ const copy = getUiCopy(page.locale).common;
     ))}
   </div>
 </section>
+
+{relatedArticles.length > 0 && (
+  <section class="seo-related seo-related--articles" aria-labelledby="related-articles-title" data-related-articles>
+    <p class="section-index">{copy.relatedArticlesKicker}</p>
+    <h2 id="related-articles-title">{copy.relatedArticlesHeading}</h2>
+    <div class="seo-related__grid">
+      {relatedArticles.map((article) => (
+        <a href={article.path}>
+          <span>{article.navigationLabel}</span>
+          <span aria-hidden="true">→</span>
+        </a>
+      ))}
+    </div>
+  </section>
+)}
