@@ -3,6 +3,10 @@ import { OPERATOR_PROFILES } from "@markiro/legal-documents";
 import { LEGAL_SEARCH_PAGES } from "../content/legal-pages";
 import { ARTICLE_SEARCH_PAGES, type ArticlePageDefinition } from "../content/articles";
 import { HUB_SEARCH_PAGES, findHubPage, hubPath, type HubPageDefinition } from "../content/hubs";
+import { articlesForLocale } from "../content/articles";
+import { mirrorPathFor } from "./mirror-path.ts";
+
+export { mirrorPathFor };
 import {
   MARKETING_SEARCH_PAGES,
   SEO_PAGES,
@@ -404,6 +408,54 @@ ${urls}
 `;
 }
 
+function escapeXml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function rfc822(date: string): string {
+  return new Date(`${date}T00:00:00Z`).toUTCString();
+}
+
+export function renderArticlesRss(locale: "ru" | "en"): string {
+  const hub = findHubPage(hubPath(locale, "articles"));
+  const articles = articlesForLocale(locale);
+  const newest =
+    articles
+      .map(({ publishedAt }) => publishedAt)
+      .sort()
+      .at(-1) ?? hub.reviewedAt;
+  const items = articles
+    .map((article) => {
+      const url = absoluteUrl(article.path);
+      return `    <item>
+      <title>${escapeXml(article.heading)}</title>
+      <link>${url}</link>
+      <guid isPermaLink="true">${url}</guid>
+      <pubDate>${rfc822(article.publishedAt)}</pubDate>
+      <description>${escapeXml(article.description)}</description>
+    </item>`;
+    })
+    .join("\n");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>${escapeXml(hub.title)}</title>
+    <link>${absoluteUrl(hub.path)}</link>
+    <description>${escapeXml(hub.description)}</description>
+    <language>${locale}</language>
+    <lastBuildDate>${rfc822(newest)}</lastBuildDate>
+    <atom:link href="${absoluteUrl(`${hub.path}rss.xml`)}" rel="self" type="application/rss+xml" />
+${items}
+  </channel>
+</rss>
+`;
+}
+
 export function renderLlmsTxt(): string {
   const links = (locale: "ru" | "en", homePath: string) =>
     INDEXABLE_PAGES.filter(
@@ -418,12 +470,44 @@ export function renderLlmsTxt(): string {
 
 > Производственная система для маркировки, агрегации и прослеживаемости с локальной работой станций.
 
+## Коротко о продукте
+
+- Что это: производственная система маркировки «Честный знак» для линий розлива. Коды Data Matrix проверяются на станции при сканировании, единицы собираются в короба с SSCC, этикетки печатаются в ZPL или TSPL, каждое действие остаётся в журнале.
+- Товарная группа сейчас: пиво, напитки на основе пива и слабоалкогольные напитки, включая сидр. Новые товарные группы добавляются поэтапно.
+- Уровень агрегации: единица → короб. Паллетная агрегация запланирована отдельным этапом.
+- Рабочее место: станция для Windows x64, сканер как клавиатурный ввод или через COM-порт, принтер ZPL или TSPL по сети, через COM-порт или USB.
+- Офлайн: станция работает без сети с локальным журналом SQLite и отправляет очередь после восстановления связи с ключом идемпотентности.
+- Интеграции: обмен с 1С по CommerceML, публичный REST API с OpenAPI, выгрузки отчётов смены TXT, CSV и XML агрегации для ГИС МТ, чтение статусов кодов через True API «Честного знака».
+- Киоск выбытия: сотрудник сканирует бейдж и коды, заявка проводится в кабинете через кассу или списанием.
+- Контакт: hello@v-b.tech. Демонстрация на сценарии вашей линии: ${absoluteUrl("/#demo")}
+
 ${links("ru", "/")}
 
 ## English
 
 > Production serialization, aggregation, and traceability with offline-capable line stations.
 
+## About the product
+
+- What it is: a Chestny ZNAK production serialization system for bottling lines. Data Matrix codes are validated on the station at scan time, items are aggregated into cases with SSCC, labels print in ZPL or TSPL, and every action stays in the log.
+- Current product group: beer, beer-based beverages and low-alcohol beverages, including cider. Additional product groups are added gradually.
+- Aggregation level: item-to-case. Pallet aggregation is planned as a separate stage.
+- Workstation: a Windows x64 station, a scanner as keyboard input or over a COM port, a ZPL or TSPL printer over the network, COM port or USB.
+- Offline: the station works without a network with a local SQLite journal and submits its queue after reconnecting with an idempotency key.
+- Integrations: 1C exchange over CommerceML, a public REST API with OpenAPI, shift report exports as TXT, CSV and aggregation XML for GIS MT, code status reads through the Chestny ZNAK True API.
+- Disposal kiosk: an employee scans a badge and codes, and the request is processed in the cabinet through the register or as a write-off.
+- Contact: hello@v-b.tech. Demonstration on your line's workflow: ${absoluteUrl("/en/#demo")}
+
 ${links("en", "/en/")}
+
+## Полные тексты
+
+- Все страницы одним файлом в Markdown: ${absoluteUrl("/llms-full.txt")}
+- Markdown-версия любой страницы: адрес без завершающего слэша плюс .md, например ${absoluteUrl("/faq.md")}
+
+## Full texts
+
+- Every page in one Markdown file: ${absoluteUrl("/llms-full.txt")}
+- A Markdown version of any page: its address without the trailing slash plus .md, for example ${absoluteUrl("/en/faq.md")}
 `;
 }

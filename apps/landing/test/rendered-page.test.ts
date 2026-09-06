@@ -1446,6 +1446,31 @@ describe("rendered landing page", () => {
     }
   });
 
+  it("advertises the locale feed and a markdown mirror on every indexable page", () => {
+    for (const [route, routeDocument] of documents) {
+      const feed = routeDocument.querySelector('link[rel="alternate"][type="application/rss+xml"]');
+      expect(feed?.getAttribute("href"), route).toBe(
+        route.startsWith("/en/") ? "/en/articles/rss.xml" : "/stati/rss.xml",
+      );
+      const markdown = routeDocument.querySelector('link[rel="alternate"][type="text/markdown"]');
+      const expected = route === "/" ? "/index.md" : `${route.slice(0, -1)}.md`;
+      expect(markdown?.getAttribute("href"), route).toBe(expected);
+    }
+    const notFound = new JSDOM(
+      readFileSync(path.join(outputDirectory, "404.html"), "utf8"),
+    ).window.document;
+    expect(notFound.querySelector('link[rel="alternate"][type="text/markdown"]')).toBeNull();
+    const verification = new JSDOM(
+      readFileSync(
+        path.join(outputDirectory, "d/MKR-PD-01/2026.08/01/15.08.2026/index.html"),
+        "utf8",
+      ),
+    ).window.document;
+    expect(verification.querySelector('link[rel="alternate"][type="text/markdown"]')).toBeNull();
+    expect(existsSync(path.join(outputDirectory, "stati/rss.xml"))).toBe(true);
+    expect(existsSync(path.join(outputDirectory, "en/articles/rss.xml"))).toBe(true);
+  });
+
   it("offers the public phone next to the demo call to action on topic pages", () => {
     const routeDocument = documents.get("/markirovka-chestny-znak/") as Document;
     expect(routeDocument.querySelector('.seo-cta a[href$="#demo"]')).not.toBeNull();

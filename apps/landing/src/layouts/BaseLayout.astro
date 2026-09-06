@@ -5,10 +5,12 @@ import "../styles/landing.css";
 import { getUiCopy } from "../content/ui";
 import {
   attachOrganizationContact,
+  mirrorPathFor,
   serializeJsonLd,
   type PageGraph,
   type PageMetadata,
 } from "../lib/seo";
+import { findHubPage, hubPath } from "../content/hubs";
 import { readPublicSiteConfig } from "../lib/site-config";
 import { socialImageDimensions } from "../lib/social-image";
 import ConsentPanel from "../components/ConsentPanel.astro";
@@ -31,6 +33,9 @@ const ruUrl = page.locale === "ru" ? canonicalUrl : alternateUrl;
 const enUrl = page.locale === "en" ? canonicalUrl : alternateUrl;
 const copy = getUiCopy(page.locale).common;
 const publicPhone = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }).phone;
+const feedHub = findHubPage(hubPath(page.locale, "articles"));
+const feedPath = `${feedHub.path}rss.xml`;
+const markdownPath = noindex ? null : mirrorPathFor(page.path);
 const jsonLd = serializeJsonLd(
   attachOrganizationContact(graph, { telephone: publicPhone?.display ?? null }),
 );
@@ -70,6 +75,8 @@ const jsonLd = serializeJsonLd(
         <link rel="alternate" hreflang="x-default" href={ruUrl} />
       </>
     )}
+    <link rel="alternate" type="application/rss+xml" title={feedHub.title} href={feedPath} />
+    {markdownPath && <link rel="alternate" type="text/markdown" href={markdownPath} />}
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="manifest" href={page.locale === "ru" ? "/site.webmanifest" : "/site.en.webmanifest"} />
     <title>{page.title}</title>

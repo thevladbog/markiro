@@ -11,6 +11,7 @@ import {
   buildHubPageGraph,
   buildPageGraph,
   buildLegalPageGraph,
+  renderArticlesRss,
   renderLlmsTxt,
   renderRobotsTxt,
   renderSitemapXml,
@@ -146,6 +147,42 @@ describe("SEO generators", () => {
     );
     expect(llms).toContain("https://markiro.app/en/sscc-and-aggregation/");
     expect(llms).not.toMatch(/ranking|ранжир/i);
+  });
+
+  it("gives agents verifiable product facts, contacts and full-text pointers", () => {
+    const llms = renderLlmsTxt();
+
+    expect(llms).toContain("## Коротко о продукте");
+    expect(llms).toContain("единица → короб");
+    expect(llms).toContain("hello@v-b.tech");
+    expect(llms).toContain("https://markiro.app/#demo");
+    expect(llms).toContain("## Полные тексты");
+    expect(llms).toContain("https://markiro.app/llms-full.txt");
+    expect(llms).toContain("https://markiro.app/faq.md");
+    expect(llms).toContain("## About the product");
+    expect(llms).not.toMatch(
+      /(?<!\p{L})(?:цена|цены|прайс|price|pricing|клиент\p{L}*|customer\p{L}*|гарант\p{L}*)(?!\p{L})/iu,
+    );
+  });
+
+  it("publishes an RSS feed per locale with every article", () => {
+    const ru = renderArticlesRss("ru");
+    const en = renderArticlesRss("en");
+
+    expect(ru).toContain('<rss version="2.0"');
+    expect(ru).toContain("<link>https://markiro.app/stati/</link>");
+    expect(ru).toContain("<language>ru</language>");
+    expect(ru.match(/<item>/g)).toHaveLength(9);
+    expect(ru).toContain(
+      '<guid isPermaLink="true">https://markiro.app/stati/markirovka-piva-2026/</guid>',
+    );
+    expect(ru).toMatch(/<pubDate>[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} 00:00:00 GMT<\/pubDate>/);
+    expect(ru).toContain("<atom:link");
+    expect(ru).not.toContain("/d/");
+    expect(en).toContain("<link>https://markiro.app/en/articles/</link>");
+    expect(en).toContain("<language>en</language>");
+    expect(en.match(/<item>/g)).toHaveLength(9);
+    expect(en).not.toMatch(/[А-Яа-яЁё]/);
   });
 
   it("discovers every active bilingual legal route exactly once", () => {
