@@ -71,11 +71,17 @@ const kioskForbiddenPaths = Object.freeze([
 ]);
 
 function caddyPathMatches(pattern, path) {
-  const normalizedPattern = pattern.toLowerCase();
-  const normalizedPath = path.toLowerCase();
-  return normalizedPattern.endsWith("*")
-    ? normalizedPath.startsWith(normalizedPattern.slice(0, -1))
-    : normalizedPath === normalizedPattern;
+  // Caddy path matchers are case-insensitive globs where `*` matches any run of characters.
+  const source = pattern.toLowerCase().split("*").map(escapeRegExp).join(".*");
+  return new RegExp(`^${source}$`).test(path.toLowerCase());
+}
+
+function caddyFileMatches(fileMatcher, path, files) {
+  if (files === undefined) return true;
+  const candidates = fileMatcher.try_files ?? [];
+  return candidates.some((candidate) =>
+    files.has(candidate.replaceAll("{http.request.uri.path}", path).replaceAll("{path}", path)),
+  );
 }
 
 function caddyHeaderMatches(pattern, value) {
@@ -218,22 +224,34 @@ function kioskOrderedRouteTable(route) {
   return tables[0].routes;
 }
 
-function adaptedRouteMatches(route, { method, path, headers = {} }) {
-  if (!Array.isArray(route.match)) return true;
-  return route.match.some(
-    (matcher) =>
-      (!Array.isArray(matcher.method) || matcher.method.includes(method)) &&
-      (!Array.isArray(matcher.path) ||
-        matcher.path.some((pattern) => caddyPathMatches(pattern, path))) &&
-      (matcher.path_regexp === undefined || new RegExp(matcher.path_regexp.pattern).test(path)) &&
-      (matcher.header === undefined ||
-        Object.entries(matcher.header).every(([name, patterns]) => {
-          const value = headers[name.toLowerCase()];
-          return (
-            value !== undefined && patterns.some((pattern) => caddyHeaderMatches(pattern, value))
-          );
-        })),
+function matcherSetMatches(matcher, { method, path, headers = {}, files }) {
+  return (
+    (!Array.isArray(matcher.method) || matcher.method.includes(method)) &&
+    (!Array.isArray(matcher.path) ||
+      matcher.path.some((pattern) => caddyPathMatches(pattern, path))) &&
+    (matcher.path_regexp === undefined || new RegExp(matcher.path_regexp.pattern).test(path)) &&
+    (matcher.file === undefined || caddyFileMatches(matcher.file, path, files)) &&
+    (!Array.isArray(matcher.not) ||
+      matcher.not.every(
+        (negated) => !matcherSetMatches(negated, { method, path, headers, files }),
+      )) &&
+    (matcher.header === undefined ||
+      Object.entries(matcher.header).every(([name, patterns]) => {
+        const value = headers[name.toLowerCase()];
+        return (
+          value !== undefined && patterns.some((pattern) => caddyHeaderMatches(pattern, value))
+        );
+      }))
   );
+}
+
+/**
+ * `files` lists the site-relative files that exist on disk; when given, `file`
+ * matchers are evaluated against it, otherwise they are treated as matching.
+ */
+function adaptedRouteMatches(route, request) {
+  if (!Array.isArray(route.match)) return true;
+  return route.match.some((matcher) => matcherSetMatches(matcher, request));
 }
 
 function selectedAdaptedRoute(routeTable, request) {
@@ -476,6 +494,12 @@ function assertAuthorityContract(adapted, { alb }) {
       headerSets.some((headers) => headers["Cache-Control"]?.[0] === "no-cache"),
       `${host} must disable SPA document caching`,
     );
+    if (host === landingHost) {
+      assert.ok(
+        headerSets.some((headers) => headers["Cache-Control"]?.[0] === "public, max-age=86400"),
+        "landing must cache images, manifests and legal files for a day",
+      );
+    }
     const methods = nestedObjects(route)
       .filter((candidate) => Array.isArray(candidate.method))
       .map((candidate) => candidate.method);
@@ -485,17 +509,7 @@ function assertAuthorityContract(adapted, { alb }) {
         ? [["OPTIONS"], ["OPTIONS"], ["GET", "HEAD"]]
         : host === kioskHost || host === saasAdminHost
           ? [["GET", "HEAD"]]
-          : [
-              ["POST"],
-              ["GET", "HEAD"],
-              ["GET", "HEAD"],
-              ["GET", "HEAD"],
-              ["GET", "HEAD"],
-              ["GET", "HEAD"],
-              ["GET", "HEAD"],
-              ["GET", "HEAD"],
-              ["GET", "HEAD"],
-            ],
+          : [["POST"], ...Array.from({ length: 14 }, () => ["GET", "HEAD"])],
       `${host} must reserve mutations for API handlers instead of the SPA`,
     );
     assertPlainFallback(route, host);
@@ -641,15 +655,36 @@ function assertAuthorityContract(adapted, { alb }) {
       assertOnlyPlain404(selectedAdaptedRoute(landingRoutes, request), request);
     }
   }
+  const landingFiles = new Set([
+    "/index.html",
+    "/faq/index.html",
+    "/stati/index.html",
+    "/d/MKR-PD-01/2026.08/01/15.08.2026/index.html",
+    "/robots.txt",
+    "/sitemap.xml",
+    "/llms.txt",
+    "/llms-full.txt",
+    "/faq.md",
+    "/index.md",
+    "/og-markiro.jpg",
+    "/favicon.svg",
+    "/site.webmanifest",
+    "/images/articles/markirovka-piva-2026-control-map.svg",
+    "/legal/files/markiro_mkr-pd-01_2026.08-01_ru.pdf",
+    "/stati/rss.xml",
+  ]);
   for (const path of [
     "/",
     "/faq/",
+    "/stati/",
     "/d/MKR-PD-01/2026.08/01/15.08.2026",
     "/robots.txt",
     "/sitemap.xml",
     "/llms.txt",
+    "/llms-full.txt",
+    "/stati/rss.xml",
   ]) {
-    const request = { method: "GET", path };
+    const request = { method: "GET", path, files: landingFiles };
     const selected = selectedAdaptedRoute(landingRoutes, request);
     assert.ok(
       nestedObjects(selected).some((candidate) => candidate.handler === "file_server"),
@@ -665,6 +700,107 @@ function assertAuthorityContract(adapted, { alb }) {
       ),
       `landing GET ${path} must not redirect to a slash-appended route`,
     );
+  }
+  for (const [path, location] of [
+    ["/faq", "{http.request.uri.path}/{http.request.uri.prefixed_query}"],
+    ["/stati", "{http.request.uri.path}/{http.request.uri.prefixed_query}"],
+    ["/index.html", "{http.regexp.landingIndexFile.1}{http.request.uri.prefixed_query}"],
+    ["/faq/index.html", "{http.regexp.landingIndexFile.1}{http.request.uri.prefixed_query}"],
+    [
+      "/d/MKR-PD-01/2026.08/01/15.08.2026/",
+      "{http.regexp.landingVerificationSlash.1}{http.request.uri.prefixed_query}",
+    ],
+  ]) {
+    for (const method of ["GET", "HEAD"]) {
+      const request = { method, path, files: landingFiles };
+      const selected = selectedAdaptedRoute(landingRoutes, request);
+      const objects = nestedObjects(selected);
+      assert.deepEqual(
+        objects.filter((candidate) => candidate.handler === "static_response"),
+        [{ handler: "static_response", headers: { Location: [location] }, status_code: 308 }],
+        `landing ${method} ${path} must redirect permanently to its canonical form`,
+      );
+      assert.ok(
+        objects.every(
+          (candidate) =>
+            candidate.handler !== "file_server" &&
+            candidate.handler !== "rewrite" &&
+            candidate.handler !== "reverse_proxy",
+        ),
+        `landing ${method} ${path} must redirect before serving anything`,
+      );
+    }
+  }
+  for (const path of ["/missing-directory", "/robots.txt", "/faq.md"]) {
+    const request = { method: "GET", path, files: landingFiles };
+    const selected = selectedAdaptedRoute(landingRoutes, request);
+    assert.ok(
+      nestedObjects(selected).every(
+        (candidate) => candidate.handler !== "static_response" || candidate.status_code === 404,
+      ),
+      `landing GET ${path} must not be redirected as a directory`,
+    );
+  }
+  for (const path of [
+    "/og-markiro.jpg",
+    "/favicon.svg",
+    "/site.webmanifest",
+    "/images/articles/markirovka-piva-2026-control-map.svg",
+    "/legal/files/markiro_mkr-pd-01_2026.08-01_ru.pdf",
+  ]) {
+    const selected = selectedAdaptedRoute(landingRoutes, {
+      method: "GET",
+      path,
+      files: landingFiles,
+    });
+    const objects = nestedObjects(selected);
+    assert.ok(
+      objects.some((candidate) => candidate.handler === "file_server"),
+      `landing GET ${path} must be served as a static file`,
+    );
+    assert.deepEqual(
+      objects
+        .filter((candidate) => candidate.handler === "headers")
+        .map((candidate) => candidate.response?.set?.["Cache-Control"]?.[0]),
+      ["public, max-age=86400"],
+      `landing GET ${path} must be cacheable for a day`,
+    );
+  }
+  {
+    const selected = selectedAdaptedRoute(landingRoutes, {
+      method: "GET",
+      path: "/faq.md",
+      files: landingFiles,
+    });
+    const set = Object.assign(
+      {},
+      ...nestedObjects(selected)
+        .filter((candidate) => candidate.handler === "headers")
+        .map((candidate) => candidate.response?.set ?? {}),
+    );
+    assert.deepEqual(set, {
+      "Cache-Control": ["public, max-age=300"],
+      "Content-Type": ["text/markdown; charset=utf-8"],
+      "X-Robots-Tag": ["noindex"],
+    });
+    assert.ok(nestedObjects(selected).some((candidate) => candidate.handler === "file_server"));
+  }
+  {
+    const selected = selectedAdaptedRoute(landingRoutes, {
+      method: "GET",
+      path: "/llms-full.txt",
+      files: landingFiles,
+    });
+    const set = Object.assign(
+      {},
+      ...nestedObjects(selected)
+        .filter((candidate) => candidate.handler === "headers")
+        .map((candidate) => candidate.response?.set ?? {}),
+    );
+    assert.deepEqual(set, {
+      "Cache-Control": ["public, max-age=300"],
+      "X-Robots-Tag": ["noindex"],
+    });
   }
   for (const method of ["GET", "HEAD"]) {
     const request = { method, path: "/definitely-missing/" };
@@ -1197,7 +1333,7 @@ test("direct Caddy adapter isolates the Markiro and v-b authorities", async () =
   ]);
 });
 
-test("direct Caddy adapter exposes only the four exact legacy legal redirects", async () => {
+test("direct Caddy adapter exposes only the four exact legacy legal redirects plus canonical-form redirects", async () => {
   const adapted = await adaptCaddy(await readFile("deploy/production/Caddyfile", "utf8"));
   const landing = applicationRoute(adapted, landingHost);
   const routeTable = applicationOrderedRouteTable(landing);
@@ -1207,11 +1343,23 @@ test("direct Caddy adapter exposes only the four exact legacy legal redirects", 
     ["/d/MKR-DPA-01/2026.08.01/2026-08-15", "/d/MKR-DPA-01/2026.08/01/15.08.2026"],
     ["/d/MKR-BRD-01/2026.08.01/2026-08-15", "/d/MKR-BRD-01/2026.08/01/15.08.2026"],
   ]);
-  const redirects = routeTable.filter((route) =>
+  const allRedirects = routeTable.filter((route) =>
     nestedObjects(route).some(
       (candidate) => candidate.handler === "static_response" && candidate.status_code === 308,
     ),
   );
+  // Canonical-form redirects (index.html, slash-less directories, slashed
+  // verification routes) compute their target from placeholders; legacy legal
+  // redirects point at one literal revision URL each.
+  const canonical = allRedirects.filter((route) =>
+    nestedObjects(route).some(
+      (candidate) =>
+        candidate.handler === "static_response" &&
+        candidate.headers?.Location?.[0]?.includes("{http."),
+    ),
+  );
+  const redirects = allRedirects.filter((route) => !canonical.includes(route));
+  assert.equal(canonical.length, 3, "landing must keep exactly three canonical-form redirects");
   assert.equal(redirects.length, expected.size);
   for (const [legacyPath, target] of expected) {
     const matching = redirects.filter((route) =>

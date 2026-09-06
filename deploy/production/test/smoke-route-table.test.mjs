@@ -343,6 +343,7 @@ function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
           "/legal/",
           "/privacy/",
           "/personal-data-consent/",
+          "/stati/",
           "/d/MKR-PD-01/2026.08/01/15.08.2026",
         ].includes(path)
       )
@@ -353,6 +354,49 @@ function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
             "content-type": "text/html; charset=utf-8",
             ...(releaseSha ? { "x-markiro-release-sha": releaseSha } : {}),
           },
+        });
+      const canonicalRedirects = new Map([
+        ["/faq", "/faq/"],
+        ["/index.html", "/"],
+        ["/faq/index.html", "/faq/"],
+        ["/d/MKR-PD-01/2026.08/01/15.08.2026/", "/d/MKR-PD-01/2026.08/01/15.08.2026"],
+      ]);
+      if (landing && canonicalRedirects.has(path))
+        return landingResponse({
+          status: 308,
+          body: "",
+          headers: { location: canonicalRedirects.get(path) },
+        });
+      if (landing && path === "/llms-full.txt")
+        return landingResponse({
+          body: "# Markiro\n\n---\ntitle: Markiro\nurl: https://markiro.app/\n---\n",
+          headers: {
+            "cache-control": "public, max-age=300",
+            "content-type": "text/plain; charset=utf-8",
+            "x-robots-tag": "noindex",
+          },
+        });
+      if (landing && path === "/faq.md")
+        return landingResponse({
+          body: "---\ntitle: FAQ\nurl: https://markiro.app/faq/\n---\n\n# FAQ\n",
+          headers: {
+            "cache-control": "public, max-age=300",
+            "content-type": "text/markdown; charset=utf-8",
+            "x-robots-tag": "noindex",
+          },
+        });
+      if (landing && path === "/stati/rss.xml")
+        return landingResponse({
+          body: '<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Markiro</title></channel></rss>',
+          headers: {
+            "cache-control": "no-cache",
+            "content-type": "application/rss+xml; charset=utf-8",
+          },
+        });
+      if (landing && path === "/og-markiro.jpg")
+        return landingResponse({
+          body: "\xff\xd8\xff",
+          headers: { "cache-control": "public, max-age=86400", "content-type": "image/jpeg" },
         });
       if (landing && path === "/robots.txt")
         return landingResponse({
@@ -1089,10 +1133,24 @@ test("defines the complete immutable public-route smoke contract", () => {
     ["GET", "/legal/", "landing-page"],
     ["GET", "/privacy/", "landing-page"],
     ["GET", "/personal-data-consent/", "landing-page"],
+    ["GET", "/stati/", "landing-page"],
     ["GET", "/d/MKR-PD-01/2026.08/01/15.08.2026", "landing-page"],
+    ["GET", "/faq", "canonical-redirect", "/faq/"],
+    ["GET", "/index.html", "canonical-redirect", "/"],
+    ["GET", "/faq/index.html", "canonical-redirect", "/faq/"],
+    [
+      "GET",
+      "/d/MKR-PD-01/2026.08/01/15.08.2026/",
+      "canonical-redirect",
+      "/d/MKR-PD-01/2026.08/01/15.08.2026",
+    ],
     ["GET", "/robots.txt", "robots"],
     ["GET", "/sitemap.xml", "sitemap"],
     ["GET", "/llms.txt", "llms"],
+    ["GET", "/llms-full.txt", "llms-full"],
+    ["GET", "/faq.md", "markdown"],
+    ["GET", "/stati/rss.xml", "feed"],
+    ["GET", "/og-markiro.jpg", "static-asset"],
     ["GET", "/api/demo-requests", "not-found"],
     ["HEAD", "/api/demo-requests", "not-found"],
     ["PUT", "/api/demo-requests", "not-found"],

@@ -63,3 +63,56 @@ for (const malformed of [
     expect(body).not.toContain("artifacts.json");
   });
 }
+
+const canonicalRedirects = new Map([
+  ["/faq", "/faq/"],
+  ["/faq?utm_source=test&ysclid=1", "/faq/?utm_source=test&ysclid=1"],
+  ["/index.html", "/"],
+  ["/faq/index.html", "/faq/"],
+  ["/stati", "/stati/"],
+  ["/d/MKR-PD-01/2026.08/01/15.08.2026/", "/d/MKR-PD-01/2026.08/01/15.08.2026"],
+]);
+
+test("production Caddy redirects URL variants to their canonical form and keeps the query", async ({
+  request,
+}) => {
+  for (const [variant, target] of canonicalRedirects) {
+    const response = await request.get(variant, { maxRedirects: 0 });
+    expect(response.status(), variant).toBe(308);
+    expect(response.headers().location, variant).toBe(target);
+    expect(response.headers()["content-security-policy"], variant).toContain("script-src 'self'");
+  }
+  for (const canonical of ["/faq/", "/stati/", "/d/MKR-PD-01/2026.08/01/15.08.2026"]) {
+    const response = await request.get(canonical, { maxRedirects: 0 });
+    expect(response.status(), canonical).toBe(200);
+  }
+});
+
+test("production Caddy caches static images and manifests for a day", async ({ request }) => {
+  for (const path of ["/og-markiro.jpg", "/favicon.svg", "/site.webmanifest", "/brand/markiro-logo.svg"]) {
+    const response = await request.get(path);
+    expect(response.status(), path).toBe(200);
+    expect(response.headers()["cache-control"], path).toBe("public, max-age=86400");
+  }
+  const document = await request.get("/faq/");
+  expect(document.headers()["cache-control"]).toBe("no-cache");
+});
+
+test("production Caddy serves markdown mirrors and the full text as noindex agent surfaces", async ({
+  request,
+}) => {
+  const markdown = await request.get("/faq.md");
+  expect(markdown.status()).toBe(200);
+  expect(markdown.headers()["content-type"]).toBe("text/markdown; charset=utf-8");
+  expect(markdown.headers()["x-robots-tag"]).toBe("noindex");
+  expect(await markdown.text()).toContain("url: https://markiro.app/faq/");
+
+  const full = await request.get("/llms-full.txt");
+  expect(full.status()).toBe(200);
+  expect(full.headers()["x-robots-tag"]).toBe("noindex");
+  expect((await full.text()).startsWith("# Markiro\n")).toBe(true);
+
+  const feed = await request.get("/stati/rss.xml");
+  expect(feed.status()).toBe(200);
+  expect(await feed.text()).toContain("<rss version=\"2.0\"");
+});

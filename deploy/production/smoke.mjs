@@ -166,10 +166,24 @@ export const LANDING_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["GET", "/legal/", "landing-page"]),
   Object.freeze(["GET", "/privacy/", "landing-page"]),
   Object.freeze(["GET", "/personal-data-consent/", "landing-page"]),
+  Object.freeze(["GET", "/stati/", "landing-page"]),
   Object.freeze(["GET", "/d/MKR-PD-01/2026.08/01/15.08.2026", "landing-page"]),
+  Object.freeze(["GET", "/faq", "canonical-redirect", "/faq/"]),
+  Object.freeze(["GET", "/index.html", "canonical-redirect", "/"]),
+  Object.freeze(["GET", "/faq/index.html", "canonical-redirect", "/faq/"]),
+  Object.freeze([
+    "GET",
+    "/d/MKR-PD-01/2026.08/01/15.08.2026/",
+    "canonical-redirect",
+    "/d/MKR-PD-01/2026.08/01/15.08.2026",
+  ]),
   Object.freeze(["GET", "/robots.txt", "robots"]),
   Object.freeze(["GET", "/sitemap.xml", "sitemap"]),
   Object.freeze(["GET", "/llms.txt", "llms"]),
+  Object.freeze(["GET", "/llms-full.txt", "llms-full"]),
+  Object.freeze(["GET", "/faq.md", "markdown"]),
+  Object.freeze(["GET", "/stati/rss.xml", "feed"]),
+  Object.freeze(["GET", "/og-markiro.jpg", "static-asset"]),
   Object.freeze(["GET", "/api/demo-requests", "not-found"]),
   Object.freeze(["HEAD", "/api/demo-requests", "not-found"]),
   Object.freeze(["PUT", "/api/demo-requests", "not-found"]),
@@ -448,8 +462,22 @@ function landingPageSignature(html, expectedUrl) {
 }
 
 function assertLandingRoute(check, response, body, baseUrl, landingDemoSubmissionState) {
-  const [, path, kind] = check;
+  const [, path, kind, target] = check;
   const contentType = response.headers.get("content-type") || "";
+  if (kind === "canonical-redirect") {
+    const location = response.headers.get("location");
+    if (response.status !== 308 || location === null)
+      throw new Error(`landing ${path} did not redirect permanently`);
+    let resolved;
+    try {
+      resolved = new URL(location, `${baseUrl}/`);
+    } catch {
+      throw new Error(`landing ${path} redirect target is not a URL`);
+    }
+    if (resolved.origin !== new URL(baseUrl).origin || resolved.pathname !== target)
+      throw new Error(`landing ${path} did not redirect to ${target}`);
+    return;
+  }
   if (kind === "not-found") {
     if (response.status !== 404 || /text\/html/i.test(contentType))
       throw new Error(`landing ${path} did not return a non-HTML 404`);
@@ -485,8 +513,45 @@ function assertLandingRoute(check, response, body, baseUrl, landingDemoSubmissio
     return;
   }
 
+  if (kind === "static-asset") {
+    if (
+      !/^image\//i.test(contentType) ||
+      response.headers.get("cache-control") !== "public, max-age=86400"
+    )
+      throw new Error(`landing ${path} is not a day-cacheable static asset`);
+    return;
+  }
+  if (kind === "feed") {
+    if (
+      !/(?:application\/(?:rss\+)?xml|text\/xml)/i.test(contentType) ||
+      !/<rss\b/i.test(body) ||
+      response.headers.get("cache-control") !== "no-cache"
+    )
+      throw new Error(`landing ${path} is not a revalidation-only RSS feed`);
+    return;
+  }
   if (response.headers.get("cache-control") !== "public, max-age=300")
     throw new Error(`landing ${path} has an invalid cache policy`);
+  if (kind === "llms-full") {
+    if (
+      !/text\/plain/i.test(contentType) ||
+      response.headers.get("x-robots-tag") !== "noindex" ||
+      !body.startsWith("# Markiro\n") ||
+      !body.includes(`url: ${new URL("/", `${LANDING_SITE_URL}/`).href}`)
+    )
+      throw new Error("landing llms-full text is not the noindex full-text mirror");
+    return;
+  }
+  if (kind === "markdown") {
+    if (
+      !/text\/markdown/i.test(contentType) ||
+      response.headers.get("x-robots-tag") !== "noindex" ||
+      !body.startsWith("---\n") ||
+      !body.includes(`url: ${new URL("/faq/", `${LANDING_SITE_URL}/`).href}`)
+    )
+      throw new Error(`landing ${path} is not a noindex markdown mirror`);
+    return;
+  }
   if (kind === "robots") {
     if (
       !/text\/plain/i.test(contentType) ||
@@ -1229,7 +1294,9 @@ async function runLandingSmoke(options, client) {
     const [method, path] = check;
     const requestOptions = {
       method,
-      ...(path.startsWith("/d/") ? { redirect: "manual" } : {}),
+      ...(path.startsWith("/d/") || check[2] === "canonical-redirect"
+        ? { redirect: "manual" }
+        : {}),
     };
     const response =
       path === "/" ? root : await publicRequest(client, new URL(path, baseUrl), requestOptions);
