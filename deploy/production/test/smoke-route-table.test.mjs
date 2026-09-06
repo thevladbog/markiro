@@ -357,6 +357,7 @@ function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
         });
       const canonicalRedirects = new Map([
         ["/faq", "/faq/"],
+        ["/stati", "/stati/"],
         ["/index.html", "/"],
         ["/faq/index.html", "/faq/"],
         ["/d/MKR-PD-01/2026.08/01/15.08.2026/", "/d/MKR-PD-01/2026.08/01/15.08.2026"],
@@ -1136,6 +1137,7 @@ test("defines the complete immutable public-route smoke contract", () => {
     ["GET", "/stati/", "landing-page"],
     ["GET", "/d/MKR-PD-01/2026.08/01/15.08.2026", "landing-page"],
     ["GET", "/faq", "canonical-redirect", "/faq/"],
+    ["GET", "/stati", "canonical-redirect", "/stati/"],
     ["GET", "/index.html", "canonical-redirect", "/"],
     ["GET", "/faq/index.html", "canonical-redirect", "/faq/"],
     [

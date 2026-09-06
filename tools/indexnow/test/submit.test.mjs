@@ -52,6 +52,20 @@ test("selects only URLs whose lastmod falls inside the window", () => {
   assert.equal(DEFAULT_ENDPOINT, "https://api.indexnow.org/indexnow");
 });
 
+test("measures the window in UTC calendar days so a date-only lastmod on the boundary counts", () => {
+  const boundarySitemap = `<urlset>
+  <url><loc>https://markiro.app/on-boundary/</loc><lastmod>2026-08-07</lastmod></url>
+  <url><loc>https://markiro.app/one-day-older/</loc><lastmod>2026-08-06</lastmod></url>
+</urlset>`;
+  for (const now of ["2026-09-06T00:00:00Z", "2026-09-06T12:00:00Z", "2026-09-06T23:59:59Z"]) {
+    assert.deepEqual(
+      selectChangedUrls(boundarySitemap, { now: new Date(now), windowDays: 30 }),
+      ["https://markiro.app/on-boundary/"],
+      now,
+    );
+  }
+});
+
 test("refuses to submit when the key file is not published on the host", async () => {
   const { fetchImpl } = fakeFetch({ [`https://markiro.app/${KEY}.txt`]: jsonResponse(404) });
   await assert.rejects(

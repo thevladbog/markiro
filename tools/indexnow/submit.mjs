@@ -39,9 +39,15 @@ function readWindowDays(env) {
   return days;
 }
 
-/** Returns the `<loc>` values whose `<lastmod>` is within `windowDays` before `now`. */
+/**
+ * Returns the `<loc>` values whose `<lastmod>` is within `windowDays` before `now`.
+ * The window is measured in UTC calendar days: sitemap dates are date-only values
+ * that parse to midnight UTC, so a page reviewed exactly `windowDays` days ago is
+ * still included whatever the current time of day.
+ */
 export function selectChangedUrls(sitemapXml, { now, windowDays }) {
-  const threshold = now.getTime() - windowDays * DAY_MS;
+  const startOfToday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const threshold = startOfToday - windowDays * DAY_MS;
   const urls = [];
   for (const match of sitemapXml.matchAll(/<url>([\s\S]*?)<\/url>/g)) {
     const entry = match[1];

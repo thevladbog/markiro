@@ -169,6 +169,7 @@ export const LANDING_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["GET", "/stati/", "landing-page"]),
   Object.freeze(["GET", "/d/MKR-PD-01/2026.08/01/15.08.2026", "landing-page"]),
   Object.freeze(["GET", "/faq", "canonical-redirect", "/faq/"]),
+  Object.freeze(["GET", "/stati", "canonical-redirect", "/stati/"]),
   Object.freeze(["GET", "/index.html", "canonical-redirect", "/"]),
   Object.freeze(["GET", "/faq/index.html", "canonical-redirect", "/faq/"]),
   Object.freeze([
