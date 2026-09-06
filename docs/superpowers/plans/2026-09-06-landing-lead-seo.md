@@ -46,59 +46,66 @@
 
 **Files:** `src/lib/seo.ts`, `src/lib/seo.test.ts`, `src/lib/social-image.ts`, `src/lib/social-image.test.ts`, `src/content/legal-pages.ts`, `src/layouts/BaseLayout.astro`, `public/brand/markiro-logo.svg`
 
-- [ ] Failing tests: robots contains `User-agent: Yandex` + `Clean-param`, training bots disallowed; `readJpegDimensions` returns real sizes for `public/og-*.jpg`; Organization has `email`, `logo`, `contactPoint`, optional `telephone`; WebPage carries `dateModified`; sitemap omits `/d/` and self-referencing hreflang; `/legal/` lastmod equals the newest active release.
-- [ ] Implement; run `pnpm --filter @markiro/landing exec vitest run src/lib`.
-- [ ] Commit `feat(landing): robots Clean-param, richer Organization and truthful OG dimensions`.
+- [x] Failing tests: robots contains `User-agent: Yandex` + `Clean-param`, training bots disallowed; `readJpegDimensions` returns real sizes for `public/og-*.jpg`; Organization has `email`, `logo`, `contactPoint`, optional `telephone`; WebPage carries `dateModified`; sitemap omits `/d/` and self-referencing hreflang; `/legal/` lastmod equals the newest active release.
+- [x] Implement; run `pnpm --filter @markiro/landing exec vitest run src/lib`.
+- [x] Commit `feat(landing): robots Clean-param, richer Organization and truthful OG dimensions`.
 
 ### Task 2: Hubs, navigation, breadcrumbs, related articles
 
 **Files:** `src/content/hubs.ts` (+ test), `src/content/articles.ts`, `src/content/ui.ts`, `src/components/{HubPage,HomeMaterials,Breadcrumbs,RelatedPages,LandingHeader,LandingFooter,InstructionDocument,HomePage}.astro`, four hub pages, 18 article pages, `src/lib/seo.ts` (hub graph, 3-level article breadcrumbs), `test/rendered-page.test.ts`
 
-- [ ] Failing tests: hub registry, sitemap count and hub URLs, article breadcrumb has three items, rendered hub pages list every article/instruction of the locale, home has `section#materials`, header links to the articles hub.
-- [ ] Implement; run landing `test`, `typecheck`, `lint`.
-- [ ] Commit `feat(landing): article and instruction hubs with cluster navigation`.
+- [x] Failing tests: hub registry, sitemap count and hub URLs, article breadcrumb has three items, rendered hub pages list every article/instruction of the locale, home has `section#materials`, header links to the articles hub.
+- [x] Implement; run landing `test`, `typecheck`, `lint`.
+- [x] Commit `feat(landing): article and instruction hubs with cluster navigation`.
 
 ### Task 3: Commercial page depth
 
 **Files:** `src/content/pages.ts`, `src/content/pages.test.ts`, `src/components/SeoArticle.astro`, `test/rendered-page.test.ts`
 
-- [ ] Failing tests: each non-home topic page has ≥ 4 sections, a summary, ≥ 3 FAQ entries and ≥ 2 related articles; FAQPage strings equal visible strings on every page with FAQ; visible `<time>` review date; RU body text ≥ 400 words.
-- [ ] Write the content (RU, then EN parity), implement components; run landing gates.
-- [ ] Commit `feat(landing): deepen commercial pages with summaries, FAQ and related articles`.
+- [x] Failing tests: each non-home topic page has ≥ 4 sections, a summary, ≥ 3 FAQ entries and ≥ 2 related articles; FAQPage strings equal visible strings on every page with FAQ; visible `<time>` review date; RU body text ≥ 400 words.
+- [x] Write the content (RU, then EN parity), implement components; run landing gates.
+- [x] Commit `feat(landing): deepen commercial pages with summaries, FAQ and related articles`.
 
 ### Task 4: Feeds, llms and markdown mirrors
 
 **Files:** `src/lib/seo.ts`, `src/lib/markdown-mirror.ts` (+ test), `src/pages/stati/rss.xml.ts`, `src/pages/en/articles/rss.xml.ts`, `src/layouts/BaseLayout.astro`, `package.json` build script
 
-- [ ] Failing tests: RSS has every article of the locale with `pubDate`; llms.txt has the product facts block, hub links and `llms-full.txt`; markdown mirror of a fixture HTML keeps headings, lists, links and skips `aria-hidden`; generator writes `dist/faq.md` and `dist/llms-full.txt`.
-- [ ] Implement; run landing gates and `pnpm --filter @markiro/landing build`.
-- [ ] Commit `feat(landing): RSS feeds, llms-full and markdown mirrors for agents`.
+- [x] Failing tests: RSS has every article of the locale with `pubDate`; llms.txt has the product facts block, hub links and `llms-full.txt`; markdown mirror of a fixture HTML keeps headings, lists, links and skips `aria-hidden`; generator writes `dist/faq.md` and `dist/llms-full.txt`.
+- [x] Implement; run landing gates and `pnpm --filter @markiro/landing build`.
+- [x] Commit `feat(landing): RSS feeds, llms-full and markdown mirrors for agents`.
 
 ### Task 5: Edge canonicalisation and cache policy
 
 **Files:** `deploy/production/Caddyfile`, `deploy/production/smoke.mjs`, `deploy/production/test/{edge-contract,smoke-route-table}.test.mjs`, `tools/production-browser/tests/landing-caddy-csp.spec.ts`
 
-- [ ] Failing contract tests: redirect matchers exist for `index.html`, slash-less directories and `/d/…/`; static images/manifests/legal files get `public, max-age=86400`; `*.md` and `llms-full.txt` get `text/markdown`/`noindex`; smoke checks `/faq` → 308 `/faq/`.
-- [ ] Implement; run `pnpm test:production-bundle:contract`; probe with Docker Caddy.
-- [ ] Commit `feat(edge): canonical landing redirects and static cache policy`.
+- [x] Failing contract tests: redirect matchers exist for `index.html`, slash-less directories and `/d/…/`; static images/manifests/legal files get `public, max-age=86400`; `*.md` and `llms-full.txt` get `text/markdown`/`noindex`; smoke checks `/faq` → 308 `/faq/`.
+- [x] Implement; run `pnpm test:production-bundle:contract`; probe with Docker Caddy.
+- [x] Commit `feat(edge): canonical landing redirects and static cache policy`.
 
 ### Task 6: Images, Lighthouse scope, console note, verification noindex
 
 **Files:** 18 article pages, `tools/production-browser/scripts/lighthouse-landing.mjs` (+ test), `src/components/LineConsole.astro`, `src/components/LegalVerification.astro`, `src/lib/audit.ts` (+ test), `src/content/ui.ts`
 
-- [ ] Failing tests: article `<img>` fallback ends with `.jpg`; Lighthouse URL list has three routes; console has the illustrative note; `/d/…` page has `noindex` and audit accepts a `noindex` page missing from the sitemap.
-- [ ] Implement; run landing gates and the lighthouse parser test.
-- [ ] Commit `feat(landing): lighter article fallbacks, wider Lighthouse gate, noindex verification pages`.
+- [x] Failing tests: article `<img>` fallback ends with `.jpg`; Lighthouse URL list has three routes; console has the illustrative note; `/d/…` page has `noindex` and audit accepts a `noindex` page missing from the sitemap.
+- [x] Implement; run landing gates and the lighthouse parser test.
+- [x] Commit `feat(landing): lighter article fallbacks, wider Lighthouse gate, noindex verification pages`.
 
 ### Task 7: IndexNow automation and runbooks
 
 **Files:** `tools/indexnow/submit.mjs`, `tools/indexnow/test/submit.test.mjs`, `package.json`, `src/pages/[indexNowKey].txt.ts`, `src/lib/site-config.ts` (+ test), `deploy/production/edge.Dockerfile`, `.github/workflows/{release-images,deploy-production}.yml`, `deploy/production/test/{edge-contract,workflow-contract,runbook-contract}.test.mjs`, `docs/runbooks/{landing-publication,landing-google-analytics}.md`
 
-- [ ] Failing tests: `readIndexNowKey` validates the key format; the key route renders only when configured; `submit.mjs` selects URLs by lastmod window, verifies the key file and posts one request; workflow contract sees the build arg and the post-deploy step; runbook mentions DNS verification for Яндекс Вебмастер.
-- [ ] Implement; run `pnpm test:production-bundle:contract`, `pnpm test:ci-policy`, `node --test tools/indexnow/test/*.test.mjs`.
-- [ ] Commit `feat(release): IndexNow submission after production deploy`.
+- [x] Failing tests: `readIndexNowKey` validates the key format; the key route renders only when configured; `submit.mjs` selects URLs by lastmod window, verifies the key file and posts one request; workflow contract sees the build arg and the post-deploy step; runbook mentions DNS verification for Яндекс Вебмастер.
+- [x] Implement; run `pnpm test:production-bundle:contract`, `pnpm test:ci-policy`, `node --test tools/indexnow/test/*.test.mjs`.
+- [x] Commit `feat(release): IndexNow submission after production deploy`.
 
 ### Task 8: Final gates
 
-- [ ] `pnpm --filter @markiro/landing test typecheck lint build`, `pnpm test:production-bundle:contract`, `pnpm test:landing:browser`, `pnpm format:check`, `git diff --check`.
-- [ ] Report automated checks separately from external gates (DNS, webmaster ownership, IndexNow acceptance, indexing).
+- [x] `pnpm --filter @markiro/landing test typecheck lint build`, `pnpm test:production-bundle:contract`, `pnpm test:landing:browser`, `pnpm test:landing:lighthouse`, `pnpm test:ci-policy`, `pnpm test:indexnow`, `pnpm format:check`, `git diff --check`.
+- [x] Report automated checks separately from external gates (DNS, webmaster ownership, IndexNow acceptance, indexing).
+
+## Execution notes (2026-09-06)
+
+- Executed inline in the authoring session, one commit per task on `claude/russian-landing-seo-c1b119`.
+- Extra task discovered by the wider Lighthouse gate: the article template scored 0.88 on mobile because `font-display: swap` shifted the hero when IBM Plex arrived; fixed by preloading the locale's above-the-fold font subsets (`src/lib/font-preloads.ts`). Mobile scores after the fix: home 0.94, topic 0.96, article 0.95.
+- The kiosk page was rewritten to the real «Выбытие» flow after the sources showed the previous copy described a customer pickup that the product does not ship.
+- Verified locally: landing unit and rendered tests, built-site audit, Playwright landing suite (desktop and mobile), Lighthouse on three routes, production bundle contracts, CI policy tests, IndexNow tests, production Caddy landing routes probed in Docker. Not verified: live DNS/TLS, webmaster ownership, IndexNow acceptance by engines, real indexing, the Caddy Playwright spec against the compose stack (not wired into CI).
