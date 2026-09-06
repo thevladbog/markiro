@@ -32,6 +32,11 @@ const EXPECTED_ROUTES = [
   "/en/offline-production/",
   "/en/faq/",
 ] as const;
+const HUB_ROUTES = ["/stati/", "/instruktsii/", "/en/articles/", "/en/instructions/"] as const;
+const SAMPLE_CLUSTER_ROUTES = [
+  "/stati/markirovka-piva-2026/",
+  "/instruktsii/stantsiya-vkhod-i-start-smeny/",
+] as const;
 
 beforeAll(() => {
   execFileSync(
@@ -63,6 +68,7 @@ beforeAll(() => {
         ASTRO_TELEMETRY_DISABLED: "1",
         PUBLIC_DEMO_CONSENT_VERSION: "stray-enabled-consent",
         PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
+        PUBLIC_INDEXNOW_KEY: "markiro-indexnow-render-key",
         PUBLIC_PERSONAL_DATA_CONSENT_PATH: "/personal-data-consent/",
         PUBLIC_PHONE: "",
         PUBLIC_PRIVACY_POLICY_PATH: "/privacy/",
@@ -72,7 +78,7 @@ beforeAll(() => {
     },
   );
 
-  for (const route of EXPECTED_ROUTES) {
+  for (const route of [...EXPECTED_ROUTES, ...HUB_ROUTES, ...SAMPLE_CLUSTER_ROUTES]) {
     const outputPath =
       route === "/"
         ? path.join(outputDirectory, "index.html")
@@ -172,7 +178,7 @@ describe("rendered landing page", () => {
     expect(
       documents
         .get("/sscc-i-agregatsiya/")
-        ?.querySelector('[data-related-pages] a[href="/stati/agregatsiya-piva-v-koroba/"]'),
+        ?.querySelector('[data-related-articles] a[href="/stati/agregatsiya-piva-v-koroba/"]'),
     ).not.toBeNull();
   });
 
@@ -1259,8 +1265,93 @@ describe("rendered landing page", () => {
       descriptions.add(description as string);
     }
 
-    expect(titles.size).toBe(EXPECTED_ROUTES.length);
-    expect(descriptions.size).toBe(EXPECTED_ROUTES.length);
+    expect(titles.size).toBe(documents.size);
+    expect(descriptions.size).toBe(documents.size);
+  });
+
+  it("publishes hubs that list every article and instruction of their locale", () => {
+    const ruArticles = documents.get("/stati/") as Document;
+    const enArticles = documents.get("/en/articles/") as Document;
+    const ruInstructions = documents.get("/instruktsii/") as Document;
+    const enInstructions = documents.get("/en/instructions/") as Document;
+
+    const ruArticleLinks = [...ruArticles.querySelectorAll("[data-hub-item] a[href]")].map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(ruArticleLinks).toEqual(
+      expect.arrayContaining([
+        "/stati/markirovka-piva-2026/",
+        "/stati/agregatsiya-piva-v-koroba/",
+        "/stati/otchet-o-nanesenii-kodov-pivo/",
+      ]),
+    );
+    expect(ruArticleLinks).toHaveLength(9);
+    expect(ruArticleLinks.every((href) => href?.startsWith("/stati/"))).toBe(true);
+    expect([...enArticles.querySelectorAll("[data-hub-item] a[href]")]).toHaveLength(9);
+
+    const ruInstructionLinks = [...ruInstructions.querySelectorAll("[data-hub-item] a[href]")].map(
+      (a) => a.getAttribute("href"),
+    );
+    expect(ruInstructionLinks).toHaveLength(9);
+    expect(ruInstructionLinks.every((href) => href?.startsWith("/instruktsii/"))).toBe(true);
+    expect([...enInstructions.querySelectorAll("[data-hub-item] a[href]")]).toHaveLength(5);
+
+    for (const hub of [ruArticles, enArticles, ruInstructions, enInstructions]) {
+      expect(hub.querySelectorAll("h1")).toHaveLength(1);
+      expect(hub.querySelector('a[href$="#demo"]')).not.toBeNull();
+    }
+  });
+
+  it("links the cluster from the header, footer and a home materials section", () => {
+    expect(document.querySelector("section#materials[aria-labelledby]")).not.toBeNull();
+    const materialLinks = [...document.querySelectorAll("#materials a[href]")].map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(
+      materialLinks.filter((href) => href?.startsWith("/stati/") && href !== "/stati/"),
+    ).toHaveLength(3);
+    expect(materialLinks).toContain("/stati/");
+    expect(materialLinks).toContain("/instruktsii/");
+    expect(document.querySelector('header nav a[href="/stati/"]')).not.toBeNull();
+    expect(document.querySelector('footer nav a[href="/stati/"]')).not.toBeNull();
+    expect(document.querySelector('footer nav a[href="/instruktsii/"]')).not.toBeNull();
+
+    const english = documents.get("/en/") as Document;
+    expect(english.querySelector('header nav a[href="/en/articles/"]')).not.toBeNull();
+    expect(english.querySelector('footer nav a[href="/en/instructions/"]')).not.toBeNull();
+  });
+
+  it("routes article and instruction breadcrumbs through their hubs", () => {
+    const article = documents.get("/stati/markirovka-piva-2026/") as Document;
+    const crumbs = [...article.querySelectorAll('nav[aria-label="Хлебные крошки"] li')].map(
+      (item) => item.textContent?.trim(),
+    );
+    expect(crumbs).toEqual(["Markiro", "Статьи", "Маркировка пива в 2026 году"]);
+    expect(
+      article.querySelector('nav[aria-label="Хлебные крошки"] a[href="/stati/"]'),
+    ).not.toBeNull();
+
+    const instruction = documents.get("/instruktsii/stantsiya-vkhod-i-start-smeny/") as Document;
+    const instructionCrumbs = [
+      ...instruction.querySelectorAll('nav[aria-label="Хлебные крошки"] li'),
+    ].map((item) => item.textContent?.trim());
+    expect(instructionCrumbs.slice(0, 2)).toEqual(["Markiro", "Инструкции"]);
+    expect(instructionCrumbs).toHaveLength(3);
+  });
+
+  it("links topic pages to related articles of the same locale", () => {
+    for (const route of EXPECTED_ROUTES.filter((path) => path !== "/" && path !== "/en/")) {
+      const routeDocument = documents.get(route) as Document;
+      const articleLinks = [
+        ...routeDocument.querySelectorAll('[data-related-articles] a[href^="/"]'),
+      ].map((a) => a.getAttribute("href") ?? "");
+      expect(articleLinks.length, route).toBeGreaterThanOrEqual(2);
+      const prefix = route.startsWith("/en/") ? "/en/articles/" : "/stati/";
+      expect(
+        articleLinks.every((href) => href.startsWith(prefix)),
+        route,
+      ).toBe(true);
+    }
   });
 
   it("renders English pages without Russian interface copy", () => {
@@ -1286,9 +1377,19 @@ describe("rendered landing page", () => {
       };
 
       expect(graph["@graph"].some((entry) => entry["@type"] === "WebSite")).toBe(true);
-      expect(graph["@graph"].some((entry) => entry["@type"] === "WebPage")).toBe(true);
+      expect(
+        graph["@graph"].some(
+          (entry) => entry["@type"] === "WebPage" || entry["@type"] === "CollectionPage",
+        ),
+      ).toBe(true);
       expect(graph["@graph"].some((entry) => entry["@type"] === "Organization")).toBe(true);
-      expect(graph["@graph"].some((entry) => entry["@type"] === "SoftwareApplication")).toBe(true);
+      // The product entity belongs to the topic cluster; hubs, articles and
+      // instructions describe their own content instead of repeating it.
+      if ((EXPECTED_ROUTES as readonly string[]).includes(route)) {
+        expect(graph["@graph"].some((entry) => entry["@type"] === "SoftwareApplication")).toBe(
+          true,
+        );
+      }
 
       if (route !== "/" && route !== "/en/") {
         const breadcrumbsLabel = route.startsWith("/en/") ? "Breadcrumbs" : "Хлебные крошки";
@@ -1298,27 +1399,170 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("keeps FAQ structured answers identical to visible answers", () => {
-    const faqDocument = documents.get("/faq/") as Document;
-    const graph = JSON.parse(
-      faqDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
-    ) as {
-      "@graph": Array<Record<string, unknown>>;
-    };
-    const faq = graph["@graph"].find((entry) => entry["@type"] === "FAQPage") as {
-      mainEntity: Array<{ name: string; acceptedAnswer: { text: string } }>;
-    };
+  it("keeps FAQ structured answers identical to visible answers on every page with FAQ", () => {
+    let pagesWithFaq = 0;
+    for (const [route, routeDocument] of documents) {
+      const visible = [...routeDocument.querySelectorAll("[data-faq-item]")].map((item) => ({
+        name: item.querySelector("h2")?.textContent?.trim(),
+        text: item.querySelector("p")?.textContent?.trim(),
+      }));
+      const graph = JSON.parse(
+        routeDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
+      ) as { "@graph": Array<Record<string, unknown>> };
+      const faq = graph["@graph"].find((entry) => entry["@type"] === "FAQPage") as
+        { mainEntity: Array<{ name: string; acceptedAnswer: { text: string } }> } | undefined;
 
-    const visible = [...faqDocument.querySelectorAll("[data-faq-item]")].map((item) => ({
-      name: item.querySelector("h2")?.textContent?.trim(),
-      text: item.querySelector("p")?.textContent?.trim(),
-    }));
-    expect(visible).toEqual(
-      faq.mainEntity.map((entry) => ({
-        name: entry.name,
-        text: entry.acceptedAnswer.text,
-      })),
+      if (visible.length === 0) {
+        expect(faq, route).toBeUndefined();
+        continue;
+      }
+      pagesWithFaq += 1;
+      expect(faq, route).toBeDefined();
+      expect(visible, route).toEqual(
+        faq?.mainEntity.map((entry) => ({ name: entry.name, text: entry.acceptedAnswer.text })),
+      );
+    }
+    expect(pagesWithFaq).toBeGreaterThanOrEqual(14);
+  });
+
+  it("gives topic pages a summary, a visible review date and enough substance", () => {
+    for (const route of EXPECTED_ROUTES.filter((path) => path !== "/" && path !== "/en/")) {
+      const routeDocument = documents.get(route) as Document;
+      expect(
+        routeDocument.querySelectorAll("[data-page-summary] li").length,
+        route,
+      ).toBeGreaterThanOrEqual(3);
+      const reviewed = routeDocument.querySelector<HTMLTimeElement>("time[data-reviewed-at]");
+      expect(reviewed?.getAttribute("datetime"), route).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(reviewed?.textContent?.trim().length, route).toBeGreaterThan(0);
+      const words =
+        routeDocument
+          .querySelector("main")
+          ?.textContent?.replace(/\s+/g, " ")
+          .trim()
+          .split(" ")
+          .filter(Boolean).length ?? 0;
+      expect(words, route).toBeGreaterThanOrEqual(450);
+    }
+  });
+
+  it("advertises the locale feed and a markdown mirror on every indexable page", () => {
+    for (const [route, routeDocument] of documents) {
+      const feed = routeDocument.querySelector('link[rel="alternate"][type="application/rss+xml"]');
+      expect(feed?.getAttribute("href"), route).toBe(
+        route.startsWith("/en/") ? "/en/articles/rss.xml" : "/stati/rss.xml",
+      );
+      const markdown = routeDocument.querySelector('link[rel="alternate"][type="text/markdown"]');
+      const expected = route === "/" ? "/index.md" : `${route.slice(0, -1)}.md`;
+      expect(markdown?.getAttribute("href"), route).toBe(expected);
+    }
+    const notFound = new JSDOM(readFileSync(path.join(outputDirectory, "404.html"), "utf8")).window
+      .document;
+    expect(notFound.querySelector('link[rel="alternate"][type="text/markdown"]')).toBeNull();
+    const verification = new JSDOM(
+      readFileSync(
+        path.join(outputDirectory, "d/MKR-PD-01/2026.08/01/15.08.2026/index.html"),
+        "utf8",
+      ),
+    ).window.document;
+    expect(verification.querySelector('link[rel="alternate"][type="text/markdown"]')).toBeNull();
+    expect(existsSync(path.join(outputDirectory, "stati/rss.xml"))).toBe(true);
+    expect(existsSync(path.join(outputDirectory, "en/articles/rss.xml"))).toBe(true);
+  });
+
+  it("offers the public phone next to the demo call to action on topic pages", () => {
+    const routeDocument = documents.get("/markirovka-chestny-znak/") as Document;
+    expect(routeDocument.querySelector('.seo-cta a[href$="#demo"]')).not.toBeNull();
+    expect(routeDocument.querySelector('.seo-cta a[href^="tel:"]')).toBeNull();
+  });
+
+  it("preloads the above-the-fold font subsets that the stylesheet actually uses", () => {
+    for (const [route, expectedSubsets, forbiddenSubset] of [
+      ["/", ["cyrillic", "latin"], null],
+      ["/stati/markirovka-piva-2026/", ["cyrillic", "latin"], null],
+      ["/en/", ["latin"], "cyrillic"],
+    ] as const) {
+      const routeDocument = documents.get(route) as Document;
+      const preloads = [...routeDocument.querySelectorAll('link[rel="preload"][as="font"]')].map(
+        (link) => link.getAttribute("href") ?? "",
+      );
+      expect(preloads.length, route).toBeGreaterThanOrEqual(3);
+      expect(preloads.length, route).toBeLessThanOrEqual(6);
+      const stylesheetHref =
+        routeDocument.querySelector('link[rel="stylesheet"]')?.getAttribute("href") ?? "";
+      const stylesheet = readFileSync(path.join(outputDirectory, stylesheetHref.slice(1)), "utf8");
+      for (const href of preloads) {
+        expect(href, route).toMatch(
+          /^\/assets\/ibm-plex-(?:sans|mono)-[a-z-]+-(?:400|500|600)-normal\..+\.woff2$/,
+        );
+        expect(existsSync(path.join(outputDirectory, href.slice(1))), `${route} ${href}`).toBe(
+          true,
+        );
+        expect(stylesheet.includes(href.slice("/assets/".length)), `${route} ${href}`).toBe(true);
+      }
+      for (const subset of expectedSubsets) {
+        expect(
+          preloads.some((href) => href.includes(`-${subset}-`)),
+          `${route} ${subset}`,
+        ).toBe(true);
+      }
+      if (forbiddenSubset !== null) {
+        expect(
+          preloads.some((href) => href.includes(`-${forbiddenSubset}-`)),
+          route,
+        ).toBe(false);
+      }
+      for (const link of routeDocument.querySelectorAll('link[rel="preload"][as="font"]')) {
+        expect(link.hasAttribute("crossorigin"), route).toBe(true);
+        expect(link.getAttribute("type"), route).toBe("font/woff2");
+      }
+    }
+  });
+
+  it("publishes the IndexNow key file only when the key is configured", () => {
+    const keyFile = "markiro-indexnow-render-key.txt";
+    expect(existsSync(path.join(outputDirectory, keyFile))).toBe(false);
+    expect(existsSync(path.join(enabledOutputDirectory, keyFile))).toBe(true);
+    expect(readFileSync(path.join(enabledOutputDirectory, keyFile), "utf8")).toBe(
+      "markiro-indexnow-render-key",
     );
+    expect(enabledDocuments.get("/")?.documentElement.outerHTML).not.toContain(
+      "markiro-indexnow-render-key",
+    );
+  });
+
+  it("falls back to a JPEG for article hero images instead of the multi-megabyte PNG", () => {
+    const article = documents.get("/stati/markirovka-piva-2026/") as Document;
+    const hero = article.querySelector<HTMLImageElement>("[data-article-hero-image]");
+    expect(hero?.getAttribute("src")).toMatch(/\.jpe?g$/);
+    expect(hero?.getAttribute("srcset")).not.toMatch(/\.png/);
+    expect(article.querySelector('picture source[type="image/avif"]')).not.toBeNull();
+  });
+
+  it("labels the illustrative station console so extracted text is not read as a fact", () => {
+    for (const [route, note] of [
+      ["/", "значения условные"],
+      ["/en/", "values are illustrative"],
+    ] as const) {
+      const routeDocument = documents.get(route) as Document;
+      const consoles = [...routeDocument.querySelectorAll(".line-console")];
+      expect(consoles.length, route).toBeGreaterThanOrEqual(1);
+      for (const element of consoles) {
+        expect(element.querySelector("[data-illustrative-note]")?.textContent, route).toContain(
+          note,
+        );
+      }
+    }
+  });
+
+  it("describes the kiosk as a disposal flow for employees, not a customer pickup point", () => {
+    const ru = documents.get("/kiosk-samovydachi/")?.body.textContent ?? "";
+    expect(ru).toContain("выбыти");
+    expect(ru).toContain("бейдж");
+    expect(ru).not.toContain("покупатель получает подготовленный заказ");
+    const en = documents.get("/en/self-service-pickup-kiosk/")?.body.textContent ?? "";
+    expect(en.toLowerCase()).toContain("disposal");
+    expect(en.toLowerCase()).toContain("badge");
   });
 
   it("links every specialist page to at least two canonical related pages", () => {

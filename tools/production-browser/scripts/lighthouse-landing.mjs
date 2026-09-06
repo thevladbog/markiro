@@ -9,6 +9,12 @@ import { computeMedianRun } from "lighthouse/core/lib/median-run.js";
 
 const execFileAsync = promisify(execFile);
 export const LIGHTHOUSE_RUN_COUNT = 3;
+/** The home page, one commercial topic page and one article: the three page templates that carry leads. */
+export const LIGHTHOUSE_ROUTES = Object.freeze([
+  "/",
+  "/markirovka-chestny-znak/",
+  "/stati/markirovka-piva-2026/",
+]);
 export const LIGHTHOUSE_THRESHOLDS = Object.freeze({
   seo: 1,
   accessibility: 1,
@@ -103,27 +109,33 @@ export async function runLandingLighthouse() {
   const outputRoot = await mkdtemp(path.join(tmpdir(), "markiro-lighthouse-"));
   try {
     await waitForServer("http://127.0.0.1:5473/", preview);
-    for (const profile of ["mobile", "desktop"]) {
-      const reports = [];
-      for (let attempt = 1; attempt <= LIGHTHOUSE_RUN_COUNT; attempt += 1) {
-        const output = path.join(outputRoot, `${profile}-${attempt}.json`);
-        const arguments_ = lighthouseArguments({
-          chromePath: chromium.executablePath(),
-          isCI: Boolean(process.env.CI),
-          output,
-          profile,
-          url: "http://127.0.0.1:5473/",
-        });
-        await execFileAsync(path.join(toolRoot, "node_modules/.bin/lighthouse"), arguments_, {
-          cwd: toolRoot,
-        });
-        const report = JSON.parse(await readFile(output, "utf8"));
-        reports.push(report);
-        console.log(lighthouseScoreSummary(report, `${profile} attempt ${attempt}`));
+    for (const route of LIGHTHOUSE_ROUTES) {
+      for (const profile of ["mobile", "desktop"]) {
+        const label = `${profile} ${route}`;
+        const reports = [];
+        for (let attempt = 1; attempt <= LIGHTHOUSE_RUN_COUNT; attempt += 1) {
+          const output = path.join(
+            outputRoot,
+            `${profile}-${route.replaceAll("/", "_")}-${attempt}.json`,
+          );
+          const arguments_ = lighthouseArguments({
+            chromePath: chromium.executablePath(),
+            isCI: Boolean(process.env.CI),
+            output,
+            profile,
+            url: new URL(route, "http://127.0.0.1:5473/").href,
+          });
+          await execFileAsync(path.join(toolRoot, "node_modules/.bin/lighthouse"), arguments_, {
+            cwd: toolRoot,
+          });
+          const report = JSON.parse(await readFile(output, "utf8"));
+          reports.push(report);
+          console.log(lighthouseScoreSummary(report, `${label} attempt ${attempt}`));
+        }
+        const report = representativeLighthouseReport(reports);
+        assertLighthouseReport(report, label);
+        console.log(lighthouseScoreSummary(report, `${label} representative`));
       }
-      const report = representativeLighthouseReport(reports);
-      assertLighthouseReport(report, profile);
-      console.log(lighthouseScoreSummary(report, `${profile} representative`));
     }
   } finally {
     preview.kill("SIGTERM");

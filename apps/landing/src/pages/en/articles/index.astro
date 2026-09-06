@@ -1,0 +1,9 @@
+---
+import HubPage from "../../../components/HubPage.astro";
+import { findHubPage } from "../../../content/hubs";
+import { readPublicSiteConfig } from "../../../lib/site-config";
+
+const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+---
+
+<HubPage hub={findHubPage("/en/articles/")} phone={config.phone} />

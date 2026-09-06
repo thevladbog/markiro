@@ -120,6 +120,12 @@ jobs:
           export YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH="$key_path"
           node deploy/yandex/remote-deploy.mjs run
 
+      - name: Submit changed landing URLs to IndexNow
+        if: ${{ vars.PUBLIC_INDEXNOW_KEY != '' }}
+        env:
+          PUBLIC_INDEXNOW_KEY: ${{ vars.PUBLIC_INDEXNOW_KEY }}
+        run: node tools/indexnow/submit.mjs
+
       - name: Remove local deployment credentials
         if: always()
         run: |

@@ -120,6 +120,13 @@ export function getLegalRegistryPage(locale: LegalLocale): PageMetadata {
 
 export const ACTIVE_LEGAL_RELEASES = LEGAL_RELEASES.filter(({ status }) => status === "active");
 
+/** The public registry changes whenever a release is added, so its lastmod is the newest active release. */
+export const LEGAL_REGISTRY_LAST_MODIFIED = ACTIVE_LEGAL_RELEASES.map(
+  ({ effectiveDate }) => effectiveDate,
+)
+  .sort()
+  .at(-1) as `${number}-${number}-${number}`;
+
 export const LEGAL_SEARCH_PAGES: readonly SearchPageRecord[] = [
   ...(["ru", "en"] as const).map((locale) => {
     const metadata = getLegalRegistryPage(locale);
@@ -129,7 +136,7 @@ export const LEGAL_SEARCH_PAGES: readonly SearchPageRecord[] = [
       locale,
       navigationLabel: locale === "ru" ? "Юридические документы" : "Legal documents",
       description: metadata.description,
-      lastModified: "2026-08-15" as const,
+      lastModified: LEGAL_REGISTRY_LAST_MODIFIED,
     };
   }),
   ...ACTIVE_LEGAL_RELEASES.flatMap((release) =>
@@ -145,12 +152,12 @@ export const LEGAL_SEARCH_PAGES: readonly SearchPageRecord[] = [
       };
     }),
   ),
-  ...ACTIVE_LEGAL_RELEASES.map((release) => ({
-    path: legalVerificationPath(release),
-    alternatePath: legalVerificationPath(release),
-    locale: "ru" as const,
-    navigationLabel: `${release.code} ${release.revision} — проверка / verification`,
-    description: `Проверка опубликованной редакции ${release.code} и её SHA-256. Document revision verification.`,
-    lastModified: release.effectiveDate,
-  })),
 ];
+
+/**
+ * Verification routes stay published for printed Data Matrix codes but are
+ * `noindex`: they are not search content and never enter the sitemap.
+ */
+export const LEGAL_VERIFICATION_ROUTES: readonly string[] = ACTIVE_LEGAL_RELEASES.map((release) =>
+  legalVerificationPath(release),
+);

@@ -8,6 +8,7 @@ import { readPublicSiteConfig } from "../lib/site-config";
 import { buildPageGraph } from "../lib/seo";
 import BaseLayout from "../layouts/BaseLayout.astro";
 import DemoSection from "./DemoSection.astro";
+import HomeMaterials from "./HomeMaterials.astro";
 import ImplementationSteps from "./ImplementationSteps.astro";
 import LandingFooter from "./LandingFooter.astro";
 import LandingHeader from "./LandingHeader.astro";
@@ -93,6 +94,7 @@ const siteConfig = readPublicSiteConfig(
     <TraceLog locale={page.locale} />
     <PlatformModules locale={page.locale} />
     <ImplementationSteps locale={page.locale} />
+    <HomeMaterials locale={page.locale} />
     <DemoSection
       locale={page.locale}
       phone={siteConfig.phone}

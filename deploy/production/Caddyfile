@@ -289,12 +289,70 @@
 			file_server
 		}
 
+		# Canonical URL form is the trailing-slash directory URL (verification
+		# routes under /d/ are the exception and carry no trailing slash).
+		@landingIndexFile {
+			method GET HEAD
+			path_regexp landingIndexFile ^(.*/)index\.html$
+		}
+		handle @landingIndexFile {
+			redir * {re.landingIndexFile.1}{http.request.uri.prefixed_query} 308
+		}
+
+		@landingVerificationSlash {
+			method GET HEAD
+			path_regexp landingVerificationSlash ^(/d/.+)/$
+		}
+		handle @landingVerificationSlash {
+			redir * {re.landingVerificationSlash.1}{http.request.uri.prefixed_query} 308
+		}
+
+		@landingDirectory {
+			method GET HEAD
+			not path /d/*
+			not path */
+			file {path}/index.html
+		}
+		handle @landingDirectory {
+			redir * {path}/{http.request.uri.prefixed_query} 308
+		}
+
 		@landingPolicy {
 			path /robots.txt /sitemap.xml /llms.txt
 			method GET HEAD
 		}
 		handle @landingPolicy {
 			header Cache-Control "public, max-age=300"
+			file_server
+		}
+
+		@landingFullText {
+			path /llms-full.txt
+			method GET HEAD
+		}
+		handle @landingFullText {
+			header Cache-Control "public, max-age=300"
+			header X-Robots-Tag "noindex"
+			file_server
+		}
+
+		@landingMarkdown {
+			method GET HEAD
+			path_regexp landingMarkdown \.md$
+		}
+		handle @landingMarkdown {
+			header Cache-Control "public, max-age=300"
+			header Content-Type "text/markdown; charset=utf-8"
+			header X-Robots-Tag "noindex"
+			file_server
+		}
+
+		@landingStatic {
+			method GET HEAD
+			path_regexp landingStatic ^/(?:images/.+|brand/.+|legal/files/.+|og-[^/]+\.jpg|favicon\.svg|site(?:\.en)?\.webmanifest)$
+		}
+		handle @landingStatic {
+			header Cache-Control "public, max-age=86400"
 			file_server
 		}
 

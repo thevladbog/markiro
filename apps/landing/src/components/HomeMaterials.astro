@@ -1,0 +1,41 @@
+---
+import { formatLegalEffectiveDate } from "@markiro/legal-documents";
+
+import { articlesForLocale } from "../content/articles";
+import { hubPath } from "../content/hubs";
+import type { Locale } from "../content/pages";
+import { getUiCopy } from "../content/ui";
+
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+const copy = getUiCopy(locale).home.materials;
+const minutes = getUiCopy(locale).hub.minutes;
+const articles = articlesForLocale(locale).slice(0, 3);
+---
+
+<section class="section section--materials" id="materials" aria-labelledby="materials-title">
+  <div class="container">
+    <p class="section-index">{copy.kicker}</p>
+    <h2 id="materials-title" class="display-heading display-heading--sentence">{copy.heading[0]}<br />{copy.heading[1]}</h2>
+    <p class="section-lead">{copy.lead}</p>
+
+    <div class="materials-grid" data-reveal-group>
+      {articles.map((article, index) => (
+        <a class="materials-card" href={article.path} data-reveal>
+          <span class="materials-card__number">{String(index + 1).padStart(2, "0")}</span>
+          <h3>{article.navigationLabel}</h3>
+          <p>{article.description}</p>
+          <span class="materials-card__meta">
+            <time datetime={article.publishedAt}>{formatLegalEffectiveDate(article.publishedAt, locale)}</time>
+            <span>{" · "}{article.readingTimeMinutes} {minutes}</span>
+          </span>
+        </a>
+      ))}
+    </div>
+
+    <div class="materials-links">
+      <a class="text-link" href={hubPath(locale, "articles")}>{copy.allArticles} <span aria-hidden="true">→</span></a>
+      <a class="text-link" href={hubPath(locale, "instructions")}>{copy.allInstructions} <span aria-hidden="true">→</span></a>
+    </div>
+  </div>
+</section>

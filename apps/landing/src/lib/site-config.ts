@@ -43,6 +43,18 @@ function readPhone(value: string | undefined): PublicPhone | null {
   };
 }
 
+const INDEXNOW_KEY_PATTERN = /^[A-Za-z0-9-]{8,128}$/;
+
+/** IndexNow keys are public by protocol; the format is still validated so a stray value never becomes a route. */
+export function readIndexNowKey(env: PublicEnvironment): string | null {
+  const key = readOptionalValue(env.PUBLIC_INDEXNOW_KEY);
+  if (key === null) return null;
+  if (!INDEXNOW_KEY_PATTERN.test(key)) {
+    throw new Error("PUBLIC_INDEXNOW_KEY must be 8-128 characters of a-z, A-Z, 0-9 or -");
+  }
+  return key;
+}
+
 function readEnabled(value: string | undefined): boolean {
   const normalized = readOptionalValue(value);
   if (normalized === null || normalized === "false") return false;

@@ -32,6 +32,10 @@ test.beforeEach(async ({ page }) => {
 
 const routes = [
   "/",
+  "/stati/",
+  "/instruktsii/",
+  "/en/articles/",
+  "/en/instructions/",
   "/markirovka-chestny-znak/",
   "/sscc-i-agregatsiya/",
   "/stati/agregatsiya-piva-v-koroba/",

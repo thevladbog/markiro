@@ -97,6 +97,7 @@ jobs:
       # guard from silently degrading into one that always passes.
       - run: pnpm check:deps
       - run: pnpm test:dependency-guard
+      - run: pnpm test:indexnow
       - run: pnpm turbo lint typecheck build --concurrency=1 --force
 
   verify-api-tests:
@@ -347,12 +348,14 @@ jobs:
           PUBLIC_DEMO_SUBMISSION_ENABLED: "false"
           PUBLIC_SMARTCAPTCHA_CLIENT_KEY: ""
           PUBLIC_PHONE: ""
+          PUBLIC_INDEXNOW_KEY: ""
         run: |
           docker build --file deploy/production/api.Dockerfile --tag "ghcr.io/thevladbog/markiro-api:${{ github.sha }}" .
           docker build \
             --build-arg PUBLIC_DEMO_SUBMISSION_ENABLED="$PUBLIC_DEMO_SUBMISSION_ENABLED" \
             --build-arg PUBLIC_SMARTCAPTCHA_CLIENT_KEY="$PUBLIC_SMARTCAPTCHA_CLIENT_KEY" \
             --build-arg PUBLIC_PHONE="$PUBLIC_PHONE" \
+            --build-arg PUBLIC_INDEXNOW_KEY="$PUBLIC_INDEXNOW_KEY" \
             --file deploy/production/edge.Dockerfile \
             --tag "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}" \
             .
