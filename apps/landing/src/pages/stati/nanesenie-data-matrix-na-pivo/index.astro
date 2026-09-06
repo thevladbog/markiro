@@ -30,7 +30,7 @@ const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE
             <div class="article-byline" aria-label="Сведения о публикации"><span>{article.authorName}</span><time datetime={article.publishedAt}>26 августа 2026</time><span>{article.readingTimeMinutes} минут чтения</span></div>
           </div>
           <figure class="article-hero__media" data-article-visual>
-            <Picture src={articleHero} alt="Специалист сравнивает этикетку, типографский образец и прямую печать для маркировки пива" widths={[480, 720, 1080]} formats={["avif", "webp"]} sizes="(max-width: 767px) 100vw, 45vw" loading="eager" fetchpriority="high" data-article-hero-image />
+            <Picture src={articleHero} alt="Специалист сравнивает этикетку, типографский образец и прямую печать для маркировки пива" widths={[480, 720, 1080]} formats={["avif", "webp"]} sizes="(max-width: 767px) 100vw, 45vw" loading="eager" fetchpriority="high" fallbackFormat="jpg" data-article-hero-image />
             <figcaption>Метод выбирают по таре, партии и управляемости процесса, а не по максимальной скорости из каталога.</figcaption>
           </figure>
         </div>

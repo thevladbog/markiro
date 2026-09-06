@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   assertLighthouseReport,
   lighthouseArguments,
+  LIGHTHOUSE_ROUTES,
   LIGHTHOUSE_RUN_COUNT,
   LIGHTHOUSE_THRESHOLDS,
   lighthouseScoreSummary,
@@ -34,6 +35,15 @@ test("uses three sequential runs and the representative Lighthouse median", () =
     representativeLighthouseReport([slowOutlier, representative, fastOutlier]),
     representative,
   );
+});
+
+test("gates the home page, a commercial topic page and an article", () => {
+  assert.ok(Object.isFrozen(LIGHTHOUSE_ROUTES));
+  assert.deepEqual(LIGHTHOUSE_ROUTES, [
+    "/",
+    "/markirovka-chestny-znak/",
+    "/stati/markirovka-piva-2026/",
+  ]);
 });
 
 test("accepts exact Lighthouse score thresholds", () => {

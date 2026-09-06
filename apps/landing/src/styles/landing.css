@@ -3320,3 +3320,13 @@ input:focus-visible {
 .seo-cta__phone:focus-visible {
   color: var(--accent);
 }
+
+/* Text-only note for extracted content; the console itself is aria-hidden decoration. */
+.line-console__note {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

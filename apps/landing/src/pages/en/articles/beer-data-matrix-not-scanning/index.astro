@@ -28,7 +28,7 @@ const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE
             <div class="article-byline" aria-label="Publication details"><span>{article.authorName}</span><time datetime={article.publishedAt}>August 26, 2026</time><span>{article.readingTimeMinutes} min read</span></div>
           </div>
           <figure class="article-hero__media" data-article-visual>
-            <Picture src={articleHero} alt="Operator scanning a Data Matrix on a beer bottle on a production line" widths={[480, 720, 1080]} formats={["avif", "webp"]} sizes="(max-width: 767px) 100vw, 45vw" loading="eager" fetchpriority="high" data-article-hero-image />
+            <Picture src={articleHero} alt="Operator scanning a Data Matrix on a beer bottle on a production line" widths={[480, 720, 1080]} formats={["avif", "webp"]} sizes="(max-width: 767px) 100vw, 45vw" loading="eager" fetchpriority="high" fallbackFormat="jpg" data-article-hero-image />
             <figcaption>Start with a precise question: was the code not decoded, altered in transit, or deliberately rejected?</figcaption>
           </figure>
         </div>

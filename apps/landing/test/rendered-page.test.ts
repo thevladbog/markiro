@@ -1475,6 +1475,30 @@ describe("rendered landing page", () => {
     expect(routeDocument.querySelector('.seo-cta a[href^="tel:"]')).toBeNull();
   });
 
+  it("falls back to a JPEG for article hero images instead of the multi-megabyte PNG", () => {
+    const article = documents.get("/stati/markirovka-piva-2026/") as Document;
+    const hero = article.querySelector<HTMLImageElement>("[data-article-hero-image]");
+    expect(hero?.getAttribute("src")).toMatch(/\.jpe?g$/);
+    expect(hero?.getAttribute("srcset")).not.toMatch(/\.png/);
+    expect(article.querySelector('picture source[type="image/avif"]')).not.toBeNull();
+  });
+
+  it("labels the illustrative station console so extracted text is not read as a fact", () => {
+    for (const [route, note] of [
+      ["/", "значения условные"],
+      ["/en/", "values are illustrative"],
+    ] as const) {
+      const routeDocument = documents.get(route) as Document;
+      const consoles = [...routeDocument.querySelectorAll(".line-console")];
+      expect(consoles.length, route).toBeGreaterThanOrEqual(1);
+      for (const element of consoles) {
+        expect(element.querySelector("[data-illustrative-note]")?.textContent, route).toContain(
+          note,
+        );
+      }
+    }
+  });
+
   it("describes the kiosk as a disposal flow for employees, not a customer pickup point", () => {
     const ru = documents.get("/kiosk-samovydachi/")?.body.textContent ?? "";
     expect(ru).toContain("выбыти");
