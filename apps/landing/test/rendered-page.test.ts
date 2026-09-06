@@ -1180,11 +1180,13 @@ describe("rendered landing page", () => {
       );
       expect(form?.querySelector(".smart-captcha")?.getAttribute("data-hl")).toBe(expectedLocale);
       expect(form?.querySelector("[data-captcha-error]")).not.toBeNull();
+      // The captcha runtime is injected lazily by the form script, never as a
+      // render-blocking tag: PageSpeed attributed most blocking time to it.
       expect(
         enabledDocument.querySelector(
           'script[src="https://smartcaptcha.cloud.yandex.ru/captcha.js"]',
         ),
-      ).not.toBeNull();
+      ).toBeNull();
     }
   });
 
