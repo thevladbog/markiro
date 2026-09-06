@@ -12,6 +12,17 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
     throw new Error("US local browser requires explicit US edition and development/test mode");
 
   const proxy = {
+    "^/api/us/traceability/lots(\\?.*)?$": {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    "^/api/us/traceability/lots/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}(/(source|status))?$":
+      {
+        target: "http://localhost:3100",
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+      },
     "^/api/us/traceability/products/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$":
       {
         target: "http://localhost:3100",

@@ -126,6 +126,15 @@ function renderWorkspace(
 }
 
 describe("connected US master-data workspace", () => {
+  it.each(["en-US", "es-US"] as const)("shows the complete Latin brand in %s", async (locale) => {
+    renderWorkspace(workspaceClient(), { locale });
+    const brand = await screen.findByRole("img", { name: "Markiro" });
+    expect(brand.textContent).toBe("MARKIRO");
+    expect(brand.querySelector("svg")?.getAttribute("viewBox")).toBe("0 0 64 64");
+    expect(brand.querySelectorAll("svg rect")).toHaveLength(9);
+    await screen.findByRole("button", { name: locale === "en-US" ? "Add party" : "Agregar parte" });
+  });
+
   it("keeps view requests live through the development StrictMode effect probe", async () => {
     renderWorkspace(
       workspaceClient({

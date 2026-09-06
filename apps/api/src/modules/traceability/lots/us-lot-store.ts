@@ -6,6 +6,7 @@ import {
   listTraceabilityLotsQuerySchema,
   platformUuidSchema,
   postLotStatusSchema,
+  patchLotSourceSchema,
   type TraceabilityLot,
   type TraceabilityLotList,
 } from "@markiro/platform-contracts";
@@ -14,6 +15,7 @@ import {
   authorizeUsMasterData,
   escapeLikePattern,
   parseMasterDataInput,
+  isUniqueConstraintViolation,
   type UsMasterDataTransaction,
 } from "../master-data/us-master-data-support";
 import {
@@ -129,6 +131,101 @@ export class UsLotStore {
     });
   }
 
+  async changeSource(
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+    input: unknown,
+    requestId: string,
+  ): Promise<TraceabilityLot> {
+    return this.db.transaction(async (tx) => {
+      await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.MASTER_DATA_WRITE);
+      const lotId = parseMasterDataInput(platformUuidSchema, id);
+      const value = parseMasterDataInput(patchLotSourceSchema, input);
+      const [row] = await tx
+        .select()
+        .from(lots)
+        .where(and(eq(lots.tenantId, tenantId), eq(lots.id, lotId)))
+        .limit(1)
+        .for("update");
+      if (!row) throw new NotFoundException({ code: "lot_not_found" });
+      const current = lotResponse(row);
+      if (current.sourceLockedAt !== null)
+        throw new ConflictException({ code: "lot_source_locked" });
+      const source = lotSourceColumns(value.source);
+      const sameSource =
+        row.sourceLocationId === source.sourceLocationId &&
+        row.sourceReferenceKind === source.sourceReferenceKind &&
+        row.sourceReferenceValue === source.sourceReferenceValue &&
+        row.sourceReferenceLocationId === source.sourceReferenceLocationId;
+      if (value.expectedRevision !== current.revision) {
+        if (
+          value.expectedRevision === current.revision - 1 &&
+          sameSource &&
+          row.lastSourceReason === value.reason &&
+          row.updatedBy === actorUserId
+        )
+          return current;
+        throw new ConflictException({ code: "lot_revision_conflict" });
+      }
+      if (sameSource) return current;
+      await assertLotReferences(tx, tenantId, row.productId, value.source);
+      let updated: typeof lots.$inferSelect | undefined;
+      try {
+        // Recover a uniqueness conflict inside a savepoint before looking up its tenant-scoped ID.
+        [updated] = await tx.transaction((savepoint) =>
+          savepoint
+            .update(lots)
+            .set({
+              ...source,
+              revision: current.revision + 1,
+              lastSourceReason: value.reason,
+              lastStatusReason: null,
+              updatedBy: actorUserId,
+              updatedAt: new Date(),
+            })
+            .where(and(eq(lots.tenantId, tenantId), eq(lots.id, lotId)))
+            .returning(),
+        );
+      } catch (error) {
+        if (
+          ![
+            "traceability_lots_location_tlc_uq",
+            "traceability_lots_reference_tlc_uq",
+            "traceability_lots_missing_source_tlc_uq",
+          ].some((constraint) => isUniqueConstraintViolation(error, constraint))
+        )
+          throw error;
+        const [existing] = await tx
+          .select({ id: lots.id })
+          .from(lots)
+          .where(
+            and(
+              eq(lots.tenantId, tenantId),
+              eq(lots.tlc, row.tlc),
+              sourceIdentityPredicate(value.source),
+            ),
+          )
+          .limit(1);
+        if (!existing) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
+        throw new ConflictException({ code: "LOT_DUPLICATE", existingId: existing.id });
+      }
+      if (!updated) throw new NotFoundException({ code: "lot_not_found" });
+      const response = lotResponse(updated);
+      await this.audit(
+        tx,
+        tenantId,
+        actorUserId,
+        requestId,
+        current,
+        response,
+        value.reason,
+        "traceability.lot.source_changed",
+      );
+      return response;
+    });
+  }
+
   async changeStatus(
     tenantId: string,
     actorUserId: string,
@@ -163,6 +260,7 @@ export class UsLotStore {
           status: value.status,
           revision: current.revision + 1,
           lastStatusReason: value.reason,
+          lastSourceReason: null,
           updatedBy: actorUserId,
           updatedAt: new Date(),
         })
@@ -183,11 +281,17 @@ export class UsLotStore {
     before: TraceabilityLot | null,
     after: TraceabilityLot,
     reason?: string,
+    action:
+      | "traceability.lot.created"
+      | "traceability.lot.status_changed"
+      | "traceability.lot.source_changed" = before
+      ? "traceability.lot.status_changed"
+      : "traceability.lot.created",
   ): Promise<void> {
     await tx.insert(schema.tenantAuditEvents).values({
       organizationId: tenantId,
       actorUserId,
-      action: before ? "traceability.lot.status_changed" : "traceability.lot.created",
+      action,
       outcome: "success",
       targetType: "traceability_lot",
       targetId: after.id,

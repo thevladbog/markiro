@@ -77,6 +77,313 @@ describe.skipIf(!url)("US lot store in disposable PostgreSQL", () => {
     tlc,
     source: { kind: "location", locationId: location },
   });
+  it("corrects only the source and atomically records exact prior and next identity", async () => {
+    const lot = await store.createLot(tenant, actor, { ...input(), source: null }, "create");
+    const source = { kind: "location", locationId: location };
+    const body = { source, expectedRevision: 1, reason: "  Supplier site confirmed  " };
+    const corrected = await store.changeSource(tenant, actor, lot.id, body, "source-corrected");
+    expect(corrected).toEqual({ ...lot, source, revision: 2, updatedAt: expect.any(String) });
+    expect(await store.changeSource(tenant, actor, lot.id, body, "retry")).toEqual(corrected);
+    expect(
+      await store.changeSource(tenant, actor, lot.id, { ...body, expectedRevision: 2 }, "no-op"),
+    ).toEqual(corrected);
+    expect(await audits()).toEqual([
+      expect.objectContaining({ action: "traceability.lot.created", after: lot }),
+      expect.objectContaining({
+        organizationId: tenant,
+        actorUserId: actor,
+        action: "traceability.lot.source_changed",
+        outcome: "success",
+        targetType: "traceability_lot",
+        targetId: lot.id,
+        before: lot,
+        after: { ...corrected, reason: "Supplier site confirmed" },
+        requestId: "source-corrected",
+      }),
+    ]);
+    const reference = {
+      kind: "reference",
+      referenceKind: "web_url",
+      referenceValue: "HTTPS://supplier.example.test/Source",
+      resolvedLocationId: otherLocation,
+    };
+    const referenced = await store.changeSource(
+      tenant,
+      actor,
+      lot.id,
+      { source: reference, expectedRevision: 2, reason: "Use supplied reference" },
+      "reference",
+    );
+    expect(referenced).toMatchObject({
+      id: lot.id,
+      tlc: lot.tlc,
+      productId: product,
+      source: reference,
+      revision: 3,
+    });
+    expect(
+      await store.changeSource(
+        tenant,
+        actor,
+        lot.id,
+        { source: null, expectedRevision: 3, reason: "Withdraw incorrect source" },
+        "withdraw",
+      ),
+    ).toMatchObject({ source: null, revision: 4 });
+  });
+  it("rolls back source collisions and returns only the tenant's conflicting ID", async () => {
+    const existing = await store.createLot(tenant, actor, input(), "existing");
+    const candidate = await store.createLot(
+      tenant,
+      actor,
+      { ...input(), source: null },
+      "candidate",
+    );
+    await expect(
+      store.changeSource(
+        tenant,
+        actor,
+        candidate.id,
+        { source: existing.source, expectedRevision: 1, reason: "Correct source" },
+        "duplicate",
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: { code: "LOT_DUPLICATE", existingId: existing.id },
+    });
+    expect(await store.getLot(tenant, actor, candidate.id)).toEqual(candidate);
+    expect(await audits()).toHaveLength(2);
+  });
+  it("serializes two source corrections targeting the same source/TLC", async () => {
+    const first = await store.createLot(tenant, actor, input(), "first");
+    const second = await store.createLot(tenant, actor, { ...input(), source: null }, "second");
+    const body = {
+      source: { kind: "location", locationId: otherLocation },
+      expectedRevision: 1,
+      reason: "Correct source",
+    };
+    const results = await Promise.allSettled([
+      store.changeSource(tenant, actor, first.id, body, "one"),
+      store.changeSource(tenant, actor, second.id, body, "two"),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.find((result) => result.status === "rejected")).toMatchObject({
+      reason: { status: 409, response: { code: "LOT_DUPLICATE" } },
+    });
+    expect(await audits()).toHaveLength(3);
+  });
+  it("allows only one divergent correction of the same revision", async () => {
+    const lot = await store.createLot(tenant, actor, input(), "create");
+    const results = await Promise.allSettled([
+      store.changeSource(
+        tenant,
+        actor,
+        lot.id,
+        { source: null, expectedRevision: 1, reason: "Withdraw source" },
+        "withdraw",
+      ),
+      store.changeSource(
+        tenant,
+        actor,
+        lot.id,
+        {
+          source: { kind: "location", locationId: otherLocation },
+          expectedRevision: 1,
+          reason: "Correct site",
+        },
+        "correct",
+      ),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.find((result) => result.status === "rejected")).toMatchObject({
+      reason: { status: 409, response: { code: "lot_revision_conflict" } },
+    });
+    expect(await store.getLot(tenant, actor, lot.id)).toMatchObject({ revision: 2 });
+    expect(await audits()).toHaveLength(2);
+  });
+  it.each(["COMMIT", "ROLLBACK"] as const)(
+    "waits for a concurrent source lock transaction to %s",
+    async (completion) => {
+      const lot = await store.createLot(tenant, actor, input(), "create");
+      const finalizer = await fixture.pool.connect();
+      const lockedAt = new Date("2026-09-06T00:00:00Z");
+      try {
+        await finalizer.query("BEGIN");
+        const {
+          rows: [connection],
+        } = await finalizer.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+        if (!connection) throw new Error("Missing finalizer connection");
+        // Simulate only the future finalizer's row lock/latch, not a finalized event.
+        await finalizer.query(
+          "UPDATE traceability_lots SET source_locked_at=$3 WHERE tenant_id=$1 AND id=$2",
+          [tenant, lot.id, lockedAt],
+        );
+        const correction = store
+          .changeSource(
+            tenant,
+            actor,
+            lot.id,
+            { source: null, expectedRevision: 1, reason: "Withdraw incorrect source" },
+            "correction",
+          )
+          .then(
+            (value) => ({ value, error: undefined }),
+            (error: unknown) => ({ value: undefined, error }),
+          );
+        await expect
+          .poll(
+            async () => {
+              const {
+                rows: [state],
+              } = await fixture.pool.query<{ blocked: boolean }>(
+                "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1::int=ANY(pg_blocking_pids(pid))) AS blocked",
+                [connection.pid],
+              );
+              return state?.blocked;
+            },
+            { timeout: 5_000 },
+          )
+          .toBe(true);
+        await finalizer.query(completion);
+        const result = await correction;
+        if (completion === "COMMIT") {
+          expect(result.error).toMatchObject({
+            status: 409,
+            response: { code: "lot_source_locked" },
+          });
+          expect(await store.getLot(tenant, actor, lot.id)).toEqual({
+            ...lot,
+            sourceLockedAt: lockedAt.toISOString(),
+          });
+          expect(await audits()).toHaveLength(1);
+        } else {
+          expect(result.error).toBeUndefined();
+          expect(result.value).toMatchObject({
+            id: lot.id,
+            source: null,
+            revision: 2,
+            sourceLockedAt: null,
+          });
+          expect(await audits()).toHaveLength(2);
+        }
+      } finally {
+        await finalizer.query("ROLLBACK");
+        finalizer.release();
+      }
+    },
+  );
+  it("does not confuse status and source retries or accept forged identity", async () => {
+    const lot = await store.createLot(tenant, actor, input(), "create");
+    const status = { status: "quarantined", reason: "Hold for QA", expectedRevision: 1 };
+    await store.changeStatus(tenant, actor, lot.id, status, "hold");
+    const body = { source: null, reason: "Withdraw incorrect source", expectedRevision: 2 };
+    await store.changeSource(tenant, actor, lot.id, body, "withdraw");
+    await expect(
+      store.changeStatus(
+        tenant,
+        actor,
+        lot.id,
+        { ...status, expectedRevision: 2 },
+        "not-status-retry",
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    await store.changeStatus(
+      tenant,
+      actor,
+      lot.id,
+      { status: "active", reason: "Release QA hold", expectedRevision: 3 },
+      "release",
+    );
+    await expect(
+      store.changeSource(
+        tenant,
+        actor,
+        lot.id,
+        { ...body, expectedRevision: 3 },
+        "not-source-retry",
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    for (const extra of [
+      { tlc: "NEW" },
+      { productId: product },
+      { sourceLockedAt: null },
+      { tenantId: tenant },
+      { expectedRevision: 0 },
+    ]) {
+      await expect(
+        store.changeSource(
+          tenant,
+          actor,
+          lot.id,
+          { ...body, expectedRevision: 4, ...extra },
+          "invalid",
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+    }
+    expect(await audits()).toHaveLength(4);
+  });
+  it("refuses source mutation once a future finalizer has frozen it, without blocking QA status", async () => {
+    const lot = await store.createLot(tenant, actor, input(), "create");
+    const lockedAt = new Date("2026-09-06T00:00:00Z");
+    await fixture.db
+      .update(schema.traceabilityLots)
+      .set({ sourceLockedAt: lockedAt })
+      .where(
+        and(eq(schema.traceabilityLots.tenantId, tenant), eq(schema.traceabilityLots.id, lot.id)),
+      );
+    await expect(
+      store.changeSource(
+        tenant,
+        actor,
+        lot.id,
+        { source: null, expectedRevision: 1, reason: "Withdraw source" },
+        "locked",
+      ),
+    ).rejects.toMatchObject({ status: 409, response: { code: "lot_source_locked" } });
+    expect(await store.getLot(tenant, actor, lot.id)).toEqual({
+      ...lot,
+      sourceLockedAt: lockedAt.toISOString(),
+    });
+    expect(
+      await store.changeStatus(
+        tenant,
+        actor,
+        lot.id,
+        { status: "recalled", expectedRevision: 1, reason: "QA recall" },
+        "recall",
+      ),
+    ).toMatchObject({
+      sourceLockedAt: lockedAt.toISOString(),
+      source: lot.source,
+      status: "recalled",
+    });
+    expect(await audits()).toHaveLength(2);
+  });
+  it.each([
+    ["owner", true],
+    ["admin", true],
+    ["manager", true],
+    ["traceability_qa", true],
+    ["traceability_receiving", false],
+    ["traceability_production", false],
+    ["traceability_shipping", false],
+    ["traceability_auditor", false],
+    ["viewer", false],
+    ["unknown", false],
+  ] as const)("checks current source-correction capability for %s", async (role, allowed) => {
+    const lot = await store.createLot(tenant, actor, input(), "create");
+    await fixture.db.update(schema.member).set({ role }).where(eq(schema.member.id, member));
+    const action = store.changeSource(
+      tenant,
+      actor,
+      lot.id,
+      { source: null, expectedRevision: 1, reason: "Withdraw incorrect source" },
+      "source",
+    );
+    if (allowed) await expect(action).resolves.toMatchObject({ source: null, revision: 2 });
+    else await expect(action).rejects.toMatchObject({ status: 403 });
+    expect(await audits()).toHaveLength(allowed ? 2 : 1);
+  });
   it.each(["US_FSMA204_PROCESSOR", "US_GENERIC_LOT_TRACEABILITY"] as const)(
     "persists a GTIN-less imported lot under %s with exact audit",
     async (code) => {
@@ -90,6 +397,7 @@ describe.skipIf(!url)("US lot store in disposable PostgreSQL", () => {
         productId: product,
         tlc: "=Apple  á-01",
         source: { kind: "location", locationId: location },
+        sourceLockedAt: null,
         assignmentBasis: "imported",
         status: "active",
         revision: 1,
@@ -301,9 +609,32 @@ describe.skipIf(!url)("US lot store in disposable PostgreSQL", () => {
       ),
     ).rejects.toMatchObject({ status: 404 });
     expect((await store.listLots(tenant, actor, {})).items).toEqual([]);
+    const local = await store.createLot(
+      tenant,
+      actor,
+      { ...input(), source: null },
+      "same-code-local",
+    );
+    expect(local).toMatchObject({ tlc: "A-1" });
+    const correction = { source: null, expectedRevision: 1, reason: "Correct supplier site" };
     await expect(
-      store.createLot(tenant, actor, { ...input(), source: null }, "same-code-local"),
-    ).resolves.toMatchObject({ tlc: "A-1" });
+      store.changeSource(tenant, actor, foreignLot, correction, "foreign-lot"),
+    ).rejects.toMatchObject({ status: 404, response: { code: "lot_not_found" } });
+    for (const source of [
+      { kind: "location", locationId: foreignLocation },
+      {
+        kind: "reference",
+        referenceKind: "web_url",
+        referenceValue: "https://example.test/x",
+        resolvedLocationId: foreignLocation,
+      },
+    ]) {
+      await expect(
+        store.changeSource(tenant, actor, local.id, { ...correction, source }, "foreign-location"),
+      ).rejects.toMatchObject({ status: 404 });
+    }
+    expect(await store.getLot(tenant, actor, local.id)).toEqual(local);
+    expect(await audits()).toHaveLength(1);
   });
   it("retains historical actors and audit snapshots after the account is deleted", async () => {
     const lot = await store.createLot(tenant, actor, input(), "historical-create");
@@ -520,6 +851,10 @@ describe.skipIf(!url)("US lot store in disposable PostgreSQL", () => {
     const lot = await store.createLot(tenant, actor, input(), "setup");
     await fixture.db.delete(schema.member).where(eq(schema.member.id, member));
     await expect(store.listLots(tenant, actor, {})).rejects.toMatchObject({ status: 403 });
+    const correction = { source: null, expectedRevision: 1, reason: "Withdraw incorrect source" };
+    await expect(
+      store.changeSource(tenant, actor, lot.id, correction, "revoked-source"),
+    ).rejects.toMatchObject({ status: 403 });
     await expect(
       store.changeStatus(
         tenant,
@@ -544,8 +879,11 @@ describe.skipIf(!url)("US lot store in disposable PostgreSQL", () => {
       status: 503,
       response: { code: "traceability_profile_invalid" },
     });
+    await expect(
+      store.changeSource(tenant, actor, lot.id, correction, "invalid-profile-source"),
+    ).rejects.toMatchObject({ status: 503, response: { code: "traceability_profile_invalid" } });
   });
-  it("rolls back both creation and status on audit failure", async () => {
+  it("rolls back creation, source correction and status on audit failure", async () => {
     const lot = await store.createLot(tenant, actor, input(), "setup");
     await fixture.pool.query(
       "ALTER TABLE tenant_audit_events ADD CONSTRAINT reject_lot_test_audit CHECK(request_id <> 'force-lot-audit-fail') NOT VALID",
@@ -560,6 +898,15 @@ describe.skipIf(!url)("US lot store in disposable PostgreSQL", () => {
           actor,
           lot.id,
           { status: "recalled", reason: "Rollback test", expectedRevision: 1 },
+          "force-lot-audit-fail",
+        ),
+      ).rejects.toThrow();
+      await expect(
+        store.changeSource(
+          tenant,
+          actor,
+          lot.id,
+          { source: null, expectedRevision: 1, reason: "Rollback source test" },
           "force-lot-audit-fail",
         ),
       ).rejects.toThrow();

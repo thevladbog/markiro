@@ -107,9 +107,27 @@ Section 5.5:
 - A reference document number is unique only within the context of type/party, not
   globally.
 
+Implemented document storage, 2026-09-06: migration0120 enforces
+`(tenant_id, type, party_id, number)` with separate partial unique indexes for null
+and non-null issuers. Identity is case-sensitive and includes archived records;
+the custom label for `other` does not create a separate number namespace. The
+composite issuer foreign key is tenant-scoped. The isolated API creates and reads
+metadata only; document editing/archival commands, event links, frozen snapshots
+and binary attachments are not implemented by this increment.
+
 See LOT-002, LOT-003 and LOT-007 in [requirements.md](requirements.md) for the
 corresponding acceptance criteria (opaque TLC string, mandatory TLC source location or
 TLC source reference, no assumption of global TLC uniqueness).
+
+Owner-approved source correction, 2026-09-06: a lot's UUID, TLC and product remain
+unchanged. Before its first finalized event, create-authorized roles may correct or
+withdraw the source with the current revision and a reason, with atomic before/after
+audit. After first finalized use, source correction remains locked even if that event
+is later amended or voided. Migration0119 adds the server-only nullable
+`source_locked_at` latch and action-specific retry metadata; API responses expose
+`sourceLockedAt`, but no input can set or clear it. Finalizers must latch the unchanged
+identity under a lot row lock in the same transaction as snapshots. The correction API
+and storage protection are implemented; event finalization and its integration are not.
 
 ## 6. Event lifecycle
 

@@ -13,6 +13,7 @@ const record = {
   productId,
   tlc: "A-1",
   source: reference,
+  sourceLockedAt: null,
   assignmentBasis: "imported",
   status: "active",
   revision: 1,
@@ -22,6 +23,36 @@ const record = {
   updatedAt: "2026-09-06T00:00:00.000Z",
 };
 describe("lot record boundaries", () => {
+  it("accepts only source, reason and revision for source corrections", () => {
+    const body = { source: reference, reason: "  Correct supplier site  ", expectedRevision: 1 };
+    expect(contracts.patchLotSourceSchema.parse(body)).toEqual({
+      ...body,
+      reason: "Correct supplier site",
+    });
+    expect(contracts.patchLotSourceSchema.parse({ ...body, source: null }).source).toBeNull();
+    for (const extra of [
+      { productId },
+      { tlc: "NEW" },
+      { assignmentBasis: "transformation" },
+      { sourceLockedAt: null },
+      { tenantId: "forged" },
+      { reason: " " },
+      { expectedRevision: undefined },
+      { expectedRevision: 0 },
+      { source: undefined },
+    ])
+      expect(contracts.patchLotSourceSchema.safeParse({ ...body, ...extra }).success).toBe(false);
+  });
+  it("requires an explicit persisted source lock state and preserves its timestamp", () => {
+    const locked = { ...record, sourceLockedAt: "2026-09-06T00:00:00.000Z" };
+    expect(contracts.traceabilityLotSchema.parse(locked)).toEqual(locked);
+    expect(
+      contracts.traceabilityLotSchema.safeParse({ ...record, sourceLockedAt: undefined }).success,
+    ).toBe(false);
+    expect(
+      contracts.traceabilityLotSchema.safeParse({ ...record, sourceLockedAt: "bad" }).success,
+    ).toBe(false);
+  });
   it("preserves the exact reference including a mixed-case HTTP scheme", () => {
     const source = { ...reference, referenceValue: "HtTpS://Supplier.example.test/Source/A" };
     expect(

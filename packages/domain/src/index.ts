@@ -31,6 +31,8 @@ export type { TraceabilityLotStatus } from "./traceability/lots/status.js";
 export { ancestorsOf, descendantsOf, wouldCreateCycle } from "./traceability/lots/genealogy.js";
 export type { LotGenealogyEdge } from "./traceability/lots/genealogy.js";
 export { UOM_CODES_V1 } from "./traceability/uom.js";
+export { parseTraceabilityQuantity } from "./traceability/quantity.js";
+export { isTraceabilityCivilDate } from "./traceability/civil-date.js";
 export type { TraceabilityUom } from "./traceability/uom.js";
 export { validateProductDescription } from "./traceability/products/description.js";
 export type {

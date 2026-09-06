@@ -415,6 +415,7 @@ export {
   createTraceabilityLotSchema,
   traceabilityLotSchema,
   postLotStatusSchema,
+  patchLotSourceSchema,
   listTraceabilityLotsQuerySchema,
   traceabilityLotListSchema,
 } from "./traceability/lot-records.js";
@@ -424,6 +425,7 @@ export type {
   TraceabilityLotList,
   CreateTraceabilityLotInput,
   PostLotStatusInput,
+  PatchLotSourceInput,
   ListTraceabilityLotsQuery,
 } from "./traceability/lot-records.js";
 export {
@@ -451,3 +453,24 @@ export type {
   UsProduct,
   UsProductList,
 } from "./traceability/catalog.js";
+export {
+  traceabilityCivilDateSchema,
+  traceabilityQuantitySchema,
+} from "./traceability/event-values.js";
+export {
+  referenceDocumentTypeSchema,
+  referenceDocumentInputSchema,
+  referenceDocumentSnapshotSchema,
+  referenceDocumentSchema,
+  referenceDocumentListSchema,
+  listReferenceDocumentsQuerySchema,
+} from "./traceability/documents.js";
+export type {
+  ReferenceDocumentType,
+  ReferenceDocumentInput,
+  ReferenceDocumentSnapshot,
+  ReferenceDocument,
+  ReferenceDocumentList,
+} from "./traceability/documents.js";
+export { receivingDraftItemSchema, receivingDraftSchema } from "./traceability/receiving.js";
+export type { ReceivingDraftItem, ReceivingDraft } from "./traceability/receiving.js";

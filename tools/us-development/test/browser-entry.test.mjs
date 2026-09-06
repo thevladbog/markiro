@@ -104,7 +104,10 @@ test("US proxy never forwards RU routes and preserves configured API Host", asyn
     "/api/us/traceability/parties/../profile",
     "/api/us/traceability/parties/%2e%2e/profile",
     "/api/us/traceability/parties/a0000000-0000-4000-8000-000000000001/exports",
-    "/api/us/traceability/lots",
+    "/api/us/traceability/lots/invalid-id",
+    "/api/us/traceability/lots/a0000000-0000-4000-8000-000000000001/source/unlock",
+    "/api/us/traceability/lots/a0000000-0000-4000-8000-000000000001?tenantId=x",
+    "/api/us/traceability/lots/a0000000-0000-4000-8000-000000000001/status?context=system",
     "/api/us/traceability/products",
     "/api/us/traceability/products/invalid-id",
     "/api/us/traceability/products/a0000000-0000-4000-8000-000000000001/exports",
@@ -119,6 +122,20 @@ test("US proxy never forwards RU routes and preserves configured API Host", asyn
       false,
     );
   for (const [input, output] of [
+    ["/api/us/traceability/lots?search=A&limit=50", "/traceability/lots?search=A&limit=50"],
+    ["/api/us/traceability/lots", "/traceability/lots"],
+    [
+      "/api/us/traceability/lots/a0000000-0000-4000-8000-000000000001",
+      "/traceability/lots/a0000000-0000-4000-8000-000000000001",
+    ],
+    [
+      "/api/us/traceability/lots/a0000000-0000-4000-8000-000000000001/source",
+      "/traceability/lots/a0000000-0000-4000-8000-000000000001/source",
+    ],
+    [
+      "/api/us/traceability/lots/a0000000-0000-4000-8000-000000000001/status",
+      "/traceability/lots/a0000000-0000-4000-8000-000000000001/status",
+    ],
     ["/api/us-auth/get-session", "/api/us-auth/get-session"],
     ["/api/us/deployment", "/deployment"],
     ["/api/us/traceability/profile", "/traceability/profile"],

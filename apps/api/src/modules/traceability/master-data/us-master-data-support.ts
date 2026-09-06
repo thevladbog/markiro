@@ -143,7 +143,8 @@ export async function authorizeUsMasterData(
   tx: UsMasterDataTransaction,
   tenantId: string,
   actorUserId: string,
-  required: UsCapability,
+  // An explicit array means any of these capabilities; an empty array denies.
+  required: UsCapability | readonly UsCapability[],
 ): Promise<ProvisionUsTraceabilityProfileInput["code"]> {
   const [membership] = await tx
     .select({ role: schema.member.role })
@@ -152,7 +153,11 @@ export async function authorizeUsMasterData(
     .limit(1)
     .for("share");
   const access = resolveUsAccess(membership?.role ?? "");
-  if (!membership || !hasUsCapabilities(access.capabilities, [required])) {
+  const alternatives = typeof required === "string" ? [required] : required;
+  if (
+    !membership ||
+    !alternatives.some((capability) => hasUsCapabilities(access.capabilities, [capability]))
+  ) {
     throw new ForbiddenException({ code: "insufficient_permission" });
   }
 

@@ -21,11 +21,6 @@
   border-right: 1px solid var(--mk-rail-border);
 }
 
-.us-md-wordmark {
-  font: 600 26px/1 var(--font-mono);
-  letter-spacing: -0.03em;
-}
-
 .us-md-org {
   display: grid;
   gap: 8px;

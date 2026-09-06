@@ -28,6 +28,19 @@ function renderWith(responder: (path: string, init?: RequestInit) => Response | 
 }
 
 describe("US access and profile application", () => {
+  it("retains the Latin brand symbol and wordmark across locale and theme changes", async () => {
+    renderWith((path) => (path === "/api/us/deployment" ? json(metadata) : json(null)));
+    await screen.findByRole("heading", { name: "Sign in" });
+    const brand = screen.getByRole("img", { name: "Markiro" });
+    expect(brand.textContent).toBe("MARKIRO");
+    expect(brand.querySelector("svg")?.getAttribute("viewBox")).toBe("0 0 64 64");
+    expect(brand.querySelectorAll("svg rect")).toHaveLength(9);
+    await userEvent.click(screen.getByRole("button", { name: "Change theme" }));
+    await userEvent.click(screen.getByRole("button", { name: "Language" }));
+    expect(screen.getByRole("img", { name: "Markiro" })).toBe(brand);
+    expect(brand.textContent).toBe("MARKIRO");
+  });
+
   it("attests deployment before showing login or making an auth call", async () => {
     const { send } = renderWith((path) =>
       path === "/api/us/deployment" ? json(metadata) : json(null),

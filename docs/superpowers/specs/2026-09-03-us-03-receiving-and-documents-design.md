@@ -1,10 +1,10 @@
 # US-03 — Receiving CTE, common event shell and reference documents — Design Spec
 
-> Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+> Revised 2026-09-06: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. The input foundation and reference-document metadata storage/API described at the end are implemented locally; the event workflow remains a draft design.
 
 **Date:** 2026-09-03
 
-**Status:** Draft for review (not implemented)
+**Status:** Input foundation and reference-document create/list/detail API implemented locally; receiving event persistence/API, lifecycle, UI and CSV remain draft design.
 
 **Slice:** US-03 from docs/us/implementation-plan.md; depends on US-00 (regulatory profile, U.S. capabilities, profile gate), US-01 (`traceability_locations`, location snapshot builder), US-02 (`traceability_lots`, product snapshot builder)
 
@@ -211,6 +211,8 @@ Controller `apps/api/src/modules/traceability/receiving/receiving.controller.ts`
 
 Finalization transaction (`receiving.service.ts`):
 
+US-02 integration requirement, approved 2026-09-06: before validating/snapshotting a linked lot, lock its row and use the current source, with a consistent multi-lot/master-record lock order. Latch `source_locked_at` once in this same transaction, without changing UUID/TLC/product/source in the latch statement. All source correction must use the revisioned/audited US-02 command before first finalized use; void/amendment never clears the latch. Migration0119 and simulated latch/concurrency tests supply storage protection only; the finalization transaction below remains unimplemented design. See [source-correction scope](../../us/implementation-plan.md#us-02-lot-source-corrections--2026-09-06).
+
 1. `SELECT ... FOR UPDATE` on `traceability_events`; assert `draft`.
 2. Load header, items, documents, locations (US-01 repository), product traceability profiles and linked lots (US-02 repository).
 3. Run `validateReceivingCompleteness`; any `error` → 409 `event_incomplete`.
@@ -288,3 +290,23 @@ Use the shared contract: current means finalized and not superseded; amendment d
 ## Approved CSV boundary — 2026-09-05
 
 [CLAR-04](../../us/development-clarifications.md) supersedes earlier blanket P1 import annotations. P0 supplies one fixed supplier template, preview/errors, all-or-nothing confirmed apply to a draft, retry idempotency and a safe receiving-record CSV download (`GET /traceability/receivings/:id/csv`, existing fresh read/export capability checks). Manual header entry and separate QA finalization remain. Expanded mappings, shipping adapters and multi-CTE CSV ZIP/JSON remain P1. Require malformed-file zero writes, duplicate retry, tenant/role denial, exact audit and spreadsheet-injection/round-trip tests. Proposed routes/contracts here are not implemented.
+
+## Implemented input foundation — 2026-09-06
+
+The [bounded implementation plan](../plans/2026-09-06-us-03-receiving-input-foundation.md) implements `parseTraceabilityQuantity` and `isTraceabilityCivilDate` in `packages/domain/src/traceability/`, with shared `event-values.ts`, `documents.ts` and `receiving.ts` contracts in `packages/platform-contracts/src/traceability/`. Public package entries export these rules and inferred document/draft types.
+
+Quantity entry is an exact positive decimal string, up to 15 integer and 3 fractional digits, with no rounding or conversion. Civil dates are valid Gregorian `YYYY-MM-DD` strings in years 0001–9999, not instants. Documents accept the nine planned types and an explicit custom label only for `other`; numbers retain leading zeros, case, Unicode and formula-looking text. Snapshot validation performs no transformations. It is a read contract, not an implemented snapshot builder, storage guarantee or binary-retention mechanism.
+
+Draft headers and lines require explicit fields, allowing null for missing input and zero lines. This intentionally permits incomplete product/source/TLC/quantity/unit/exemption combinations. Existing TLC, structured source, UUID and UOM boundaries validate values that are present. Server-owned fields are rejected; each request is bounded to 100 ordered lines and 100 unique document IDs without truncation. Parsing does not prove ownership, permissions, source completeness, review of an exemption or readiness to finalize. These remain transactional store/finalizer responsibilities.
+
+Before implementing event persistence, replace the draft's historical RU controller/auth/UI paths with the current isolated US composition, keep incomplete draft columns nullable, and add the frozen event timezone required by the MVP contract. The existing typed source must replace primitive free-text source assumptions. The revision-safety rules above supersede OQ-US03-4/5 and any earlier unconditional exempt-supplier reassignment: preserve an existing TLC, block dependent downstream changes, and never leave usable lots with a void origin. Choose the next migration from current state rather than the historical 0112 reference. The input-foundation increment introduced no receiving/document route, table, lifecycle operation, CSV or UI. Verification and remaining gates are recorded in its implementation plan.
+
+## Implemented reference-document metadata API — 2026-09-06
+
+The [persistence plan](../plans/2026-09-06-us-03-reference-document-persistence.md) implements migration0120, strict record/list/query contracts, a transactional store and GET/POST `/traceability/reference-documents` plus GET `/traceability/reference-documents/:id`. The controller is registered only in the isolated US composition, behind the current session/MFA and transport protections. The RU application and browser proxy are not extended.
+
+The actual table stores the nine document types, optional custom label/issuer/date/notes, opaque number, archive timestamp and historical creator/timestamps. Two partial unique indexes enforce `(tenant,type,party,number)` separately for null and non-null issuers, including archived records. A custom `other` label does not split that identity. Duplicate creation returns 409 `document_duplicate`; it neither merges nor overwrites metadata. The composite issuer foreign key prevents cross-tenant references. Migration0120 is additive and has only been exercised on owned disposable synthetic databases.
+
+Reads require current `traceability.read`. Creation accepts any of receiving, transformation or shipping write capability, reloading and locking membership/profile in the same transaction. A supplied issuer must be active and tenant-owned; its row stays locked through insert and exact `traceability.reference_document.created` audit. An audit failure rolls back creation. Numbers and civil dates are preserved; notes and search reject NUL/lone surrogates before database conversion. Stored response validation never repairs invalid content and fails closed with a sanitized error.
+
+The implemented query uses `search` (not the historical `q`), optional type/issuer, `archived=false|true|all`, and bounded limit/offset. Archived metadata is readable by ID and never releases a number. There is no archive/edit/delete command, attachment, event linkage, receiving persistence, finalizer, frozen snapshot storage, UI or CSV in this increment. Those portions above remain design, not implemented routes or acceptance evidence.

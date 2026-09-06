@@ -1,8 +1,10 @@
 import { catalogCopy } from "../catalog/copy.js";
+import { lotCopy } from "../lots/copy.js";
 import { productProfileCopy } from "../catalog/profile-copy.js";
 
 export const masterDataCopy = {
   "en-US": {
+    lots: lotCopy["en-US"],
     productProfile: productProfileCopy["en-US"],
     catalog: catalogCopy["en-US"],
     md: {
@@ -122,6 +124,7 @@ export const masterDataCopy = {
     },
   },
   "es-US": {
+    lots: lotCopy["es-US"],
     productProfile: productProfileCopy["es-US"],
     catalog: catalogCopy["es-US"],
     md: {

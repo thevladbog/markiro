@@ -8,7 +8,12 @@ import type { INestApplication } from "@nestjs/common";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { hashPassword } from "better-auth/crypto";
 import { createDb, schema } from "@markiro/db";
-import { traceabilityLotSchema, traceabilityLotListSchema } from "@markiro/platform-contracts";
+import {
+  traceabilityLotSchema,
+  traceabilityLotListSchema,
+  referenceDocumentSchema,
+  referenceDocumentListSchema,
+} from "@markiro/platform-contracts";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -195,6 +200,375 @@ describe.skipIf(!base)("US catalog HTTP with real MFA and isolated PostgreSQL", 
     await login();
   });
 
+  const documentInput = {
+    type: "bol",
+    typeOtherLabel: null,
+    number: "=0001",
+    partyId: null,
+    issuedOn: "2026-09-14",
+    notes: "Synthetic receipt",
+  };
+  async function createReference(body: unknown = documentInput) {
+    const response = await catalogRequest("/traceability/reference-documents", "POST", body);
+    expect(response.status).toBe(201);
+    return referenceDocumentSchema.parse(await response.json());
+  }
+
+  it("US documents: creates and reads metadata with exact trusted audit", async () => {
+    const response = await catalogRequest(
+      "/traceability/reference-documents",
+      "POST",
+      documentInput,
+      { "x-request-id": "forged-id" },
+    );
+    expect(response.status).toBe(201);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const requestId = response.headers.get("x-request-id");
+    expect(requestId).toMatch(/^[a-f0-9-]{36}$/);
+    expect(requestId).not.toBe("forged-id");
+    const saved = referenceDocumentSchema.parse(await response.json());
+    expect(saved).toMatchObject({ ...documentInput, createdBy: userId });
+    const detail = await catalogRequest(`/traceability/reference-documents/${saved.id}`);
+    expect(detail.status).toBe(200);
+    expect(referenceDocumentSchema.parse(await detail.json())).toEqual(saved);
+    const list = await catalogRequest("/traceability/reference-documents?type=bol&search=%3D0001");
+    expect(list.status).toBe(200);
+    expect(referenceDocumentListSchema.parse(await list.json()).items).toEqual([saved]);
+    const audit = await fixture.db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(eq(schema.tenantAuditEvents.organizationId, tenantId));
+    expect(audit).toEqual([
+      expect.objectContaining({
+        organizationId: tenantId,
+        actorUserId: userId,
+        action: "traceability.reference_document.created",
+        outcome: "success",
+        targetType: "traceability_reference_document",
+        targetId: saved.id,
+        before: null,
+        after: saved,
+        requestId,
+      }),
+    ]);
+  });
+
+  it("US documents: rejects duplicates and malformed inputs without extra writes", async () => {
+    await createReference();
+    const duplicate = await catalogRequest(
+      "/traceability/reference-documents",
+      "POST",
+      documentInput,
+    );
+    expect(duplicate.status).toBe(409);
+    expect(await duplicate.json()).toEqual({ code: "document_duplicate" });
+    for (const patch of [
+      { tenantId: "forged" },
+      { createdBy: "forged" },
+      { archivedAt: null },
+      { issuedOn: "2026-02-29" },
+      { attachmentObjectKey: "private" },
+      { notes: "x\u0000y" },
+    ])
+      expect(
+        (
+          await catalogRequest("/traceability/reference-documents", "POST", {
+            ...documentInput,
+            ...patch,
+          })
+        ).status,
+      ).toBe(400);
+    for (const path of [
+      "/traceability/reference-documents/invalid",
+      "/traceability/reference-documents?limit=101",
+      "/traceability/reference-documents?tenantId=foreign",
+      "/traceability/reference-documents?search=x%00y",
+    ])
+      expect((await catalogRequest(path)).status).toBe(400);
+    const audit = await fixture.db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(eq(schema.tenantAuditEvents.organizationId, tenantId));
+    expect(audit).toHaveLength(1);
+  });
+
+  it("US documents: respects fresh roles and MFA", async () => {
+    const saved = await createReference();
+    await fixture.db
+      .update(schema.member)
+      .set({ role: "traceability_shipping" })
+      .where(eq(schema.member.organizationId, tenantId));
+    await createReference({ ...documentInput, number: "SHIPPING" });
+    await fixture.db
+      .update(schema.member)
+      .set({ role: "traceability_auditor" })
+      .where(eq(schema.member.organizationId, tenantId));
+    expect((await catalogRequest(`/traceability/reference-documents/${saved.id}`)).status).toBe(
+      200,
+    );
+    expect(
+      (
+        await catalogRequest("/traceability/reference-documents", "POST", {
+          ...documentInput,
+          number: "NO",
+        })
+      ).status,
+    ).toBe(403);
+    await fixture.db
+      .update(schema.member)
+      .set({ role: "member" })
+      .where(eq(schema.member.organizationId, tenantId));
+    expect((await catalogRequest("/traceability/reference-documents")).status).toBe(403);
+    expect(
+      (
+        await httpFetch(`${serverUrl}/traceability/reference-documents`, {
+          headers: { host: "localhost:3100" },
+        })
+      ).status,
+    ).toBe(401);
+  });
+
+  it("US documents: keeps foreign issuers and records invisible", async () => {
+    const foreign = randomUUID(),
+      foreignParty = randomUUID();
+    await fixture.db
+      .insert(schema.organization)
+      .values({ id: foreign, name: "Foreign synthetic", slug: foreign, createdAt: new Date() });
+    await fixture.db
+      .insert(schema.traceabilityParties)
+      .values({ id: foreignParty, tenantId: foreign, name: "Foreign synthetic" });
+    const [record] = await fixture.db
+      .insert(schema.referenceDocuments)
+      .values({ tenantId: foreign, type: "bol", number: "FOREIGN", createdBy: "historical" })
+      .returning();
+    expect((await catalogRequest(`/traceability/reference-documents/${record?.id}`)).status).toBe(
+      404,
+    );
+    expect(
+      (
+        await catalogRequest("/traceability/reference-documents", "POST", {
+          ...documentInput,
+          partyId: foreignParty,
+        })
+      ).status,
+    ).toBe(404);
+    const list = await catalogRequest("/traceability/reference-documents?search=FOREIGN");
+    expect(list.status).toBe(200);
+    expect(referenceDocumentListSchema.parse(await list.json()).items).toEqual([]);
+  });
+
+  it("US documents: preserves transport policy and leaves edits, attachments and events closed", async () => {
+    const saved = await createReference();
+    expect(
+      (
+        await catalogRequest("/traceability/reference-documents", "POST", documentInput, {
+          host: "foreign.test",
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await catalogRequest("/traceability/reference-documents", "POST", documentInput, {
+          origin: "http://localhost:5173",
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await catalogRequest("/traceability/reference-documents", "POST", documentInput, {
+          "content-type": "text/plain",
+        })
+      ).status,
+    ).toBe(415);
+    expect(
+      (
+        await catalogRequest("/traceability/reference-documents", "POST", {
+          ...documentInput,
+          notes: "x".repeat(17000),
+        })
+      ).status,
+    ).toBe(413);
+    for (const method of ["PATCH", "PUT", "DELETE"])
+      expect(
+        (await catalogRequest(`/traceability/reference-documents/${saved.id}`, method, {})).status,
+      ).toBe(404);
+    for (const path of [
+      `/traceability/reference-documents/${saved.id}/archive`,
+      `/traceability/reference-documents/${saved.id}/attachment`,
+      "/traceability/receivings",
+      "/station/bootstrap",
+    ])
+      expect((await catalogRequest(path, "POST", {})).status).toBe(404);
+    expect((await catalogRequest("/health/ready")).status).toBe(503);
+  });
+
+  it("US documents: exposes strict OpenAPI for only the supported routes", () => {
+    const document = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder().setTitle("US test").setVersion("0").build(),
+    );
+    const collection = document.paths["/traceability/reference-documents"];
+    expect(Object.keys(collection ?? {}).sort()).toEqual(["get", "post"]);
+    expect(Object.keys(document.paths["/traceability/reference-documents/{id}"] ?? {})).toEqual([
+      "get",
+    ]);
+    expect(collection?.post?.requestBody).toMatchObject({
+      content: { "application/json": { schema: { additionalProperties: false } } },
+    });
+    expect(collection?.post?.responses).toHaveProperty("409");
+    expect(collection?.get?.responses).toHaveProperty("503");
+    expect(JSON.stringify(collection?.post?.requestBody)).not.toContain("attachmentObjectKey");
+  });
+
+  it("US documents: sanitizes corrupt stored content at the HTTP boundary", async () => {
+    const [record] = await fixture.db
+      .insert(schema.referenceDocuments)
+      .values({ tenantId, type: "bol", number: "🍎".repeat(65), createdBy: "historical" })
+      .returning();
+    const response = await catalogRequest(`/traceability/reference-documents/${record?.id}`);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ code: "us_database_unavailable" });
+  });
+
+  it("US lot source: corrects a source through real MFA without changing the lot identity", async () => {
+    const productId = randomUUID();
+    const partyId = randomUUID();
+    const locationId = randomUUID();
+    await fixture.db
+      .insert(schema.products)
+      .values({ id: productId, tenantId, name: "Source correction" });
+    await fixture.db
+      .insert(schema.traceabilityParties)
+      .values({ id: partyId, tenantId, name: "Source supplier" });
+    await fixture.db.insert(schema.traceabilityLocations).values({
+      id: locationId,
+      tenantId,
+      partyId,
+      name: "Source site",
+      businessName: "Source site",
+    });
+    const lot = traceabilityLotSchema.parse(
+      await (
+        await catalogRequest("/traceability/lots", "POST", {
+          productId,
+          tlc: "Source-A",
+          source: null,
+        })
+      ).json(),
+    );
+    await fixture.db
+      .update(schema.member)
+      .set({ role: "manager" })
+      .where(eq(schema.member.organizationId, tenantId));
+    const body = {
+      source: { kind: "location", locationId },
+      expectedRevision: 1,
+      reason: "Supplier confirmed the site",
+    };
+    const result = await catalogRequest(`/traceability/lots/${lot.id}/source`, "PATCH", body, {
+      "x-request-id": "forged",
+    });
+    expect(result.status).toBe(200);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+    const saved = traceabilityLotSchema.parse(await result.json());
+    expect(saved).toEqual({
+      ...lot,
+      source: body.source,
+      revision: 2,
+      updatedAt: expect.any(String),
+    });
+    expect(
+      await (await catalogRequest(`/traceability/lots/${lot.id}/source`, "PATCH", body)).json(),
+    ).toEqual(saved);
+    const audit = (
+      await fixture.db
+        .select()
+        .from(schema.tenantAuditEvents)
+        .where(eq(schema.tenantAuditEvents.organizationId, tenantId))
+    ).filter((row) => row.action === "traceability.lot.source_changed");
+    expect(audit).toEqual([
+      expect.objectContaining({
+        organizationId: tenantId,
+        actorUserId: userId,
+        action: "traceability.lot.source_changed",
+        targetType: "traceability_lot",
+        targetId: lot.id,
+        outcome: "success",
+        before: lot,
+        after: { ...saved, reason: body.reason },
+        requestId: result.headers.get("x-request-id"),
+      }),
+    ]);
+    expect(audit[0]?.requestId).not.toBe("forged");
+    for (const patch of [
+      { tlc: "changed" },
+      { sourceLockedAt: null },
+      { productId },
+      { reason: " " },
+      { expectedRevision: undefined },
+    ]) {
+      expect(
+        (
+          await catalogRequest(`/traceability/lots/${lot.id}/source`, "PATCH", {
+            ...body,
+            expectedRevision: 2,
+            ...patch,
+          })
+        ).status,
+      ).toBe(400);
+    }
+    await fixture.db
+      .update(schema.member)
+      .set({ role: "traceability_auditor" })
+      .where(eq(schema.member.organizationId, tenantId));
+    expect(
+      (
+        await catalogRequest(`/traceability/lots/${lot.id}/source`, "PATCH", {
+          ...body,
+          source: null,
+          expectedRevision: 2,
+        })
+      ).status,
+    ).toBe(403);
+  });
+  it("US lot source: returns a documented lock conflict and keeps unlock routes absent", async () => {
+    const productId = randomUUID();
+    await fixture.db
+      .insert(schema.products)
+      .values({ id: productId, tenantId, name: "Locked source" });
+    const lot = traceabilityLotSchema.parse(
+      await (
+        await catalogRequest("/traceability/lots", "POST", {
+          productId,
+          tlc: "Locked-A",
+          source: null,
+        })
+      ).json(),
+    );
+    await fixture.db
+      .update(schema.traceabilityLots)
+      .set({ sourceLockedAt: new Date() })
+      .where(eq(schema.traceabilityLots.id, lot.id));
+    const result = await catalogRequest(`/traceability/lots/${lot.id}/source`, "PATCH", {
+      source: null,
+      expectedRevision: 1,
+      reason: "Cannot rewrite frozen source",
+    });
+    expect(result.status).toBe(409);
+    expect(await result.json()).toEqual({ code: "lot_source_locked" });
+    expect(
+      (await catalogRequest(`/traceability/lots/${lot.id}/source/unlock`, "POST", {})).status,
+    ).toBe(404);
+    const document = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder().addCookieAuth("markiro-us.session_token").build(),
+    );
+    const path = document.paths["/traceability/lots/{id}/source"];
+    expect(Object.keys(path ?? {})).toEqual(["patch"]);
+    expect(path?.patch?.security).toEqual([{ "markiro-us.session_token": [] }]);
+    expect(JSON.stringify(path?.patch?.requestBody)).toContain("expectedRevision");
+    expect(JSON.stringify(path?.patch?.responses["409"])).toContain("lot_source_locked");
+  });
   it("US lots: serves creation, lookup, list and QA status with exact server audit", async () => {
     const productId = randomUUID();
     await fixture.db

@@ -26,11 +26,6 @@ body {
   justify-content: space-between;
   color: var(--fg-on-inverse);
 }
-.us-wordmark {
-  font-family: var(--font-mono);
-  font-size: 32px;
-  font-weight: 600;
-}
 .us-brand h2 {
   font-size: 34px;
   line-height: 1.12;

@@ -42,6 +42,7 @@ export function lotResponse(row: LotRow): TraceabilityLot {
     productId: row.productId,
     tlc: row.tlc,
     source,
+    sourceLockedAt: row.sourceLockedAt?.toISOString() ?? null,
     assignmentBasis: row.assignmentBasis,
     status: row.status,
     revision: row.revision,

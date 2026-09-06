@@ -18,6 +18,8 @@ test("actual US Vite proxy reaches only the independent API with its configured 
     for (const route of [
       "/api/us/traceability/profile",
       "/api/us/traceability/access",
+      "/api/us/traceability/lots?limit=50&offset=0",
+      "/api/us/traceability/lots/a0000000-0000-4000-8000-000000000001",
       "/api/us/traceability/parties?archived=false&limit=50&offset=0",
       "/api/us/traceability/locations?roles=supplier&roles=receive_at",
       "/api/us/traceability/parties/a0000000-0000-4000-8000-000000000001",
@@ -35,10 +37,26 @@ test("actual US Vite proxy reaches only the independent API with its configured 
       "/api/us/traceability/parties-extra",
       "/api/us/traceability/locations/invalid-id",
       "/api/us/traceability/parties/a0000000-0000-4000-8000-000000000001/exports",
-      "/api/us/traceability/lots",
+      "/api/us/traceability/lots/invalid-id",
+      "/api/us/traceability/lots/a0000000-0000-4000-8000-000000000001/source/unlock",
     ]) {
       const response = await fetch(`http://localhost:5174${route}`);
       assert.equal(response.status, 404);
+      await response.arrayBuffer();
+    }
+    for (const [command, method] of [
+      ["source", "PATCH"],
+      ["status", "POST"],
+    ]) {
+      const response = await fetch(
+        `http://localhost:5174/api/us/traceability/lots/a0000000-0000-4000-8000-000000000001/${command}`,
+        {
+          method,
+          headers: { "content-type": "application/json", origin: "http://localhost:5174" },
+          body: "{}",
+        },
+      );
+      assert.equal(response.status, 401);
       await response.arrayBuffer();
     }
     const denied = await fetch("http://localhost:5174/api/us-auth/sign-in/email", {

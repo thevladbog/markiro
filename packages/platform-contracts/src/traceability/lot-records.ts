@@ -45,6 +45,7 @@ export const traceabilityLotSchema = z
     tlc: preservedTlcSchema,
     source: traceabilityLotSourceSchema,
     assignmentBasis: tlcAssignmentBasisSchema,
+    sourceLockedAt: z.iso.datetime({ offset: true }).nullable(),
     status: traceabilityLotStatusSchema,
     revision: z.number().int().min(1).max(2147483647),
     createdBy: actor,
@@ -57,6 +58,11 @@ export const traceabilityLotSchema = z
 export const postLotStatusSchema = changeLotStatusSchema.safeExtend({
   expectedRevision: z.number().int().min(1).max(2147483646),
 });
+
+export const patchLotSourceSchema = postLotStatusSchema
+  .pick({ reason: true, expectedRevision: true })
+  .extend({ source: traceabilityLotSourceSchema })
+  .strict();
 
 export const listTraceabilityLotsQuerySchema = listUsPartiesQuerySchema
   .pick({ limit: true, offset: true, search: true })
@@ -83,4 +89,5 @@ export type TraceabilityLot = z.infer<typeof traceabilityLotSchema>;
 export type TraceabilityLotList = z.infer<typeof traceabilityLotListSchema>;
 export type CreateTraceabilityLotInput = z.infer<typeof createTraceabilityLotSchema>;
 export type PostLotStatusInput = z.infer<typeof postLotStatusSchema>;
+export type PatchLotSourceInput = z.infer<typeof patchLotSourceSchema>;
 export type ListTraceabilityLotsQuery = z.infer<typeof listTraceabilityLotsQuerySchema>;

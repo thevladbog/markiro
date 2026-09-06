@@ -5,6 +5,7 @@ import {
   HttpCode,
   Inject,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -15,6 +16,7 @@ import { ApiCookieAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from "@ne
 import {
   createTraceabilityLotSchema,
   listTraceabilityLotsQuerySchema,
+  patchLotSourceSchema,
   platformUuidSchema,
   postLotStatusSchema,
   traceabilityLotListSchema,
@@ -28,7 +30,11 @@ import { UsSessionGuard, type UsRequest } from "./us-profile.controller";
 
 const conflictSchema = z.union([
   z.object({ code: z.literal("LOT_DUPLICATE"), existingId: platformUuidSchema }).strict(),
-  z.object({ code: z.enum(["lot_revision_conflict", "lot_reference_archived"]) }).strict(),
+  z
+    .object({
+      code: z.enum(["lot_revision_conflict", "lot_reference_archived", "lot_source_locked"]),
+    })
+    .strict(),
 ]);
 
 @Controller("traceability/lots")
@@ -117,6 +123,29 @@ export class UsLotController {
     const principal = this.principal(request);
     return this.runtime.databaseOperation(() =>
       this.runtime.lots.getLot(principal.tenantId, principal.userId, id),
+    );
+  }
+
+  @Patch(":id/source")
+  @ApiOperation({
+    summary: "Correct a lot source before its first finalized event",
+    description:
+      "Requires lot-creation permission, the current revision and a reason. Preserves lot ID, TLC and product. The first finalized event permanently locks source correction; there is no unlock command.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodBody(patchLotSourceSchema)
+  @ApiZodResponse({ status: 200, schema: traceabilityLotSchema })
+  @ApiZodResponse({ status: 409, schema: conflictSchema })
+  source(@Req() request: UsRequest, @Param("id") id: unknown, @Body() body: unknown) {
+    const principal = this.principal(request);
+    return this.runtime.databaseOperation(() =>
+      this.runtime.lots.changeSource(
+        principal.tenantId,
+        principal.userId,
+        id,
+        body,
+        this.requestId(request),
+      ),
     );
   }
 

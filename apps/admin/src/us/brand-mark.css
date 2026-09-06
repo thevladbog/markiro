@@ -1,0 +1,32 @@
+.us-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 10px;
+  white-space: nowrap;
+  font: 600 16px/1 var(--font-mono);
+  letter-spacing: 0.16em;
+}
+
+.us-brand-mark svg {
+  display: block;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+}
+
+.us-brand-mark--inverse {
+  color: var(--fg-on-inverse);
+}
+
+.us-brand-mark--inverse .us-brand-mark__modules {
+  fill: var(--surface-inverse);
+}
+
+.us-brand-mark--rail {
+  color: var(--mk-rail-fg);
+}
+
+.us-brand-mark--rail .us-brand-mark__modules {
+  fill: var(--mk-rail-bg);
+}

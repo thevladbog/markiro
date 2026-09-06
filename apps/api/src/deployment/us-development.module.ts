@@ -13,6 +13,7 @@ import { UsProductProfileController } from "./us-product-profile.controller";
 import { UsRuntime } from "./us-runtime";
 import { UsProfileController, UsSessionGuard } from "./us-profile.controller";
 import { UsMasterDataController } from "./us-master-data.controller";
+import { UsReferenceDocumentController } from "./us-reference-document.controller";
 
 @Controller()
 class UsDevelopmentController {
@@ -54,6 +55,7 @@ export class UsDevelopmentModule {
         UsCatalogController,
         UsLotController,
         UsProductProfileController,
+        UsReferenceDocumentController,
       ],
       providers: [{ provide: UsRuntime, useValue: runtime }, UsSessionGuard],
     };

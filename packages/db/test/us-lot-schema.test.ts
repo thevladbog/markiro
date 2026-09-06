@@ -2,6 +2,14 @@ import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import { schema } from "../src/index.js";
 describe("lot storage tenant anchors", () => {
+  it("keeps correction reason and the server-only source lock nullable for existing lots", () => {
+    const config = getTableConfig(schema.traceabilityLots);
+    expect(schema.traceabilityLots.lastSourceReason.notNull).toBe(false);
+    expect(schema.traceabilityLots.sourceLockedAt.notNull).toBe(false);
+    expect(config.checks.map((check) => check.name)).toContain(
+      "traceability_lots_source_reason_length",
+    );
+  });
   it("anchors product and both source forms to their tenant", () => {
     const config = getTableConfig(schema.traceabilityLots);
     for (const [name, column, table] of [

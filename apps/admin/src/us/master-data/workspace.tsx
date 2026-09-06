@@ -6,6 +6,8 @@ import { UsClientError, type UsBrowserClient } from "../client.js";
 import { LocationsView } from "./locations-view.js";
 import { PartiesView } from "./parties-view.js";
 import { ProductsView } from "../catalog/products-view.js";
+import { LotsView } from "../lots/lots-view.js";
+import { UsBrandMark } from "../brand-mark.js";
 import { navStyle, type NoticeKind } from "./workspace-shared.js";
 import "./master-data.css";
 
@@ -17,7 +19,7 @@ export type MasterDataProps = {
   onSessionLost: () => void;
 };
 
-type View = "parties" | "locations" | "products";
+type View = "parties" | "locations" | "products" | "lots";
 type Notice = { kind: NoticeKind; key: string } | null;
 
 export function MasterDataWorkspace({
@@ -181,7 +183,7 @@ export function MasterDataWorkspace({
   return (
     <div className="us-md-shell" aria-busy={mutationPending}>
       <aside className="us-md-sidebar">
-        <div className="us-md-wordmark">markiro</div>
+        <UsBrandMark surface="rail" />
         <div className="us-md-org">
           <strong>{organization.name}</strong>
           <span>
@@ -189,6 +191,16 @@ export function MasterDataWorkspace({
           </span>
         </div>
         <nav aria-label={t("md.referenceData")}>
+          <Button
+            variant="secondary"
+            className={`us-md-nav ${view === "lots" ? "is-active" : ""}`}
+            style={navStyle(view === "lots")}
+            disabled={mutationPending}
+            aria-current={view === "lots" ? "page" : undefined}
+            onClick={() => navigate("lots")}
+          >
+            {t("lots.title")}
+          </Button>
           <Button
             variant="secondary"
             className={`us-md-nav ${view === "products" ? "is-active" : ""}`}
@@ -251,7 +263,17 @@ export function MasterDataWorkspace({
             {t(notice.key)}
           </div>
         ) : null}
-        {view === "products" ? (
+        {view === "lots" ? (
+          <LotsView
+            key={`lots-${viewGeneration}`}
+            {...viewProps}
+            profileCode={profile.code}
+            timeZone={profile.timeZone}
+            canManageQa={
+              !accessError && !accessPending && capabilities.includes(US_CAPABILITY.QA_MANAGE)
+            }
+          />
+        ) : view === "products" ? (
           <ProductsView
             key={`products-${viewGeneration}`}
             {...viewProps}

@@ -5,6 +5,7 @@ import { I18nextProvider, useTranslation } from "react-i18next";
 import { createUsBrowserClient, UsClientError, type UsBrowserClient } from "./client.js";
 import { masterDataCopy } from "./master-data/copy.js";
 import { MasterDataWorkspace } from "./master-data/workspace.js";
+import { UsBrandMark } from "./brand-mark.js";
 
 const copy = {
   "en-US": {
@@ -498,9 +499,7 @@ function UsApplication({ client }: { client: UsBrowserClient }) {
   return (
     <main className="us-app">
       <aside className="us-brand">
-        <div className="us-wordmark" aria-label="Markiro">
-          markiro
-        </div>
+        <UsBrandMark surface="inverse" />
         <div>
           <h2>{t("brandTitle")}</h2>
           <p>{t("brandBody")}</p>

@@ -7,6 +7,8 @@ import test from "node:test";
 import { startUsBrowserFixture } from "../browser-fixture.mjs";
 import { exerciseUsMasterData } from "./master-data-flow.mjs";
 import { exerciseUsCatalog } from "./catalog-flow.mjs";
+import { exerciseUsLots } from "./lot-flow.mjs";
+import { expectUsBrand } from "./brand-flow.mjs";
 
 // Use the separately pinned browser tool workspace. No browser dependency enters
 // the product bundle. NODE_PATH can supply an already installed read-only runtime.
@@ -49,7 +51,13 @@ test(
       await page.goto("http://localhost:5174");
       await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
       await expect(page.getByRole("link", { name: /register|sign up|forgot/i })).toHaveCount(0);
+      await expectUsBrand({ page, expect });
       await page.screenshot({ path: join(screenshots, "sign-in-en.png"), fullPage: true });
+      await page.getByRole("button", { name: "Change theme", exact: true }).click();
+      await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+      await expectUsBrand({ page, expect });
+      await page.screenshot({ path: join(screenshots, "sign-in-en-dark.png"), fullPage: true });
+      await page.getByRole("button", { name: "Change theme", exact: true }).click();
 
       await page.getByLabel("Email", { exact: true }).fill(fixture.email);
       await page.getByRole("button", { name: "Language", exact: true }).click();
@@ -62,6 +70,7 @@ test(
       await expect(page.locator("html")).toHaveAttribute("lang", "es-US");
       await page.setViewportSize({ width: 390, height: 844 });
       await page.getByLabel("Correo electrónico", { exact: true }).fill("");
+      await expectUsBrand({ page, expect });
       await page.screenshot({ path: join(screenshots, "sign-in-es-mobile.png"), fullPage: true });
       assert.equal(
         await page.evaluate(
@@ -117,6 +126,7 @@ test(
       await expect(page.getByText("America/Chicago", { exact: true })).toBeVisible();
       await exerciseUsMasterData({ page, expect, screenshots, fixture });
       await exerciseUsCatalog({ page, expect, screenshots, fixture });
+      await exerciseUsLots({ page, expect, screenshots, fixture });
       await page.screenshot({ path: join(screenshots, "profile-en.png"), fullPage: true });
       await page.getByRole("button", { name: "Change theme", exact: true }).click();
       await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -136,6 +146,7 @@ test(
         path: join(screenshots, "profile-es-dark-mobile.png"),
         fullPage: true,
       });
+      await expectUsBrand({ page, expect });
       await page.getByRole("button", { name: "Idioma", exact: true }).click();
       await page.getByRole("button", { name: "Sign out", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();

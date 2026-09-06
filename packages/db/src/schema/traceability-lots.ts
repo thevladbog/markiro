@@ -48,6 +48,9 @@ export const traceabilityLots = pgTable(
     status: traceabilityLotStatus("status").notNull().default("active"),
     revision: integer("revision").notNull().default(1),
     lastStatusReason: text("last_status_reason"),
+    lastSourceReason: text("last_source_reason"),
+    // Finalizers set this in their transaction; the database trigger prevents reversal.
+    sourceLockedAt: timestamp("source_locked_at", { withTimezone: true }),
     // Opaque historical actors are retained independently of cabinet account lifecycle.
     createdBy: text("created_by").notNull(),
     updatedBy: text("updated_by").notNull(),
@@ -103,6 +106,10 @@ export const traceabilityLots = pgTable(
     check(
       "traceability_lots_reason_length",
       sql`length(btrim(${table.lastStatusReason})) BETWEEN 3 AND 2000`,
+    ),
+    check(
+      "traceability_lots_source_reason_length",
+      sql`length(btrim(${table.lastSourceReason})) BETWEEN 3 AND 2000`,
     ),
   ],
 );

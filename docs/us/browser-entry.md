@@ -12,6 +12,8 @@ Public signup, password recovery, factor replacement, organization creation, pro
 
 Enrollment keys, backup codes and passwords stay in transient component state. Enrollment material clears on successful verification, session loss and logout. Late responses cannot restore obsolete UI state. Logout waits for an already-started mutation to settle before sending sign-out, so a delayed MFA response cannot set a new session cookie after successful logout. A failed sign-out does not claim that the server session ended.
 
+The subsequent [lot browser increment](lot-browser.md), 2026-09-06, adds the connected lot registry, imported creation, approved source correction and controlled QA status changes. It adds only exact lot collection, UUID item and source/status command proxy paths; event/export workflows remain unavailable. The initial verification below is historical.
+
 ## Local build boundary
 
 `apps/admin/vite.us.config.ts` uses `apps/admin/us` as its own HTML root and writes only `apps/admin/dist-us`. It does not load primary environment files or copy the RU public directory. The entry rejects imports of other admin application modules, except bundled assets. The ordinary RU entry, router, translations and Vite configuration remain unchanged.
@@ -54,6 +56,34 @@ US_TEST_DATABASE_URL=postgres://markiro_us:markiro-us-development-only@127.0.0.1
 ```
 
 Both checks reserve ports 3100 and 5174; stop manually started US application servers first. Never substitute a primary database URL. During local verification the existing main-checkout Playwright runtime was consumed read-only through `NODE_PATH`; no main-checkout files were changed.
+
+## Brand restoration — 2026-09-06
+
+The access/profile shell and reference-data workspace now share `UsBrandMark`.
+It preserves the existing eight-module Markiro symbol (including the lower green
+module) and the uppercase English landing wordmark, `MARKIRO`, in locally bundled
+IBM Plex Mono 600 with letter spacing. The previous large lowercase text-only
+placeholders were not the approved brand composition. The brand remains Latin
+in both English and Spanish; no new logo or font family was introduced.
+
+The component uses shared UI tokens, with inverse-surface colors for access/profile
+screens and fixed rail colors for the workspace. It imports no RU application code
+and changes no shared component, primary app, release setting or dependency.
+
+DOM tests cover both consumers and locale/theme changes. The local Chromium flow
+checks exact symbol geometry, actual font loading, foreground/background mapping
+and bounds, including lot screens at 1440/1024/390 pixels in EN/ES and both themes.
+Screenshots are inspected separately from these automated assertions. This does
+not establish hosted-browser or physical-device acceptance; the Pencil document
+was not modified in this code-only correction.
+
+Verification for this correction: all 1,149 admin tests passed (101 files, no
+skips); typecheck, RU/US builds, 17 isolation contracts and the release-isolation
+checker passed. Lint had no errors and retained five existing RU hook warnings;
+both builds retained their large-chunk warnings. The two real local browser/proxy
+scenarios passed, and desktop sign-in in both themes plus desktop EN/light and
+mobile ES/dark lot screenshots were visually inspected. No hosted, physical-device
+or remote CI check was performed, and no commit, push or release was made.
 
 ## Remaining limits
 

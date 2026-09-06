@@ -1,5 +1,11 @@
 import { z } from "zod";
 import {
+  createTraceabilityLotSchema,
+  listTraceabilityLotsQuerySchema,
+  patchLotSourceSchema,
+  postLotStatusSchema,
+  traceabilityLotListSchema,
+  traceabilityLotSchema,
   productTraceabilityProfileSchema,
   putProductTraceabilityProfileSchema,
   createUsProductSchema,
@@ -32,6 +38,10 @@ export type UsClientErrorCode =
   | "party_archived"
   | "product_gtin_taken"
   | "product_gtin_locked"
+  | "lot_duplicate"
+  | "lot_source_locked"
+  | "lot_revision_conflict"
+  | "lot_reference_archived"
   | "conflict"
   | "rate_limited"
   | "profile_not_provisioned"
@@ -43,6 +53,13 @@ export class UsClientError extends Error {
   constructor(readonly code: UsClientErrorCode) {
     super(code);
     this.name = "UsClientError";
+  }
+}
+
+export class UsLotDuplicateError extends UsClientError {
+  constructor(readonly existingId: string) {
+    super("lot_duplicate");
+    this.name = "UsLotDuplicateError";
   }
 }
 
@@ -91,6 +108,7 @@ const accessPath = "/api/us/traceability/access";
 const partiesPath = "/api/us/traceability/parties";
 const locationsPath = "/api/us/traceability/locations";
 const productsPath = "/api/us/traceability/catalog/products";
+const lotsPath = "/api/us/traceability/lots";
 const deploymentSchema = z
   .object({
     edition: z.literal("US"),
@@ -156,6 +174,24 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
         if (response.ok) throw new UsClientError("invalid_response");
       }
       if (!response.ok) {
+        if (response.status === 409 && (path === lotsPath || path.startsWith(`${lotsPath}/`))) {
+          const duplicate = z
+            .object({ code: z.literal("LOT_DUPLICATE"), existingId: platformUuidSchema })
+            .strict()
+            .safeParse(value);
+          if (duplicate.success) throw new UsLotDuplicateError(duplicate.data.existingId);
+          const conflict = z
+            .object({
+              code: z.enum([
+                "lot_source_locked",
+                "lot_revision_conflict",
+                "lot_reference_archived",
+              ]),
+            })
+            .strict()
+            .safeParse(value);
+          if (conflict.success) throw new UsClientError(conflict.data.code);
+        }
         if (
           response.status === 409 &&
           (path === productsPath || path.startsWith(`${productsPath}/`))
@@ -197,6 +233,49 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
     }
   }
   return {
+    async listLots(input: unknown = {}) {
+      const query = checked(listTraceabilityLotsQuerySchema, input, "invalid_input");
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(query)) {
+        if (value !== undefined) params.set(key, String(value));
+      }
+      return request(`${lotsPath}?${params}`, traceabilityLotListSchema);
+    },
+    async getLot(id: unknown) {
+      const lotId = checked(platformUuidSchema, id, "invalid_input");
+      const result = await request(`${lotsPath}/${lotId}`, traceabilityLotSchema);
+      if (result.id !== lotId) throw new UsClientError("invalid_response");
+      return result;
+    },
+    async createLot(input: unknown) {
+      const body = checked(createTraceabilityLotSchema, input, "invalid_input");
+      const result = await request(lotsPath, traceabilityLotSchema, "POST", body);
+      if (result.productId !== body.productId || result.tlc !== body.tlc)
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async changeLotSource(id: unknown, input: unknown) {
+      const lotId = checked(platformUuidSchema, id, "invalid_input");
+      const result = await request(
+        `${lotsPath}/${lotId}/source`,
+        traceabilityLotSchema,
+        "PATCH",
+        checked(patchLotSourceSchema, input, "invalid_input"),
+      );
+      if (result.id !== lotId) throw new UsClientError("invalid_response");
+      return result;
+    },
+    async changeLotStatus(id: unknown, input: unknown) {
+      const lotId = checked(platformUuidSchema, id, "invalid_input");
+      const result = await request(
+        `${lotsPath}/${lotId}/status`,
+        traceabilityLotSchema,
+        "POST",
+        checked(postLotStatusSchema, input, "invalid_input"),
+      );
+      if (result.id !== lotId) throw new UsClientError("invalid_response");
+      return result;
+    },
     async getProductProfile(id: unknown) {
       const productId = checked(platformUuidSchema, id, "invalid_input");
       const result = await request(
