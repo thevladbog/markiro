@@ -669,6 +669,7 @@ function assertAuthorityContract(adapted, { alb }) {
     "/index.md",
     "/og-markiro.jpg",
     "/favicon.svg",
+    "/apple-touch-icon.png",
     "/site.webmanifest",
     "/images/articles/markirovka-piva-2026-control-map.svg",
     "/legal/files/markiro_mkr-pd-01_2026.08-01_ru.pdf",
@@ -745,6 +746,7 @@ function assertAuthorityContract(adapted, { alb }) {
   for (const path of [
     "/og-markiro.jpg",
     "/favicon.svg",
+    "/apple-touch-icon.png",
     "/site.webmanifest",
     "/images/articles/markirovka-piva-2026-control-map.svg",
     "/legal/files/markiro_mkr-pd-01_2026.08-01_ru.pdf",

@@ -21,15 +21,15 @@ const articles = articlesForLocale(locale).slice(0, 3);
 
     <div class="materials-grid" data-reveal-group>
       {articles.map((article, index) => (
-        <a class="materials-card" href={article.path} data-reveal>
+        <article class="materials-card" data-materials-card data-reveal>
           <span class="materials-card__number">{String(index + 1).padStart(2, "0")}</span>
-          <h3>{article.navigationLabel}</h3>
+          <h3><a class="materials-card__link" href={article.path}>{article.navigationLabel}</a></h3>
           <p>{article.description}</p>
           <span class="materials-card__meta">
             <time datetime={article.publishedAt}>{formatLegalEffectiveDate(article.publishedAt, locale)}</time>
             <span>{" · "}{article.readingTimeMinutes} {minutes}</span>
           </span>
-        </a>
+        </article>
       ))}
     </div>
 

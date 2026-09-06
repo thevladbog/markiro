@@ -1216,6 +1216,42 @@ describe("rendered landing page", () => {
     ).toBeUndefined();
   });
 
+  it("ships an Apple touch icon and links it from every page", () => {
+    expect(existsSync(path.join(outputDirectory, "apple-touch-icon.png"))).toBe(true);
+    for (const [route, routeDocument] of documents) {
+      const link = routeDocument.querySelector('link[rel="apple-touch-icon"]');
+      expect(link?.getAttribute("href"), route).toBe("/apple-touch-icon.png");
+      expect(link?.getAttribute("sizes"), route).toBe("180x180");
+    }
+  });
+
+  it("describes the hero photograph for image search", () => {
+    expect(document.querySelector("[data-hero-image]")?.getAttribute("alt")).toContain("розлива");
+    expect(
+      documents.get("/en/")?.querySelector("[data-hero-image]")?.getAttribute("alt"),
+    ).toContain("bottling line");
+  });
+
+  it("keeps card links short so the anchor text is the title alone", () => {
+    const cards = [...document.querySelectorAll("#materials [data-materials-card]")];
+    expect(cards).toHaveLength(3);
+    for (const card of cards) {
+      const link = card.querySelector("a[href]");
+      expect(link?.textContent?.trim()).toBe(card.querySelector("h3")?.textContent?.trim());
+      expect(card.querySelector("p")?.closest("a")).toBeNull();
+    }
+    for (const route of HUB_ROUTES) {
+      const hub = documents.get(route) as Document;
+      for (const item of hub.querySelectorAll("[data-hub-item]")) {
+        const link = item.querySelector("a[href]");
+        const description = item.querySelector(".hub-item__description");
+        expect(description, route).not.toBeNull();
+        expect(description?.closest("a"), route).toBeNull();
+        expect(link?.textContent?.length ?? 999, route).toBeLessThan(160);
+      }
+    }
+  });
+
   it("gives the above-the-fold factory image stable dimensions", () => {
     const heroImage = document.querySelector<HTMLImageElement>("[data-hero-image]");
     expect(Number(heroImage?.getAttribute("width"))).toBeGreaterThan(0);

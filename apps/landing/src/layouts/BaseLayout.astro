@@ -82,6 +82,7 @@ const jsonLd = serializeJsonLd(
     <link rel="alternate" type="application/rss+xml" title={feedHub.title} href={feedPath} />
     {markdownPath && <link rel="alternate" type="text/markdown" href={markdownPath} />}
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href={page.locale === "ru" ? "/site.webmanifest" : "/site.en.webmanifest"} />
     <title>{page.title}</title>
     <script type="application/ld+json" set:html={jsonLd} is:inline />

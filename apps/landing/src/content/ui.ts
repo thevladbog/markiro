@@ -74,6 +74,7 @@ const RU = {
     },
     hero: {
       heading: ["Маркировка и агрегация.", "Линия идёт."],
+      imageAlt: "Оператор у конвейера линии розлива: бутылки с напитком движутся по ленте",
       kicker: "МАРКИРОВКА / АГРЕГАЦИЯ / ПРОСЛЕЖИВАЕМОСТЬ",
       lead: "Производственная система для пива, сидра и слабоалкогольных напитков: проверяем коды, собираем короба, печатаем этикетки и сохраняем операции при нестабильной сети.",
       note: "ДЛЯ ПРОИЗВОДСТВЕННЫХ ЛИНИЙ, КОТОРЫЕ НЕЛЬЗЯ ОСТАНАВЛИВАТЬ",
@@ -258,6 +259,7 @@ const EN = {
     },
     hero: {
       heading: ["Serialization and aggregation.", "Keep the line moving."],
+      imageAlt: "An operator at a bottling line watching bottles move along the conveyor",
       kicker: "SERIALIZATION / AGGREGATION / TRACEABILITY",
       lead: "A production system for beer, cider and low-alcohol beverages: verify codes, aggregate cases, print labels, and retain operations through unstable connectivity.",
       note: "FOR PRODUCTION LINES THAT CANNOT AFFORD TO STOP",
