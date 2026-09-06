@@ -27,6 +27,21 @@ export const LIGHTHOUSE_THRESHOLDS = Object.freeze({
  * TTI instead; on a shared CI runner that can select a run whose score fell
  * through total-blocking-time noise while its paint metrics stayed average.
  */
+/**
+ * The gate must measure what production serves: the enabled demo form with its
+ * captcha container. Any PUBLIC_* value already in the environment wins, so a
+ * caller can still audit the disabled variant on purpose.
+ */
+export function lighthouseBuildEnvironment(environment) {
+  return {
+    PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
+    PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "ysc1_lighthouse-gate-key",
+    PUBLIC_PHONE: "+7 934 355-14-90",
+    ...environment,
+    ASTRO_TELEMETRY_DISABLED: "1",
+  };
+}
+
 export function representativeLighthouseReport(reports) {
   if (reports.length !== LIGHTHOUSE_RUN_COUNT) {
     throw new Error(`expected ${LIGHTHOUSE_RUN_COUNT} Lighthouse reports`);
@@ -109,13 +124,11 @@ export async function runLandingLighthouse() {
   const toolRoot = path.resolve(import.meta.dirname, "..");
   const appRoot = path.resolve(toolRoot, "../../apps/landing");
   const astro = path.join(appRoot, "node_modules/.bin/astro");
-  await execFileAsync(astro, ["build"], {
-    cwd: appRoot,
-    env: { ...process.env, ASTRO_TELEMETRY_DISABLED: "1" },
-  });
+  const environment = lighthouseBuildEnvironment(process.env);
+  await execFileAsync(astro, ["build"], { cwd: appRoot, env: environment });
   const preview = spawn(astro, ["preview", "--host", "127.0.0.1", "--port", "5473"], {
     cwd: appRoot,
-    env: { ...process.env, ASTRO_TELEMETRY_DISABLED: "1" },
+    env: environment,
     stdio: "ignore",
   });
   const outputRoot = await mkdtemp(path.join(tmpdir(), "markiro-lighthouse-"));

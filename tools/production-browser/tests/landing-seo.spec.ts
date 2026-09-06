@@ -307,6 +307,30 @@ for (const route of routes) {
   });
 }
 
+test("the captcha runtime loads only once the visitor reaches the demo form", async ({ page }) => {
+  let captchaRequests = 0;
+  await page.route("https://smartcaptcha.cloud.yandex.ru/captcha.js", async (route) => {
+    captchaRequests += 1;
+    await route.fulfill({
+      body: "window.smartCaptcha = { reset() {} };",
+      contentType: "application/javascript",
+      status: 200,
+    });
+  });
+
+  await page.goto("/", { waitUntil: "networkidle" });
+  expect(captchaRequests).toBe(0);
+  await expect(
+    page.locator('script[src="https://smartcaptcha.cloud.yandex.ru/captcha.js"]'),
+  ).toHaveCount(0);
+
+  await page.locator('[data-demo-form] input[name="name"]').focus();
+  await expect.poll(() => captchaRequests).toBe(1);
+  await page.locator('[data-demo-form] input[name="company"]').focus();
+  await page.waitForTimeout(200);
+  expect(captchaRequests).toBe(1);
+});
+
 test("keyboard focus is visible on the first interactive control", async ({ page }) => {
   await page.goto("/");
   await page.keyboard.press("Tab");
