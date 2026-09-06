@@ -89,7 +89,12 @@ test("production Caddy redirects URL variants to their canonical form and keeps 
 });
 
 test("production Caddy caches static images and manifests for a day", async ({ request }) => {
-  for (const path of ["/og-markiro.jpg", "/favicon.svg", "/site.webmanifest", "/brand/markiro-logo.svg"]) {
+  for (const path of [
+    "/og-markiro.jpg",
+    "/favicon.svg",
+    "/site.webmanifest",
+    "/brand/markiro-logo.svg",
+  ]) {
     const response = await request.get(path);
     expect(response.status(), path).toBe(200);
     expect(response.headers()["cache-control"], path).toBe("public, max-age=86400");
@@ -114,5 +119,5 @@ test("production Caddy serves markdown mirrors and the full text as noindex agen
 
   const feed = await request.get("/stati/rss.xml");
   expect(feed.status()).toBe(200);
-  expect(await feed.text()).toContain("<rss version=\"2.0\"");
+  expect(await feed.text()).toContain('<rss version="2.0"');
 });

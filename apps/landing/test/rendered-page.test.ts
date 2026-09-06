@@ -68,6 +68,7 @@ beforeAll(() => {
         ASTRO_TELEMETRY_DISABLED: "1",
         PUBLIC_DEMO_CONSENT_VERSION: "stray-enabled-consent",
         PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
+        PUBLIC_INDEXNOW_KEY: "markiro-indexnow-render-key",
         PUBLIC_PERSONAL_DATA_CONSENT_PATH: "/personal-data-consent/",
         PUBLIC_PHONE: "",
         PUBLIC_PRIVACY_POLICY_PATH: "/privacy/",
@@ -1473,6 +1474,18 @@ describe("rendered landing page", () => {
     const routeDocument = documents.get("/markirovka-chestny-znak/") as Document;
     expect(routeDocument.querySelector('.seo-cta a[href$="#demo"]')).not.toBeNull();
     expect(routeDocument.querySelector('.seo-cta a[href^="tel:"]')).toBeNull();
+  });
+
+  it("publishes the IndexNow key file only when the key is configured", () => {
+    const keyFile = "markiro-indexnow-render-key.txt";
+    expect(existsSync(path.join(outputDirectory, keyFile))).toBe(false);
+    expect(existsSync(path.join(enabledOutputDirectory, keyFile))).toBe(true);
+    expect(readFileSync(path.join(enabledOutputDirectory, keyFile), "utf8")).toBe(
+      "markiro-indexnow-render-key",
+    );
+    expect(enabledDocuments.get("/")?.documentElement.outerHTML).not.toContain(
+      "markiro-indexnow-render-key",
+    );
   });
 
   it("falls back to a JPEG for article hero images instead of the multi-megabyte PNG", () => {

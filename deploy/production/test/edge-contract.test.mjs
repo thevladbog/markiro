@@ -18,6 +18,7 @@ const publicLandingBuildVariables = Object.freeze([
   "PUBLIC_DEMO_SUBMISSION_ENABLED",
   "PUBLIC_SMARTCAPTCHA_CLIENT_KEY",
   "PUBLIC_PHONE",
+  "PUBLIC_INDEXNOW_KEY",
 ]);
 const pinnedVeraPdfImage =
   "docker.io/verapdf/cli@sha256:d5ee329657cf9bc4b2400392dd54c7d0a0ce9980ff6fa2da5590eebeec007cdb";

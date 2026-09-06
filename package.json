@@ -16,6 +16,8 @@
     "check:deps": "node tools/check-no-major-bumps.mjs",
     "test:dependency-guard": "node --test tools/test/*.test.mjs",
     "test:ci-policy": "node --test tools/ci/test/*.test.mjs",
+    "test:indexnow": "node --test tools/indexnow/test/*.test.mjs",
+    "indexnow:submit": "node tools/indexnow/submit.mjs",
     "test:yandex-runtime": "node --test deploy/yandex/test/*.test.mjs",
     "test:station-release:contract": "node --test tools/station-release/test/*.test.mjs",
     "test:signer-release:contract": "node --test tools/signer-release/test/*.test.mjs",

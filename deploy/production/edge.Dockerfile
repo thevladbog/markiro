@@ -53,9 +53,11 @@ FROM legal-documents-build AS landing-build
 ARG PUBLIC_DEMO_SUBMISSION_ENABLED=false
 ARG PUBLIC_SMARTCAPTCHA_CLIENT_KEY=
 ARG PUBLIC_PHONE=
+ARG PUBLIC_INDEXNOW_KEY=
 ENV PUBLIC_DEMO_SUBMISSION_ENABLED=${PUBLIC_DEMO_SUBMISSION_ENABLED}
 ENV PUBLIC_SMARTCAPTCHA_CLIENT_KEY=${PUBLIC_SMARTCAPTCHA_CLIENT_KEY}
 ENV PUBLIC_PHONE=${PUBLIC_PHONE}
+ENV PUBLIC_INDEXNOW_KEY=${PUBLIC_INDEXNOW_KEY}
 RUN pnpm --filter @markiro/ui build
 COPY --from=legal-artifact-verification /tmp/legal-artifacts.verified /tmp/legal-artifacts.verified
 RUN pnpm --filter @markiro/landing build
