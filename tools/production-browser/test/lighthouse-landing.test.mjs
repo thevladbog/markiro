@@ -37,6 +37,16 @@ test("uses three sequential runs and the representative Lighthouse median", () =
   );
 });
 
+test("gates on the run with the median performance score, not Lighthouse's metric median", () => {
+  // A shared CI runner can drop one run's score through total-blocking-time
+  // alone while its FCP/TTI stay in the middle; that run must not be the gate.
+  const cpuNoise = report({ performance: 0.86 }, { fcp: 1000, interactive: 3000 });
+  const medianScore = report({ performance: 0.94 }, { fcp: 900, interactive: 2800 });
+  const best = report({ performance: 0.95 }, { fcp: 1200, interactive: 3300 });
+  assert.equal(representativeLighthouseReport([cpuNoise, medianScore, best]), medianScore);
+  assert.equal(representativeLighthouseReport([best, cpuNoise, medianScore]), medianScore);
+});
+
 test("gates the home page, a commercial topic page and an article", () => {
   assert.ok(Object.isFrozen(LIGHTHOUSE_ROUTES));
   assert.deepEqual(LIGHTHOUSE_ROUTES, [

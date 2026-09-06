@@ -5,7 +5,6 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { chromium } from "@playwright/test";
-import { computeMedianRun } from "lighthouse/core/lib/median-run.js";
 
 const execFileAsync = promisify(execFile);
 export const LIGHTHOUSE_RUN_COUNT = 3;
@@ -22,11 +21,24 @@ export const LIGHTHOUSE_THRESHOLDS = Object.freeze({
   performance: 0.9,
 });
 
+/**
+ * The gate judges the performance score, so the representative run is the one
+ * with the median score. Lighthouse's own median-run helper picks by FCP and
+ * TTI instead; on a shared CI runner that can select a run whose score fell
+ * through total-blocking-time noise while its paint metrics stayed average.
+ */
 export function representativeLighthouseReport(reports) {
   if (reports.length !== LIGHTHOUSE_RUN_COUNT) {
     throw new Error(`expected ${LIGHTHOUSE_RUN_COUNT} Lighthouse reports`);
   }
-  return computeMedianRun(reports);
+  const scored = reports.map((report) => {
+    const score = report?.categories?.performance?.score;
+    if (typeof score !== "number" || !Number.isFinite(score))
+      throw new Error("Lighthouse performance score is missing");
+    return { report, score };
+  });
+  scored.sort((left, right) => left.score - right.score);
+  return scored[Math.floor(scored.length / 2)].report;
 }
 
 export function assertLighthouseReport(report, profile) {
