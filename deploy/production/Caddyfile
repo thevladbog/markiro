@@ -349,7 +349,7 @@
 
 		@landingStatic {
 			method GET HEAD
-			path_regexp landingStatic ^/(?:images/.+|brand/.+|legal/files/.+|og-[^/]+\.jpg|favicon\.svg|site(?:\.en)?\.webmanifest)$
+			path_regexp landingStatic ^/(?:images/.+|brand/.+|legal/files/.+|og-[^/]+\.jpg|favicon\.svg|apple-touch-icon\.png|site(?:\.en)?\.webmanifest)$
 		}
 		handle @landingStatic {
 			header Cache-Control "public, max-age=86400"

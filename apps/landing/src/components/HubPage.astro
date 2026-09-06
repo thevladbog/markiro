@@ -111,7 +111,7 @@ const graph = buildHubPageGraph(
         </div>
         <div class="legal-registry__list">
           {group.entries.map((entry) => (
-            <article class="legal-registry__entry" data-hub-item>
+            <article class="legal-registry__entry hub-item" data-hub-item>
               <a class="legal-registry__item" href={entry.path}>
                 <span class="legal-registry__code">{entry.code}</span>
                 <span class="legal-registry__title">{entry.name}</span>
@@ -120,8 +120,8 @@ const graph = buildHubPageGraph(
                   {entry.meta.length > 0 && <span>{" · "}{entry.meta}</span>}
                 </span>
                 <span class="legal-registry__arrow" aria-hidden="true">→</span>
-                <span class="hub-item__description">{entry.description}</span>
               </a>
+              <p class="hub-item__description">{entry.description}</p>
             </article>
           ))}
         </div>
