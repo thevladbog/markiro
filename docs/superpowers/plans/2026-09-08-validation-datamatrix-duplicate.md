@@ -202,7 +202,7 @@ Produces типы выше, `validationPrintInputSchema`, `validationPrintPolicy
 `productLabelValueDigest(value: unknown): string`,
 `productLabelBytesDigest(bytes: Uint8Array): string` (SHA-256 самих байтов).
 
-- [ ] Добавить первый failing test целого кода:
+- [x] Добавить первый failing test целого кода:
 
 ```ts
 import { expect, it } from "vitest";
@@ -217,8 +217,8 @@ it("does not accept a different crypto tail for the same item", () => {
 });
 ```
 
-- [ ] Run `pnpm --filter @markiro/domain exec vitest run test/product-labels-km.test.ts`; ожидается отсутствие нового модуля/export.
-- [ ] Реализовать полноту и сравнение; основная логика:
+- [x] Run `pnpm --filter @markiro/domain exec vitest run test/product-labels-km.test.ts`; ожидается отсутствие нового модуля/export.
+- [x] Реализовать полноту и сравнение; основная логика:
 
 ```ts
 export function parseDuplicateKm(raw: string): ParsedKm {
@@ -242,7 +242,7 @@ export function compareDuplicateKm(
 }
 ```
 
-- [ ] Добавить strict discriminated Zod schemas типов выше. Отдельно проверить отсутствующие хвосты, пустые/повторные AI, GS, предел 1024 UTF-8 bytes, `]d2`, кавычки, скобки, `^`, регистр, повреждённую кодировку. Пример отрицательного контракта:
+- [x] Добавить strict discriminated Zod schemas типов выше. Отдельно проверить отсутствующие хвосты, пустые/повторные AI, GS, предел 1024 UTF-8 bytes, `]d2`, кавычки, скобки, `^`, регистр, повреждённую кодировку. Пример отрицательного контракта:
 
 ```ts
 expect(
@@ -258,8 +258,8 @@ expect(
 сохраняет порядок массивов, отвергает undefined/NaN/функции/циклы; хеширует UTF-8
 существующим `@noble/hashes`. Для raw digest сначала вызывается `parseDuplicateKm`.
 
-- [ ] Run обе новые suites плюс `test/km.test.ts`; затем domain typecheck/build.
-- [ ] Commit только эти файлы: `feat(domain): define duplicate label contracts and full code checks`.
+- [x] Run обе новые suites плюс `test/km.test.ts`; затем domain typecheck/build.
+- [x] Commit только эти файлы: `feat(domain): define duplicate label contracts and full code checks`.
 
 ## Task 2: Назначение шаблона, исходная этикетка и TSPL-растр
 
@@ -1453,3 +1453,18 @@ Env загружается по AGENTS.md без вывода значений. 
 новые общие типы и сигнатуры сверены между задачами; ссылки на существующие
 исходники проверены, отсутствующие файлы обозначены как создаваемые. Реализация
 и её runtime-проверки при подготовке этого плана не выполнялись.
+
+## Ход реализации
+
+2026-09-08: задача 1 завершена в `codex/validation-dm-duplicate`. До изменений
+485 тестов domain прошли; после задачи 1 — 555 тестов. Typecheck исходников и
+тестов, lint и build прошли. Новые 70 тестов сначала падали на отсутствующем
+контракте, затем прошли.
+
+Окружение: новая рабочая копия использует установленные зависимости исходного
+checkout через локальные ссылки внутри игнорируемых node_modules.
+`pnpm install --frozen-lockfile --offline` отклоняет существующую запись
+packageManager в lockfile; автоматическая проверка зависимостей при запуске pnpm
+также пытается переустановить окружение. Lockfile не изменён. Vitest, tsc, ESLint
+и Prettier запускаются напрямую теми же установленными версиями, что указаны
+в проекте. Для следующих пакетов окружение необходимо проверить отдельно.
