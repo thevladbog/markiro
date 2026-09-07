@@ -8,7 +8,10 @@ export function isTlcSourceReferenceUrl(value: string): boolean {
     return false;
   try {
     const url = new URL(value);
-    return Boolean(url.hostname) && !url.username && !url.password;
+    // Native URL handling of empty ACE labels differs between Node versions.
+    // Check the parsed hostname, including case/percent-encoded input variants.
+    const emptyAceLabel = url.hostname.split(".").some((label) => label.toLowerCase() === "xn--");
+    return Boolean(url.hostname) && !url.username && !url.password && !emptyAceLabel;
   } catch {
     return false;
   }

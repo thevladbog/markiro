@@ -8,6 +8,9 @@ describe("typed TLC web references without network resolution", () => {
     "HTTPS://supplier.example.test/Source/A",
     "HtTp://supplier.example.test/Source/A",
     "https://example.test/é",
+    "https://例え.テスト/Ä",
+    "https://xn--r8jz45g.xn--zckzah/Ä",
+    "https://example.test/xn--?source=xn--",
   ])("accepts a bounded reference %s", (value) => {
     expect(domain.isTlcSourceReferenceUrl(value)).toBe(true);
   });
@@ -15,6 +18,10 @@ describe("typed TLC web references without network resolution", () => {
     "",
     "arbitrary source",
     "https://",
+    "https://xn--/",
+    "https://XN--.example.test/",
+    "https://source.xn--/",
+    "https://%78n--/",
     "file:///tmp/source",
     "javascript:alert(1)",
     "https://user:pass@example.test",
