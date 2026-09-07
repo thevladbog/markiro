@@ -344,10 +344,18 @@ export interface ProductLabelProjection {
   verificationOutcome: VerificationOutcome;
   status: ProductLabelJobStatus;
   payloadDigest: string;
+  shiftId: string;
+  codeHash: string;
+  acceptedAt: string;
+  policyRevision: string;
+  templateDigest: string;
+  bytesDigest: string;
+  language: PrinterLanguage;
+  dpi: 203 | 300;
 }
 ```
 
-- [ ] Зафиксировать выходы без принтера:
+- [x] Зафиксировать выходы без принтера:
 
 ```ts
 expect(productLabelStatus("sent", "none", false)).toBe("completed");
@@ -356,8 +364,8 @@ expect(productLabelStatus("delivery_unknown", "required", false)).toBe("attentio
 expect(productLabelStatus("delivery_unknown", "required", true)).toBe("completed");
 ```
 
-- [ ] Run `pnpm --filter @markiro/domain exec vitest run test/product-labels-state.test.ts`; ожидается missing export.
-- [ ] Реализовать таблицу переходов:
+- [x] Run `pnpm --filter @markiro/domain exec vitest run test/product-labels-state.test.ts`; ожидается missing export.
+- [x] Реализовать таблицу переходов:
 
 ```ts
 export function productLabelStatus(
@@ -365,7 +373,15 @@ export function productLabelStatus(
   verification: VerificationPolicy,
   verified: boolean,
 ): ProductLabelJobStatus {
-  if (verified) return "completed";
+  if (verified) {
+    if (attempt !== "sent" && attempt !== "delivery_unknown") {
+      throw new DomainError(
+        "PRODUCT_LABEL_TRANSITION_INVALID",
+        "Verification requires a sent or unknown attempt",
+      );
+    }
+    return "completed";
+  }
   if (attempt === "prepared") return "prepared";
   if (attempt === "sending") return "sending";
   if (attempt === "sent")
@@ -374,8 +390,8 @@ export function productLabelStatus(
 }
 ```
 
-- [ ] Проверить полную event-матрицу: начальное `prepared` №1 без причины; повтор с №+1 и причиной; `prepared→sending→sent`; `prepared→failed_before_send`; `sending→delivery_unknown`; только текущий attempt в sent/delivery_unknown может подтверждаться; `verified` требует совпадающий payloadDigest; verification_rejected не завершает задание. Повторное событие с тем же ID/нагрузкой — no-op хранилища; другой payload с тем же ID — конфликт хранилища; stale/gap sequence не меняет projection. Новый явный reprint создаёт текущую pending-проверку, но не стирает подтверждение предыдущей попытки в истории. Чистая apply-функция бросает DomainError при запрещённом переходе; replay/CAS решает вызывающее хранилище.
-- [ ] Run новая suite и domain typecheck/build. Commit: `feat(domain): define product label attempt transitions`.
+- [x] Проверить полную event-матрицу: начальное `prepared` №1 без причины; повтор с №+1 и причиной; `prepared→sending→sent`; `prepared→failed_before_send`; `sending→delivery_unknown`; только текущий attempt в sent/delivery_unknown может подтверждаться; `verified` требует совпадающий payloadDigest; verification_rejected не завершает задание. Повторное событие с тем же ID/нагрузкой — no-op хранилища; другой payload с тем же ID — конфликт хранилища; stale/gap sequence не меняет projection. Новый явный reprint создаёт текущую pending-проверку, но не стирает подтверждение предыдущей попытки в истории. Чистая apply-функция бросает DomainError при запрещённом переходе; replay/CAS решает вызывающее хранилище.
+- [x] Run новая suite и domain typecheck/build. Commit: `feat(domain): define product label attempt transitions`.
 
 ## Task 4: Postgres-схема и библиотечный seed
 
@@ -1480,3 +1496,11 @@ geometry preview получает тот же opt-in. Это техническ�
 2026-09-08: задача 2 завершена. Domain: 583 теста прошли; typecheck (src/test),
 lint и build прошли. Новый флаг kmDataMatrix=raster включается только явно,
 legacy golden tests не изменены. Физический принтер не запускался.
+
+2026-09-08: задача 3 завершена. Первые 33 теста переходов наблюдались падающими
+до реализации; итоговая suite содержит 39 проверок, включая полную матрицу
+исходящих событий. Всего domain: 622 теста прошли, typecheck/lint/build прошли.
+Projection дополнен immutable origin и bytes/language/DPI, чтобы чистый reducer
+отклонял подмену смены, политики или содержимого между попытками.
+Контрольная точка 1 (задачи 1–3) завершена; UI, БД, sync и аппаратная приёмка
+ещё не реализованы. Следующая контрольная точка — задачи 4–7.
