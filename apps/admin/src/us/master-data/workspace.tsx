@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@markiro/ui";
 import { US_CAPABILITY } from "@markiro/domain";
+import type { ReceivingFinalizedRecord } from "@markiro/platform-contracts";
 import { useTranslation } from "react-i18next";
 import { UsClientError, type UsBrowserClient } from "../client.js";
 import { LocationsView } from "./locations-view.js";
 import { PartiesView } from "./parties-view.js";
 import { ProductsView } from "../catalog/products-view.js";
 import { LotsView } from "../lots/lots-view.js";
+import { ReceivingView } from "../receiving/view.js";
 import { UsBrandMark } from "../brand-mark.js";
 import { navStyle, type NoticeKind } from "./workspace-shared.js";
 import "./master-data.css";
@@ -19,7 +21,7 @@ export type MasterDataProps = {
   onSessionLost: () => void;
 };
 
-type View = "parties" | "locations" | "products" | "lots";
+type View = "parties" | "locations" | "products" | "lots" | "receiving";
 type Notice = { kind: NoticeKind; key: string } | null;
 
 export function MasterDataWorkspace({
@@ -35,6 +37,10 @@ export function MasterDataWorkspace({
   const [accessPending, setAccessPending] = useState(false);
   const [view, setView] = useState<View>("parties");
   const [viewGeneration, setViewGeneration] = useState(0);
+  const [receivingLotEntry, setReceivingLotEntry] = useState<{
+    lotId: string;
+    record: ReceivingFinalizedRecord;
+  } | null>(null);
   const [mutationPending, setMutationPending] = useState(false);
   const mutationCount = useRef(0);
   const [editorDirty, setEditorDirty] = useState(false);
@@ -133,6 +139,7 @@ export function MasterDataWorkspace({
       return;
     }
     setView(next);
+    setReceivingLotEntry(null);
     setViewGeneration((current) => current + 1);
   }
 
@@ -191,6 +198,16 @@ export function MasterDataWorkspace({
           </span>
         </div>
         <nav aria-label={t("md.referenceData")}>
+          <Button
+            variant="secondary"
+            className={`us-md-nav ${view === "receiving" ? "is-active" : ""}`}
+            style={navStyle(view === "receiving")}
+            disabled={mutationPending}
+            aria-current={view === "receiving" ? "page" : undefined}
+            onClick={() => navigate("receiving")}
+          >
+            {t("receiving.title")}
+          </Button>
           <Button
             variant="secondary"
             className={`us-md-nav ${view === "lots" ? "is-active" : ""}`}
@@ -263,12 +280,39 @@ export function MasterDataWorkspace({
             {t(notice.key)}
           </div>
         ) : null}
-        {view === "lots" ? (
+        {view === "receiving" ? (
+          <ReceivingView
+            key={`receiving-${viewGeneration}`}
+            {...viewProps}
+            timeZone={profile.timeZone}
+            canManageQa={
+              !accessError && !accessPending && capabilities.includes(US_CAPABILITY.QA_MANAGE)
+            }
+            {...(receivingLotEntry ? { initialRecord: receivingLotEntry.record } : {})}
+            onOpenLot={(lotId, record) => {
+              setReceivingLotEntry({ lotId, record });
+              setView("lots");
+              setViewGeneration((n) => n + 1);
+            }}
+            canWrite={
+              !accessError && !accessPending && capabilities.includes(US_CAPABILITY.RECEIVING_WRITE)
+            }
+          />
+        ) : view === "lots" ? (
           <LotsView
             key={`lots-${viewGeneration}`}
             {...viewProps}
             profileCode={profile.code}
             timeZone={profile.timeZone}
+            {...(receivingLotEntry
+              ? {
+                  entryLotId: receivingLotEntry.lotId,
+                  onEntryBack: () => {
+                    setView("receiving");
+                    setViewGeneration((n) => n + 1);
+                  },
+                }
+              : {})}
             canManageQa={
               !accessError && !accessPending && capabilities.includes(US_CAPABILITY.QA_MANAGE)
             }

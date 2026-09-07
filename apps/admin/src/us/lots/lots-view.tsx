@@ -10,7 +10,13 @@ import { allowedLotStatuses, lotSourceLabel } from "./shared.js";
 import { loadLotReferenceLabels } from "./reference-labels.js";
 import "./lots.css";
 
-type Props = MasterDataViewProps & { canManageQa: boolean; profileCode: string; timeZone: string };
+type Props = MasterDataViewProps & {
+  canManageQa: boolean;
+  profileCode: string;
+  timeZone: string;
+  entryLotId?: string;
+  onEntryBack?: () => void;
+};
 
 export function LotsView(props: Props) {
   const {
@@ -23,6 +29,8 @@ export function LotsView(props: Props) {
     onForbidden,
     onSessionLost,
     onNotice,
+    entryLotId,
+    onEntryBack,
   } = props;
   const { t, i18n } = useTranslation();
   const [rows, setRows] = useState<TraceabilityLot[]>([]);
@@ -76,11 +84,37 @@ export function LotsView(props: Props) {
     }
   }, [client, offset, search, status, onForbidden, onSessionLost]);
   useEffect(() => {
+    if (entryLotId) return;
     void load();
     return () => {
       run.current += 1;
     };
-  }, [load, refresh]);
+  }, [load, refresh, entryLotId]);
+  useEffect(() => {
+    if (!entryLotId) return;
+    const current = ++openRun.current;
+    setOpening(true);
+    setOpenFailure(false);
+    void client
+      .getLot(entryLotId)
+      .then((result) => {
+        if (openRun.current !== current) return;
+        setLot(result);
+        focusNeeded.current = true;
+      })
+      .catch(async (error: unknown) => {
+        if (openRun.current !== current) return;
+        setOpenFailure(true);
+        if (error instanceof UsClientError && error.code === "session_required") onSessionLost();
+        if (error instanceof UsClientError && error.code === "forbidden") await onForbidden();
+      })
+      .finally(() => {
+        if (openRun.current === current) setOpening(false);
+      });
+    return () => {
+      openRun.current += 1;
+    };
+  }, [entryLotId, client, onForbidden, onSessionLost]);
   useEffect(() => {
     if (!lot) return;
     let current = true;
@@ -132,6 +166,22 @@ export function LotsView(props: Props) {
     }
   }
 
+  if (entryLotId && !lot)
+    return (
+      <div className="us-lot-page">
+        <Button type="button" variant="secondary" disabled={mutationPending} onClick={onEntryBack}>
+          {t("receiving.back")}
+        </Button>
+        <p role={openFailure ? "alert" : "status"}>
+          {t(openFailure ? "receiving.openError" : "md.stale")}
+        </p>
+        {openFailure ? (
+          <Button type="button" disabled={opening} onClick={() => void open(entryLotId)}>
+            {t("md.retry")}
+          </Button>
+        ) : null}
+      </div>
+    );
   if (editor)
     return (
       <LotEditor
@@ -175,13 +225,17 @@ export function LotsView(props: Props) {
             variant="secondary"
             disabled={opening || mutationPending}
             onClick={() => {
+              if (onEntryBack) {
+                onEntryBack();
+                return;
+              }
               setLot(null);
               setOpenFailure(false);
               setRefresh((n) => n + 1);
               focusNeeded.current = true;
             }}
           >
-            ← {t("lots.back")}
+            ← {t(onEntryBack ? "receiving.back" : "lots.back")}
           </Button>
           <Button
             variant="secondary"

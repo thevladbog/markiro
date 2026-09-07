@@ -32,6 +32,24 @@ export { ancestorsOf, descendantsOf, wouldCreateCycle } from "./traceability/lot
 export type { LotGenealogyEdge } from "./traceability/lots/genealogy.js";
 export { UOM_CODES_V1 } from "./traceability/uom.js";
 export { parseTraceabilityQuantity } from "./traceability/quantity.js";
+export {
+  assessReceivingReadiness,
+  RECEIVING_READINESS_RULE_VERSION,
+  RECEIVING_READINESS_FIELDS,
+  RECEIVING_READINESS_CODES,
+  RECEIVING_READINESS_DETAILS,
+} from "./traceability/receiving-readiness.js";
+export type {
+  ReceivingReadinessInput,
+  ReceivingReadinessIssue,
+} from "./traceability/receiving-readiness.js";
+export { assessReceivingExemptionLine } from "./traceability/receiving-exemption.js";
+export type {
+  ReceivingExemptReceiptInput,
+  ReceivingExemptionLine,
+  ReceivingExemptionIssue,
+  ReceivingExemptionAssessment,
+} from "./traceability/receiving-exemption.js";
 export { isTraceabilityCivilDate } from "./traceability/civil-date.js";
 export type { TraceabilityUom } from "./traceability/uom.js";
 export { validateProductDescription } from "./traceability/products/description.js";

@@ -96,6 +96,20 @@ test("US proxy never forwards RU routes and preserves configured API Host", asyn
     "/api/auth/get-session",
     "/api/boxes",
     "/api/us/boxes",
+    "/api/us/traceability/receiving/invalid-id",
+    "/api/us/traceability/receiving/invalid-id/readiness?expectedDraftVersion=1",
+    "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/readiness",
+    "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/readiness?expectedDraftVersion=01",
+    "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/readiness?expectedDraftVersion=1&tenantId=x",
+    "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/readiness/finalize?expectedDraftVersion=1",
+    "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/finalize?x=1",
+    "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/finalize/extra",
+    "/api/us/traceability/receiving?status=voided",
+    "/api/us/traceability/receiving?status=draft&status=finalized",
+    "/api/us/traceability/receiving?limit=50&tenantId=x",
+    "/api/us/traceability/receiving?offset=100001",
+    "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001?tenantId=x",
+    "/api/us/traceability/reference-documents/a0000000-0000-4000-8000-000000000001/attachments",
     "/api/us/deployment-evil",
     "/api/us/traceability/parties-extra",
     "/api/us/traceability/access?forged=1",
@@ -122,6 +136,36 @@ test("US proxy never forwards RU routes and preserves configured API Host", asyn
       false,
     );
   for (const [input, output] of [
+    [
+      "/api/us/traceability/receiving?limit=50&offset=0",
+      "/traceability/receiving?limit=50&offset=0",
+    ],
+    ["/api/us/traceability/receiving", "/traceability/receiving"],
+    [
+      "/api/us/traceability/receiving?status=finalized&limit=50&offset=0",
+      "/traceability/receiving?status=finalized&limit=50&offset=0",
+    ],
+    [
+      "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/finalize",
+      "/traceability/receiving/a0000000-0000-4000-8000-000000000001/finalize",
+    ],
+    [
+      "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/readiness?expectedDraftVersion=12",
+      "/traceability/receiving/a0000000-0000-4000-8000-000000000001/readiness?expectedDraftVersion=12",
+    ],
+    [
+      "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001",
+      "/traceability/receiving/a0000000-0000-4000-8000-000000000001",
+    ],
+    [
+      "/api/us/traceability/reference-documents?search=BOL",
+      "/traceability/reference-documents?search=BOL",
+    ],
+    ["/api/us/traceability/reference-documents", "/traceability/reference-documents"],
+    [
+      "/api/us/traceability/reference-documents/a0000000-0000-4000-8000-000000000001",
+      "/traceability/reference-documents/a0000000-0000-4000-8000-000000000001",
+    ],
     ["/api/us/traceability/lots?search=A&limit=50", "/traceability/lots?search=A&limit=50"],
     ["/api/us/traceability/lots", "/traceability/lots"],
     [

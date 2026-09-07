@@ -1,0 +1,208 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Inject,
+  Param,
+  Post,
+  Put,
+  Query,
+  Req,
+  UnauthorizedException,
+  UseGuards,
+} from "@nestjs/common";
+import { ApiCookieAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from "@nestjs/swagger";
+import {
+  createReceivingDraftSchema,
+  listReceivingRecordsQuerySchema,
+  receivingRecordListSchema,
+  receivingRecordSchema,
+  receivingFinalizedRecordSchema,
+  finalizeReceivingSchema,
+  receivingDraftRecordSchema,
+  receivingReadinessQuerySchema,
+  receivingReadinessSchema,
+  receivingReadinessIssueSchema,
+  saveReceivingDraftSchema,
+} from "@markiro/platform-contracts";
+import { z } from "zod";
+import { ApiZodBody, ApiZodQuery, ApiZodResponse } from "../lib/openapi";
+import { usMasterDataBadRequestSchema, usMasterDataErrorSchema } from "./us-master-data-openapi";
+import { UsRuntime } from "./us-runtime";
+import { UsSessionGuard, type UsRequest } from "./us-profile.controller";
+
+const finalizationConflictSchema = z.union([
+  z
+    .object({
+      code: z.enum([
+        "receiving_draft_conflict",
+        "receiving_operation_conflict",
+        "receiving_already_finalized",
+        "receiving_readiness_changed",
+        "receiving_lot_conflict",
+      ]),
+    })
+    .strict(),
+  z
+    .object({ code: z.literal("event_incomplete"), issues: z.array(receivingReadinessIssueSchema) })
+    .strict(),
+]);
+
+@Controller("traceability/receiving")
+@UseGuards(UsSessionGuard)
+@ApiTags("us-traceability-receiving")
+@ApiCookieAuth("markiro-us.session_token")
+@ApiResponse({
+  status: 400,
+  description: "Malformed JSON, UUID or strict receiving draft input.",
+  schema: usMasterDataBadRequestSchema,
+})
+@ApiResponse({
+  status: 401,
+  description: "A verified US session is required.",
+  schema: usMasterDataErrorSchema,
+})
+@ApiResponse({
+  status: 403,
+  description: "Current US capability, profile, MFA, Host and mutation Origin are required.",
+  schema: usMasterDataErrorSchema,
+})
+@ApiResponse({
+  status: 404,
+  description:
+    "receiving_draft_not_found or receiving_reference_not_found: the selected record is absent from this tenant.",
+  schema: usMasterDataErrorSchema,
+})
+@ApiResponse({
+  status: 409,
+  description:
+    "receiving_draft_conflict: stale saved version; receiving_operation_conflict: rebound key; receiving_already_finalized: immutable lifecycle; receiving_readiness_changed: recheck references; receiving_lot_conflict: identity race; event_incomplete: typed readiness issues; receiving_reference_inactive: inactive draft reference.",
+  schema: usMasterDataErrorSchema,
+})
+@ApiResponse({
+  status: 413,
+  description: "Receiving POST/PUT JSON exceeds 256 KiB; other requests remain bounded at 16 KiB.",
+  schema: usMasterDataErrorSchema,
+})
+@ApiResponse({
+  status: 415,
+  description: "Uncompressed application/json is required for writes.",
+  schema: usMasterDataErrorSchema,
+})
+@ApiResponse({
+  status: 503,
+  description: "US profile or database is unavailable; no automatic repair runs.",
+  schema: usMasterDataErrorSchema,
+})
+export class UsReceivingController {
+  constructor(@Inject(UsRuntime) private readonly runtime: UsRuntime) {}
+
+  @Get()
+  @ApiOperation({
+    summary: "List saved receiving drafts and finalized history",
+    description:
+      "Requires current US read capability. Returns bounded header summaries and child counts only; archived master-data references remain visible by their saved IDs.",
+  })
+  @ApiZodQuery(listReceivingRecordsQuerySchema)
+  @ApiZodResponse({ status: 200, schema: receivingRecordListSchema })
+  list(@Req() request: UsRequest, @Query() query: unknown) {
+    const principal = this.principal(request);
+    return this.runtime.databaseOperation(() =>
+      this.runtime.receiving.listRecords(principal.tenantId, principal.userId, query),
+    );
+  }
+
+  @Post()
+  @ApiOperation({
+    summary: "Create an incomplete receiving draft",
+    description:
+      "Requires receiving write capability and operationKey. An identical successful retry returns the original response. Does not finalize, assign lots, affect inventory or freeze snapshots.",
+  })
+  @ApiZodBody(createReceivingDraftSchema)
+  @ApiZodResponse({ status: 201, schema: receivingDraftRecordSchema })
+  create(@Req() request: UsRequest, @Body() body: unknown) {
+    const principal = this.principal(request);
+    const requestId = this.requestId(request);
+    return this.runtime.databaseOperation(() =>
+      this.runtime.receiving.createDraft(principal.tenantId, principal.userId, body, requestId),
+    );
+  }
+
+  @Get(":id")
+  @ApiOperation({
+    summary: "Read a saved draft or immutable finalized receiving",
+    description:
+      "Requires current US read capability; preserves stored values even if referenced master data was later archived.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodResponse({ status: 200, schema: receivingRecordSchema })
+  get(@Req() request: UsRequest, @Param("id") id: unknown) {
+    const principal = this.principal(request);
+    return this.runtime.databaseOperation(() =>
+      this.runtime.receiving.getRecord(principal.tenantId, principal.userId, id),
+    );
+  }
+
+  @Put(":id")
+  @ApiOperation({
+    summary: "Replace a receiving draft atomically",
+    description:
+      "Requires receiving write capability, operationKey and expectedDraftVersion. A changed save increments draftVersion only; revision stays 1. Stale saves return 409. A current unchanged save neither increments nor audits. Rows and document links are full ordered replacements.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodBody(saveReceivingDraftSchema)
+  @ApiZodResponse({ status: 200, schema: receivingDraftRecordSchema })
+  save(@Req() request: UsRequest, @Param("id") id: unknown, @Body() body: unknown) {
+    const principal = this.principal(request);
+    const requestId = this.requestId(request);
+    return this.runtime.databaseOperation(() =>
+      this.runtime.receiving.saveDraft(principal.tenantId, principal.userId, id, body, requestId),
+    );
+  }
+
+  @Get(":id/readiness")
+  @ApiOperation({
+    summary: "Check current saved receiving data readiness",
+    description:
+      "Requires current US read capability and the saved expectedDraftVersion. Reads the draft and current tenant references in one consistent transaction. Returns data issues without saving validation state, auditing, assigning lots, locking sources or finalizing. Complete is data readiness only.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodQuery(receivingReadinessQuerySchema)
+  @ApiZodResponse({ status: 200, schema: receivingReadinessSchema })
+  readiness(@Req() request: UsRequest, @Param("id") id: unknown, @Query() query: unknown) {
+    const principal = this.principal(request);
+    return this.runtime.databaseOperation(() =>
+      this.runtime.receiving.checkReadiness(principal.tenantId, principal.userId, id, query),
+    );
+  }
+
+  @Post(":id/finalize")
+  @HttpCode(200)
+  @ApiOperation({
+    summary: "Finalize a saved ordinary Receiving draft",
+    description:
+      "Requires current QA capability, saved version and readiness digest. Atomic lots, source latches, frozen snapshot and audit; exact authorized retries return the original result. Limited to 16 KiB JSON.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodBody(finalizeReceivingSchema)
+  @ApiZodResponse({ status: 200, schema: receivingFinalizedRecordSchema })
+  @ApiZodResponse({ status: 409, schema: finalizationConflictSchema })
+  finalize(@Req() request: UsRequest, @Param("id") id: unknown, @Body() body: unknown) {
+    const principal = this.principal(request);
+    const requestId = this.requestId(request);
+    return this.runtime.databaseOperation(() =>
+      this.runtime.receiving.finalize(principal.tenantId, principal.userId, id, body, requestId),
+    );
+  }
+
+  private principal(request: UsRequest) {
+    if (!request.usPrincipal) throw new UnauthorizedException("us_session_required");
+    return request.usPrincipal;
+  }
+
+  private requestId(request: UsRequest) {
+    if (!request.usRequestId) throw new UnauthorizedException("us_request_context_required");
+    return request.usRequestId;
+  }
+}

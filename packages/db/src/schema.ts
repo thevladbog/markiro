@@ -22,4 +22,5 @@ export * from "./schema/traceability-master-data.js";
 export * from "./schema/traceability-products.js";
 export * from "./schema/traceability-lots.js";
 export * from "./schema/traceability-documents.js";
+export * from "./schema/traceability-receiving.js";
 export * from "./schema/us-auth.js";

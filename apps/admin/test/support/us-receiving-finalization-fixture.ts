@@ -1,0 +1,153 @@
+import type {
+  ReceivingDraftRecord,
+  ReceivingFinalizedRecord,
+  ReceivingReadiness,
+} from "@markiro/platform-contracts";
+
+export const id = "a0000000-0000-4000-8000-000000000001";
+export const locationId = "a0000000-0000-4000-8000-000000000002";
+export const productId = "a0000000-0000-4000-8000-000000000003";
+export const lotId = "a0000000-0000-4000-8000-000000000004";
+export const operationKey = "b0000000-0000-4000-8000-000000000001";
+export const path = "/api/us/traceability/receiving";
+const timestamp = "2026-09-07T10:00:00.000Z";
+const location = {
+  schemaVersion: 1 as const,
+  locationId,
+  partyId: id,
+  businessName: "Frozen farm",
+  phoneNumber: "+1 509 555 0100",
+  address: { kind: "street" as const, streetAddress: "100 Test Way" },
+  city: "Yakima",
+  stateOrRegion: "WA",
+  zipOrPostalCode: "98901",
+  countryCode: "US",
+  countryDisplay: "United States",
+};
+export const record: ReceivingDraftRecord = {
+  id,
+  eventNumber: "REC-26-0001",
+  status: "draft",
+  revision: 1,
+  draftVersion: 7,
+  timeZone: "America/Chicago",
+  createdBy: "creator",
+  updatedBy: "creator",
+  createdAt: timestamp,
+  updatedAt: timestamp,
+  draft: {
+    dateReceived: "2026-09-07",
+    locationId,
+    previousSourceLocationId: locationId,
+    receivedAtNote: "Dock 4",
+    notes: null,
+    documentIds: [],
+    items: ["500.000", "0.25", "999999999999999.999"].map((quantity, index) => ({
+      productId,
+      lotId: index === 1 ? lotId : null,
+      lotLinkMode: index === 1 ? "link_existing" : "create_on_finalize",
+      tlc: `Supplier-${index}`,
+      source: { kind: "location", locationId },
+      quantity,
+      unitOfMeasure: index === 2 ? "kg" : "lb",
+      exemptSupplier: false,
+      exemptReason: null,
+      supplierLotReference: "SUP-001",
+      notes: null,
+    })),
+  },
+};
+export const complete: ReceivingReadiness = {
+  eventId: id,
+  draftVersion: 7,
+  checkedAt: timestamp,
+  inputDigest: "a".repeat(64),
+  ruleVersion: "receiving-readiness-v3",
+  exemptReviewRequiredLines: [],
+  profileCode: "US_GENERIC_LOT_TRACEABILITY",
+  state: "complete",
+  issues: [
+    {
+      severity: "warning",
+      group: "documents",
+      line: null,
+      field: "documents",
+      code: "required",
+      detail: null,
+    },
+  ],
+};
+export const finalized: ReceivingFinalizedRecord = {
+  id,
+  eventNumber: record.eventNumber,
+  status: "finalized",
+  revision: 1,
+  draftVersion: 7,
+  timeZone: record.timeZone,
+  createdBy: "creator",
+  createdAt: timestamp,
+  updatedBy: "qa-user",
+  updatedAt: timestamp,
+  finalizedBy: "qa-user",
+  finalizedAt: timestamp,
+  snapshot: {
+    snapshotVersion: 1,
+    dateReceived: "2026-09-07",
+    locationId,
+    previousSourceLocationId: locationId,
+    receivedAtNote: "Dock 4",
+    notes: null,
+    profileCode: "US_GENERIC_LOT_TRACEABILITY",
+    baselineVersion: "US-REG-2026-09-03",
+    locationDescription: location,
+    previousSourceDescription: location,
+    documents: [],
+    items: record.draft.items.map((item, index) => ({
+      lineNo: index + 1,
+      productId,
+      lotId,
+      lotLinkMode: item.lotLinkMode,
+      tlc: `Supplier-${index}`,
+      source: { kind: "location", locationId },
+      quantity: item.quantity ?? "1",
+      unitOfMeasure: item.unitOfMeasure ?? "lb",
+      supplierLotReference: "SUP-001",
+      notes: null,
+      sourceDescription: location,
+      productDescription: {
+        snapshotVersion: 1,
+        sourceProductId: productId,
+        productName: "Frozen apples",
+        brandName: null,
+        commodity: null,
+        variety: null,
+        packagingSize: null,
+        packagingStyle: null,
+        gtin: null,
+      },
+      coverage: {
+        coverageStatus: "unknown",
+        coverageRationale: null,
+        ftlCategory: null,
+        ftlSourceUrl: null,
+        ftlSourceVersion: null,
+        reviewedBy: null,
+        reviewedAt: null,
+      },
+    })),
+    confirmation: {
+      ruleVersion: "receiving-readiness-v2",
+      inputDigest: complete.inputDigest,
+      warnings: [
+        {
+          severity: "warning",
+          group: "documents",
+          line: null,
+          field: "documents",
+          code: "required",
+          detail: null,
+        },
+      ],
+    },
+  },
+};

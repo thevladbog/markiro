@@ -401,8 +401,11 @@ Source: [03-cte-events.md](../design-briefs/us/03-cte-events.md)
 
 1. Screen 1: one mixed list with a type filter (as drafted) or three lists under one section
    header? The specs describe three routes; prototype both.
-2. Screen 2: the exempt-supplier toggle locks the TLC source to the receiving site. Disabled
-   combobox, or a plain text line replacing it?
+2. Screen 2 — resolved 2026-09-07: preserve an existing TLC and source. Only explicit
+   own assignment uses the receiving site, shown as plain text. QA reviews each
+   exempt line for this receipt; no supplier-wide approval is inherited. See the
+   [exempt Receiving specification](../superpowers/specs/2026-09-07-us-03-exempt-supplier-receiving-design.md)
+   (product behavior and technical design approved 2026-09-07; not implemented).
 3. Screen 3: where does the genealogy preview live with more than four inputs — inline,
    collapsible, or detail page only?
 4. Screen 4: the P1 case selector must read as optional ("lot-level workflow with optional

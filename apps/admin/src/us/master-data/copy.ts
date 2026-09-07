@@ -1,9 +1,15 @@
 import { catalogCopy } from "../catalog/copy.js";
 import { lotCopy } from "../lots/copy.js";
 import { productProfileCopy } from "../catalog/profile-copy.js";
+import { receivingCopy } from "../receiving/copy.js";
+import { referenceCopy } from "../receiving/reference-copy.js";
+import { readinessCopy } from "../receiving/readiness-copy.js";
 
 export const masterDataCopy = {
   "en-US": {
+    receivingReadiness: readinessCopy["en-US"],
+    receiving: receivingCopy["en-US"],
+    receivingRef: referenceCopy["en-US"],
     lots: lotCopy["en-US"],
     productProfile: productProfileCopy["en-US"],
     catalog: catalogCopy["en-US"],
@@ -124,6 +130,9 @@ export const masterDataCopy = {
     },
   },
   "es-US": {
+    receivingReadiness: readinessCopy["es-US"],
+    receiving: receivingCopy["es-US"],
+    receivingRef: referenceCopy["es-US"],
     lots: lotCopy["es-US"],
     productProfile: productProfileCopy["es-US"],
     catalog: catalogCopy["es-US"],

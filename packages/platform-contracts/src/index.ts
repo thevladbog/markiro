@@ -1,6 +1,19 @@
 export { platformErrorSchema } from "./errors.js";
 export type { PlatformError } from "./errors.js";
 export {
+  receivingReadinessSchema,
+  receivingReadinessQuerySchema,
+  receivingReadinessIssueSchema,
+} from "./traceability/receiving-readiness.js";
+export type {
+  ReceivingReadiness,
+  ReceivingReadinessQuery,
+} from "./traceability/receiving-readiness.js";
+export {
+  preservedReceivingExemptReceiptSchema,
+  receivingExemptReceiptSchema,
+} from "./traceability/receiving-exemption.js";
+export {
   platformMoneySchema,
   platformNullableTimestampSchema,
   platformTenantIdSchema,
@@ -474,3 +487,45 @@ export type {
 } from "./traceability/documents.js";
 export { receivingDraftItemSchema, receivingDraftSchema } from "./traceability/receiving.js";
 export type { ReceivingDraftItem, ReceivingDraft } from "./traceability/receiving.js";
+export {
+  createReceivingDraftSchema,
+  listReceivingDraftsQuerySchema,
+  receivingDraftListSchema,
+  saveReceivingDraftSchema,
+  receivingDraftRecordSchema,
+  receivingDraftSummarySchema,
+} from "./traceability/receiving-records.js";
+export type {
+  ReceivingDraftRecord,
+  ReceivingDraftSummary,
+  ReceivingDraftList,
+  ListReceivingDraftsQuery,
+  CreateReceivingDraftInput,
+  SaveReceivingDraftInput,
+} from "./traceability/receiving-records.js";
+export {
+  finalizeReceivingSchema,
+  listReceivingRecordsQuerySchema,
+  receivingFinalizationSnapshotSchema,
+  receivingFinalizedRecordSchema,
+  receivingRecordListSchema,
+  receivingRecordSchema,
+  receivingRecordSummarySchema,
+} from "./traceability/receiving-finalization.js";
+export type {
+  FinalizeReceivingInput,
+  ListReceivingRecordsQuery,
+  ReceivingFinalizationSnapshot,
+  ReceivingFinalizedRecord,
+  ReceivingRecord,
+  ReceivingRecordList,
+  ReceivingRecordSummary,
+} from "./traceability/receiving-finalization.js";
+export {
+  receivingFinalizationSnapshotV1Schema,
+  type ReceivingFinalizationSnapshotV1,
+} from "./traceability/receiving-finalization-v1.js";
+export {
+  receivingFinalizationSnapshotV2Schema,
+  type ReceivingFinalizationSnapshotV2,
+} from "./traceability/receiving-finalization-v2.js";

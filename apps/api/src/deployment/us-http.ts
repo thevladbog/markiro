@@ -20,6 +20,7 @@ function isUsBusinessPath(path: string): boolean {
 export function mountUsHttp(app: INestApplication, runtime: UsRuntime): void {
   const host = new URL(runtime.env.BETTER_AUTH_URL).host;
   const parseJson = json({ limit: "16kb", inflate: false });
+  const parseReceivingJson = json({ limit: "256kb", inflate: false });
   const authHandler = toNodeHandler((request) =>
     handleUsAuth(runtime.auth, request, () => runtime.assertDatabaseReady()),
   );
@@ -41,7 +42,14 @@ export function mountUsHttp(app: INestApplication, runtime: UsRuntime): void {
       return response.status(403).json({ code: "us_origin_required" });
     if (mutation && !request.is("application/json"))
       return response.status(415).json({ code: "us_json_required" });
-    parseJson(request, response, (error: unknown) => {
+    const receivingWrite =
+      (request.method === "POST" && /^\/traceability\/receiving\/?$/i.test(request.path)) ||
+      (request.method === "PUT" &&
+        /^\/traceability\/receiving\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(
+          request.path,
+        ));
+    const parseBody = receivingWrite ? parseReceivingJson : parseJson;
+    parseBody(request, response, (error: unknown) => {
       if (error) {
         const status = typeof error === "object" && "status" in error ? error.status : undefined;
         const safeStatus = status === 413 || status === 415 ? status : 400;

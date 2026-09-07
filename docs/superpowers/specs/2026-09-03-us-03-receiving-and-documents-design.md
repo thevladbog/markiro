@@ -2,9 +2,11 @@
 
 > Revised 2026-09-06: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. The input foundation and reference-document metadata storage/API described at the end are implemented locally; the event workflow remains a draft design.
 
+> Current increment status is recorded in [Receiving browser](../../us/receiving-browser.md): ordinary draft/check/finalization is implemented locally. The [2026-09-07 exempt-supplier design](2026-09-07-us-03-exempt-supplier-receiving-design.md) records the owner-approved receipt-specific review and conditional TLC assignment; its technical specification was approved 2026-09-07 and remains unimplemented. The older broad lifecycle, route and schema proposals below are not current implementation claims.
+
 **Date:** 2026-09-03
 
-**Status:** Input foundation and reference-document create/list/detail API implemented locally; receiving event persistence/API, lifecycle, UI and CSV remain draft design.
+**Status:** Historical broad design. Current local implementation and remaining lifecycle/CSV scope are recorded in [Receiving browser](../../us/receiving-browser.md); later increment specifications supersede the corresponding proposals below.
 
 **Slice:** US-03 from docs/us/implementation-plan.md; depends on US-00 (regulatory profile, U.S. capabilities, profile gate), US-01 (`traceability_locations`, location snapshot builder), US-02 (`traceability_lots`, product snapshot builder)
 
@@ -121,7 +123,7 @@ Immutability guard: trigger `traceability_events_immutable_finalized` (`BEFORE U
 | unit_of_measure        | text NOT NULL; must be a code of US-02 `UOM_CODES_V1` (OQ-US03-6)                                                     |
 | notes                  | text NULL                                                                                                             |
 
-Exempt supplier rule: when `exempt_supplier = true` the tenant assigns its own TLC, `tlc_source_location_id` must equal the event's `location_id` (the receiving site), and the created lot gets assignment basis `exempt_supplier_receipt` (LOT-004). Non-exempt lines create lots with basis `imported` and keep the supplier's TLC (LOT-005).
+Exempt supplier rule, corrected 2026-09-07: the flag alone never assigns or replaces a TLC. Preserve an already-assigned TLC and its source; a newly entered lot record uses `imported`, while an explicitly linked lot keeps its actual assignment basis. Only an explicitly reviewed receipt with no assigned TLC creates a lot using a separately proposed own TLC, source equal to the receiving site and basis `exempt_supplier_receipt` (LOT-004). QA confirms the rationale and supporting evidence per line during finalization, without a reusable supplier-wide approval. Follow the newer exempt-supplier specification for the draft fields, review command and frozen history.
 
 `reference_documents`:
 
@@ -176,8 +178,13 @@ New module `packages/domain/src/traceability/` (pure, no DB):
 - `events/lifecycle.ts`: `TRACEABILITY_EVENT_STATUSES`, `canTransition(from, to, ctx)` with the table draft→finalized, draft→void, finalized→void, finalized→amended (only by finalizing a successor revision), amended and void terminal. `nextRevision(previous)` returns the header copy rules (same `root_event_id`, `event_number`, `revision + 1`, `amendment_reason` required).
 - `documents/types.ts`: `REFERENCE_DOCUMENT_TYPES` and `isReferenceDocumentTypeAllowedFor(eventType)`: receiving accepts any type but the P0 export registry expects `asn`, `bol`, `po`, `invoice`, `other`.
 - `quantity.ts`: `parseQuantity(string)` → decimal string with at most 3 fraction digits, > 0, no exponent; `isUomCode(value)` delegates to US-02 `UOM_CODES_V1` (OQ-US03-6).
-- `receiving/completeness.ts`: `validateReceivingCompleteness(input): CompletenessIssue[]` where `input` is a plain object (header, items, resolved locations, product profiles, linked documents, profile code). Issues carry `{ path, code, severity: "error" | "warning", requirementId }`. Errors: `event_date` (date received) missing; `location` (receive-at) missing or its description invalid per US-01 validator (`business_name, phone, street_or_coordinates, city, state, zip, country`); `previous_source_location` missing or invalid; no items; per item: product missing, product description incomplete per US-02 rules, `tlc` blank, neither `tlc_source_location_id` nor `tlc_source_reference`, exempt without reason, exempt with a TLC source other than the receiving site, quantity/UOM invalid, link mode `link_existing` with a lot whose product or TLC differs; no reference document when profile is `US_FSMA204_PROCESSOR` (REC-006; warning only under `US_GENERIC_LOT_TRACEABILITY`). Warnings: same TLC on two lines with the same source, previous source equals receive-at.
+- `receiving/completeness.ts`: historical proposed pure validator over the header, lines, resolved references and profile. Required data includes the receiving date and location, previous source, at least one item, complete product/source descriptions, effective TLC, quantity/UOM and consistent linked-lot identity. FSMA requires a document; the generic profile treats its absence as a warning. Exempt lines additionally need rationale, evidence and an explicit handling mode. Only own-assignment lines require the receiving site as the TLC source. Duplicate create identities are errors, not warnings. Use the later increment contracts for actual paths, field names and issue shapes.
 - `receiving/snapshot.ts`: `buildReceivingFinalizationPlan(input)` returns the exact writes (lot creates, snapshots, document snapshots) so the service is a thin transaction and tests compare plans deterministically.
+
+The 2026-09-07 exempt design separates the saved-data check from explicit per-line
+QA confirmation at finalization. The current code still blocks exempt
+finalization until that design is implemented and verified.
+
 - `imports/receiving-csv.ts` (P0 fixed-template implementation; mapping profiles P1): `RECEIVING_CSV_COLUMNS` (`tlc, product, quantity, unit_of_measure, tlc_source, tlc_source_reference, exempt_supplier, exempt_reason, supplier_lot_reference, notes`), `parseReceivingCsv(text, mapping?)` → rows with per-row issues; `product` resolves by GTIN-14, then `products.external_ref`, then exact name; `tlc_source` resolves by the US-01 location code or GLN. Column keys are the receiving keys of the US-07 field registry; until US-07 exists they are declared here and US-07 must adopt them (OQ-US03-9).
 
 ### Contracts and API

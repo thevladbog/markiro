@@ -50,7 +50,14 @@ describe.skipIf(!url)("US catalog migration on isolated PostgreSQL", () => {
       LEGACY_PRODUCT_ID,
     ]);
     legacyBefore = before.rows[0] as Record<string, unknown>;
-    migrationStartedAt = new Date();
+    // The migration uses PostgreSQL now(), not the host clock. Container/host
+    // clocks can briefly diverge after suspension; compare the same time source.
+    const clock = await fixture.pool.query<{ started_at: Date }>(
+      "SELECT clock_timestamp() AS started_at",
+    );
+    const startedAt = clock.rows[0]?.started_at;
+    if (!(startedAt instanceof Date)) throw new Error("Missing PostgreSQL test clock");
+    migrationStartedAt = startedAt;
     await fixture.pool.query(readFileSync("migrations/0116_us_catalog_gtin.sql", "utf8"));
   }, 60_000);
 

@@ -8,11 +8,11 @@ The separate admin entry supports English (`en-US`) and Spanish (`es-US`), light
 
 The reachable flow is server edition attestation → password sign-in → authenticator enrollment or fresh MFA challenge → organization selection → initial traceability profile setup → stored, read-only profile summary → reference data. Reference data contains connected Products, Parties and Locations lists, forms and archive/restore actions, controlled by fresh server capabilities. The [catalog browser record](catalog-browser.md) defines the product increment and its limits. A one-use backup code can satisfy the login challenge. Profile and IANA time zone require explicit choices; retention defaults to five calendar years with a minimum of two. Server authorization, baseline, timestamps and persisted retention remain authoritative.
 
-Public signup, password recovery, factor replacement, organization creation, profile editing and operational modules are absent. A profile summary explicitly states that receiving, transformation, shipping, plan, request and export workflows are not implemented. It is not an operational dashboard or regulatory-compliance claim.
+Public signup, password recovery, factor replacement, organization creation and profile editing are absent. The profile summary distinguishes the connected receipt workflow from unfinished transformation, shipping, plan, request and export workflows. It is not an operational dashboard or regulatory-compliance claim.
 
 Enrollment keys, backup codes and passwords stay in transient component state. Enrollment material clears on successful verification, session loss and logout. Late responses cannot restore obsolete UI state. Logout waits for an already-started mutation to settle before sending sign-out, so a delayed MFA response cannot set a new session cookie after successful logout. A failed sign-out does not claim that the server session ended.
 
-The subsequent [lot browser increment](lot-browser.md), 2026-09-06, adds the connected lot registry, imported creation, approved source correction and controlled QA status changes. It adds only exact lot collection, UUID item and source/status command proxy paths; event/export workflows remain unavailable. The initial verification below is historical.
+The subsequent [lot browser increment](lot-browser.md), 2026-09-06, adds the connected lot registry, imported creation, approved source correction and controlled QA status changes. It adds only exact lot collection, UUID item and source/status command proxy paths. The [receiving browser increment](receiving-browser.md), 2026-09-07, adds saved drafts, explicit versioned saves, reference-document metadata, saved-data checks and current-QA finalization for ordinary and receipt-specific exempt lines. Exact collection/UUID/readiness/finalize proxy paths are allowlisted; export and other event workflows remain unavailable. The initial verification below is historical.
 
 ## Local build boundary
 
@@ -84,6 +84,18 @@ both builds retained their large-chunk warnings. The two real local browser/prox
 scenarios passed, and desktop sign-in in both themes plus desktop EN/light and
 mobile ES/dark lot screenshots were visually inspected. No hosted, physical-device
 or remote CI check was performed, and no commit, push or release was made.
+
+## Ordinary receiving finalization — 2026-09-07
+
+The [ordinary finalization increment](receiving-browser.md#ordinary-finalization--2026-09-07) supersedes the preceding confirmed-event exclusion for ordinary Receiving only. Current QA confirmation, same-command retry, mixed-status history and explicit current-lot navigation are connected locally. Exact UUID `/finalize` has no query; strict bounded list queries optionally filter draft/finalized. Exempt-supplier and downstream workflows remain open.
+
+The real combined Chromium journey passed in 25.78 seconds, including committed-response loss, stale digest, frozen labels after reference mutation and operator denial; the actual proxy smoke passed separately. EN/ES light/dark confirmation/history were exercised at 1440/1024/390 pixels and safe representative screenshots inspected. See the linked increment for automated counts, warnings and evidence limits. No release lock was changed.
+
+## Exempt-supplier Receiving — 2026-09-07
+
+The [exempt receipt increment](receiving-browser.md#exempt-supplier-receipt-review--2026-09-07) connects receipt-specific draft fields, an exact saved-line QA checklist and frozen v2 history without a supplier-wide approval. It preserves received TLC/source identity or assigns a separate proposal only when no TLC arrived. The real companion runs after ordinary finalization in the same owned fixture and passed mixed paths, no cross-receipt inheritance, committed-response loss with exact retry, master-data mutation, exact lot/audit persistence and operator denial. EN/ES light/dark 1440/1024/390 layouts passed keyboard and overflow checks; the release lock remains unchanged.
+
+The subsequent final UI correction run passed the complete existing journey again after final formatting: 1/1 in 34.36 seconds (35.91 seconds total). It used real keyboard insertion to persist all 120 supplementary Unicode points in proposed TLC and verified the 121-point rejection, displayed and persisted the exact saved reference source plus resolved location separately from evidence, and showed the current pending-QA line list to QA and non-QA users in EN/ES with stale invalidation. Fresh EN desktop and ES mobile originals for both source review and the pending notice are in `/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-AuCcFK`. The full admin result is 1,255/1,255; the covering Receiving result is 106/106. No backend/domain/DB gate was repeated for this frontend-only correction, and no release setting changed.
 
 ## Remaining limits
 

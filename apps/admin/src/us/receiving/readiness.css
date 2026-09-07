@@ -1,0 +1,94 @@
+.us-rec-readiness-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+.us-rec-readiness-heading > .mk-btn {
+  flex-shrink: 0;
+}
+.us-rec-readiness-status p {
+  margin: 0 0 16px;
+}
+.us-rec-readiness-summary {
+  font: var(--text-body);
+  font-weight: 600;
+  color: var(--fg-1);
+}
+.us-rec-readiness-summary.is-blocked {
+  color: var(--err-fg);
+}
+.us-rec-readiness-summary.is-complete {
+  color: var(--ok-fg);
+}
+.us-rec-readiness-group {
+  border-top: 1px solid var(--line);
+  padding: 16px 0;
+}
+.us-rec-readiness-group h3 {
+  font: var(--text-h3);
+  margin: 0 0 12px;
+}
+.us-rec-readiness-group ul {
+  display: grid;
+  gap: 16px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.us-rec-readiness-group li {
+  display: grid;
+  grid-template-columns: minmax(80px, auto) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  font: var(--text-body-sm);
+  overflow-wrap: anywhere;
+}
+.us-rec-readiness-group li p {
+  margin: 4px 0 0;
+  color: var(--fg-2);
+}
+.us-rec-readiness-severity {
+  padding: 3px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  font: var(--text-meta);
+  text-align: center;
+}
+.us-rec-readiness-severity.is-error {
+  color: var(--err-fg);
+  background: var(--err-bg);
+  border-color: var(--err-border);
+}
+.us-rec-readiness-severity.is-warning {
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+.us-rec-readiness-findings.is-stale {
+  color: var(--fg-2);
+}
+.us-rec-readiness-findings.is-stale .us-rec-readiness-severity {
+  color: var(--fg-2);
+  background: var(--surface-panel);
+  border-color: var(--line);
+}
+.us-rec-readiness-scope {
+  margin: 16px 0 0;
+}
+@media (max-width: 900px) {
+  .us-rec-readiness-heading {
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+}
+@media (max-width: 500px) {
+  .us-rec-readiness-group li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .us-rec-readiness-severity {
+    justify-self: start;
+  }
+}

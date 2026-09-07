@@ -10,6 +10,7 @@ export default defineConfig({
     "./src/schema/traceability-products.ts",
     "./src/schema/traceability-lots.ts",
     "./src/schema/traceability-documents.ts",
+    "./src/schema/traceability-receiving.ts",
     "./src/schema/us-auth.ts",
     "./src/schema/auth.ts",
     "./src/schema/platform.ts",

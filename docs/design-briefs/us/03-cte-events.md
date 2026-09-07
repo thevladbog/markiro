@@ -94,14 +94,14 @@ source per event; a mixed delivery is two events (OQ-US03-11).
 
 **Lines** — a table where each row is a lot:
 
-| Column          | Control                                                                                                                                                              |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Product         | Combobox with search; below it the **product description snapshot** preview: name, brand, commodity, variety, packaging size + style                                 |
-| TLC             | Monospace input; opaque string, no format hint                                                                                                                       |
-| TLC source      | Toggle: **Source location** (combobox) or **Source reference** (text); one of the two is required                                                                    |
-| Quantity        | Decimal input + unit select from the closed list (lb, oz, kg, g, each, case, bag, cup, gal, l)                                                                       |
-| Exempt supplier | Checkbox; reveals `Reason` (required) and `Supplier lot reference`; Assign a TLC only if none exists; show the reviewed receiving basis and applicable source fields |
-| Link            | "Create lot on finalize" (default) or "Link existing lot" (picker filtered to product; TLC must match)                                                               |
+| Column          | Control                                                                                                                                                                 |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Product         | Combobox with search; below it the **product description snapshot** preview: name, brand, commodity, variety, packaging size + style                                    |
+| TLC             | Monospace input; opaque string, no format hint                                                                                                                          |
+| TLC source      | Toggle: **Source location** (combobox) or **Source reference** (text); one of the two is required                                                                       |
+| Quantity        | Decimal input + unit select from the closed list (lb, oz, kg, g, each, case, bag, cup, gal, l)                                                                          |
+| Exempt supplier | Checkbox expands rationale, evidence URL, supplier lot reference and existing/absent TLC choice; own TLC is proposed separately and requires receipt-specific QA review |
+| Link            | "Create lot on finalize" (default) or "Link existing lot" (picker filtered to product; TLC must match)                                                                  |
 
 Demo: line 1 `OSS-260914-A1`, Fresh-Cut Red Delicious Apple Slices, Orchard Slice, 10 lb bag,
 500.000 lb, source Orchard Slice Supply LLC (Yakima, WA); line 2 `OSS-260914-A2`, same
@@ -117,6 +117,29 @@ phone on the previous source, blank TLC, no document); exempt-supplier line expa
 existing lot" line with a TLC mismatch; save conflict (409 `not_draft`, finalized meanwhile);
 draft revision 2 with locked TLC/source cells ("lot identity is locked after finalization;
 void and re-enter to change it").
+
+#### Exempt-supplier increment — owner decision, 2026-09-07
+
+The [exempt Receiving specification](../../superpowers/specs/2026-09-07-us-03-exempt-supplier-receiving-design.md)
+records the product behavior and technical design approved on 2026-09-07; the
+increment is not implemented. Existing TLCs and their sources are retained. Only the explicit
+“No TLC assigned” path proposes an own code, with the receiving site as its
+physical source. Do not erase a populated TLC/source/lot when toggling modes.
+Show a source summary, not a disabled source picker, for an accepted own-assignment
+path. A mismatch after changing the receiving site needs explicit correction.
+
+Show rationale and a supporting evidence URL per exempt line. QA reviews those
+lines individually in the existing finalization dialog; all confirmations start
+unchecked and reset after edits, reload or lost QA access. This is approval for
+this saved receipt only, not a permanent supplier status. A complete data check
+must still name the outstanding QA review. Only finalization creates the lot and
+freezes the reviewer/time and reviewed data. Finalized history displays the
+existing/assigned TLC distinction and evidence reference from the snapshot.
+
+Additional states: existing supplier TLC retained; proposed own TLC; missing
+evidence or mode; source/identity mismatch; one of several lines not yet reviewed;
+stale confirmation; uncertain retry with unchanged review choices; frozen review
+after master-data edits. Retain EN/ES, both themes and the existing grouped layout.
 
 ### 3. Transformation form
 
@@ -292,8 +315,9 @@ view; void view; "master data changed since" note; loading; not found.
 
 1. Screen 1: one mixed list with a type filter (as drafted) or three lists under one section
    header? The specs describe three routes; prototype both.
-2. Screen 2: the exempt-supplier toggle locks the TLC source to the receiving site. Disabled
-   combobox, or a plain text line replacing it?
+2. Screen 2 — resolved 2026-09-07: preserve the source of an existing TLC. Only the
+   explicit own-assignment path shows the receiving site as a plain-text source;
+   the exemption toggle alone never replaces identity. See the increment above.
 3. Screen 3: where does the genealogy preview live with more than four inputs — inline,
    collapsible, or detail page only?
 4. Screen 4: the P1 case selector must read as optional ("lot-level workflow with optional

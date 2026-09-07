@@ -3,7 +3,7 @@
 > Read the [shared MVP contract](mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Target design is not a completion claim; dated increment records below describe verified implementation scope.
 
 - Source: MUS-001 v0.1 (2026-09-03), sections 11, 11.1, 11.2 and 15
-- Status: US-00, US-01 and US-02 in progress as of 2026-09-06; no slice complete
+- Status: US-00, US-01, US-02 and US-03 in progress as of 2026-09-07; no slice complete
 - Owner: Vladislav Bogatyrev
 
 ![Architecture scope](diagrams/architecture_scope.png)
@@ -224,6 +224,36 @@ The broad API run passes 1,769 tests and skips 1,411, but is not green: eight pr
 
 Repository-wide formatting and diff checks pass, and the post-format document store/catalog HTTP rerun passes all 46 tests without skips. Receiving persistence, event links, completeness/finalization, frozen snapshots, revision lifecycle, document UI and CSV remain pending. DOC-001/002 and INT-001 stay in progress. The next step is revisioned receiving draft storage using the existing input contracts and tenant-owned reference documents; it must preserve incomplete input and the shared MVP revision/source rules.
 
+### US-03 receiving draft persistence and API — 2026-09-07
+
+The [receiving draft plan](../superpowers/plans/2026-09-06-us-03-receiving-draft-persistence.md) implements the approved incomplete-draft boundary: create, read and full replacement in the isolated US API. Migration0121 adds a draft-only event header, ordered rows/document links, tenant/year number counters and durable operation receipts. `draftVersion` advances only for changed saves; confirmed-event `revision` stays 1. Exact quantity spelling, calendar dates, captured timezone and stable event identity are retained.
+
+Current membership/profile locks precede every request and replay. Changed saves validate tenant-owned active references without enforcing finalization completeness. Same-key retries return their original response even after subsequent changes or a different current writer; different input with that key conflicts. Stale new-key saves conflict before no-op detection. Header, children, operation receipt and exact before/after audit share one commit. Tests cover concurrent requests and audit rollback. No lot/source lock/balance is written, and no confirmed snapshots are fabricated.
+
+POST `/traceability/receiving` and GET/PUT `/traceability/receiving/:id` require actual US session/MFA and current capabilities. Only receiving POST/PUT receives a 256 KiB body limit; other paths stay at 16 KiB. Strict contracts and OpenAPI preserve server-owned identity/actors and safe errors. List/search, UI/proxy, CSV, finalization, amendment, void, export and hosted acceptance remain pending. REC-001/002/003, DOC-001 and INT-001 remain in progress, not evidenced as complete. See the plan's verification section for final checks and limitations.
+
+### US-03 connected receiving drafts — 2026-09-07
+
+The [receiving browser record](receiving-browser.md) adds a saved-draft registry and a grouped editor: receiving details, selected product/lot line and reference documents. The new tenant-scoped GET collection has literal event-number search and bounded summary pagination. Existing create/read/save persistence now has an EN/ES interface with explicit saves, version conflicts and same-command recovery after an unknown result. Metadata creation supports all nine reference-document types; links are saved with the receipt, not silently persisted on selection.
+
+Client validation rejects mismatched acknowledgements without clearing input or retry identity. A populated TLC source cannot be cleared by changing its type without confirmation. Session loss continues to clear protected transient state; there is no cross-session draft persistence. No finalization, CSV, lot assignment, stock mutation, confirmed-event snapshots or lifecycle command is added. REC-001/002/003, DOC-001/002 and INT-001 remain in progress. Existing Markiro components/tokens and grouped layout were retained through the frontend guidance; no `.pen` modification is included.
+
+Final local verification passes 1,192 admin tests across 104 files, including 43 focused receiving client/UI/reference tests; 379 isolated API tests across 19 files; and 407 shared-contract tests across 21 files, all without skips. Admin/API/contracts typecheck, lint and build pass, including both primary and isolated US browser builds. Five unchanged RU hook warnings and large-chunk advisories remain. The primary API/infrastructure suite was not rerun; its earlier environment gaps are not resolved by these US results.
+
+The final real Chromium flow passes save-after-lost-response recovery, reload/reopen, exact audit verification and concurrent-version conflict with retained input. It exercises both locales/themes at 1440/1024/390 pixels; desktop EN and narrow dark ES screenshots were visually inspected. The actual Vite/API proxy smoke, all 17 isolation contracts, local release-lock checker, repository formatting and whitespace checks pass. Independent review reports no remaining blocking findings after response-validation and source-confirmation fixes. Hosted operation, native devices, screen readers and fluent Spanish acceptance remain unverified. Work stays local in the isolated `codex/us-mvp` worktree, with no commit, push, merge or deployment.
+
+### US-03 saved-draft data check — 2026-09-07
+
+The [saved-data check](receiving-browser.md#saved-draft-data-check--2026-09-07) adds a pure domain assessment, strict query/result contracts, tenant-scoped read-only API and an EN/ES panel in the existing receiving editor. One repeatable-read transaction checks the requested saved version with current references and returns a rule version, check time and input digest. Header, numbered line and document findings include missing descriptions, inactive references, unresolved product coverage, mismatched linked lots and duplicate create identities. The generic profile explicitly leaves applicability unassessed; an exempt-supplier flag cannot substitute for the future QA-reviewed basis or TLC assignment.
+
+The interface checks only on request, never saves automatically, and invalidates results after edits (including edit-and-revert), save attempts or reloads. Late replies cannot restore old results. A complete result is limited to the saved data at check time; it is not finalized/export-ready/compliant status. No audit, receipt, draft, lot or source lock is written by checking. Finalization, frozen snapshots, reviewed exempt receiving and cross-event completeness remain pending; US-03 and REC-001/002 remain in progress.
+
+Focused failing tests preceded implementation. Final local gates pass: 877 domain tests (47 files), 411 contract tests (22 files), 1,206 admin tests (106 files), and 395 isolated API/entry/environment/health tests (20 files), without skips. The final receiving client/UI subset passes 57 tests. Domain/contracts/admin/API typecheck, lint and builds pass, including both primary and isolated US browser builds; five existing primary UI hook warnings and large-chunk advisories remain. All 17 isolation contracts, release-lock checker, repository formatting and whitespace checks pass. Independent source/test review reports no remaining actionable findings; it did not independently rerun tests.
+
+The real Chromium journey verifies explicit saved-data checks, blocked findings, edit-and-revert invalidation, stable digest on unchanged input, changed digest after saved-version advancement, and exact unchanged receiving audit counts alongside the existing save-recovery/conflict flows. Both locales/themes at 1440/1024/390 pixels have no page overflow, and every finding and scope note can be scrolled above the sticky save bar. A diagnostic showed that viewport intersection alone could ignore that bar in the test; explicit scroll positioning fixed the assertion without changing product layout. Final desktop EN and narrow dark ES captures were visually inspected. Actual proxy smoke confirms the narrow readiness allowlist and refusal of extra/nested commands. No hosted environment, physical devices, screen reader or fluent Spanish acceptance was exercised.
+
+No migration, commit, push, merge, deployment or release-setting change is included in this readiness increment. The full primary API/infrastructure suite is not rerun because its required primary environment is intentionally outside this isolated increment. Existing primary-checkout changes are unchanged. The frontend guidance retained Markiro components/tokens and the existing grouped layout rather than introducing a separate visual system.
+
 1. US-00: edition, provisioning, authorization, data-location inventory and deployment design.
 2. US-01/02: parties, locations, product profiles and lots.
 3. US-03/04/05: receiving, standalone transformation and shipping.
@@ -291,6 +321,63 @@ P/I = probability / impact.
 | R-10 | Personal/confidential data leak    | Low/High      | U.S.-hosted data plane, synthetic demo, privacy scan, redaction and access audit.     |
 | R-11 | Estimate does not cover scope      | Medium/Medium | Station/EPCIS/EDI are P1/P2; protect critical path.                                   |
 | R-12 | Product presented as legal advice  | Medium/High   | Claim language matrix and clear product limitations.                                  |
+
+### US-03 ordinary receiving finalization — 2026-09-07
+
+The [approved ordinary-finalization design](../superpowers/specs/2026-09-07-us-03-ordinary-receiving-finalization-design.md) is connected through shared strict contracts, additive migration0122, atomic US-only command/read APIs and the [Receiving browser](receiving-browser.md#ordinary-finalization--2026-09-07). Current QA explicitly confirms a saved complete check; exact identifiers, decimal quantities and captured civil date/timezone are preserved. Mixed create/link lots, permanent source latches, immutable history and exact audit commit together. Replay requires current authorization and cannot repeat effects. Older draft/readiness-only exclusions above remain the historical record of those increments and are superseded only for ordinary finalization.
+
+Client/UI proof covers acknowledgement correlation (event/version/digest), typed 409 findings, dialog cancellation, exact BigInt totals, QA loss/restoration, dirty documents, late checks, double submission, unknown same-command retries, historical save recovery and failed current-record reload. Post-integration disposable DB checks passed 22/22; ten affected API suites passed 284/284. The real local browser journey passed in 25.78 seconds, including stale references, genuinely committed response loss, frozen labels after live edits, exact lot/back navigation even after failed GET, and operator denial. Confirmation/history were exercised in EN/ES light/dark at 1440/1024/390, with keyboard and overflow assertions; representative safe screenshots were inspected. Actual proxy smoke and 17 isolation/release-lock contracts passed.
+
+After the final source freeze, all 1,225 admin tests passed across 108 files in 179.59 seconds, with no skips. Admin typecheck, lint, primary build and US build passed; five existing primary-app hook warnings, build chunk-size notices and expected jsdom canvas/navigation warnings remain. The full legacy API suite was not repeated: its eight primary-environment setup failures remain an explicit pre-existing limit. No primary environment/base migration, hosted/hardware/native-device/screen-reader check, fluent Spanish acceptance, commit, publication or release occurred.
+
+A separate controller run after the last UI recovery guard passed the complete local Chromium journey again: 1/1, no skips, 24.75 seconds (26.56 seconds including process setup/cleanup). This closes the timing gap between the earlier browser run and final source freeze. The final run's narrow dark ES confirmation and tablet light ES history were also visually inspected; no clipping or branding regression was observed. This remains synthetic local evidence, not hosted acceptance.
+
+Independent task reviews and the final cross-layer integration review are complete with no remaining actionable Critical, Important or Minor findings. The final review was read-only and assessed the recorded tests/browser evidence without rerunning broad suites. Its approval covers this isolated ordinary-finalization increment only; it provides no merge or release authorization.
+
+US-03 and the MVP remain In progress. Exempt-supplier receiving is the next P0 increment; amendment/void, Transformation, Shipping, genealogy, balances, CSV and export remain unfinished. Ordinary finalization does not establish export eligibility or a regulatory conclusion.
+
+### US-03 exempt-supplier Receiving — design decision, 2026-09-07
+
+The owner approved receipt-specific, per-line QA review at finalization, with
+mandatory rationale and supporting source URL. Existing TLC/source identity is
+preserved; only absence of an assigned TLC allows a separate own-code proposal
+at the receiving site. No supplier-wide exemption registry or automatic legal
+classification is included. The [technical specification](../superpowers/specs/2026-09-07-us-03-exempt-supplier-receiving-design.md)
+was approved 2026-09-07. The [implementation plan](../superpowers/plans/2026-09-07-us-03-exempt-supplier-receiving.md)
+separates pure input rules, additive storage/frozen contracts, atomic API activation
+and the connected review interface. Task 1 (pure rules and strict primitives)
+passed its independent review on 2026-09-07. Task 2 additive storage and frozen-v2
+contracts also passed review after a timestamp-identity correction. Task 3 active
+API/readiness/finalization and legacy compatibility passed independent review;
+the connected per-line QA interface and real-browser acceptance remain pending.
+Design brief03 and its mirrored open question reflect this decision; earlier unconditional source
+replacement wording is superseded.
+
+This entry records a design, not delivery. Current exempt-supplier finalization
+remains blocked; REC-004 and the corresponding assignment path remain unfinished.
+No API, database, browser behavior, migration or release setting changed in this
+documentation step. Previous verification results are not proof of this new path.
+
+Documentation checks passed: whole-worktree formatting, scoped formatting after
+the final wording edits, diff checks and all 17 isolation contracts (no skips).
+The specification was self-reviewed for identity, review timing, retries and
+legacy-history compatibility. Application/database/browser tests for the new
+path were not run because no implementation changed. Hosted and hardware checks
+remain outside this documentation step. No staging, commit, push or release.
+
+### US-03 exempt-supplier Receiving — connected implementation, 2026-09-07
+
+The approved receipt-specific design is now connected through strict optional draft metadata, readiness v3, exact per-line QA review and frozen snapshot v2. The editor preserves received TLC/source/lot data, keeps the own proposal separate and requires explicit correction of a conflicting source. Confirmation resolves readable labels once per unique reference, begins unchecked for every saved receipt, blocks incomplete/mismatched/stale metadata and freezes one exact retry command after uncertain delivery. V1 history and missing-versus-null legacy receipt data remain compatible; v2 history reads only frozen review and identity data.
+
+After review, the editor binds each resolved physical-source label to its selected location ID, preventing a previous site's name from appearing while the new lookup is delayed or failed. Connected success/failure/obsolete-response cases went RED before the fix; shared receiving/previous location lookup counts are also asserted. The broader Receiving regression passes 99/99, and amended editor tests pass 17/17 after the final test typing correction. Admin typecheck/lint and the US build with both edition variables pass. The final real Chromium source passed 1/1 in 33.83 seconds (35.71 seconds including setup/cleanup) using the existing owned FSMA fixture. It proved mixed preserved/own paths, independent same-supplier receipts, real commit then delivery abort with exact retry, exact persisted/audit/lot identities, frozen history after master-data changes and real operator 403. EN/ES light/dark 1440/1024/390 checks found no horizontal overflow; original-resolution mobile preserve, own, bottom/footer confirmation, top-of-dialog confirmation and frozen screenshots under `/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-Z4wywV` were personally inspected. The owned disposable database and loopback servers were confirmed closed; production source did not change after the browser run.
+
+Before this bounded UI follow-up, scoped package gates passed: domain 904/904, contracts 469/469, exact API list 337/337 and admin 1,245/1,245 across 110 files, plus typecheck/lint/build for domain/contracts/DB/API and admin typecheck/lint/primary+US builds. The final-source full admin rerun passed 1,248/1,248 across 110 files, with no skips and the three new race tests included. DB reported 406 passes and 141 explicit skips across 27 files; isolated US database cases ran and tests requiring other package database variables remained skipped. Isolation contracts passed 17/17 and actual proxy smoke passed 1/1. Unaffected backend/domain/DB suites were not repeated for the source-label fix. Existing CommonJS/module-type, five RU hook, jsdom canvas/navigation and chunk-size warnings remain unsuppressed.
+
+This closes the scoped exempt receipt UI/finalization path, not US-03 or the MVP. Amendment/void, Transformation, Shipping, genealogy, balances, CSV/export, hosted operation, hardware/native-device/screen-reader and fluent Spanish acceptance remain open. The broad legacy API suite is still outside this isolated gate because of its previously recorded primary-environment setup failures. No profile mutation, external evidence fetch, browser approval/key storage, primary environment/base database change, workflow release enablement, staging, commit, push, publication or deployment occurred.
+
+The final three-finding UI correction wave is also complete. Proposed TLC entry now permits every contract-valid 120-code-point value even when supplementary characters occupy 240 UTF-16 units, while the unchanged contract still rejects 121. Saved QA confirmation distinguishes physical and reference sources and shows the exact reference URL and resolved location separately from exemption evidence. The saved-data readiness card shows the exact current pending-QA lines to every role in EN/ES, with the existing edit/generation invalidation preventing stale notices. Correction tests passed 35/35; the covering Receiving set passed 106/106; the fresh full admin run passed 1,255/1,255 across 110 files. Admin typecheck/lint, the primary build and the separate US build with both edition variables passed. Unaffected backend/domain/DB suites were not repeated.
+
+The final local Chromium source passed 1/1 in 34.36 seconds (35.91 seconds total) after all production formatting edits. Its genuine keyboard path reproduced the old UTF-16 cap under mutation, then proved exact native entry and persistence of 120 supplementary points plus rejection of 121 on final source. It also asserted the exact reference-source database and frozen tuples, null physical-source column, separate evidence, pending line list `1, 2`, existing retry/audit/lot/role safeguards and EN/ES light/dark 1440/1024/390 coverage. Four new source-reference and pending-notice originals under `/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-AuCcFK` were inspected. Production source hashes were unchanged across the run; the owned database and loopback servers were clean afterward. This remains isolated synthetic browser evidence and does not broaden the existing US-03/MVP or external-acceptance limits.
 
 ## 6. Final rule
 

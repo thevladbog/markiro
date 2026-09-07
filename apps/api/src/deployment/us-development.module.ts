@@ -14,6 +14,7 @@ import { UsRuntime } from "./us-runtime";
 import { UsProfileController, UsSessionGuard } from "./us-profile.controller";
 import { UsMasterDataController } from "./us-master-data.controller";
 import { UsReferenceDocumentController } from "./us-reference-document.controller";
+import { UsReceivingController } from "./us-receiving.controller";
 
 @Controller()
 class UsDevelopmentController {
@@ -56,6 +57,7 @@ export class UsDevelopmentModule {
         UsLotController,
         UsProductProfileController,
         UsReferenceDocumentController,
+        UsReceivingController,
       ],
       providers: [{ provide: UsRuntime, useValue: runtime }, UsSessionGuard],
     };

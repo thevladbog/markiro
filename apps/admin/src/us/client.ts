@@ -1,5 +1,22 @@
 import { z } from "zod";
 import {
+  createReceivingDraftSchema,
+  finalizeReceivingSchema,
+  receivingFinalizedRecordSchema,
+  receivingRecordSchema,
+  listReceivingRecordsQuerySchema,
+  receivingRecordListSchema,
+  receivingReadinessIssueSchema,
+  receivingReadinessQuerySchema,
+  receivingReadinessSchema,
+  saveReceivingDraftSchema,
+  receivingDraftRecordSchema,
+  listReceivingDraftsQuerySchema,
+  receivingDraftListSchema,
+  listReferenceDocumentsQuerySchema,
+  referenceDocumentInputSchema,
+  referenceDocumentListSchema,
+  referenceDocumentSchema,
   createTraceabilityLotSchema,
   listTraceabilityLotsQuerySchema,
   patchLotSourceSchema,
@@ -28,7 +45,19 @@ import {
   usTraceabilityAccessSchema,
   usTraceabilityProfileSummarySchema,
   type ListUsLocationsQuery,
+  type ReceivingDraft,
 } from "@markiro/platform-contracts";
+
+function sameReceivingDraftInput(left: ReceivingDraft, right: ReceivingDraft): boolean {
+  const comparable = (draft: ReceivingDraft) => ({
+    ...draft,
+    items: draft.items.map(({ exemptReceipt, ...item }) => ({
+      ...item,
+      exemptReceipt: exemptReceipt ?? null,
+    })),
+  });
+  return JSON.stringify(comparable(left)) === JSON.stringify(comparable(right));
+}
 
 export type UsClientErrorCode =
   | "invalid_input"
@@ -42,6 +71,16 @@ export type UsClientErrorCode =
   | "lot_source_locked"
   | "lot_revision_conflict"
   | "lot_reference_archived"
+  | "receiving_draft_conflict"
+  | "receiving_operation_conflict"
+  | "receiving_reference_inactive"
+  | "receiving_reference_not_found"
+  | "receiving_draft_not_found"
+  | "receiving_already_finalized"
+  | "receiving_readiness_changed"
+  | "receiving_lot_conflict"
+  | "event_incomplete"
+  | "document_duplicate"
   | "conflict"
   | "rate_limited"
   | "profile_not_provisioned"
@@ -60,6 +99,13 @@ export class UsLotDuplicateError extends UsClientError {
   constructor(readonly existingId: string) {
     super("lot_duplicate");
     this.name = "UsLotDuplicateError";
+  }
+}
+
+export class UsReceivingIncompleteError extends UsClientError {
+  constructor(readonly issues: z.infer<typeof receivingReadinessIssueSchema>[]) {
+    super("event_incomplete");
+    this.name = "UsReceivingIncompleteError";
   }
 }
 
@@ -109,6 +155,8 @@ const partiesPath = "/api/us/traceability/parties";
 const locationsPath = "/api/us/traceability/locations";
 const productsPath = "/api/us/traceability/catalog/products";
 const lotsPath = "/api/us/traceability/lots";
+const receivingPath = "/api/us/traceability/receiving";
+const documentsPath = "/api/us/traceability/reference-documents";
 const deploymentSchema = z
   .object({
     edition: z.literal("US"),
@@ -174,6 +222,49 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
         if (response.ok) throw new UsClientError("invalid_response");
       }
       if (!response.ok) {
+        if (path === receivingPath || path.startsWith(`${receivingPath}/`)) {
+          if (response.status === 409) {
+            const incomplete = z
+              .object({
+                code: z.literal("event_incomplete"),
+                issues: z.array(receivingReadinessIssueSchema).max(5000),
+              })
+              .strict()
+              .safeParse(value);
+            if (incomplete.success) throw new UsReceivingIncompleteError(incomplete.data.issues);
+          }
+          const safe = (
+            response.status === 409
+              ? z
+                  .object({
+                    code: z.enum([
+                      "receiving_draft_conflict",
+                      "receiving_operation_conflict",
+                      "receiving_reference_inactive",
+                      "receiving_already_finalized",
+                      "receiving_readiness_changed",
+                      "receiving_lot_conflict",
+                    ]),
+                  })
+                  .strict()
+              : z
+                  .object({
+                    code: z.enum(["receiving_reference_not_found", "receiving_draft_not_found"]),
+                  })
+                  .strict()
+          ).safeParse(value);
+          if ([404, 409].includes(response.status) && safe.success)
+            throw new UsClientError(safe.data.code);
+        }
+        if (
+          path === documentsPath &&
+          response.status === 409 &&
+          z
+            .object({ code: z.literal("document_duplicate") })
+            .strict()
+            .safeParse(value).success
+        )
+          throw new UsClientError("document_duplicate");
         if (response.status === 409 && (path === lotsPath || path.startsWith(`${lotsPath}/`))) {
           const duplicate = z
             .object({ code: z.literal("LOT_DUPLICATE"), existingId: platformUuidSchema })
@@ -233,6 +324,121 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
     }
   }
   return {
+    async finalizeReceiving(id: unknown, input: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const body = checked(finalizeReceivingSchema, input, "invalid_input");
+      const result = await request(
+        `${receivingPath}/${eventId}/finalize`,
+        receivingFinalizedRecordSchema,
+        "POST",
+        body,
+      );
+      if (
+        result.id.toLowerCase() !== eventId ||
+        result.draftVersion !== body.expectedDraftVersion ||
+        result.snapshot.confirmation.inputDigest !== body.expectedInputDigest
+      )
+        throw new UsClientError("invalid_response");
+      const expectedReviews = body.reviewedExemptLines ?? [];
+      const confirmedReviews =
+        result.snapshot.snapshotVersion === 2
+          ? result.snapshot.confirmation.reviewedExemptLines
+          : [];
+      if (
+        expectedReviews.length !== confirmedReviews.length ||
+        expectedReviews.some((line, index) => line !== confirmedReviews[index])
+      )
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async listReceivingRecords(input: unknown = {}) {
+      const query = checked(listReceivingRecordsQuerySchema, input, "invalid_input");
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(query)) {
+        if (value !== undefined) params.set(key, String(value));
+      }
+      return request(`${receivingPath}?${params}`, receivingRecordListSchema);
+    },
+    async getReceivingRecord(id: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const result = await request(`${receivingPath}/${eventId}`, receivingRecordSchema);
+      if (result.id.toLowerCase() !== eventId) throw new UsClientError("invalid_response");
+      return result;
+    },
+    async checkReceivingReadiness(id: unknown, expectedDraftVersion: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const query = checked(
+        receivingReadinessQuerySchema,
+        { expectedDraftVersion },
+        "invalid_input",
+      );
+      const result = await request(
+        `${receivingPath}/${eventId}/readiness?${new URLSearchParams({ expectedDraftVersion: String(query.expectedDraftVersion) })}`,
+        receivingReadinessSchema,
+      );
+      if (
+        result.eventId.toLowerCase() !== eventId ||
+        result.draftVersion !== query.expectedDraftVersion
+      )
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async listReceivingDrafts(input: unknown = {}) {
+      const query = checked(listReceivingDraftsQuerySchema, input, "invalid_input");
+      const params = new URLSearchParams({ status: "draft" });
+      for (const [key, value] of Object.entries(query)) {
+        if (value !== undefined) params.set(key, String(value));
+      }
+      return request(`${receivingPath}?${params}`, receivingDraftListSchema);
+    },
+    async getReceivingDraft(id: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const result = await request(`${receivingPath}/${eventId}`, receivingDraftRecordSchema);
+      if (result.id.toLowerCase() !== eventId) throw new UsClientError("invalid_response");
+      return result;
+    },
+    async createReceivingDraft(input: unknown) {
+      const body = checked(createReceivingDraftSchema, input, "invalid_input");
+      const result = await request(receivingPath, receivingDraftRecordSchema, "POST", body);
+      if (!sameReceivingDraftInput(result.draft, body.draft))
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async saveReceivingDraft(id: unknown, input: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const body = checked(saveReceivingDraftSchema, input, "invalid_input");
+      const result = await request(
+        `${receivingPath}/${eventId}`,
+        receivingDraftRecordSchema,
+        "PUT",
+        body,
+      );
+      if (result.id.toLowerCase() !== eventId || !sameReceivingDraftInput(result.draft, body.draft))
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async listReferenceDocuments(input: unknown = {}) {
+      const query = checked(listReferenceDocumentsQuerySchema, input, "invalid_input");
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(query)) {
+        if (value !== undefined) params.set(key, String(value));
+      }
+      return request(`${documentsPath}?${params}`, referenceDocumentListSchema);
+    },
+    async getReferenceDocument(id: unknown) {
+      const documentId = checked(platformUuidSchema, id, "invalid_input");
+      const result = await request(`${documentsPath}/${documentId}`, referenceDocumentSchema);
+      if (result.id.toLowerCase() !== documentId) throw new UsClientError("invalid_response");
+      return result;
+    },
+    async createReferenceDocument(input: unknown) {
+      return request(
+        documentsPath,
+        referenceDocumentSchema,
+        "POST",
+        checked(referenceDocumentInputSchema, input, "invalid_input"),
+      );
+    },
     async listLots(input: unknown = {}) {
       const query = checked(listTraceabilityLotsQuerySchema, input, "invalid_input");
       const params = new URLSearchParams();

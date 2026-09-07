@@ -12,6 +12,7 @@ import { UsProductProfileStore } from "../modules/traceability/products/us-produ
 import { UsProfileStore } from "../modules/traceability/profile/us-profile-store";
 import { UsMasterDataStore } from "../modules/traceability/master-data/us-master-data-store";
 import { UsReferenceDocumentStore } from "../modules/traceability/documents/us-reference-document-store";
+import { UsReceivingStore } from "../modules/traceability/receiving/us-receiving-store";
 
 /** Owns only the explicitly supplied US pool; never imports RU application providers. */
 export class UsRuntime implements OnApplicationShutdown {
@@ -22,6 +23,7 @@ export class UsRuntime implements OnApplicationShutdown {
   readonly lots: UsLotStore;
   readonly productProfiles: UsProductProfileStore;
   readonly referenceDocuments: UsReferenceDocumentStore;
+  readonly receiving: UsReceivingStore;
 
   constructor(
     readonly env: Env,
@@ -38,6 +40,7 @@ export class UsRuntime implements OnApplicationShutdown {
     this.lots = new UsLotStore(connection.db);
     this.productProfiles = new UsProductProfileStore(connection.db);
     this.referenceDocuments = new UsReferenceDocumentStore(connection.db);
+    this.receiving = new UsReceivingStore(connection.db);
     // Idle-pool failures must not crash the metadata/liveness process or log SQL.
     connection.pool.on("error", () => {});
   }

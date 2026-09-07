@@ -4,8 +4,16 @@ import { platformUuidSchema } from "../primitives.js";
 import { traceabilityCivilDateSchema, traceabilityQuantitySchema } from "./event-values.js";
 import { traceabilityLotSourceSchema } from "./lot-records.js";
 import { tlcSchema } from "./lots.js";
+import { receivingExemptReceiptSchema } from "./receiving-exemption.js";
 
-const text = (maximum: number) => z.string().trim().min(1).max(maximum).nullable();
+const text = (maximum: number) =>
+  z
+    .string()
+    .refine((value) => !value.includes("\u0000") && !/\p{Cs}/u.test(value))
+    .trim()
+    .min(1)
+    .max(maximum)
+    .nullable();
 
 /** Structurally valid but potentially incomplete. Never authorizes or finalizes a receipt. */
 export const receivingDraftItemSchema = z
@@ -17,6 +25,7 @@ export const receivingDraftItemSchema = z
     source: traceabilityLotSourceSchema,
     exemptSupplier: z.boolean(),
     exemptReason: text(2000),
+    exemptReceipt: receivingExemptReceiptSchema.nullable().optional(),
     supplierLotReference: text(128),
     quantity: traceabilityQuantitySchema.nullable(),
     unitOfMeasure: z.enum(UOM_CODES_V1).nullable(),

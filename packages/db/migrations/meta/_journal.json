@@ -848,6 +848,27 @@
       "when": 1788662252644,
       "tag": "0120_us_reference_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1788694485293,
+      "tag": "0121_us_receiving_drafts",
+      "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1788769916293,
+      "tag": "0122_us_receiving_finalization",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1788786396797,
+      "tag": "0123_us_receiving_exemption",
+      "breakpoints": true
     }
   ]
 }

@@ -59,7 +59,7 @@ const copy = {
       baseline: "Regulatory baseline",
       effective: "Effective",
       unfinished:
-        "Receiving, transformation, shipping, plan, request, and export workflows are not yet implemented.",
+        "Receiving drafts and ordinary receipt finalization are available. Exempt-supplier receiving, transformation, shipping, plan, request, and export workflows are not yet implemented.",
       profileConflict:
         "A different profile already exists. Reload the server profile instead of overwriting it.",
       reload: "Reload server profile",
@@ -125,7 +125,7 @@ const copy = {
       baseline: "Base regulatoria",
       effective: "Vigente desde",
       unfinished:
-        "Los flujos de recepción, transformación, envío, plan, solicitud y exportación aún no están implementados.",
+        "Los borradores y la finalización de recepciones ordinarias están disponibles. La recepción de proveedores exentos y los flujos de transformación, envío, plan, solicitud y exportación aún no están implementados.",
       profileConflict:
         "Ya existe un perfil diferente. Recargue el perfil del servidor en lugar de sobrescribirlo.",
       reload: "Recargar perfil del servidor",

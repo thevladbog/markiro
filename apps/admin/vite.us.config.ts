@@ -11,7 +11,43 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
   )
     throw new Error("US local browser requires explicit US edition and development/test mode");
 
+  const receivingQueryField =
+    "(?:search=(?:%[a-fA-F0-9]{2}|[a-zA-Z0-9_.!~*'()+-]){0,1800}|status=(?:draft|finalized)|limit=(?:[1-9]|[1-9][0-9]|100)|offset=(?:0|[1-9][0-9]{0,4}|100000))";
+  const receivingListPath =
+    "^/api/us/traceability/receiving" +
+    ["search", "status", "limit", "offset"]
+      .map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`)
+      .join("") +
+    `(\\?${receivingQueryField}(?:&${receivingQueryField}){0,3})?$`;
   const proxy = {
+    [receivingListPath]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    "^/api/us/traceability/receiving/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}/finalize$":
+      {
+        target: "http://localhost:3100",
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+      },
+    "^/api/us/traceability/receiving/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}/readiness\\?expectedDraftVersion=[1-9][0-9]{0,9}$":
+      {
+        target: "http://localhost:3100",
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+      },
+    "^/api/us/traceability/reference-documents(\\?.*)?$": {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    "^/api/us/traceability/(receiving|reference-documents)/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$":
+      {
+        target: "http://localhost:3100",
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+      },
     "^/api/us/traceability/lots(\\?.*)?$": {
       target: "http://localhost:3100",
       changeOrigin: true,

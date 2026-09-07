@@ -8,6 +8,7 @@ import { startUsBrowserFixture } from "../browser-fixture.mjs";
 import { exerciseUsMasterData } from "./master-data-flow.mjs";
 import { exerciseUsCatalog } from "./catalog-flow.mjs";
 import { exerciseUsLots } from "./lot-flow.mjs";
+import { exerciseUsReceiving } from "./receiving-flow.mjs";
 import { expectUsBrand } from "./brand-flow.mjs";
 
 // Use the separately pinned browser tool workspace. No browser dependency enters
@@ -22,8 +23,8 @@ const { createOTP } = authRequire("@better-auth/utils/otp");
 const { base32 } = authRequire("@better-auth/utils/base32");
 
 test(
-  "US browser: real MFA, profile and reference data, EN/ES and mobile",
-  { timeout: 90000 },
+  "US browser: real MFA, profile, reference data and receiving drafts, EN/ES and mobile",
+  { timeout: 120000 },
   async () => {
     const fixture = await startUsBrowserFixture(process.env.US_TEST_DATABASE_URL);
     let browser;
@@ -127,6 +128,7 @@ test(
       await exerciseUsMasterData({ page, expect, screenshots, fixture });
       await exerciseUsCatalog({ page, expect, screenshots, fixture });
       await exerciseUsLots({ page, expect, screenshots, fixture });
+      await exerciseUsReceiving({ page, expect, screenshots, fixture });
       await page.screenshot({ path: join(screenshots, "profile-en.png"), fullPage: true });
       await page.getByRole("button", { name: "Change theme", exact: true }).click();
       await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
