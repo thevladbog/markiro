@@ -6,6 +6,8 @@ export { canonicalizeKm, kmHash, kmKey, MAX_KM_UTF8_BYTES, parseKm } from "./gs1
 export type { ParsedKm } from "./gs1/km.js";
 export * from "./product-labels/contracts.js";
 export * from "./product-labels/km.js";
+export { rasterizeGs1DataMatrix } from "./barcodes/gs1-data-matrix.js";
+export { assertDuplicateTemplate, buildDuplicateLabelTemplate } from "./labels/duplicate.js";
 export {
   buildSscc,
   formatSsccHri,

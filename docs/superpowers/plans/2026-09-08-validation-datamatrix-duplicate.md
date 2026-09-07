@@ -26,7 +26,7 @@
 - `.pen` — только Pencil MCP. Согласованный файл: `docs/design-briefs/check_with_reprint.pen`; файлы соседних дизайн-задач не менять.
 - Node >=24, Corepack и версия pnpm из repository manifest. Новых зависимостей план не требует; lockfile вручную не редактировать.
 - Серверные записи tenant-scoped; device/terminal определяются аутентификацией. Badge/PIN/ключи не включать в события и тестовые выводы.
-- Печатный путь нового сценария TSPL — GS1-растр и `BITMAP`; старые шаблоны не переводить на него автоматически. ZPL остаётся на существующем пути при прохождении тестов.
+- Печатный путь нового сценария TSPL — GS1-растр и `BITMAP`; старые шаблоны не переводить на него автоматически. ZPL нового сценария использует тот же растр через ^GFA: тест обнаружил несовместимую семантику размера в старом native-пути; старые вызовы не меняются.
 - Перед кодом — актуальный `git status`, чтение AGENTS.md, отдельная ветка/worktree через `using-git-worktrees` при изоляции. Этот план не разрешает push, PR или production deploy.
 
 ---
@@ -265,7 +265,7 @@ expect(
 
 **Files:** Create `packages/domain/src/labels/duplicate.ts`,
 `packages/domain/src/barcodes/gs1-data-matrix.ts`; modify
-`barcodes/svg.ts`, `labels/{eligibility,tspl}.ts`, `index.ts`;
+`barcodes/svg.ts`, `labels/{eligibility,tspl,zpl,bounds}.ts`, `index.ts`;
 test `product-labels-render.test.ts`, `labels-eligibility.test.ts`,
 `labels-tspl.test.ts`, `labels-zpl.test.ts`, `barcodes.test.ts`.
 Для превью modify `apps/admin/src/pages/labels/renderer.ts` и соответствующий
@@ -274,11 +274,12 @@ test `product-labels-render.test.ts`, `labels-eligibility.test.ts`,
 **Interfaces:** Produces `assertDuplicateTemplate(spec: LabelTemplateSpec): void`,
 `buildDuplicateLabelTemplate(): LabelTemplateSpec`,
 `rasterizeGs1DataMatrix(raw: string, sideDots: number): RasterResult`;
-`GenerateTsplDeps.kmDataMatrix?: "native" | "raster"`.
+`GenerateTsplDeps.kmDataMatrix?: "native" | "raster"`, такой же флаг в GenerateZplDeps;
+`elementBoundsMm(element,data,{kmDataMatrix:"raster"})` возвращает полный квадрат кода.
 `buildDuplicateLabelTemplate` возвращает 58×40 мм, 203 dpi, имя хранится отдельно:
 `Дубликат Data Matrix 58×40`. `LabelTemplatePurpose` берётся из задачи 1.
 
-- [ ] Написать failing test на привязку KM и на raster-команду:
+- [x] Написать failing test на привязку KM и на raster-команду:
 
 ```ts
 const spec = buildDuplicateLabelTemplate();
@@ -298,9 +299,9 @@ domain-модулей и новые функции из `labels/duplicate.ts`. �
 из Data Matrix `(x=3,y=3,size=24 mm)` и ASCII-подписей/полей с ограниченной шириной;
 кириллическое имя товара добавляется в сценарии с настоящим `rasterizeText`.
 
-- [ ] Run `pnpm --filter @markiro/domain exec vitest run test/product-labels-render.test.ts`; ожидается отсутствие raster-пути.
-- [ ] Вынести существующую сборку GS1/FNC1 из `svg.ts` в общий модуль без изменения escaping. Использовать `bwipjs.raw` для module grid с теми же параметрами; проверять форму результата, не маскировать её через `any`. Увеличивать модули целым числом точек, добавить свободную зону в одну module-cell. Укладывать символ в отведённый квадрат; при scale < 1 бросать `DUPLICATE_LABEL_TOO_SMALL`.
-- [ ] Паковать bitmap существующим `bitmapToZplHex`, а полярность TSPL получать через `buildBitmapCommand`. В ветке barcode добавить точечное условие:
+- [x] Run `pnpm --filter @markiro/domain exec vitest run test/product-labels-render.test.ts`; ожидается отсутствие raster-пути.
+- [x] Вынести существующую сборку GS1/FNC1 из `svg.ts` в общий модуль без изменения escaping. Использовать `bwipjs.raw` для module grid с теми же параметрами; проверять форму результата, не маскировать её через `any`. Увеличивать модули целым числом точек, добавить свободную зону в одну module-cell. Укладывать символ в отведённый квадрат; при scale < 1 бросать `DUPLICATE_LABEL_TOO_SMALL`.
+- [x] Паковать bitmap существующим `bitmapToZplHex`, а полярность TSPL получать через `buildBitmapCommand`. В ветке barcode добавить точечное условие:
 
 ```ts
 if (
@@ -318,9 +319,9 @@ if (
 }
 ```
 
-- [ ] `assertDuplicateTemplate` проверяет ровно один `datamatrix` с `data="km.code"`, отсутствие зависимостей `sscc`, границы KM-квадрата и свободной зоны. Predicate назначения коробов дополнить `purpose=box` с fallback для старых отсутствующих метаданных. Проверить literal KM, два KM, ноль KM, скрытый sscc field, неподходящую категорию.
-- [ ] Добавить проверку TSPL byte packing >0x7f и точности модулей после распаковки BITMAP. Тестовый decoder `helpers/decode-data-matrix.ts` поддерживает ограниченный набор режимов: не распространять его PASS на весь GS1. Для обычного ASCII-вектора проверить FNC1 codeword 232 и точный хвост; остальные режимы сравнить с raw-grid общего encoder и оставить физическое декодирование задачей 16. Отдельно сохранить прежние golden tests нативного TSPL и ZPL.
-- [ ] Run domain test/typecheck/lint/build. Commit: `feat(domain): render duplicate Data Matrix labels through shared GS1 raster`.
+- [x] `assertDuplicateTemplate` проверяет ровно один `datamatrix` с `data="km.code"`, отсутствие зависимостей `sscc`, границы KM-квадрата и свободной зоны. Predicate назначения коробов дополнить `purpose=box` с fallback для старых отсутствующих метаданных. Проверить literal KM, два KM, ноль KM, скрытый sscc field, неподходящую категорию.
+- [x] Добавить проверку TSPL byte packing >0x7f и точности модулей после распаковки BITMAP. Тестовый decoder `helpers/decode-data-matrix.ts` поддерживает ограниченный набор режимов: не распространять его PASS на весь GS1. Для обычного ASCII-вектора проверить FNC1 codeword 232 и точный хвост; остальные режимы сравнить с raw-grid общего encoder и оставить физическое декодирование задачей 16. Отдельно сохранить прежние golden tests нативного TSPL и ZPL.
+- [x] Run domain test/typecheck/lint/build. Commit: `feat(domain): render duplicate Data Matrix labels through shared GS1 raster`.
 
 ## Task 3: Чистые переходы состояний
 
@@ -767,7 +768,7 @@ return { ...base, "km.code": parseDuplicateKm(input.canonicalRaw).raw, qty: "1",
 ```
 
 Подготовка валидирует KM/template, вызывает renderer с `kmDataMatrix="raster"`
-для TSPL и существующий ZPL для zpl, сохраняет Latin-1 bytes как base64 через
+для обоих языков TSPL/ZPL, сохраняет Latin-1 bytes как base64 через
 `bytesToBase64`. Вход complete label context валидируется до принятия кода.
 
 - [ ] Добавить optional renderer options последним аргументом `renderLabelBytes`:
@@ -1132,7 +1133,8 @@ const validationPrint: ValidationPrintInput = printEnabled
       через `assertDuplicateTemplate`, сервер повторяет проверку. Для копирования в
       другое назначение создаётся новый шаблон и применяется его eligibility.
 - [ ] Превью и download используют ту же спецификацию, GS1-модель и raster option,
-      что Station. Preview fixture содержит полный синтетический KM, не реальный код
+      что Station. Новый preview передаёт kmDataMatrix=raster и в elementBoundsMm;
+      геометрия старых matrix-шаблонов не меняется. Preview fixture содержит полный синтетический KM, не реальный код
       клиента; thumbnail без пригодного sample не рисует выдуманный barcode. Проверить
       Cyrillic, размер 58×40 и исключение duplicate template из всех box selectors.
 - [ ] RU/EN: «Обязательная проверка этикетки» / «Require label verification»;
@@ -1468,3 +1470,13 @@ packageManager в lockfile; автоматическая проверка зав
 также пытается переустановить окружение. Lockfile не изменён. Vitest, tsc, ESLint
 и Prettier запускаются напрямую теми же установленными версиями, что указаны
 в проекте. Для следующих пакетов окружение необходимо проверить отдельно.
+
+Уточнение задачи 2 по исходникам и failing test: native ZPL интерпретирует
+sizeMm как размер модуля, поэтому 24 мм превращались в ^BXN,192 при 203 dpi.
+Новый режим печатает один и тот же GS1-растр через TSPL BITMAP / ZPL ^GFA;
+geometry preview получает тот же opt-in. Это техническое уточнение сохраняет
+согласованный размер целого кода и поведение всех старых вызовов.
+
+2026-09-08: задача 2 завершена. Domain: 583 теста прошли; typecheck (src/test),
+lint и build прошли. Новый флаг kmDataMatrix=raster включается только явно,
+legacy golden tests не изменены. Физический принтер не запускался.

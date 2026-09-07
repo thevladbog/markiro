@@ -1,7 +1,10 @@
 import type { LabelField, LabelTemplateSpec } from "./model.js";
+import type { LabelTemplatePurpose } from "../product-labels/contracts.js";
 
 /** The selection metadata a template carries besides its print spec. */
 export interface BoxLabelTemplateEligibility {
+  /** Absent on legacy bundles, which only carried box templates. */
+  purpose?: LabelTemplatePurpose;
   enabled: boolean;
   /** `null` means every category; otherwise the ЧЗ product-group codes it applies to. */
   chzProductGroupCodes: readonly number[] | null;
@@ -16,7 +19,8 @@ export function isBoxLabelTemplateEligible(
   template: BoxLabelTemplateEligibility,
   chzProductGroupCode: number | null,
 ): boolean {
-  if (!template.enabled) return false;
+  if (!template.enabled || (template.purpose !== undefined && template.purpose !== "box"))
+    return false;
   if (template.chzProductGroupCodes === null) return true;
   return (
     chzProductGroupCode !== null && template.chzProductGroupCodes.includes(chzProductGroupCode)
