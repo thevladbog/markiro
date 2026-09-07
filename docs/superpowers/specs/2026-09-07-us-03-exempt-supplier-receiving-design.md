@@ -3,8 +3,10 @@
 Date: 2026-09-07.
 
 Status: product behavior and technical specification approved by the owner on
-2026-09-07. Not implemented. Ordinary Receiving remains available; exempt
-Receiving remains blocked in current code until this increment is verified.
+2026-09-07. Implemented and verified locally, including the final UI correction
+wave; see [Receiving browser](../../us/receiving-browser.md#exempt-supplier-receipt-review--2026-09-07)
+for exact evidence and external-acceptance limits. US-03 remains partial and
+release locked; amendment/void and CSV are separate pending increments.
 
 Execution is organized by the [implementation plan](../plans/2026-09-07-us-03-exempt-supplier-receiving.md).
 

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { schema } from "@markiro/db";
 import type { ReceivingDraft } from "@markiro/platform-contracts";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { UsReceivingStore } from "../src/modules/traceability/receiving/us-receiving-store";
 import { createUsProfileTestDatabase } from "./support/us-profile-database";
 import {
@@ -110,11 +110,19 @@ describe.skipIf(!url)("US receiving draft persistence", () => {
   });
 
   it("paginates deterministically across equal creation timestamps", async () => {
-    const created = await Promise.all([create(), create(), create()]);
-    await fixture.db
-      .update(schema.traceabilityEvents)
-      .set({ createdAt: new Date("2026-09-06T12:00:00.000Z") })
-      .where(eq(schema.traceabilityEvents.tenantId, context.tenant));
+    // Set the creation clock instead of rewriting immutable provenance afterward.
+    const created = await (async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-09-06T12:00:00.000Z"));
+      try {
+        return await Promise.all([create(), create(), create()]);
+      } finally {
+        vi.useRealTimers();
+      }
+    })();
+    expect(created.map((record) => record.createdAt)).toEqual(
+      Array(3).fill("2026-09-06T12:00:00.000Z"),
+    );
     const expectedIds = created
       .map((record) => record.id)
       .sort()

@@ -44,6 +44,53 @@ test("release checker fails on a pull request to main, even with all workflows l
   assert.match(result.stderr, /US development must not merge into main/);
 });
 
+test("US receiving storage and contract regressions run unconditionally in the isolated job", () => {
+  const job = workflows()["us-development.yml"].jobs.isolation;
+  assert.equal(job.if, undefined);
+  for (const [pkg, file] of [
+    ["db", "us-receiving-basis-version-migration.e2e.test.ts"],
+    ["api", "us-receiving-basis-version.e2e.test.ts"],
+    ["db", "us-receiving-roots-migration.e2e.test.ts"],
+    ["db", "us-receiving-lifecycle-migration.e2e.test.ts"],
+    ["api", "us-receiving-roots.e2e.test.ts"],
+    ["api", "us-receiving-basis.e2e.test.ts"],
+    ["api", "us-receiving-history.e2e.test.ts"],
+    ["api", "us-receiving-registry.e2e.test.ts"],
+    ["api", "us-receiving-read-concurrency.e2e.test.ts"],
+    ["api", "us-receiving-lifecycle.e2e.test.ts"],
+    ["api", "us-receiving-lifecycle-concurrency.e2e.test.ts"],
+    ["api", "us-receiving-lifecycle-compatibility.e2e.test.ts"],
+    ["api", "us-receiving-amendment-save.e2e.test.ts"],
+    ["api", "us-receiving-amendment-save-concurrency.e2e.test.ts"],
+    ["api", "us-receiving-revision-readiness.e2e.test.ts"],
+    ["api", "us-receiving-revision-readiness-concurrency.e2e.test.ts"],
+    ["api", "us-receiving-revision-finalization.e2e.test.ts"],
+    ["api", "us-receiving-revision-finalization-concurrency.e2e.test.ts"],
+    ["platform-contracts", "us-receiving-lifecycle.test.ts"],
+    ["platform-contracts", "us-receiving-finalization-v3.test.ts"],
+    ["platform-contracts", "us-receiving-live-records.test.ts"],
+    ["platform-contracts", "us-receiving-registry.test.ts"],
+    ["platform-contracts", "us-receiving-revision-readiness.test.ts"],
+  ]) {
+    const step = job.steps.find((candidate) =>
+      candidate.run
+        ?.split("\n")
+        .some(
+          (line) =>
+            line.startsWith(`pnpm --filter @markiro/${pkg} exec vitest run `) &&
+            line.split(/\s+/).includes(`test/${file}`),
+        ),
+    );
+    assert.ok(step, `Missing ${pkg} receiving storage regression: ${file}`);
+    assert.equal(step.if, undefined);
+    assert.equal(step["continue-on-error"], undefined);
+    assert.equal(
+      step.env.US_TEST_DATABASE_URL,
+      "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev",
+    );
+  }
+});
+
 test("US dependency stack has private ports and independently named persistent data", () => {
   const stack = load(readFileSync("deploy/us-development/compose.yml", "utf8"));
   assert.equal(stack.name, "markiro-us-development");

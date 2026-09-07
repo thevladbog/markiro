@@ -2,6 +2,32 @@
 
 Status: connected locally on 2026-09-07; development-only, release locked. US-03 remains partial.
 
+Next increment: the [approved Receiving lifecycle design](../superpowers/specs/2026-09-07-us-03-receiving-lifecycle-design.md)
+covers amendments, voids, revision history and separate current receiving basis.
+The written technical design was owner-approved on 2026-09-07; its
+[implementation plan](../superpowers/plans/2026-09-07-us-03-receiving-lifecycle.md)
+has completed the domain/contract foundation, internal lot support-version bridge,
+revision storage and frozen-v3 constraints. As of 2026-09-08, internal server
+methods also read exact revision history and current lot receiving basis from a
+consistent database snapshot. Their 40 focused cases and the 396-case scoped API
+regression pass; see the plan's read-foundation checkpoint for evidence and limits.
+Internal QA-controlled amend/void commands now also preserve historical receipts,
+audit and lot identity under retries and concurrent changes; the plan's command
+checkpoint records that server-only slice. Internal amendment saving now checks
+exact predecessor bindings, current QA and saved/root versions, without changing
+current receipt support. Internal readiness v4 now checks saved amendments,
+including retained and removed predecessor lots, with current references and fresh
+exemption-review requirements. Internal explicit-v2 finalization now atomically
+freezes v3, replaces the current revision and its receipt support, and records
+the predecessor transition and exact line-to-lot mappings. It is not connected
+to the browser or controller yet. Internal live registry reads now support explicit
+current/all history, status filters and snapshot-consistent summaries, including
+the terminal receipt after a later amendment draft was abandoned. This does not
+change the connected registry or its current transport yet.
+The active HTTP API still emits its existing formats;
+new lifecycle controls and endpoints are not available yet. Storage/server tests
+are not browser acceptance.
+
 ## Available behavior
 
 Receiving joins the isolated US workspace. The registry lists drafts and finalized ordinary or exempt receipts, with an optional status filter, 50-row pagination and literal, bounded event-number search. It does not search product names or TLC. Opening an event always reads its current server record. The editor groups receiving details, ordered product/lot lines and reference documents; only the selected line's detailed controls are mounted. Finalized details use frozen snapshots. Existing Markiro branding, shared components and tokens are retained, with EN-US/ES-US and light/dark layouts.

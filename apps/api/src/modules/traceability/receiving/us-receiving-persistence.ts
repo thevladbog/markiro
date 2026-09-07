@@ -69,6 +69,19 @@ export async function readReceivingRecord(
     if (!frozen.success) throw unavailable();
     return frozen.data;
   }
+  return parseReceivingRecord({
+    ...metadata,
+    draft: await readReceivingSavedInput(tx, tenantId, header),
+  });
+}
+
+/** Saved child projection only; caller validates the versioned original/live envelope. */
+export async function readReceivingSavedInput(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  header: typeof events.$inferSelect,
+) {
+  const id = header.id;
   const lines = await tx
     .select()
     .from(items)
@@ -84,66 +97,60 @@ export async function readReceivingRecord(
     links.some((row, index) => row.position !== index + 1)
   )
     throw unavailable();
-  return parseReceivingRecord({
-    id: header.id,
-    eventNumber: header.eventNumber,
-    status: header.status,
-    revision: header.revision,
-    draftVersion: header.draftVersion,
-    timeZone: header.timeZone,
-    createdBy: header.createdBy,
-    updatedBy: header.updatedBy,
-    createdAt: header.createdAt.toISOString(),
-    updatedAt: header.updatedAt.toISOString(),
-    draft: {
-      dateReceived: header.dateReceived,
-      locationId: header.locationId,
-      previousSourceLocationId: header.previousSourceLocationId,
-      receivedAtNote: header.receivedAtNote,
-      notes: header.notes,
-      documentIds: links.map((row) => row.documentId),
-      items: lines.map((row) => {
-        let source: unknown = null;
-        if (row.sourceLocationId !== null) {
-          if (
-            row.sourceReferenceKind !== null ||
-            row.sourceReferenceValue !== null ||
-            row.sourceReferenceLocationId !== null
-          )
-            throw unavailable();
-          source = { kind: "location", locationId: row.sourceLocationId };
-        } else if (
+  return {
+    dateReceived: header.dateReceived,
+    locationId: header.locationId,
+    previousSourceLocationId: header.previousSourceLocationId,
+    receivedAtNote: header.receivedAtNote,
+    notes: header.notes,
+    documentIds: links.map((row) => row.documentId),
+    items: lines.map((row) => {
+      let source: unknown = null;
+      if (row.sourceLocationId !== null) {
+        if (
           row.sourceReferenceKind !== null ||
           row.sourceReferenceValue !== null ||
           row.sourceReferenceLocationId !== null
-        ) {
-          source = {
-            kind: "reference",
-            referenceKind: row.sourceReferenceKind,
-            referenceValue: row.sourceReferenceValue,
-            resolvedLocationId: row.sourceReferenceLocationId,
-          };
-        }
-        return {
-          productId: row.productId,
-          lotLinkMode: row.lotLinkMode,
-          lotId: row.lotId,
-          tlc: row.tlc,
-          source,
-          exemptSupplier: row.exemptSupplier,
-          exemptReason: row.exemptReason,
-          exemptReceipt: row.exemptReceipt ?? null,
-          supplierLotReference: row.supplierLotReference,
-          quantity: row.quantity,
-          unitOfMeasure: row.unitOfMeasure,
-          notes: row.notes,
+        )
+          throw unavailable();
+        source = { kind: "location", locationId: row.sourceLocationId };
+      } else if (
+        row.sourceReferenceKind !== null ||
+        row.sourceReferenceValue !== null ||
+        row.sourceReferenceLocationId !== null
+      ) {
+        source = {
+          kind: "reference",
+          referenceKind: row.sourceReferenceKind,
+          referenceValue: row.sourceReferenceValue,
+          resolvedLocationId: row.sourceReferenceLocationId,
         };
-      }),
-    },
-  });
+      }
+      return {
+        ...(header.revision > 1 ? { previousLineNo: row.previousLineNo } : {}),
+        productId: row.productId,
+        lotLinkMode: row.lotLinkMode,
+        lotId: row.lotId,
+        tlc: row.tlc,
+        source,
+        exemptSupplier: row.exemptSupplier,
+        exemptReason: row.exemptReason,
+        exemptReceipt: row.exemptReceipt ?? null,
+        supplierLotReference: row.supplierLotReference,
+        quantity: row.quantity,
+        unitOfMeasure: row.unitOfMeasure,
+        notes: row.notes,
+      };
+    }),
+  };
 }
 
-export function receivingHeader(draft: ReceivingDraft) {
+export function receivingHeader(
+  draft: Pick<
+    ReceivingDraft,
+    "dateReceived" | "locationId" | "previousSourceLocationId" | "receivedAtNote" | "notes"
+  >,
+) {
   return {
     dateReceived: draft.dateReceived,
     locationId: draft.locationId,

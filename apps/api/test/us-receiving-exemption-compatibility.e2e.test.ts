@@ -284,10 +284,22 @@ describe.skipIf(!url)("receiving stored compatibility", () => {
       "UPDATE traceability_lots SET source_locked_at=$1 WHERE tenant_id=$2 AND id=$3",
       [time, c.tenant, c.lot],
     );
-    await fixture.pool.query(
-      "UPDATE traceability_events SET status='finalized',finalized_at=$1,finalized_by=$2,updated_at=$1,updated_by=$2,finalization_snapshot=$3 WHERE tenant_id=$4 AND id=$5",
-      [time, c.actor, snapshot, c.tenant, saved.id],
-    );
+    const connection = await fixture.pool.connect();
+    try {
+      await connection.query("BEGIN");
+      await connection.query(
+        "UPDATE receiving_event_roots SET lifecycle_version=2,current_event_id=$2,pending_draft_id=NULL WHERE tenant_id=$1 AND id=$2",
+        [c.tenant, saved.id],
+      );
+      await connection.query(
+        "UPDATE traceability_events SET status='finalized',finalized_at=$1,finalized_by=$2,updated_at=$1,updated_by=$2,finalization_snapshot=$3 WHERE tenant_id=$4 AND id=$5",
+        [time, c.actor, snapshot, c.tenant, saved.id],
+      );
+      await connection.query("COMMIT");
+    } finally {
+      await connection.query("ROLLBACK");
+      connection.release();
+    }
     const { draft, ...header } = saved;
     void draft;
     const result = receivingFinalizedRecordSchema.parse({

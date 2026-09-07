@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type PgTableExtraConfigValue,
   boolean,
   check,
   date,
@@ -12,6 +13,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
@@ -31,6 +33,15 @@ export const traceabilityEvents = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: tenant(),
+    rootEventId: uuid("root_event_id").notNull(),
+    previousRevisionId: uuid("previous_revision_id"),
+    supersededByEventId: uuid("superseded_by_event_id"),
+    amendmentReason: text("amendment_reason"),
+    supersededAt: timestamp("superseded_at", { withTimezone: true }),
+    supersededBy: text("superseded_by"),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by"),
+    voidReason: text("void_reason"),
     eventNumber: text("event_number").notNull(),
     type: text("type").notNull().default("receiving"),
     status: text("status").notNull().default("draft"),
@@ -50,9 +61,31 @@ export const traceabilityEvents = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [
+  (t): PgTableExtraConfigValue[] => [
     unique("traceability_events_tenant_id_uq").on(t.tenantId, t.id),
-    unique("traceability_events_number_uq").on(t.tenantId, t.eventNumber),
+    unique("traceability_events_root_id_uq").on(t.tenantId, t.rootEventId, t.id),
+    unique("traceability_events_root_revision_uq").on(t.tenantId, t.rootEventId, t.revision),
+    uniqueIndex("receiving_one_current_uq")
+      .on(t.tenantId, t.rootEventId)
+      .where(sql`${t.status} = 'finalized'`),
+    uniqueIndex("receiving_one_pending_uq")
+      .on(t.tenantId, t.rootEventId)
+      .where(sql`${t.status} = 'draft'`),
+    foreignKey({
+      name: "receiving_previous_revision_fk",
+      columns: [t.tenantId, t.rootEventId, t.previousRevisionId],
+      foreignColumns: [t.tenantId, t.rootEventId, t.id],
+    }),
+    foreignKey({
+      name: "receiving_superseded_by_fk",
+      columns: [t.tenantId, t.rootEventId, t.supersededByEventId],
+      foreignColumns: [t.tenantId, t.rootEventId, t.id],
+    }),
+    foreignKey({
+      name: "traceability_events_root_fk",
+      columns: [t.tenantId, t.rootEventId],
+      foreignColumns: [receivingEventRoots.tenantId, receivingEventRoots.id],
+    }),
     foreignKey({
       name: "traceability_events_location_fk",
       columns: [t.tenantId, t.locationId],
@@ -66,9 +99,16 @@ export const traceabilityEvents = pgTable(
     index("traceability_events_tenant_created_idx").on(t.tenantId, t.createdAt, t.id),
     check(
       "traceability_events_lifecycle_valid",
-      sql`${t.type} = 'receiving' AND ${t.revision} = 1 AND (
-        (${t.status} = 'draft' AND ${t.finalizedAt} IS NULL AND ${t.finalizedBy} IS NULL AND ${t.finalizationSnapshot} IS NULL)
-        OR (${t.status} = 'finalized' AND ${t.finalizedAt} IS NOT NULL AND ${t.finalizedBy} IS NOT NULL
+      sql`${t.type} = 'receiving' AND ${t.revision} > 0
+        AND ((${t.revision}=1 AND ${t.previousRevisionId} IS NULL AND ${t.amendmentReason} IS NULL)
+          OR (${t.revision}>1 AND ${t.previousRevisionId} IS NOT NULL AND ${t.amendmentReason} IS NOT NULL AND length(btrim(${t.amendmentReason})) BETWEEN 1 AND 2000))
+        AND ((${t.status}='amended' AND ${t.supersededByEventId} IS NOT NULL AND ${t.supersededAt} IS NOT NULL AND ${t.supersededBy} IS NOT NULL AND length(btrim(${t.supersededBy})) BETWEEN 1 AND 128)
+          OR (${t.status}<>'amended' AND ${t.supersededByEventId} IS NULL AND ${t.supersededAt} IS NULL AND ${t.supersededBy} IS NULL))
+        AND ((${t.status}='void' AND ${t.voidedAt} IS NOT NULL AND ${t.voidedBy} IS NOT NULL AND length(btrim(${t.voidedBy})) BETWEEN 1 AND 128 AND ${t.voidReason} IS NOT NULL AND length(btrim(${t.voidReason})) BETWEEN 1 AND 2000)
+          OR (${t.status}<>'void' AND ${t.voidedAt} IS NULL AND ${t.voidedBy} IS NULL AND ${t.voidReason} IS NULL))
+        AND (
+        (${t.status} IN ('draft','void') AND ${t.finalizedAt} IS NULL AND ${t.finalizedBy} IS NULL AND ${t.finalizationSnapshot} IS NULL)
+        OR (${t.status} IN ('finalized','amended','void') AND ${t.finalizedAt} IS NOT NULL AND ${t.finalizedBy} IS NOT NULL
         AND length(btrim(${t.finalizedBy})) BETWEEN 1 AND 128 AND ${t.finalizationSnapshot} IS NOT NULL
         AND jsonb_typeof(${t.finalizationSnapshot}) = 'object' AND ${t.dateReceived} IS NOT NULL
         AND ${t.locationId} IS NOT NULL AND ${t.previousSourceLocationId} IS NOT NULL
@@ -92,12 +132,52 @@ export const traceabilityEvents = pgTable(
   ],
 );
 
+/** Permanent identity and current pointers; circular FKs are deferred in SQL. */
+export const receivingEventRoots = pgTable(
+  "receiving_event_roots",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: tenant(),
+    eventNumber: text("event_number").notNull(),
+    lifecycleVersion: integer("lifecycle_version").notNull().default(1),
+    nextRevision: integer("next_revision").notNull().default(2),
+    currentEventId: uuid("current_event_id"),
+    pendingDraftId: uuid("pending_draft_id"),
+  },
+  (t): PgTableExtraConfigValue[] => [
+    unique("receiving_roots_tenant_id_uq").on(t.tenantId, t.id),
+    unique("receiving_roots_number_uq").on(t.tenantId, t.eventNumber),
+    foreignKey({
+      name: "receiving_roots_current_fk",
+      columns: [t.tenantId, t.id, t.currentEventId],
+      foreignColumns: [
+        traceabilityEvents.tenantId,
+        traceabilityEvents.rootEventId,
+        traceabilityEvents.id,
+      ],
+    }),
+    foreignKey({
+      name: "receiving_roots_pending_fk",
+      columns: [t.tenantId, t.id, t.pendingDraftId],
+      foreignColumns: [
+        traceabilityEvents.tenantId,
+        traceabilityEvents.rootEventId,
+        traceabilityEvents.id,
+      ],
+    }),
+    check("receiving_roots_version_valid", sql`${t.lifecycleVersion} > 0`),
+    check("receiving_roots_revision_valid", sql`${t.nextRevision} > 1`),
+    check("receiving_roots_number_valid", sql`${t.eventNumber} ~ '^REC-[0-9]{2}-[0-9]{4,10}$'`),
+  ],
+);
+
 export const receivingEventItems = pgTable(
   "receiving_event_items",
   {
     tenantId: tenant(),
     eventId: uuid("event_id").notNull(),
     lineNo: integer("line_no").notNull(),
+    previousLineNo: integer("previous_line_no"),
     productId: uuid("product_id"),
     lotId: uuid("lot_id"),
     lotLinkMode: text("lot_link_mode").notNull(),
@@ -116,6 +196,8 @@ export const receivingEventItems = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.tenantId, t.eventId, t.lineNo] }),
+    unique("receiving_items_previous_line_uq").on(t.tenantId, t.eventId, t.previousLineNo),
+    check("receiving_items_previous_line_valid", sql`${t.previousLineNo} BETWEEN 1 AND 100`),
     foreignKey({
       name: "receiving_items_event_fk",
       columns: [t.tenantId, t.eventId],
@@ -251,7 +333,7 @@ export const receivingOperations = pgTable(
     }),
     check(
       "receiving_operations_command_valid",
-      sql`${t.command} IN ('receiving.create', 'receiving.save', 'receiving.finalize')`,
+      sql`${t.command} IN ('receiving.create', 'receiving.save', 'receiving.finalize', 'receiving.amend', 'receiving.void')`,
     ),
     check("receiving_operations_digest_valid", sql`${t.inputDigest} ~ '^[0-9a-f]{64}$'`),
     check("receiving_operations_result_valid", sql`jsonb_typeof(${t.result}) = 'object'`),

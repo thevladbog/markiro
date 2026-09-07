@@ -4,6 +4,7 @@ import {
   assessReceivingExemptionLine,
   RECEIVING_READINESS_RULE_VERSION,
   type ReceivingReadinessInput,
+  type ReceivingRetainedBinding,
 } from "@markiro/domain";
 import { schema } from "@markiro/db";
 import {
@@ -11,6 +12,7 @@ import {
   usLocationSchema,
   usPartySchema,
   type ReceivingDraftRecord,
+  type ReceivingDraft,
   type TraceabilityLotSource,
 } from "@markiro/platform-contracts";
 import { and, asc, eq, inArray, or } from "drizzle-orm";
@@ -25,6 +27,14 @@ import { profileDefaults, storedProfileResponse } from "../products/us-product-p
 import { unavailable } from "./us-receiving-persistence";
 
 const ruleVersion = RECEIVING_READINESS_RULE_VERSION;
+// Pin readiness v3 to its original inputs. The internal support token is for
+// lifecycle readiness v4; it must not silently change the existing digest.
+function readinessV3Lot({
+  receivingBasisVersion: _version,
+  ...original
+}: typeof schema.traceabilityLots.$inferSelect) {
+  return original;
+}
 const ids = (values: (string | null)[]) =>
   [...new Set(values.filter((value): value is string => value !== null))].sort();
 const locationId = (source: TraceabilityLotSource) =>
@@ -41,14 +51,17 @@ function identity(tlc: string | null, source: TraceabilityLotSource) {
 }
 
 /** Caller owns one repeatable-read transaction, including current membership/profile checks. */
-export async function readReceivingReferenceContext(
+export async function readReceivingReferenceFacts(
   tx: UsMasterDataTransaction,
   tenantId: string,
-  saved: ReceivingDraftRecord,
+  draft: ReceivingDraft,
   profileCode: ReceivingReadinessInput["profileCode"],
   lockReferences = false,
+  revision?: {
+    retainedBindings: readonly ReceivingRetainedBinding[];
+    additionalLotIds: readonly string[];
+  },
 ) {
-  const { draft } = saved;
   const products = schema.products,
     profiles = schema.productTraceabilityProfiles,
     lots = schema.traceabilityLots,
@@ -56,7 +69,10 @@ export async function readReceivingReferenceContext(
     parties = schema.traceabilityParties,
     documents = schema.referenceDocuments;
   const productIds = ids(draft.items.map((line) => line.productId));
-  const lotIds = ids(draft.items.map((line) => line.lotId));
+  const lotIds = ids([
+    ...draft.items.map((line) => line.lotId),
+    ...(revision?.additionalLotIds ?? []),
+  ]);
   const lotQuery = tx
     .select()
     .from(lots)
@@ -142,12 +158,24 @@ export async function readReceivingReferenceContext(
   const partyById = new Map(partyRows.map((row) => [row.id, row]));
 
   // Each source/TLC identity has a unique tenant index, so <=100 draft lines yield <=100 rows.
-  const assessedLines = draft.items.map((line) => ({
-    line,
-    effectiveTlc: assessReceivingExemptionLine(line, draft.locationId).effectiveTlc,
-  }));
+  const retained = new Map(
+    revision?.retainedBindings.map((binding) => [binding.lineNo, binding.lotId]),
+  );
+  const assessedLines = draft.items.map((line, index) => {
+    const retainedLotId = retained.get(index + 1);
+    return {
+      line,
+      retained: retainedLotId !== undefined,
+      effectiveTlc: assessReceivingExemptionLine(
+        line,
+        draft.locationId,
+        retainedLotId === undefined ? undefined : { retainedLotId },
+      ).effectiveTlc,
+    };
+  });
   const createLines = assessedLines.filter(
-    ({ line, effectiveTlc }) => line.lotLinkMode === "create_on_finalize" && effectiveTlc !== null,
+    ({ line, effectiveTlc, retained: bound }) =>
+      !bound && line.lotLinkMode === "create_on_finalize" && effectiveTlc !== null,
   );
   const conflicts = createLines.length
     ? await tx
@@ -219,13 +247,47 @@ export async function readReceivingReferenceContext(
         number: current.number,
       };
     }),
-    conflictingCreateLines: assessedLines.flatMap(({ line, effectiveTlc }, index) =>
-      line.lotLinkMode === "create_on_finalize" &&
-      conflictIdentities.has(identity(effectiveTlc, line.source))
-        ? [index + 1]
-        : [],
+    conflictingCreateLines: assessedLines.flatMap(
+      ({ line, effectiveTlc, retained: bound }, index) =>
+        !bound &&
+        line.lotLinkMode === "create_on_finalize" &&
+        conflictIdentities.has(identity(effectiveTlc, line.source))
+          ? [index + 1]
+          : [],
     ),
   };
+  return {
+    input,
+    profile,
+    organizationProfile,
+    productRows,
+    locationRows,
+    partyRows,
+    lotRows,
+    documentRows,
+    conflicts,
+  };
+}
+
+/** Legacy v3 projection, including its original digest field order and omitted lot token. */
+export async function readReceivingReferenceContext(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  saved: ReceivingDraftRecord,
+  profileCode: ReceivingReadinessInput["profileCode"],
+  lockReferences = false,
+) {
+  const {
+    input,
+    profile,
+    organizationProfile,
+    productRows,
+    locationRows,
+    partyRows,
+    lotRows,
+    documentRows,
+    conflicts,
+  } = await readReceivingReferenceFacts(tx, tenantId, saved.draft, profileCode, lockReferences);
   const inputDigest = createHash("sha256")
     .update(
       JSON.stringify({
@@ -236,9 +298,9 @@ export async function readReceivingReferenceContext(
         productRows,
         locationRows,
         partyRows,
-        lotRows,
+        lotRows: lotRows.map(readinessV3Lot),
         documentRows,
-        conflicts,
+        conflicts: conflicts.map(readinessV3Lot),
         input,
       }),
     )

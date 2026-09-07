@@ -47,6 +47,8 @@ export const traceabilityLots = pgTable(
     sourceReferenceLocationId: uuid("source_reference_location_id"),
     status: traceabilityLotStatus("status").notNull().default("active"),
     revision: integer("revision").notNull().default(1),
+    // Internal MVCC coordination token, not a support count or a business revision.
+    receivingBasisVersion: integer("receiving_basis_version").notNull().default(1),
     lastStatusReason: text("last_status_reason"),
     lastSourceReason: text("last_source_reason"),
     // Finalizers set this in their transaction; the database trigger prevents reversal.
@@ -91,6 +93,10 @@ export const traceabilityLots = pgTable(
       sql`length(${table.tlc}) BETWEEN 1 AND 120 AND ${table.tlc} = btrim(${table.tlc}) AND ${table.tlc} !~ U&'[\\0001-\\001F\\007F-\\009F]'`,
     ),
     check("traceability_lots_revision_positive", sql`${table.revision} > 0`),
+    check(
+      "traceability_lots_receiving_basis_version_positive",
+      sql`${table.receivingBasisVersion} > 0`,
+    ),
     check(
       "traceability_lots_source_shape",
       sql`(${table.sourceReferenceKind} IS NULL AND ${table.sourceReferenceValue} IS NULL AND ${table.sourceReferenceLocationId} IS NULL) OR (${table.sourceLocationId} IS NULL AND ${table.sourceReferenceKind} IS NOT NULL AND ${table.sourceReferenceKind} = 'web_url' AND ${table.sourceReferenceValue} IS NOT NULL AND ${table.sourceReferenceLocationId} IS NOT NULL)`,

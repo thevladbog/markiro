@@ -2,6 +2,14 @@ import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import { schema } from "../src/index.js";
 describe("lot storage tenant anchors", () => {
+  it("stores a positive internal receiving basis version independently of business revision", () => {
+    const config = getTableConfig(schema.traceabilityLots);
+    const version = config.columns.find((column) => column.name === "receiving_basis_version");
+    expect(version).toMatchObject({ notNull: true, default: 1, dataType: "number" });
+    expect(config.checks.map((check) => check.name)).toContain(
+      "traceability_lots_receiving_basis_version_positive",
+    );
+  });
   it("keeps correction reason and the server-only source lock nullable for existing lots", () => {
     const config = getTableConfig(schema.traceabilityLots);
     expect(schema.traceabilityLots.lastSourceReason.notNull).toBe(false);

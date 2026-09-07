@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { assessReceivingReadiness, type ReceivingReadinessInput } from "../src/index.js";
+import {
+  assessReceivingReadiness,
+  assessReceivingRevisionReadiness,
+  type ReceivingReadinessInput,
+  type ReceivingRetainedBinding,
+} from "../src/index.js";
 
 function at<T>(values: T[], index: number): T {
   const value = values[index];
@@ -395,5 +400,279 @@ describe("saved receiving data readiness", () => {
         .issues.filter((i) => i.code === "unavailable")
         .map((i) => i.field),
     ).toEqual(["product", "documents"]);
+  });
+});
+
+describe("retained Receiving line readiness", () => {
+  const binding: ReceivingRetainedBinding = { lineNo: 1, previousLineNo: 2, lotId: "lot" };
+  const context = { retainedBindings: [binding] };
+  function retained(
+    status = "recalled",
+    mode: "create_on_finalize" | "link_existing" = "create_on_finalize",
+  ) {
+    const value = input();
+    const row = at(value.draft.items, 0);
+    row.lotId = "lot";
+    row.lotLinkMode = mode;
+    value.lots = [
+      { id: "lot", productId: "apple", tlc: "=Case/Ä-001", source: row.source, status },
+    ];
+    value.conflictingCreateLines = [1];
+    return value;
+  }
+
+  it.each(["consumed", "shipped", "quarantined", "recalled", "archived"])(
+    "permits correction of retained %s lots without altering their status or identity",
+    (status) => {
+      for (const mode of ["create_on_finalize", "link_existing"] as const) {
+        const value = retained(status, mode);
+        const before = structuredClone(value);
+        expect(assessReceivingRevisionReadiness(value, context)).toEqual({
+          state: "complete",
+          issues: [],
+          exemptReviewRequiredLines: [],
+        });
+        expect(value).toEqual(before);
+        expect(assessReceivingReadiness(value).state).toBe("blocked");
+      }
+    },
+  );
+
+  it("keeps existing readiness exactly for drafts without retained lines", () => {
+    const value = input();
+    expect(assessReceivingRevisionReadiness(value, { retainedBindings: [] })).toEqual({
+      state: "complete",
+      issues: [],
+      exemptReviewRequiredLines: [],
+    });
+    expect(
+      assessReceivingRevisionReadiness(retained(), { retainedBindings: [] }).issues.map(
+        (i) => i.code,
+      ),
+    ).toEqual(["lot_link_inconsistent", "duplicate_identity"]);
+  });
+
+  it("still rejects a newly added non-active linked lot alongside a retained one", () => {
+    const value = retained();
+    value.draft.items.push({ ...at(value.draft.items, 0), lotLinkMode: "link_existing" });
+    expect(assessReceivingRevisionReadiness(value, context)).toEqual({
+      state: "blocked",
+      exemptReviewRequiredLines: [],
+      issues: [
+        {
+          severity: "error",
+          group: "lines",
+          line: 2,
+          field: "lot",
+          code: "inactive",
+          detail: null,
+        },
+      ],
+    });
+  });
+
+  it("does not suppress a new create collision with a retained identity", () => {
+    const value = retained();
+    value.draft.items.push({ ...at(value.draft.items, 0), lotId: null });
+    expect(
+      assessReceivingRevisionReadiness(value, context).issues.map((i) => [i.line, i.code]),
+    ).toEqual([[2, "duplicate_identity"]]);
+  });
+
+  it("rechecks exact live lot identity, including resolved reference location", () => {
+    const value = retained();
+    at(value.draft.items, 0).source = {
+      kind: "reference",
+      referenceKind: "web_url",
+      referenceValue: "https://supplier.example.test/Case/A",
+      resolvedLocationId: "source",
+    };
+    value.lots = [
+      {
+        id: "lot",
+        productId: "pear",
+        tlc: "other",
+        status: "recalled",
+        source: {
+          kind: "reference",
+          referenceKind: "web_url",
+          referenceValue: "https://supplier.example.test/Case/A",
+          resolvedLocationId: "dock",
+        },
+      },
+    ];
+    expect(assessReceivingRevisionReadiness(value, context).issues.map((i) => i.code)).toEqual([
+      "lot_product_mismatch",
+      "lot_tlc_mismatch",
+      "lot_source_mismatch",
+    ]);
+    value.lots = [];
+    expect(assessReceivingRevisionReadiness(value, context).issues.map((i) => i.code)).toEqual([
+      "unavailable",
+    ]);
+  });
+
+  it("does not skip product, coverage, source, quantity, UOM, document or header checks", () => {
+    const value = retained();
+    const row = at(value.draft.items, 0);
+    row.quantity = "0";
+    row.unitOfMeasure = "invalid";
+    row.source = null;
+    value.draft.dateReceived = null;
+    at(value.products, 0).archived = true;
+    at(value.products, 0).coverage.coverageStatus = "unknown";
+    at(value.documents, 0).archived = true;
+    const result = assessReceivingRevisionReadiness(value, context);
+    expect(result.state).toBe("blocked");
+    expect(result.issues.map((i) => [i.field, i.code])).toEqual([
+      ["dateReceived", "required"],
+      ["product", "inactive"],
+      ["coverage", "coverage_unresolved"],
+      ["source", "required"],
+      ["quantity", "format"],
+      ["unitOfMeasure", "format"],
+      ["lot", "lot_source_mismatch"],
+      ["documents", "inactive"],
+    ]);
+  });
+
+  it.each(
+    [
+      [{ ...binding, lotId: "other" }],
+      [{ ...binding, previousLineNo: 0 }],
+      [{ ...binding, previousLineNo: 101 }],
+      [{ ...binding, previousLineNo: 1.5 }],
+      [{ ...binding, lineNo: 2 }],
+      [{ ...binding, lineNo: 0 }],
+      [binding, { ...binding, previousLineNo: 3 }],
+    ].map((retainedBindings) => ({ retainedBindings })),
+  )("fails closed for malformed or conflicting binding context %#", ({ retainedBindings }) => {
+    const result = assessReceivingRevisionReadiness(retained(), { retainedBindings });
+    expect(result.state).toBe("blocked");
+    expect(result.issues.some((i) => i.code === "lot_link_inconsistent")).toBe(true);
+  });
+
+  it("rejects a predecessor line reused on two current lines without granting either status exception", () => {
+    const value = retained("recalled", "link_existing");
+    value.draft.items.push({ ...at(value.draft.items, 0) });
+    const result = assessReceivingRevisionReadiness(value, {
+      retainedBindings: [binding, { ...binding, lineNo: 2 }],
+    });
+    expect(result.state).toBe("blocked");
+    expect(result.issues.filter((i) => i.code === "inactive").map((i) => i.line)).toEqual([1, 2]);
+    expect(
+      result.issues.filter((i) => i.code === "lot_link_inconsistent").map((i) => i.line),
+    ).toEqual([1, 2]);
+  });
+
+  it("retains an own-assigned lot with null received TLC and requires fresh QA review", () => {
+    const value = retained();
+    const row = at(value.draft.items, 0);
+    Object.assign(row, {
+      tlc: null,
+      source: { kind: "location", locationId: "dock" },
+      exemptSupplier: true,
+      exemptReason: "Corrected supplier rationale",
+      exemptReceipt: {
+        evidenceUrl: "https://supplier.example.test/corrected",
+        tlcHandling: "assign_if_missing",
+        proposedTlc: "=Case/Ä-001",
+      },
+    });
+    at(value.lots, 0).source = row.source;
+    const before = structuredClone(value);
+    expect(assessReceivingRevisionReadiness(value, context)).toEqual({
+      state: "complete",
+      issues: [],
+      exemptReviewRequiredLines: [1],
+    });
+    expect(value).toEqual(before);
+    expect(assessReceivingReadiness(value).state).toBe("blocked");
+    row.exemptReason = null;
+    row.exemptReceipt = {
+      evidenceUrl: null,
+      tlcHandling: "assign_if_missing",
+      proposedTlc: "=Case/Ä-001",
+    };
+    expect(assessReceivingRevisionReadiness(value, context)).toMatchObject({
+      state: "blocked",
+      exemptReviewRequiredLines: [1],
+    });
+    expect(assessReceivingRevisionReadiness(value, context).issues.map((i) => i.detail)).toEqual([
+      "exemptReason",
+      "evidenceUrl",
+    ]);
+  });
+
+  it("keeps retained own-assignment source distinct from a corrected receiving location", () => {
+    const value = retained();
+    const row = at(value.draft.items, 0);
+    Object.assign(row, {
+      tlc: null,
+      exemptSupplier: true,
+      exemptReason: "Rationale",
+      exemptReceipt: {
+        evidenceUrl: "https://supplier.example.test/evidence",
+        tlcHandling: "assign_if_missing",
+        proposedTlc: "=Case/Ä-001",
+      },
+    });
+    // The saved lot/source remain at 'source'; only the receipt header says 'dock'.
+    expect(assessReceivingRevisionReadiness(value, context)).toEqual({
+      state: "complete",
+      issues: [],
+      exemptReviewRequiredLines: [1],
+    });
+    expect(assessReceivingReadiness(value).issues).toContainEqual({
+      severity: "error",
+      group: "lines",
+      line: 1,
+      field: "source",
+      code: "format",
+      detail: null,
+    });
+  });
+
+  it("still rejects a retained own assignment with received TLC, wrong source or changed mode", () => {
+    const value = retained("active", "link_existing");
+    const row = at(value.draft.items, 0);
+    row.source = {
+      kind: "reference",
+      referenceKind: "web_url",
+      referenceValue: "https://supplier.example.test/source",
+      resolvedLocationId: "source",
+    };
+    at(value.lots, 0).source = row.source;
+    row.exemptSupplier = true;
+    row.exemptReason = "Rationale";
+    row.exemptReceipt = {
+      evidenceUrl: "https://supplier.example.test/evidence",
+      tlcHandling: "assign_if_missing",
+      proposedTlc: "=Case/Ä-001",
+    };
+    expect(
+      assessReceivingRevisionReadiness(value, context).issues.map((i) => [i.field, i.code]),
+    ).toEqual([
+      ["tlc", "format"],
+      ["source", "format"],
+      ["lot", "lot_link_inconsistent"],
+    ]);
+  });
+
+  it("requires fresh review on retained preserved-TLC exemption lines too", () => {
+    const value = retained();
+    const row = at(value.draft.items, 0);
+    row.exemptSupplier = true;
+    row.exemptReason = "Updated rationale";
+    row.exemptReceipt = {
+      evidenceUrl: "https://supplier.example.test/evidence",
+      tlcHandling: "preserve_existing",
+      proposedTlc: null,
+    };
+    expect(assessReceivingRevisionReadiness(value, context)).toEqual({
+      state: "complete",
+      issues: [],
+      exemptReviewRequiredLines: [1],
+    });
   });
 });

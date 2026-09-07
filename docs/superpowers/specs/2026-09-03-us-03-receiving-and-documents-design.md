@@ -1,8 +1,8 @@
 # US-03 — Receiving CTE, common event shell and reference documents — Design Spec
 
-> Revised 2026-09-06: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. The input foundation and reference-document metadata storage/API described at the end are implemented locally; the event workflow remains a draft design.
+> Historical revision note, 2026-09-06: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. At that checkpoint the input foundation and reference-document metadata storage/API described at the end were implemented locally; the event workflow was still a draft design. See the current increment note below for subsequent delivery.
 
-> Current increment status is recorded in [Receiving browser](../../us/receiving-browser.md): ordinary draft/check/finalization is implemented locally. The [2026-09-07 exempt-supplier design](2026-09-07-us-03-exempt-supplier-receiving-design.md) records the owner-approved receipt-specific review and conditional TLC assignment; its technical specification was approved 2026-09-07 and remains unimplemented. The older broad lifecycle, route and schema proposals below are not current implementation claims.
+> Current increment status is recorded in [Receiving browser](../../us/receiving-browser.md): ordinary and exempt draft/check/finalization are implemented locally. The [2026-09-07 exempt-supplier design](2026-09-07-us-03-exempt-supplier-receiving-design.md) records the delivered receipt-specific review and conditional TLC assignment. The [Receiving lifecycle design](2026-09-07-us-03-receiving-lifecycle-design.md) was approved by the owner on 2026-09-07; rules/contracts and additive storage are implemented, while lifecycle APIs and connected UI remain pending. The older broad lifecycle, route and schema proposals below are historical intent, not current implementation claims; later scoped specifications take precedence.
 
 **Date:** 2026-09-03
 

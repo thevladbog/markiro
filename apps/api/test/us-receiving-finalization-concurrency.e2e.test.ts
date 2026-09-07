@@ -131,6 +131,73 @@ describe.skipIf(!url)("ordinary receiving real transaction races", { timeout: 15
       }
     },
   );
+  it("serializes independent receipts of an already-latched lot without changing business fields", async () => {
+    const initial = await ready();
+    await store.finalize(c.tenant, c.actor, initial.saved.id, initial.command, "initial");
+    c = {
+      ...c,
+      draft: { ...c.draft, items: c.draft.items.filter((line) => line.lotId === c.lot) },
+    };
+    const a = await ready(),
+      b = await ready();
+    const before = await fixture.pool.query(
+      "SELECT (to_jsonb(l)-'receiving_basis_version')::text AS exact FROM traceability_lots l WHERE tenant_id=$1 ORDER BY id",
+      [c.tenant],
+    );
+    const gate = await barrier(
+      "SELECT id FROM traceability_lots WHERE tenant_id=$1 AND id=$2 FOR UPDATE",
+      [c.tenant, c.lot],
+    );
+    const first = outcome(
+      store.finalize(c.tenant, c.actor, a.saved.id, a.command, "independent-a"),
+    );
+    const pending = [first];
+    try {
+      await waitFor(gate.pid);
+      const second = outcome(
+        store.finalize(c.tenant, c.actor, b.saved.id, b.command, "independent-b"),
+      );
+      pending.push(second);
+      await waitFor(gate.pid, 2);
+      await gate.connection.query("COMMIT");
+      for (const result of await Promise.all(pending)) {
+        expect(result.error).toBeUndefined();
+        expect(result.value?.status).toBe("finalized");
+      }
+      expect(
+        (
+          await fixture.pool.query(
+            "SELECT receiving_basis_version FROM traceability_lots WHERE tenant_id=$1 AND id=$2",
+            [c.tenant, c.lot],
+          )
+        ).rows,
+      ).toEqual([{ receiving_basis_version: 4 }]);
+      expect(
+        (
+          await fixture.pool.query(
+            "SELECT (to_jsonb(l)-'receiving_basis_version')::text AS exact FROM traceability_lots l WHERE tenant_id=$1 ORDER BY id",
+            [c.tenant],
+          )
+        ).rows,
+      ).toEqual(before.rows);
+      const audits = await fixture.pool.query(
+        "SELECT actor_user_id,action,outcome,target_type,target_id FROM tenant_audit_events WHERE organization_id=$1 AND request_id IN ('independent-a','independent-b') ORDER BY target_id",
+        [c.tenant],
+      );
+      expect(audits.rows).toEqual(
+        [a.saved.id, b.saved.id].sort().map((target) => ({
+          actor_user_id: c.actor,
+          action: "traceability.receiving.finalized",
+          outcome: "success",
+          target_type: "traceability_event",
+          target_id: target,
+        })),
+      );
+    } finally {
+      await gate.close();
+      await Promise.all(pending);
+    }
+  });
   it("retries a whole transaction after a saved draft wins the event lock", async () => {
     const { saved, command } = await ready();
     const gate = await barrier("SELECT id FROM traceability_events WHERE id=$1 FOR UPDATE", [

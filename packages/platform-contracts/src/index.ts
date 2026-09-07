@@ -9,6 +9,8 @@ export type {
   ReceivingReadiness,
   ReceivingReadinessQuery,
 } from "./traceability/receiving-readiness.js";
+export { receivingRevisionReadinessSchema } from "./traceability/receiving-revision-readiness.js";
+export type { ReceivingRevisionReadiness } from "./traceability/receiving-revision-readiness.js";
 export {
   preservedReceivingExemptReceiptSchema,
   receivingExemptReceiptSchema,
@@ -486,6 +488,46 @@ export type {
   ReferenceDocumentList,
 } from "./traceability/documents.js";
 export { receivingDraftItemSchema, receivingDraftSchema } from "./traceability/receiving.js";
+export {
+  receivingLiveRecordSchema,
+  receivingLiveRecordListSchema,
+  listReceivingLiveRecordsQuerySchema,
+  receivingOperationReceiptV2Schema,
+  receivingCommandResultSchema,
+  receivingRevisionListSchema,
+  receivingBasisSchema,
+  receivingRevisionListQuerySchema,
+  receivingBasisQuerySchema,
+} from "./traceability/receiving-live-records.js";
+export type {
+  ReceivingLiveRecord,
+  ReceivingLiveRecordList,
+  ListReceivingLiveRecordsQuery,
+  ReceivingOperationReceiptV2,
+  ReceivingCommandResult,
+  ReceivingRevisionList,
+  ReceivingBasis,
+  ReceivingRevisionListQuery,
+  ReceivingBasisQuery,
+} from "./traceability/receiving-live-records.js";
+export {
+  receivingFinalizationSnapshotV3Schema,
+  type ReceivingFinalizationSnapshotV3,
+} from "./traceability/receiving-finalization-v3.js";
+export {
+  amendReceivingSchema,
+  voidReceivingSchema,
+  receivingAmendmentDraftSchema,
+  saveReceivingAmendmentSchema,
+  finalizeReceivingRevisionSchema,
+} from "./traceability/receiving-lifecycle.js";
+export type {
+  AmendReceivingInput,
+  VoidReceivingInput,
+  ReceivingAmendmentDraft,
+  SaveReceivingAmendmentInput,
+  FinalizeReceivingRevisionInput,
+} from "./traceability/receiving-lifecycle.js";
 export type { ReceivingDraftItem, ReceivingDraft } from "./traceability/receiving.js";
 export {
   createReceivingDraftSchema,

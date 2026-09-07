@@ -31,6 +31,7 @@ export type ReceivingExemptionAssessment = {
 export function assessReceivingExemptionLine(
   line: ReceivingExemptionLine,
   receivingLocationId: string | null,
+  context?: { retainedLotId: string },
 ): ReceivingExemptionAssessment {
   if (!line.exemptSupplier) {
     return {
@@ -80,13 +81,19 @@ export function assessReceivingExemptionLine(
       issues.push({ field: "tlc", code: "format", detail: "proposedTlc" });
     }
   }
+  // A validated retained binding keeps the original assignment site, even when
+  // correcting the receipt header. It never assigns a TLC at a new location.
+  const isRetained =
+    context !== undefined && context.retainedLotId !== "" && context.retainedLotId === line.lotId;
   if (
     receivingLocationId === null ||
     line.source?.kind !== "location" ||
-    line.source.locationId !== receivingLocationId
+    (!isRetained && line.source.locationId !== receivingLocationId)
   )
     issues.push({ field: "source", code: "format", detail: null });
-  if (line.lotLinkMode !== "create_on_finalize" || line.lotId !== null)
+  // Only a validated predecessor binding permits an already assigned lot ID.
+  // Received TLC, original mode/source, evidence and fresh review still apply.
+  if (line.lotLinkMode !== "create_on_finalize" || (!isRetained && line.lotId !== null))
     issues.push({ field: "lot", code: "lot_link_inconsistent", detail: null });
 
   return {

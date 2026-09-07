@@ -122,7 +122,8 @@ void and re-enter to change it").
 
 The [exempt Receiving specification](../../superpowers/specs/2026-09-07-us-03-exempt-supplier-receiving-design.md)
 records the product behavior and technical design approved on 2026-09-07; the
-increment is not implemented. Existing TLCs and their sources are retained. Only the explicit
+increment is implemented locally; see [Receiving browser](../../us/receiving-browser.md)
+for verified scope and limits. Existing TLCs and their sources are retained. Only the explicit
 “No TLC assigned” path proposes an own code, with the receiving site as its
 physical source. Do not erase a populated TLC/source/lot when toggling modes.
 Show a source summary, not a disabled source picker, for an accepted own-assignment
@@ -248,11 +249,22 @@ with warnings; in progress; failure (409 issue list inside the dialog, "Back to 
 
 ### 7. Amendment flow
 
+The following is design intent, not delivered lifecycle functionality. The
+[approved Receiving lifecycle design](../../superpowers/specs/2026-09-07-us-03-receiving-lifecycle-design.md)
+updates Receiving only and was approved by the owner on 2026-09-07. It
+keeps one pending amendment, retains the preceding effective revision until
+finalization, and requires QA-only amendment editing. Abandoned revision numbers
+are not reused. Retained line bindings preserve lot UUIDs even when reordered;
+they must not be drawn as fresh lot creation. Identity summaries are locked for
+both previously created and previously linked lots. Exempt lines require fresh
+review for the new revision, not inherited approval. On mobile, stack the grouped
+content and use accessible comparison tabs; never require a side-by-side layout.
+
 Amend is available on a finalized event to the QA Manager. It opens a dialog with a required
-`Reason` and creates **draft revision 2** of the same number. The editor shows the previous
+`Reason` and creates **the next draft revision** of the same number. The editor shows the previous
 revision in a right-hand read-only pane (side by side at 1440, tabbed at 1024) with changed
 fields highlighted as the user edits. Lot identity cells (TLC, source, product) of lines that
-already created lots are locked (screen 2). Finalizing turns revision 1 into Amended.
+already created or linked lots are locked (screen 2). Finalizing the amendment turns its predecessor into Amended.
 
 States to draw: reason dialog; side-by-side editor with two changed fields; locked identity
 cells; revision 1 detail after supersession (banner "Superseded by rev 2 on 09/18/2026 by
@@ -263,7 +275,17 @@ A. Reyes — reason: quantity corrected after recount", with link).
 Void applies to drafts and finalized events; reason required. The event stays in the list and
 on lot cards, greyed with the Void chip; its detail page opens with a banner: reason, actor,
 time, "Excluded from trace results and exports; the exclusion is recorded with this reason".
-Consequences differ by type and the dialog must say so: Receiving — refuse while finalized downstream events depend on the received lot; show those records. After allowed void, the lot is unavailable for new use; Transformation — refused while
+Consequences differ by type and the dialog must say so. Receiving refuses while
+finalized downstream events depend on the affected receipt; show those records.
+The owner-approved Receiving rule preserves lot identity, status and the permanent
+source lock. Show current receiving basis separately: another current finalized
+receipt may retain it; losing the last one shows “No current receiving basis” and
+must block applicable future use. Never imply automatic archival, quarantine
+release or that every void removes every lot's basis. The lifecycle design also
+requires explicit cancellation of a pending amendment before voiding the effective
+receipt; it does not silently cancel it.
+
+Transformation — refused while
 a finalized shipment uses the output lot (409 naming the shipment, with link), otherwise
 output lots are archived; Shipping — the lot balance is restored, status may return to Active.
 States to draw: void dialog per type; refusal for transformation; voided detail; voided row.

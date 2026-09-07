@@ -7,7 +7,7 @@ import {
   receivingFinalizedRecordSchema,
   type ReceivingFinalizedRecord,
 } from "@markiro/platform-contracts";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   authorizeUsMasterData,
   isUniqueConstraintViolation,
@@ -18,6 +18,12 @@ import { readReceivingDraft, readReceivingRecord, unavailable } from "./us-recei
 import { readReceivingReferenceContext } from "./us-receiving-reference-context";
 import { planReceivingSnapshot } from "./us-receiving-snapshots";
 import { receivingFinalizationCommandDigest } from "./us-receiving-finalization-command";
+import { lockReceivingOperation } from "./us-receiving-operations";
+import {
+  bumpReceivingBasisVersions,
+  finalizeOriginalReceivingRoot,
+  lockReceivingRoot,
+} from "./us-receiving-roots";
 
 function retryable(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
@@ -55,19 +61,12 @@ export async function finalizeReceiving(
           const value = parseMasterDataInput(finalizeReceivingSchema, input);
           const inputDigest = receivingFinalizationCommandDigest(eventId, value);
           const operations = schema.receivingOperations;
-          await tx.execute(
-            sql`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["us-receiving", tenantId, "receiving.finalize", value.operationKey])}, 0))`,
+          const receipt = await lockReceivingOperation(
+            tx,
+            tenantId,
+            "receiving.finalize",
+            value.operationKey,
           );
-          const [receipt] = await tx
-            .select()
-            .from(operations)
-            .where(
-              and(
-                eq(operations.tenantId, tenantId),
-                eq(operations.command, "receiving.finalize"),
-                eq(operations.operationKey, value.operationKey),
-              ),
-            );
           if (receipt) {
             if (receipt.inputDigest !== inputDigest)
               throw new ConflictException({ code: "receiving_operation_conflict" });
@@ -76,6 +75,7 @@ export async function finalizeReceiving(
               throw unavailable();
             return result.data;
           }
+          await lockReceivingRoot(tx, tenantId, eventId);
           const before = await readReceivingDraft(tx, tenantId, eventId, "update");
           if (before.draftVersion !== value.expectedDraftVersion)
             throw new ConflictException({ code: "receiving_draft_conflict" });
@@ -210,6 +210,12 @@ export async function finalizeReceiving(
                 eq(schema.traceabilityEvents.id, eventId),
               ),
             );
+          await finalizeOriginalReceivingRoot(tx, tenantId, eventId);
+          await bumpReceivingBasisVersions(
+            tx,
+            tenantId,
+            snapshot.items.map((line) => line.lotId),
+          );
           const after = await readReceivingRecord(tx, tenantId, eventId, "update");
           if (after.status !== "finalized") throw unavailable();
           await tx.insert(schema.tenantAuditEvents).values({

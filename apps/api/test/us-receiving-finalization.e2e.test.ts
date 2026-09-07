@@ -281,7 +281,7 @@ describe.skipIf(!url)("ordinary receiving finalization", () => {
       exemptReason: "Earlier draft supplier note",
     });
   });
-  it("keeps already latched lots byte-for-byte and retains historical save receipts", async () => {
+  it("keeps already latched lot business fields exact and retains historical save receipts", async () => {
     const lockedAt = new Date("2026-09-01T00:00:00.000Z");
     await fixture.db
       .update(schema.traceabilityLots)
@@ -322,7 +322,9 @@ describe.skipIf(!url)("ordinary receiving finalization", () => {
         .select()
         .from(schema.traceabilityLots)
         .where(eq(schema.traceabilityLots.id, c.lot)),
-    ).toEqual(before);
+    ).toEqual(
+      before.map((row) => ({ ...row, receivingBasisVersion: row.receivingBasisVersion + 1 })),
+    );
     expect(await store.saveDraft(c.tenant, c.actor, saved.id, saveInput, "late-save")).toEqual(
       savedAgain,
     );
@@ -360,7 +362,7 @@ describe.skipIf(!url)("ordinary receiving finalization", () => {
     const { saved, command } = await ready();
     await store.finalize(c.tenant, c.actor, saved.id, command, "confirm");
     await fixture.pool.query(
-      "ALTER TABLE traceability_events DISABLE TRIGGER receiving_header_finalization_guard",
+      "ALTER TABLE traceability_events DISABLE TRIGGER receiving_event_identity_guard",
     );
     try {
       await fixture.pool.query(
@@ -369,7 +371,7 @@ describe.skipIf(!url)("ordinary receiving finalization", () => {
       );
     } finally {
       await fixture.pool.query(
-        "ALTER TABLE traceability_events ENABLE TRIGGER receiving_header_finalization_guard",
+        "ALTER TABLE traceability_events ENABLE TRIGGER receiving_event_identity_guard",
       );
     }
     await expect(store.getRecord(c.tenant, c.actor, saved.id)).rejects.toMatchObject({

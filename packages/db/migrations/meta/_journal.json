@@ -869,6 +869,27 @@
       "when": 1788786396797,
       "tag": "0123_us_receiving_exemption",
       "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1788809037854,
+      "tag": "0124_us_receiving_basis_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1788810953839,
+      "tag": "0125_us_receiving_roots",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1788812793773,
+      "tag": "0126_us_receiving_lifecycle",
+      "breakpoints": true
     }
   ]
 }

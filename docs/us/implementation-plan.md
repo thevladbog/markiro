@@ -3,8 +3,32 @@
 > Read the [shared MVP contract](mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Target design is not a completion claim; dated increment records below describe verified implementation scope.
 
 - Source: MUS-001 v0.1 (2026-09-03), sections 11, 11.1, 11.2 and 15
-- Status: US-00, US-01, US-02 and US-03 in progress as of 2026-09-07; no slice complete
+- Status: US-00, US-01, US-02 and US-03 in progress as of 2026-09-08; no slice complete
 - Owner: Vladislav Bogatyrev
+
+Next scoped increment: [Receiving amendments, voids and current receiving basis](../superpowers/specs/2026-09-07-us-03-receiving-lifecycle-design.md).
+The owner approved preserving lot identity/status/source locks on void and checking
+current receipt basis separately and approved the written technical design on
+2026-09-07. The [execution plan](../superpowers/plans/2026-09-07-us-03-receiving-lifecycle.md)
+has completed its rules/contract foundation and additive storage (Tasks 1–3):
+internal lot support-version, permanent roots, revision/void constraints and frozen-v3
+relational validation. The original create/save/finalize bridge remains compatible.
+Task 4 has internal revision detail/history/current-basis reads and QA-controlled
+amend/void and amendment-save commands with durable replay, verified with concurrent
+database changes. Amendment saving preserves exact predecessor bindings and lot
+identity, requires current QA and leaves current support unchanged.
+Internal readiness v4 now checks saved amendments against their predecessor,
+current references and all affected lot support tokens in one read-only snapshot.
+Internal explicit-v2 finalization now writes frozen v3 snapshots and atomically
+replaces receipt support, preserving retained lot identity and historical content.
+Internal live registry reads now select current/pending revisions or explicit all
+history, with independent status filters and consistent summary pagination.
+Complete error/result and original-command compatibility contracts, then coordinated
+HTTP integration remain next; connected UI follows in Task 5.
+New formats are not yet active HTTP responses; legacy frozen
+readers remain unchanged. See the dated storage, read and command checkpoints
+in the execution plan for automated proof and remaining limits. Fixed-template Receiving
+CSV follows separately, then US-04 Transformation with the P0 server case bridge.
 
 ![Architecture scope](diagrams/architecture_scope.png)
 

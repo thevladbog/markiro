@@ -1,0 +1,2 @@
+ALTER TABLE "traceability_lots" ADD COLUMN "receiving_basis_version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "traceability_lots" ADD CONSTRAINT "traceability_lots_receiving_basis_version_positive" CHECK ("traceability_lots"."receiving_basis_version" > 0);

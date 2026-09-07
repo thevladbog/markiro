@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { ConflictException } from "@nestjs/common";
 import { US_CAPABILITY } from "@markiro/domain";
@@ -12,6 +12,9 @@ import {
   receivingReadinessQuerySchema,
   saveReceivingDraftSchema,
   platformUuidSchema,
+  receivingBasisQuerySchema,
+  receivingRevisionListQuerySchema,
+  listReceivingLiveRecordsQuerySchema,
   type ReceivingDraftList,
   type ReceivingDraft,
   type ReceivingDraftRecord,
@@ -35,6 +38,15 @@ import {
   unavailable,
 } from "./us-receiving-persistence";
 import { finalizeReceiving } from "./us-receiving-finalization";
+import { createReceivingRoot, lockReceivingRoot } from "./us-receiving-roots";
+import { readReceivingBasis } from "./us-receiving-basis";
+import { readReceivingLiveRecord, readReceivingRevisions } from "./us-receiving-history";
+import { executeReceivingLifecycle } from "./us-receiving-lifecycle";
+import { lockReceivingOperation } from "./us-receiving-operations";
+import { saveReceivingAmendment } from "./us-receiving-amendment-save";
+import { readReceivingRevisionContext } from "./us-receiving-revision-readiness";
+import { finalizeReceivingRevision } from "./us-receiving-revision-finalization";
+import { readReceivingRegistry } from "./us-receiving-registry";
 
 const events = schema.traceabilityEvents,
   items = schema.receivingEventItems,
@@ -57,6 +69,136 @@ function comparableDraft(draft: ReceivingDraft) {
 
 export class UsReceivingStore {
   constructor(private readonly db: Db) {}
+
+  finalizeRevision(
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+    input: unknown,
+    requestId: string,
+  ) {
+    return finalizeReceivingRevision(this.db, tenantId, actorUserId, id, input, requestId);
+  }
+
+  // Internal until the coordinated lifecycle HTTP/response switch.
+  async checkRevisionReadiness(tenantId: string, actorUserId: string, id: unknown, query: unknown) {
+    return this.db.transaction(
+      async (tx) => {
+        const profileCode = await authorizeUsMasterData(
+          tx,
+          tenantId,
+          actorUserId,
+          US_CAPABILITY.READ,
+        );
+        const eventId = parseMasterDataInput(platformUuidSchema, id);
+        const value = parseMasterDataInput(receivingReadinessQuerySchema, query);
+        return (
+          await readReceivingRevisionContext(
+            tx,
+            tenantId,
+            eventId,
+            value.expectedDraftVersion,
+            profileCode,
+          )
+        ).readiness;
+      },
+      { isolationLevel: "repeatable read" },
+    );
+  }
+
+  saveAmendment(
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+    input: unknown,
+    requestId: string,
+  ) {
+    return saveReceivingAmendment(this.db, tenantId, actorUserId, id, input, requestId);
+  }
+
+  amend(tenantId: string, actorUserId: string, id: unknown, input: unknown, requestId: string) {
+    return executeReceivingLifecycle(
+      this.db,
+      tenantId,
+      actorUserId,
+      "receiving.amend",
+      id,
+      input,
+      requestId,
+    );
+  }
+
+  void(tenantId: string, actorUserId: string, id: unknown, input: unknown, requestId: string) {
+    return executeReceivingLifecycle(
+      this.db,
+      tenantId,
+      actorUserId,
+      "receiving.void",
+      id,
+      input,
+      requestId,
+    );
+  }
+
+  // Additive server foundation; HTTP activation belongs to the complete lifecycle switch.
+  async listLiveRecords(tenantId: string, actorUserId: string, query: unknown) {
+    return this.db.transaction(
+      async (tx) => {
+        await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+        return readReceivingRegistry(
+          tx,
+          tenantId,
+          parseMasterDataInput(listReceivingLiveRecordsQuerySchema, query),
+        );
+      },
+      { isolationLevel: "repeatable read" },
+    );
+  }
+
+  async getLiveRecord(tenantId: string, actorUserId: string, id: unknown) {
+    return this.db.transaction(
+      async (tx) => {
+        await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+        return readReceivingLiveRecord(tx, tenantId, parseMasterDataInput(platformUuidSchema, id));
+      },
+      { isolationLevel: "repeatable read" },
+    );
+  }
+
+  async listRevisions(tenantId: string, actorUserId: string, id: unknown, query: unknown) {
+    return this.db.transaction(
+      async (tx) => {
+        await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+        return readReceivingRevisions(
+          tx,
+          tenantId,
+          parseMasterDataInput(platformUuidSchema, id),
+          parseMasterDataInput(receivingRevisionListQuerySchema, query),
+        );
+      },
+      { isolationLevel: "repeatable read" },
+    );
+  }
+
+  async getLotReceivingBasis(
+    tenantId: string,
+    actorUserId: string,
+    lotId: unknown,
+    query: unknown,
+  ) {
+    return this.db.transaction(
+      async (tx) => {
+        await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+        return readReceivingBasis(
+          tx,
+          tenantId,
+          parseMasterDataInput(platformUuidSchema, lotId),
+          parseMasterDataInput(receivingBasisQuerySchema, query),
+        );
+      },
+      { isolationLevel: "repeatable read" },
+    );
+  }
 
   finalize(tenantId: string, actorUserId: string, id: unknown, input: unknown, requestId: string) {
     return finalizeReceiving(this.db, tenantId, actorUserId, id, input, requestId);
@@ -229,10 +371,14 @@ export class UsReceivingStore {
         .returning();
       if (!counter) throw unavailable();
       const eventNumber = `REC-${String(year).slice(-2).padStart(2, "0")}-${String(counter.sequence).padStart(4, "0")}`;
+      const eventId = randomUUID();
+      await createReceivingRoot(tx, { tenantId, eventId, eventNumber });
       const [header] = await tx
         .insert(events)
         .values({
           ...receivingHeader(value.draft),
+          id: eventId,
+          rootEventId: eventId,
           tenantId,
           eventNumber,
           timeZone: profile.timeZone,
@@ -278,6 +424,7 @@ export class UsReceivingStore {
         inputDigest,
       );
       if (replay) return replay;
+      await lockReceivingRoot(tx, tenantId, eventId);
       const before = await readReceivingDraft(tx, tenantId, eventId, "update");
       if (before.draftVersion !== value.expectedDraftVersion)
         throw new ConflictException({ code: "receiving_draft_conflict" });
@@ -317,20 +464,7 @@ export class UsReceivingStore {
     operationKey: string,
     inputDigest: string,
   ) {
-    // Hash collisions only serialize unrelated commands; receipt identity uses the full key.
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["us-receiving", tenantId, command, operationKey])}, 0))`,
-    );
-    const [receipt] = await tx
-      .select()
-      .from(operations)
-      .where(
-        and(
-          eq(operations.tenantId, tenantId),
-          eq(operations.command, command),
-          eq(operations.operationKey, operationKey),
-        ),
-      );
+    const receipt = await lockReceivingOperation(tx, tenantId, command, operationKey);
     if (!receipt) return null;
     if (receipt.inputDigest !== inputDigest)
       throw new ConflictException({ code: "receiving_operation_conflict" });

@@ -163,6 +163,21 @@ export function assessReceivingReadiness(input: ReceivingReadinessInput): {
   issues: ReceivingReadinessIssue[];
   exemptReviewRequiredLines: number[];
 } {
+  return assessReceivingRevisionReadiness(input, { retainedBindings: [] });
+}
+
+export interface ReceivingRetainedBinding {
+  lineNo: number;
+  previousLineNo: number;
+  lotId: string;
+}
+
+/** The server must derive these bindings from the immutable, tenant-owned predecessor. */
+export function assessReceivingRevisionReadiness(
+  input: ReceivingReadinessInput,
+  context: { retainedBindings: readonly ReceivingRetainedBinding[] },
+): ReturnType<typeof assessReceivingReadiness> {
+  const { retainedBindings } = context;
   const profile = parseTraceabilityProfile(input.profileCode);
   if (profile === "RU_CHZ")
     throw new DomainError("traceability_profile_required", "A US profile is required.");
@@ -204,7 +219,42 @@ export function assessReceivingReadiness(input: ReceivingReadinessInput): {
       add(group, line, field, "wrong_role");
   };
   const { draft } = input;
-  const assessed = draft.items.map((line) => assessReceivingExemptionLine(line, draft.locationId));
+  const retained = new Map<number, ReceivingRetainedBinding>();
+  const currentCounts = new Map<number, number>();
+  const previousCounts = new Map<number, number>();
+  for (const binding of retainedBindings) {
+    currentCounts.set(binding.lineNo, (currentCounts.get(binding.lineNo) ?? 0) + 1);
+    previousCounts.set(
+      binding.previousLineNo,
+      (previousCounts.get(binding.previousLineNo) ?? 0) + 1,
+    );
+  }
+  for (const binding of retainedBindings) {
+    const currentLineValid =
+      Number.isInteger(binding.lineNo) &&
+      binding.lineNo >= 1 &&
+      binding.lineNo <= draft.items.length;
+    if (
+      !currentLineValid ||
+      !Number.isInteger(binding.previousLineNo) ||
+      binding.previousLineNo < 1 ||
+      binding.previousLineNo > 100 ||
+      !binding.lotId ||
+      binding.lotId !== draft.items[binding.lineNo - 1]?.lotId ||
+      currentCounts.get(binding.lineNo) !== 1 ||
+      previousCounts.get(binding.previousLineNo) !== 1
+    ) {
+      add("lines", currentLineValid ? binding.lineNo : null, "lot", "lot_link_inconsistent");
+    } else retained.set(binding.lineNo, binding);
+  }
+  const assessed = draft.items.map((line, index) => {
+    const binding = retained.get(index + 1);
+    return assessReceivingExemptionLine(
+      line,
+      draft.locationId,
+      binding === undefined ? undefined : { retainedLotId: binding.lotId },
+    );
+  });
   const exemptReviewRequiredLines = draft.items.flatMap((line, index) =>
     line.exemptSupplier ? [index + 1] : [],
   );
@@ -228,6 +278,7 @@ export function assessReceivingReadiness(input: ReceivingReadinessInput): {
   ]);
   draft.items.forEach((row, index) => {
     const line = index + 1;
+    const isRetained = retained.has(line);
     const issue = (
       field: ReceivingReadinessIssue["field"],
       code: ReceivingReadinessIssue["code"],
@@ -288,13 +339,13 @@ export function assessReceivingReadiness(input: ReceivingReadinessInput): {
     }
     if (row.unitOfMeasure === null) issue("unitOfMeasure", "required");
     else if (!isTraceabilityUom(row.unitOfMeasure)) issue("unitOfMeasure", "format");
-    if (row.lotLinkMode === "link_existing") {
+    if (isRetained || row.lotLinkMode === "link_existing") {
       if (row.lotId === null) issue("lot", "required");
       else {
         const lot = lots.get(row.lotId);
         if (!lot) issue("lot", "unavailable");
         else {
-          if (lot.status !== "active") issue("lot", "inactive");
+          if (!isRetained && lot.status !== "active") issue("lot", "inactive");
           if (lot.productId !== row.productId) issue("lot", "lot_product_mismatch");
           if (lot.tlc !== effectiveTlc) issue("lot", "lot_tlc_mismatch");
           if (!sameSource(lot.source, row.source)) issue("lot", "lot_source_mismatch");

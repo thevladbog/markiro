@@ -52,10 +52,22 @@ describe.skipIf(!url)("receiving frozen-v1 raw transition parity", () => {
     ).id;
   });
   async function transition(value: unknown) {
-    return fixture.pool.query(
-      "UPDATE traceability_events SET status='finalized', finalized_at=now(), updated_at=now(), finalized_by=$1, updated_by=$1, finalization_snapshot=$2 WHERE tenant_id=$3 AND id=$4",
-      [c.actor, value, c.tenant, target],
-    );
+    const connection = await fixture.pool.connect();
+    try {
+      await connection.query("BEGIN");
+      await connection.query(
+        "UPDATE receiving_event_roots SET lifecycle_version=2,current_event_id=$2,pending_draft_id=NULL WHERE tenant_id=$1 AND id=$2",
+        [c.tenant, target],
+      );
+      await connection.query(
+        "UPDATE traceability_events SET status='finalized', finalized_at=now(), updated_at=now(), finalized_by=$1, updated_by=$1, finalization_snapshot=$2 WHERE tenant_id=$3 AND id=$4",
+        [c.actor, value, c.tenant, target],
+      );
+      await connection.query("COMMIT");
+    } finally {
+      await connection.query("ROLLBACK");
+      connection.release();
+    }
   }
   async function denied(value: unknown) {
     expect(receivingFinalizationSnapshotSchema.safeParse(value).success).toBe(false);

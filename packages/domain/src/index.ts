@@ -34,6 +34,7 @@ export { UOM_CODES_V1 } from "./traceability/uom.js";
 export { parseTraceabilityQuantity } from "./traceability/quantity.js";
 export {
   assessReceivingReadiness,
+  assessReceivingRevisionReadiness,
   RECEIVING_READINESS_RULE_VERSION,
   RECEIVING_READINESS_FIELDS,
   RECEIVING_READINESS_CODES,
@@ -42,8 +43,28 @@ export {
 export type {
   ReceivingReadinessInput,
   ReceivingReadinessIssue,
+  ReceivingRetainedBinding,
 } from "./traceability/receiving-readiness.js";
+export {
+  assessReceivingTransition,
+  isCurrentReceiving,
+  getBlockingReceivingConsumerIds,
+} from "./traceability/receiving-lifecycle.js";
+export type {
+  ReceivingEventStatus,
+  ReceivingLifecycleState,
+  ReceivingLifecycleAction,
+  ReceivingLifecycleDecision,
+  ReceivingConsumerFact,
+} from "./traceability/receiving-lifecycle.js";
 export { assessReceivingExemptionLine } from "./traceability/receiving-exemption.js";
+export { classifyReceivingAmendment } from "./traceability/receiving-amendment.js";
+export type {
+  ReceivingMaterialSource,
+  ReceivingMaterialLine,
+  ReceivingMaterialRevision,
+  ReceivingAmendmentEffect,
+} from "./traceability/receiving-amendment.js";
 export type {
   ReceivingExemptReceiptInput,
   ReceivingExemptionLine,
