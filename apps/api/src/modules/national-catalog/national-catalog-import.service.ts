@@ -188,6 +188,7 @@ export class NationalCatalogImportService {
       const session = await this.repository.lock(tx, actor.tenantId, sessionId);
       await this.assertSessionAccess(tx, actor, session);
       const checkpoint = parseCheckpoint(session.checkpoint);
+      if (session.incompleteReason === "session_row_limit") return this.summary(tx, session);
       if (checkpoint.enqueuePending || checkpoint.state === "started")
         return this.summary(tx, session);
       const recoverable = checkpoint.failures.filter((f) => f.retryable);
@@ -465,12 +466,28 @@ export class NationalCatalogImportService {
   ): Promise<void> {
     const work = cp.work[0];
     if (!work) return;
+    if (stop) {
+      await this.stopWork(tx, session, cp, reason, false);
+      return;
+    }
     if (work.kind === "gtins") {
-      const counts = await this.repository.upsert(
-        tx,
-        session,
-        work.gtins.map((gtin) => missingItem(gtin, reason)),
-      );
+      let counts: { loaded: number; selected: number };
+      try {
+        counts = await this.repository.upsert(
+          tx,
+          session,
+          work.gtins.map((gtin) => missingItem(gtin, reason)),
+        );
+      } catch (error) {
+        if (
+          error instanceof UnprocessableEntityException &&
+          error.message === "session_row_limit"
+        ) {
+          await this.stopWork(tx, session, cp, "session_row_limit", false);
+          return;
+        }
+        throw error;
+      }
       await this.advance(
         tx,
         { ...session, ...counts },
@@ -479,7 +496,7 @@ export class NationalCatalogImportService {
       );
       return;
     }
-    if (!retryable && !stop) {
+    if (!retryable) {
       await this.advance(tx, session, {
         ...cp,
         work: cp.work.slice(1),
@@ -487,8 +504,19 @@ export class NationalCatalogImportService {
       });
       return;
     }
-    // Exhausted transport pauses until explicit retry, retaining every sibling.
-    // Deterministic gaps are visible and cannot make complete=true.
+    await this.stopWork(tx, session, cp, reason, retryable);
+  }
+  /** Terminal/error markers never allocate item rows, including a full GTIN session. */
+  private async stopWork(
+    tx: DbTx,
+    session: ImportSessionRow,
+    cp: ImportCheckpoint,
+    reason: string,
+    retryable: boolean,
+  ): Promise<void> {
+    const work = cp.work[0];
+    if (!work) return;
+    // Retain every sibling for diagnosis/recovery; capacity exhaustion cannot be retried.
     await this.repository.save(tx, session, {
       state: "partial",
       complete: false,
@@ -498,7 +526,7 @@ export class NationalCatalogImportService {
         state: "failed",
         enqueuePending: false,
         nextRetryAt: null,
-        failures: [...cp.failures, { work, reason, retryable: retryable && !stop }],
+        failures: [...cp.failures, { work, reason, retryable }],
         work: cp.work.slice(1),
       },
     });
@@ -526,6 +554,7 @@ export class NationalCatalogImportService {
         error.reason === "access_changed"
       )
         return;
+      if (!(await this.authorizeBackground(tx, current, cp))) return;
       if (
         error.state === "failed" ||
         (error.reason === "forbidden" && cp.work[0]?.kind === "gtins")

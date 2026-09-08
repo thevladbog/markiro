@@ -892,4 +892,148 @@ describe.skipIf(!process.env.DATABASE_URL)("durable National Catalog sessions", 
       expect(await readProduct()).toEqual(previousProduct);
     },
   );
+  it.each(["ok", "forbidden", "exhausted", "remaining"] as const)(
+    "stops a full GTIN session without placeholders after packaging expansion and %s",
+    async (outcome) => {
+      const requestedCount = outcome === "remaining" ? 51 : 26;
+      const requested = Array.from({ length: requestedCount }, (_, index) => gtin(index + 1));
+      const invalid = Array.from(
+        { length: 100000 - requestedCount },
+        (_, index) => `bad${String(index).padStart(5, "0")}`,
+      );
+      const session = await service.start(actor, {
+        mode: "gtins",
+        text: [...invalid, ...requested].join(";"),
+      });
+      detail.mockResolvedValueOnce(
+        feed(
+          requested
+            .slice(0, 25)
+            .map((value, index) =>
+              product(
+                index + 1,
+                index === 0
+                  ? [
+                      value,
+                      ...Array.from({ length: requestedCount - 25 }, (_, level) =>
+                        gtin(1000 + level),
+                      ),
+                    ]
+                  : [value],
+              ),
+            ),
+        ),
+      );
+      await service.resume(actor.tenantId, session.id);
+      expect(await service.read(actor.tenantId, session.id)).toMatchObject({
+        loaded: 100000,
+        complete: false,
+      });
+      if (outcome === "ok") detail.mockResolvedValue(feed([product(26, [requested[25]!])]));
+      else if (outcome === "forbidden" || outcome === "remaining")
+        detail.mockResolvedValue({ status: "forbidden", message: "denied" });
+      else detail.mockResolvedValue({ status: "unavailable" });
+      for (let attempt = 0; attempt < (outcome === "exhausted" ? 4 : 1); attempt++) {
+        await due(session.id);
+        await service.resume(actor.tenantId, session.id);
+      }
+      expect(await service.read(actor.tenantId, session.id)).toMatchObject({
+        loaded: 100000,
+        state: "partial",
+        complete: false,
+        reason: "session_row_limit",
+      });
+      expect(
+        (await service.items(actor.tenantId, session.id, { ...query, search: requested[25]! }))
+          .items,
+      ).toEqual([]);
+      const [count] = await db
+        .select({ value: sql<number>`count(*)::int` })
+        .from(items)
+        .where(and(eq(items.tenantId, actor.tenantId), eq(items.sessionId, session.id)));
+      expect(count?.value).toBe(100000);
+      const terminal = await row(session.id);
+      expect(terminal.checkpoint).toMatchObject({
+        state: "failed",
+        enqueuePending: false,
+        nextRetryAt: null,
+        failures: [expect.objectContaining({ reason: "session_row_limit", retryable: false })],
+      });
+      const calls = detail.mock.calls.length;
+      await build().resume(actor.tenantId, session.id);
+      expect(await row(session.id)).toEqual(terminal);
+      expect(detail).toHaveBeenCalledTimes(calls);
+      await service.retry(actor, session.id);
+      expect(await row(session.id)).toEqual(terminal);
+    },
+    30000,
+  );
+  it.each(["role", "environment", "subscription"] as const)(
+    "rechecks %s before persisting a forbidden GTIN result and preserves recovery work",
+    async (change) => {
+      const subscription = await createManagedSubscription(db, { tenantId: actor.tenantId });
+      const session = await service.start(actor, { mode: "gtins", text: GTIN });
+      detail.mockImplementationOnce(async () => {
+        if (change === "role")
+          await db
+            .update(schema.member)
+            .set({ role: "member" })
+            .where(eq(schema.member.userId, actor.userId));
+        if (change === "environment")
+          await db
+            .update(schema.integrationChannels)
+            .set({ settings: { environment: "production" } })
+            .where(eq(schema.integrationChannels.tenantId, actor.tenantId));
+        if (change === "subscription")
+          await db
+            .update(schema.tenantSubscriptions)
+            .set({ endsAt: new Date(Date.now() - 1000) })
+            .where(eq(schema.tenantSubscriptions.id, subscription.subscriptionId));
+        return { status: "forbidden", message: "denied" };
+      });
+      await service.resume(actor.tenantId, session.id);
+      const reason =
+        change === "role"
+          ? "permission_denied"
+          : change === "environment"
+            ? "environment_mismatch"
+            : "subscription_read_only";
+      expect(await service.read(actor.tenantId, session.id)).toMatchObject({
+        state: "blocked",
+        reason,
+        loaded: 0,
+        complete: false,
+      });
+      expect((await service.items(actor.tenantId, session.id, query)).items).toEqual([]);
+      expect((await row(session.id)).checkpoint).toMatchObject({
+        state: "blocked",
+        attempts: 1,
+        enqueuePending: false,
+        work: [{ kind: "gtins", gtins: [GTIN] }],
+        failures: [],
+      });
+      await db
+        .update(schema.member)
+        .set({ role: "owner" })
+        .where(eq(schema.member.userId, actor.userId));
+      await db
+        .update(schema.integrationChannels)
+        .set({ settings: { environment: "sandbox" } })
+        .where(eq(schema.integrationChannels.tenantId, actor.tenantId));
+      await db
+        .update(schema.tenantSubscriptions)
+        .set({ endsAt: new Date(Date.now() + 3600000) })
+        .where(eq(schema.tenantSubscriptions.id, subscription.subscriptionId));
+      await service.retry(actor, session.id);
+      detail.mockResolvedValueOnce(feed([product(1)]));
+      await service.resume(actor.tenantId, session.id);
+      expect(await service.read(actor.tenantId, session.id)).toMatchObject({
+        state: "ready",
+        loaded: 1,
+        complete: true,
+        reason: null,
+      });
+      expect(detail).toHaveBeenCalledTimes(2);
+    },
+  );
 });
