@@ -539,7 +539,7 @@ export function presentProductLabelJob(job: StoredProductLabelJob): ProductLabel
 `ownershipConflict` обновляется из явного server receipt/существующего ownership
 reconciliation; конфликт не меняет исторический transport result.
 
-- [ ] Написать тест реальной SQLite с двумя rotating connections; все миграции применить существующим `applyMigrations`. После принятия проверить один code, один scan event, один scan outbox, один job и prepared event. Повтор того же code после завершения первого job с другим jobId должен вернуть duplicate, без второго print job.
+- [x] Написать тест реальной SQLite с двумя rotating connections; все миграции применить существующим `applyMigrations`. После принятия проверить один code, один scan event, один scan outbox, один job и prepared event. Повтор того же code после завершения первого job с другим jobId должен вернуть duplicate, без второго print job.
 
 ```ts
 expect(await recordProductLabelAcceptance(exec, input)).toEqual({
@@ -564,9 +564,9 @@ domain, policy со spec задачи 2, fields из LABEL_FIELDS (пустые,
 bytesDigest; IDs уникальные фиксированные UUID. Fixture не вызывает renderer,
 поскольку здесь проверяется атомарность. Actual render проверяет задача 8.
 
-- [ ] Run `pnpm --filter @markiro/station exec vitest run test/product-labels-acceptance.test.ts`; ожидается missing acceptance module.
-- [ ] Добавить таблицы `product_label_accept_commands`, `product_label_jobs`, `product_label_attempts`, `product_label_events`, `product_label_outbox`. Payload и bytes — TEXT/base64, чтобы не зависеть от передачи BLOB через Tauri IPC. Все IDs берутся из команды, не из `last_insert_rowid()` другого соединения. Таблицы имеют credentialOwnership; активный job ограничен partial UNIQUE на credentialOwnership. FK job→command, attempt/event→job, outbox→event используют ON DELETE CASCADE; cleanup допускается только по условиям задачи 15. Codes/legacy outbox не имеют каскадного FK на эти локальные копии.
-- [ ] INSERT команды должен одним триггером записать code, scan event, legacy scan outbox, job, attempt, event и product_label_outbox. Ранний guard и write-pattern:
+- [x] Run `pnpm --filter @markiro/station exec vitest run test/product-labels-acceptance.test.ts`; ожидается missing acceptance module.
+- [x] Добавить таблицы `product_label_accept_commands`, `product_label_jobs`, `product_label_attempts`, `product_label_events`, `product_label_outbox`. Payload и bytes — TEXT/base64, чтобы не зависеть от передачи BLOB через Tauri IPC. Все IDs берутся из команды, не из `last_insert_rowid()` другого соединения. Таблицы имеют credentialOwnership; активный job ограничен partial UNIQUE на credentialOwnership. FK job→command, attempt/event→job, outbox→event используют ON DELETE CASCADE; cleanup допускается только по условиям задачи 15. Codes/legacy outbox не имеют каскадного FK на эти локальные копии.
+- [x] INSERT команды должен одним триггером записать code, scan event, legacy scan outbox, job, attempt, event и product_label_outbox. Ранний guard и write-pattern:
 
 ```sql
 SELECT CASE WHEN EXISTS (
@@ -588,7 +588,7 @@ verdict=ok, box_id=NULL, operatorId исходного скана. Не вызы
 unique-конфликт codes_mirror записать обычным `recordScan(exec, duplicateEvent, null)`
 в журнал дублей без принятого code и без печати. Busy ничего не принимает.
 
-- [ ] Создать fault-trigger для проверки отката внутри одного statement:
+- [x] Создать fault-trigger для проверки отката внутри одного statement:
 
 ```sql
 CREATE TRIGGER test_product_label_outbox_fault
@@ -602,7 +602,7 @@ END;
 Повторить fault на каждом обязательном INSERT. Через afterRun rotating hook
 потерять ответ после успешной команды: повтор jobId не создаёт вторую приёмку.
 
-- [ ] Run SQLite schema tests, station acceptance/journal/mirror tests, db build перед consumer tests. Commit: `feat(station): atomically record accepted units with duplicate label jobs`.
+- [x] Run SQLite schema tests, station acceptance/journal/mirror tests, db build перед consumer tests. Commit: `feat(station): atomically record accepted units with duplicate label jobs`.
 
 ## Task 6: API шаблонов и защита дефолтов коробов
 
@@ -1516,3 +1516,16 @@ lint и build прошли. Общие API gates повторяются посл
 Для совместимости новых DB полей расширены внутренняя выборка смены и fixture.
 Тестовый PLATFORM_AUTH_URL исправлен на bare local origin; рабочая .env и
 общая dev база не изменялись. Защита назначения box defaults входит в задачу 6.
+
+2026-09-08: задача 5 завершена. Атомарный INSERT команды с AFTER INSERT
+триггером сохраняет code/scan/outbox/job/attempt/event/product outbox.
+Одна незавершённая единица на credentialOwnership, стабильный повтор jobId,
+проверка digest и отдельная регистрация duplicate подтверждены на двух
+соединениях к реальной SQLite. Новый набор: 23 теста, включая восемь точек
+отказа, потерю ответа, restart, повреждённые bytes/projection и границы cleanup.
+Все 1264 теста Station и 371 тест DB прошли; typecheck/lint/build прошли.
+App-тесты уточнены: перехват INSERT теперь отличает запись скана от создания
+триггера с текстом INSERT внутри, без изменения производственного App.
+Операция чтения job использует единый SQL snapshot и сверяет projection с
+immutable events. Windows/Tauri pool и физическое отключение питания пока
+не проверялись: тестовый SQLite helper отключает fsync, это не аппаратная приёмка.

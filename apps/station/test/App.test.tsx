@@ -928,15 +928,15 @@ async function renderActiveShiftForOperatorSwitch(
     }
     if (cmd === "plugin:sql|execute") {
       const { query, values = [] } = (payload ?? {}) as { query: string; values?: unknown[] };
-      if (query.includes("INSERT INTO codes_mirror")) boxItemCount += 1;
-      if (query.includes("INSERT INTO scan_events_mirror")) {
+      if (/^\s*INSERT INTO codes_mirror\b/i.test(query)) boxItemCount += 1;
+      if (/^\s*INSERT INTO scan_events_mirror\b/i.test(query)) {
         journalOperatorIds.push(values[5] as string);
         if (journalOperatorIds.length === 1) {
           markFirstJournalStarted();
           return firstJournalGate;
         }
       }
-      if (query.includes("INSERT INTO outbox")) outboxOperatorIds.push(values[9] as string);
+      if (/^\s*INSERT INTO outbox\b/i.test(query)) outboxOperatorIds.push(values[9] as string);
     }
     return baseInvoke(cmd, payload);
   });
@@ -2543,7 +2543,7 @@ describe("App", () => {
       expect(paths).not.toContain("POST /shifts/shift-1/open");
       expect(
         recovery.executed.filter(({ query }) =>
-          /INSERT INTO boxes_mirror|UPDATE boxes_mirror\s+SET sscc|UPDATE sscc_pool\s+SET next_serial = next_serial \+ 1|INSERT INTO scan_events_mirror|INSERT INTO outbox/.test(
+          /^\s*(?:INSERT INTO boxes_mirror\b|UPDATE boxes_mirror\s+SET sscc\b|UPDATE sscc_pool\s+SET next_serial = next_serial \+ 1|INSERT INTO scan_events_mirror\b|INSERT INTO outbox\b)/i.test(
             query,
           ),
         ),

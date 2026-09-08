@@ -3246,6 +3246,111 @@ export const STATION_MIGRATIONS: string[] = [
         WHERE json_extract(item.value, '$.kind') = 'reprint'
        ON CONFLICT(inventory_id, snapshot_id, correction_id) DO NOTHING;
      END;`,
+  // Product duplicate labels: each command and all dependent facts commit in one statement.
+  `CREATE TABLE IF NOT EXISTS product_label_accept_commands (
+     credential_ownership TEXT NOT NULL,
+     job_id TEXT NOT NULL,
+     shift_id TEXT NOT NULL,
+     terminal_id TEXT NOT NULL,
+     operator_id TEXT NOT NULL,
+     raw TEXT NOT NULL,
+     code_hash TEXT NOT NULL,
+     gtin14 TEXT NOT NULL,
+     serial TEXT NOT NULL,
+     accepted_at TEXT NOT NULL,
+     acceptance_json TEXT NOT NULL,
+     command_digest TEXT NOT NULL,
+     projection_json TEXT NOT NULL,
+     PRIMARY KEY (credential_ownership, job_id),
+     CONSTRAINT product_label_acceptance_json_check CHECK (json_valid(acceptance_json) AND json_type(acceptance_json) = 'object'),
+     CONSTRAINT product_label_acceptance_projection_check CHECK (json_valid(projection_json) AND json_type(projection_json) = 'object')
+   );`,
+  `CREATE TABLE IF NOT EXISTS product_label_jobs (
+     credential_ownership TEXT NOT NULL,
+     job_id TEXT NOT NULL,
+     shift_id TEXT NOT NULL,
+     projection_json TEXT NOT NULL,
+     status TEXT NOT NULL,
+     ownership_conflict INTEGER NOT NULL DEFAULT 0,
+     updated_at TEXT NOT NULL,
+     PRIMARY KEY (credential_ownership, job_id),
+     FOREIGN KEY (credential_ownership, job_id) REFERENCES product_label_accept_commands(credential_ownership, job_id) ON DELETE CASCADE,
+     CONSTRAINT product_label_jobs_status_check CHECK (status IN ('prepared', 'sending', 'awaiting_verification', 'completed', 'attention')),
+     CONSTRAINT product_label_jobs_projection_check CHECK (json_valid(projection_json) AND json_type(projection_json) = 'object'),
+     CONSTRAINT product_label_jobs_conflict_check CHECK (ownership_conflict IN (0, 1))
+   );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS product_label_jobs_one_unresolved_owner_uq ON product_label_jobs (credential_ownership) WHERE status <> 'completed';`,
+  `CREATE INDEX IF NOT EXISTS product_label_jobs_owner_shift_idx ON product_label_jobs (credential_ownership, shift_id, updated_at);`,
+  `CREATE TABLE IF NOT EXISTS product_label_attempts (
+     credential_ownership TEXT NOT NULL,
+     attempt_id TEXT NOT NULL,
+     job_id TEXT NOT NULL,
+     attempt_no INTEGER NOT NULL,
+     prepared_json TEXT NOT NULL,
+     state TEXT NOT NULL,
+     verified_at TEXT,
+     verified_by TEXT,
+     PRIMARY KEY (credential_ownership, attempt_id),
+     FOREIGN KEY (credential_ownership, job_id) REFERENCES product_label_jobs(credential_ownership, job_id) ON DELETE CASCADE,
+     CONSTRAINT product_label_attempts_number_check CHECK (attempt_no BETWEEN 1 AND 9007199254740991),
+     CONSTRAINT product_label_attempts_state_check CHECK (state IN ('prepared', 'sending', 'sent', 'failed_before_send', 'delivery_unknown')),
+     CONSTRAINT product_label_attempts_prepared_check CHECK (json_valid(prepared_json) AND json_type(prepared_json) = 'object'),
+     CONSTRAINT product_label_attempts_verified_check CHECK ((verified_at IS NULL) = (verified_by IS NULL))
+   );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS product_label_attempts_job_number_uq ON product_label_attempts (credential_ownership, job_id, attempt_no);`,
+  `CREATE TABLE IF NOT EXISTS product_label_events (
+     credential_ownership TEXT NOT NULL,
+     event_id TEXT NOT NULL,
+     job_id TEXT NOT NULL,
+     sequence INTEGER NOT NULL,
+     event_json TEXT NOT NULL,
+     PRIMARY KEY (credential_ownership, event_id),
+     FOREIGN KEY (credential_ownership, job_id) REFERENCES product_label_jobs(credential_ownership, job_id) ON DELETE CASCADE,
+     CONSTRAINT product_label_events_sequence_check CHECK (sequence BETWEEN 1 AND 9007199254740991),
+     CONSTRAINT product_label_events_json_check CHECK (json_valid(event_json) AND json_type(event_json) = 'object')
+   );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS product_label_events_job_sequence_uq ON product_label_events (credential_ownership, job_id, sequence);`,
+  `CREATE TABLE IF NOT EXISTS product_label_outbox (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     credential_ownership TEXT NOT NULL,
+     event_id TEXT NOT NULL,
+     queued_at TEXT NOT NULL,
+     FOREIGN KEY (credential_ownership, event_id) REFERENCES product_label_events(credential_ownership, event_id) ON DELETE CASCADE
+   );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS product_label_outbox_event_uq ON product_label_outbox (credential_ownership, event_id);`,
+  `CREATE INDEX IF NOT EXISTS product_label_outbox_owner_id_idx ON product_label_outbox (credential_ownership, id);`,
+  // AFTER INSERT matters: ON CONFLICT DO NOTHING retries must not run the busy guard.
+  `CREATE TRIGGER IF NOT EXISTS product_label_accept_command_apply
+   AFTER INSERT ON product_label_accept_commands
+   BEGIN
+     SELECT CASE WHEN EXISTS (
+       SELECT 1 FROM product_label_jobs
+       WHERE credential_ownership = NEW.credential_ownership AND status <> 'completed'
+     ) THEN RAISE(ABORT, 'PRODUCT_LABEL_BUSY') END;
+
+     INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+     VALUES (NEW.code_hash, NEW.shift_id, NEW.gtin14, NEW.serial, NEW.accepted_at, NULL);
+
+     INSERT INTO scan_events_mirror (shift_id, terminal_id, raw, verdict, scanned_at, operator_id)
+     VALUES (NEW.shift_id, NEW.terminal_id, NEW.raw, 'ok', NEW.accepted_at, NEW.operator_id);
+
+     INSERT INTO outbox (shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial, box_id, operator_id)
+     VALUES (NEW.shift_id, NEW.terminal_id, NEW.raw, 'ok', NEW.accepted_at, NEW.code_hash, NEW.gtin14, NEW.serial, NULL, NEW.operator_id);
+
+     INSERT INTO product_label_jobs (credential_ownership, job_id, shift_id, projection_json, status, updated_at)
+     VALUES (NEW.credential_ownership, NEW.job_id, NEW.shift_id, NEW.projection_json, 'prepared', NEW.accepted_at);
+
+     INSERT INTO product_label_attempts (credential_ownership, attempt_id, job_id, attempt_no, prepared_json, state)
+     VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.attemptId'), NEW.job_id, 1,
+             json_extract(NEW.acceptance_json, '$.preparedEvent'), 'prepared');
+
+     INSERT INTO product_label_events (credential_ownership, event_id, job_id, sequence, event_json)
+     VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.eventId'), NEW.job_id, 1,
+             json_extract(NEW.acceptance_json, '$.preparedEvent'));
+
+     INSERT INTO product_label_outbox (credential_ownership, event_id, queued_at)
+     VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.eventId'), NEW.accepted_at);
+   END;`,
 ];
 
 export interface StationMigrationEntry {
