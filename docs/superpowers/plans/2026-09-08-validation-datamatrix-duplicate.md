@@ -1192,7 +1192,7 @@ capability задачи 8 и текущего оператора существ�
 задачи 7 даёт доступность протокола; отдельный список product templates задачи 6
 не подменяет старую библиотеку коробов. Props `NewShift` сохраняются совместимыми.
 
-- [ ] Расширить `new-shift.test.tsx` с существующими `client`, `silentSource`,
+- [x] Расширить `new-shift.test.tsx` с существующими `client`, `silentSource`,
       `submitGtin`, mocked fetch: ответить на GTIN/product/planning/template requests,
       выбрать validation и полный fixture template. Проверить обязательность и body:
 
@@ -1210,21 +1210,21 @@ fireEvent.click(screen.getByLabelText("Require label verification"));
 шаблона и существующий start action; захваченный JSON POST должен содержать
 `{mode:"duplicate_dm",verification:"none",templateId}` внутри validationPrint.
 
-- [ ] Run `pnpm --filter @markiro/station exec vitest run test/new-shift.test.tsx`; ожидается отсутствие выбора печати.
-- [ ] В существующую последовательность добавить шаг настроек после выбора
+- [x] Run `pnpm --filter @markiro/station exec vitest run test/new-shift.test.tsx`; ожидается отсутствие выбора печати.
+- [x] В существующую последовательность добавить шаг настроек после выбора
       validation, затем выбор duplicate template. Для aggregation сохраняется выбор
       box template. Все новые controls используют текущие большие station controls.
       При возврате сохранять выбор до смены товара; второй клик start блокируется
       существующим entry lease. POST body строить общим input задачи 1.
-- [ ] До старта проверить выбранный шаблон, printer language/DPI и доступность
+- [x] До старта проверить выбранный шаблон, printer language/DPI и доступность
       протокола. Если принтер не настроен, дать переход в существующие настройки;
       не создавать активную печатную смену с непригодным контекстом. Потеря сети до
       create показывает повтор запроса; новая возможность офлайн-создания не вводится.
-- [ ] Проверить отсутствие capability, пустой список, отключённый шаблон между
+- [x] Проверить отсутствие capability, пустой список, отключённый шаблон между
       выбором и POST, возврат с шага, смену товара при pending fetch, required по
       умолчанию, none по явному выбору, stale credential/entry lease. При ответе
       сервера восстанавливать авторитетный snapshot, не локальный draft.
-- [ ] Добавить gallery states `validation-print-create-required` и
+- [x] Добавить gallery states `validation-print-create-required` и
       `validation-print-create-none` на реальном NewShift с fixture client.
       Test gallery registration подтверждает существование состояний. Run new-shift,
       gallery и station gates. Commit: `feat(station): let operators configure duplicate print shifts`.
@@ -1596,3 +1596,9 @@ RED→GREEN: новый канал отсутствовал; при пропущ
 В библиотеке показано назначение. Новый product_duplicate получает базовый шаблон 58×40, существующее назначение неизменно; копия создаёт новую строку. assertDuplicateTemplate блокирует сохранение непригодного импорта. Дубликаты исключены из box defaults и fallback selectors. Preview, resize geometry и ZPL/TSPL download используют raster option и полный синтетический KM; Cyrillic preview получает те же ограничения ширины/строк, что печать. Исходный шаблон и существующие native matrix previews сохраняют прежние правила.
 
 Проверки: новые настройки формы сначала отсутствовали (RED), затем сценарии выбора/none/required/product change/late response/planned/active прошли. Фокусные 7 suites 147/147; дополнительные 4 suites 83/83 включают реальные GS1 raster bytes для ZPL/TSPL при 203/300 dpi и копирование без PATCH оригинала. Полный admin 91 suites / 998 tests PASS, дополнительный org-profile regression 30/30 PASS. Typecheck, lint (5 существующих warnings в boxes/conflicts), build, scoped format и diff check PASS. Для локального запуска из изолированного worktree скопированы установленные font assets в его игнорируемую dependency directory: стандартные symlinks в основной рабочей копии восстановлены, manifests/lockfile не менялись. Canvas и аппаратная проверка этим прогоном не подтверждены; браузерные screenshots и сквозной сценарий выполняются в задаче 16. Холст проверен только через Pencil MCP, без изменений.
+
+### Task 13 — Настройка смены оператором
+
+Существующий быстрый старт проверки без печати сохранён. После выбора товара оператор открывает настройки кнопкой в нижней панели: печать выключена по умолчанию, при включении предлагается обязательная проверка и отдельный шаблон. Перед созданием повторно проверяются protocol, доступность шаблона и printer/DPI; перед входом сверяется авторитетная политика ответа сервера. Известный результат create повторно используется после сбоя open, выбор сохраняется при возврате из настроек принтера. Старые credential generations и повторные клики не создают смен. Gallery использует реальный NewShift с изолированными fixtures для required, none и выбора шаблона.
+
+RED→GREEN: отсутствие UI, повторное создание после сбоя open, неожиданная серверная печать при запросе none. Новая suite 17 сценариев; полный Station **91 suites / 1355 tests PASS**, typecheck/lint/build PASS. Дизайн использует существующие горизонтальные StationScreen/FloorFooter и touch controls. Scoped format и diff check PASS. Браузерная и аппаратная приёмка остаётся в задаче 16.

@@ -81,7 +81,7 @@ import { ConflictList } from "./pages/ConflictList.js";
 import { Enrollment } from "./pages/Enrollment.js";
 import { OperatorLogin } from "./pages/OperatorLogin.js";
 import { TaskSelection } from "./pages/TaskSelection.js";
-import { NewShift } from "./pages/NewShift.js";
+import { NewShift, type NewShiftDraft } from "./pages/NewShift.js";
 import { WorkScreen } from "./pages/WorkScreen.js";
 import { InventoryWorkScreen } from "./pages/InventoryWorkScreen.js";
 import { WorkstationSetup } from "./pages/WorkstationSetup.js";
@@ -246,6 +246,10 @@ export function App() {
   const [hardwareConfig, setHardwareConfig] = useState<HardwareConfig>(DEFAULT_HARDWARE_CONFIG);
   const [scannerStatus, setScannerStatus] = useState<ScannerStatus | null>(null);
   const [showSetup, setShowSetup] = useState(false);
+  const [newShiftDraft, setNewShiftDraft] = useState<{
+    generation: CredentialGeneration;
+    draft: NewShiftDraft;
+  } | null>(null);
   const [printRecoveryBlocked, setPrintRecoveryBlocked] = useState(false);
   // Printer Setup deliberately unmounts WorkScreen. Its cleanup publishes
   // `false`, but that does not resolve the persisted recovery which opened
@@ -1292,6 +1296,7 @@ export function App() {
   function handleShiftEntered(entered: ProductionShiftTask, lease?: ShiftEntryLease): void {
     if (!lease || shiftEntryLeaseRef.current !== lease || !lease.isCurrent()) return;
     if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
+    setNewShiftDraft(null);
     shiftEntryGenerationRef.current += 1;
     activeShiftIdRef.current = entered.id;
     shiftRecoverySyncPaused.current = true;
@@ -1613,18 +1618,34 @@ export function App() {
           }
           {...(floorGeneration ? { credentialGeneration: floorGeneration } : {})}
           onFloorWorkRegister={registerFloorWorkBarrier}
-          onNew={() => setFloorView("new")}
+          onNew={() => {
+            setNewShiftDraft(null);
+            setFloorView("new");
+          }}
           onSetup={() => setShowSetup(true)}
           onConflicts={() => setShowConflicts(true)}
         />
       ) : (
         <NewShift
           client={activeClient}
+          hardwareConfig={hardwareConfig}
+          onSetup={(draft) => {
+            if (!floorGeneration || !credentialGenerationIsCurrent(floorGeneration)) return;
+            setNewShiftDraft({ generation: floorGeneration, draft });
+            setShowSetup(true);
+          }}
+          {...(newShiftDraft?.generation === floorGeneration
+            ? { initialDraft: newShiftDraft.draft }
+            : {})}
+          isCurrent={() =>
+            floorGeneration ? credentialGenerationIsCurrent(floorGeneration) : false
+          }
           source={scanSource}
           acquireShiftEntry={acquireShiftEntry}
           onStarted={handleShiftEntered}
           onBack={() => {
             if (shiftEntryLeaseRef.current || activeShiftIdRef.current) return;
+            setNewShiftDraft(null);
             setFloorView("select");
           }}
         />

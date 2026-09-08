@@ -33,6 +33,7 @@ import { Enrollment } from "../pages/Enrollment.js";
 import { ExceptionFlow } from "../pages/ExceptionFlow.js";
 import { InventoryTaskConfirmation } from "../pages/InventoryTaskConfirmation.js";
 import { InventoryWorkScreen } from "../pages/InventoryWorkScreen.js";
+import { NewShift } from "../pages/NewShift.js";
 import { TaskSelection } from "../pages/TaskSelection.js";
 import { UpdateCenter } from "../pages/UpdateCenter.js";
 import { WorkstationSetup } from "../pages/WorkstationSetup.js";
@@ -1115,7 +1116,118 @@ function LoginFixture({ variant, locale }: { variant: string; locale: GalleryLoc
   );
 }
 
+/** Drives the real creation form to a review state. This client cannot create/open shifts. */
+function DuplicateNewShiftFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
+  const root = useRef<HTMLDivElement>(null);
+  const client = useMemo<StationClient>(
+    () => ({
+      get<T>(path: string): Promise<T> {
+        if (path.startsWith("/products?"))
+          return Promise.resolve({
+            items: [
+              {
+                id: "11111111-1111-4111-8111-111111111111",
+                gtin14: "04600000000015",
+                name: locale === "ru" ? "Кега · тестовый продукт" : "Keg · sample product",
+                boxCapacity: null,
+              },
+            ],
+          } as T);
+        if (path.startsWith("/shifts/planning-config"))
+          return Promise.resolve({ validationPrintProtocol: "validation-dm-duplicate-v1" } as T);
+        if (path.startsWith("/shifts/product-label-templates"))
+          return Promise.resolve({
+            items: [
+              {
+                id: "22222222-2222-4222-8222-222222222222",
+                name: locale === "ru" ? "Внешняя этикетка" : "Outer label",
+                widthMm: 58,
+                heightMm: 40,
+                dpi: 203,
+              },
+            ],
+          } as T);
+        return Promise.reject(new Error("Unknown gallery request"));
+      },
+      post<T>(path: string): Promise<T> {
+        if (path === "/products/gtin-check")
+          return Promise.resolve({ gtin14: "04600000000015", owner: "own" } as T);
+        return Promise.reject(new Error("Shift writes are disabled in the gallery"));
+      },
+      download: () => Promise.reject(new Error("Gallery download unavailable")),
+      whoami: () => Promise.resolve({ ok: true }),
+    }),
+    [locale],
+  );
+  const source = useMemo<ScanSource>(
+    () => ({
+      start(listener) {
+        let active = true;
+        queueMicrotask(() => {
+          if (active) listener("04600000000015");
+        });
+        return () => {
+          active = false;
+        };
+      },
+    }),
+    [],
+  );
+  useEffect(() => {
+    const container = root.current;
+    if (!container) return;
+    let step = 0;
+    const advance = () => {
+      if (step === 0) {
+        const button = container.querySelector<HTMLButtonElement>(
+          '[data-testid="new-shift-print-settings"]',
+        );
+        if (!button || button.disabled) return;
+        step = 1;
+        button.click();
+        return;
+      }
+      if (step === 1) {
+        const input = container.querySelector<HTMLInputElement>('input[name="duplicate-print"]');
+        if (!input || input.disabled) return;
+        step = 2;
+        if (!input.checked) input.click();
+        return;
+      }
+      if (step === 2) {
+        const input = container.querySelector<HTMLInputElement>(
+          'input[name="duplicate-verification"]',
+        );
+        if (!input || input.disabled) return;
+        step = 3;
+        if (variant === "print-none" && input.checked) input.click();
+        if (variant !== "print-template") return;
+        container
+          .querySelector<HTMLButtonElement>('[data-testid="new-shift-print-continue"]')
+          ?.click();
+      }
+    };
+    const observer = new MutationObserver(advance);
+    observer.observe(container, { childList: true, subtree: true, attributes: true });
+    advance();
+    return () => observer.disconnect();
+  }, [variant]);
+  return (
+    <div ref={root} style={{ height: "100%", minHeight: 0 }}>
+      <NewShift
+        client={client}
+        source={source}
+        hardwareConfig={{ ...GALLERY_SETUP_HARDWARE_CONFIG, printerDpi: 203 }}
+        onStarted={() => undefined}
+        onBack={() => undefined}
+      />
+    </div>
+  );
+}
+
 function NewShiftFixture({ view, locale }: { view: string; locale: GalleryLocale }) {
+  if (view.startsWith("print-"))
+    return <DuplicateNewShiftFixture key={view} variant={view} locale={locale} />;
   const ru = locale === "ru";
   const notFound = view === "not-found";
   const found = view === "found";

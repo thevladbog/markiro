@@ -4890,3 +4890,23 @@ body,
     transform: translateY(51px);
   }
 }
+
+.new-shift__print-settings {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-content: start;
+}
+
+.new-shift__print-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+  align-content: center;
+  align-items: start;
+}
+
+.new-shift__verification-choice p,
+.new-shift__print-hint {
+  margin: var(--sp-3) 0 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}

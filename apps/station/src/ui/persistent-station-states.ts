@@ -1,3 +1,4 @@
+import type { VerificationPolicy } from "@markiro/domain";
 import type { SignalTone } from "@markiro/ui";
 
 import type { CredentialRecoveryPhase, LegacyIdentityState, StationView } from "../App.js";
@@ -64,7 +65,13 @@ export const PERSISTENT_STATION_STATE_GALLERY = {
     found: "new-shift-found",
     notFound: "new-shift-not-found",
     template: "new-shift-template",
+    validationPrint: "validation-print-create-required",
+    productTemplate: "validation-print-create-template",
   } as const satisfies Record<NewShiftView, string>,
+  newShiftVerification: {
+    required: "validation-print-create-required",
+    none: "validation-print-create-none",
+  } as const satisfies Record<VerificationPolicy, string>,
   shiftSelection: {
     loading: "shift-loading",
     "read-error": "shift-read-error",
