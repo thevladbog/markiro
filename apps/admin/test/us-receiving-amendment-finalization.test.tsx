@@ -216,12 +216,38 @@ describe("Amendment saved check and finalization", () => {
     await confirm(user);
     await user.click(screen.getByRole("button", { name: "Confirm finalization" }));
     await screen.findByRole("button", { name: "Reload current record" });
+    expect(screen.getByText(/Retained lot identity cannot be changed/)).toBeTruthy();
+    expect(screen.getByText("Line 1: Lot")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Check saved draft" })).toHaveProperty(
       "disabled",
       true,
     );
     expect(screen.queryByRole("button", { name: "Finalize" })).toBeNull();
     expect(writes(send)).toHaveLength(1);
+  });
+  it("explains the lifecycle conflict returned by a saved-draft check", async () => {
+    const { user, send } = await setup({
+      handle: (url) =>
+        url.includes("/readiness?")
+          ? Response.json(
+              {
+                code: "receiving_lifecycle_conflict",
+                rootId: amendment.lifecycle.rootId,
+                lifecycleVersion: 6,
+                currentEventId: amendment.id,
+                pendingDraftId: null,
+              },
+              { status: 409 },
+            )
+          : undefined,
+    });
+    await user.click(screen.getByRole("button", { name: "Check saved draft" }));
+    expect(await screen.findByText(/The receipt lifecycle has changed/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Check saved draft" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(writes(send)).toHaveLength(0);
   });
   it("checks the exact predecessor and finalizes with captured L/D/digest while distinguishing retained lots", async () => {
     const { user, send } = await setup();

@@ -10,8 +10,9 @@ import {
   type ReceivingLiveRecord,
   type ReceivingOperationReceiptV2,
 } from "@markiro/platform-contracts";
-import { UsClientError } from "../client.js";
+import { UsClientError, UsReceivingLifecycleError } from "../client.js";
 import type { MasterDataViewProps } from "../master-data/workspace-shared.js";
+import { ReceivingConflictDetails } from "./conflict-details.js";
 
 type Command = { record: ReceivingLiveRecord } & (
   { action: "amend"; input: AmendReceivingInput } | { action: "void"; input: VoidReceivingInput }
@@ -43,6 +44,9 @@ export function ReceivingLifecycleActions({
   const [phase, setPhase] = useState<"edit" | "unknown" | "read_failed" | "rejected">("edit");
   const [preview, setPreview] = useState<string[] | null>(null);
   const [previewFailed, setPreviewFailed] = useState(false);
+  const [conflictDetail, setConflictDetail] = useState<UsReceivingLifecycleError["detail"] | null>(
+    null,
+  );
   const command = useRef<Command | null>(null);
   const acknowledged = useRef<ReceivingOperationReceiptV2 | null>(null);
   const release = useRef<(() => void) | null>(null);
@@ -76,6 +80,7 @@ export function ReceivingLifecycleActions({
     setAction(null);
     setReason("");
     setPhase("edit");
+    setConflictDetail(null);
   }
   async function denied(error: unknown) {
     if (!(error instanceof UsClientError)) return false;
@@ -171,6 +176,8 @@ export function ReceivingLifecycleActions({
       onOpenRecord(current);
     } catch (error) {
       if (!alive.current || (await denied(error))) return;
+      if (!readOnly && !acknowledged.current && error instanceof UsReceivingLifecycleError)
+        setConflictDetail(error.detail);
       setPhase(
         acknowledged.current
           ? "read_failed"
@@ -309,15 +316,18 @@ export function ReceivingLifecycleActions({
             onChange={(event) => setReason(event.target.value)}
           />
           {phase !== "edit" ? (
-            <p role="alert">
-              {t(
-                phase === "read_failed"
-                  ? "receiving.currentUnavailable"
-                  : phase === "unknown"
-                    ? "receiving.operationUnknown"
-                    : "receiving.operationRejected",
-              )}
-            </p>
+            <div role="alert">
+              <p>
+                {t(
+                  phase === "read_failed"
+                    ? "receiving.currentUnavailable"
+                    : phase === "unknown"
+                      ? "receiving.operationUnknown"
+                      : "receiving.operationRejected",
+                )}
+              </p>
+              <ReceivingConflictDetails detail={conflictDetail} />
+            </div>
           ) : null}
         </Modal>
       ) : null}

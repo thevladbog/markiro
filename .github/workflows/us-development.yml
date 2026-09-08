@@ -54,8 +54,8 @@ jobs:
         run: pnpm --filter @markiro/admin exec vitest run test/us-client.test.ts test/us-master-data-client.test.ts test/us-master-data-forms.test.ts test/us-master-data-ui.test.tsx test/us-catalog-client.test.ts test/us-catalog-ui.test.tsx test/us-product-profile-client.test.ts test/us-product-profile-ui.test.tsx test/us-lot-client.test.ts test/us-lots-ui.test.tsx test/us-app.test.tsx
       - name: Verify receiving draft, finalization and exempt-review browser boundaries
         run: pnpm --filter @markiro/admin exec vitest run test/us-receiving-client.test.ts test/us-receiving-command-acknowledgement.test.ts test/us-receiving-live-client.test.ts test/us-receiving-revision-acknowledgement.test.ts test/us-receiving-lifecycle-client.test.ts test/us-receiving-lifecycle.test.tsx test/us-receiving-amendment-editor.test.tsx test/us-receiving-amendment-finalization.test.tsx test/us-receiving-ui.test.tsx test/us-receiving-references.test.tsx test/us-receiving-readiness-client.test.ts test/us-receiving-readiness.test.tsx test/us-receiving-finalization-client.test.ts test/us-receiving-finalization.test.tsx test/us-receiving-exemption-client.test.ts test/us-receiving-exemption.test.tsx
-      - name: Verify exact receiving revision navigation
-        run: pnpm --filter @markiro/admin exec vitest run test/us-receiving-history.test.tsx
+      - name: Verify exact receiving revision navigation and Unicode TLC entry
+        run: pnpm --filter @markiro/admin exec vitest run test/us-receiving-history.test.tsx test/us-receiving-tlc-input.test.tsx
       - name: Build local-only US browser entry
         env:
           VITE_DEPLOYMENT_EDITION: US

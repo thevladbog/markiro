@@ -24,8 +24,14 @@ consumers are switched together. Explicit amendment commands, QA lifecycle contr
 retained-line editing/comparison, saved checks/finalization and exact revision
 history navigation and independent lot-basis cards are connected in the local UI.
 Basis loading/error/missing states, bounded pages and exact-revision navigation
-preserve lot status and return context. Contextual conflict presentation and
-remaining Task 5 acceptance remain pending.
+preserve lot status and return context. Ordinary TLC native entry now preserves
+the full 120-point Unicode boundary without changing shared validation.
+Contextual EN/ES explanations now cover changed lifecycle, pending correction
+and locked retained-line identity, keeping the existing explicit reload guards.
+Cancelled revision non-reuse, multiple independent supports, delayed reads and
+QA revoke/restore recovery now have local test coverage. The dated cross-task
+verification checkpoint records the remaining visual/external acceptance limits;
+reserved downstream dependency presentation is still pending actual consumers.
 Client acknowledgement validators for explicit revision commands are connected
 with captured pre-command context, including amend target/result distinction,
 retained bindings and immutable void content. These local routes/UI do not enable

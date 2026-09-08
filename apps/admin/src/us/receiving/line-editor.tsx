@@ -87,7 +87,6 @@ export function ReceivingLineEditor({
           <Input
             label={t("receiving.tlc")}
             value={value.tlc ?? ""}
-            maxLength={200}
             onChange={(e) => text("tlc", e.target.value)}
           />
           <div className="us-rec-quantity">

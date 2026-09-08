@@ -227,6 +227,70 @@ A version or operation-key conflict never overwrites input. Reloading the saved 
 
 Dirty navigation and page unload warn before discarding input. Language and theme changes preserve the mounted draft. Permission denial refreshes capabilities; session expiry or read-access revocation exits protected content under the existing account-isolation boundary. Unsaved input and pending operation keys are not retained across logout, session loss, page reload or browser closure. After an uncertain result and a new session, inspect the saved receiving registry before creating another event. Cross-session draft recovery is not implemented.
 
+## Cancellation and void-retry acceptance — 2026-09-08
+
+The existing real-MFA Chromium fixture now creates and cancels correction 2, then
+creates correction 3 with a different ID. Both cancelled revisions remain in
+history and can be opened through their exact UI links with their own reasons.
+The current finalized receipt, lot records and complete receiving-basis response
+remain unchanged by either cancellation.
+
+For final-receipt void, the fixture lets the server commit and then drops the
+response. The UI preserves the reason and retries the exact same command. Both
+HTTP 200 acknowledgements are identical. A separate failed GET after the replay
+offers only a current-state read retry. Five exact lifecycle audits cover two
+amendments, two draft cancellations and one final-receipt void; the retry adds
+none. The last-basis token advances once and lot business fields do not change.
+
+This increment extends browser acceptance only; no product/UI/server contract,
+dependency, migration or release behavior changed. It does not establish hosted,
+screen-reader or native-device acceptance. Remaining Task 5 browser coverage
+includes multiple simultaneous receiving supports and delayed-read/authorization
+recovery scenarios, followed by cross-task final gates before CSV.
+
+## Contextual lifecycle conflicts — 2026-09-08
+
+Save, saved-draft checks, finalization and amendment/void dialogs retain validated
+structured conflict context. EN/ES explanations distinguish a changed lifecycle,
+an existing pending correction and locked retained-lot identity, with exact
+reported line numbers and translated field labels. Server messages, arbitrary
+fields and raw exception text are not rendered. Existing generic notices remain
+the fallback for other or unavailable context; the reserved downstream dependency
+contract does not enable a dependency browser or correction operation.
+
+The presentation adds no requests, retry mechanism or persistent cache. Existing
+reload confirmation preserves dirty input if declined; a successful explicit read
+clears obsolete context. A failed read retains the reason and conflict details.
+Pending correction recovery uses the existing sequence: reload the receipt, then
+explicitly open the now-current pending-correction link. It does not navigate
+using an unverified conflict pointer or automatically cancel another draft.
+
+Focused connected tests cover save-input preservation, declined reload, typed
+readiness/finalization conflicts and EN/ES pending-conflict read recovery. The
+owned Chromium journey creates a real concurrent amendment while the dialog holds
+an older lifecycle, receives HTTP 409, preserves the entered reason, then reaches
+the pending draft with GET-only recovery and an unchanged saved record. New EN
+light conflict screenshots at 1440/390 were inspected. This is not hosted,
+native-device, screen-reader or fluent Spanish acceptance. Wider Task 5 acceptance
+remains open; the MVP is not ready for release.
+
+## Ordinary TLC native input — 2026-09-08
+
+The ordinary line editor no longer imposes a 200-unit HTML `maxLength`, which
+previously cut supplementary Unicode characters off at 100 points. Entry preserves
+the complete input; the existing shared TLC contract still accepts at most 120
+Unicode code points and rejects invalid/control characters. Save reports the
+invalid line/TLC without silently truncating the user's text or sending a write.
+There is no change to lot identity rules, draft versions or server validation.
+
+The EN/ES controlled line-editor regression proves 120-point preservation and
+121-point contract rejection. The real browser companion
+`tools/us-development/test/receiving-tlc-input-flow.mjs` enters native key events,
+saves 120 points exactly, then enters a 121st and verifies a visible TLC error,
+zero mutation requests and the complete unchanged saved record. It runs after
+the existing lifecycle scenarios in the owned synthetic fixture, retaining the
+exempt-TLC native-input proof. The new focused test is included in check-only CI.
+
 ## Lot receiving basis and return navigation — 2026-09-08
 
 The [lot detail](lot-browser.md#current-receiving-basis--2026-09-08) now reads current
@@ -244,6 +308,51 @@ There is no persistent navigation cache, polling, automatic mutation or new rout
 The real read-only browser companion verifies unchanged complete lot/receipt DTOs,
 zero business writes, failure recovery and EN/ES light/dark responsive layouts.
 Detailed verification and remaining Task 5 scope are recorded in the execution plan.
+
+## Multiple receiving supports — 2026-09-08
+
+The synthetic browser companion
+`tools/us-development/test/receiving-multiple-basis-flow.mjs` creates and finalizes
+a second independent receipt linked to the same lot through real authenticated
+commands, then voids both receipts through their exact lot-card links. Support
+counts move from two to one to none. Before the first void the selected lot is
+absent from the last-basis warning; before the second it is present. The remaining
+revision link stays exact after the first void and disappears after the last.
+
+Both operations preserve the complete lot record and frozen receipt content.
+Basis and lifecycle versions advance once per applicable operation; exactly two
+void commands produce two exact tenant/actor/target/before/after audit records.
+This verifies existing rules and adds no product behavior. The complete browser
+journey passed twice, with new EN light captures at 1440/390; desktop and all three
+mobile support states were inspected. No new Spanish-specific multiple-support,
+native-device, screen-reader or hosted acceptance is claimed. Delayed-read and
+lifecycle authorization recovery remain open before cross-task final gates.
+
+## Delayed reads and lifecycle access recovery — 2026-09-08
+
+The synthetic `receiving-access-recovery-flow.mjs` companion holds an actual
+successful detail response until the user has left Receiving for Products. Its
+delivery cannot reopen the departed receipt, and returning to Receiving requires
+an explicit selection. The lifecycle companion also holds the successful
+current-state read after an acknowledged void: retry, navigation and dismissal
+stay blocked until the read settles, without another mutation.
+
+For correction and void, the owned fixture revokes QA after the confirmation
+dialog has opened. The real command returns 403; current access is refreshed,
+the dialog/reason/retry state is cleared and navigation is released. Restoring
+the original role and explicitly re-entering the workspace reloads capabilities;
+the next dialog is empty and cannot submit without a new reason. The two rejected
+commands leave the complete receipt and tenant audit rows unchanged. Role changes
+are test setup in the owned disposable database and are restored in `finally`,
+not a new product permission-management workflow.
+
+A connected component test additionally resolves an old acknowledged read after
+QA loss/restoration and opening a new dialog. It cannot replace the view, clear
+the new reason or release the new dialog's lock. These are test-only acceptance
+additions for existing rules, not polling or automatic authorization refresh on
+external membership changes. New recovery scenarios use EN; hosted, native-device,
+screen-reader and fluent Spanish acceptance remain separate. Cross-task final
+gates and acceptance-document reconciliation are still required.
 
 ## Saved-draft data check — 2026-09-07
 
@@ -301,4 +410,13 @@ The final existing Chromium journey passed 1/1 in 34.36 seconds (35.91 seconds i
 
 ## Limits
 
-Cross-event completeness, revision/amendment/void lifecycle, Transformation, Shipping, genealogy, CSV, trace, balances and export remain unfinished. US-03 and the MVP remain partial. No hosted environment, real data, mail, object storage, hardware, native mobile device or screen reader was tested. Fluent Spanish review remains required before operational use. The full primary API/infrastructure suite is not an acceptance gate for this isolated increment and its previously recorded environment gaps remain unresolved. No `.pen` edits, primary-checkout edits, commit, push, merge, publication or deployment are included.
+Receiving amendment/void, exact revision history and independent lot support are
+implemented locally, with the dated recovery/browser evidence above. Cross-event
+completeness, actual downstream-consumer validation, Transformation, Shipping,
+genealogy, CSV, trace, balances and export remain unfinished. US-03 and the MVP
+remain partial. No hosted environment, real data, mail, object storage, hardware,
+native mobile device or screen reader was tested. Fluent Spanish review remains
+required before operational use. The full primary API/infrastructure suite is not
+an acceptance gate for this isolated increment and its previously recorded
+environment gaps remain unresolved. No `.pen` edits, primary-checkout edits,
+commit, push, merge, publication or deployment are included.

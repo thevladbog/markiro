@@ -1,12 +1,26 @@
 # Markiro U.S. Traceability: acceptance and test strategy
 
-> Revised 2026-09-04: read the [shared MVP contract](mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
+> Revised 2026-09-08: read the [shared MVP contract](mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. This is the acceptance strategy, not a claim that every gate has passed; implementation evidence is tracked separately.
 
 - Source: MUS-001 v0.1 (2026-09-03), sections 9.4, 10.3, 12.1–12.5, Appendix C and the source checklist CSV
-- Status: baseline, not yet implemented
+- Status: acceptance baseline; partial local implementation verified, complete MVP acceptance pending
 - Owner: Vladislav Bogatyrev
 
 This document defines how the U.S. adaptation is accepted: performance targets, automated and browser tests, negative/overclaim tests, evidence QA, the release evidence bundle and the export-ready checklist. Requirements are defined in [requirements.md](requirements.md) and tracked in [requirements-traceability.md](requirements-traceability.md); the demo dataset that these checks run against is described in [demo-scenario.md](demo-scenario.md); slice delivery is planned in [implementation-plan.md](implementation-plan.md); explicit non-goals are in [limitations.md](limitations.md).
+
+## Current local evidence — 2026-09-08
+
+Receiving now has local ordinary/exempt finalization, amendments, voids, immutable
+revision history, independent lot support and explicit retry/current-read recovery.
+See the [lifecycle acceptance checkpoint](../superpowers/plans/2026-09-07-us-03-receiving-lifecycle.md#cross-task-verification-checkpoint--2026-09-08)
+and the [requirement matrix](requirements-traceability.md). Automated DOM checks,
+owned-database tests and Chromium screenshots are distinct evidence surfaces.
+They do not establish hosted operation, fluent Spanish or screen-reader acceptance.
+
+Fixed-template Receiving CSV, other CTEs, trace/export artifacts and the complete
+MVP evidence package remain open. The performance targets and later artifact
+checks below are requirements, not measured or completed results. Release remains
+locked; evidence-package tagging/publication requires separate owner approval.
 
 ## 1. Performance targets
 

@@ -76,8 +76,22 @@ endpoints, with authoritative support counts, bounded pages, distinct loading/
 error/missing states and exact revision links. Receipt and lot return contexts
 survive successful and failed lookups; support never changes lot status or source
 locks. See [basis behavior](lot-browser.md#current-receiving-basis--2026-09-08).
-Contextual conflict presentation, the ordinary TLC native-cap regression and
-wider Task 5 acceptance remain next.
+Ordinary TLC native input now preserves all 120 allowed Unicode points; a 121st
+point remains visible with a save error and cannot alter the saved draft. The
+shared contract is unchanged. Contextual EN/ES explanations now distinguish a
+changed lifecycle, pending correction and locked retained-line fields. Existing
+explicit reload/navigation preserves input until the user accepts replacement;
+failed reads do not repeat commands. Real browser acceptance additionally proves
+non-reused cancelled revision numbers, exact historical links and lost-response
+void replay without a second audit or basis effect. A real two-receipt journey
+also proves support counts 2 → 1 → 0, correct last-basis warnings, exact remaining
+links, unchanged lot/frozen content and two exact void audits. Browser recovery
+checks now also cover late detail reads after navigation, locked acknowledged
+current-state reads and actual QA revoke/restore for correction and void. A
+connected component test covers a late acknowledged read after QA loss while a
+new dialog is open. Cross-task automated gates and acceptance reconciliation now
+pass; the [dated verification checkpoint](../superpowers/plans/2026-09-07-us-03-receiving-lifecycle.md#cross-task-verification-checkpoint--2026-09-08)
+separates that result from the remaining visual/language and external acceptance.
 Tasks 4/5 and US-03 remain partial. See the dated storage, read and command checkpoints
 in the execution plan for automated proof and remaining limits. Fixed-template Receiving
 CSV follows separately, then US-04 Transformation with the P0 server case bridge.

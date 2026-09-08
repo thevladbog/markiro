@@ -142,6 +142,43 @@ async function setup(
 }
 
 describe("Bound amendment editor", () => {
+  it("keeps unsaved input and locked-identity context until an explicit successful reload", async () => {
+    const { user, send } = await setup({
+      handle: (_url, init) =>
+        init?.method === "PUT"
+          ? Response.json(
+              {
+                code: "lot_identity_locked",
+                lines: [{ lineNo: 2, fields: ["productId", "tlc", "source"] }],
+              },
+              { status: 409 },
+            )
+          : undefined,
+    });
+    await user.type(
+      screen.getByRole("textbox", { name: "Receiving notes" }),
+      "Unsubmitted correction",
+    );
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(await screen.findByText("Line 2: Product, Lot code (TLC), TLC source")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Receiving notes" })).toHaveProperty(
+      "value",
+      expect.stringContaining("Unsubmitted correction"),
+    );
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const callsBefore = send.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "Reload saved draft" }));
+    expect(send.mock.calls).toHaveLength(callsBefore);
+    expect(screen.getByRole("textbox", { name: "Receiving notes" })).toHaveProperty(
+      "value",
+      expect.stringContaining("Unsubmitted correction"),
+    );
+    expect(screen.getByText(/Retained lot identity cannot be changed/)).toBeTruthy();
+    confirm.mockReturnValue(true);
+    await user.click(screen.getByRole("button", { name: "Reload saved draft" }));
+    expect(screen.queryByText(/Retained lot identity cannot be changed/)).toBeNull();
+    expect(send.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1);
+  });
   it("retains exempt own-assignment identity while allowing fresh documentary evidence", async () => {
     const original = exemptionFinalized.snapshot.items[1];
     const input = exemptionRecord.draft.items[1];

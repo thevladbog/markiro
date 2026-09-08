@@ -4,9 +4,11 @@ import { productProfileCopy } from "../catalog/profile-copy.js";
 import { receivingCopy } from "../receiving/copy.js";
 import { referenceCopy } from "../receiving/reference-copy.js";
 import { readinessCopy } from "../receiving/readiness-copy.js";
+import { receivingConflictCopy } from "../receiving/conflict-copy.js";
 
 export const masterDataCopy = {
   "en-US": {
+    receivingConflict: receivingConflictCopy["en-US"],
     receivingReadiness: readinessCopy["en-US"],
     receiving: receivingCopy["en-US"],
     receivingRef: referenceCopy["en-US"],
@@ -130,6 +132,7 @@ export const masterDataCopy = {
     },
   },
   "es-US": {
+    receivingConflict: receivingConflictCopy["es-US"],
     receivingReadiness: readinessCopy["es-US"],
     receiving: receivingCopy["es-US"],
     receivingRef: referenceCopy["es-US"],

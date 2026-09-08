@@ -6,6 +6,7 @@ import { exerciseUsReceivingFinalization } from "./receiving-finalization-flow.m
 import { exerciseUsReceivingExemption } from "./receiving-exemption-flow.mjs";
 import { exerciseUsReceivingLifecycle } from "./receiving-lifecycle-flow.mjs";
 import { exerciseUsReceivingAmendmentFinalization } from "./receiving-amendment-finalization-flow.mjs";
+import { exerciseUsReceivingTlcInput } from "./receiving-tlc-input-flow.mjs";
 
 /** Real saved drafts; only the first response is intentionally lost after server commit. */
 export async function exerciseUsReceiving({ page, expect, screenshots, fixture }) {
@@ -282,4 +283,5 @@ export async function exerciseUsReceiving({ page, expect, screenshots, fixture }
   await exerciseUsReceivingExemption({ page, expect, screenshots, fixture });
   await exerciseUsReceivingLifecycle({ page, expect, screenshots, fixture, original });
   await exerciseUsReceivingAmendmentFinalization({ page, expect, screenshots, fixture, original });
+  await exerciseUsReceivingTlcInput({ page, expect });
 }

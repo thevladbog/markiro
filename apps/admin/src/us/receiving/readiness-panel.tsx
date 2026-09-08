@@ -10,6 +10,7 @@ import {
   type UsBrowserClient,
 } from "../client.js";
 import { ReceivingFinalizationDialog } from "./finalization-dialog.js";
+import { ReceivingConflictDetails } from "./conflict-details.js";
 import "./readiness.css";
 
 type CheckResult = Awaited<ReturnType<UsBrowserClient["checkReceivingReadiness"]>>;
@@ -52,6 +53,9 @@ export function ReceivingReadinessPanel({
   const { t, i18n } = useTranslation();
   const [check, setCheck] = useState<CheckState | null>(null);
   const [conflicted, setConflicted] = useState<ReceivingDraftView | null>(null);
+  const [conflictDetail, setConflictDetail] = useState<UsReceivingLifecycleError["detail"] | null>(
+    null,
+  );
   const [confirmation, setConfirmation] = useState<{ context: string; result: CheckResult } | null>(
     null,
   );
@@ -126,7 +130,10 @@ export function ReceivingReadinessPanel({
         code === "conflict" ||
         code === "receiving_draft_not_found" ||
         error instanceof UsReceivingLifecycleError;
-      if (stale) setConflicted(record);
+      if (stale) {
+        setConflicted(record);
+        setConflictDetail(error instanceof UsReceivingLifecycleError ? error.detail : null);
+      }
       setCheck({ context, pending: false, result: null, error: stale ? "conflict" : "failed" });
     }
   }
@@ -173,6 +180,7 @@ export function ReceivingReadinessPanel({
       {conflict || (current && check?.error) ? (
         <div role="alert" className="us-md-notice us-md-notice--alert">
           <p>{t(`receivingReadiness.${conflict ? "conflict" : check?.error}`)}</p>
+          {conflict ? <ReceivingConflictDetails detail={conflictDetail} /> : null}
           {conflict ? (
             <Button
               type="button"
@@ -304,6 +312,7 @@ export function ReceivingReadinessPanel({
           onForbidden={onForbidden}
           onSessionLost={onSessionLost}
           onConflict={(error) => {
+            setConflictDetail(error instanceof UsReceivingLifecycleError ? error.detail : null);
             setConfirmation(null);
             setCheck(null);
             setFinalizationFailure(true);

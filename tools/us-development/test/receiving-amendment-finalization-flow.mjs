@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { exerciseUsReceivingHistory } from "./receiving-history-flow.mjs";
 import { exerciseUsLotReceivingBasis } from "./lot-receiving-basis-flow.mjs";
+import { exerciseUsMultipleReceivingBasis } from "./receiving-multiple-basis-flow.mjs";
 
 /** Real revision finalization in the existing owned synthetic MFA fixture. */
 export async function exerciseUsReceivingAmendmentFinalization({
@@ -87,7 +88,72 @@ export async function exerciseUsReceivingAmendmentFinalization({
   await page
     .getByRole("textbox", { name: "Reason", exact: true })
     .fill("Synthetic reviewed correction");
+  // Another authenticated command wins while the browser still holds the old lifecycle.
+  const concurrent = await post(
+    `receiving/${first.id}/amend`,
+    {
+      commandVersion: 2,
+      operationKey: randomUUID(),
+      expectedLifecycleVersion: first.lifecycle.lifecycleVersion,
+      reason: "Synthetic reviewed correction",
+    },
+    201,
+  );
+  const rejectedResponse = page.waitForResponse(
+    (response) =>
+      response.url() === `${base}/receiving/${first.id}/amend` &&
+      response.request().method() === "POST",
+  );
+  void rejectedResponse.catch(() => {});
   await page.getByRole("button", { name: "Start correction", exact: true }).click();
+  const rejection = await rejectedResponse;
+  assert.equal(rejection.status(), 409);
+  const conflict = await rejection.json();
+  assert.equal(conflict.code, "receiving_lifecycle_conflict");
+  assert.equal(conflict.pendingDraftId, concurrent.eventId);
+  await expect(page.getByText(/The receipt lifecycle has changed/)).toBeVisible();
+  await expect(page.getByText(/A correction draft is already pending/)).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Reason", exact: true })).toHaveValue(
+    "Synthetic reviewed correction",
+  );
+  await expect(page.getByRole("button", { name: "Retry same operation", exact: true })).toHaveCount(
+    0,
+  );
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    const notice = page.getByRole("alert");
+    await notice.scrollIntoViewIfNeeded();
+    assert.equal(
+      await notice.evaluate((element) => element.scrollWidth <= element.clientWidth),
+      true,
+    );
+    await page.screenshot({
+      path: join(screenshots, `receiving-lifecycle-conflict-en-light-${width}.png`),
+      animations: "disabled",
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const recoveryWrites = [];
+  const observeRecovery = (request) => {
+    if (
+      request.url().startsWith(`${base}/receiving`) &&
+      ["POST", "PUT", "PATCH", "DELETE"].includes(request.method())
+    )
+      recoveryWrites.push(request.method());
+  };
+  page.on("request", observeRecovery);
+  try {
+    await page.getByRole("button", { name: "Reload current record", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.getByRole("button", { name: "Open pending correction", exact: true }).click();
+    await expect(
+      page.getByRole("region", { name: "Previous revision", exact: true }),
+    ).toBeVisible();
+    assert.deepEqual(recoveryWrites, []);
+    assert.deepEqual(await read(`receiving/${concurrent.eventId}`), concurrent.record);
+  } finally {
+    page.off("request", observeRecovery);
+  }
   await expect(page.getByRole("region", { name: "Previous revision", exact: true })).toBeVisible();
   const predecessor = await read(`receiving/${first.id}`);
   const pending = await read(`receiving/${predecessor.lifecycle.pendingDraftId}`);
@@ -250,6 +316,7 @@ export async function exerciseUsReceivingAmendmentFinalization({
   ]);
   await exerciseUsReceivingHistory({ page, expect, screenshots, first, final });
   await exerciseUsLotReceivingBasis({ page, expect, screenshots, final });
+  await exerciseUsMultipleReceivingBasis({ page, expect, screenshots, fixture, final });
   await page.getByRole("button", { name: "← Profile", exact: true }).click();
   console.log(
     "Receiving amendment: fresh exempt QA review, captured v2 finalize with lost-response exact replay, preserved predecessor and lot identity, replaced basis and single audit; EN/ES light/dark 1440/1024/390 passed.",

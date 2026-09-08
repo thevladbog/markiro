@@ -27,6 +27,7 @@ import { ReceivingRetainedLineEditor } from "./retained-line-editor.js";
 import { ReceivingLifecycleNotice } from "./lifecycle-notice.js";
 import { ReceivingLifecycleActions } from "./lifecycle-dialog.js";
 import { ReceivingRevisionNavigation } from "./revision-history.js";
+import { ReceivingConflictDetails } from "./conflict-details.js";
 
 const emptyDraft: ReceivingDraft = {
   dateReceived: null,
@@ -110,6 +111,9 @@ export function ReceivingEditor({
   const [pending, setPending] = useState(false);
   const [finalizationLocked, setFinalizationLocked] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [conflictDetail, setConflictDetail] = useState<UsReceivingLifecycleError["detail"] | null>(
+    null,
+  );
   const [saved, setSaved] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [blocked, setBlocked] = useState(false);
@@ -224,6 +228,7 @@ export function ReceivingEditor({
     setUncertain(false);
     setFailure(null);
     setIssues([]);
+    setConflictDetail(null);
     command.current = null;
     acknowledgedEventId.current = null;
   }
@@ -384,6 +389,7 @@ export function ReceivingEditor({
         if (!uncertain) command.current = null;
         await onForbidden();
       } else if (error instanceof UsReceivingLifecycleError) {
+        setConflictDetail(error.detail);
         command.current = null;
         setUncertain(false);
         setBlocked(true);
@@ -553,6 +559,7 @@ export function ReceivingEditor({
                 className="us-md-notice us-md-notice--alert"
               >
                 <p>{t(`receiving.${failure}`)}</p>
+                <ReceivingConflictDetails detail={conflictDetail} />
                 {issues.length ? (
                   <ul>
                     {issues.map((issue, index) => (

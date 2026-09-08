@@ -1,5 +1,5 @@
 import { createHash, webcrypto } from "node:crypto";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "@markiro/ui";
 import { StrictMode, useState } from "react";
@@ -256,6 +256,40 @@ describe("Receiving lifecycle dialogs and current-state recovery", () => {
     await user.click(screen.getByRole("button", { name: "Correct receipt" }));
     expect(screen.getByRole("textbox", { name: "Reason" })).toHaveProperty("value", "");
   });
+  it("ignores a late acknowledged read after QA loss even when a new dialog is open", async () => {
+    let releaseRead: ((response: Response) => void) | undefined;
+    const heldRead = new Promise<Response>((resolve) => {
+      releaseRead = resolve;
+    });
+    const target = `/api/us/traceability/receiving/${amendmentId}`;
+    const { user, send, rerenderQa } = await setup({
+      handle: (url) => (url === target ? heldRead : undefined),
+    });
+    await user.click(screen.getByRole("button", { name: "Correct receipt" }));
+    await user.type(screen.getByRole("textbox", { name: "Reason" }), "Old acknowledged correction");
+    await user.click(screen.getByRole("button", { name: "Start correction" }));
+    await waitFor(() => expect(send.mock.calls.some(([url]) => url === target)).toBe(true));
+    rerenderQa(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    rerenderQa(true);
+    await user.click(screen.getByRole("button", { name: "Correct receipt" }));
+    expect(screen.getByRole("textbox", { name: "Reason" })).toHaveProperty("value", "");
+    await user.type(screen.getByRole("textbox", { name: "Reason" }), "New unsent reason");
+    await act(async () => {
+      releaseRead?.(Response.json(amendment));
+    });
+    expect(screen.getByRole("dialog", { name: "Correct receipt" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Reason" })).toHaveProperty(
+      "value",
+      "New unsent reason",
+    );
+    expect(screen.getByRole("button", { name: "Workspace navigation" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(screen.queryByRole("region", { name: "Previous revision" })).toBeNull();
+    expect(send.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
   it("routes session loss through the existing boundary and clears the protected dialog", async () => {
     const { user, onSessionLost } = await setup({
       handle: (url) => (url.endsWith("/amend") ? Response.json({}, { status: 401 }) : undefined),
@@ -294,6 +328,64 @@ describe("Receiving lifecycle dialogs and current-state recovery", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(send.mock.calls.filter(([url]) => String(url).endsWith("/amend"))).toHaveLength(1);
   });
+  it.each([
+    {
+      locale: "en-US" as const,
+      open: "Correct receipt",
+      reason: "Reason",
+      submit: "Start correction",
+      reload: "Reload current record",
+      explanation: /A correction draft is already pending/,
+    },
+    {
+      locale: "es-US" as const,
+      open: "Corregir recepción",
+      reason: "Motivo",
+      submit: "Iniciar corrección",
+      reload: "Recargar registro actual",
+      explanation: /Ya hay un borrador de corrección pendiente/,
+    },
+  ])(
+    "explains a pending correction in $locale without repeating the command",
+    async ({ locale, open, reason, submit, reload, explanation }) => {
+      let rejected = false;
+      let failRead = true;
+      const { user, send } = await setup({
+        locale,
+        handle: (url) => {
+          if (url.endsWith("/amend")) {
+            rejected = true;
+            return Response.json(
+              { code: "receiving_pending_amendment", pendingDraftId: amendmentId },
+              { status: 409 },
+            );
+          }
+          if (rejected && failRead && url === path) return Response.json({}, { status: 503 });
+          return undefined;
+        },
+      });
+      await user.click(screen.getByRole("button", { name: open }));
+      await user.type(screen.getByRole("textbox", { name: reason }), "Keep this correction reason");
+      await user.click(screen.getByRole("button", { name: submit }));
+      expect(await screen.findByText(explanation)).toBeTruthy();
+      expect(screen.getByRole("textbox", { name: reason })).toHaveProperty(
+        "value",
+        "Keep this correction reason",
+      );
+      expect(screen.queryByRole("button", { name: submit })).toBeNull();
+      await user.click(screen.getByRole("button", { name: reload }));
+      expect(screen.getByText(explanation)).toBeTruthy();
+      expect(screen.getByRole("textbox", { name: reason })).toHaveProperty(
+        "value",
+        "Keep this correction reason",
+      );
+      failRead = false;
+      await user.click(screen.getByRole("button", { name: reload }));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(screen.queryByText(explanation)).toBeNull();
+      expect(send.mock.calls.filter(([url]) => String(url).endsWith("/amend"))).toHaveLength(1);
+    },
+  );
   it("uses Spanish operation copy without enabling actions for a reader", async () => {
     const { user, rerenderQa } = await setup({ locale: "es-US", qa: false });
     expect(screen.queryByRole("button", { name: "Corregir recepción" })).toBeNull();

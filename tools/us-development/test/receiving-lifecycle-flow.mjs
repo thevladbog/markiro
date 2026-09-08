@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { exerciseUsReceivingAccessRecovery } from "./receiving-access-recovery-flow.mjs";
 
 /** Real lifecycle writes in the owned synthetic fixture; faults affect delivery only. */
 export async function exerciseUsReceivingLifecycle({
@@ -24,6 +25,7 @@ export async function exerciseUsReceivingLifecycle({
   await page.getByRole("button", { name: "Open reference data", exact: true }).click();
   await page.getByRole("button", { name: "Receiving", exact: true }).click();
   await page.getByRole("button", { name: original.eventNumber, exact: true }).click();
+  await exerciseUsReceivingAccessRecovery({ page, expect, fixture, original });
 
   // Inspect both dialogs, translations and themes before sending any operation.
   for (const locale of ["en", "es"]) {
@@ -221,42 +223,139 @@ export async function exerciseUsReceivingLifecycle({
   await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
   await page.getByRole("button", { name: original.eventNumber, exact: true }).click();
 
+  // A cancelled revision remains historical; a new correction must get a new ID and number.
+  await page.getByRole("button", { name: "Correct receipt", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "Reason", exact: true })
+    .fill("Synthetic second correction");
+  await page.getByRole("button", { name: "Start correction", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Previous revision", exact: true })).toBeVisible();
+  const secondCurrent = await read(`receiving/${original.id}`);
+  const second = await read(`receiving/${secondCurrent.lifecycle.pendingDraftId}`);
+  assert.notEqual(second.id, started.eventId);
+  assert.equal(started.record.revision, 2);
+  assert.equal(second.revision, 3);
+  assert.equal(second.lifecycle.previousRevisionId, original.id);
+  assert.equal(second.lifecycle.currentEventId, original.id);
+  assert.deepEqual((await read(`receiving/${started.eventId}`)).content, cancelled.content);
+  await page.getByRole("button", { name: "Void receipt", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "Reason", exact: true })
+    .fill("Synthetic second correction cancelled");
+  await page.getByRole("button", { name: "Confirm void", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByText(/This receipt is void/)).toBeVisible();
+  const secondCancelled = await read(`receiving/${second.id}`);
+  assert.equal(secondCancelled.status, "void");
+  assert.deepEqual(secondCancelled.content, second.content);
+  assert.equal(secondCancelled.lifecycle.currentEventId, original.id);
+  assert.equal(secondCancelled.lifecycle.pendingDraftId, null);
+  const history = await read(`receiving/${original.id}/revisions?limit=50&offset=0`);
+  assert.deepEqual(
+    history.items
+      .map(({ id, revision, status }) => ({ id, revision, status }))
+      .sort((a, b) => a.revision - b.revision),
+    [
+      { id: original.id, revision: 1, status: "finalized" },
+      { id: started.eventId, revision: 2, status: "void" },
+      { id: second.id, revision: 3, status: "void" },
+    ],
+  );
+  for (const [index, id] of lotIds.entries()) {
+    assert.deepEqual(await read(`lots/${id}`), lotsBefore[index]);
+    assert.deepEqual(await read(`lots/${id}/receiving-basis?limit=1&offset=0`), basesBefore[index]);
+  }
+  await page.getByRole("button", { name: "Show revision history", exact: true }).click();
+  const revisionHistory = page.getByRole("region", { name: "Revision history", exact: true });
+  await expect(revisionHistory.getByRole("listitem")).toHaveCount(3);
+  await revisionHistory.getByRole("button", { name: "Open revision 2", exact: true }).click();
+  await expect(page.getByText("Synthetic correction cancelled", { exact: true })).toBeVisible();
+  await expect(page.getByText(/This receipt is void/)).toBeVisible();
+  await page.getByRole("button", { name: "Show revision history", exact: true }).click();
+  await revisionHistory.getByRole("button", { name: "Open revision 3", exact: true }).click();
+  await expect(
+    page.getByText("Synthetic second correction cancelled", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Open current receipt", exact: true }).click();
+
   const voidPattern = `**/api/us/traceability/receiving/${original.id}/void`;
   const currentPattern = `**/api/us/traceability/receiving/${original.id}`;
-  let voidPosts = 0;
+  const voidAttempts = [];
+  const voidReceipts = [];
   let reads = 0;
+  const currentDelivery = Promise.withResolvers();
+  let currentFetched = false;
   await page.route(voidPattern, async (route) => {
-    voidPosts += 1;
-    return route.continue();
+    assert.equal(route.request().method(), "POST");
+    voidAttempts.push(route.request().postDataJSON());
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    voidReceipts.push(await response.json());
+    if (voidAttempts.length === 1) return route.abort("failed");
+    return route.fulfill({ response });
   });
   await page.route(currentPattern, async (route) => {
     if (route.request().method() === "GET" && ++reads === 1)
       return route.fulfill({ status: 503, json: { code: "us_database_unavailable" } });
-    return route.continue();
+    const response = await route.fetch();
+    assert.equal(response.status(), 200);
+    currentFetched = true;
+    await currentDelivery.promise;
+    return route.fulfill({ response });
   });
-  await page.getByRole("button", { name: "Void receipt", exact: true }).click();
-  const dialog = page.getByRole("dialog");
-  for (const line of before.content.snapshot.items)
-    await expect(dialog.getByText(line.tlc, { exact: true })).toBeVisible();
-  await page
-    .getByRole("textbox", { name: "Reason", exact: true })
-    .fill("Synthetic receipt withdrawn");
-  await page.getByRole("button", { name: "Confirm void", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "Retry current state", exact: true }),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Retry same operation", exact: true })).toHaveCount(
-    0,
-  );
-  await page.getByRole("button", { name: "Retry current state", exact: true }).click();
-  await expect(page.getByText(/This receipt is void/)).toBeVisible();
-  assert.equal(voidPosts, 1);
-  assert.equal(reads, 2);
-  await page.unroute(voidPattern);
-  await page.unroute(currentPattern);
+  try {
+    await page.getByRole("button", { name: "Void receipt", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    for (const line of before.content.snapshot.items)
+      await expect(dialog.getByText(line.tlc, { exact: true })).toBeVisible();
+    await page
+      .getByRole("textbox", { name: "Reason", exact: true })
+      .fill("Synthetic receipt withdrawn");
+    await page.getByRole("button", { name: "Confirm void", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "Retry same operation", exact: true }),
+    ).toBeVisible();
+    assert.equal(reads, 0);
+    const committedVoid = await read(`receiving/${original.id}`);
+    assert.equal(committedVoid.status, "void");
+    assert.deepEqual(committedVoid, voidReceipts[0].record);
+    await expect(page.getByRole("textbox", { name: "Reason", exact: true })).toHaveValue(
+      "Synthetic receipt withdrawn",
+    );
+    await page.getByRole("button", { name: "Retry same operation", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "Retry current state", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Retry same operation", exact: true }),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "Retry current state", exact: true }).click();
+    await expect.poll(() => currentFetched).toBe(true);
+    await expect(
+      page.getByRole("button", { name: "Retry current state", exact: true }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Back to receiving", exact: true }),
+    ).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Products", exact: true })).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeVisible();
+    assert.equal(voidAttempts.length, 2);
+    currentDelivery.resolve();
+    await expect(page.getByText(/This receipt is void/)).toBeVisible();
+    assert.equal(voidAttempts.length, 2);
+    assert.deepEqual(voidAttempts[0], voidAttempts[1]);
+    assert.equal(voidReceipts.length, 2);
+    assert.deepEqual(voidReceipts[0], voidReceipts[1]);
+    assert.equal(reads, 2);
+  } finally {
+    currentDelivery.resolve();
+    await page.unroute(voidPattern);
+    await page.unroute(currentPattern);
+  }
   const voided = await read(`receiving/${original.id}`);
   assert.equal(voided.lifecycle.currentEventId, null);
-  assert.equal(voided.lifecycle.lifecycleVersion, before.lifecycle.lifecycleVersion + 3);
+  assert.equal(voided.lifecycle.lifecycleVersion, before.lifecycle.lifecycleVersion + 5);
   for (let index = 0; index < lotIds.length; index++) {
     const basisAfter = await read(`lots/${lotIds[index]}/receiving-basis?limit=1&offset=0`);
     assert.equal(basisAfter.supportCount, 0);
@@ -270,17 +369,26 @@ export async function exerciseUsReceivingLifecycle({
     [
       fixture.tenantId,
       ["traceability.receiving.amendment_started", "traceability.receiving.voided"],
-      [original.id, started.eventId],
+      [original.id, started.eventId, second.id],
     ],
   );
-  assert.equal(audit.rows.length, 3);
-  for (const [index, record] of [started.record, cancelled, voided].entries()) {
+  assert.equal(audit.rows.length, 5);
+  const expectedAudits = [
+    { record: started.record, reason: "Synthetic delivery correction", result: "draft_started" },
+    { record: cancelled, reason: "Synthetic correction cancelled", result: "voided" },
+    { record: second, reason: "Synthetic second correction", result: "draft_started" },
+    { record: secondCancelled, reason: "Synthetic second correction cancelled", result: "voided" },
+    { record: voided, reason: "Synthetic receipt withdrawn", result: "voided" },
+  ];
+  for (const [index, { record, reason, result }] of expectedAudits.entries()) {
     const row = audit.rows[index];
     assert.equal(row.organization_id, fixture.tenantId);
     assert.equal(row.actor_user_id, fixture.userId);
     assert.equal(
       row.action,
-      index === 0 ? "traceability.receiving.amendment_started" : "traceability.receiving.voided",
+      result === "draft_started"
+        ? "traceability.receiving.amendment_started"
+        : "traceability.receiving.voided",
     );
     assert.equal(row.outcome, "success");
     assert.equal(row.target_type, "traceability_event");
@@ -288,19 +396,14 @@ export async function exerciseUsReceivingLifecycle({
     assert.deepEqual(row.after, {
       rootId: before.lifecycle.rootId,
       revision: record.revision,
-      reason:
-        index === 0
-          ? "Synthetic delivery correction"
-          : index === 1
-            ? "Synthetic correction cancelled"
-            : "Synthetic receipt withdrawn",
-      result: index === 0 ? "draft_started" : "voided",
+      reason,
+      result,
       record,
     });
   }
   await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
   await page.getByRole("button", { name: "← Profile", exact: true }).click();
   console.log(
-    "Receiving lifecycle: real amend with lost-response replay, draft cancellation preserves basis, void with GET-only recovery, exact audits and unchanged lot identity/source/status; EN/ES light/dark dialog layouts 1440/1024/390 passed.",
+    "Receiving lifecycle: real amend/void with lost-response exact replay, cancelled revision 2 retained and never reused by revision 3, cancellations preserve basis, acknowledged void uses GET-only recovery, five exact audits and unchanged lot identity/source/status; EN/ES light/dark dialog layouts 1440/1024/390 passed.",
   );
 }
