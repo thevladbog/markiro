@@ -4,6 +4,11 @@ import { ConflictException, type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { and, desc, eq, inArray, like } from "drizzle-orm";
 import { createDb, schema, type PlatformRole } from "@markiro/db";
+import {
+  buildDefaultLabelTemplates,
+  buildDuplicateLabelTemplate,
+  DEFAULT_BOX_LABEL_TEMPLATE_NAME,
+} from "@markiro/domain";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
@@ -370,6 +375,33 @@ describe.skipIf(!ready)("platform tenant management", () => {
       .from(schema.pickupTenantPolicies)
       .where(eq(schema.pickupTenantPolicies.tenantId, createdTenantId));
     expect(policy).toEqual({ limitsEnabled: true });
+  });
+
+  it("seeds one duplicate template and preserves all box presets and the box default", async () => {
+    await ensureTenant();
+    const templates = await setup.db
+      .select()
+      .from(schema.labelTemplates)
+      .where(eq(schema.labelTemplates.tenantId, tenantId));
+    const boxes = templates.filter((template) => template.purpose === "box");
+    expect(
+      boxes.map(({ name, spec }) => ({ name, spec })).sort((a, b) => a.name.localeCompare(b.name)),
+    ).toEqual(buildDefaultLabelTemplates().sort((a, b) => a.name.localeCompare(b.name)));
+    expect(templates.filter((template) => template.purpose === "product_duplicate")).toEqual([
+      expect.objectContaining({
+        name: "Дубликат Data Matrix 58×40 (203 dpi)",
+        spec: buildDuplicateLabelTemplate(),
+        enabled: true,
+        chzProductGroupCodes: null,
+      }),
+    ]);
+    const [profile] = await setup.db
+      .select()
+      .from(schema.orgProfiles)
+      .where(eq(schema.orgProfiles.tenantId, tenantId));
+    expect(profile?.defaultBoxLabelTemplateId).toBe(
+      boxes.find((template) => template.name === DEFAULT_BOX_LABEL_TEMPLATE_NAME)?.id,
+    );
   });
 
   it("creates one pending demo, lists bounded states, and redacts financial fields for support", async () => {

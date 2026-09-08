@@ -9,6 +9,7 @@ export default defineConfig({
     "./src/schema/platform.ts",
     "./src/schema/org-profile.ts",
     "./src/schema/labels.ts",
+    "./src/schema/product-labels.ts",
     "./src/schema/pickup.ts",
     "./src/schema/integrations.ts",
     "./src/schema/media.ts",

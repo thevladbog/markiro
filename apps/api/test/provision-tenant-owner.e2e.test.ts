@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { and, eq, inArray, like, or } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createDb, schema } from "@markiro/db";
+import { buildDuplicateLabelTemplate } from "@markiro/domain";
 import { MailCryptoService } from "../src/modules/mail/mail-crypto.service";
 import { MailDeliveryService } from "../src/modules/mail/mail-delivery.service";
 import { activationIdentifier } from "../src/modules/tenant-owner-activation/token";
@@ -275,10 +276,20 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
     });
 
     const templates = await connection.db
-      .select({ id: schema.labelTemplates.id, name: schema.labelTemplates.name })
+      .select({
+        id: schema.labelTemplates.id,
+        name: schema.labelTemplates.name,
+        purpose: schema.labelTemplates.purpose,
+        spec: schema.labelTemplates.spec,
+      })
       .from(schema.labelTemplates)
       .where(eq(schema.labelTemplates.tenantId, result.tenantId));
-    expect(templates.map((t) => t.name).sort()).toEqual(
+    expect(
+      templates
+        .filter((t) => t.purpose === "box")
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(
       [
         "Коробка 58×40 (203 dpi)",
         "Коробка 58×40 (300 dpi)",
@@ -323,7 +334,13 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .select({ id: schema.labelTemplates.id })
       .from(schema.labelTemplates)
       .where(eq(schema.labelTemplates.tenantId, result.tenantId));
-    expect(after).toHaveLength(20);
+    expect(after).toHaveLength(21);
+    expect(templates.filter((t) => t.purpose === "product_duplicate")).toEqual([
+      expect.objectContaining({
+        name: "Дубликат Data Matrix 58×40 (203 dpi)",
+        spec: buildDuplicateLabelTemplate(),
+      }),
+    ]);
   });
 
   it("renews an expired unused activation only when explicitly requested", async () => {

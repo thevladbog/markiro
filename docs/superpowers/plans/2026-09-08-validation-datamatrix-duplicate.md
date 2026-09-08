@@ -408,7 +408,7 @@ labelTemplates.purpose; shifts.validationPrintMode, validationPrintVerification,
 validationPrintTemplateId, validationPrintSnapshot, validationPrintPolicyRevision.
 Сервер хранит policy snapshot, но не готовые принтерные байты.
 
-- [ ] В DB-тесте проверить наличие колонок и CHECK на недопустимую конфигурацию; схема SQLite в эту задачу не входит. Проверить tenant-FK шаблона и смены, операторов событий, owner device, уникальность `(tenantId, deviceId, eventId)` и `(tenantId, deviceId, jobId, sequence)`.
+- [x] В DB-тесте проверить наличие колонок и CHECK на недопустимую конфигурацию; схема SQLite в эту задачу не входит. Проверить tenant-FK шаблона и смены, операторов событий, owner device, уникальность `(tenantId, deviceId, eventId)` и `(tenantId, deviceId, jobId, sequence)`.
 
 ```ts
 import { getTableColumns } from "drizzle-orm";
@@ -420,8 +420,8 @@ expect(Object.keys(getTableColumns(schema.productLabelJobs))).toEqual(
 );
 ```
 
-- [ ] Run `pnpm --filter @markiro/db exec vitest run test/product-labels-schema.test.ts`; ожидается отсутствие таблиц/полей.
-- [ ] Добавить Drizzle-определения и SQL-ограничения. Политика `none` хранит null snapshot/template/revision и verification none; duplicate требует validation, non-null snapshot/template/revision. Purpose разрешает только box/product_duplicate и по умолчанию box. Проверяемое условие миграции:
+- [x] Run `pnpm --filter @markiro/db exec vitest run test/product-labels-schema.test.ts`; ожидается отсутствие таблиц/полей.
+- [x] Добавить Drizzle-определения и SQL-ограничения. Политика `none` хранит null snapshot/template/revision и verification none; duplicate требует validation, non-null snapshot/template/revision. Purpose разрешает только box/product_duplicate и по умолчанию box. Проверяемое условие миграции:
 
 ```sql
 CHECK (
@@ -454,9 +454,9 @@ FK только tenant/device, без FK на job/shift из отклонённ�
 Parent принятого скана проверяется сервисом: partitioned codes/scan_events не
 включать в Drizzle-генерацию. Не добавлять им вымышленный UUID scanId.
 
-- [ ] Сгенерировать миграцию следующим свободным номером штатным `db:generate`; точное имя номера определяется актуальным журналом на исполнении, не закрепляется заранее. Добавить idempotent seed одного product_duplicate шаблона для существующих тенантов и в provisioning новых. Существующие 20 box-шаблонов и их дефолты не менять. Seed сверить с `buildDuplicateLabelTemplate()` drift-тестом.
-- [ ] Run db migration на локальной тестовой БД, db test/typecheck/lint/build и provisioning test. Отдельно проверить upgrade данных обычных смен и запрет сделать product_duplicate шаблон дефолтом короба.
-- [ ] Commit: `feat(db): persist validation print policy and product label history`.
+- [x] Сгенерировать миграцию следующим свободным номером штатным `db:generate`; точное имя номера определяется актуальным журналом на исполнении, не закрепляется заранее. Добавить idempotent seed одного product_duplicate шаблона для существующих тенантов и в provisioning новых. Существующие 20 box-шаблонов и их дефолты не менять. Seed сверить с `buildDuplicateLabelTemplate()` drift-тестом.
+- [x] Run db migration на локальной тестовой БД, db test/typecheck/lint/build и provisioning test. Upgrade данных обычных смен проверен. Запрет назначения product_duplicate дефолтом короба проверяется вместе с API-валидацией задачи 6; текущий seed не меняет дефолты.
+- [x] Commit: `feat(db): persist validation print policy and product label history`.
 
 ## Task 5: Атомарная SQLite-приёмка с заданием
 
@@ -1504,3 +1504,15 @@ Projection дополнен immutable origin и bytes/language/DPI, чтобы �
 отклонял подмену смены, политики или содержимого между попытками.
 Контрольная точка 1 (задачи 1–3) завершена; UI, БД, sync и аппаратная приёмка
 ещё не реализованы. Следующая контрольная точка — задачи 4–7.
+
+2026-09-08: задача 4 завершена. Новая миграция 0113 создана Drizzle Kit;
+добавлен idempotent seed отдельного product_duplicate 58×40. Drift-тест
+сравнивает SQL seed с публичной сборкой domain. DB: 370/370 тестов прошли
+на изолированных локальных PostgreSQL базах, включая upgrade с 0112 и
+cross-tenant/device/operator/FK/receipt проверки; typecheck src/test, lint,
+build прошли. API: 49 тестов создания организации и смен прошли, один
+LOCAL_INFRA_SMOKE (реальная почта/CLI инфраструктура) пропущен; typecheck,
+lint и build прошли. Общие API gates повторяются после сквозных API изменений.
+Для совместимости новых DB полей расширены внутренняя выборка смены и fixture.
+Тестовый PLATFORM_AUTH_URL исправлен на bare local origin; рабочая .env и
+общая dev база не изменялись. Защита назначения box defaults входит в задачу 6.
