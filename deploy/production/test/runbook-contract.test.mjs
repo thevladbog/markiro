@@ -338,6 +338,8 @@ test("landing publication runbook separates reachability from indexed search evi
     "Яндекс Вебмастер",
     "Bing Webmaster",
     "IndexNow",
+    "PUBLIC_INDEXNOW_KEY",
+    "DNS TXT",
     "Rich Results Test",
     "Валидатор микроразметки",
     "CRM",

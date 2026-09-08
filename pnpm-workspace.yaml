@@ -19,7 +19,13 @@ overrides:
   postcss: "8.5.23"
   js-yaml: "5.2.2"
   undici: "7.29.0"
-  fast-uri: "3.1.5"
+  # GHSA-jqff-g426-hqxp, GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf and
+  # GHSA-5jgf-p345-68v8: host confusion and SSRF in fast-uri < 3.1.6. Reached
+  # only through ajv (nestjs/cli, ajv-formats, @hookform/resolvers,
+  # workbox-build). 3.1.6 is the first patched release and is already older
+  # than the 7-day release-age policy; Dependabot cannot pass this override
+  # on its own, so bump it here when the next advisory lands.
+  fast-uri: "3.1.6"
 
   # GHSA-67mh-4wv8-2f99: esbuild <=0.24.2 lets any website talk to its dev
   # server. Reached only through @esbuild-kit/*, which is deprecated upstream

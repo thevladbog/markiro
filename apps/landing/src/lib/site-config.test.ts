@@ -1,11 +1,32 @@
 import { describe, expect, it } from "vitest";
 
-import { readPublicSiteConfig } from "./site-config";
+import { readIndexNowKey, readPublicSiteConfig } from "./site-config";
 
 const ENABLED_ENV = {
   PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
   PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "ysc1_test-client-key",
 } as const;
+
+describe("readIndexNowKey", () => {
+  it("returns null when the key is absent or blank", () => {
+    expect(readIndexNowKey({})).toBeNull();
+    expect(readIndexNowKey({ PUBLIC_INDEXNOW_KEY: "  " })).toBeNull();
+  });
+
+  it("accepts an IndexNow key of 8 to 128 URL-safe characters", () => {
+    expect(readIndexNowKey({ PUBLIC_INDEXNOW_KEY: "a1b2c3d4" })).toBe("a1b2c3d4");
+    expect(readIndexNowKey({ PUBLIC_INDEXNOW_KEY: " markiro-Key-2026 " })).toBe("markiro-Key-2026");
+  });
+
+  it.each(["short", "has space here", "ключ-кириллица", "x".repeat(129)])(
+    "rejects an unsafe key: %s",
+    (key) => {
+      expect(() => readIndexNowKey({ PUBLIC_INDEXNOW_KEY: key })).toThrow(
+        "PUBLIC_INDEXNOW_KEY must be 8-128 characters of a-z, A-Z, 0-9 or -",
+      );
+    },
+  );
+});
 
 describe("readPublicSiteConfig", () => {
   it("keeps optional contact channels and the demo boundary absent", () => {

@@ -5,10 +5,15 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { chromium } from "@playwright/test";
-import { computeMedianRun } from "lighthouse/core/lib/median-run.js";
 
 const execFileAsync = promisify(execFile);
 export const LIGHTHOUSE_RUN_COUNT = 3;
+/** The home page, one commercial topic page and one article: the three page templates that carry leads. */
+export const LIGHTHOUSE_ROUTES = Object.freeze([
+  "/",
+  "/markirovka-chestny-znak/",
+  "/stati/markirovka-piva-2026/",
+]);
 export const LIGHTHOUSE_THRESHOLDS = Object.freeze({
   seo: 1,
   accessibility: 1,
@@ -16,11 +21,39 @@ export const LIGHTHOUSE_THRESHOLDS = Object.freeze({
   performance: 0.9,
 });
 
+/**
+ * The gate judges the performance score, so the representative run is the one
+ * with the median score. Lighthouse's own median-run helper picks by FCP and
+ * TTI instead; on a shared CI runner that can select a run whose score fell
+ * through total-blocking-time noise while its paint metrics stayed average.
+ */
+/**
+ * The gate must measure what production serves: the enabled demo form with its
+ * captcha container. Any PUBLIC_* value already in the environment wins, so a
+ * caller can still audit the disabled variant on purpose.
+ */
+export function lighthouseBuildEnvironment(environment) {
+  return {
+    PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
+    PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "ysc1_lighthouse-gate-key",
+    PUBLIC_PHONE: "+7 934 355-14-90",
+    ...environment,
+    ASTRO_TELEMETRY_DISABLED: "1",
+  };
+}
+
 export function representativeLighthouseReport(reports) {
   if (reports.length !== LIGHTHOUSE_RUN_COUNT) {
     throw new Error(`expected ${LIGHTHOUSE_RUN_COUNT} Lighthouse reports`);
   }
-  return computeMedianRun(reports);
+  const scored = reports.map((report) => {
+    const score = report?.categories?.performance?.score;
+    if (typeof score !== "number" || !Number.isFinite(score))
+      throw new Error("Lighthouse performance score is missing");
+    return { report, score };
+  });
+  scored.sort((left, right) => left.score - right.score);
+  return scored[Math.floor(scored.length / 2)].report;
 }
 
 export function assertLighthouseReport(report, profile) {
@@ -91,39 +124,43 @@ export async function runLandingLighthouse() {
   const toolRoot = path.resolve(import.meta.dirname, "..");
   const appRoot = path.resolve(toolRoot, "../../apps/landing");
   const astro = path.join(appRoot, "node_modules/.bin/astro");
-  await execFileAsync(astro, ["build"], {
-    cwd: appRoot,
-    env: { ...process.env, ASTRO_TELEMETRY_DISABLED: "1" },
-  });
+  const environment = lighthouseBuildEnvironment(process.env);
+  await execFileAsync(astro, ["build"], { cwd: appRoot, env: environment });
   const preview = spawn(astro, ["preview", "--host", "127.0.0.1", "--port", "5473"], {
     cwd: appRoot,
-    env: { ...process.env, ASTRO_TELEMETRY_DISABLED: "1" },
+    env: environment,
     stdio: "ignore",
   });
   const outputRoot = await mkdtemp(path.join(tmpdir(), "markiro-lighthouse-"));
   try {
     await waitForServer("http://127.0.0.1:5473/", preview);
-    for (const profile of ["mobile", "desktop"]) {
-      const reports = [];
-      for (let attempt = 1; attempt <= LIGHTHOUSE_RUN_COUNT; attempt += 1) {
-        const output = path.join(outputRoot, `${profile}-${attempt}.json`);
-        const arguments_ = lighthouseArguments({
-          chromePath: chromium.executablePath(),
-          isCI: Boolean(process.env.CI),
-          output,
-          profile,
-          url: "http://127.0.0.1:5473/",
-        });
-        await execFileAsync(path.join(toolRoot, "node_modules/.bin/lighthouse"), arguments_, {
-          cwd: toolRoot,
-        });
-        const report = JSON.parse(await readFile(output, "utf8"));
-        reports.push(report);
-        console.log(lighthouseScoreSummary(report, `${profile} attempt ${attempt}`));
+    for (const route of LIGHTHOUSE_ROUTES) {
+      for (const profile of ["mobile", "desktop"]) {
+        const label = `${profile} ${route}`;
+        const reports = [];
+        for (let attempt = 1; attempt <= LIGHTHOUSE_RUN_COUNT; attempt += 1) {
+          const output = path.join(
+            outputRoot,
+            `${profile}-${route.replaceAll("/", "_")}-${attempt}.json`,
+          );
+          const arguments_ = lighthouseArguments({
+            chromePath: chromium.executablePath(),
+            isCI: Boolean(process.env.CI),
+            output,
+            profile,
+            url: new URL(route, "http://127.0.0.1:5473/").href,
+          });
+          await execFileAsync(path.join(toolRoot, "node_modules/.bin/lighthouse"), arguments_, {
+            cwd: toolRoot,
+          });
+          const report = JSON.parse(await readFile(output, "utf8"));
+          reports.push(report);
+          console.log(lighthouseScoreSummary(report, `${label} attempt ${attempt}`));
+        }
+        const report = representativeLighthouseReport(reports);
+        assertLighthouseReport(report, label);
+        console.log(lighthouseScoreSummary(report, `${label} representative`));
       }
-      const report = representativeLighthouseReport(reports);
-      assertLighthouseReport(report, profile);
-      console.log(lighthouseScoreSummary(report, `${profile} representative`));
     }
   } finally {
     preview.kill("SIGTERM");

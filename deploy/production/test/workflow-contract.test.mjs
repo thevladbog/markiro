@@ -13,6 +13,7 @@ const publicLandingBuildVariables = Object.freeze([
   "PUBLIC_DEMO_SUBMISSION_ENABLED",
   "PUBLIC_SMARTCAPTCHA_CLIENT_KEY",
   "PUBLIC_PHONE",
+  "PUBLIC_INDEXNOW_KEY",
 ]);
 const demoRuntimeVariables = Object.freeze([
   "LANDING_DEMO_SUBMISSION_ENABLED",
@@ -72,7 +73,7 @@ test("CI keeps production bundle, Yandex runtime and infrastructure contracts", 
     parse(".github/workflows/ci.yml"),
     read(".github/workflows/ci.yml"),
   ]);
-  for (const command of ["test:production-bundle:contract", "test:yandex-runtime"])
+  for (const command of ["test:production-bundle:contract", "test:yandex-runtime", "test:indexnow"])
     assert.match(source, new RegExp(command.replaceAll(":", "\\:")));
   assert.match(source, /pnpm format:check/);
   for (const variable of ["PLATFORM_AUTH_SECRET", "PLATFORM_AUTH_URL", "SAAS_ADMIN_ORIGIN"])
@@ -240,6 +241,16 @@ test("production deploy is one protected manual GitHub-hosted SSH job", async ()
   );
   assert.match(source, /GHCR_TOKEN:\s*\$\{\{ github\.token \}\}/);
   assert.match(source, /if:\s*always\(\)/);
+
+  const delivery = namedStep(workflow, "deploy", "Deploy immutable Compose bundle");
+  const indexNow = namedStep(workflow, "deploy", "Submit changed landing URLs to IndexNow");
+  const cleanup = namedStep(workflow, "deploy", "Remove local deployment credentials");
+  assert.ok(deploy.steps.indexOf(delivery) < deploy.steps.indexOf(indexNow));
+  assert.ok(deploy.steps.indexOf(indexNow) < deploy.steps.indexOf(cleanup));
+  assert.equal(indexNow.if, "${{ vars.PUBLIC_INDEXNOW_KEY != '' }}");
+  assert.deepEqual(indexNow.env, { PUBLIC_INDEXNOW_KEY: "${{ vars.PUBLIC_INDEXNOW_KEY }}" });
+  assert.match(indexNow.run, /^node tools\/indexnow\/submit\.mjs\n?$/);
+  assert.doesNotMatch(source, /(?:echo|printf)[^\n]*INDEXNOW/);
   assert.doesNotMatch(
     source,
     /workflow_run|self-hosted|id-token|deployment_phase|rollback_rehearsal|production-controller|production-cleanup|YC_IAM|YC_LOAD_BALANCER/i,

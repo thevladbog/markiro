@@ -39,6 +39,7 @@ interface PageRecord {
   title: string;
   description: string;
   canonical: string;
+  indexable: boolean;
 }
 
 const SITE_ORIGIN = "https://markiro.app";
@@ -299,7 +300,10 @@ export async function auditBuiltSite(root: string): Promise<AuditFinding[]> {
       document.querySelector('meta[name="description"]')?.getAttribute("content")?.trim() ?? "";
     const canonical =
       document.querySelector('link[rel~="canonical"]')?.getAttribute("href")?.trim() ?? "";
-    pages.push({ route, document, title, description, canonical });
+    const robots =
+      document.querySelector('meta[name="robots"]')?.getAttribute("content")?.toLowerCase() ?? "";
+    const indexable = !robots.includes("noindex");
+    pages.push({ route, document, title, description, canonical, indexable });
 
     if (!title) findings.push(finding("MISSING_TITLE", route, "title is absent"));
     if (!description)
@@ -401,8 +405,12 @@ export async function auditBuiltSite(root: string): Promise<AuditFinding[]> {
   const sitemap = files.has(sitemapFile)
     ? sitemapRoutes(await readFile(path.join(resolvedRoot, sitemapFile), "utf8"))
     : null;
+  // Only indexable documents must appear in the sitemap; `noindex` pages such as the
+  // printed-code verification routes are published but deliberately unlisted.
   const pageRoutes = new Set(
-    pages.filter(({ route }) => route !== "/404.html").map(({ route }) => canonicalRoute(route)),
+    pages
+      .filter(({ route, indexable }) => route !== "/404.html" && indexable)
+      .map(({ route }) => canonicalRoute(route)),
   );
   if (
     sitemap === null ||

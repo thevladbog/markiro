@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { ARTICLE_SEARCH_PAGES } from "./articles";
 import { SEO_PAGES, findSeoPage } from "./pages";
 
 const EXPECTED_PATHS = [
@@ -60,6 +61,43 @@ describe("SEO page registry", () => {
       expect(alternate).toBeDefined();
       expect(alternate?.locale).not.toBe(page.locale);
       expect(alternate?.alternatePath).toBe(page.path);
+    }
+  });
+
+  it("gives every topic page answer-shaped depth", () => {
+    const knownArticles = new Map(ARTICLE_SEARCH_PAGES.map((article) => [article.path, article]));
+
+    for (const page of SEO_PAGES) {
+      if (page.path === "/" || page.path === "/en/") continue;
+      const isFaq = page.path.endsWith("/faq/");
+
+      expect(page.summary.length, page.path).toBeGreaterThanOrEqual(3);
+      expect(page.faq?.length ?? 0, page.path).toBeGreaterThanOrEqual(isFaq ? 10 : 3);
+      if (!isFaq) expect(page.sections.length, page.path).toBeGreaterThanOrEqual(4);
+      expect(page.relatedArticlePaths.length, page.path).toBeGreaterThanOrEqual(2);
+      for (const articlePath of page.relatedArticlePaths) {
+        expect(knownArticles.get(articlePath)?.locale, `${page.path} -> ${articlePath}`).toBe(
+          page.locale,
+        );
+      }
+
+      const questions = (page.faq ?? []).map(({ question }) => question);
+      expect(new Set(questions).size, page.path).toBe(questions.length);
+      for (const entry of page.faq ?? []) {
+        expect(entry.question.endsWith("?"), `${page.path}: ${entry.question}`).toBe(true);
+        expect(entry.answer.length, `${page.path}: ${entry.question}`).toBeGreaterThanOrEqual(60);
+      }
+
+      const words = [
+        page.introduction,
+        ...page.summary,
+        ...page.sections.flatMap((section) => [...section.paragraphs, ...(section.bullets ?? [])]),
+        ...(page.faq ?? []).map(({ answer }) => answer),
+      ]
+        .join(" ")
+        .split(/\s+/)
+        .filter(Boolean).length;
+      expect(words, page.path).toBeGreaterThanOrEqual(isFaq ? 350 : 400);
     }
   });
 

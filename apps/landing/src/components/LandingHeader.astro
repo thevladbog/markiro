@@ -2,6 +2,7 @@
 import type { PublicPhone } from "../lib/site-config";
 import { getUiCopy } from "../content/ui";
 import type { PageMetadata } from "../lib/seo";
+import { hubPath } from "../content/hubs";
 import BrandMark from "./BrandMark.astro";
 
 interface Props {
@@ -38,6 +39,7 @@ const paths = page.locale === "ru"
     <a href={paths.serialization}>{copy.nav.serialization}</a>
     <a href={paths.aggregation}>{copy.nav.aggregation}</a>
     <a href={paths.offline}>{copy.nav.offline}</a>
+    <a href={hubPath(page.locale, "articles")}>{copy.nav.articles}</a>
     <a href={paths.faq}>{copy.nav.faq}</a>
     {phone && (
       <a

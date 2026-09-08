@@ -142,10 +142,10 @@
 
 ## Webmaster и отправка URL
 
-1. Подтвердить ownership в Google Search Console, Яндекс Вебмастер и Bing Webmaster Tools. Токены подтверждения не добавлять в отчёты и логи.
+1. Подтвердить ownership в Google Search Console, Яндекс Вебмастер и Bing Webmaster Tools. Токены подтверждения не добавлять в отчёты и логи. Для Яндекс Вебмастера использовать подтверждение через DNS TXT-запись: GTM-тег подтверждения не сработает, потому что контейнер GTM загружается только после согласия посетителя на аналитику, которого у робота нет.
 2. Отправить `https://markiro.app/sitemap.xml` во все поддерживаемые панели.
 3. Запросить обход главной и ключевых topic pages через URL inspection/reindex tools.
-4. Передать новые или существенно изменённые URL через IndexNow по [официальному протоколу](https://www.indexnow.org/documentation). Не считать HTTP acceptance доказательством индексации.
+4. Передать новые или существенно изменённые URL через IndexNow по [официальному протоколу](https://www.indexnow.org/documentation). После настройки переменной репозитория `PUBLIC_INDEXNOW_KEY` ключ публикуется сборкой как `https://markiro.app/<ключ>.txt`, а workflow **Deploy production** после доставки бандла сам отправляет URL из `sitemap.xml`, чей `lastmod` попадает в окно 30 дней (`tools/indexnow/submit.mjs`). Ключ по протоколу публичный, но в логи и отчёты не попадает. Не считать HTTP acceptance доказательством индексации: статус проверяется в панелях вебмастеров.
 5. Зафиксировать baseline в `docs/seo/search-console-baseline-template.md`.
 
 ## Независимое ревью перед публичным включением

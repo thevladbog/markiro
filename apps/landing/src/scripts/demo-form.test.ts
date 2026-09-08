@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import {
   browserDemoFormRuntime,
@@ -66,9 +66,17 @@ function runtime(
       if (response === undefined) throw new Error("Runtime fixture requires one response");
       return response instanceof Error ? Promise.reject(response) : Promise.resolve(response);
     }),
+    loadCaptcha: vi.fn(),
     resetCaptcha: vi.fn(),
     track: vi.fn(),
+    whenNear: vi.fn(() => vi.fn()),
   };
+}
+
+function nearCallback(currentRuntime: DemoFormRuntime): () => void {
+  const call = (currentRuntime.whenNear as Mock).mock.calls[0] as [Element, () => void] | undefined;
+  if (call === undefined) throw new Error("whenNear was not called");
+  return call[1];
 }
 
 async function submit(form: HTMLFormElement): Promise<void> {
@@ -348,7 +356,148 @@ describe("initDemoForm", () => {
   });
 });
 
+describe("lazy captcha", () => {
+  it("does not load the captcha runtime at init, only watches the form", () => {
+    const form = renderForm();
+    const currentRuntime = runtime();
+    initDemoForm(form, currentRuntime);
+
+    expect(currentRuntime.loadCaptcha).not.toHaveBeenCalled();
+    expect(currentRuntime.whenNear).toHaveBeenCalledWith(form, expect.any(Function));
+  });
+
+  it("loads the captcha once when the form approaches the viewport", () => {
+    const form = renderForm();
+    const currentRuntime = runtime();
+    const disconnect = vi.fn();
+    (currentRuntime.whenNear as Mock).mockReturnValue(disconnect);
+    initDemoForm(form, currentRuntime);
+
+    nearCallback(currentRuntime)();
+    form.dispatchEvent(new Event("focusin", { bubbles: true }));
+    form.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+
+    expect(currentRuntime.loadCaptcha).toHaveBeenCalledOnce();
+    expect(disconnect).toHaveBeenCalledOnce();
+  });
+
+  it("loads the captcha on the first focus even before the form is visible", () => {
+    const form = renderForm();
+    const currentRuntime = runtime();
+    const disconnect = vi.fn();
+    (currentRuntime.whenNear as Mock).mockReturnValue(disconnect);
+    initDemoForm(form, currentRuntime);
+
+    form
+      .querySelector<HTMLInputElement>('input[name="name"]')
+      ?.dispatchEvent(new Event("focusin", { bubbles: true }));
+    nearCallback(currentRuntime)();
+
+    expect(currentRuntime.loadCaptcha).toHaveBeenCalledOnce();
+    expect(disconnect).toHaveBeenCalledOnce();
+  });
+
+  it("skips the captcha entirely when the form has no captcha container", () => {
+    const form = renderForm();
+    form.querySelector(".smart-captcha")?.remove();
+    const currentRuntime = runtime();
+    initDemoForm(form, currentRuntime);
+
+    form.dispatchEvent(new Event("focusin", { bubbles: true }));
+
+    expect(currentRuntime.whenNear).not.toHaveBeenCalled();
+    expect(currentRuntime.loadCaptcha).not.toHaveBeenCalled();
+  });
+
+  it("stops watching and listening after cleanup", () => {
+    const form = renderForm();
+    const currentRuntime = runtime();
+    const disconnect = vi.fn();
+    (currentRuntime.whenNear as Mock).mockReturnValue(disconnect);
+    const cleanup = initDemoForm(form, currentRuntime);
+
+    cleanup();
+    form.dispatchEvent(new Event("focusin", { bubbles: true }));
+
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(currentRuntime.loadCaptcha).not.toHaveBeenCalled();
+  });
+});
+
 describe("browserDemoFormRuntime", () => {
+  afterEach(() => {
+    delete (window as { smartCaptcha?: unknown }).smartCaptcha;
+    delete (window as { IntersectionObserver?: unknown }).IntersectionObserver;
+    document.head.querySelectorAll("script").forEach((script) => script.remove());
+  });
+
+  it("injects the captcha script once and never while the runtime already exists", () => {
+    const currentRuntime = browserDemoFormRuntime(window);
+
+    currentRuntime.loadCaptcha();
+    currentRuntime.loadCaptcha();
+
+    const scripts = document.head.querySelectorAll(
+      'script[src="https://smartcaptcha.cloud.yandex.ru/captcha.js"]',
+    );
+    expect(scripts).toHaveLength(1);
+    expect(scripts[0]?.hasAttribute("async")).toBe(true);
+    expect(scripts[0]?.hasAttribute("data-smart-captcha")).toBe(true);
+
+    scripts[0]?.remove();
+    Object.defineProperty(window, "smartCaptcha", { configurable: true, value: { reset() {} } });
+    currentRuntime.loadCaptcha();
+    expect(
+      document.head.querySelector('script[src="https://smartcaptcha.cloud.yandex.ru/captcha.js"]'),
+    ).toBeNull();
+  });
+
+  it("watches the form with a generous root margin and disconnects after the first sighting", () => {
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    let intersect: ((entries: Array<{ isIntersecting: boolean }>) => void) | undefined;
+    const options: IntersectionObserverInit[] = [];
+    class FakeObserver {
+      constructor(
+        callback: (entries: Array<{ isIntersecting: boolean }>) => void,
+        init?: IntersectionObserverInit,
+      ) {
+        intersect = callback;
+        if (init) options.push(init);
+      }
+      observe = observe;
+      disconnect = disconnect;
+    }
+    Object.defineProperty(window, "IntersectionObserver", {
+      configurable: true,
+      value: FakeObserver,
+    });
+    const currentRuntime = browserDemoFormRuntime(window);
+    const form = renderForm();
+    const callback = vi.fn();
+
+    const stop = currentRuntime.whenNear(form, callback);
+    expect(observe).toHaveBeenCalledWith(form);
+    expect(options[0]?.rootMargin).toBe("400px 0px");
+    intersect?.([{ isIntersecting: false }]);
+    expect(callback).not.toHaveBeenCalled();
+    intersect?.([{ isIntersecting: true }]);
+    expect(callback).toHaveBeenCalledOnce();
+    expect(disconnect).toHaveBeenCalledOnce();
+    stop();
+    expect(disconnect).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to loading immediately when IntersectionObserver is unavailable", () => {
+    const currentRuntime = browserDemoFormRuntime(window);
+    const callback = vi.fn();
+
+    const stop = currentRuntime.whenNear(renderForm(), callback);
+
+    expect(callback).toHaveBeenCalledOnce();
+    expect(() => stop()).not.toThrow();
+  });
+
   it("posts JSON without credentials and exposes only the bounded public error code", async () => {
     const fetch = vi.fn().mockResolvedValue({
       json: vi.fn().mockResolvedValue({ code: "captcha_invalid", detail: "do not expose" }),

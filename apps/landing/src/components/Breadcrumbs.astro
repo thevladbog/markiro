@@ -1,19 +1,27 @@
 ---
-import type { SeoPageDefinition } from "../content/pages";
+import type { Locale } from "../content/pages";
 import { getUiCopy } from "../content/ui";
 
-interface Props {
-  page: SeoPageDefinition;
+export interface Crumb {
+  label: string;
+  path: string;
 }
 
-const { page } = Astro.props;
-const copy = getUiCopy(page.locale).common;
-const homePath = page.locale === "ru" ? "/" : "/en/";
+interface Props {
+  locale: Locale;
+  current: string;
+  trail?: readonly Crumb[];
+}
+
+const { locale, current, trail = [] } = Astro.props;
+const copy = getUiCopy(locale).common;
+const homePath = locale === "ru" ? "/" : "/en/";
 ---
 
 <nav class="breadcrumbs" aria-label={copy.breadcrumbsLabel}>
   <ol>
     <li><a href={homePath}>Markiro</a></li>
-    <li aria-current="page">{page.navigationLabel}</li>
+    {trail.map((crumb) => <li><a href={crumb.path}>{crumb.label}</a></li>)}
+    <li aria-current="page">{current}</li>
   </ol>
 </nav>

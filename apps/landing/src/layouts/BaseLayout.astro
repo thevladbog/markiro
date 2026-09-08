@@ -3,7 +3,17 @@ import "@markiro/ui/styles.css";
 import "../styles/landing.css";
 
 import { getUiCopy } from "../content/ui";
-import { serializeJsonLd, type PageGraph, type PageMetadata } from "../lib/seo";
+import {
+  attachOrganizationContact,
+  mirrorPathFor,
+  serializeJsonLd,
+  type PageGraph,
+  type PageMetadata,
+} from "../lib/seo";
+import { findHubPage, hubPath } from "../content/hubs";
+import { fontPreloads } from "../lib/font-preloads";
+import { readPublicSiteConfig } from "../lib/site-config";
+import { socialImageDimensions } from "../lib/social-image";
 import ConsentPanel from "../components/ConsentPanel.astro";
 
 interface Props {
@@ -15,11 +25,21 @@ interface Props {
 const { metadata: page, graph, noindex = false } = Astro.props;
 const canonicalUrl = new URL(page.path, Astro.site);
 const socialImageUrl = new URL(page.socialImage, Astro.site);
-const alternateUrl = page.alternatePath === undefined ? null : new URL(page.alternatePath, Astro.site);
+const socialImageSize = socialImageDimensions(page.socialImage);
+const alternateUrl =
+  page.alternatePath === undefined || page.alternatePath === page.path
+    ? null
+    : new URL(page.alternatePath, Astro.site);
 const ruUrl = page.locale === "ru" ? canonicalUrl : alternateUrl;
 const enUrl = page.locale === "en" ? canonicalUrl : alternateUrl;
 const copy = getUiCopy(page.locale).common;
-const jsonLd = serializeJsonLd(graph);
+const publicPhone = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }).phone;
+const feedHub = findHubPage(hubPath(page.locale, "articles"));
+const feedPath = `${feedHub.path}rss.xml`;
+const markdownPath = noindex ? null : mirrorPathFor(page.path);
+const jsonLd = serializeJsonLd(
+  attachOrganizationContact(graph, { telephone: publicPhone?.display ?? null }),
+);
 ---
 
 <!doctype html>
@@ -27,6 +47,9 @@ const jsonLd = serializeJsonLd(graph);
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    {fontPreloads(page.locale).map((href) => (
+      <link rel="preload" as="font" type="font/woff2" href={href} crossorigin />
+    ))}
     <meta name="description" content={page.description} />
     <meta name="robots" content={noindex ? "noindex,follow" : "index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1"} />
     <meta name="theme-color" content="#131216" />
@@ -40,8 +63,8 @@ const jsonLd = serializeJsonLd(graph);
     <meta property="og:description" content={page.description} />
     <meta property="og:url" content={canonicalUrl} />
     <meta property="og:image" content={socialImageUrl} />
-    <meta property="og:image:width" content="1376" />
-    <meta property="og:image:height" content="768" />
+    {socialImageSize && <meta property="og:image:width" content={String(socialImageSize.width)} />}
+    {socialImageSize && <meta property="og:image:height" content={String(socialImageSize.height)} />}
     <meta property="og:image:alt" content={page.socialImageAlt} />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={page.title} />
@@ -56,7 +79,10 @@ const jsonLd = serializeJsonLd(graph);
         <link rel="alternate" hreflang="x-default" href={ruUrl} />
       </>
     )}
+    <link rel="alternate" type="application/rss+xml" title={feedHub.title} href={feedPath} />
+    {markdownPath && <link rel="alternate" type="text/markdown" href={markdownPath} />}
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href={page.locale === "ru" ? "/site.webmanifest" : "/site.en.webmanifest"} />
     <title>{page.title}</title>
     <script type="application/ld+json" set:html={jsonLd} is:inline />

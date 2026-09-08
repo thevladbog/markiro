@@ -1,4 +1,4 @@
-import type { SearchPageRecord } from "./pages";
+import type { Locale, SearchPageRecord } from "./pages";
 
 export interface ArticlePageDefinition extends SearchPageRecord {
   readonly title: string;
@@ -410,7 +410,7 @@ export const BEER_APPLICATION_REPORT_ARTICLE_EN = {
   lastModified: "2026-08-27",
 } as const satisfies ArticlePageDefinition;
 
-export const ARTICLE_SEARCH_PAGES: readonly SearchPageRecord[] = [
+export const ARTICLE_PAGES: readonly ArticlePageDefinition[] = [
   BEER_CASE_AGGREGATION_ARTICLE,
   BEER_MARKING_2026_ARTICLE,
   BEER_DATAMATRIX_DIAGNOSTICS_ARTICLE,
@@ -430,3 +430,20 @@ export const ARTICLE_SEARCH_PAGES: readonly SearchPageRecord[] = [
   DUPLICATE_BEER_MARKING_ARTICLE_EN,
   BEER_APPLICATION_REPORT_ARTICLE_EN,
 ];
+
+export const ARTICLE_SEARCH_PAGES: readonly SearchPageRecord[] = ARTICLE_PAGES;
+
+/** Articles of one locale, newest first, with a stable secondary order by heading. */
+export function articlesForLocale(locale: Locale): readonly ArticlePageDefinition[] {
+  return ARTICLE_PAGES.filter((article) => article.locale === locale).sort(
+    (left, right) =>
+      right.publishedAt.localeCompare(left.publishedAt) ||
+      left.heading.localeCompare(right.heading, locale),
+  );
+}
+
+export function findArticlePage(path: string): ArticlePageDefinition {
+  const article = ARTICLE_PAGES.find((candidate) => candidate.path === path);
+  if (article === undefined) throw new Error(`Unknown article page: ${path}`);
+  return article;
+}
