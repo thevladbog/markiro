@@ -62,6 +62,7 @@ export type GalleryFixtureKind =
   | "new-shift"
   | "shift"
   | "work"
+  | "product-label"
   | "work-overlay"
   | "signal"
   | "box"
@@ -86,6 +87,58 @@ export interface GalleryFixture {
 }
 
 export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
+  {
+    id: "validation-print-prepared",
+    kind: "product-label",
+    variant: "prepared",
+    source: "synthetic",
+  },
+  {
+    id: "validation-print-sending",
+    kind: "product-label",
+    variant: "sending",
+    source: "synthetic",
+  },
+  {
+    id: "validation-print-required",
+    kind: "product-label",
+    variant: "required",
+    source: "synthetic",
+  },
+  { id: "validation-print-none", kind: "product-label", variant: "none", source: "synthetic" },
+  {
+    id: "validation-print-unknown",
+    kind: "product-label",
+    variant: "unknown",
+    source: "synthetic",
+  },
+  {
+    id: "validation-print-verified",
+    kind: "product-label",
+    variant: "verified",
+    source: "synthetic",
+  },
+  {
+    id: "validation-print-waiting",
+    kind: "product-label",
+    variant: "waiting",
+    source: "synthetic",
+  },
+  {
+    id: "validation-print-mismatch",
+    kind: "product-label",
+    variant: "mismatch",
+    source: "synthetic",
+  },
+  {
+    id: "validation-print-invalid",
+    kind: "product-label",
+    variant: "invalid",
+    source: "synthetic",
+  },
+  { id: "validation-print-reason", kind: "product-label", variant: "reason", source: "synthetic" },
+  { id: "validation-print-failed", kind: "product-label", variant: "failed", source: "synthetic" },
+
   { id: "app-loading", kind: "system", variant: "loading", source: "synthetic" },
   {
     id: "credential-recovery-sealing",

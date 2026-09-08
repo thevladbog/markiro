@@ -4910,3 +4910,38 @@ body,
   color: var(--fg-2);
   font: var(--floor-body);
 }
+
+.work-product-label {
+  min-height: 0;
+}
+.work-product-label__readout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.work-product-label__readout strong {
+  font-size: 28px;
+}
+.work-product-label__readout code {
+  font-size: 28px;
+}
+.product-label-history {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.product-label-history__rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.product-label-history__row {
+  display: grid;
+  grid-template-columns: 130px 1fr auto;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--line-strong);
+}

@@ -135,3 +135,31 @@ export async function markFixtureSent(
     [input.credentialOwnership, input.jobId],
   );
 }
+
+/** Supplies the active, snapshotted shift required by floor acceptance tests. */
+export async function seedProductLabelShift(
+  exec: SqlExecutor,
+  input: PreparedProductLabelAcceptance,
+): Promise<void> {
+  await exec.run(
+    `INSERT INTO shift_mirror(id,product_id,status,mode,validation_print_context) SELECT ?,?,'active','validation',? WHERE NOT EXISTS (SELECT 1 FROM shift_mirror WHERE id=?) ON CONFLICT(id) DO NOTHING`,
+    [
+      input.shiftId,
+      randomUUID(),
+      JSON.stringify({
+        policy: input.policy,
+        labelContext: {
+          productName: "Кега",
+          productPrintName: null,
+          gtin14: input.gtin14,
+          egaisCode: null,
+          shelfLifeDays: null,
+          counterpartyName: null,
+          productionDate: "2026-09-08",
+          shiftNumber: null,
+        },
+      }),
+      input.shiftId,
+    ],
+  );
+}

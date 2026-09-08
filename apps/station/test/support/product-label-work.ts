@@ -14,6 +14,7 @@ import { productLabelAcceptanceFixture } from "./product-labels.js";
 export async function openProductLabelWork(
   verification: VerificationPolicy = "required",
   ownership?: string,
+  accept = true,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "markiro-label-work-"));
   const path = join(directory, "station.sqlite");
@@ -99,10 +100,10 @@ export async function openProductLabelWork(
     operators: [],
     sscc: null,
   });
-  await recordProductLabelAcceptance(exec, input);
+  if (accept) await recordProductLabelAcceptance(exec, input);
   let sequence = 0;
   let tick = 0;
-  const print = vi.fn(async () => {});
+  const print = vi.fn<ProductLabelPrintingDeps["print"]>(async () => {});
   const actor = {
     operatorId: input.operatorId,
     now: () => new Date(Date.parse(input.acceptedAt) + ++tick * 1000).toISOString(),

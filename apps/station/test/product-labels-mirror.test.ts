@@ -182,8 +182,8 @@ describe("durable duplicate label mirror", () => {
 
   it("uses durable accepted jobs to prevent downgrade even after reproducible caches were cleared", async () => {
     const { bundle, acceptance } = fixture();
-    await recordProductLabelAcceptance(exec, acceptance);
     await upsertBundle(exec, bundle);
+    await recordProductLabelAcceptance(exec, acceptance);
     await exec.run("DELETE FROM shift_mirror");
     const legacy = { ...bundle.shift };
     delete legacy.validationPrint;

@@ -34,3 +34,22 @@ export async function restoreProductLabelWork(
   }
   return presentProductLabelJob(job);
 }
+
+/** Startup gate uses only the current credential; remotely closed shifts remain recoverable. */
+export async function readProductLabelRecoveryShift(
+  exec: SqlExecutor,
+  owner: string,
+): Promise<{ id: string; status: string; mode: string } | null> {
+  const [pending] = await exec.all<{ job_id: string; shift_id: string }>(
+    "SELECT job_id,shift_id FROM product_label_jobs WHERE credential_ownership=? AND status<>'completed' LIMIT 1",
+    [owner],
+  );
+  if (!pending) return null;
+  await requireProductLabelJob(exec, owner, pending.job_id);
+  const [shift] = await exec.all<{ id: string; status: string; mode: string }>(
+    "SELECT id,status,mode FROM shift_mirror WHERE id=?",
+    [pending.shift_id],
+  );
+  if (!shift || shift.mode !== "validation") throw new Error("PRODUCT_LABEL_CONTEXT_MISSING");
+  return shift;
+}

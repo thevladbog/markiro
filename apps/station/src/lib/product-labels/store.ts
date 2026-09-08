@@ -143,6 +143,7 @@ export function presentProductLabelJob(job: StoredProductLabelJob): ProductLabel
     language: job.projection.language,
     dpi: job.projection.dpi,
     status: job.projection.status,
+    attemptState: job.projection.attemptState,
     verification: job.projection.verification,
     verificationOutcome: job.projection.verificationOutcome,
     ownershipConflict: job.ownershipConflict,
@@ -190,6 +191,7 @@ export async function appendProductLabelEvent(
   exec: SqlExecutor,
   credentialOwnership: string,
   input: ProductLabelEvent,
+  options: { recovery?: boolean } = {},
 ): Promise<"applied" | "replayed" | "stale"> {
   const event = productLabelEventSchema.parse(input);
   const digest = productLabelValueDigest(event);
@@ -212,8 +214,8 @@ export async function appendProductLabelEvent(
   try {
     await exec.run(
       `INSERT INTO product_label_event_commands
-      (credential_ownership,event_id,job_id,command_token,event_digest,expected_sequence,expected_attempt_id,event_json,projection_json)
-      VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(credential_ownership,event_id) DO NOTHING`,
+      (credential_ownership,event_id,job_id,command_token,event_digest,expected_sequence,expected_attempt_id,event_json,projection_json,recovery)
+      VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(credential_ownership,event_id) DO NOTHING`,
       [
         credentialOwnership,
         event.eventId,
@@ -224,6 +226,7 @@ export async function appendProductLabelEvent(
         job.projection.attemptId,
         JSON.stringify(event),
         JSON.stringify(projection),
+        options.recovery ? 1 : 0,
       ],
     );
   } catch (error) {
@@ -252,4 +255,19 @@ export async function appendProductLabelEvent(
       "Product label event ID already contains different data",
     );
   return command.command_token === token ? "applied" : "replayed";
+}
+
+export async function listProductLabelJobViews(
+  exec: SqlExecutor,
+  owner: string,
+  shiftId: string,
+): Promise<ProductLabelJobView[]> {
+  const rows = await exec.all<{ job_id: string }>(
+    "SELECT job_id FROM product_label_jobs WHERE credential_ownership=? AND shift_id=? ORDER BY updated_at DESC,job_id DESC LIMIT 100",
+    [owner, shiftId],
+  );
+  const result: ProductLabelJobView[] = [];
+  for (const row of rows)
+    result.push(presentProductLabelJob(await requireProductLabelJob(exec, owner, row.job_id)));
+  return result;
 }

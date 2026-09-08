@@ -510,6 +510,9 @@ describe("WorkstationSetup", () => {
       target: { value: "10.0.0.7" },
     });
     fireEvent.click(screen.getByRole("radio", { name: "TSPL" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Printer resolution" }), {
+      target: { value: "300" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
@@ -517,6 +520,7 @@ describe("WorkstationSetup", () => {
     expect(saved.scanner).toEqual({ port: "COM3", baud: 9600 });
     expect(saved.printer).toEqual({ kind: "tcp", host: "10.0.0.7", port: 9100 });
     expect(saved.printerLanguage).toBe("tspl");
+    expect(saved.printerDpi).toBe(300);
     expect(runs.some(([sql]) => sql.includes("station_meta"))).toBe(true);
   });
 
@@ -664,7 +668,7 @@ describe("WorkstationSetup", () => {
 
     await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
     const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
-    expect(saved).toEqual(stored);
+    expect(saved).toEqual({ ...stored, printerDpi: null });
   });
 
   it("renders the no-scanner option even when the discovered port list is empty (Finding 1)", async () => {
@@ -1030,7 +1034,7 @@ describe("WorkstationSetup", () => {
 
     await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
     const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
-    expect(saved).toEqual(stored);
+    expect(saved).toEqual({ ...stored, printerDpi: null });
   });
 
   it("rejects a baud of 0 instead of persisting it as a working scanner baud (PR12 round 2, Finding 1)", async () => {

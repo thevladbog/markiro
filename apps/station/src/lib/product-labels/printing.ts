@@ -59,10 +59,15 @@ async function sendPreparedBody(
     });
     return presentProductLabelJob(await requireProductLabelJob(exec, credentialOwnership, jobId));
   }
-  const claimed = await appendProductLabelEvent(exec, credentialOwnership, {
-    ...base,
-    kind: "sending",
-  });
+  const claimed = await appendProductLabelEvent(
+    exec,
+    credentialOwnership,
+    {
+      ...base,
+      kind: "sending",
+    },
+    { recovery: deps.recovery ?? false },
+  );
   if (claimed !== "applied")
     return presentProductLabelJob(await requireProductLabelJob(exec, credentialOwnership, jobId));
   const bytes = Uint8Array.from(atob(job.bytesBase64), (char) => char.charCodeAt(0));
@@ -127,6 +132,7 @@ export async function prepareProductLabelReprint(
     shiftId: string;
     credentialOwnership: string;
     reason: ReprintReason;
+    recovery?: boolean;
   },
 ): Promise<string> {
   const reason = z.enum(["not_printed", "damaged", "lost"]).parse(input.reason);
@@ -146,7 +152,11 @@ export async function prepareProductLabelReprint(
     dpi: job.projection.dpi,
     bytesDigest: job.projection.bytesDigest,
   };
-  if ((await appendProductLabelEvent(exec, input.credentialOwnership, event)) !== "applied")
+  if (
+    (await appendProductLabelEvent(exec, input.credentialOwnership, event, {
+      recovery: input.recovery ?? false,
+    })) !== "applied"
+  )
     throw new DomainError(
       "PRODUCT_LABEL_STALE",
       "The print attempt changed; refresh the current label",

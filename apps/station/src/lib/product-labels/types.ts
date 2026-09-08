@@ -82,6 +82,7 @@ export interface ProductLabelJobView {
   language: PrinterLanguage;
   dpi: 203 | 300;
   status: ProductLabelJobStatus;
+  attemptState: ProductLabelAttemptState;
   verification: VerificationPolicy;
   verificationOutcome: VerificationOutcome;
   ownershipConflict: boolean;
@@ -101,4 +102,5 @@ export interface ProductLabelPrintingDeps extends ProductLabelActor {
   language: PrinterLanguage;
   dpi: 203 | 300 | null;
   print(target: PrintTarget, bytes: Uint8Array): Promise<void>;
+  recovery?: boolean;
 }

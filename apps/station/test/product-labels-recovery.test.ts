@@ -4,7 +4,10 @@ import {
   sendPreparedProductLabel,
   verifyProductLabel,
 } from "../src/lib/product-labels/printing.js";
-import { restoreProductLabelWork } from "../src/lib/product-labels/recovery.js";
+import {
+  readProductLabelRecoveryShift,
+  restoreProductLabelWork,
+} from "../src/lib/product-labels/recovery.js";
 import { appendProductLabelEvent, readProductLabelJob } from "../src/lib/product-labels/store.js";
 import { openProductLabelWork } from "./support/product-label-work.js";
 
@@ -19,6 +22,18 @@ async function fixture(verification: "none" | "required" = "required") {
 }
 
 describe("product label recovery", () => {
+  it("restores only the current owner's pending shift, including a remotely closed shift", async () => {
+    const work = await fixture();
+    await work.exec.run("UPDATE shift_mirror SET status='closed' WHERE id=?", [work.input.shiftId]);
+    expect(await readProductLabelRecoveryShift(work.exec, work.input.credentialOwnership)).toEqual({
+      id: work.input.shiftId,
+      status: "closed",
+      mode: "validation",
+    });
+    expect(await readProductLabelRecoveryShift(work.exec, "another-credential")).toBeNull();
+    expect(work.print).not.toHaveBeenCalled();
+  });
+
   it("restores prepared work without starting transport", async () => {
     const work = await fixture();
     work.restart();

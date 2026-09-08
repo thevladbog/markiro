@@ -3458,6 +3458,41 @@ export const STATION_MIGRATIONS: string[] = [
          AND job_id IN (SELECT job_id FROM product_label_events WHERE credential_ownership=NEW.credential_ownership AND event_id=NEW.event_id);
      DELETE FROM product_label_outbox WHERE credential_ownership=NEW.credential_ownership AND event_id=NEW.event_id;
    END;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_accept_active_guard BEFORE INSERT ON product_label_accept_commands
+   WHEN NOT EXISTS (SELECT 1 FROM product_label_accept_commands WHERE credential_ownership=NEW.credential_ownership AND job_id=NEW.job_id)
+   BEGIN
+     SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM shift_mirror WHERE id=NEW.shift_id AND status='active'
+       AND json_extract(validation_print_context,'$.policy.policyRevision')=json_extract(NEW.acceptance_json,'$.policy.policyRevision')
+       AND json_extract(validation_print_context,'$.policy.snapshot.digest')=json_extract(NEW.acceptance_json,'$.policy.snapshot.digest'))
+       OR EXISTS (SELECT 1 FROM shift_close_outbox WHERE shift_id=NEW.shift_id)
+       THEN RAISE(ABORT,'PRODUCT_LABEL_SHIFT_CLOSED') END;
+   END;`,
+  `ALTER TABLE product_label_event_commands ADD COLUMN recovery INTEGER NOT NULL DEFAULT 0 CHECK (recovery IN (0,1));`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_event_active_guard BEFORE INSERT ON product_label_event_commands
+   WHEN json_extract(NEW.event_json,'$.kind') IN ('prepared','sending')
+   BEGIN
+     SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM shift_mirror WHERE id=json_extract(NEW.event_json,'$.shiftId') AND status='active')
+       OR EXISTS (SELECT 1 FROM shift_close_outbox WHERE shift_id=json_extract(NEW.event_json,'$.shiftId'))
+       THEN CASE WHEN NEW.recovery<>1 OR NOT EXISTS (
+         SELECT 1 FROM product_label_jobs WHERE credential_ownership=NEW.credential_ownership AND job_id=NEW.job_id AND status<>'completed'
+       ) THEN RAISE(ABORT,'PRODUCT_LABEL_SHIFT_CLOSED') END END;
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_shift_close_guard BEFORE INSERT ON shift_close_outbox
+   BEGIN
+     SELECT CASE WHEN EXISTS (SELECT 1 FROM product_label_jobs WHERE shift_id=NEW.shift_id AND status<>'completed')
+       THEN RAISE(ABORT,'PRODUCT_LABEL_UNRESOLVED') END;
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_shift_close_apply AFTER INSERT ON shift_close_outbox
+   WHEN EXISTS (SELECT 1 FROM shift_mirror WHERE id=NEW.shift_id AND json_extract(validation_print_context,'$.policy.mode')='duplicate_dm')
+   BEGIN UPDATE shift_mirror SET status='closed' WHERE id=NEW.shift_id; END;`,
+
+  `CREATE TRIGGER IF NOT EXISTS product_label_close_snapshot_guard BEFORE INSERT ON shift_close_outbox
+   WHEN EXISTS (SELECT 1 FROM shift_mirror WHERE id=NEW.shift_id AND json_extract(validation_print_context,'$.policy.mode')='duplicate_dm')
+   BEGIN
+     SELECT CASE WHEN NEW.actual_qty<>(SELECT COUNT(*) FROM codes_mirror WHERE shift_id=NEW.shift_id)
+       OR NEW.planned_qty_snapshot IS NOT (SELECT planned_qty FROM shift_mirror WHERE id=NEW.shift_id)
+       THEN RAISE(ABORT,'PRODUCT_LABEL_CLOSE_CHANGED') END;
+   END;`,
 ];
 
 export interface StationMigrationEntry {

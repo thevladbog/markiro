@@ -8,7 +8,7 @@ import {
 import { appendProductLabelEvent, readProductLabelJob } from "../src/lib/product-labels/store.js";
 import { openProductLabelWork } from "./support/product-label-work.js";
 import { recordProductLabelAcceptance } from "../src/lib/product-labels/acceptance.js";
-import { productLabelAcceptanceFixture } from "./support/product-labels.js";
+import { productLabelAcceptanceFixture, seedProductLabelShift } from "./support/product-labels.js";
 import { restoreProductLabelWork } from "../src/lib/product-labels/recovery.js";
 
 describe("product label printing", () => {
@@ -164,11 +164,11 @@ describe("product label printing", () => {
       if (boundary === "released") await work.exec.run("DELETE FROM codes_mirror");
       if (boundary === "conflict")
         await work.exec.run("UPDATE product_label_jobs SET ownership_conflict=1");
-      if (boundary === "pending")
-        await recordProductLabelAcceptance(
-          work.exec,
-          productLabelAcceptanceFixture({ serial: "OTHER-UNIT" }),
-        );
+      if (boundary === "pending") {
+        const other = productLabelAcceptanceFixture({ serial: "OTHER-UNIT" });
+        await seedProductLabelShift(work.exec, other);
+        await recordProductLabelAcceptance(work.exec, other);
+      }
       await expect(
         prepareProductLabelReprint(work.exec, {
           ...work.actor,

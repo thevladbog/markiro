@@ -1255,7 +1255,7 @@ policy этот параметр обязателен, App передаёт ег
 Старые none callers остаются совместимыми. `undefined` не означает доступ ко
 всем owners и не разрешает закрытие смены с печатным долгом.
 
-- [ ] В test harness существующего WorkScreen передать SQLite exec, enabled
+- [x] В test harness существующего WorkScreen передать SQLite exec, enabled
       snapshot и spy принтера. Скан оригинала через существующий manual ScanSource:
 
 ```ts
@@ -1275,44 +1275,44 @@ expect(await hasUnresolvedProductLabelJob(exec, ownership, shiftId)).toBe(false)
 после всех трёх сканов. Отдельный none-case завершается «Отправлено на принтер»
 без экрана штатной проверки и без события verified.
 
-- [ ] Run `pnpm --filter @markiro/station exec vitest run test/product-label-work.test.tsx`; ожидается обычная validation вместо нового процесса.
-- [ ] В последовательном обработчике ScanQueue выбрать новую приёмку только для
+- [x] Run `pnpm --filter @markiro/station exec vitest run test/product-label-work.test.tsx`; ожидается обычная validation вместо нового процесса.
+- [x] В последовательном обработчике ScanQueue выбрать новую приёмку только для
       enabled policy. После atomic acceptance показать job, вызвать единственный
       `sendPreparedProductLabel`. Отклонённые GTIN/invalid/duplicate сохраняют прежние
       verdicts и звук, но не печатают. Полный scan перестаёт быть доступен UI после
       передачи контроллеру; в строке задания — только безопасный codeSuffix.
-- [ ] Маршрутизировать один scanner sink: production → print busy → verification
+- [x] Маршрутизировать один scanner sink: production → print busy → verification
       или production. Переключение публикуется до завершения текущего queue handler;
       удалить накопленный до переключения ввод, чтобы исходный скан не подтвердил
       свою этикетку. В sending новые сканы не принимают товар. Проверка вызывает
       `verifyProductLabel` с current attemptId; следующий production scan доступен
       только после успешного commit результата. Тестом удержать commit Promise и
       доказать, что ранний следующий скан не принят.
-- [ ] `ProductLabelVerification` использует отдельный `FullScreenDialog` и полный
+- [x] `ProductLabelVerification` использует отдельный `FullScreenDialog` и полный
       KM comparator; не менять контракт SSCC verification. Кнопки: «Пауза»,
       «Напечатать повторно»; кнопки пропуска нет. При unknown разрешены сканирование
       совпавшей этикетки и явный reprint с причиной в обоих режимах. При none не
       показывать «проверено», пока не было фактического recovery verification.
-- [ ] В «Исключениях» добавить историю product jobs текущей смены этой станции.
+- [x] В «Исключениях» добавить историю product jobs текущей смены этой станции.
       Повтор требует not_printed/damaged/lost, неизменные bytes и новый attempt.
       Чужая смена/станция и известный ownership conflict запрещают reprint. Наличие
       другого незавершённого job блокирует его и в UI, и в атомарном store guard.
-- [ ] Pause/logout сначала останавливает intake и ждёт floor writes, сохраняя job.
+- [x] Pause/logout сначала останавливает intake и ждёт floor writes, сохраняя job.
       После входа другого оператора `restoreProductLabelWork` получает нового actor;
       старая отправка не запускается ещё раз. При startup unresolved job проверяется
       до production routing, включая remotely closed shift. Для закрытой смены
       разрешён только recovery этого задания, обычный приём новых единиц запрещён.
-- [ ] Добавить atomic close guard: SQL изменения статуса/close command не проходит
+- [x] Добавить atomic close guard: SQL изменения статуса/close command не проходит
       при существующем unresolved job. UI-проверка лишь объясняет запрет. Создание
       acceptance, явный reprint и close также проверяют статус смены под единым
       statement guard, чтобы гонка close/scan не оставила новый долг в закрытой смене.
       Исключение — reprint уже незавершённого задания при удалённом закрытии, через
       явно отмеченный recovery path и сохранённый ownership.
-- [ ] Credential generation seal запрещает новые вызовы и дожидается текущего I/O;
+- [x] Credential generation seal запрещает новые вызовы и дожидается текущего I/O;
       запоздалый callback не меняет чужой journal. После rejected credential snapshot
       и долг остаются закрытыми от новой tenant generation. Новая привязка не даёт
       права читать/печатать старый job; его существующий sealed-work flow видит count.
-- [ ] Тесты race scan/screen/pause/close/login, stale callback, restart каждого
+- [x] Тесты race scan/screen/pause/close/login, stale callback, restart каждого
       состояния, double reprint, remote close, original+confirmation same queue burst,
       required disabled/none captions и unchanged aggregation/SSCC. Run эти suites и
       station gates. Commit: `feat(station): integrate recoverable duplicate printing into validation`.
@@ -1602,3 +1602,13 @@ RED→GREEN: новый канал отсутствовал; при пропущ
 Существующий быстрый старт проверки без печати сохранён. После выбора товара оператор открывает настройки кнопкой в нижней панели: печать выключена по умолчанию, при включении предлагается обязательная проверка и отдельный шаблон. Перед созданием повторно проверяются protocol, доступность шаблона и printer/DPI; перед входом сверяется авторитетная политика ответа сервера. Известный результат create повторно используется после сбоя open, выбор сохраняется при возврате из настроек принтера. Старые credential generations и повторные клики не создают смен. Gallery использует реальный NewShift с изолированными fixtures для required, none и выбора шаблона.
 
 RED→GREEN: отсутствие UI, повторное создание после сбоя open, неожиданная серверная печать при запросе none. Новая suite 17 сценариев; полный Station **91 suites / 1355 tests PASS**, typecheck/lint/build PASS. Дизайн использует существующие горизонтальные StationScreen/FloorFooter и touch controls. Scoped format и diff check PASS. Браузерная и аппаратная приёмка остаётся в задаче 16.
+
+### Task 14 — Рабочий экран и восстановление
+
+Единый controller удерживает приёмку от подготовки до durable sent/verified. WorkScreen сохраняет один scanner sink, удаляет исходный burst перед печатью и не принимает ввод во время I/O/commit или выбора причины. Required сравнивает полный KM; none показывает только отправку. Потеря ответа acceptance восстанавливает точную сохранённую команду и предлагает явную отправку без второй приёмки. Два повторных нажатия защищены локальным latch и атомарными event guards. При pause/retirement controller закрывается синхронно, текущая запись/transport входят в floor barrier и credential lease.
+
+Startup gate показывает только незавершённое задание текущего credential owner. Сохранённая закрытая смена открывается для recovery без загрузки обычного allocating bundle; восстановление само не печатает. Повторный вход использует текущего оператора, неизменные bytes/date остаются исходными. В исключениях — последние 100 безопасных job views с suffix и явной причиной reprint. Printer setup сохраняет известное разрешение 203/300 dpi или null.
+
+Append-only SQLite guards не допускают новую acceptance вне active policy, закрытие с pending job и reprint завершённого job закрытой смены. Явный recovery разрешён только незавершённому заданию. Close публикует closed в том же statement; изменение количества между чтением и записью требует повторного закрытия. Старые acceptance fixtures дополнены активной сменой; mirror downgrade test теперь сначала публикует bundle, как production.
+
+Проверки: RED→GREEN для четырёх close boundaries, отсутствующего controller, выбора DPI и потерянного ответа acceptance. Реальный WorkScreen + rotating SQLite проверяют burst, mismatch crypto tail, none, pause/remount, reason и неизменность bytes/count. App проверяет startup закрытой смены без bundle/print. Полный Station **94 suites / 1377 tests PASS**, typecheck/lint/build PASS. DB full: 371 passed и один отказ порядка добавленного столбца в Drizzle; порядок исправлен, повтор parity suite **2/2 PASS**, DB source/test typecheck, lint, build PASS. В галерее 11 состояний печати используют реальные production instruments/dialogs с явно synthetic views, шесть новых runtime gallery checks зелёные. Scoped format/diff check PASS. Реальный браузер, Windows/Tauri pool, физические устройства и потеря питания остаются в задаче 16.

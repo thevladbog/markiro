@@ -13,7 +13,19 @@ import {
   readProductLabelJob,
 } from "../src/lib/product-labels/store.js";
 import { makeRotatingExec, openFileDatabase } from "./support/sqlite-exec.js";
-import { markFixtureSent, productLabelAcceptanceFixture } from "./support/product-labels.js";
+import {
+  markFixtureSent,
+  productLabelAcceptanceFixture,
+  seedProductLabelShift,
+} from "./support/product-labels.js";
+
+async function acceptFixture(
+  exec: SqlExecutor,
+  input: Parameters<typeof recordProductLabelAcceptance>[1],
+) {
+  await seedProductLabelShift(exec, input);
+  return recordProductLabelAcceptance(exec, input);
+}
 
 const tables = [
   "product_label_accept_commands",
@@ -53,11 +65,11 @@ describe("atomic product label acceptance", () => {
 
   it("atomically keeps full data, attribution, print bytes and one acceptance; retries are stable", async () => {
     const input = productLabelAcceptanceFixture();
-    expect(await recordProductLabelAcceptance(exec, input)).toEqual({
+    expect(await acceptFixture(exec, input)).toEqual({
       status: "accepted",
       jobId: input.jobId,
     });
-    expect(await recordProductLabelAcceptance(exec, input)).toEqual({
+    expect(await acceptFixture(exec, input)).toEqual({
       status: "accepted",
       jobId: input.jobId,
     });
@@ -116,6 +128,7 @@ describe("atomic product label acceptance", () => {
         "codeSuffix",
         "attemptId",
         "attemptNo",
+        "attemptState",
         "language",
         "dpi",
         "status",
@@ -131,7 +144,7 @@ describe("atomic product label acceptance", () => {
 
   it("restores the complete job after migration replay and connection restart", async () => {
     const input = productLabelAcceptanceFixture();
-    await recordProductLabelAcceptance(exec, input);
+    await acceptFixture(exec, input);
     for (const db of databases) db.close();
     databases = [
       openFileDatabase(join(folder, "station.sqlite")),
@@ -147,16 +160,16 @@ describe("atomic product label acceptance", () => {
 
   it("blocks another unit across shifts while this owner has an unresolved job", async () => {
     const first = productLabelAcceptanceFixture();
-    await recordProductLabelAcceptance(exec, first);
-    expect(
-      await recordProductLabelAcceptance(exec, productLabelAcceptanceFixture({ serial: "NEXT" })),
-    ).toEqual({ status: "busy" });
+    await acceptFixture(exec, first);
+    expect(await acceptFixture(exec, productLabelAcceptanceFixture({ serial: "NEXT" }))).toEqual({
+      status: "busy",
+    });
     expect(await counts()).toEqual(tables.map(() => 1));
     const other = productLabelAcceptanceFixture({
       serial: "OTHER",
       ownership: "credential-generation-b",
     });
-    expect(await recordProductLabelAcceptance(exec, other)).toEqual({
+    expect(await acceptFixture(exec, other)).toEqual({
       status: "accepted",
       jobId: other.jobId,
     });
@@ -164,8 +177,8 @@ describe("atomic product label acceptance", () => {
 
   it("serializes concurrent acceptance so exactly one unit wins the owner slot", async () => {
     const results = await Promise.all([
-      recordProductLabelAcceptance(exec, productLabelAcceptanceFixture()),
-      recordProductLabelAcceptance(exec, productLabelAcceptanceFixture({ serial: "NEXT" })),
+      acceptFixture(exec, productLabelAcceptanceFixture()),
+      acceptFixture(exec, productLabelAcceptanceFixture({ serial: "NEXT" })),
     ]);
     expect(results.map((result) => result.status).sort()).toEqual(["accepted", "busy"]);
     expect(await counts()).toEqual(tables.map(() => 1));
@@ -173,10 +186,10 @@ describe("atomic product label acceptance", () => {
 
   it("records a duplicate scan after completion without another accepted unit or print job", async () => {
     const input = productLabelAcceptanceFixture({ verification: "none" });
-    await recordProductLabelAcceptance(exec, input);
+    await acceptFixture(exec, input);
     await markFixtureSent(exec, input);
     expect(await hasUnresolvedProductLabelJob(exec, input.credentialOwnership)).toBe(false);
-    expect(await recordProductLabelAcceptance(exec, productLabelAcceptanceFixture())).toEqual({
+    expect(await acceptFixture(exec, productLabelAcceptanceFixture())).toEqual({
       status: "duplicate",
     });
     expect(await counts()).toEqual([1, 1, 2, 2, 1, 1, 3, 1]);
@@ -188,9 +201,9 @@ describe("atomic product label acceptance", () => {
 
   it("rejects reused job identity with changed immutable content", async () => {
     const input = productLabelAcceptanceFixture();
-    await recordProductLabelAcceptance(exec, input);
+    await acceptFixture(exec, input);
     await expect(
-      recordProductLabelAcceptance(exec, {
+      acceptFixture(exec, {
         ...input,
         fields: { ...input.fields, date: "09.09.2026" },
       }),
@@ -212,8 +225,8 @@ describe("atomic product label acceptance", () => {
         }
       },
     });
-    await expect(recordProductLabelAcceptance(dropping, input)).rejects.toThrow("TEST_REPLY_LOST");
-    expect(await recordProductLabelAcceptance(exec, input)).toEqual({
+    await expect(acceptFixture(dropping, input)).rejects.toThrow("TEST_REPLY_LOST");
+    expect(await acceptFixture(exec, input)).toEqual({
       status: "accepted",
       jobId: input.jobId,
     });
@@ -224,9 +237,9 @@ describe("atomic product label acceptance", () => {
     await exec.run(
       `CREATE TRIGGER test_product_label_fault BEFORE INSERT ON ${table} BEGIN SELECT RAISE(ABORT, 'TEST_DISK_FAILURE'); END;`,
     );
-    await expect(
-      recordProductLabelAcceptance(exec, productLabelAcceptanceFixture()),
-    ).rejects.toThrow("TEST_DISK_FAILURE");
+    await expect(acceptFixture(exec, productLabelAcceptanceFixture())).rejects.toThrow(
+      "TEST_DISK_FAILURE",
+    );
     expect(await counts()).toEqual(tables.map(() => 0));
   });
 
@@ -234,15 +247,15 @@ describe("atomic product label acceptance", () => {
     await exec.run(
       "CREATE TRIGGER test_product_label_fault BEFORE INSERT ON product_label_events BEGIN SELECT RAISE(ABORT, 'UNIQUE constraint failed: unrelated.id'); END;",
     );
-    await expect(
-      recordProductLabelAcceptance(exec, productLabelAcceptanceFixture()),
-    ).rejects.toThrow("unrelated.id");
+    await expect(acceptFixture(exec, productLabelAcceptanceFixture())).rejects.toThrow(
+      "unrelated.id",
+    );
     expect(await counts()).toEqual(tables.map(() => 0));
   });
 
   it("keeps accepted unit facts when the isolated print context is removed", async () => {
     const input = productLabelAcceptanceFixture({ verification: "none" });
-    await recordProductLabelAcceptance(exec, input);
+    await acceptFixture(exec, input);
     await markFixtureSent(exec, input);
     // Exercise FK behavior only. Production retention additionally requires all receipts in task 15.
     await exec.run(
@@ -254,7 +267,7 @@ describe("atomic product label acceptance", () => {
 
   it("detects a damaged persisted projection instead of exposing a completed unit", async () => {
     const input = productLabelAcceptanceFixture();
-    await recordProductLabelAcceptance(exec, input);
+    await acceptFixture(exec, input);
     await exec.run(
       "UPDATE product_label_jobs SET status='completed',projection_json=json_set(projection_json,'$.status','completed') WHERE job_id=?",
       [input.jobId],
@@ -266,7 +279,7 @@ describe("atomic product label acceptance", () => {
 
   it("detects changed printer bytes in the saved acceptance context", async () => {
     const input = productLabelAcceptanceFixture();
-    await recordProductLabelAcceptance(exec, input);
+    await acceptFixture(exec, input);
     await exec.run(
       "UPDATE product_label_accept_commands SET acceptance_json=json_set(acceptance_json,'$.bytesBase64',?) WHERE job_id=?",
       [Buffer.from("ALTERED").toString("base64"), input.jobId],
@@ -279,7 +292,7 @@ describe("atomic product label acceptance", () => {
   it("rejects prepared DPI that differs from the frozen template before writing", async () => {
     const input = productLabelAcceptanceFixture();
     await expect(
-      recordProductLabelAcceptance(exec, {
+      acceptFixture(exec, {
         ...input,
         preparedEvent: { ...input.preparedEvent, dpi: 300 },
       }),
@@ -291,7 +304,7 @@ describe("atomic product label acceptance", () => {
     "rejects corrupt acceptance %s before any write",
     async (field) => {
       const input = productLabelAcceptanceFixture();
-      await expect(recordProductLabelAcceptance(exec, { ...input, [field]: "" })).rejects.toThrow();
+      await expect(acceptFixture(exec, { ...input, [field]: "" })).rejects.toThrow();
       expect(await counts()).toEqual(tables.map(() => 0));
     },
   );

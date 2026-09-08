@@ -1,3 +1,10 @@
+import type { ProductLabelJobView } from "../lib/product-labels/types.js";
+import type { ProductLabelWork, ProductLabelWorkState } from "../lib/use-product-label-work.js";
+import { ProductLabelInstrument } from "../ui/work/ProductLabelInstrument.js";
+import {
+  ProductLabelVerification,
+  ProductLabelReprintReason,
+} from "../ui/work/ProductLabelVerification.js";
 import {
   useEffect,
   useLayoutEffect,
@@ -159,6 +166,7 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
   // they never can in production.
   const rendersActiveShiftWorkScreen =
     fixture.kind === "work" ||
+    fixture.kind === "product-label" ||
     (fixture.kind === "box" && fixture.variant === "full") ||
     syncVariant === "offline";
   // Unconditional operatorControl/windowControl/update is a SEPARATE fact
@@ -257,6 +265,8 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
       return <NewShiftFixture view={fixture.variant} locale={locale} />;
     case "shift":
       return <ShiftFixture variant={fixture.variant} locale={locale} />;
+    case "product-label":
+      return <ProductLabelFixture variant={fixture.variant} locale={locale} />;
     case "work":
       return <WorkFixture mode={fixture.variant} locale={locale} />;
     case "work-overlay":
@@ -1463,7 +1473,91 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
   );
 }
 
-function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) {
+function ProductLabelFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
+  const completed = variant === "none" || variant === "verified";
+  const job: ProductLabelJobView | null =
+    variant === "waiting"
+      ? null
+      : {
+          jobId: "11111111-1111-4111-8111-111111111111",
+          shiftId: "22222222-2222-4222-8222-222222222222",
+          codeSuffix: "IAL-42",
+          attemptId: "33333333-3333-4333-8333-333333333333",
+          attemptNo: 1,
+          language: "zpl",
+          dpi: 203,
+          status: completed
+            ? "completed"
+            : variant === "prepared"
+              ? "prepared"
+              : variant === "sending"
+                ? "sending"
+                : variant === "unknown" || variant === "failed"
+                  ? "attention"
+                  : "awaiting_verification",
+          attemptState:
+            variant === "unknown"
+              ? "delivery_unknown"
+              : variant === "failed"
+                ? "failed_before_send"
+                : variant === "prepared"
+                  ? "prepared"
+                  : variant === "sending"
+                    ? "sending"
+                    : "sent",
+          verification: variant === "none" ? "none" : "required",
+          verificationOutcome:
+            variant === "verified" ? "verified" : variant === "none" ? "not_required" : "pending",
+          ownershipConflict: false,
+          acceptedAt: "2026-09-08T10:00:00.000Z",
+          updatedAt: "2026-09-08T10:00:01.000Z",
+        };
+  const state: ProductLabelWorkState = {
+    ready: true,
+    busy: variant === "sending",
+    job,
+    error: null,
+    closed: false,
+    result: variant === "mismatch" ? "mismatch" : variant === "invalid" ? "invalid" : null,
+  };
+  // Visual-only fixture: production components receive safe views, never credentials or a transport.
+  const work: ProductLabelWork = {
+    getSnapshot: () => state,
+    subscribe: () => () => {},
+    setVerificationPaused: () => {},
+    checkPrinter: () => {},
+    canAccept: () => !job || completed,
+    list: () => Promise.resolve(job ? [job] : []),
+    open: async () => {},
+    close: async () => {},
+    idle: async () => {},
+    accept: () => Promise.resolve({ status: "busy" }),
+    verify: () => Promise.resolve("stale"),
+    resumePrepared: async () => {},
+    reprint: async () => {},
+    retry: async () => {},
+  };
+  return (
+    <>
+      <WorkFixture mode="validation" locale={locale} productLabel={{ job, busy: state.busy }} />
+      {variant === "reason" ? (
+        <ProductLabelReprintReason busy={false} onConfirm={() => {}} onBack={() => {}} />
+      ) : job && !completed ? (
+        <ProductLabelVerification state={state} work={work} onPause={() => {}} onSetup={() => {}} />
+      ) : null}
+    </>
+  );
+}
+
+function WorkFixture({
+  mode,
+  locale,
+  productLabel,
+}: {
+  mode: string;
+  locale: GalleryLocale;
+  productLabel?: { job: ProductLabelJobView | null; busy: boolean };
+}) {
   const ru = locale === "ru";
   const t = i18n.getFixedT(locale);
   // "box-full" is a filled box moments before it closes -- still an ordinary
@@ -1510,8 +1604,9 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
               gtin="04607000000042"
               operation={waiting ? null : (operations[0] ?? null)}
               labels={workLabels.status}
-              showVerdict={!aggregation}
+              showVerdict={!aggregation && !productLabel}
             />
+            {productLabel ? <ProductLabelInstrument {...productLabel} /> : null}
             {aggregation ? (
               <BoxFillInstrument
                 box={{ boxId: "gallery-box-1", itemCount: boxItemCount }}

@@ -91,6 +91,7 @@ export function WorkstationSetup({
   const [usbPrinter, setUsbPrinter] = useState("");
   const [printerTransport, setPrinterTransport] = useState<PrintTarget["kind"] | "none">("none");
   const [printerLanguage, setPrinterLanguage] = useState<PrinterLanguage>("zpl");
+  const [printerDpi, setPrinterDpi] = useState<203 | 300 | null>(null);
   const [verifyPrintedLabel, setVerifyPrintedLabel] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ tab: SetupTabId; text: string } | null>(null);
@@ -139,6 +140,7 @@ export function WorkstationSetup({
           setPrinterTransport("none");
         }
         setPrinterLanguage(config.printerLanguage);
+        setPrinterDpi(config.printerDpi ?? null);
         setVerifyPrintedLabel(config.verifyPrintedLabel);
         setLoading(false);
       })
@@ -240,6 +242,7 @@ export function WorkstationSetup({
         scanner,
         printer,
         printerLanguage,
+        printerDpi,
         verifyPrintedLabel: printer === null ? false : verifyPrintedLabel,
       },
     };
@@ -396,6 +399,8 @@ export function WorkstationSetup({
           usbPrinters={usbPrinters}
           usbPrinter={usbPrinter}
           language={printerLanguage}
+          printerDpi={printerDpi}
+          onPrinterDpiChange={setPrinterDpi}
           verifyPrintedLabel={verifyPrintedLabel}
           disabled={loading}
           busy={busy}

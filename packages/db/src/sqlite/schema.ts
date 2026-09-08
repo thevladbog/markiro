@@ -1026,6 +1026,7 @@ export const productLabelEventCommands = sqliteTable(
     expectedAttemptId: text("expected_attempt_id").notNull(),
     eventJson: text("event_json").notNull(),
     projectionJson: text("projection_json").notNull(),
+    recovery: integer("recovery", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [
     primaryKey({ columns: [t.credentialOwnership, t.eventId] }),

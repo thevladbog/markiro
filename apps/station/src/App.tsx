@@ -30,6 +30,7 @@ import {
   createCredentialGeneration,
   createFloorWorkRegistry,
   credentialGenerationIsCurrent,
+  credentialGenerationOwnership,
   readBackfilledBoxTemplateRecovery,
   readSealedWorkSummary,
   type CredentialGeneration,
@@ -43,7 +44,12 @@ import {
   loadHardwareConfig,
   type HardwareConfig,
 } from "./lib/hardware-config.js";
-import { createHardwareScanSource, tauriHardware, type ScannerStatus } from "./lib/hardware.js";
+import {
+  createHardwareScanSource,
+  tauriHardware,
+  type ScannerStatus,
+  type PrintTarget,
+} from "./lib/hardware.js";
 import {
   applyMigrations,
   readShiftContext,
@@ -59,6 +65,7 @@ import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
 import { tauriExecutor } from "./lib/sqlite.js";
 import { resolveLegacyStationIdentity } from "./lib/legacy-identity.js";
 import { createLockdownLifecycle } from "./lib/lockdown.js";
+import { readProductLabelRecoveryShift } from "./lib/product-labels/recovery.js";
 import { findUnresolvedBoxPrint } from "./lib/boxes.js";
 import { ConfigTransitionCoordinator } from "./lib/config-transition.js";
 import {
@@ -558,7 +565,21 @@ export function App() {
               )
             : null;
           if (cancelled) return;
-          if (!recovery && ownsRecoveryPause && !normalMirrorStarted) {
+          const labelOwner = currentCredentialGeneration.current
+            ? await credentialGenerationOwnership(currentCredentialGeneration.current)
+            : null;
+          const labelRecovery =
+            mirror?.validationPrint?.mode === "duplicate_dm" && labelOwner
+              ? await readProductLabelRecoveryShift(tauriExecutor, labelOwner)
+              : null;
+          if (cancelled) return;
+          if (
+            !recovery &&
+            !labelRecovery &&
+            mirror?.status !== "closed" &&
+            ownsRecoveryPause &&
+            !normalMirrorStarted
+          ) {
             normalMirrorStarted = true;
             startNormalShiftMirrorRef.current(shift.id);
           }
@@ -797,6 +818,39 @@ export function App() {
     verifiedClient,
   ]);
   const authenticatedClient = credentialRecovery ? null : credentialBoundClient;
+  const [labelRecoveryEpoch, setLabelRecoveryEpoch] = useState(0);
+  const labelRecoveryKey = useMemo(
+    () => ({
+      credentialGeneration,
+      operatorId: operator?.operatorId,
+      activeFloorTask,
+      epoch: labelRecoveryEpoch,
+    }),
+    [credentialGeneration, operator?.operatorId, activeFloorTask, labelRecoveryEpoch],
+  );
+  const [labelRecovery, setLabelRecovery] = useState<{
+    key: object;
+    shift: ProductionShiftTask | null;
+    error: boolean;
+  } | null>(null);
+  useEffect(() => {
+    if (!credentialGeneration || !operator || activeFloorTask) return;
+    let active = true;
+    void (async () => {
+      try {
+        const owner = await credentialGenerationOwnership(credentialGeneration);
+        const pending = owner ? await readProductLabelRecoveryShift(tauriExecutor, owner) : null;
+        if (active && credentialGenerationIsCurrent(credentialGeneration))
+          setLabelRecovery({ key: labelRecoveryKey, shift: pending, error: false });
+      } catch {
+        if (active) setLabelRecovery({ key: labelRecoveryKey, shift: null, error: true });
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [credentialGeneration, operator, activeFloorTask, labelRecoveryKey]);
+
   const refreshOperatorRoster = useMemo(() => {
     if (!authenticatedClient || !credentialGeneration) return null;
     return createOperatorRosterRefresher(authenticatedClient, tauriExecutor, credentialGeneration);
@@ -1503,6 +1557,18 @@ export function App() {
           ) : shiftContext && shift ? (
             <WorkScreen
               exec={tauriExecutor}
+              {...(floorGeneration && config.deviceId
+                ? {
+                    productLabelEnvironment: {
+                      generation: floorGeneration,
+                      deviceId: config.deviceId,
+                      operatorName: operator.name,
+                      hardwareConfig,
+                      print: (target: PrintTarget, bytes: Uint8Array) =>
+                        tauriHardware.print(target, bytes),
+                    },
+                  }
+                : {})}
               shiftId={shift.id}
               terminalId={config.deviceId ?? null}
               operatorId={operator.operatorId}
@@ -1521,6 +1587,7 @@ export function App() {
               sound={sound}
               onScanRecorded={nudgeSync}
               onScanQueueRegister={registerFloorWorkBarrier}
+              onFloorWorkRegister={registerFloorWorkBarrier}
               exceptionWindowControl={windowModeControl}
               onExit={() => {
                 // Both cleared together: `floorView` is separate state that
@@ -1539,6 +1606,12 @@ export function App() {
                   shiftId: shift.id,
                   deviceId: config.deviceId,
                   operatorId: operator.operatorId,
+                  ...(floorGeneration
+                    ? {
+                        credentialOwnership:
+                          (await credentialGenerationOwnership(floorGeneration)) ?? "",
+                      }
+                    : {}),
                   ...(reasonCode === undefined ? {} : { reasonCode }),
                 });
                 nudgeSync();
@@ -1603,6 +1676,49 @@ export function App() {
             <p role="status">{t("inventory.loadingLocalTask")}</p>
           </main>
         )
+      ) : floorGeneration && labelRecovery?.key !== labelRecoveryKey ? (
+        <main className="station-centered-screen">
+          <p role="status">{t("productLabels.restoring")}</p>
+        </main>
+      ) : labelRecovery?.key === labelRecoveryKey &&
+        (labelRecovery.shift || labelRecovery.error) ? (
+        <FullScreenDialog
+          open
+          title={t(
+            labelRecovery.error ? "productLabels.storageError" : "productLabels.resumeTitle",
+          )}
+          backLabel={t("productLabels.switchOperator")}
+          backPlacement="footer"
+          onClose={() => void switchOperator()}
+          initialFocus="dialog"
+          footer={
+            <Button
+              size="floor"
+              disabled={shiftEntryPending}
+              onClick={() => {
+                if (labelRecovery.error) {
+                  setLabelRecoveryEpoch((n) => n + 1);
+                  return;
+                }
+                const pending = labelRecovery.shift;
+                if (!pending) return;
+                void acquireShiftEntry()
+                  .then((lease) => {
+                    try {
+                      handleShiftEntered(pending, lease);
+                    } finally {
+                      lease.release();
+                    }
+                  })
+                  .catch(() => setLabelRecoveryEpoch((n) => n + 1));
+              }}
+            >
+              {t(labelRecovery.error ? "productLabels.retry" : "productLabels.resume")}
+            </Button>
+          }
+        >
+          <p>{t("productLabels.resumeHint")}</p>
+        </FullScreenDialog>
       ) : floorView === "select" ? (
         <TaskSelection
           client={activeClient}
