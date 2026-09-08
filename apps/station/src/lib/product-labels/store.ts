@@ -4,11 +4,14 @@ import {
   productLabelEventSchema,
   productLabelValueDigest,
   type ProductLabelProjection,
+  type ProductLabelEvent,
+  type ProductLabelEventBase,
 } from "@markiro/domain";
 import { z } from "zod";
 import type { SqlExecutor } from "../mirror.js";
 import type {
   ProductLabelJobView,
+  ProductLabelActor,
   StoredProductLabelAttempt,
   StoredProductLabelJob,
 } from "./types.js";
@@ -146,4 +149,107 @@ export function presentProductLabelJob(job: StoredProductLabelJob): ProductLabel
     acceptedAt: job.acceptedAt,
     updatedAt: job.updatedAt,
   };
+}
+
+export async function requireProductLabelJob(
+  exec: SqlExecutor,
+  credentialOwnership: string,
+  jobId: string,
+): Promise<StoredProductLabelJob> {
+  const job = await readProductLabelJob(exec, credentialOwnership, jobId);
+  if (!job)
+    throw new DomainError(
+      "PRODUCT_LABEL_JOB_MISSING",
+      "Product label job is unavailable for this credential",
+    );
+  return job;
+}
+
+export function nextProductLabelEventBase(
+  job: StoredProductLabelJob,
+  actor: ProductLabelActor,
+): ProductLabelEventBase {
+  return {
+    eventId: actor.newId(),
+    jobId: job.jobId,
+    attemptId: job.projection.attemptId,
+    sequence: job.projection.latestSequence + 1,
+    shiftId: job.shiftId,
+    codeHash: job.codeHash,
+    acceptedAt: job.acceptedAt,
+    policyRevision: job.policy.policyRevision,
+    templateDigest: job.policy.snapshot.digest,
+    payloadDigest: job.projection.payloadDigest,
+    operatorId: actor.operatorId,
+    occurredAt: actor.now(),
+  };
+}
+
+/** The random command token distinguishes our successful claim from a simultaneous replay. */
+export async function appendProductLabelEvent(
+  exec: SqlExecutor,
+  credentialOwnership: string,
+  input: ProductLabelEvent,
+): Promise<"applied" | "replayed" | "stale"> {
+  const event = productLabelEventSchema.parse(input);
+  const digest = productLabelValueDigest(event);
+  const [existing] = await exec.all<{ event_json: string }>(
+    "SELECT event_json FROM product_label_events WHERE credential_ownership=? AND event_id=?",
+    [credentialOwnership, event.eventId],
+  );
+  if (existing) {
+    if (productLabelValueDigest(parseJson(existing.event_json)) !== digest)
+      throw new DomainError(
+        "PRODUCT_LABEL_EVENT_ID_CONFLICT",
+        "Product label event ID already contains different data",
+      );
+    return "replayed";
+  }
+  const job = await requireProductLabelJob(exec, credentialOwnership, event.jobId);
+  if (event.sequence !== job.projection.latestSequence + 1) return "stale";
+  const projection = applyProductLabelEvent(job.projection, event, job.policy.verification);
+  const token = crypto.randomUUID();
+  try {
+    await exec.run(
+      `INSERT INTO product_label_event_commands
+      (credential_ownership,event_id,job_id,command_token,event_digest,expected_sequence,expected_attempt_id,event_json,projection_json)
+      VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(credential_ownership,event_id) DO NOTHING`,
+      [
+        credentialOwnership,
+        event.eventId,
+        event.jobId,
+        token,
+        digest,
+        job.projection.latestSequence,
+        job.projection.attemptId,
+        JSON.stringify(event),
+        JSON.stringify(projection),
+      ],
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("PRODUCT_LABEL_STALE")) return "stale";
+    if (message.includes("PRODUCT_LABEL_OWNERSHIP_CONFLICT"))
+      throw new DomainError(
+        "PRODUCT_LABEL_OWNERSHIP_CONFLICT",
+        "The accepted code is no longer available for printing on this station",
+      );
+    if (message.includes("PRODUCT_LABEL_BUSY"))
+      throw new DomainError(
+        "PRODUCT_LABEL_BUSY",
+        "Finish the current product label before reprinting another unit",
+      );
+    throw error;
+  }
+  const [command] = await exec.all<{ command_token: string; event_digest: string }>(
+    "SELECT command_token,event_digest FROM product_label_event_commands WHERE credential_ownership=? AND event_id=?",
+    [credentialOwnership, event.eventId],
+  );
+  if (!command) invalidStoredJob();
+  if (command.event_digest !== digest)
+    throw new DomainError(
+      "PRODUCT_LABEL_EVENT_ID_CONFLICT",
+      "Product label event ID already contains different data",
+    );
+  return command.command_token === token ? "applied" : "replayed";
 }

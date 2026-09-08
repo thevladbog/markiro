@@ -827,7 +827,7 @@ export interface ProductLabelPrintingDeps extends ProductLabelActor {
   credentialOwnership: string;
   target: PrintTarget | null;
   language: "zpl" | "tspl";
-  dpi: 203 | 300;
+  dpi: 203 | 300 | null;
   print(target: PrintTarget, bytes: Uint8Array): Promise<void>;
 }
 export function sendPreparedProductLabel(
@@ -864,10 +864,12 @@ export function appendProductLabelEvent(
 ): Promise<"applied" | "replayed" | "stale">;
 ```
 
+Составная запись выполняется через новую таблицу product_label_event_commands: один INSERT и AFTER INSERT trigger проверяют expected sequence/attempt, затем сохраняют event, attempt, projection и outbox. Случайный command token отличает собственный claim от одновременного replay без connection-local changes(). In-process transport отслеживается отдельно, чтобы повторный restore не объявлял ещё выполняющуюся отправку прерванной.
+
 `prepareProductLabelReprint` возвращает новый attemptId, использует прежние байты
 и новый prepared event. `PrintTarget` импортируется из `lib/hardware.ts`.
 
-- [ ] В printing test через подготовленный job задачи 5 задать transport mock:
+- [x] В printing test через подготовленный job задачи 5 задать transport mock:
 
 ```ts
 const print = vi.fn(async () => {
@@ -888,8 +890,8 @@ expect(print).toHaveBeenCalledTimes(1);
 print по умолчанию resolved; now/newId детерминированы; terminal/device/operator
 — валидные UUID; target `{kind:"tcp",host:"127.0.0.1",port:9100}` только mock.
 
-- [ ] Run `pnpm --filter @markiro/station exec vitest run test/product-labels-printing.test.ts`; ожидается missing send function.
-- [ ] `appendProductLabelEvent` пишет immutable row одним statement. Триггер проверяет
+- [x] Run `pnpm --filter @markiro/station exec vitest run test/product-labels-printing.test.ts`; ожидается missing send function.
+- [x] `appendProductLabelEvent` пишет immutable row одним statement. Триггер проверяет
       expected sequence и актуальную попытку, CAS-обновляет projection, сохраняет
       attempt result и добавляет outbox. Повтор eventId принимает только равный digest.
       До claim проверить target и совпадение language/DPI с сохранёнными bytes;
@@ -918,20 +920,20 @@ readProductLabelJob, при null бросить `PRODUCT_LABEL_JOB_MISSING` бе
 Если запись результата не удалась, вернуть recoverable error; не вызывать
 транспорт повторно. Сохранённый sending остаётся для следующего восстановления.
 
-- [ ] Restore превращает sending в delivery_unknown событием interrupted;
+- [x] Restore превращает sending в delivery_unknown событием interrupted;
       prepared разрешает продолжение только после входа оператора/готовности контекста,
       sent+required возвращает проверку. Disabled verification завершает только sent,
       а не unknown. Проверка сравнивает полный код задачей 1 и публикует verified
       только после commit; race old attempt/double callback возвращает stale.
-- [ ] Явный reprint: current shift/current credential owner, есть исходный accepted
+- [x] Явный reprint: current shift/current credential owner, есть исходный accepted
       code, нет другого pending job, нет известного ownership conflict/release; reason
       обязательна. Вторая prepared фиксирует attemptNo+1 и resets текущий verification
       outcome, сохраняя прошлые события. Язык/DPI должны соответствовать сохранённым bytes.
-- [ ] Тесты: before-I/O fault → zero print calls; after-I/O persistence fault →
+- [x] Тесты: before-I/O fault → zero print calls; after-I/O persistence fault →
       no automatic repeat; повтор/двойной click → один claim; verify mismatch/invalid →
       без изменения codes/outbox продукции; stale verify не подтверждает новый attempt;
       новый оператор имеет отдельную атрибуцию; bytes и date при reprint неизменны.
-- [ ] Run printing/recovery/acceptance suites, station gates. Commit: `feat(station): recover duplicate printing without automatic resends`.
+- [x] Run printing/recovery/acceptance suites, station gates. Commit: `feat(station): recover duplicate printing without automatic resends`.
 
 ## Task 10: Серверный приём событий и явная квитанция
 
@@ -1556,3 +1558,9 @@ immutable events. Windows/Tauri pool и физическое отключени�
 Политика и данные для печати опубликованы одним JSON в shift_mirror; новый столбец и два SQLite guard-триггера добавлены append-only. Старый ответ не может убрать active policy даже после очистки mirror, если сохранился accepted job. Перезапуск проверен на файле SQLite с двумя чередующимися соединениями. Журнал ошибок загрузки не содержит payload.
 
 RED→GREEN: helper/context отсутствовали, DPI искажение ранее допускалось, настройки не хранили DPI. Полные проверки: Station **87 suites / 1287 tests**, DB **67 / 372**, domain **40 / 622**. Все typecheck/lint/build прошли, API consumers 58/58, форматирование/diff check прошли. Существующая проверка station entry без Buffer выявила Node-specific bwip import; оба barcode модуля переведены на установленный bwip-js/generic, доменные SVG/raster тесты и запуск без Buffer зелёные. Один повтор full Station был ошибочно вызван из корня с --root, что ломает 11 cwd-dependent artifact tests; итоговый полный PASS получен из apps/station без изменения этих тестов. Физическая печать и потеря питания не проверялись.
+
+### Task 9 — Печать и восстановление
+
+RED→GREEN: отсутствовали printing/recovery. Атомарный журнал переходов допускает transport только после собственного сохранённого sending claim; потеря ответа claim, ошибка transport или записи результата никогда не вызывают автоматический resend. Контрольный скан подтверждается только после commit, полный KM сравнивается с сохранённым. Reprint сохраняет bytes/date и атрибуцию прошлых попыток; чужой owner/shift, release, конфликт и другое pending задание блокируют повтор. При конфликте после I/O физический результат и проверка всё равно сохраняются.
+
+Проверки: focused printing/recovery/acceptance **55/55**, полный Station **89 suites / 1318 tests**, DB **67 / 372**. Typecheck/lint/build, schema parity, scoped formatting и diff check прошли. Fault injection проверяет rollback event/attempt/projection/outbox на двух соединениях к файлу SQLite; lost acknowledgement и restart не вызывают print. Физическая печать, Windows/Tauri и потеря питания ещё не проверялись.

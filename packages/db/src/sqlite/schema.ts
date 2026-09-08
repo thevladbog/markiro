@@ -1012,3 +1012,35 @@ export const productLabelOutbox = sqliteTable(
     index("product_label_outbox_owner_id_idx").on(t.credentialOwnership, t.id),
   ],
 );
+
+/** One statement claims and commits an event, projection, attempt and outbox record. */
+export const productLabelEventCommands = sqliteTable(
+  "product_label_event_commands",
+  {
+    credentialOwnership: text("credential_ownership").notNull(),
+    eventId: text("event_id").notNull(),
+    jobId: text("job_id").notNull(),
+    commandToken: text("command_token").notNull(),
+    eventDigest: text("event_digest").notNull(),
+    expectedSequence: integer("expected_sequence").notNull(),
+    expectedAttemptId: text("expected_attempt_id").notNull(),
+    eventJson: text("event_json").notNull(),
+    projectionJson: text("projection_json").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.credentialOwnership, t.eventId] }),
+    foreignKey({
+      columns: [t.credentialOwnership, t.jobId],
+      foreignColumns: [productLabelJobs.credentialOwnership, productLabelJobs.jobId],
+    }).onDelete("cascade"),
+    index("product_label_event_commands_owner_job_idx").on(t.credentialOwnership, t.jobId),
+    check(
+      "product_label_event_commands_sequence_check",
+      sql`${t.expectedSequence} BETWEEN 1 AND 9007199254740990`,
+    ),
+    check(
+      "product_label_event_commands_json_check",
+      sql`json_valid(${t.eventJson}) AND json_type(${t.eventJson}) = 'object' AND json_valid(${t.projectionJson}) AND json_type(${t.projectionJson}) = 'object'`,
+    ),
+  ],
+);

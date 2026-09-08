@@ -80,6 +80,7 @@ describe("product label SQLite schema parity", () => {
       ["product_label_attempts", schema.productLabelAttempts],
       ["product_label_events", schema.productLabelEvents],
       ["product_label_outbox", schema.productLabelOutbox],
+      ["product_label_event_commands", schema.productLabelEventCommands],
     ] as const;
     for (const [name, table] of tables) {
       const actual = db
@@ -94,6 +95,7 @@ describe("product label SQLite schema parity", () => {
       "product_label_attempts",
       "product_label_events",
       "product_label_outbox",
+      "product_label_event_commands",
     ]) {
       expect(db.prepare(`PRAGMA foreign_key_list(${table})`).all()).toEqual(
         expect.arrayContaining([
@@ -114,5 +116,12 @@ describe("product label SQLite schema parity", () => {
         }),
       ]),
     );
+    expect(
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='trigger' AND name='product_label_event_command_apply'",
+        )
+        .get(),
+    ).toEqual({ name: "product_label_event_command_apply" });
   });
 });

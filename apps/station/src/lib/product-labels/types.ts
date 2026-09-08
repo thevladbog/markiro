@@ -10,6 +10,8 @@ import type {
   VerificationOutcome,
   VerificationPolicy,
 } from "@markiro/domain";
+import type { PrintTarget } from "../hardware.js";
+import type { SqlExecutor } from "../mirror.js";
 import type { BoxLabelInput } from "../box-label.js";
 
 export type DuplicateLabelFieldsInput = Omit<BoxLabelInput, "sscc" | "itemCount" | "closedAt"> & {
@@ -85,4 +87,18 @@ export interface ProductLabelJobView {
   ownershipConflict: boolean;
   acceptedAt: string;
   updatedAt: string;
+}
+
+export interface ProductLabelActor {
+  operatorId: string;
+  now(): string;
+  newId(): string;
+}
+export interface ProductLabelPrintingDeps extends ProductLabelActor {
+  exec: SqlExecutor;
+  credentialOwnership: string;
+  target: PrintTarget | null;
+  language: PrinterLanguage;
+  dpi: 203 | 300 | null;
+  print(target: PrintTarget, bytes: Uint8Array): Promise<void>;
 }

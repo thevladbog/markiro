@@ -3383,6 +3383,58 @@ export const STATION_MIGRATIONS: string[] = [
          OR json_extract(NEW.validation_print_context, '$.policy') IS NOT json_extract(accepted.acceptance_json, '$.policy'))
    )
    BEGIN SELECT RAISE(ABORT, 'PRODUCT_LABEL_POLICY_FROZEN'); END;`,
+  `CREATE TABLE IF NOT EXISTS product_label_event_commands (
+     credential_ownership TEXT NOT NULL, event_id TEXT NOT NULL, job_id TEXT NOT NULL,
+     command_token TEXT NOT NULL, event_digest TEXT NOT NULL,
+     expected_sequence INTEGER NOT NULL, expected_attempt_id TEXT NOT NULL,
+     event_json TEXT NOT NULL, projection_json TEXT NOT NULL,
+     PRIMARY KEY (credential_ownership, event_id),
+     FOREIGN KEY (credential_ownership, job_id) REFERENCES product_label_jobs(credential_ownership, job_id) ON DELETE CASCADE,
+     CONSTRAINT product_label_event_commands_sequence_check CHECK (expected_sequence BETWEEN 1 AND 9007199254740990),
+     CONSTRAINT product_label_event_commands_json_check CHECK (json_valid(event_json) AND json_type(event_json) = 'object' AND json_valid(projection_json) AND json_type(projection_json) = 'object')
+   );`,
+  `CREATE INDEX IF NOT EXISTS product_label_event_commands_owner_job_idx ON product_label_event_commands (credential_ownership, job_id);`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_event_command_apply
+   AFTER INSERT ON product_label_event_commands
+   BEGIN
+     SELECT CASE WHEN NOT EXISTS (
+       SELECT 1 FROM product_label_jobs job
+       WHERE job.credential_ownership = NEW.credential_ownership AND job.job_id = NEW.job_id
+         AND json_extract(job.projection_json, '$.latestSequence') = NEW.expected_sequence
+         AND json_extract(job.projection_json, '$.attemptId') = NEW.expected_attempt_id
+     ) THEN RAISE(ABORT, 'PRODUCT_LABEL_STALE') END;
+     SELECT CASE WHEN json_extract(NEW.event_json, '$.sequence') IS NOT NEW.expected_sequence + 1
+       OR json_extract(NEW.event_json, '$.jobId') IS NOT NEW.job_id
+       OR json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id
+       OR json_extract(NEW.projection_json, '$.latestSequence') IS NOT NEW.expected_sequence + 1
+       THEN RAISE(ABORT, 'PRODUCT_LABEL_EVENT_INVALID') END;
+     SELECT CASE WHEN json_extract(NEW.event_json, '$.kind') IN ('prepared','sending') AND (
+       EXISTS (SELECT 1 FROM product_label_jobs job WHERE job.credential_ownership = NEW.credential_ownership AND job.job_id = NEW.job_id AND job.ownership_conflict = 1)
+       OR EXISTS (SELECT 1 FROM conflicts_mirror conflict WHERE conflict.code_hash = json_extract(NEW.event_json, '$.codeHash'))
+       OR NOT EXISTS (SELECT 1 FROM codes_mirror code WHERE code.code_hash = json_extract(NEW.event_json, '$.codeHash')
+         AND code.shift_id = json_extract(NEW.event_json, '$.shiftId') AND code.scanned_at = json_extract(NEW.event_json, '$.acceptedAt'))
+     ) THEN RAISE(ABORT, 'PRODUCT_LABEL_OWNERSHIP_CONFLICT') END;
+     SELECT CASE WHEN json_extract(NEW.event_json, '$.kind') = 'prepared' AND EXISTS (
+       SELECT 1 FROM product_label_jobs job WHERE job.credential_ownership = NEW.credential_ownership
+         AND job.job_id <> NEW.job_id AND job.status <> 'completed'
+     ) THEN RAISE(ABORT, 'PRODUCT_LABEL_BUSY') END;
+
+     INSERT INTO product_label_events(credential_ownership,event_id,job_id,sequence,event_json)
+     VALUES(NEW.credential_ownership,NEW.event_id,NEW.job_id,json_extract(NEW.event_json,'$.sequence'),NEW.event_json);
+     INSERT INTO product_label_attempts(credential_ownership,attempt_id,job_id,attempt_no,prepared_json,state)
+     SELECT NEW.credential_ownership,json_extract(NEW.event_json,'$.attemptId'),NEW.job_id,
+       json_extract(NEW.event_json,'$.attemptNo'),NEW.event_json,'prepared'
+     WHERE json_extract(NEW.event_json,'$.kind') = 'prepared';
+     UPDATE product_label_attempts SET state=json_extract(NEW.projection_json,'$.attemptState'),
+       verified_at=CASE WHEN json_extract(NEW.event_json,'$.kind')='verified' THEN json_extract(NEW.event_json,'$.occurredAt') ELSE verified_at END,
+       verified_by=CASE WHEN json_extract(NEW.event_json,'$.kind')='verified' THEN json_extract(NEW.event_json,'$.operatorId') ELSE verified_by END
+     WHERE credential_ownership=NEW.credential_ownership AND job_id=NEW.job_id AND attempt_id=json_extract(NEW.event_json,'$.attemptId');
+     UPDATE product_label_jobs SET projection_json=NEW.projection_json,
+       status=json_extract(NEW.projection_json,'$.status'),updated_at=json_extract(NEW.event_json,'$.occurredAt')
+     WHERE credential_ownership=NEW.credential_ownership AND job_id=NEW.job_id;
+     INSERT INTO product_label_outbox(credential_ownership,event_id,queued_at)
+     VALUES(NEW.credential_ownership,NEW.event_id,json_extract(NEW.event_json,'$.occurredAt'));
+   END;`,
 ];
 
 export interface StationMigrationEntry {
