@@ -131,11 +131,12 @@ export class NationalCatalogClient {
   async listOwnProducts(
     auth: NationalCatalogAuth,
     request: NationalCatalogListRequest,
+    options: NationalCatalogRequestOptions = {},
   ): Promise<NationalCatalogListResult> {
     return this.request<NationalCatalogListPage, { status: "selection_too_large" }>(
       auth,
       productListPath(request),
-      {},
+      options,
       NATIONAL_CATALOG_RESPONSE_BYTE_LIMITS.list,
       (payload) => parseNationalCatalogListPage(payload, request),
       (response) => {
@@ -184,17 +185,30 @@ export class NationalCatalogClient {
   ): Promise<NationalCatalogResult<T> | TSpecial> {
     const controller = new AbortController();
     const cancelAbort = this.dependencies.scheduleAbort(controller, this.requestTimeoutMs);
+    const abort = () => controller.abort();
+    options.signal?.addEventListener("abort", abort, { once: true });
+    let response: Response | undefined;
     try {
+      if (options.signal?.aborted) return { status: "unavailable" };
       const headers = new Headers({
         Accept: "application/json",
         Authorization: `Bearer ${auth.token}`,
       });
       if (options.ifNoneMatch) headers.set("If-None-Match", options.ifNoneMatch);
 
-      const response = await this.dependencies.fetch(urlFor(auth.baseUrl, path), {
+      response = await this.dependencies.fetch(urlFor(auth.baseUrl, path), {
         method: "GET",
         headers,
         signal: controller.signal,
+      });
+      options.onResponse?.({
+        method: path.split("?")[0] ?? path,
+        status: response.status,
+        usage: {
+          total: usageValue(response.headers.get("API-Usage-Limit"), true),
+          method: usageValue(response.headers.get("API-Method-Usage-Limit"), true),
+        },
+        retryAfterSeconds: coordinatedRetryAfterSeconds(response),
       });
       const specialResult = specialStatus?.(response);
       if (specialResult !== undefined && specialResult !== null) return specialResult;
@@ -240,6 +254,10 @@ export class NationalCatalogClient {
     } catch {
       return { status: "unavailable" };
     } finally {
+      // Early status branches must close the unread body before the coordinator
+      // releases its lease/slot. Await real transport cleanup, not a race timer.
+      await response?.body?.cancel().catch(() => undefined);
+      options.signal?.removeEventListener("abort", abort);
       cancelAbort();
     }
   }
@@ -449,14 +467,33 @@ async function readResponseBytes(
   return bytes;
 }
 
-function usageValue(value: string | null): { used: number; limit: number } | null {
+function usageValue(
+  value: string | null,
+  allowOverLimit = false,
+): { used: number; limit: number } | null {
   const match = /^(\d+)\/(\d+)$/.exec(value ?? "");
   if (!match) return null;
   const used = Number(match[1]);
   const limit = Number(match[2]);
-  return Number.isSafeInteger(used) && Number.isSafeInteger(limit) && limit > 0 && used <= limit
+  return Number.isSafeInteger(used) &&
+    Number.isSafeInteger(limit) &&
+    limit > 0 &&
+    (allowOverLimit || used <= limit)
     ? { used, limit }
     : null;
+}
+
+/** Preserve legacy delta-only result parsing; coordination also honors HTTP dates. */
+function coordinatedRetryAfterSeconds(response: Response): number | null {
+  const delta = retryAfterSeconds(response);
+  if (delta !== null) return delta;
+  const retryAt = Date.parse(response.headers.get("retry-after") ?? "");
+  if (!Number.isFinite(retryAt)) return null;
+  const serverNow = Date.parse(response.headers.get("date") ?? "");
+  return Math.max(
+    0,
+    Math.ceil((retryAt - (Number.isFinite(serverNow) ? serverNow : Date.now())) / 1000),
+  );
 }
 
 function retryAfterSeconds(response: Response): number | null {

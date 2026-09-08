@@ -1478,3 +1478,114 @@ describe("NationalCatalogClient", () => {
     expect(cancelled).toBe(true);
   });
 });
+
+describe("coordinated transport context", () => {
+  it.each([413, 429, 503])(
+    "observes quota before handling status %s and cancels its body",
+    async (status) => {
+      const metadata: unknown[] = [];
+      let cancelled = false;
+      const client = new NationalCatalogClient(
+        dependencies(
+          async () =>
+            new Response(
+              new ReadableStream({
+                cancel() {
+                  cancelled = true;
+                },
+              }),
+              {
+                status,
+                headers: {
+                  "API-Usage-Limit": "500/500",
+                  "API-Method-Usage-Limit": "10/10",
+                  "Retry-After": "1800",
+                },
+              },
+            ),
+        ),
+      );
+      await client.listOwnProducts(auth, listRequest, {
+        onResponse: (value) => {
+          metadata.push(value);
+        },
+      });
+      expect(metadata).toEqual([
+        {
+          method: "/v4/product-list",
+          status,
+          usage: { total: { used: 500, limit: 500 }, method: { used: 10, limit: 10 } },
+          retryAfterSeconds: 1800,
+        },
+      ]);
+      expect(cancelled).toBe(true);
+    },
+  );
+
+  it("forwards external abort to the actual fetch while keeping the standalone timeout", async () => {
+    const controller = new AbortController();
+    let started = () => {};
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let actualSignal: AbortSignal | null = null;
+    let timeout = 0;
+    const client = new NationalCatalogClient(
+      dependencies(
+        async (_url, init) => {
+          const signal = init?.signal;
+          if (!signal) throw new Error("missing abort signal");
+          actualSignal = signal;
+          started();
+          return new Promise<Response>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+          });
+        },
+        (_controller, ms) => {
+          timeout = ms;
+          return () => {};
+        },
+      ),
+      120_000,
+    );
+    const pending = client.getFeedProducts(auth, ["04601234567890"], { signal: controller.signal });
+    await ready;
+    controller.abort();
+    expect(actualSignal).toHaveProperty("aborted", true);
+    await expect(pending).resolves.toEqual({ status: "unavailable" });
+    expect(timeout).toBe(120_000);
+  });
+});
+
+it("retains over-limit quota and HTTP-date Retry-After in coordinated metadata without changing legacy parsing", async () => {
+  const metadata: unknown[] = [];
+  const client = new NationalCatalogClient(
+    dependencies(
+      async () =>
+        new Response(null, {
+          status: 429,
+          headers: {
+            "API-Usage-Limit": "501/500",
+            "API-Method-Usage-Limit": "11/10",
+            Date: "Tue, 08 Sep 2026 09:00:00 GMT",
+            "Retry-After": "Tue, 08 Sep 2026 09:30:00 GMT",
+          },
+        }),
+    ),
+  );
+  await expect(
+    client.getFeedProducts(auth, ["04601234567890"], {
+      onResponse: (value) => {
+        metadata.push(value);
+      },
+    }),
+  ).resolves.toEqual({ status: "rate_limited", retryAfterSeconds: null });
+  expect(metadata).toEqual([
+    {
+      method: "/v3/feed-product",
+      status: 429,
+      usage: { total: { used: 501, limit: 500 }, method: { used: 11, limit: 10 } },
+      retryAfterSeconds: 1800,
+    },
+  ]);
+});

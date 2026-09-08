@@ -17,8 +17,21 @@ export interface NationalCatalogAuth {
   token: string;
 }
 
+export interface NationalCatalogResponseMetadata {
+  /** Fixed provider route only; no query, URL, token or card data. */
+  method: string;
+  status: number;
+  usage: {
+    total: { used: number; limit: number } | null;
+    method: { used: number; limit: number } | null;
+  };
+  retryAfterSeconds: number | null;
+}
+
 export interface NationalCatalogRequestOptions {
   ifNoneMatch?: string;
+  signal?: AbortSignal;
+  onResponse?: (metadata: NationalCatalogResponseMetadata) => void;
 }
 
 export interface NationalCatalogCategoriesRequest extends NationalCatalogRequestOptions {

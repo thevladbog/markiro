@@ -4,6 +4,7 @@ import { DB } from "../../auth/auth.module";
 import type { Env } from "../../env";
 import { ChzTokenService } from "../chz-exports/chz-token.service";
 import { ChzCryptoService } from "../signer-agents/chz-crypto.service";
+import { NationalCatalogRequestCoordinator } from "./national-catalog-request-coordinator";
 import { NationalCatalogClient } from "./national-catalog.client";
 import { NationalCatalogController } from "./national-catalog.controller";
 import {
@@ -42,6 +43,15 @@ export class NationalCatalogModule {
           useFactory: () => new ChzCryptoService(env.CHZ_TOKEN_ENCRYPTION_KEY),
         },
         ChzTokenService,
+        {
+          provide: NationalCatalogRequestCoordinator,
+          inject: [DB, ChzTokenService, NATIONAL_CATALOG_BASE_URL],
+          useFactory: (
+            db: ConstructorParameters<typeof NationalCatalogRequestCoordinator>[0],
+            tokens: ChzTokenService,
+            baseUrl: string | undefined,
+          ) => new NationalCatalogRequestCoordinator(db, tokens, baseUrl),
+        },
         {
           provide: NationalCatalogProposalService,
           inject: [DB],
@@ -105,6 +115,7 @@ export class NationalCatalogModule {
         },
       ],
       exports: [
+        NationalCatalogRequestCoordinator,
         NationalCatalogClient,
         NationalCatalogProductsService,
         NationalCatalogSchemaService,

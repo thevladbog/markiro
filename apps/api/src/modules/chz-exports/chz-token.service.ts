@@ -19,6 +19,9 @@ export type ChzTokenResult =
   | { status: "expired" }
   | { status: "undecryptable" };
 
+export type CatalogTokenResult =
+  ChzTokenResult | { status: "provenance_unknown" } | { status: "environment_mismatch" };
+
 @Injectable()
 export class ChzTokenService {
   private readonly logger = new Logger(ChzTokenService.name);
@@ -87,6 +90,56 @@ export class ChzTokenService {
     };
   }
 
+  /** Strict catalogue boundary; legacy exporters retain getActiveToken semantics. */
+  async getCatalogToken(
+    tenantId: string,
+    expected: keyof typeof CHZ_TRUE_API_BASE_URLS,
+  ): Promise<CatalogTokenResult> {
+    if (!this.crypto.isConfigured()) return { status: "unconfigured" };
+    // One statement observes token provenance and channel settings together.
+    const [row] = await this.db
+      .select({
+        token: schema.chzApiTokens,
+        settings: schema.integrationChannels.settings,
+      })
+      .from(schema.chzApiTokens)
+      .leftJoin(
+        schema.integrationChannels,
+        and(
+          eq(schema.integrationChannels.tenantId, schema.chzApiTokens.tenantId),
+          eq(schema.integrationChannels.type, CHZ_CHANNEL_TYPE),
+        ),
+      )
+      .where(eq(schema.chzApiTokens.tenantId, tenantId));
+    let result: CatalogTokenResult;
+    if (!row) result = { status: "missing" };
+    else {
+      const parsed = chzSignerSettingsSchema.safeParse(row.settings);
+      if (!parsed.success) result = { status: "unconfigured" };
+      else if (parsed.data.environment !== expected) result = { status: "environment_mismatch" };
+      else if (row.token.sourceTrueApiBaseUrl === null) result = { status: "provenance_unknown" };
+      else if (row.token.sourceTrueApiBaseUrl !== CHZ_TRUE_API_BASE_URLS[expected])
+        result = { status: "environment_mismatch" };
+      else if (row.token.expiresAt.getTime() <= Date.now()) result = { status: "expired" };
+      else {
+        try {
+          return {
+            status: "ok",
+            auth: {
+              baseUrl: row.token.sourceTrueApiBaseUrl,
+              token: this.crypto.decrypt(tenantId, row.token),
+            },
+            obtainedAt: row.token.obtainedAt,
+          };
+        } catch {
+          result = { status: "undecryptable" };
+        }
+      }
+    }
+    await this.requestRefresh(tenantId);
+    return result;
+  }
+
   /**
    * Removes only the bearer that actually received a 401 and immediately asks
    * the active signer to replace it. Matching `obtainedAt` avoids deleting a
@@ -103,7 +156,13 @@ export class ChzTokenService {
         ),
       )
       .returning({ tenantId: schema.chzApiTokens.tenantId });
-    if (!deleted || !this.crypto.isConfigured()) return;
+    if (!deleted) return;
+    await this.requestRefresh(tenantId);
+  }
+
+  /** Idempotent refresh intent; preserves an existing bearer on provenance failure. */
+  async requestRefresh(tenantId: string): Promise<void> {
+    if (!this.crypto.isConfigured()) return;
 
     const [agent] = await this.db
       .select({ id: schema.chzSignerAgents.id })

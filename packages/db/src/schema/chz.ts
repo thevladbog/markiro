@@ -154,6 +154,8 @@ export const chzApiTokens = pgTable(
     tokenNonce: bytea("token_nonce").notNull(),
     tokenTag: bytea("token_tag").notNull(),
     tokenType: text("token_type").notNull().default("jwt"),
+    // Unknown for pre-migration tokens; never infer provenance from current settings.
+    sourceTrueApiBaseUrl: text("source_true_api_base_url"),
     obtainedAt: timestamp("obtained_at", { withTimezone: true }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     agentId: uuid("agent_id"),

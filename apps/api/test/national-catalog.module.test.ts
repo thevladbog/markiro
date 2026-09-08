@@ -4,6 +4,7 @@ import { Test } from "@nestjs/testing";
 import { AuthorizationGuard } from "../src/authorization/authorization.guard";
 import { DB } from "../src/auth/auth.module";
 import type { Env } from "../src/env";
+import { NationalCatalogRequestCoordinator } from "../src/modules/national-catalog/national-catalog-request-coordinator";
 import { NationalCatalogModule } from "../src/modules/national-catalog/national-catalog.module";
 import { NationalCatalogProductsService } from "../src/modules/national-catalog/national-catalog-products.service";
 import { NationalCatalogProposalService } from "../src/modules/national-catalog/national-catalog-proposal.service";
@@ -62,6 +63,9 @@ describe("NationalCatalogModule wiring", () => {
       .compile();
 
     expect(ref.get(NationalCatalogProposalService)).toBeInstanceOf(NationalCatalogProposalService);
+    expect(ref.get(NationalCatalogRequestCoordinator)).toBeInstanceOf(
+      NationalCatalogRequestCoordinator,
+    );
     await ref.close();
   });
 });
