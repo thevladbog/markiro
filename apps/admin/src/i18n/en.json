@@ -2172,6 +2172,7 @@
       }
     },
     "codeSearch": {
+      "chzStatusLabel": "CHZ status",
       "title": "Code search",
       "backAction": "← Code search",
       "tabs": {
@@ -2193,6 +2194,8 @@
         "written_off": "Written off"
       },
       "filters": {
+        "chzStatusAll": "All CHZ statuses",
+        "chzStatusError": "Could not load CHZ statuses",
         "fromLabel": "From",
         "toLabel": "To",
         "productionFromLabel": "Production from",

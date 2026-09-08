@@ -59,11 +59,11 @@ const CODE_CARD = {
   ],
 };
 
-function stubFetch() {
+function stubFetch(chzStatus: string | null = null) {
   const fetchMock = vi.fn(async (url: string) => {
     const path = String(url);
     if (path.startsWith("/api/code-search/codes/")) {
-      return jsonResponse(200, CODE_CARD);
+      return jsonResponse(200, { ...CODE_CARD, chzStatus });
     }
     return jsonResponse(404, { message: "not found" });
   });
@@ -105,6 +105,35 @@ afterEach(() => {
 });
 
 describe("CodeCardPage", () => {
+  it.each([
+    ["INTRODUCED", "В обороте", "ok"],
+    ["EMITTED", "Эмитирован", "info"],
+    ["APPLIED", "Нанесён", "info"],
+    ["RETIRED", "Выбыл", "warn"],
+    ["WRITTEN_OFF", "Списан", "warn"],
+    ["WITHDRAWN", "WITHDRAWN", "warn"],
+    ["DISAGGREGATION", "Расформирован", "neutral"],
+    ["FUTURE_STATUS", "FUTURE_STATUS", "neutral"],
+  ])(
+    "shows CHZ status %s as a colored tag independently from the local status",
+    async (status, label, tone) => {
+      stubFetch(status);
+      renderPage();
+      expect(await screen.findByText("Статус в ЧЗ")).toBeTruthy();
+      expect(
+        screen.getByText(label).closest(".mk-chip")?.classList.contains(`mk-chip--${tone}`),
+      ).toBe(true);
+      expect(screen.getByText("В коробе")).toBeTruthy();
+    },
+  );
+
+  it("hides the CHZ field when no status has been received", async () => {
+    stubFetch();
+    renderPage();
+    await screen.findByText("Молоко 1л");
+    expect(screen.queryByText("Статус в ЧЗ")).toBeNull();
+  });
+
   it("renders code details, status, current box, and history with contextual links", async () => {
     stubFetch();
     renderPage();
