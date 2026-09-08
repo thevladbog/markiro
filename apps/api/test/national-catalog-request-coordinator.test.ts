@@ -292,6 +292,7 @@ describe.skipIf(!process.env.DATABASE_URL)("National Catalog shared request coor
     await expect(restarted.run(context(tenant), http, { attempt: 0 })).rejects.toMatchObject({
       state: "deferred",
       reason: "quota_wait",
+      nextRetryAt: expect.any(Date),
       consumesAttempt: false,
     });
     await expect(

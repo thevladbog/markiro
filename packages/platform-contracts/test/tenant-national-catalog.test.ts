@@ -257,6 +257,7 @@ describe("tenant National Catalog import output contracts", () => {
       state: "ready",
       loaded: 1,
       selected: 1,
+      selectedItemIds: [ID_1],
       startedAt: UTC_DATE,
       throughAt: UTC_DATE,
       expiresAt: UTC_DATE,
@@ -264,6 +265,20 @@ describe("tenant National Catalog import output contracts", () => {
       reason: null,
     } as const;
     expect(importSessionSchema.safeParse(session).success).toBe(true);
+    expect(
+      importSessionSchema.safeParse({ ...session, selectedItemIds: [ID_1, ID_1] }).success,
+    ).toBe(false);
+    expect(importSessionSchema.safeParse({ ...session, selectedItemIds: [] }).success).toBe(false);
+    expect(
+      importSessionSchema.safeParse({
+        ...session,
+        selected: 101,
+        selectedItemIds: Array.from(
+          { length: 101 },
+          (_, i) => `10000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+        ),
+      }).success,
+    ).toBe(false);
     expect(
       importSessionSchema.safeParse({ ...session, startedAt: "2026-09-08T15:30:00.000+03:00" })
         .success,
@@ -308,7 +323,7 @@ describe("tenant National Catalog import output contracts", () => {
         search: "рубашка",
         statuses: ["draft", "published"],
         includeArchived: false,
-        limit: 1000,
+        limit: 100,
       }).success,
     ).toBe(true);
     expect(
@@ -343,4 +358,16 @@ describe("tenant National Catalog import output contracts", () => {
       }).success,
     ).toBe(false);
   });
+});
+
+it("bounds session list queries before SQL", () => {
+  const query = { cursor: null, search: "", statuses: [], includeArchived: false, limit: 100 };
+  expect(importItemsQuerySchema.safeParse(query).success).toBe(true);
+  expect(importItemsQuerySchema.safeParse({ ...query, limit: 101 }).success).toBe(false);
+  expect(importItemsQuerySchema.safeParse({ ...query, search: "x".repeat(500) }).success).toBe(
+    true,
+  );
+  expect(importItemsQuerySchema.safeParse({ ...query, search: "x".repeat(501) }).success).toBe(
+    false,
+  );
 });

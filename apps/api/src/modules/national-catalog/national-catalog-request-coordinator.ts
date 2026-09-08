@@ -175,7 +175,9 @@ export class NationalCatalogRequestCoordinator {
     if (claimed) return { owner, fence: claimed.fence };
     const [busy] = await this.db
       .select({
-        next: sql<Date>`greatest(${leases.leaseUntil}, ${leases.nextAllowedAt})`,
+        next: sql<Date>`greatest(${leases.leaseUntil}, ${leases.nextAllowedAt})`.mapWith(
+          leases.nextAllowedAt,
+        ),
         quotaWait: sql<boolean>`${leases.nextAllowedAt} > now()`,
       })
       .from(leases)

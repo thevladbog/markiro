@@ -8,7 +8,6 @@ export const IMPORT_GTIN_TEXT_MAX_CHARS = 1_500_000;
 export const IMPORT_GTIN_MAX_TOKENS = 100_000;
 
 const MAX_APPLY_ITEMS = 100;
-const MAX_LIST_ITEMS = 1_000;
 
 function countImportTokens(text: string): number {
   const importTokenPattern = /[^\s,;]+/gu;
@@ -99,14 +98,24 @@ export const importSessionSchema = z
     mode: z.enum(["own_catalog", "gtins"]),
     state: importSessionStateSchema,
     loaded: nonNegativeIntegerSchema,
-    selected: nonNegativeIntegerSchema,
+    selected: nonNegativeIntegerSchema.max(MAX_APPLY_ITEMS),
+    selectedItemIds: z.array(platformUuidSchema).max(MAX_APPLY_ITEMS),
     startedAt: utcDateTimeSchema,
     throughAt: utcDateTimeSchema,
     expiresAt: utcDateTimeSchema,
     complete: z.boolean(),
     reason: nullableReasonSchema,
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    addDuplicateIssue(value.selectedItemIds, context, ["selectedItemIds"]);
+    if (value.selected !== value.selectedItemIds.length)
+      context.addIssue({
+        code: "custom",
+        path: ["selectedItemIds"],
+        message: "Selection count does not match item IDs",
+      });
+  });
 export type ImportSession = z.infer<typeof importSessionSchema>;
 
 export const importItemSchema = z
@@ -295,10 +304,10 @@ export type CatalogCapabilities = z.infer<typeof catalogCapabilitiesSchema>;
 export const importItemsQuerySchema = z
   .object({
     cursor: z.string().nullable(),
-    search: z.string(),
+    search: z.string().max(500),
     statuses: z.array(chzStatusKeySchema),
     includeArchived: z.boolean(),
-    limit: z.number().int().min(1).max(MAX_LIST_ITEMS),
+    limit: z.number().int().min(1).max(MAX_APPLY_ITEMS),
   })
   .strict();
 export type ImportItemsQuery = z.infer<typeof importItemsQuerySchema>;

@@ -71,6 +71,12 @@ describe("AuthorizationService", () => {
     service = new AuthorizationService(fakeDb(membershipRows));
   });
 
+  it("uses a supplied transaction executor for current membership", async () => {
+    const tx = fakeDb([{ userId: "user_1", organizationId: "org_1", role: "admin" }]);
+    const principal = await service.resolvePrincipal("user_1", "org_1", tx);
+    expect(principal?.roles).toEqual(["admin"]);
+  });
+
   it("resolves only the membership matching both user and active tenant", async () => {
     const principal = await service.resolvePrincipal("user_1", "org_1");
     expect(principal).toEqual({
