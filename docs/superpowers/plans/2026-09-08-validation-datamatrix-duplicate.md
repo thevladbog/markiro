@@ -938,7 +938,8 @@ readProductLabelJob, при null бросить `PRODUCT_LABEL_JOB_MISSING` бе
 ## Task 10: Серверный приём событий и явная квитанция
 
 **Files:** Create `apps/api/src/modules/station-scans/product-label-events.ts`;
-modify `station-scans/{dto,station-scans.service}.ts` и OpenAPI;
+modify `station-scans/{dto,station-scans.service,station-scans.controller}.ts` и OpenAPI;
+create `station-scans/body-parser.ts`, modify `apps/api/src/main.ts` для ограниченного parser только POST /station/scans;
 create `apps/api/test/station-product-label-events.e2e.test.ts`;
 extend `station-scans-dto.test.ts`, `station-scans.e2e.test.ts`.
 
@@ -949,7 +950,11 @@ extend `station-scans-dto.test.ts`, `station-scans.e2e.test.ts`.
 export type StationScanTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
 export function applyStationProductLabelEvents(
   tx: StationScanTransaction,
-  context: { tenantId: string; authenticatedTerminalId: string },
+  context: {
+    tenantId: string;
+    authenticatedTerminalId: string;
+    deniedEventIds?: ReadonlySet<string>;
+  },
   events: ProductLabelEvent[],
 ): Promise<ProductLabelReceipt>;
 ```
@@ -962,7 +967,7 @@ ownership_conflict | invalid_transition | sequence_gap | subscription_read_only`
 именно он записывается в deviceId новых server tables. Не принимать независимый
 device/terminal из event и не преобразовывать machineId станции в UUID.
 
-- [ ] DTO test:
+- [x] DTO test:
 
 ```ts
 expect(
@@ -974,18 +979,18 @@ expect(
 ).toBe(false);
 ```
 
-- [ ] Run `pnpm --filter @markiro/api exec vitest run test/station-scans-dto.test.ts`; ожидается отсутствие нового parsed field.
-- [ ] Добавить schemas и service module. Обрабатывать события после исходных scans
+- [x] Run `pnpm --filter @markiro/api exec vitest run test/station-scans-dto.test.ts`; ожидается отсутствие нового parsed field.
+- [x] Добавить schemas и service module. Обрабатывать события после исходных scans
       и ownership claims в той же transaction. Сохранённые canonicalRaw/shift policy
       должны давать те же digests. Parent находится по shiftId/codeHash/acceptedAt
       и аутентифицированному terminal, а не по придуманному клиентскому scan UUID.
-- [ ] Локировать job rows в фиксированном порядке после существующего registry
+- [x] Локировать job rows в фиксированном порядке после существующего registry
       lock, проверять eventId/digest и sequence. Применять чистые переходы задачи 3.
       Accepted/quarantined receipt состоит только из запрошенных eventId; одинаковый
       eventId с другим payload → conflict всей повторной записи, не успешный replay.
       Семантически неразрешённый parent/политика → per-record quarantine; последующие
       события этого job не считаются успешными. Другие jobs продолжают применяться.
-- [ ] В existing replay return добавить сохранённый receipt:
+- [x] В existing replay return добавить сохранённый receipt:
 
 ```ts
 return {
@@ -997,20 +1002,20 @@ return {
 };
 ```
 
-Legacy unbound replay без receipt не выдаёт подтверждения новому каналу.
+Legacy unbound replay без receipt не выдаёт подтверждения новому каналу. Пустой новый канал исключается из payload digest, чтобы сохранённые до обновления batch IDs оставались повторяемыми. Совмещённый пакет scans/closures/exceptions/productLabelEvents может превышать прежние 100 KiB Express: только POST /station/scans получает предел 2 MiB; остальные маршруты сохраняют прежний предел. DTO продолжает ограничивать каждый массив и каждую строку.
 Добавить новый канал в payload digest, shift permission/subscription checks,
 denied/quarantine bookkeeping и query locks. Не менять scan counts на печатных фактах.
 DeniedStationRecordDto.recordKind принимает `product_label_event`; quarantine
 payload map включает новый массив. Несуществующий job/parent сохраняется здесь,
-а не обходом FK в product_label_events. Повтор отказанного eventId с тем же
+а не обходом FK в product_label_events. Все отвергнутые факты сохраняются в station_sync_quarantine; они не продвигают projection успешного задания. Источник job неизменяем, повторное исходное job для той же приёмки и повторное использование attemptId отклоняются. lateDataAt изменяется только при первом приёме нового события, не при replay. Повтор отказанного eventId с тем же
 digest остаётся тем же отказом, даже если пришёл в другом batchId; глобальный
 ключ и digest отказа хранить в `productLabelEventReceipts` задачи 4.
 
-- [ ] E2E в реальной тестовой БД: один batch с scan+prepared, event-only batch,
+- [x] E2E в реальной тестовой БД: один batch с scan+prepared, event-only batch,
       replay после потери ответа, изменённый payload/event ID, поздний verified,
       cross-tenant/device, одинаковый код с другим хвостом, проигранный ownership,
       parent denied, две смены (ошибка одной не теряет вторую). Assert точные audit fields.
-- [ ] Run focused e2e/DTO и API package gates с DB env. Commit: `feat(api): sync product label events with durable receipts`.
+- [x] Run focused e2e/DTO и API package gates с DB env. Commit: `feat(api): sync product label events with durable receipts`.
 
 ## Task 11: Новый канал outbox, стабильный batch и ACK
 
@@ -1564,3 +1569,11 @@ RED→GREEN: helper/context отсутствовали, DPI искажение �
 RED→GREEN: отсутствовали printing/recovery. Атомарный журнал переходов допускает transport только после собственного сохранённого sending claim; потеря ответа claim, ошибка transport или записи результата никогда не вызывают автоматический resend. Контрольный скан подтверждается только после commit, полный KM сравнивается с сохранённым. Reprint сохраняет bytes/date и атрибуцию прошлых попыток; чужой owner/shift, release, конфликт и другое pending задание блокируют повтор. При конфликте после I/O физический результат и проверка всё равно сохраняются.
 
 Проверки: focused printing/recovery/acceptance **55/55**, полный Station **89 suites / 1318 tests**, DB **67 / 372**. Typecheck/lint/build, schema parity, scoped formatting и diff check прошли. Fault injection проверяет rollback event/attempt/projection/outbox на двух соединениях к файлу SQLite; lost acknowledgement и restart не вызывают print. Физическая печать, Windows/Tauri и потеря питания ещё не проверялись.
+
+### Task 10 — Серверные события и квитанции
+
+События обрабатываются после scan/ownership в одной transaction с точными per-event receipts. Parent проверяется по tenant, аутентифицированному device, shift/codeHash/acceptedAt и полному KM в codes и scan_events. Policy/dpi, оператор, sequence, origin и уникальность исходного задания/attempt проверяются до продвижения projection. Отклонённые факты остаются в station_sync_quarantine; receipt отказа стабилен между batch IDs. Количество приёмок не меняется на событиях печати.
+
+Пустой новый канал не меняет исторический payload digest. Exact replay сохраняет receipt; изменённый payload/event ID отклоняет transaction. lateDataAt обновляется только для нового факта. Только POST /station/scans получает parser limit 2 MiB для совмещённых bounded каналов, остальные маршруты остаются с прежним лимитом.
+
+Проверки: RED→GREEN для DTO, 24 e2e (включая 100 событий, cross-tenant/device, mixed errors, rollback, concurrent replay, reprint attribution, subscription renewal) и parser. Focused семи suites до двух последних проверок: 127/127. Полный API: 2892 passed, 25 skipped, один отказ inventory guard из-за нового bare Express теста без явной привязки 127.0.0.1. Test harness исправлен по существующему стандарту; повтор parser+inventory 3/3, typecheck/lint PASS. Production-код прошёл полный прогон; typecheck/lint/build прошли. Повтор parser без разрешения локального порта сначала дал EPERM, с разрешённым loopback прошёл. Scoped formatting и diff check прошли. Физическая/браузерная приёмка ещё не выполнялась.

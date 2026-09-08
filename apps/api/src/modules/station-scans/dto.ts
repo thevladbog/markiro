@@ -5,7 +5,13 @@ import {
   kmHash,
   MAX_BOX_CLOSURES_PER_SYNC_BATCH,
   MAX_KM_UTF8_BYTES,
+  MAX_PRODUCT_LABEL_EVENTS,
+  productLabelEventSchema,
+  productLabelReceiptSchema,
+  type ProductLabelReceipt,
+  type ProductLabelRejectionCode,
 } from "@markiro/domain";
+import { zodApiSchema } from "../../lib/openapi";
 
 const scanItemSchema = z
   .object({
@@ -126,6 +132,14 @@ export const syncBatchSchema = z.object({
   // Kept equal to the station drain size so the largest client-generated
   // payload remains below the API's JSON body ceiling.
   items: z.array(scanItemSchema).max(100),
+  productLabelEvents: z
+    .array(productLabelEventSchema)
+    .max(MAX_PRODUCT_LABEL_EVENTS)
+    .refine(
+      (events) => new Set(events.map((event) => event.eventId)).size === events.length,
+      "Product label event IDs must be unique in a batch",
+    )
+    .default([]),
   // Box closures carried by this batch. Independent of `items`: a box can
   // close well after its last item was drained, in a batch carrying no
   // items at all -- the drain is sequential, so the box row it refers to
@@ -259,10 +273,10 @@ export interface BatchConflictDto {
 }
 
 export interface DeniedStationRecordDto {
-  recordKind: "item" | "box" | "exception";
+  recordKind: "item" | "box" | "exception" | "product_label_event";
   recordIndex: number;
   shiftId: string;
-  code: "subscription_read_only" | "legacy_unbound_replay";
+  code: ProductLabelRejectionCode | "legacy_unbound_replay";
 }
 
 export interface SyncBatchResponseDto {
@@ -276,6 +290,7 @@ export interface SyncBatchResponseDto {
   conflicts: BatchConflictDto[];
   /** Present only when the client negotiated station-recovery-v1. */
   denied?: DeniedStationRecordDto[];
+  productLabelReceipt?: ProductLabelReceipt;
 }
 
 const codeHashOpenApiSchema = { type: "string", pattern: "^[0-9a-f]{64}$" } as const;
@@ -323,10 +338,21 @@ const deniedStationRecordOpenApiSchema: SchemaObject = {
   additionalProperties: false,
   required: ["recordKind", "recordIndex", "shiftId", "code"],
   properties: {
-    recordKind: { type: "string", enum: ["item", "box", "exception"] },
+    recordKind: { type: "string", enum: ["item", "box", "exception", "product_label_event"] },
     recordIndex: { type: "integer", minimum: 0 },
     shiftId: { type: "string", format: "uuid" },
-    code: { type: "string", enum: ["subscription_read_only", "legacy_unbound_replay"] },
+    code: {
+      type: "string",
+      enum: [
+        "subscription_read_only",
+        "legacy_unbound_replay",
+        "parent_missing",
+        "policy_mismatch",
+        "ownership_conflict",
+        "invalid_transition",
+        "sequence_gap",
+      ],
+    },
   },
 };
 
@@ -337,6 +363,7 @@ export const syncBatchResponseOpenApiSchema: SchemaObject = {
   properties: {
     applied: { type: "integer", minimum: 0 },
     alreadyApplied: { type: "boolean" },
+    productLabelReceipt: zodApiSchema(productLabelReceiptSchema),
     conflicts: {
       type: "array",
       items: batchConflictOpenApiSchema,

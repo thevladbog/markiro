@@ -1,6 +1,7 @@
 import { canonicalizeKm, kmHash } from "@markiro/domain";
 import { describe, expect, it } from "vitest";
-import { syncBatchSchema } from "../src/modules/station-scans/dto";
+import { syncBatchSchema, syncBatchResponseOpenApiSchema } from "../src/modules/station-scans/dto";
+import { zodApiSchema } from "../src/lib/openapi";
 
 const GS = "\u001d";
 const RAW = `]d2 010460068200001321abcDEF1234567${GS}93AbCd `;
@@ -46,6 +47,25 @@ function closure(overrides: Record<string, unknown> = {}) {
 }
 
 describe("syncBatchSchema marking-code contract", () => {
+  it("defaults the product label channel for legacy batches and rejects malformed events", () => {
+    expect(syncBatchSchema.parse({ batchId: "legacy", items: [] }).productLabelEvents).toEqual([]);
+    expect(
+      syncBatchSchema.safeParse({ batchId: "new", items: [], productLabelEvents: [{}] }).success,
+    ).toBe(false);
+  });
+
+  it("documents bounded product label events and explicit receipts", () => {
+    const requestSchema = zodApiSchema(syncBatchSchema);
+    expect(requestSchema.properties?.productLabelEvents).toMatchObject({
+      type: "array",
+      maxItems: 100,
+    });
+    expect(syncBatchResponseOpenApiSchema.properties?.productLabelReceipt).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["protocol", "acceptedEventIds", "quarantined"],
+    });
+  });
   it("derives canonicalRaw while preserving captured raw", () => {
     const parsed = syncBatchSchema.parse(body());
     expect(parsed.items[0]?.raw).toBe(RAW);

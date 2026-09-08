@@ -26,6 +26,7 @@ import type {
   SyncBatchResponseDto,
 } from "./dto";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
+import { applyStationProductLabelEvents } from "./product-label-events";
 
 /**
  * Upper bound on how many distinct calendar months a single batch's
@@ -131,7 +132,11 @@ function canonicalJson(value: unknown): string {
 }
 
 function payloadDigest(body: SyncBatchDto): string {
-  return createHash("sha256").update(canonicalJson(body)).digest("hex");
+  // An absent/empty new channel must retain digests of pinned pre-feature batches.
+  const { productLabelEvents, ...legacy } = body;
+  return createHash("sha256")
+    .update(canonicalJson(productLabelEvents.length > 0 ? body : legacy))
+    .digest("hex");
 }
 
 @Injectable()
@@ -180,14 +185,17 @@ export class StationScansService {
    */
   async applyBatch(
     tenantId: string,
-    body: SyncBatchDto,
+    input: Omit<SyncBatchDto, "productLabelEvents"> & {
+      productLabelEvents?: SyncBatchDto["productLabelEvents"];
+    },
     authenticatedTerminalId: string,
   ): Promise<SyncBatchResponseDto> {
-    body = {
-      ...body,
-      items: body.items.map((item) => ({ ...item, terminalId: authenticatedTerminalId })),
-      boxes: body.boxes.map((box) => ({ ...box, terminalId: authenticatedTerminalId })),
-      exceptions: body.exceptions.map((exception) => ({
+    let body: SyncBatchDto = {
+      ...input,
+      productLabelEvents: input.productLabelEvents ?? [],
+      items: input.items.map((item) => ({ ...item, terminalId: authenticatedTerminalId })),
+      boxes: input.boxes.map((box) => ({ ...box, terminalId: authenticatedTerminalId })),
+      exceptions: input.exceptions.map((exception) => ({
         ...exception,
         terminalId: authenticatedTerminalId,
       })),
@@ -311,6 +319,9 @@ export class StationScansService {
           alreadyApplied: true,
           conflicts: stored?.conflicts ?? [],
           ...(stored?.denied ? { denied: stored.denied } : {}),
+          ...(stored?.productLabelReceipt
+            ? { productLabelReceipt: stored.productLabelReceipt }
+            : {}),
         };
       }
 
@@ -326,6 +337,7 @@ export class StationScansService {
           ...body.items.map((item) => item.shiftId),
           ...body.boxes.map((box) => box.shiftId),
           ...body.exceptions.map((exception) => exception.shiftId),
+          ...body.productLabelEvents.map((event) => event.shiftId),
         ]),
       ].sort();
       // Cabinet production-date changes lock this same tenant-scoped shift
@@ -344,6 +356,7 @@ export class StationScansService {
               .for("update");
       const shiftById = new Map(shiftRows.map((shift) => [shift.id, shift]));
       let denied: DeniedStationRecordDto[] = [];
+      const deniedProductLabelEventIds = new Set<string>();
       if (access.access === "read_only") {
         const endsAt = access.subscription?.endsAt ?? null;
         const eligible = (shiftId: string) => {
@@ -355,6 +368,9 @@ export class StationScansService {
             shift.openedAt < endsAt
           );
         };
+        for (const event of body.productLabelEvents) {
+          if (!eligible(event.shiftId)) deniedProductLabelEventIds.add(event.eventId);
+        }
         denied = [
           ...body.items.flatMap((item, recordIndex) =>
             eligible(item.shiftId)
@@ -403,7 +419,11 @@ export class StationScansService {
             (_exception, index) => !deniedKeys.has(`exception:${index}`),
           ),
         };
-      } else if (shiftRows.length !== allShiftIds.length) {
+      } else if (
+        [...body.items, ...body.boxes, ...body.exceptions].some(
+          (record) => !shiftById.has(record.shiftId),
+        )
+      ) {
         throw new BadRequestException("Unknown shift in batch");
       }
 
@@ -442,6 +462,7 @@ export class StationScansService {
       }
       const codeLocks = new Set([
         ...body.items.flatMap((item) => (item.code === null ? [] : [item.code.codeHash])),
+        ...body.productLabelEvents.map((event) => event.codeHash),
         ...body.exceptions.flatMap((exception) =>
           exception.codeHash === null ? [] : [exception.codeHash],
         ),
@@ -1344,11 +1365,36 @@ export class StationScansService {
           );
       }
 
+      const productLabelReceipt =
+        body.productLabelEvents.length > 0
+          ? await applyStationProductLabelEvents(
+              tx,
+              { tenantId, authenticatedTerminalId, deniedEventIds: deniedProductLabelEventIds },
+              body.productLabelEvents,
+            )
+          : undefined;
+      if (productLabelReceipt) {
+        const rejected = new Map(
+          productLabelReceipt.quarantined.map((record) => [record.eventId, record.code]),
+        );
+        const deniedLabels = body.productLabelEvents.flatMap(
+          (event, recordIndex): DeniedStationRecordDto[] => {
+            const code = rejected.get(event.eventId);
+            return code
+              ? [{ recordKind: "product_label_event", recordIndex, shiftId: event.shiftId, code }]
+              : [];
+          },
+        );
+        await this.quarantine(tx, tenantId, authenticatedTerminalId, digest, body, deniedLabels);
+        denied.push(...deniedLabels);
+      }
+
       const result: SyncBatchResponseDto = {
         applied: body.items.length,
         alreadyApplied: false,
         conflicts: batchConflicts,
         ...(denied.length > 0 ? { denied } : {}),
+        ...(productLabelReceipt ? { productLabelReceipt } : {}),
       };
       await tx
         .update(schema.syncBatches)
@@ -1376,6 +1422,7 @@ export class StationScansService {
       item: body.items,
       box: body.boxes,
       exception: body.exceptions,
+      product_label_event: body.productLabelEvents,
     } as const;
     await tx
       .insert(schema.stationSyncQuarantine)

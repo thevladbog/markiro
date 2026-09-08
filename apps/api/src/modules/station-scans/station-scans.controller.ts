@@ -98,12 +98,12 @@ export class StationScansController {
   @ApiOperation({
     summary: "Record a station scan batch",
     description:
-      "Idempotent by `batchId`: a resend of an already-applied batch acknowledges without reapplying. `denied` is returned only when the x-station-capabilities header includes station-recovery-v1.",
+      "Idempotent by `batchId`: a resend of an already-applied batch acknowledges without reapplying. Nonempty productLabelEvents receive an explicit productLabelReceipt with stable event IDs. `denied` is returned only when the x-station-capabilities header includes station-recovery-v1.",
   })
   @ApiZodBody(syncBatchSchema)
   @ApiCreatedResponse({ schema: syncBatchResponseOpenApiSchema })
   @ApiZodValidationError()
-  @ApiHttpErrors(401, 403, 409, 429)
+  @ApiHttpErrors(401, 403, 409, 413, 429)
   async ingest(
     @Req() req: RequestWithTenant,
     @Headers("x-station-capabilities") capabilities: string | undefined,
@@ -125,6 +125,7 @@ export class StationScansController {
       applied: result.applied,
       alreadyApplied: result.alreadyApplied,
       conflicts: result.conflicts,
+      ...(result.productLabelReceipt ? { productLabelReceipt: result.productLabelReceipt } : {}),
     };
   }
 }
