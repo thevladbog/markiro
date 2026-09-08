@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, DataTabs, StatusChip } from "@markiro/ui";
 import { bridge, type AgentStatus } from "../lib/bridge.js";
+import { AutostartControl } from "../components/AutostartControl.js";
 import { CertificatePicker } from "../components/CertificatePicker.js";
 import { JournalList } from "../components/JournalList.js";
 import { UpdateControl } from "../components/UpdateControl.js";
@@ -97,6 +98,10 @@ export function Status({
 
           <section className="signer-status__section">
             <UpdateControl currentVersion={status.appVersion} onCheck={onCheckForUpdate} />
+          </section>
+
+          <section className="signer-status__section">
+            <AutostartControl />
           </section>
 
           <section className="signer-status__section">

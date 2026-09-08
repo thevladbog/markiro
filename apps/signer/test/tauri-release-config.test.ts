@@ -37,6 +37,23 @@ describe("signer release configuration", () => {
     ]);
   });
 
+  it("registers the executable name declared for the installer", () => {
+    expect(base.mainBinaryName).toBe("markiro-signer");
+    expect(stable.mainBinaryName ?? base.mainBinaryName).toBe(base.mainBinaryName);
+    const hooks = readFileSync(
+      new URL("../src-tauri/windows/installer-hooks.nsh", moduleUrl),
+      "utf8",
+    );
+    const runCommand = hooks
+      .split(/\r?\n/)
+      .find((line) => line.trimStart().startsWith("WriteRegStr HKCU"));
+    expect(runCommand).toContain(
+      '"Software\\Microsoft\\Windows\\CurrentVersion\\Run" "MarkiroSigner"',
+    );
+    expect(runCommand).toContain("$INSTDIR\\${MAINBINARYNAME}.exe");
+    expect(runCommand).not.toContain("Markiro Signer.exe");
+  });
+
   it("starts hidden so the agent lives in the tray", () => {
     expect(base.app.windows[0].visible).toBe(false);
   });
