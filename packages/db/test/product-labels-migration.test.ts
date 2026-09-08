@@ -9,7 +9,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 // The DB has no runtime dependency on domain. Compare the migration fixture with its public build.
-import { buildDuplicateLabelTemplate } from "../../domain/dist/index.js";
+import { buildDuplicateLabelTemplate } from "@markiro/domain";
 
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));

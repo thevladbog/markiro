@@ -83,6 +83,16 @@ export const STATION_PREFLIGHTS = Object.freeze([
   { path: "/shifts", method: "GET", headers: "content-type,x-api-key,x-station-capabilities" },
   { path: "/shifts", method: "POST", headers: "content-type,x-api-key,x-station-capabilities" },
   {
+    path: "/shifts/planning-config",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/shifts/product-label-templates",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
     path: "/shifts/box-label-templates",
     method: "GET",
     headers: "content-type,x-api-key,x-station-capabilities",

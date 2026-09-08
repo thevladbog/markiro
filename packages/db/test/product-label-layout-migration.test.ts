@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildDuplicateLabelTemplate, productLabelValueDigest } from "../../domain/dist/index.js";
+import { buildDuplicateLabelTemplate, productLabelValueDigest } from "@markiro/domain";
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 const seedName = "Дубликат Data Matrix 58×40 (203 dpi)";

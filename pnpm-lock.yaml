@@ -641,6 +641,9 @@ importers:
         specifier: 8.23.0
         version: 8.23.0
     devDependencies:
+      '@markiro/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@types/node':
         specifier: 26.2.0
         version: 26.2.0
