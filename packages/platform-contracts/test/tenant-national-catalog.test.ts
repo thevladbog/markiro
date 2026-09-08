@@ -157,6 +157,20 @@ describe("tenant National Catalog import input contracts", () => {
     expect(
       importPrepareSchema.safeParse({
         itemIds: [ID_1],
+        manualNames: [{ itemId: ID_1, name: ` ${"a".repeat(200)} ` }],
+        categoryChoices: [],
+      }).success,
+    ).toBe(true);
+    expect(
+      importPrepareSchema.safeParse({
+        itemIds: [ID_1],
+        manualNames: [{ itemId: ID_1, name: "a".repeat(201) }],
+        categoryChoices: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      importPrepareSchema.safeParse({
+        itemIds: [ID_1],
         manualNames: [{ itemId: ID_1, name: " ".repeat(3) }],
         categoryChoices: [],
       }).success,
@@ -190,6 +204,14 @@ describe("tenant National Catalog import input contracts", () => {
         photo: { kind: "keep" },
       }).success,
     ).toBe(false);
+    expect(
+      importDecisionSchema.safeParse({
+        previewId: ID_1,
+        acceptedEntryIds: ids(101),
+        linkAction: "attach",
+        photo: { kind: "keep" },
+      }).success,
+    ).toBe(true);
   });
 
   it("enforces 1-100 decisions and rejects repeated preview IDs", () => {

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { isValidGtin } from "@markiro/domain";
+
 import { platformUuidSchema } from "./primitives.js";
 
 export const IMPORT_GTIN_TEXT_MAX_CHARS = 1_500_000;
@@ -18,15 +20,6 @@ function countImportTokens(text: string): number {
   return count;
 }
 
-function hasValidGtin14CheckDigit(gtin14: string): boolean {
-  let sum = 0;
-  for (let index = gtin14.length - 2, position = 0; index >= 0; index -= 1, position += 1) {
-    const digit = gtin14.charCodeAt(index) - 48;
-    sum += position % 2 === 0 ? digit * 3 : digit;
-  }
-  return (10 - (sum % 10)) % 10 === Number(gtin14.at(-1));
-}
-
 function addDuplicateIssue(
   values: readonly string[],
   context: z.RefinementCtx,
@@ -43,7 +36,7 @@ const utcDateTimeSchema = z.iso.datetime();
 const normalizedGtin14Schema = z
   .string()
   .regex(/^\d{14}$/u)
-  .refine(hasValidGtin14CheckDigit, { message: "Invalid GTIN-14 check digit" });
+  .refine(isValidGtin, { message: "Invalid GTIN-14 check digit" });
 
 export const catalogEnvironmentSchema = z.enum(["production", "sandbox"]);
 export type CatalogEnvironment = z.infer<typeof catalogEnvironmentSchema>;
@@ -234,7 +227,7 @@ const candidatePhotoDecisionSchema = z
 export const importDecisionSchema = z
   .object({
     previewId: platformUuidSchema,
-    acceptedEntryIds: z.array(platformUuidSchema).max(MAX_APPLY_ITEMS),
+    acceptedEntryIds: z.array(platformUuidSchema),
     linkAction: z.enum(["attach", "keep", "replace"]),
     photo: z.discriminatedUnion("kind", [keepPhotoDecisionSchema, candidatePhotoDecisionSchema]),
   })
