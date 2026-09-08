@@ -24,6 +24,7 @@ export default defineConfig({
     "./src/schema/inventory.ts",
     "./src/schema/chz.ts",
     "./src/schema/product-regulatory.ts",
+    "./src/schema/national-catalog-import.ts",
   ],
   out: "./migrations",
   dbCredentials: { url: process.env.DATABASE_URL ?? "" },

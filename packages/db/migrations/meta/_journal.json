@@ -813,6 +813,13 @@
       "when": 1788858864496,
       "tag": "0115_duplicate_label_resolutions",
       "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1788898259939,
+      "tag": "0116_national_catalog_product_import",
+      "breakpoints": true
     }
   ]
 }
