@@ -5,6 +5,7 @@ export { gtinMatchesPrefix, isValidGtin, normalizeToGtin14 } from "./gs1/gtin.js
 export { canonicalizeKm, kmHash, kmKey, MAX_KM_UTF8_BYTES, parseKm } from "./gs1/km.js";
 export type { ParsedKm } from "./gs1/km.js";
 export * from "./product-labels/contracts.js";
+export * from "./product-labels/history.js";
 export * from "./product-labels/km.js";
 export * from "./product-labels/state.js";
 export { rasterizeGs1DataMatrix } from "./barcodes/gs1-data-matrix.js";

@@ -349,3 +349,43 @@
   font: var(--text-body-sm);
   color: var(--fg-3);
 }
+
+.mk-product-label-history {
+  display: grid;
+  gap: var(--sp-3);
+}
+.mk-product-label-history__job {
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+}
+.mk-product-label-history__job header {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.mk-product-label-history__job > time {
+  display: block;
+  margin-top: var(--sp-2);
+  color: var(--fg-3);
+  font-size: 12px;
+}
+.mk-product-label-history__events {
+  list-style: none;
+  padding: 0;
+  margin: var(--sp-2) 0;
+}
+.mk-product-label-history__events li {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 1.5fr);
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--line);
+}
+.mk-product-label-history__events li div {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

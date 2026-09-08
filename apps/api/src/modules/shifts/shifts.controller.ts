@@ -1,4 +1,10 @@
 import {
+  productLabelHistoryQuerySchema,
+  productLabelEventsQuerySchema,
+  type ProductLabelHistoryQuery,
+  type ProductLabelEventsQuery,
+} from "./product-label-history";
+import {
   Body,
   Controller,
   Delete,
@@ -24,6 +30,8 @@ import {
 import {
   CABINET_CAPABILITY,
   productLabelTemplateListSchema,
+  productLabelHistorySchema,
+  productLabelEventHistorySchema,
   PRODUCT_LABEL_PROTOCOL,
   type ProductLabelTemplateList,
 } from "@markiro/domain";
@@ -172,6 +180,43 @@ export class ShiftsController {
     query: BoxLabelTemplateProductQueryDto,
   ): Promise<ShiftBoxLabelTemplatesDto> {
     return this.shiftsService.listBoxLabelTemplates(req.tenantId!, query.productId);
+  }
+
+  @Get(":id/product-labels")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "Read duplicate label history and attempt totals" })
+  @ApiCabinetAuth()
+  @ApiParam({ name: "id", format: "uuid" })
+  @ApiZodQuery(productLabelHistoryQuerySchema)
+  @ApiOkResponse({ schema: zodApiSchema(productLabelHistorySchema) })
+  @ApiHttpErrors(400, 401, 403, 404)
+  getProductLabels(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Query(new ZodValidationPipe(productLabelHistoryQuerySchema)) query: ProductLabelHistoryQuery,
+  ) {
+    return this.shiftsService.getProductLabelHistory(req.tenantId!, id, query);
+  }
+
+  @Get(":id/product-labels/:jobId/events")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Read accepted label events in device sequence order",
+    description: "Specify deviceId when the same local job UUID occurs on multiple stations.",
+  })
+  @ApiCabinetAuth()
+  @ApiParam({ name: "id", format: "uuid" })
+  @ApiParam({ name: "jobId", format: "uuid" })
+  @ApiZodQuery(productLabelEventsQuerySchema)
+  @ApiOkResponse({ schema: zodApiSchema(productLabelEventHistorySchema) })
+  @ApiHttpErrors(400, 401, 403, 404)
+  getProductLabelEvents(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Param("jobId") jobId: string,
+    @Query(new ZodValidationPipe(productLabelEventsQuerySchema)) query: ProductLabelEventsQuery,
+  ) {
+    return this.shiftsService.getProductLabelEvents(req.tenantId!, id, jobId, query);
   }
 
   @Get(":id/summary")

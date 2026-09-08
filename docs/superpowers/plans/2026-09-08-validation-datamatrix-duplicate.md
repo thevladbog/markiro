@@ -1337,7 +1337,7 @@ verificationOutcome:VerificationOutcome,attemptNo:number,ownershipConflict:boole
 `purgeCompletedProductLabelJobs(exec:SqlExecutor,credentialOwnership:string):Promise<number>`
 удаляет только полностью доставленные закрытые локальные копии.
 
-- [ ] E2E подготовить accepted unit, две попытки sent и одно verified через
+- [x] E2E подготовить accepted unit, две попытки sent и одно verified через
       реальный sync endpoint. Проверить totals и отсутствие полного кода:
 
 ```ts
@@ -1354,27 +1354,27 @@ expect(body.items[0]).toMatchObject({ attemptNo: 2, verificationOutcome: "verifi
 `body` — parsed GET response, `raw` — исходный fixture; отдельно проверить,
 что существующий summary принятых товаров равен 1, а не 2.
 
-- [ ] Run `pnpm --filter @markiro/api exec vitest run test/product-label-history.e2e.test.ts`; ожидается отсутствующий endpoint.
-- [ ] Реализовать tenant-scoped list с keyset cursor `(acceptedAt,jobId)` и limit
+- [x] Run `pnpm --filter @markiro/api exec vitest run test/product-label-history.e2e.test.ts`; ожидается отсутствующий endpoint.
+- [x] Реализовать tenant-scoped list с keyset cursor `(acceptedAt,jobId,deviceId)` и limit
       1–100; events упорядочены sequence, max 100. Чужие tenant/shift/job → 404.
       Summary считает уникальные attempts, а не число повторно доставленных events;
       quarantine/conflict не увеличивают успешные метрики. Отдельный conflict badge
       показывает подтверждённую сервером проблему владения, не стирая попытки.
-- [ ] Admin добавляет компактный блок в существующие детали смены с четырьмя
+- [x] Admin добавляет компактный блок в существующие детали смены с четырьмя
       счётчиками и paginated журналом: время, оператор, причина, transport result,
       verification outcome. Надпись «Отправлено» не обещает физическую печать.
       Имена операторов получает tenant-scoped справочник существующего API; при
       отсутствии имени показывать безопасный идентификатор. Не добавлять remote print.
-- [ ] Локальная очистка: один DELETE родительских command rows с каскадом на
+- [x] Локальная очистка: один DELETE родительских command rows с каскадом на
       соответствующие job/attempt/event rows, только когда shift closed, job completed,
       product outbox и исходный scan outbox пусты, нет quarantine/ownership conflict.
       Parent→child FK/cascade определить в задаче 5. Серверная audit history и
       `codes_mirror` не удаляются. Вызов — после sync ACK/закрытия, с generation lease;
       повтор безопасен. Незакрытая смена сохраняет bytes для явного reprint.
-- [ ] SQLite test выполнить cleanup на каждом запрещающем условии и на полностью
+- [x] SQLite test выполнить cleanup на каждом запрещающем условии и на полностью
       завершённом job: blocked cases возвращают 0; затем 1; повтор 0. Stale callback
       после purge получает missing/stale и никогда не пересоздаёт job/transport.
-- [ ] Run API history/e2e, admin component, station recovery и package gates.
+- [x] Run API history/e2e, admin component, station recovery и package gates.
       Commit: `feat(shifts): expose product label history and retire delivered local payloads`.
 
 ## Task 16: Браузерная, аппаратная приёмка и подготовка выпуска
@@ -1612,3 +1612,16 @@ Startup gate показывает только незавершённое зад
 Append-only SQLite guards не допускают новую acceptance вне active policy, закрытие с pending job и reprint завершённого job закрытой смены. Явный recovery разрешён только незавершённому заданию. Close публикует closed в том же statement; изменение количества между чтением и записью требует повторного закрытия. Старые acceptance fixtures дополнены активной сменой; mirror downgrade test теперь сначала публикует bundle, как production.
 
 Проверки: RED→GREEN для четырёх close boundaries, отсутствующего controller, выбора DPI и потерянного ответа acceptance. Реальный WorkScreen + rotating SQLite проверяют burst, mismatch crypto tail, none, pause/remount, reason и неизменность bytes/count. App проверяет startup закрытой смены без bundle/print. Полный Station **94 suites / 1377 tests PASS**, typecheck/lint/build PASS. DB full: 371 passed и один отказ порядка добавленного столбца в Drizzle; порядок исправлен, повтор parity suite **2/2 PASS**, DB source/test typecheck, lint, build PASS. В галерее 11 состояний печати используют реальные production instruments/dialogs с явно synthetic views, шесть новых runtime gallery checks зелёные. Scoped format/diff check PASS. Реальный браузер, Windows/Tauri pool, физические устройства и потеря питания остаются в задаче 16.
+
+2026-09-08: задача 15 завершена. GET истории и событий использует кабинетные
+права и tenant-scoped запросы. Идентичность дополнена deviceId: одинаковые jobId
+разных устройств не смешиваются; неоднозначный запрос событий без deviceId
+возвращает 404. Счётчики считают уникальные попытки, quarantined события не
+увеличивают успешные метрики. Admin показывает оператора, причину, отправку и
+проверку отдельно. Очистка выполняется одним SQLite DELETE под generation lease
+только после закрытия, всех ACK и отсутствия конфликтов/закреплённого batch.
+Focused API: 37/37 (history + access + subscription inventory), Admin: 3/3,
+Station: 32/32 (retention + recovery + sync); types/lint/build этих пакетов
+прошли. Admin lint сохранил пять прежних предупреждений в boxes/conflicts.
+Domain: полный набор 622 теста, source/test types, lint/build прошли.
+Полные наборы API/Admin/Station повторяются общим финальным прогоном задачи 16.

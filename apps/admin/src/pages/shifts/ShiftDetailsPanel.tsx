@@ -1,3 +1,4 @@
+import { ProductLabelHistory } from "./ProductLabelHistory.js";
 import {
   Alert,
   Badge,
@@ -308,6 +309,9 @@ export function ShiftDetailsPanel({ shift, onClose }: { shift: ShiftDto; onClose
               <p className="mk-shift-details__empty">{t("pages.shifts.duplicate.frozen")}</p>
             ) : null}
           </section>
+        ) : null}
+        {shift.validationPrint?.mode === "duplicate_dm" && shift.status !== "planned" ? (
+          <ProductLabelHistory key={shift.id} shiftId={shift.id} />
         ) : null}
         <section className="mk-shift-details__section">
           <h3>{t("pages.shifts.details.parametersTitle")}</h3>

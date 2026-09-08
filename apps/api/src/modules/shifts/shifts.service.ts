@@ -1,4 +1,10 @@
 import {
+  readProductLabelHistory,
+  readProductLabelEventHistory,
+  type ProductLabelHistoryQuery,
+  type ProductLabelEventsQuery,
+} from "./product-label-history";
+import {
   BadRequestException,
   ConflictException,
   Inject,
@@ -418,6 +424,18 @@ export class ShiftsService {
       throw new NotFoundException();
     }
     return this.mapShiftRow(row);
+  }
+
+  getProductLabelHistory(tenantId: string, id: string, query: ProductLabelHistoryQuery) {
+    return readProductLabelHistory(this.db, tenantId, id, query);
+  }
+  getProductLabelEvents(
+    tenantId: string,
+    id: string,
+    jobId: string,
+    query: ProductLabelEventsQuery,
+  ) {
+    return readProductLabelEventHistory(this.db, tenantId, id, jobId, query);
   }
 
   async getShiftSummary(tenantId: string, id: string): Promise<ShiftSummaryDto> {

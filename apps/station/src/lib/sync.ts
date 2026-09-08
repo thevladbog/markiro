@@ -1,3 +1,4 @@
+import { purgeCompletedProductLabelJobs } from "./product-labels/retention.js";
 import {
   MAX_BOX_CLOSURES_PER_SYNC_BATCH,
   MAX_PRODUCT_LABEL_EVENTS,
@@ -948,6 +949,19 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         }
         const ceiling = await ensurePendingCeiling();
         const owner = await productLabelOwnership;
+        if (owner && !pauseInvalidated() && !credentialGeneration.sealed) {
+          const cleanupLease = acquireCredentialCommitLease(credentialGeneration);
+          if (cleanupLease) {
+            try {
+              await purgeCompletedProductLabelJobs(deps.exec, owner);
+            } catch {
+              console.warn("station: delivered print copies retained after cleanup failure");
+            } finally {
+              cleanupLease.release();
+            }
+          }
+        }
+
         let labelPin = await readProductLabelBatchPin(deps.exec, owner);
         let batch = labelPin ? [] : await readBatch(deps.exec, BATCH_SIZE, ceiling);
         // Boxes ride along independently of the outbox ceiling above (see
@@ -1358,6 +1372,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             pendingBoxCeiling = null;
             pendingExceptionCeiling = null;
             pendingProductLabelCeiling = null;
+            if (owner && commitIsCurrent()) {
+              try {
+                await purgeCompletedProductLabelJobs(deps.exec, owner);
+              } catch {
+                console.warn("station: delivered print copies retained after cleanup failure");
+              }
+            }
             lastSuccessAt = now();
             backoffMs = BACKOFF_START_MS;
           } finally {
