@@ -67,7 +67,9 @@ function resolveTextForBounds(
   element: LabelTextElement | LabelFieldElement,
   data: Record<LabelField, string>,
 ): string {
-  return element.kind === "text" ? element.text : labelFieldDisplayValue(element.field, data);
+  return element.kind === "text"
+    ? element.text
+    : labelFieldDisplayValue(element.field, data, element.textFormat);
 }
 
 function resolveBarcodeTextForBounds(

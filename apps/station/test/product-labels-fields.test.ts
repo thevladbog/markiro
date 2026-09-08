@@ -80,6 +80,37 @@ describe("duplicate label preparation", () => {
     expect(fields["product.printName"]).toBe("Сироп «Клюква»");
   });
 
+  it.each([203, 300] as const)(
+    "prints the short product name in the stock label at %i dpi",
+    async (dpi) => {
+      const { buildDuplicateLabelTemplate } = await import("@markiro/domain");
+      const value = input(dpi);
+      const snapshot = {
+        id: value.policy.snapshot.id,
+        name: `Дубликат Data Matrix 58×40 (${dpi} dpi)`,
+        spec: buildDuplicateLabelTemplate(dpi),
+      };
+      const result = await prepareProductLabelAcceptance({
+        ...value,
+        policy: {
+          ...value.policy,
+          snapshot: { ...snapshot, digest: productLabelValueDigest(snapshot) },
+        },
+        labelContext: {
+          ...value.labelContext,
+          productName: "Full product description",
+          productPrintName: "Keg 30 L",
+        },
+      });
+      const printed = Buffer.from(result.bytesBase64, "base64").toString("latin1");
+      expect(result.fields["product.printName"]).toBe("Keg 30 L");
+      expect(printed).toContain("Keg 30 L");
+      expect(printed).not.toContain("Full product description");
+      expect(printed).toContain(dpi === 203 ? "^PW464" : "^PW685");
+      expect(printed).toContain(dpi === 203 ? "^LL320" : "^LL472");
+    },
+  );
+
   it("uses the acceptance instant's local day only when the declared day is absent", () => {
     const value = input();
     const context = {

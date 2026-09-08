@@ -1126,14 +1126,14 @@ it.each([
     );
     expect(text).toContain(
       format === "zpl"
-        ? buildGfaCommand(dm)
-        : buildBitmapCommand(mmToDots(3, dpi), mmToDots(3, dpi), dm),
+        ? `^FO${mmToDots(32, dpi)},${mmToDots(8, dpi)}${buildGfaCommand(dm)}^FS`
+        : buildBitmapCommand(mmToDots(32, dpi), mmToDots(8, dpi), dm),
     );
     expect(text).not.toContain("^BX");
     expect(text).not.toContain("DMATRIX");
     expect(raster).toHaveBeenCalledWith(
       "Кега · демонстрационная этикетка",
-      expect.objectContaining({ maxWidthPx: mmToDots(52, dpi), maxLines: 2 }),
+      expect.objectContaining({ maxWidthPx: mmToDots(28, dpi), maxLines: 3, bold: true }),
     );
   },
 );

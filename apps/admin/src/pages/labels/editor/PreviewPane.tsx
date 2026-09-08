@@ -85,7 +85,9 @@ function resolvedTextOf(
   element: LabelTextElement | LabelFieldElement,
   data: Record<LabelField, string>,
 ): string {
-  return element.kind === "text" ? element.text : labelFieldDisplayValue(element.field, data);
+  return element.kind === "text"
+    ? element.text
+    : labelFieldDisplayValue(element.field, data, element.textFormat);
 }
 
 /** Every text/field element whose RESOLVED text needs rasterization -- the

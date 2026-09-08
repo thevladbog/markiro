@@ -130,13 +130,14 @@ describe.skipIf(!databaseUrl)("product label migration", () => {
     expect(seed).toBeDefined();
     if (!seed) throw new Error("Missing product duplicate backfill");
     await pool.query(
-      "UPDATE label_templates SET spec='{\"customDuplicate\":true}', enabled=false WHERE tenant_id=$1 AND purpose='product_duplicate'",
-      [a.tenant],
+      "UPDATE label_templates SET spec='{\"customDuplicate\":true}', enabled=false WHERE tenant_id=$1 AND purpose='product_duplicate' AND name=$2",
+      [a.tenant, seedName],
     );
     await pool.query(seed);
     await pool.query(seed);
     const rows = await pool.query(
-      "SELECT tenant_id, spec, enabled FROM label_templates WHERE purpose='product_duplicate' ORDER BY tenant_id",
+      "SELECT tenant_id, spec, enabled FROM label_templates WHERE purpose='product_duplicate' AND name=$1 ORDER BY tenant_id",
+      [seedName],
     );
     expect(rows.rows).toEqual([
       { tenant_id: a.tenant, spec: { customDuplicate: true }, enabled: false },

@@ -5,7 +5,7 @@ import { schema, type Db } from "@markiro/db";
 import {
   DEFAULT_BOX_LABEL_TEMPLATE_NAME,
   buildDefaultLabelTemplates,
-  buildDuplicateLabelTemplate,
+  buildDuplicateLabelTemplates,
 } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
@@ -142,13 +142,15 @@ export class TenantProvisioningService {
           `No seeded label template matched DEFAULT_BOX_LABEL_TEMPLATE_NAME (${DEFAULT_BOX_LABEL_TEMPLATE_NAME})`,
         );
       }
-      await tx.insert(schema.labelTemplates).values({
-        id: createId(),
-        tenantId: tenant.id,
-        name: "Дубликат Data Matrix 58×40 (203 dpi)",
-        purpose: "product_duplicate",
-        spec: buildDuplicateLabelTemplate(),
-      });
+      for (const { name, spec } of buildDuplicateLabelTemplates()) {
+        await tx.insert(schema.labelTemplates).values({
+          id: createId(),
+          tenantId: tenant.id,
+          name,
+          purpose: "product_duplicate",
+          spec,
+        });
+      }
       await tx.insert(schema.orgProfiles).values({
         tenantId: tenant.id,
         defaultBoxLabelTemplateId,

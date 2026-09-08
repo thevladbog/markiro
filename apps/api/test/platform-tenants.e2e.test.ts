@@ -377,7 +377,7 @@ describe.skipIf(!ready)("platform tenant management", () => {
     expect(policy).toEqual({ limitsEnabled: true });
   });
 
-  it("seeds one duplicate template and preserves all box presets and the box default", async () => {
+  it("seeds both duplicate resolutions and preserves all box presets and the box default", async () => {
     await ensureTenant();
     const templates = await setup.db
       .select()
@@ -387,10 +387,20 @@ describe.skipIf(!ready)("platform tenant management", () => {
     expect(
       boxes.map(({ name, spec }) => ({ name, spec })).sort((a, b) => a.name.localeCompare(b.name)),
     ).toEqual(buildDefaultLabelTemplates().sort((a, b) => a.name.localeCompare(b.name)));
-    expect(templates.filter((template) => template.purpose === "product_duplicate")).toEqual([
+    expect(
+      templates
+        .filter((template) => template.purpose === "product_duplicate")
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    ).toEqual([
       expect.objectContaining({
         name: "Дубликат Data Matrix 58×40 (203 dpi)",
         spec: buildDuplicateLabelTemplate(),
+        enabled: true,
+        chzProductGroupCodes: null,
+      }),
+      expect.objectContaining({
+        name: "Дубликат Data Matrix 58×40 (300 dpi)",
+        spec: { ...buildDuplicateLabelTemplate(), dpi: 300 },
         enabled: true,
         chzProductGroupCodes: null,
       }),

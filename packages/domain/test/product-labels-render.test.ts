@@ -40,19 +40,32 @@ function bitmapPayload(command: string): { bytes: Uint8Array; widthBytes: number
 }
 
 describe("duplicate template eligibility", () => {
-  it("builds a printable 58x40 layout with exactly one product code", () => {
-    expect(domain).toHaveProperty("buildDuplicateLabelTemplate", expect.any(Function));
-    const spec = domain.buildDuplicateLabelTemplate();
-    expect(domain.labelTemplateSpecSchema.parse(spec)).toMatchObject({
-      widthMm: 58,
-      heightMm: 40,
-      dpi: 203,
-    });
-    expect(() => domain.assertDuplicateTemplate(spec)).not.toThrow();
-    expect(
-      spec.elements.filter((element) => element.kind === "barcode" && element.data === "km.code"),
-    ).toEqual([expect.objectContaining({ format: "datamatrix", xMm: 3, yMm: 3, sizeMm: 24 })]);
-  });
+  it.each([203, 300] as const)(
+    "builds a printable 58x40 layout at %i dpi with exactly one product code",
+    (dpi) => {
+      expect(domain).toHaveProperty("buildDuplicateLabelTemplate", expect.any(Function));
+      const spec = domain.buildDuplicateLabelTemplate(dpi);
+      expect(domain.labelTemplateSpecSchema.parse(spec)).toMatchObject({
+        widthMm: 58,
+        heightMm: 40,
+        dpi,
+      });
+      expect(() => domain.assertDuplicateTemplate(spec)).not.toThrow();
+      expect(
+        spec.elements.filter((element) => element.kind === "barcode" && element.data === "km.code"),
+      ).toEqual([expect.objectContaining({ format: "datamatrix", xMm: 32, yMm: 8, sizeMm: 24 })]);
+      for (const field of ["product.printName", "date", "expiry", "product.egais", "km.code"]) {
+        expect(spec.elements).toContainEqual(expect.objectContaining({ kind: "field", field }));
+      }
+      expect(spec.elements).toContainEqual(
+        expect.objectContaining({
+          kind: "field",
+          field: "km.code",
+          textFormat: "km_without_crypto",
+        }),
+      );
+    },
+  );
 
   it.each<domain.LabelTemplateSpec>([
     { ...BASE, elements: [] },
@@ -103,6 +116,90 @@ describe("duplicate template eligibility", () => {
       h: 24,
     });
     expect(domain.elementBoundsMm(KM, data)).toEqual({ x: 3, y: 3, w: 576, h: 576 });
+  });
+});
+
+describe("human-readable marking identity", () => {
+  it("keeps all information left of the symbol and fits the whole identity on two lines", () => {
+    const spec = domain.buildDuplicateLabelTemplate();
+    const data = {
+      ...domain.sampleLabelData(),
+      "km.code": "010460000000001521ABCDEFGHIJabcdefghij\u001d93Tail",
+    };
+    const textElements = spec.elements.filter((el) => el.kind === "field" || el.kind === "text");
+    for (const el of textElements) {
+      const bounds = domain.elementBoundsMm(el, data);
+      expect(bounds.x + bounds.w, el.id).toBeLessThanOrEqual(30);
+      expect(bounds.y + bounds.h, el.id).toBeLessThanOrEqual(38);
+    }
+    const groups = [
+      ["cap-egais", "egais"],
+      ["cap-marking", "marking"],
+    ];
+    for (const [captionId, valueId] of groups) {
+      const caption = spec.elements.find((el) => el.id === captionId);
+      const value = spec.elements.find((el) => el.id === valueId);
+      if (!caption || !value) throw new Error("Field pair missing");
+      const bounds = domain.elementBoundsMm(caption, data);
+      expect(value.yMm, valueId).toBeGreaterThan(bounds.y + bounds.h);
+    }
+    const text = domain.labelFieldDisplayValue("km.code", data, "km_without_crypto");
+    const lines = domain.wrapTextToWidth(text, (s) => domain.estimatedTextWidthMm(s, 5), 28, 2);
+    expect(lines.join("")).toBe(text);
+  });
+  const identity = '010460000000001521a(93)"^FNC1';
+  it.each([`${identity}\u001d93AbCd`, `${identity}\u001d91Key1\u001d92CryptoTail`])(
+    "omits crypto only from explicitly formatted text: %s",
+    async (raw) => {
+      const data = { ...domain.sampleLabelData(), "km.code": raw };
+      const text = {
+        kind: "field" as const,
+        id: "hri",
+        xMm: 2,
+        yMm: 2,
+        field: "km.code" as const,
+        textFormat: "km_without_crypto" as const,
+        fontSizePt: 5,
+      };
+      const spec = domain.parseLabelTemplate({ ...BASE, elements: [text] });
+      expect(spec.elements[0]).toMatchObject({ textFormat: "km_without_crypto" });
+      expect(domain.labelFieldDisplayValue("km.code", data, "km_without_crypto")).toBe(identity);
+      expect(domain.labelFieldDisplayValue("km.code", data)).toBe(raw);
+      const zpl = await domain.generateZpl(spec, data);
+      const tspl = await domain.generateTspl(spec, data);
+      expect(zpl).not.toContain("CryptoTail");
+      expect(zpl).not.toContain("AbCd");
+      expect(tspl).not.toContain("CryptoTail");
+      expect(tspl).not.toContain("AbCd");
+      expect(data["km.code"]).toBe(raw);
+    },
+  );
+  it.each(["", "invalid\u001d93DoNotPrint"])("does not print unparsed crypto: %s", (raw) => {
+    expect(
+      domain.labelFieldDisplayValue(
+        "km.code",
+        { ...domain.sampleLabelData(), "km.code": raw },
+        "km_without_crypto",
+      ),
+    ).toBe("");
+  });
+  it("rejects applying the marking formatter to a different field", () => {
+    expect(() =>
+      domain.parseLabelTemplate({
+        ...BASE,
+        elements: [
+          {
+            kind: "field",
+            id: "bad",
+            xMm: 2,
+            yMm: 2,
+            field: "product.name",
+            textFormat: "km_without_crypto",
+            fontSizePt: 5,
+          },
+        ],
+      }),
+    ).toThrow();
   });
 });
 

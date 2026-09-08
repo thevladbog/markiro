@@ -9,7 +9,11 @@ export * from "./product-labels/history.js";
 export * from "./product-labels/km.js";
 export * from "./product-labels/state.js";
 export { rasterizeGs1DataMatrix } from "./barcodes/gs1-data-matrix.js";
-export { assertDuplicateTemplate, buildDuplicateLabelTemplate } from "./labels/duplicate.js";
+export {
+  assertDuplicateTemplate,
+  buildDuplicateLabelTemplate,
+  buildDuplicateLabelTemplates,
+} from "./labels/duplicate.js";
 export {
   buildSscc,
   formatSsccHri,

@@ -496,7 +496,7 @@ export async function generateTspl(
         lines.push(
           await renderTextLikeElement(
             element,
-            labelFieldDisplayValue(element.field, data),
+            labelFieldDisplayValue(element.field, data, element.textFormat),
             spec,
             deps,
           ),

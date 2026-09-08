@@ -295,7 +295,12 @@ export function draw(
         drawTextElement(ctx, element, element.text, scale);
         break;
       case "field":
-        drawTextElement(ctx, element, labelFieldDisplayValue(element.field, data), scale);
+        drawTextElement(
+          ctx,
+          element,
+          labelFieldDisplayValue(element.field, data, element.textFormat),
+          scale,
+        );
         break;
       case "barcode":
         if (

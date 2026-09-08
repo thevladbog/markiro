@@ -181,7 +181,8 @@ function rasterizeTextSync(
 export const rasterizeText: RasterizeTextFn = async (text, opts) => {
   const font = buildFontShorthand(opts.fontFamily, opts.fontSizePx, opts.bold);
   try {
-    await document.fonts?.load(font);
+    // Load the actual script subset; the default space only loads Latin.
+    await document.fonts?.load(font, text);
   } catch {
     // Best-effort only -- see this function's doc comment above.
   }

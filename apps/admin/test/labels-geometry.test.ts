@@ -435,11 +435,11 @@ it("fits the duplicate's whole 24 mm symbol while preserving legacy native matri
   const { fitSpecElements } = await import("../src/pages/labels/geometry.js");
   const spec = buildDuplicateLabelTemplate();
   const data = sampleLabelData();
-  const code = spec.elements[0];
+  const code = spec.elements.find((element) => element.kind === "barcode");
   if (!code) throw new Error("Missing code element");
   expect(elementBoundsMm(code, data, { kmDataMatrix: "raster" })).toEqual({
-    x: 3,
-    y: 3,
+    x: 32,
+    y: 8,
     w: 24,
     h: 24,
   });

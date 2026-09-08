@@ -334,11 +334,19 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .select({ id: schema.labelTemplates.id })
       .from(schema.labelTemplates)
       .where(eq(schema.labelTemplates.tenantId, result.tenantId));
-    expect(after).toHaveLength(21);
-    expect(templates.filter((t) => t.purpose === "product_duplicate")).toEqual([
+    expect(after).toHaveLength(22);
+    expect(
+      templates
+        .filter((t) => t.purpose === "product_duplicate")
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    ).toEqual([
       expect.objectContaining({
         name: "Дубликат Data Matrix 58×40 (203 dpi)",
         spec: buildDuplicateLabelTemplate(),
+      }),
+      expect.objectContaining({
+        name: "Дубликат Data Matrix 58×40 (300 dpi)",
+        spec: { ...buildDuplicateLabelTemplate(), dpi: 300 },
       }),
     ]);
   });
