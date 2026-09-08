@@ -8,6 +8,12 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
+import {
+  productLabelTemplateListSchema,
+  type ProductLabelTemplateList,
+  type ValidationPrintInput,
+  type ValidationPrintPolicy,
+} from "@markiro/domain";
 
 import { CABINET_ACCESS_QUERY_KEY } from "../../access/api.js";
 import { apiFetch } from "../../api/client.js";
@@ -20,6 +26,7 @@ export type ShiftOrigin = "admin" | "station";
 
 /** Mirrors `apps/api/src/modules/shifts/dto.ts`'s `ShiftDto` (joined with product/line/counterparty names). */
 export interface ShiftDto {
+  validationPrint: ValidationPrintPolicy;
   id: string;
   /** Human-readable immutable number, e.g. `AUG26-003` (`/S` = station-created). */
   number: string;
@@ -54,6 +61,7 @@ export interface ShiftDto {
  * the prefill for `counterpartyId`/capacities (see ShiftsService.createShift).
  */
 export interface CreateShiftInput {
+  validationPrint?: ValidationPrintInput;
   productId: string;
   mode: ShiftMode;
   lineId?: string | null;
@@ -85,6 +93,7 @@ interface ListShiftsResponse {
 }
 
 export interface ShiftPlanningConfigDto {
+  validationPrintProtocol: "validation-dm-duplicate-v1" | null;
   defaultBoxLabelTemplateId: string | null;
   /** Which default answered: the product's category, the organisation, or none. */
   defaultSource: "category" | "organization" | null;
@@ -188,6 +197,32 @@ export function useShiftPlanningConfig(
   return useQuery({
     queryKey: [...SHIFT_PLANNING_CONFIG_QUERY_KEY, productId],
     queryFn: () => fetchShiftPlanningConfig(productId!),
+    enabled: productId !== null,
+  });
+}
+
+export async function listProductLabelTemplates(
+  productId: string,
+  signal?: AbortSignal,
+): Promise<ProductLabelTemplateList> {
+  return productLabelTemplateListSchema.parse(
+    await apiFetch<unknown>(
+      `/shifts/product-label-templates?productId=${encodeURIComponent(productId)}`,
+      signal ? { signal } : {},
+    ),
+  );
+}
+
+export function useProductLabelTemplates(
+  productId: string | null,
+  productGroupCode: number | null,
+) {
+  return useQuery({
+    queryKey: ["product-label-templates", productId, productGroupCode],
+    queryFn: ({ signal }) => {
+      if (productId === null) throw new Error("Product is required");
+      return listProductLabelTemplates(productId, signal);
+    },
     enabled: productId !== null,
   });
 }

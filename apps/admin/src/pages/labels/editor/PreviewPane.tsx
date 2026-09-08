@@ -35,7 +35,7 @@ import {
   needsImageRendering,
   ptToDots,
   rasterAlignOffsetDots,
-  sampleLabelData,
+  type LabelTemplatePurpose,
   type LabelField,
   type LabelFieldElement,
   type LabelTemplateSpec,
@@ -50,6 +50,7 @@ import {
 } from "../../../labels/fontCoverage.js";
 import { rasterizeText as realRasterizeText } from "../../../labels/rasterizer.js";
 import { decodeRasterToRgba, dotsToMm, rasterDestXPx } from "./raster-preview.js";
+import { labelPreviewData, labelRenderOptions } from "../preview-data.js";
 import { draw, elementBoundsMm, LABEL_BACKGROUND_COLOR } from "../renderer.js";
 
 /**
@@ -68,12 +69,12 @@ export const PREVIEW_FONT_FAMILY: LabelFontFamily = "IBM Plex Sans";
  * churn the effect's dependency array with a new object identity every
  * render (`sampleLabelData()`'s return value is itself always identical in
  * content -- there is no reason to reallocate it). */
-const DEFAULT_SAMPLE_DATA = sampleLabelData();
 
 const DEFAULT_SCALE = 3;
 
 export interface PreviewPaneProps {
   spec: LabelTemplateSpec;
+  purpose?: LabelTemplatePurpose;
   data?: Record<LabelField, string>;
   scale?: number;
   rasterizeText?: RasterizeTextFn;
@@ -105,6 +106,7 @@ type CoverageStatus = "ok" | "missing" | "check-failed";
 
 export function PreviewPane({
   spec,
+  purpose = "box",
   data,
   scale = DEFAULT_SCALE,
   rasterizeText = realRasterizeText,
@@ -113,7 +115,8 @@ export function PreviewPane({
   const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [coverageStatus, setCoverageStatus] = useState<CoverageStatus>("ok");
-  const resolvedData = data ?? DEFAULT_SAMPLE_DATA;
+  const resolvedData = data ?? labelPreviewData(purpose);
+  const renderOptions = labelRenderOptions(purpose);
 
   const widthPx = spec.widthMm * scale;
   const heightPx = spec.heightMm * scale;
@@ -126,7 +129,7 @@ export function PreviewPane({
     const ctx = canvas.getContext("2d");
     if (!ctx) return undefined;
 
-    draw(spec, ctx, scale, resolvedData);
+    draw(spec, ctx, scale, resolvedData, renderOptions);
 
     let cancelled = false;
     async function compositeRaster() {
@@ -138,6 +141,10 @@ export function PreviewPane({
             fontFamily: PREVIEW_FONT_FAMILY,
             fontSizePx,
             bold: element.bold ?? false,
+            ...(element.maxWidthMm !== undefined
+              ? { maxWidthPx: mmToDots(element.maxWidthMm, spec.dpi) }
+              : {}),
+            maxLines: element.maxLines ?? 1,
           });
           if (cancelled) return;
 
@@ -170,7 +177,7 @@ export function PreviewPane({
           // the label-background color over the schematic's own bounds
           // FIRST ensures no stray schematic ink peeks out from under/around
           // the bitmap once it's composited.
-          const schematicBounds = elementBoundsMm(element, resolvedData);
+          const schematicBounds = elementBoundsMm(element, resolvedData, renderOptions);
           ctx!.fillStyle = LABEL_BACKGROUND_COLOR;
           ctx!.fillRect(
             schematicBounds.x * scale,
@@ -192,7 +199,7 @@ export function PreviewPane({
     return () => {
       cancelled = true;
     };
-  }, [spec, scale, resolvedData, rasterizeText]);
+  }, [spec, scale, resolvedData, rasterizeText, renderOptions]);
 
   // Coverage-check effect: independent of canvas availability (see this
   // module's doc comment) -- must run, and be assertable, under jsdom too.
@@ -240,6 +247,11 @@ export function PreviewPane({
       <span style={{ font: "400 12px/16px var(--font-mono)", color: "var(--fg-3)" }}>
         {t("pages.labels.editor.zoomCaption", { scale })}
       </span>
+      {purpose === "product_duplicate" ? (
+        <span style={{ font: "var(--text-body-sm)", color: "var(--fg-3)" }}>
+          {t("pages.labels.purpose.sample")}
+        </span>
+      ) : null}
       {coverageStatus === "missing" && (
         <Alert tone="warn">{t("pages.labels.editor.preview.cyrillicWarning")}</Alert>
       )}

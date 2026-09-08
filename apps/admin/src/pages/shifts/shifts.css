@@ -343,3 +343,9 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.mk-shift-form__hint {
+  margin: 0;
+  font: var(--text-body-sm);
+  color: var(--fg-3);
+}

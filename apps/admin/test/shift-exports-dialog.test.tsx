@@ -9,6 +9,13 @@ const SHIFT = {
   number: "AUG26-001",
   status: "closed",
   mode: "validation",
+  validationPrint: {
+    mode: "none",
+    verification: "none",
+    templateId: null,
+    snapshot: null,
+    policyRevision: null,
+  },
   productId: "product-1",
   productName: "Молоко 1л",
   lineId: null,

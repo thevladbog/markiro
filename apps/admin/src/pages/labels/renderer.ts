@@ -11,16 +11,8 @@
  * value; purely a canvas zoom factor chosen by the caller) using `data` to
  * resolve `field`/`barcode` element values.
  *
- * Barcodes are rendered SCHEMATICALLY, never via a real symbology encoder:
- * `code128`/`ean13` draw deterministic bar stripes (widths derived from the
- * resolved text's own character codes) and nothing else; `datamatrix`/`qr`
- * draw a deterministic module grid derived from a simple hash of the
- * resolved text, with a blank quiet-zone margin. This mirrors the actual
- * print path's own division of labor: real barcode encoding only ever
- * happens on the PRINTER (ZPL `^BC`/`^BX`/`^BQ`, TSPL `BARCODE`/`DMATRIX`/
- * `QRCODE` -- see `@markiro/domain`'s `zpl.ts`/`tspl.ts`), never in this
- * admin-side preview, so there is no real encoder to call here even if we
- * wanted pixel-accurate bars.
+ * Existing native barcodes use schematic previews. Product duplicates opt into
+ * the shared GS1 raster encoder, so their preview uses the same pixels as print.
  *
  * JSDOM NOTE (why this module has no direct unit test for `draw` itself):
  * `HTMLCanvasElement.prototype.getContext("2d")` returns `null` under jsdom
@@ -32,8 +24,12 @@
  * (called-or-skipped based on whether a real 2D context is available) by
  * `TemplateThumb.tsx` and `editor/PreviewPane.tsx`.
  */
+import { decodeRasterToRgba } from "./editor/raster-preview.js";
+
 import {
   elementBoundsMm,
+  mmToDots,
+  rasterizeGs1DataMatrix,
   INTERIOR_MODULES,
   labelFieldDisplayValue,
   LINE_HEIGHT_EM,
@@ -284,6 +280,7 @@ export function draw(
   ctx: CanvasRenderingContext2D,
   scale: number,
   data: Record<LabelField, string>,
+  options: { kmDataMatrix?: "native" | "raster" } = {},
 ): void {
   const widthPx = mmToPx(spec.widthMm, scale);
   const heightPx = mmToPx(spec.heightMm, scale);
@@ -301,7 +298,38 @@ export function draw(
         drawTextElement(ctx, element, labelFieldDisplayValue(element.field, data), scale);
         break;
       case "barcode":
-        drawBarcodeElement(ctx, element, data, scale);
+        if (
+          options.kmDataMatrix === "raster" &&
+          element.format === "datamatrix" &&
+          element.data === "km.code"
+        ) {
+          try {
+            const raster = rasterizeGs1DataMatrix(
+              data["km.code"],
+              mmToDots(element.sizeMm, spec.dpi),
+            );
+            const pixels = decodeRasterToRgba(raster);
+            const bounds = elementBoundsMm(element, data, options);
+            const dotScale = (25.4 / spec.dpi) * scale;
+            ctx.fillStyle = INK_COLOR;
+            for (let y = 0; y < raster.height; y++) {
+              for (let x = 0; x < raster.width; x++) {
+                if (pixels[(y * raster.width + x) * 4] === 0) {
+                  ctx.fillRect(
+                    (mmToDots(bounds.x, spec.dpi) + x) * dotScale,
+                    (mmToDots(bounds.y, spec.dpi) + y) * dotScale,
+                    dotScale,
+                    dotScale,
+                  );
+                }
+              }
+            }
+          } catch {
+            // No schematic replacement for a code that cannot be encoded.
+          }
+        } else {
+          drawBarcodeElement(ctx, element, data, scale);
+        }
         break;
       case "line":
         drawLineElement(ctx, element, scale);

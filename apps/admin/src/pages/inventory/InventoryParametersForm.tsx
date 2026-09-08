@@ -65,7 +65,7 @@ export function InventoryParametersForm({
       ? (templates.data ?? []).filter((template) =>
           isBoxLabelTemplateEligible(template, productGroupCode),
         )
-      : (templates.data ?? []);
+      : (templates.data ?? []).filter((template) => template.purpose !== "product_duplicate");
 
   useEffect(() => {
     if (!lineId && lines.data?.length === 1) setLineId(lines.data[0]!.id);

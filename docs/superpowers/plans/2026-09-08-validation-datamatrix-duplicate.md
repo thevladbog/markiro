@@ -1124,7 +1124,7 @@ DTO соответствует задаче 6. Новый метод
 `{items: Array<{id:string;name:string;widthMm:number;heightMm:number;dpi:203|300}>}`,
 его Zod schema и type экспортируются domain-контрактом задачи 1.
 
-- [ ] В existing ShiftForm test fixture с товаром и duplicate template проверить
+- [x] В existing ShiftForm test fixture с товаром и duplicate template проверить
       форму отправки через перехват аргумента существующего API mock:
 
 ```ts
@@ -1144,8 +1144,8 @@ expect(submittedBody).toEqual(
 `templateId` — UUID выбранного fixture из задачи 1. До действия
 заполнить обязательные поля через существующий setup `shifts.test.tsx`.
 
-- [ ] Run `pnpm --filter @markiro/admin exec vitest run test/shifts.test.tsx`; ожидается отсутствие новых настроек.
-- [ ] Добавить UI-поля только к validation: печать изначально выключена; при её
+- [x] Run `pnpm --filter @markiro/admin exec vitest run test/shifts.test.tsx`; ожидается отсутствие новых настроек.
+- [x] Добавить UI-поля только к validation: печать изначально выключена; при её
       первом включении проверка required. Выключение печати сериализует `{mode:"none"}`.
       Категория/товар изменились — прежний выбор шаблона очистить и загрузить новый
       список; устаревший ответ не возвращает старый выбор. Нельзя submit до загрузки
@@ -1164,21 +1164,21 @@ const validationPrint: ValidationPrintInput = printEnabled
 `selectedTemplate` проверяется до этой ветки; не применять non-null assertion.
 В planned edit восстановить значения; в active details показать frozen policy.
 
-- [ ] В библиотеке добавить назначение «Короб» / «Дубликат товара». Для нового
+- [x] В библиотеке добавить назначение «Короб» / «Дубликат товара». Для нового
       product_duplicate использовать `buildDuplicateLabelTemplate`; менять purpose
       существующего шаблона нельзя. В редакторе предупреждать о непригодности до save
       через `assertDuplicateTemplate`, сервер повторяет проверку. Для копирования в
       другое назначение создаётся новый шаблон и применяется его eligibility.
-- [ ] Превью и download используют ту же спецификацию, GS1-модель и raster option,
+- [x] Превью и download используют ту же спецификацию, GS1-модель и raster option,
       что Station. Новый preview передаёт kmDataMatrix=raster и в elementBoundsMm;
       геометрия старых matrix-шаблонов не меняется. Preview fixture содержит полный синтетический KM, не реальный код
       клиента; thumbnail без пригодного sample не рисует выдуманный barcode. Проверить
       Cyrillic, размер 58×40 и исключение duplicate template из всех box selectors.
-- [ ] RU/EN: «Обязательная проверка этикетки» / «Require label verification»;
+- [x] RU/EN: «Обязательная проверка этикетки» / «Require label verification»;
       пояснение выключенного режима: «После отправки на принтер можно сканировать
       следующую единицу». Использовать существующие @markiro/ui controls и tokens;
       визуальный эталон — холст, а не новые CSS-токены.
-- [ ] Run указанные suites, admin test/typecheck/lint/build. Commit: `feat(admin): configure duplicate printing and label verification`.
+- [x] Run указанные suites, admin test/typecheck/lint/build. Commit: `feat(admin): configure duplicate printing and label verification`.
 
 ## Task 13: Создание смены оператором на станции
 
@@ -1588,3 +1588,11 @@ RED→GREEN: отсутствовали printing/recovery. Атомарный ж
 RED→GREEN: новый канал отсутствовал; при пропущенной квитанции старый engine удалял scans, поздний verified не доставлялся, recovery count не учитывал labels. Добавлены event receipts и атомарные SQLite triggers, parent-aware выборка, full request pin и безопасное завершение ACK. Проверены partial ACK + restart, failure clearing pin, потеря ответа, поздний verified, старый pinned batch с нулевым новым каналом, parent за пределом первых 100 scans, чужой/unbound/sealed owner, повреждённый local event, missing/foreign/duplicate/overlap receipt, сохранение при очистке cache.
 
 Проверки: новая sync suite 17/17; вместе с существующими sync/recovery **109/109**. Полный Station **90 suites / 1335 tests**, DB **67 / 372**, typecheck/lint/build и schema parity прошли. Три старых точных fixture расширены нейтральным нулевым полем/ceiling без ослабления assertions. Scoped formatting и diff check прошли. Проверка реального Windows/Tauri pool, принтера, сканера и обрыва питания остаётся внешней.
+
+### Task 12 — Настройки кабинета и назначение шаблонов
+
+Форма смены использует существующую боковую панель и компоненты Markiro. Печать выключена по умолчанию, включение предлагает обязательную проверку, выключение явно отправляет mode=none. Требуется отдельный пригодный шаблон; смена товара/категории очищает выбор, запросы привязаны к товару и отменяются при смене, поздний ответ не подменяет новый список. Planned edit восстанавливает политику, active edit блокирует её изменение, details показывает имя сохранённого snapshot и правило проверки. В режиме дублирования отдельный box picker скрыт.
+
+В библиотеке показано назначение. Новый product_duplicate получает базовый шаблон 58×40, существующее назначение неизменно; копия создаёт новую строку. assertDuplicateTemplate блокирует сохранение непригодного импорта. Дубликаты исключены из box defaults и fallback selectors. Preview, resize geometry и ZPL/TSPL download используют raster option и полный синтетический KM; Cyrillic preview получает те же ограничения ширины/строк, что печать. Исходный шаблон и существующие native matrix previews сохраняют прежние правила.
+
+Проверки: новые настройки формы сначала отсутствовали (RED), затем сценарии выбора/none/required/product change/late response/planned/active прошли. Фокусные 7 suites 147/147; дополнительные 4 suites 83/83 включают реальные GS1 raster bytes для ZPL/TSPL при 203/300 dpi и копирование без PATCH оригинала. Полный admin 91 suites / 998 tests PASS, дополнительный org-profile regression 30/30 PASS. Typecheck, lint (5 существующих warnings в boxes/conflicts), build, scoped format и diff check PASS. Для локального запуска из изолированного worktree скопированы установленные font assets в его игнорируемую dependency directory: стандартные symlinks в основной рабочей копии восстановлены, manifests/lockfile не менялись. Canvas и аппаратная проверка этим прогоном не подтверждены; браузерные screenshots и сквозной сценарий выполняются в задаче 16. Холст проверен только через Pencil MCP, без изменений.

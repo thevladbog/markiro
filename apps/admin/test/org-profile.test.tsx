@@ -1002,3 +1002,28 @@ describe("OrgProfilePage", () => {
     ).toBeDefined();
   });
 });
+
+it("excludes a universal product duplicate from the organisation box default", async () => {
+  const box = LABEL_TEMPLATES[0];
+  if (!box) throw new Error("Missing box fixture");
+  vi.stubGlobal(
+    "fetch",
+    routeFetch({
+      labelTemplates: () =>
+        jsonResponse(200, {
+          items: [
+            { ...box, purpose: "box" },
+            { ...box, id: "duplicate", name: "Дубликат на упаковку", purpose: "product_duplicate" },
+          ],
+        }),
+    }),
+  );
+  renderPage();
+  const card = await cardOf("Профиль организации");
+  const selector = await within(card).findByRole("combobox", {
+    name: "Шаблон этикетки короба по умолчанию",
+  });
+  openSelect(selector);
+  expect(await screen.findByRole("option", { name: box.name })).toBeDefined();
+  expect(screen.queryByRole("option", { name: "Дубликат на упаковку" })).toBeNull();
+});

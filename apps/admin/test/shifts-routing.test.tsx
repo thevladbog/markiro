@@ -35,6 +35,13 @@ const SHIFT: ShiftDto = {
   number: "AUG26-001",
   status: "planned",
   mode: "validation",
+  validationPrint: {
+    mode: "none",
+    verification: "none",
+    templateId: null,
+    snapshot: null,
+    policyRevision: null,
+  },
   productId: "p1",
   productName: "Молоко 1л",
   lineId: null,

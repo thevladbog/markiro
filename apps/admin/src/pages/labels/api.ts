@@ -20,6 +20,7 @@ import type { LabelTemplateSpec } from "@markiro/domain";
 import { apiFetch } from "../../api/client.js";
 
 export interface LabelTemplateSummaryDto {
+  purpose: "box" | "product_duplicate";
   id: string;
   name: string;
   widthMm: number;
@@ -33,6 +34,7 @@ export interface LabelTemplateSummaryDto {
 }
 
 export interface LabelTemplateDto {
+  purpose: "box" | "product_duplicate";
   id: string;
   name: string;
   spec: LabelTemplateSpec;
@@ -73,6 +75,7 @@ function fetchLabelTemplate(id: string): Promise<LabelTemplateDto> {
 }
 
 export interface CreateLabelTemplateInput {
+  purpose?: "box" | "product_duplicate";
   name: string;
   spec: LabelTemplateSpec;
   enabled?: boolean;
@@ -152,6 +155,7 @@ export function useCreateLabelTemplate(): UseMutationResult<
     mutationFn: postLabelTemplate,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: LABEL_TEMPLATES_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: ["product-label-templates"] });
     },
   });
 }
@@ -173,6 +177,7 @@ export function useUpdateLabelTemplate(): UseMutationResult<
     mutationFn: ({ id, input }) => patchLabelTemplate(id, input),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({ queryKey: LABEL_TEMPLATES_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: ["product-label-templates"] });
       void queryClient.invalidateQueries({
         queryKey: [...LABEL_TEMPLATES_QUERY_KEY, variables.id],
       });

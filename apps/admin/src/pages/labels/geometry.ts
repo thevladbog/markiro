@@ -17,6 +17,7 @@ export function fitElementWithinLabel(
   element: LabelElement,
   spec: Pick<LabelTemplateSpec, "widthMm" | "heightMm">,
   data: Record<LabelField, string> = sampleLabelData(),
+  options: { kmDataMatrix?: "native" | "raster" } = {},
 ): ElementFitResult {
   if (
     !Number.isFinite(spec.widthMm) ||
@@ -26,7 +27,7 @@ export function fitElementWithinLabel(
   ) {
     return { ok: false, reason: "ELEMENT_TOO_LARGE" };
   }
-  const bounds = elementBoundsMm(element, data);
+  const bounds = elementBoundsMm(element, data, options);
   if (
     !Number.isFinite(bounds.x) ||
     !Number.isFinite(bounds.y) ||
@@ -59,7 +60,7 @@ export function fitElementWithinLabel(
         }
       : { ...element, xMm: element.xMm + deltaX, yMm: element.yMm + deltaY };
 
-  const finalBounds = elementBoundsMm(fitted, data);
+  const finalBounds = elementBoundsMm(fitted, data, options);
   if (
     finalBounds.x < -EPSILON ||
     finalBounds.y < -EPSILON ||
@@ -74,6 +75,7 @@ export function fitElementWithinLabel(
 export function fitSpecElements(
   spec: LabelTemplateSpec,
   data: Record<LabelField, string> = sampleLabelData(),
+  options: { kmDataMatrix?: "native" | "raster" } = {},
 ): { ok: true; spec: LabelTemplateSpec; adjustedIds: string[] } | ElementFitFailure {
   if (
     !Number.isFinite(spec.widthMm) ||
@@ -86,7 +88,7 @@ export function fitSpecElements(
   const adjustedIds: string[] = [];
   const elements: LabelElement[] = [];
   for (const element of spec.elements) {
-    const result = fitElementWithinLabel(element, spec, data);
+    const result = fitElementWithinLabel(element, spec, data, options);
     if (!result.ok) return result;
     elements.push(result.element);
     if (result.adjusted) adjustedIds.push(element.id);

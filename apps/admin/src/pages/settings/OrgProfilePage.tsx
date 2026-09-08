@@ -229,7 +229,10 @@ export function OrgProfilePage() {
   // The organisation default must fit every shift, so only enabled
   // templates for all categories qualify (the list is already enabled-only).
   const universalTemplates = labelTemplates.filter(
-    (template) => template.enabled && template.chzProductGroupCodes === null,
+    (template) =>
+      template.enabled &&
+      template.purpose !== "product_duplicate" &&
+      template.chzProductGroupCodes === null,
   );
   const savedTemplateIsUnavailable =
     defaultBoxLabelTemplateId !== "" &&
