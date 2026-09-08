@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DomainError } from "../../errors.js";
 import { parseTraceabilityProfile } from "../profile.js";
+import { isTraceabilityReferenceHost } from "../reference-host.js";
 
 export const COVERAGE_STATUSES = Object.freeze([
   "covered",
@@ -51,7 +52,7 @@ function validSource(value: string): boolean {
     const url = new URL(value);
     return (
       (url.protocol === "https:" || url.protocol === "http:") &&
-      Boolean(url.hostname) &&
+      isTraceabilityReferenceHost(url.hostname) &&
       !url.username &&
       !url.password
     );

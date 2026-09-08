@@ -11,6 +11,10 @@ describe("typed TLC web references without network resolution", () => {
     "https://例え.テスト/Ä",
     "https://xn--r8jz45g.xn--zckzah/Ä",
     "https://example.test/xn--?source=xn--",
+    "https://☃.net/source",
+    "https://क्‌ष.test/source",
+    "https://xn--11b2ezcs70k.test/source",
+    "https://[2001:db8::1]:443/path",
   ])("accepts a bounded reference %s", (value) => {
     expect(domain.isTlcSourceReferenceUrl(value)).toBe(true);
   });
@@ -22,6 +26,10 @@ describe("typed TLC web references without network resolution", () => {
     "https://XN--.example.test/",
     "https://source.xn--/",
     "https://%78n--/",
+    "https://xn--a.example/source",
+    "https://\u200d.test/source",
+    "https://\u200c.test/source",
+    "https://a\u200cb.test/source",
     "file:///tmp/source",
     "javascript:alert(1)",
     "https://user:pass@example.test",

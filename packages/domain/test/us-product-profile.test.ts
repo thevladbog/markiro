@@ -174,6 +174,11 @@ describe("manual coverage review policy", () => {
     "https://user:pass@example.com",
     "https://exa\nmple.com",
     "not a URL",
+    "https://xn--/source",
+    "https://xn--a.example/source",
+    "https://xn--.test/source",
+    "https://\u200d.test/source",
+    "https://a\u200cb.test/source",
   ])("rejects unsafe/invalid source %s without fetching it", (ftlSourceUrl) => {
     expect(domain.validateCoverageReview({ ...review, ftlSourceUrl }, processor)).toContainEqual({
       field: "ftlSourceUrl",
