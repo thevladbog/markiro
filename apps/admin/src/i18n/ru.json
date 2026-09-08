@@ -2172,6 +2172,7 @@
       }
     },
     "codeSearch": {
+      "chzStatusLabel": "Статус в ЧЗ",
       "title": "Поиск кодов",
       "backAction": "← Поиск кодов",
       "tabs": {
@@ -2193,6 +2194,8 @@
         "written_off": "Списан"
       },
       "filters": {
+        "chzStatusAll": "Все статусы ЧЗ",
+        "chzStatusError": "Не удалось загрузить статусы ЧЗ",
         "fromLabel": "С даты",
         "toLabel": "По дату",
         "productionFromLabel": "Производство с",

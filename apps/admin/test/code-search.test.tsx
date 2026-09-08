@@ -80,6 +80,9 @@ function stubFetch(handlers: {
 }) {
   const fetchMock = vi.fn(async (url: string) => {
     const path = String(url);
+    if (path === "/api/code-search/chz-statuses") {
+      return jsonResponse(200, ["INTRODUCED", "FUTURE_STATUS"]);
+    }
     if (path.startsWith("/api/code-search/codes")) {
       return jsonResponse(200, handlers.list ?? { items: [], page: 1, pageCount: 1, total: 0 });
     }
@@ -102,6 +105,44 @@ afterEach(() => {
 });
 
 describe("CodeSearchPage", () => {
+  it("filters by saved CHZ statuses, resets pagination and can clear the filter", async () => {
+    const fetchMock = stubFetch({
+      list: { items: [CODE_ITEM], page: 1, pageCount: 2, total: 51 },
+    });
+    const { user } = renderPage();
+    await screen.findByText("Молоко 1л");
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("page=2"))).toBe(true),
+    );
+    const select = await screen.findByRole("combobox", { name: "Статус в ЧЗ" });
+    await user.click(select);
+    await user.click(await screen.findByRole("option", { name: "В обороте" }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) => String(url).includes("page=1") && String(url).includes("chzStatus=INTRODUCED"),
+        ),
+      ).toBe(true),
+    );
+    await user.click(select);
+    await user.click(await screen.findByRole("option", { name: "FUTURE_STATUS" }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url).includes("chzStatus=FUTURE_STATUS")),
+      ).toBe(true),
+    );
+    await user.click(select);
+    await user.click(await screen.findByRole("option", { name: "Все статусы ЧЗ" }));
+    await waitFor(() => expect(select.textContent).toContain("Все статусы ЧЗ"));
+    await waitFor(() => {
+      const lastListRequest = fetchMock.mock.calls
+        .filter(([url]) => String(url).startsWith("/api/code-search/codes?"))
+        .at(-1)?.[0];
+      expect(lastListRequest).toBe("/api/code-search/codes?page=1");
+    });
+  });
+
   it("renders registry rows with status chips", async () => {
     stubFetch({
       list: { items: [CODE_ITEM, CODE_ITEM_AGGREGATED], page: 1, pageCount: 1, total: 2 },

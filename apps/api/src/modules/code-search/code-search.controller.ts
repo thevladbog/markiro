@@ -90,6 +90,15 @@ export class CodeSearchController {
     return this.codeSearchService.classify(req.tenantId!, query.q);
   }
 
+  @Get("chz-statuses")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "List saved CHZ statuses present in the tenant code registry" })
+  @ApiOkResponse({ schema: { type: "array", items: { type: "string" }, uniqueItems: true } })
+  @ApiHttpErrors(401, 403)
+  async chzStatuses(@Req() req: RequestWithTenant): Promise<string[]> {
+    return this.codeSearchService.listChzStatuses(req.tenantId!);
+  }
+
   @Get("codes")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   @ApiOperation({ summary: "List registered codes" })
@@ -123,6 +132,13 @@ export class CodeSearchController {
   })
   @ApiQuery({ name: "productId", required: false, schema: { type: "string", format: "uuid" } })
   @ApiQuery({ name: "shiftId", required: false, schema: { type: "string", format: "uuid" } })
+  @ApiQuery({
+    name: "chzStatus",
+    required: false,
+    schema: { type: "string", minLength: 1, maxLength: 256 },
+    description:
+      "Exact saved CHZ status; available values are returned by GET /code-search/chz-statuses.",
+  })
   @ApiQuery({
     name: "status",
     required: false,

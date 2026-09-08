@@ -49,6 +49,7 @@ export interface ListCodesFilters {
   productionTo?: string;
   productId?: string;
   status?: string;
+  chzStatus?: string;
 }
 
 /** Mirrors `apps/api/src/modules/code-search/dto.ts`'s `ClassifyBoxMatchDto`, `Date` fields as `string`. */
@@ -109,6 +110,8 @@ export interface CodeCardDto {
   productId: string | null;
   productName: string | null;
   status: CodeStatus;
+  /** Last status saved by the CHZ agent, absent until received. */
+  chzStatus: string | null;
   /** The owner shift's effective production day (`productionDate ?? plannedDate`), `YYYY-MM-DD`. */
   productionDate: string | null;
   currentBox: { id: string; sscc: string | null } | null;
@@ -164,6 +167,7 @@ function buildListPath(filters: ListCodesFilters): string {
   if (filters.productionTo) query.set("productionTo", filters.productionTo);
   if (filters.productId) query.set("productId", filters.productId);
   if (filters.status) query.set("status", filters.status);
+  if (filters.chzStatus) query.set("chzStatus", filters.chzStatus);
   return `/code-search/codes?${query.toString()}`;
 }
 
@@ -218,3 +222,11 @@ export function useBoxCard(boxId: string | undefined): UseQueryResult<BoxCardDto
 }
 
 export { ApiRequestError };
+
+/** Saved status values present in the active tenant's code registry. */
+export function useChzStatuses(): UseQueryResult<string[]> {
+  return useQuery({
+    queryKey: [...CODE_SEARCH_QUERY_KEY, "chz-statuses"],
+    queryFn: () => apiFetch<string[]>("/code-search/chz-statuses"),
+  });
+}
