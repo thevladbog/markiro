@@ -1,5 +1,5 @@
 import { Checkbox } from "@markiro/ui";
-import type { ReceivingDraftRecord } from "@markiro/platform-contracts";
+import type { ReceivingDraftView } from "./live-record.js";
 import { useTranslation } from "react-i18next";
 
 export type ReceivingExemptionLabels = {
@@ -15,7 +15,7 @@ export function ReceivingExemptionReview({
   onChange,
   labels,
 }: {
-  record: ReceivingDraftRecord;
+  record: ReceivingDraftView;
   requiredLines: number[];
   reviewedLines: number[];
   disabled: boolean;
@@ -25,14 +25,14 @@ export function ReceivingExemptionReview({
   const { t } = useTranslation();
   const required = new Set(requiredLines);
   const reviewed = new Set(reviewedLines);
-  const previousSource = record.draft.previousSourceLocationId;
+  const previousSource = record.content.draft.previousSourceLocationId;
 
   return (
     <section className="us-rec-exemption-review" aria-labelledby="receiving-exemption-review">
       <h3 id="receiving-exemption-review">{t("receiving.reviewTitle")}</h3>
       <p className="us-rec-hint">{t("receiving.reviewIntro")}</p>
       <ol>
-        {record.draft.items.flatMap((item, index) => {
+        {record.content.draft.items.flatMap((item, index) => {
           const line = index + 1;
           if (!item.exemptSupplier || !required.has(line)) return [];
           const receipt = item.exemptReceipt;

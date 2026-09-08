@@ -3,8 +3,9 @@ import { Button, Input, Textarea } from "@markiro/ui";
 import {
   receivingDraftSchema,
   type ReceivingDraft,
-  type ReceivingDraftRecord,
-  type ReceivingFinalizedRecord,
+  type ReceivingLiveRecord,
+  type ReceivingFinalizeResult,
+  type ReceivingCommandResult,
 } from "@markiro/platform-contracts";
 import { useTranslation } from "react-i18next";
 import { UsClientError } from "../client.js";
@@ -13,6 +14,8 @@ import { ReceivingReferencePicker } from "./reference-picker.js";
 import { ReceivingDocumentSection } from "./document-section.js";
 import { ReceivingLineEditor, emptyReceivingLine } from "./line-editor.js";
 import { ReceivingReadinessPanel } from "./readiness-panel.js";
+import { isReceivingDraftView, type ReceivingDraftView } from "./live-record.js";
+import { ReceivingLifecycleNotice } from "./lifecycle-notice.js";
 
 const emptyDraft: ReceivingDraft = {
   dateReceived: null,
@@ -30,11 +33,11 @@ type Command = {
   draft: ReceivingDraft;
 };
 type Props = MasterDataViewProps & {
-  initial: ReceivingDraftRecord | null;
+  initial: ReceivingDraftView | null;
   timeZone: string;
   onClose: () => void;
   canManageQa?: boolean;
-  onFinalized?: (record: ReceivingFinalizedRecord) => void;
+  onOpenRecord?: (record: ReceivingLiveRecord) => void;
 };
 const fieldKeys: Record<string, string> = {
   dateReceived: "date",
@@ -65,13 +68,13 @@ export function ReceivingEditor({
   onSessionLost,
   onClose,
   canManageQa = false,
-  onFinalized,
+  onOpenRecord,
 }: Props) {
   const { t, i18n } = useTranslation();
   const [record, setRecord] = useState(initial);
-  const [draft, setDraft] = useState(initial?.draft ?? emptyDraft);
+  const [draft, setDraft] = useState(initial?.content.draft ?? emptyDraft);
   const [lineKeys, setLineKeys] = useState(() =>
-    (initial?.draft.items ?? []).map(() => crypto.randomUUID()),
+    (initial?.content.draft.items ?? []).map(() => crypto.randomUUID()),
   );
   const [activeLine, setActiveLine] = useState(0);
   const [documentDirty, setDocumentDirty] = useState(false);
@@ -90,12 +93,16 @@ export function ReceivingEditor({
     resolvedReceivingLocation?.id === draft.locationId ? resolvedReceivingLocation.label : "";
   const [issues, setIssues] = useState<{ key: string; line: number | null }[]>([]);
   const command = useRef<Command | null>(null);
+  const acknowledgedEventId = useRef<{ eventId: string; result: ReceivingCommandResult } | null>(
+    null,
+  );
   const busy = useRef(false);
   const alive = useRef(true);
   const heading = useRef<HTMLHeadingElement>(null);
   const alert = useRef<HTMLDivElement>(null);
   const dirty =
-    JSON.stringify(draft) !== JSON.stringify(record?.draft ?? emptyDraft) || documentDirty;
+    JSON.stringify(draft) !== JSON.stringify(record?.content.draft ?? emptyDraft) || documentDirty;
+  const recovering = acknowledgedEventId.current !== null;
   const disabled =
     !canWrite || pending || mutationPending || uncertain || blocked || finalizationLocked;
   const currentLine = draft.items[activeLine];
@@ -113,8 +120,8 @@ export function ReceivingEditor({
     heading.current?.focus();
   }, [record?.id]);
   useEffect(
-    () => onDirtyChange(dirty || uncertain || finalizationLocked),
-    [dirty, uncertain, finalizationLocked, onDirtyChange],
+    () => onDirtyChange(dirty || uncertain || recovering || finalizationLocked),
+    [dirty, uncertain, recovering, finalizationLocked, onDirtyChange],
   );
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
   useEffect(() => {
@@ -145,14 +152,14 @@ export function ReceivingEditor({
     };
   }, [client, draft.locationId, onForbidden, onSessionLost]);
   useEffect(() => {
-    if (!dirty && !pending && !uncertain && !finalizationLocked) return;
+    if (!dirty && !pending && !uncertain && !recovering && !finalizationLocked) return;
     const protect = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", protect);
     return () => window.removeEventListener("beforeunload", protect);
-  }, [dirty, pending, uncertain, finalizationLocked]);
+  }, [dirty, pending, uncertain, recovering, finalizationLocked]);
 
   function change(next: ReceivingDraft) {
     setReadinessGeneration((value) => value + 1);
@@ -163,13 +170,65 @@ export function ReceivingEditor({
   function close() {
     if (busy.current || mutationPending || finalizationLocked) return;
     if (
-      (dirty || uncertain) &&
-      !window.confirm(t(uncertain ? "receiving.leaveUncertain" : "md.discardConfirm"))
+      (dirty || uncertain || recovering) &&
+      !window.confirm(t(uncertain || recovering ? "receiving.leaveUncertain" : "md.discardConfirm"))
     )
       return;
     onClose();
   }
+  function acceptCurrent(result: ReceivingLiveRecord) {
+    if (!isReceivingDraftView(result) || result.status !== "draft" || result.revision !== 1) {
+      onOpenRecord?.(result);
+      return;
+    }
+    setRecord(result);
+    setDraft(result.content.draft);
+    setLineKeys(result.content.draft.items.map(() => crypto.randomUUID()));
+    setActiveLine((line) => Math.min(line, Math.max(0, result.content.draft.items.length - 1)));
+    setBlocked(false);
+    setUncertain(false);
+    setFailure(null);
+    setIssues([]);
+    command.current = null;
+    acknowledgedEventId.current = null;
+  }
+  async function recoverAcknowledgement() {
+    const id = acknowledgedEventId.current?.eventId;
+    if (!id || busy.current || mutationPending) return;
+    return readAcknowledged(id);
+  }
+  async function finalizedAcknowledgement(result: ReceivingFinalizeResult) {
+    if (!alive.current) return;
+    const id = "receiptVersion" in result ? result.eventId : result.id;
+    acknowledgedEventId.current = { eventId: id, result };
+    setBlocked(true);
+    setUncertain(false);
+    setReadinessGeneration((value) => value + 1);
+    return readAcknowledged(id);
+  }
+  async function readAcknowledged(id: string) {
+    busy.current = true;
+    setPending(true);
+    const release = beginMutation();
+    try {
+      const result = await client.getReceivingRecord(id);
+      if (alive.current) {
+        acceptCurrent(result);
+        setSaved(true);
+      }
+    } catch (error) {
+      if (!alive.current) return;
+      setFailure("currentUnavailable");
+      if (error instanceof UsClientError && error.code === "session_required") onSessionLost();
+      if (error instanceof UsClientError && error.code === "forbidden") await onForbidden();
+    } finally {
+      busy.current = false;
+      if (alive.current) setPending(false);
+      release();
+    }
+  }
   async function reload() {
+    if (acknowledgedEventId.current) return recoverAcknowledgement();
     if (!record || busy.current || mutationPending) return;
     if ((dirty || uncertain) && !window.confirm(t("receiving.reloadConfirm"))) return;
     setReadinessGeneration((value) => value + 1);
@@ -181,20 +240,8 @@ export function ReceivingEditor({
     try {
       const result = await client.getReceivingRecord(record.id);
       if (!alive.current) return;
-      if (result.status === "finalized") {
-        onFinalized?.(result);
-        return;
-      }
-      setRecord(result);
-      setDraft(result.draft);
-      setLineKeys(result.draft.items.map(() => crypto.randomUUID()));
-      setActiveLine(0);
-      setBlocked(false);
-      setUncertain(false);
-      setFailure(null);
-      setIssues([]);
+      acceptCurrent(result);
       setSaved(false);
-      command.current = null;
     } catch (error) {
       if (!alive.current) return;
       setFailure("reloadError");
@@ -258,24 +305,28 @@ export function ReceivingEditor({
             });
       if (!alive.current) return;
       // A replayed create/save receipt is historical. Read current lifecycle before reopening editing.
-      const result = uncertain ? await client.getReceivingRecord(receipt.id) : receipt;
-      if (!alive.current) return;
-      if (result.status === "finalized") {
-        onFinalized?.(result);
-        return;
-      }
-      command.current = null;
+      acknowledgedEventId.current = {
+        eventId: "receiptVersion" in receipt ? receipt.eventId : receipt.id,
+        result: receipt,
+      };
       setUncertain(false);
-      setBlocked(false);
-      setRecord(result);
-      setDraft(result.draft);
+      setBlocked(true);
+      const result = await client.getReceivingRecord(acknowledgedEventId.current.eventId);
+      if (!alive.current) return;
+      acceptCurrent(result);
       setSaved(true);
-      setIssues([]);
     } catch (error) {
       if (!alive.current) return;
       const code = error instanceof UsClientError ? error.code : "unavailable";
       if (code === "session_required") {
         onSessionLost();
+        return;
+      }
+      if (acknowledgedEventId.current) {
+        setFailure("currentUnavailable");
+        setBlocked(true);
+        setUncertain(false);
+        if (code === "forbidden") await onForbidden();
         return;
       }
       if (code === "forbidden") {
@@ -345,13 +396,16 @@ export function ReceivingEditor({
           <h1 ref={heading} tabIndex={-1}>
             {record?.eventNumber ?? t("receiving.new")}
           </h1>
-          <p>{t("receiving.scope")}</p>
+          <p>{t(recovering ? "receiving.loadedDraftHint" : "receiving.scope")}</p>
         </div>
         <span className="us-rec-status">
-          {t("receiving.draft")}
+          {recovering
+            ? t("receiving.currentUnconfirmed")
+            : t(`receiving.${record?.status ?? "draft"}`)}
           {record ? ` · ${t("receiving.version")} ${record.draftVersion}` : ""}
         </span>
       </header>
+      {record ? <ReceivingLifecycleNotice record={record} /> : null}
       <form className="us-rec-form" noValidate onSubmit={(event) => void save(event)}>
         {failure ? (
           <div ref={alert} role="alert" tabIndex={-1} className="us-md-notice us-md-notice--alert">
@@ -366,7 +420,15 @@ export function ReceivingEditor({
                 ))}
               </ul>
             ) : null}
-            {blocked && record ? (
+            {acknowledgedEventId.current ? (
+              <Button
+                type="button"
+                disabled={pending || mutationPending}
+                onClick={() => void recoverAcknowledgement()}
+              >
+                {t("receiving.retryCurrent")}
+              </Button>
+            ) : blocked && record ? (
               <Button
                 type="button"
                 disabled={pending || mutationPending}
@@ -526,19 +588,22 @@ export function ReceivingEditor({
           canManageQa={canManageQa}
           beginMutation={beginMutation}
           onFinalizationLocked={setFinalizationLocked}
-          {...(onFinalized ? { onFinalized } : {})}
+          onAcknowledged={finalizedAcknowledgement}
+          {...(onOpenRecord ? { onOpenRecord } : {})}
         />
         <footer className="us-rec-save">
           <div role="status" aria-live="polite">
-            {pending
-              ? t("receiving.saving")
-              : saved
-                ? t("receiving.saved")
-                : dirty
-                  ? t("receiving.unsaved")
-                  : record
-                    ? `${t("receiving.updated")}: ${new Intl.DateTimeFormat(i18n.language, { dateStyle: "medium", timeStyle: "short", timeZone: record.timeZone }).format(new Date(record.updatedAt))}`
-                    : t("receiving.draft")}
+            {recovering
+              ? t("receiving.currentUnconfirmed")
+              : pending
+                ? t("receiving.saving")
+                : saved
+                  ? t("receiving.saved")
+                  : dirty
+                    ? t("receiving.unsaved")
+                    : record
+                      ? `${t("receiving.updated")}: ${new Intl.DateTimeFormat(i18n.language, { dateStyle: "medium", timeStyle: "short", timeZone: record.timeZone }).format(new Date(record.updatedAt))}`
+                      : t("receiving.draft")}
           </div>
           {documentDirty ? <p>{t("receiving.documentPending")}</p> : null}
           {canWrite ? (

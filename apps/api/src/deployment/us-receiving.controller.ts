@@ -15,39 +15,23 @@ import {
 import { ApiCookieAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from "@nestjs/swagger";
 import {
   createReceivingDraftSchema,
-  listReceivingRecordsQuerySchema,
-  receivingRecordListSchema,
-  receivingRecordSchema,
-  receivingFinalizedRecordSchema,
+  listReceivingLiveRecordsQuerySchema,
+  receivingLiveRecordListSchema,
+  receivingLiveRecordSchema,
+  receivingFinalizeResultSchema,
   finalizeReceivingSchema,
-  receivingDraftRecordSchema,
+  receivingCreateResultSchema,
   receivingReadinessQuerySchema,
-  receivingReadinessSchema,
-  receivingReadinessIssueSchema,
+  receivingRevisionReadinessSchema,
+  receivingSaveResultSchema,
+  receivingLifecycleErrorSchema,
   saveReceivingDraftSchema,
 } from "@markiro/platform-contracts";
-import { z } from "zod";
 import { ApiZodBody, ApiZodQuery, ApiZodResponse } from "../lib/openapi";
 import { usMasterDataBadRequestSchema, usMasterDataErrorSchema } from "./us-master-data-openapi";
 import { UsRuntime } from "./us-runtime";
+import { parseMasterDataInput } from "../modules/traceability/master-data/us-master-data-support";
 import { UsSessionGuard, type UsRequest } from "./us-profile.controller";
-
-const finalizationConflictSchema = z.union([
-  z
-    .object({
-      code: z.enum([
-        "receiving_draft_conflict",
-        "receiving_operation_conflict",
-        "receiving_already_finalized",
-        "receiving_readiness_changed",
-        "receiving_lot_conflict",
-      ]),
-    })
-    .strict(),
-  z
-    .object({ code: z.literal("event_incomplete"), issues: z.array(receivingReadinessIssueSchema) })
-    .strict(),
-]);
 
 @Controller("traceability/receiving")
 @UseGuards(UsSessionGuard)
@@ -100,16 +84,16 @@ export class UsReceivingController {
 
   @Get()
   @ApiOperation({
-    summary: "List saved receiving drafts and finalized history",
+    summary: "List current Receiving records or explicit history",
     description:
-      "Requires current US read capability. Returns bounded header summaries and child counts only; archived master-data references remain visible by their saved IDs.",
+      "Requires current US read capability. Defaults to history=current; history=all includes superseded and void records. Four lifecycle statuses, bounded summaries and child counts only; archived references retain saved IDs.",
   })
-  @ApiZodQuery(listReceivingRecordsQuerySchema)
-  @ApiZodResponse({ status: 200, schema: receivingRecordListSchema })
+  @ApiZodQuery(listReceivingLiveRecordsQuerySchema)
+  @ApiZodResponse({ status: 200, schema: receivingLiveRecordListSchema })
   list(@Req() request: UsRequest, @Query() query: unknown) {
     const principal = this.principal(request);
     return this.runtime.databaseOperation(() =>
-      this.runtime.receiving.listRecords(principal.tenantId, principal.userId, query),
+      this.runtime.receiving.listLiveRecords(principal.tenantId, principal.userId, query),
     );
   }
 
@@ -117,30 +101,35 @@ export class UsReceivingController {
   @ApiOperation({
     summary: "Create an incomplete receiving draft",
     description:
-      "Requires receiving write capability and operationKey. An identical successful retry returns the original response. Does not finalize, assign lots, affect inventory or freeze snapshots.",
+      "Requires receiving write capability and operationKey. Returns a versioned acknowledgement; an identical authorized retry preserves its exact historical response, including legacy formats. Always GET the current record after success. Does not finalize, assign lots, affect inventory or freeze snapshots.",
   })
   @ApiZodBody(createReceivingDraftSchema)
-  @ApiZodResponse({ status: 201, schema: receivingDraftRecordSchema })
+  @ApiZodResponse({ status: 201, schema: receivingCreateResultSchema })
   create(@Req() request: UsRequest, @Body() body: unknown) {
     const principal = this.principal(request);
     const requestId = this.requestId(request);
     return this.runtime.databaseOperation(() =>
-      this.runtime.receiving.createDraft(principal.tenantId, principal.userId, body, requestId),
+      this.runtime.receiving.createDraftCommand(
+        principal.tenantId,
+        principal.userId,
+        body,
+        requestId,
+      ),
     );
   }
 
   @Get(":id")
   @ApiOperation({
-    summary: "Read a saved draft or immutable finalized receiving",
+    summary: "Read current Receiving lifecycle with saved or frozen content",
     description:
-      "Requires current US read capability; preserves stored values even if referenced master data was later archived.",
+      "Requires current US read capability; returns a live versioned envelope, separate from historical command acknowledgements. Frozen snapshots v1/v2/v3 remain unchanged, including amended and void records.",
   })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
-  @ApiZodResponse({ status: 200, schema: receivingRecordSchema })
+  @ApiZodResponse({ status: 200, schema: receivingLiveRecordSchema })
   get(@Req() request: UsRequest, @Param("id") id: unknown) {
     const principal = this.principal(request);
     return this.runtime.databaseOperation(() =>
-      this.runtime.receiving.getRecord(principal.tenantId, principal.userId, id),
+      this.runtime.receiving.getLiveRecord(principal.tenantId, principal.userId, id),
     );
   }
 
@@ -148,16 +137,22 @@ export class UsReceivingController {
   @ApiOperation({
     summary: "Replace a receiving draft atomically",
     description:
-      "Requires receiving write capability, operationKey and expectedDraftVersion. A changed save increments draftVersion only; revision stays 1. Stale saves return 409. A current unchanged save neither increments nor audits. Rows and document links are full ordered replacements.",
+      "Requires receiving write capability, operationKey and expectedDraftVersion. A changed save increments draftVersion only; revision stays 1. Stale saves return 409. A current unchanged save neither increments nor audits. Rows and document links are full ordered replacements. Returns a historical acknowledgement, not current state; follow with GET even after an exact retry. Amendment writes remain unavailable on this original-only endpoint.",
   })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiZodBody(saveReceivingDraftSchema)
-  @ApiZodResponse({ status: 200, schema: receivingDraftRecordSchema })
+  @ApiZodResponse({ status: 200, schema: receivingSaveResultSchema })
   save(@Req() request: UsRequest, @Param("id") id: unknown, @Body() body: unknown) {
     const principal = this.principal(request);
     const requestId = this.requestId(request);
     return this.runtime.databaseOperation(() =>
-      this.runtime.receiving.saveDraft(principal.tenantId, principal.userId, id, body, requestId),
+      this.runtime.receiving.saveOriginalDraftCommand(
+        principal.tenantId,
+        principal.userId,
+        id,
+        body,
+        requestId,
+      ),
     );
   }
 
@@ -165,15 +160,20 @@ export class UsReceivingController {
   @ApiOperation({
     summary: "Check current saved receiving data readiness",
     description:
-      "Requires current US read capability and the saved expectedDraftVersion. Reads the draft and current tenant references in one consistent transaction. Returns data issues without saving validation state, auditing, assigning lots, locking sources or finalizing. Complete is data readiness only.",
+      "Requires current US read capability and the saved expectedDraftVersion. Reads the draft and current tenant references in one consistent transaction. Returns v4 readiness bound to the saved draft and current root/predecessor lifecycle. Reports data issues without saving validation state, auditing, assigning lots, locking sources or finalizing. Complete is data readiness only.",
   })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiZodQuery(receivingReadinessQuerySchema)
-  @ApiZodResponse({ status: 200, schema: receivingReadinessSchema })
+  @ApiZodResponse({ status: 200, schema: receivingRevisionReadinessSchema })
   readiness(@Req() request: UsRequest, @Param("id") id: unknown, @Query() query: unknown) {
     const principal = this.principal(request);
     return this.runtime.databaseOperation(() =>
-      this.runtime.receiving.checkReadiness(principal.tenantId, principal.userId, id, query),
+      this.runtime.receiving.checkRevisionReadiness(
+        principal.tenantId,
+        principal.userId,
+        id,
+        query,
+      ),
     );
   }
 
@@ -182,17 +182,23 @@ export class UsReceivingController {
   @ApiOperation({
     summary: "Finalize a saved ordinary Receiving draft",
     description:
-      "Requires current QA capability, saved version and readiness digest. Atomic lots, source latches, frozen snapshot and audit; exact authorized retries return the original result. Limited to 16 KiB JSON.",
+      "Requires current QA capability, saved version and readiness digest. Atomic lots, source latches, frozen snapshot and audit; exact authorized retries return the original historical acknowledgement, including legacy frozen versions. New results freeze v3; always GET current state after success. Original revisions only; amendment commands are not enabled here. Limited to 16 KiB JSON.",
   })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiZodBody(finalizeReceivingSchema)
-  @ApiZodResponse({ status: 200, schema: receivingFinalizedRecordSchema })
-  @ApiZodResponse({ status: 409, schema: finalizationConflictSchema })
+  @ApiZodResponse({ status: 200, schema: receivingFinalizeResultSchema })
+  @ApiZodResponse({ status: 409, schema: receivingLifecycleErrorSchema })
   finalize(@Req() request: UsRequest, @Param("id") id: unknown, @Body() body: unknown) {
     const principal = this.principal(request);
     const requestId = this.requestId(request);
     return this.runtime.databaseOperation(() =>
-      this.runtime.receiving.finalize(principal.tenantId, principal.userId, id, body, requestId),
+      this.runtime.receiving.finalizeCommand(
+        principal.tenantId,
+        principal.userId,
+        id,
+        parseMasterDataInput(finalizeReceivingSchema, body),
+        requestId,
+      ),
     );
   }
 

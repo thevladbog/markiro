@@ -3,11 +3,14 @@ import { schema, type Db } from "@markiro/db";
 import { ConflictException } from "@nestjs/common";
 import {
   receivingOperationReceiptV2Schema,
+  receivingFinalizeResultSchema,
+  type FinalizeReceivingCommandInput,
   type ReceivingOperationReceiptV2,
 } from "@markiro/platform-contracts";
 import { and, eq, sql } from "drizzle-orm";
 import type { UsMasterDataTransaction } from "../master-data/us-master-data-support";
 import { unavailable } from "./us-receiving-persistence";
+import { receivingFinalizationCommandDigest } from "./us-receiving-finalization-command";
 
 type Command = ReceivingOperationReceiptV2["command"];
 export function receivingLifecycleCommandDigest(command: Command, eventId: string, input: unknown) {
@@ -65,13 +68,58 @@ export function replayReceivingLifecycle(
   return receipt;
 }
 
+/** Caller has authorized and locked the key. Replay never reads today's event or references. */
+export function replayReceivingFinalization(
+  stored: typeof schema.receivingOperations.$inferSelect,
+  eventId: string,
+  input: FinalizeReceivingCommandInput,
+  versionedDigest: string,
+) {
+  const parsed = receivingFinalizeResultSchema.safeParse(stored.result);
+  if (!parsed.success) throw unavailable();
+  const result = parsed.data;
+  if ("receiptVersion" in result) {
+    if (
+      result.operationKey !== input.operationKey ||
+      result.inputDigest !== stored.inputDigest ||
+      result.eventId !== stored.eventId
+    )
+      throw unavailable();
+    if (stored.inputDigest !== versionedDigest)
+      throw new ConflictException({ code: "receiving_operation_conflict" });
+    if (result.eventId !== eventId) throw unavailable();
+    return result;
+  }
+  if (result.id !== stored.eventId) throw unavailable();
+  // An explicit revision command cannot downgrade to a historical original key.
+  if (
+    "commandVersion" in input ||
+    stored.inputDigest !== receivingFinalizationCommandDigest(eventId, input)
+  )
+    throw new ConflictException({ code: "receiving_operation_conflict" });
+  if (result.id !== eventId) throw unavailable();
+  return result;
+}
+
 function retryable(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   if ("code" in error && (error.code === "40001" || error.code === "40P01")) return true;
+  // A no-op does not update the locked root/event. A waiting repeatable-read
+  // transaction can therefore miss the winner's receipt in its older snapshot
+  // and collide only at INSERT. Restart to reauthorize and replay that receipt.
+  if (
+    "code" in error &&
+    error.code === "23505" &&
+    "table" in error &&
+    error.table === "receiving_operations" &&
+    "constraint" in error &&
+    error.constraint === "receiving_operations_tenant_id_command_operation_key_pk"
+  )
+    return true;
   return "cause" in error && retryable(error.cause);
 }
 
-/** Same bounded retry policy as the original finalizer; each retry reauthorizes. */
+/** At most three attempts, including invisible-receipt races; every retry reauthorizes. */
 export async function receivingTransaction<T>(
   db: Db,
   run: (tx: UsMasterDataTransaction) => Promise<T>,

@@ -1,22 +1,19 @@
-import { createHash, randomUUID } from "node:crypto";
-import { isDeepStrictEqual } from "node:util";
 import { ConflictException } from "@nestjs/common";
 import { US_CAPABILITY } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import {
-  createReceivingDraftSchema,
   listReceivingDraftsQuerySchema,
   receivingDraftListSchema,
   listReceivingRecordsQuerySchema,
   receivingRecordListSchema,
   receivingReadinessQuerySchema,
-  saveReceivingDraftSchema,
+  receivingCreateResultSchema,
+  receivingSaveResultSchema,
   platformUuidSchema,
   receivingBasisQuerySchema,
   receivingRevisionListQuerySchema,
   listReceivingLiveRecordsQuerySchema,
   type ReceivingDraftList,
-  type ReceivingDraft,
   type ReceivingDraftRecord,
   type ReceivingReadiness,
 } from "@markiro/platform-contracts";
@@ -25,50 +22,42 @@ import {
   authorizeUsMasterData,
   escapeLikePattern,
   parseMasterDataInput,
-  type UsMasterDataTransaction,
 } from "../master-data/us-master-data-support";
-import { assertReceivingReferences } from "./us-receiving-references";
 import { readReceivingReadiness } from "./us-receiving-readiness";
-import {
-  parseReceivingRecord,
-  readReceivingDraft,
-  readReceivingRecord,
-  receivingHeader,
-  replaceReceivingChildren,
-  unavailable,
-} from "./us-receiving-persistence";
+import { readReceivingDraft, readReceivingRecord, unavailable } from "./us-receiving-persistence";
 import { finalizeReceiving } from "./us-receiving-finalization";
-import { createReceivingRoot, lockReceivingRoot } from "./us-receiving-roots";
 import { readReceivingBasis } from "./us-receiving-basis";
 import { readReceivingLiveRecord, readReceivingRevisions } from "./us-receiving-history";
 import { executeReceivingLifecycle } from "./us-receiving-lifecycle";
-import { lockReceivingOperation } from "./us-receiving-operations";
 import { saveReceivingAmendment } from "./us-receiving-amendment-save";
 import { readReceivingRevisionContext } from "./us-receiving-revision-readiness";
-import { finalizeReceivingRevision } from "./us-receiving-revision-finalization";
+import {
+  finalizeReceivingRevision,
+  finalizeReceivingCommand,
+} from "./us-receiving-revision-finalization";
 import { readReceivingRegistry } from "./us-receiving-registry";
+import {
+  createReceivingDraftCommand,
+  saveOriginalReceivingDraftCommand,
+} from "./us-receiving-draft-commands";
 
 const events = schema.traceabilityEvents,
   items = schema.receivingEventItems,
-  documents = schema.receivingEventDocuments,
-  operations = schema.receivingOperations,
-  counters = schema.receivingCounters;
-type Command = "receiving.create" | "receiving.save";
-const digest = (input: unknown) => createHash("sha256").update(JSON.stringify(input)).digest("hex");
-
-// Comparison only: old operation digests and remembered payloads retain their original shapes.
-function comparableDraft(draft: ReceivingDraft) {
-  return {
-    ...draft,
-    items: draft.items.map(({ exemptReceipt, ...item }) => ({
-      ...item,
-      exemptReceipt: exemptReceipt ?? null,
-    })),
-  };
-}
+  documents = schema.receivingEventDocuments;
 
 export class UsReceivingStore {
   constructor(private readonly db: Db) {}
+
+  // Original-input HTTP uses this bridge; explicit revision input remains internal.
+  finalizeCommand(
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+    input: unknown,
+    requestId: string,
+  ) {
+    return finalizeReceivingCommand(this.db, tenantId, actorUserId, id, input, requestId);
+  }
 
   finalizeRevision(
     tenantId: string,
@@ -80,7 +69,7 @@ export class UsReceivingStore {
     return finalizeReceivingRevision(this.db, tenantId, actorUserId, id, input, requestId);
   }
 
-  // Internal until the coordinated lifecycle HTTP/response switch.
+  // Live HTTP readiness; amendment editing remains an internal workflow for now.
   async checkRevisionReadiness(tenantId: string, actorUserId: string, id: unknown, query: unknown) {
     return this.db.transaction(
       async (tx) => {
@@ -330,182 +319,69 @@ export class UsReceivingStore {
     });
   }
 
-  async createDraft(
+  createDraft(
     tenantId: string,
     actorUserId: string,
     input: unknown,
     requestId: string,
   ): Promise<ReceivingDraftRecord> {
-    return this.db.transaction(async (tx) => {
-      await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.RECEIVING_WRITE);
-      const value = parseMasterDataInput(createReceivingDraftSchema, input);
-      const inputDigest = digest(value);
-      const replay = await this.replay(
-        tx,
-        tenantId,
-        "receiving.create",
-        value.operationKey,
-        inputDigest,
-      );
-      if (replay) return replay;
-      await assertReceivingReferences(tx, tenantId, value.draft);
-      // authorizeUsMasterData already holds the profile/timezone lock through commit.
-      const [profile] = await tx
-        .select({ timeZone: schema.orgProfiles.timeZone })
-        .from(schema.orgProfiles)
-        .where(eq(schema.orgProfiles.tenantId, tenantId));
-      if (!profile) throw unavailable();
-      const now = new Date();
-      const year = Number(
-        new Intl.DateTimeFormat("en-US", { timeZone: profile.timeZone, year: "numeric" }).format(
-          now,
-        ),
-      );
-      const [counter] = await tx
-        .insert(counters)
-        .values({ tenantId, year, sequence: 1 })
-        .onConflictDoUpdate({
-          target: [counters.tenantId, counters.year],
-          set: { sequence: sql`${counters.sequence} + 1` },
-        })
-        .returning();
-      if (!counter) throw unavailable();
-      const eventNumber = `REC-${String(year).slice(-2).padStart(2, "0")}-${String(counter.sequence).padStart(4, "0")}`;
-      const eventId = randomUUID();
-      await createReceivingRoot(tx, { tenantId, eventId, eventNumber });
-      const [header] = await tx
-        .insert(events)
-        .values({
-          ...receivingHeader(value.draft),
-          id: eventId,
-          rootEventId: eventId,
-          tenantId,
-          eventNumber,
-          timeZone: profile.timeZone,
-          createdBy: actorUserId,
-          updatedBy: actorUserId,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning({ id: events.id });
-      if (!header) throw unavailable();
-      await replaceReceivingChildren(tx, tenantId, header.id, value.draft);
-      const result = await readReceivingDraft(tx, tenantId, header.id, "update");
-      await this.audit(tx, tenantId, actorUserId, requestId, null, result);
-      await this.remember(
-        tx,
-        tenantId,
-        "receiving.create",
-        value.operationKey,
-        inputDigest,
-        result,
-      );
-      return result;
-    });
+    return createReceivingDraftCommand(this.db, tenantId, actorUserId, input, requestId, "legacy");
   }
 
-  async saveDraft(
+  saveDraft(
     tenantId: string,
     actorUserId: string,
     id: unknown,
     input: unknown,
     requestId: string,
   ): Promise<ReceivingDraftRecord> {
-    return this.db.transaction(async (tx) => {
-      await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.RECEIVING_WRITE);
-      const eventId = parseMasterDataInput(platformUuidSchema, id);
-      const value = parseMasterDataInput(saveReceivingDraftSchema, input);
-      const inputDigest = digest({ eventId, ...value });
-      const replay = await this.replay(
-        tx,
-        tenantId,
-        "receiving.save",
-        value.operationKey,
-        inputDigest,
-      );
-      if (replay) return replay;
-      await lockReceivingRoot(tx, tenantId, eventId);
-      const before = await readReceivingDraft(tx, tenantId, eventId, "update");
-      if (before.draftVersion !== value.expectedDraftVersion)
-        throw new ConflictException({ code: "receiving_draft_conflict" });
-      if (isDeepStrictEqual(comparableDraft(before.draft), comparableDraft(value.draft))) {
-        await this.remember(
-          tx,
-          tenantId,
-          "receiving.save",
-          value.operationKey,
-          inputDigest,
-          before,
-        );
-        return before;
-      }
-      await assertReceivingReferences(tx, tenantId, value.draft);
-      await tx
-        .update(events)
-        .set({
-          ...receivingHeader(value.draft),
-          draftVersion: before.draftVersion + 1,
-          updatedBy: actorUserId,
-          updatedAt: new Date(),
-        })
-        .where(and(eq(events.tenantId, tenantId), eq(events.id, eventId)));
-      await replaceReceivingChildren(tx, tenantId, eventId, value.draft);
-      const result = await readReceivingDraft(tx, tenantId, eventId, "update");
-      await this.audit(tx, tenantId, actorUserId, requestId, before, result);
-      await this.remember(tx, tenantId, "receiving.save", value.operationKey, inputDigest, result);
-      return result;
-    });
+    return saveOriginalReceivingDraftCommand(
+      this.db,
+      tenantId,
+      actorUserId,
+      id,
+      input,
+      requestId,
+      "legacy",
+    );
   }
 
-  private async replay(
-    tx: UsMasterDataTransaction,
-    tenantId: string,
-    command: Command,
-    operationKey: string,
-    inputDigest: string,
-  ) {
-    const receipt = await lockReceivingOperation(tx, tenantId, command, operationKey);
-    if (!receipt) return null;
-    if (receipt.inputDigest !== inputDigest)
-      throw new ConflictException({ code: "receiving_operation_conflict" });
-    const result = parseReceivingRecord(receipt.result);
-    if (result.id !== receipt.eventId) throw unavailable();
-    return result;
-  }
-
-  private async remember(
-    tx: UsMasterDataTransaction,
-    tenantId: string,
-    command: Command,
-    operationKey: string,
-    inputDigest: string,
-    result: ReceivingDraftRecord,
-  ) {
-    await tx
-      .insert(operations)
-      .values({ tenantId, command, operationKey, inputDigest, eventId: result.id, result });
-  }
-
-  private async audit(
-    tx: UsMasterDataTransaction,
+  // HTTP acknowledgement bridge; stored historical response formats stay pinned.
+  async createDraftCommand(
     tenantId: string,
     actorUserId: string,
+    input: unknown,
     requestId: string,
-    before: ReceivingDraftRecord | null,
-    after: ReceivingDraftRecord,
   ) {
-    await tx.insert(schema.tenantAuditEvents).values({
-      organizationId: tenantId,
-      actorUserId,
-      action: before
-        ? "traceability.receiving.draft_saved"
-        : "traceability.receiving.draft_created",
-      outcome: "success",
-      targetType: "traceability_event",
-      targetId: after.id,
-      before,
-      after,
-      requestId,
-    });
+    return receivingCreateResultSchema.parse(
+      await createReceivingDraftCommand(
+        this.db,
+        tenantId,
+        actorUserId,
+        input,
+        requestId,
+        "versioned",
+      ),
+    );
+  }
+
+  async saveOriginalDraftCommand(
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+    input: unknown,
+    requestId: string,
+  ) {
+    return receivingSaveResultSchema.parse(
+      await saveOriginalReceivingDraftCommand(
+        this.db,
+        tenantId,
+        actorUserId,
+        id,
+        input,
+        requestId,
+        "versioned",
+      ),
+    );
   }
 }

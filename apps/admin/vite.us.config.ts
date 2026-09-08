@@ -12,13 +12,13 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
     throw new Error("US local browser requires explicit US edition and development/test mode");
 
   const receivingQueryField =
-    "(?:search=(?:%[a-fA-F0-9]{2}|[a-zA-Z0-9_.!~*'()+-]){0,1800}|status=(?:draft|finalized)|limit=(?:[1-9]|[1-9][0-9]|100)|offset=(?:0|[1-9][0-9]{0,4}|100000))";
+    "(?:search=(?:%[a-fA-F0-9]{2}|[a-zA-Z0-9_.!~*'()+-]){0,1800}|status=(?:draft|finalized|amended|void)|history=(?:current|all)|limit=(?:[1-9]|[1-9][0-9]|100)|offset=(?:0|[1-9][0-9]{0,4}|100000))";
   const receivingListPath =
     "^/api/us/traceability/receiving" +
-    ["search", "status", "limit", "offset"]
+    ["search", "status", "history", "limit", "offset"]
       .map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`)
       .join("") +
-    `(\\?${receivingQueryField}(?:&${receivingQueryField}){0,3})?$`;
+    `(\\?${receivingQueryField}(?:&${receivingQueryField}){0,4})?$`;
   const proxy = {
     [receivingListPath]: {
       target: "http://localhost:3100",

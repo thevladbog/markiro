@@ -5,6 +5,8 @@ import { StrictMode } from "react";
 import i18next from "i18next";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { receivingRecordSchema, type ReceivingRecord } from "@markiro/platform-contracts";
+import { liveFixture, liveReadFixtureResponse } from "./support/us-receiving-live-fixture.js";
 import { createUsBrowserClient } from "../src/us/client.js";
 import { masterDataCopy } from "../src/us/master-data/copy.js";
 import { MasterDataWorkspace } from "../src/us/master-data/workspace.js";
@@ -43,7 +45,8 @@ async function setup(
     handle?: (url: string, init?: RequestInit) => Response | Promise<Response> | undefined;
   } = {},
 ) {
-  const send = vi.fn<typeof fetch>().mockImplementation(async (url, init) => {
+  let current: ReceivingRecord = receivingRecordSchema.parse(record);
+  const source: typeof fetch = async (url, init) => {
     const custom = options.handle?.(String(url), init);
     if (custom) return custom;
     if (url === "/api/us/traceability/access")
@@ -70,7 +73,7 @@ async function setup(
         offset: 0,
       });
     }
-    if (url === `${path}/${id}` && init?.method === "GET") return Response.json(record);
+    if (url === `${path}/${id}` && init?.method === "GET") return Response.json(current);
     if ((url === path || url === `${path}/${id}`) && init?.method !== "GET") {
       const body = JSON.parse(String(init?.body));
       return Response.json({
@@ -80,6 +83,14 @@ async function setup(
       });
     }
     return Response.json({ items: [], limit: 50, offset: 0 });
+  };
+  const send = vi.fn<typeof fetch>(async (url, init) => {
+    const response = await source(url, init);
+    if (init?.method && init.method !== "GET" && response.ok) {
+      const parsed = receivingRecordSchema.safeParse(await response.clone().json());
+      if (parsed.success) current = parsed.data;
+    }
+    return liveReadFixtureResponse(url, init, response);
   });
   const instance = i18next.createInstance();
   await instance.init({
@@ -123,6 +134,52 @@ async function open(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: record.eventNumber }));
   await screen.findByRole("heading", { name: record.eventNumber });
 }
+
+it.each(["create", "save"] as const)(
+  "recovers %s with GET only after a known acknowledgement and failed current read",
+  async (command) => {
+    let acknowledged = false;
+    let reads = 0;
+    const current = liveFixture(
+      receivingRecordSchema.parse({
+        ...record,
+        draft: { ...empty, notes: "Current server notes" },
+      }),
+    );
+    const { user, send } = await setup({
+      handle: (url, init) => {
+        if (
+          url === (command === "create" ? path : `${path}/${id}`) &&
+          init?.method === (command === "create" ? "POST" : "PUT")
+        ) {
+          acknowledged = true;
+          return Response.json(record);
+        }
+        if (url === `${path}/${id}` && init?.method === "GET" && acknowledged)
+          return reads++ === 0 ? Response.json({}, { status: 503 }) : Response.json(current);
+        return undefined;
+      },
+    });
+    if (command === "create")
+      await user.click(screen.getByRole("button", { name: "New receiving" }));
+    else await open(user);
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    const retry = await screen.findByRole("button", { name: "Retry current state" });
+    expect(screen.getByRole("button", { name: "Save draft" })).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("Receiving notes").matches(":disabled")).toBe(true);
+    await user.click(retry);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Receiving notes")).toHaveProperty(
+        "value",
+        "Current server notes",
+      ),
+    );
+    expect(reads).toBe(2);
+    expect(
+      send.mock.calls.filter(([, init]) => ["POST", "PUT"].includes(init?.method ?? "")),
+    ).toHaveLength(1);
+  },
+);
 describe("connected US receiving drafts", () => {
   it("keeps input and the same command after a well-formed but mismatched acknowledgement", async () => {
     const { user, send } = await setup({
@@ -210,27 +267,41 @@ describe("connected US receiving drafts", () => {
       },
     ]);
   });
-  it("retries an uncertain create with the identical key and payload and locks editing meanwhile", async () => {
-    let attempts = 0;
-    const { user, send } = await setup({
-      handle: (url, init) => {
-        if (url !== path || init?.method !== "POST") return;
-        attempts += 1;
-        if (attempts === 1) return Promise.reject(new Error("network"));
-        return Response.json({ ...record, draft: JSON.parse(String(init.body)).draft });
-      },
-    });
-    await user.click(screen.getByRole("button", { name: "New receiving" }));
-    await user.type(screen.getByLabelText("Receiving notes"), "Uncertain delivery");
-    await user.click(screen.getByRole("button", { name: "Save draft" }));
-    const retry = await screen.findByRole("button", { name: "Retry same save" });
-    expect(screen.getByLabelText("Receiving notes").closest("fieldset")?.disabled).toBe(true);
-    await user.click(retry);
-    await screen.findByText("Draft saved.");
-    const writes = send.mock.calls.filter(([url]) => url === path);
-    expect(writes).toHaveLength(2);
-    expect(writes[0]?.[1]?.body).toBe(writes[1]?.[1]?.body);
-  });
+  it.each(["network", "wrong_version"])(
+    "retries an uncertain create with the identical key and payload and locks editing meanwhile (%s)",
+    async (failure) => {
+      let attempts = 0;
+      const { user, send } = await setup({
+        handle: (url, init) => {
+          if (url !== path || init?.method !== "POST") return;
+          attempts += 1;
+          if (attempts === 1) {
+            if (failure === "network") return Promise.reject(new Error("network"));
+            return Response.json({
+              ...record,
+              draftVersion: 2,
+              draft: JSON.parse(String(init.body)).draft,
+            });
+          }
+          return Response.json({ ...record, draft: JSON.parse(String(init.body)).draft });
+        },
+      });
+      await user.click(screen.getByRole("button", { name: "New receiving" }));
+      await user.type(screen.getByLabelText("Receiving notes"), "Uncertain delivery");
+      await user.click(screen.getByRole("button", { name: "Save draft" }));
+      const retry = await screen.findByRole("button", { name: "Retry same save" });
+      expect(screen.getByLabelText("Receiving notes").closest("fieldset")?.disabled).toBe(true);
+      expect((screen.getByLabelText("Receiving notes") as HTMLTextAreaElement).value).toBe(
+        "Uncertain delivery",
+      );
+      expect(screen.queryByText("Draft saved.")).toBeNull();
+      await user.click(retry);
+      await screen.findByText("Draft saved.");
+      const writes = send.mock.calls.filter(([url]) => url === path);
+      expect(writes).toHaveLength(2);
+      expect(writes[0]?.[1]?.body).toBe(writes[1]?.[1]?.body);
+    },
+  );
   it("preserves local edits after a stale save and requires confirmation before loading server values", async () => {
     let conflict = false;
     const { user, send } = await setup({

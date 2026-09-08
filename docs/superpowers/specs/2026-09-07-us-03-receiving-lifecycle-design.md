@@ -13,7 +13,18 @@ and affected lot support tokens in one read-only snapshot. Internal explicit-v2
 finalization now atomically writes v3 and replaces current support with durable
 replay and exact audit. Internal live registry reads now implement current/all
 history selection, status filtering and snapshot-consistent summary pagination.
-New active HTTP response formats and connected UI remain pending.
+The existing original Receiving workflow now uses live reads and versioned
+acknowledgements over HTTP, with mandatory current-state recovery in the UI.
+Strict lifecycle error and command-specific result/input bridge schemas are
+available internally. Internal original-draft create/save writers now produce v2
+acknowledgements and replay both stored formats exactly. Internal finalization
+also accepts supported original input with v4 readiness, freezes v3 and preserves
+exact historical v1/v2 replay. The original create/save/finalize HTTP writers and
+consumers are switched together; explicit amendment commands, lifecycle controls
+and complete history/basis navigation remain pending.
+Client acknowledgement validators for explicit revision commands are prepared
+with captured pre-command context, including amend target/result distinction,
+retained bindings and immutable void content. This is not route/UI activation.
 Execution evidence is described in the
 [implementation plan](../plans/2026-09-07-us-03-receiving-lifecycle.md).
 

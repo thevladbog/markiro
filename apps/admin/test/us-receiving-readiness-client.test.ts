@@ -6,7 +6,10 @@ const result = {
   draftVersion: 7,
   checkedAt: "2026-09-07T10:00:00.000Z",
   inputDigest: "a".repeat(64),
-  ruleVersion: "receiving-readiness-v3",
+  ruleVersion: "receiving-readiness-v4",
+  rootId: id,
+  expectedLifecycleVersion: 1,
+  previousRevisionId: null,
   exemptReviewRequiredLines: [],
   profileCode: "US_FSMA204_PROCESSOR",
   state: "complete",
@@ -29,6 +32,7 @@ describe("read-only readiness browser boundary", () => {
       { eventId: "b0000000-0000-4000-8000-000000000001" },
       { draftVersion: 8 },
       { state: "blocked" },
+      { ruleVersion: "receiving-readiness-v3" },
     ]) {
       const send = vi.fn<typeof fetch>(async () => Response.json({ ...result, ...change }));
       await expect(

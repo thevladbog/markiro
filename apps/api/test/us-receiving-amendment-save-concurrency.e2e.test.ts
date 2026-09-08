@@ -111,6 +111,42 @@ describe.skipIf(!url)("Receiving amendment save real transaction races", { timeo
       await Promise.all([a, b]);
     }
   }
+  it("replays a concurrent no-op without rewriting its amendment or lot basis", async () => {
+    const { original, started, command } = await start();
+    if (started.record.content.kind !== "draft") throw new Error("Expected draft");
+    const noop = {
+      ...command,
+      draft: receivingAmendmentDraftSchema.parse(started.record.content.draft),
+    };
+    const basis = await store.getLotReceivingBasis(c.tenant, c.actor, c.lot, {});
+    const [a, b] = await compete(
+      original,
+      () => store.saveAmendment(c.tenant, c.actor, started.eventId, noop, "first"),
+      () => store.saveAmendment(c.tenant, c.actor, started.eventId, noop, "second"),
+    );
+    expect(a.error).toBeUndefined();
+    expect(b.error).toBeUndefined();
+    expect(b.value).toEqual(a.value);
+    expect(a.value?.record).toEqual(started.record);
+    expect(await store.getLiveRecord(c.tenant, c.actor, started.eventId)).toEqual(started.record);
+    expect(await store.getLotReceivingBasis(c.tenant, c.actor, c.lot, {})).toEqual(basis);
+    expect(
+      (
+        await f.pool.query(
+          "SELECT count(*)::int AS count FROM receiving_operations WHERE tenant_id=$1 AND command='receiving.save'",
+          [c.tenant],
+        )
+      ).rows,
+    ).toEqual([{ count: 1 }]);
+    expect(
+      (
+        await f.pool.query(
+          "SELECT count(*)::int AS count FROM tenant_audit_events WHERE organization_id=$1 AND action='traceability.receiving.draft_saved'",
+          [c.tenant],
+        )
+      ).rows,
+    ).toEqual([{ count: 0 }]);
+  });
   it.each([true, false])(
     "serializes concurrent saves (same key=%s) with one content update",
     async (same) => {

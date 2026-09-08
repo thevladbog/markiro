@@ -105,7 +105,11 @@ describe("exempt Receiving client acknowledgement", () => {
         },
       };
       const client = createUsBrowserClient(transport(response));
-      await expect(client.createReceivingDraft(input)).rejects.toMatchObject({
+      await expect(
+        createUsBrowserClient(transport({ ...response, draftVersion: 1 })).createReceivingDraft(
+          input,
+        ),
+      ).rejects.toMatchObject({
         code: "invalid_response",
       });
       await expect(
@@ -129,7 +133,7 @@ describe("exempt Receiving client acknowledgement", () => {
     const nullDraft = { ...exemptionRecord.draft, items: [ordinary] };
     await expect(
       createUsBrowserClient(
-        transport({ ...exemptionRecord, draft: nullDraft }),
+        transport({ ...exemptionRecord, draftVersion: 1, draft: nullDraft }),
       ).createReceivingDraft({ operationKey, draft: missingDraft }),
     ).resolves.toMatchObject({ draft: nullDraft });
   });

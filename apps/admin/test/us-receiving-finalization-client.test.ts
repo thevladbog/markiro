@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { receivingFinalizedRecordSchema } from "@markiro/platform-contracts";
 import { createUsBrowserClient } from "../src/us/client.js";
+import { liveFixture } from "./support/us-receiving-live-fixture.js";
 import {
   complete,
   finalized,
@@ -51,8 +52,12 @@ describe("receiving finalization browser boundary", () => {
     expect(send).not.toHaveBeenCalled();
   });
   it("reads both record variants and strictly filters mixed-status lists", async () => {
-    for (const value of [record, finalized])
+    for (const value of [liveFixture(record), liveFixture(finalized)])
       expect(await createUsBrowserClient(transport(value)).getReceivingRecord(id)).toEqual(value);
+    for (const value of [record, finalized])
+      await expect(
+        createUsBrowserClient(transport(value)).getReceivingRecord(id),
+      ).rejects.toMatchObject({ code: "invalid_response" });
     const send = transport({ items: [], limit: 50, offset: 0 });
     await createUsBrowserClient(send).listReceivingRecords({
       status: "finalized",

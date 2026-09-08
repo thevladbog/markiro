@@ -1191,6 +1191,240 @@ not HTTP/OpenAPI/MFA or connected browser acceptance. Next: complete lifecycle
 error/result contracts and original-command terminal/replay compatibility, then
 the coordinated HTTP/OpenAPI switch and Task 5. No staging, commit, push or release.
 
+#### Original-command compatibility checkpoint — 2026-09-08
+
+Task 4 remains partial. The original save/finalize paths now validate their target
+under the existing root lock after current authorization and exact operation
+replay. The live reader validates real root/chain/frozen content before choosing
+a conflict; corrupt storage remains unavailable, not a plausible lifecycle state.
+
+- New legacy keys against void, superseded or amendment rows return a typed
+  `receiving_lifecycle_conflict` with exact authorized root/version/pointers.
+  A current finalized original retains `receiving_already_finalized`, including
+  an original already finalized internally with snapshot v3.
+- Historical create/save/finalize keys retain their exact old response and digest
+  after actual amendment finalization and void. Replay does not resurrect content,
+  write an audit entry or require old live state to still be current.
+- A saved original result must agree with both the stored operation target and
+  the requested event ID. A corrupt receipt pointing at another own event fails
+  closed even when its result and stored target agree with each other.
+- Current receiver/QA authorization still precedes replay and pointer disclosure.
+  Foreign/missing event IDs remain not-found and do not reuse another tenant's key.
+- Real PostgreSQL lock queues exercise both orderings of original save/finalize
+  against void. Only the winning mutation creates a receipt/audit entry; saved
+  versions, current/pending pointers and lot support tokens match that winner.
+
+TDD: the expanded terminal/replay matrix failed 19/25 cases before the guard;
+both void-first race cases failed before implementation. The new 25-case suite
+and four additional races pass with the existing compatibility suite (40/40).
+The first full scoped run passed 609/609 across 29 files without skips; API
+typecheck, lint and build passed after correcting only the race helper's explicit
+result-union type. CI selection was tested RED/GREEN under the existing read-only
+job; no deployment condition or permission was relaxed.
+
+After the first separately approved empty-ACE URL portability fix, scoped API
+regression again passed 609/609 in 120.70 seconds with no skips. Full domain and
+contract suites then passed 996/996 and 622/622; five affected browser-client suites
+passed 35/35. Domain typecheck/lint/build, scoped tool lint, full formatting and
+diff gates passed. The 19 check-only tool cases include release isolation and a
+direct runtime URL regression, also verified independently on Node 24.20.0 Linux.
+No DB schema or migration changed. The full DB package and primary-environment
+API suites were not repeated for this bounded follow-up; owned API fixture
+databases were still fully migrated. No new browser journey was performed.
+
+The subsequent full IDNA correction shares pinned `tr46` 6.0.0 validation between
+coverage and TLC/evidence references, preserving their other existing limits.
+It adds a direct dependency on the already-resolved version without any version
+upgrade. After rebuilding domain, 609/609 API tests passed on temporary Node
+24.20.0 in 142.52 seconds, with no skips. Both Node 24.18.0 and 24.20.0 passed
+1009/1009 domain and 622/622 contract tests; 118 focused URL/snapshot API cases
+passed again on 24.18.0. The shared host test also passed on 24.20.0 Linux.
+API typecheck/build, domain gates, client tests, primary/US browser builds and
+format/isolation gates passed. Browser builds retain chunk-size notices and are
+not a new interactive browser journey. Remote CI status and the three owner-
+requested pushed commits are recorded in `docs/us/implementation-plan.md`.
+
+Success response formats, frozen parsers, digest algorithms, current controller
+and browser routing are unchanged. The new original-command result bridge,
+complete lifecycle error/result contracts, coordinated HTTP/OpenAPI switch and
+Task 5 remain pending. Review is inline/sequential, not independent; these checks
+do not constitute new HTTP/MFA/browser, hosted or hardware acceptance.
+
+#### Shared command/error contract checkpoint — 2026-09-08
+
+Task 4 remains partial. `receiving-lifecycle-errors.ts` adds a strict shared
+`ReceivingLifecycleError` union for the existing code-only conflicts, current
+root/version/pointers, pending amendment, ordered locked line/field details and
+the unchanged readiness issue shape (bounded at 5,000 findings). Output schemas
+do not normalize saved IDs or text. Root current/pending IDs must be distinct;
+identity findings require increasing unique line numbers and canonical field order.
+
+The reserved downstream branch contains `blockingEvents` sorted by event UUID,
+with ID, number, revision and kind, plus `correctionOrder` and explicit `hasMore`.
+Both lists are bounded to 100; the correction order names exactly the displayed
+IDs once each. This is a shape/correlation contract only, not a dependency reader
+or topological-order implementation. When `hasMore` is true the visible order is
+partial, not an actionable complete correction plan. Actual dependency discovery,
+tenant scoping, completeness and downstream-first ordering remain mandatory
+US-04/05 acceptance. No new stored CTE or empty dependency adapter is enabled.
+
+`receiving-command-contracts.ts` adds strict original/revision save and finalize
+input unions and separate create/save/finalize result schemas. A partial revision
+payload cannot downgrade into the legacy branch. Each result admits only its own
+versioned command acknowledgement or the corresponding unchanged legacy result;
+an unwrapped live record or another command's receipt is rejected. Historical
+v1/v2 content and old input normalization stay pinned to their existing schemas.
+Request key/target/input correlation and a fresh live read remain consumer duties.
+
+The new API regression validates these contracts against actual original and
+amendment commands, exact pending/root/identity failures and historical save replay
+after finalization and void. It also exercises the existing OpenAPI converter
+without registering routes or changing the controller. One test-only expectation
+was corrected: discriminated error schemas emit `oneOf`, while the other unions
+emit `anyOf`; no production behavior was relaxed. Check-only CI selects both new
+contract suites and this API suite; all operational locks remain unconditional.
+
+Initial contract RED: 57 failures from absent exports; the new schemas then passed
+all 57. The check-only workflow inclusion test also failed before selection and
+passed afterward. Review is inline/sequential under the owner's execution choice.
+The original-command result writer/replay bridge, coordinated HTTP/OpenAPI switch
+and Task 5 UI remain next. No old receipt/digest/frozen parser, runtime server
+writer, controller, browser consumer, schema migration or dependency changed here.
+No commit, push, remote CI run, main merge or release is included.
+
+Fresh verification on Node 24.20.0: full contracts 679/679 (32 files), scoped
+Receiving/product-profile/lot API 613/613 (30 files, 134.24 seconds), client
+compatibility 35/35 (five files), check-only tools 19/19. All ran without skips.
+Contracts and API typecheck/lint/build and scoped tool lint pass. The local
+release-lock checker passes; zero owned API test databases remain after cleanup.
+The existing API Vite configuration warning remains, without suppressing it.
+No domain/DB source changed, so their full package suites were not repeated;
+API fixtures still applied the full migration chain to owned disposable databases.
+The primary-environment API suite, new endpoint/MFA/browser journeys, actual
+downstream consumers, hosted and hardware checks were not run for this
+contract-only checkpoint. Browser source and routes remain unchanged.
+
+#### Original-draft acknowledgement checkpoint — 2026-09-08
+
+Task 4 remains partial. Internal `createDraftCommand` and
+`saveOriginalDraftCommand` now write receipt-v2 acknowledgements for new original
+draft operations. A shared draft-command module owns creation, numbering, root,
+child replacement, audit and receipt writes; existing `createDraft`/`saveDraft`
+entry points still select their legacy result/digest/audit format. Output mode
+is server-owned, never inferred from a client field. No controller is switched.
+
+The new reader explicitly distinguishes stored receipt-v2 from legacy results,
+validates command/key/digest/event correlation and returns the saved JSON shape
+without live-state reconciliation or reapplication. Unknown/corrupt formats fail
+closed. Old digest algorithms remain pinned; new digests bind command version,
+command, event ID and strict input. New create replay binds the stored event ID.
+Authorization precedes input parsing and replay. Original draft writes retain
+their receiving-write capability and cannot become amendment saves via extensions.
+
+New-mode transactions use repeatable read with at most three attempts. A semantic
+no-op remembers its acknowledgement without changing content/version, audit or
+lot basis; omitted versus null exemption details remain distinct command digests.
+Real ordered concurrency tests exposed an invisible-receipt race: after waiting,
+a no-op transaction could retain a snapshot predating the winner's receipt and
+fail only at the receipt primary-key insert. The shared lifecycle transaction
+helper now retries that exact `23505` table/constraint as well as serialization
+and deadlock errors. Each attempt reauthorizes. Other unique failures are not
+retried; retry exhaustion is sanitized 503. No dummy root/event update is added.
+The same failure was reproduced and fixed for amendment no-op saving.
+
+Initial RED: 13 missing-command failures. After implementation, real no-op races
+failed for both original and amendment saves; the exact retry-bound test failed
+too. All passed after the targeted retry change. The new suite also covers exact
+audit/receipts, old and new replay after actual v3 finalization and void, stale and
+cross-tenant denial, revoked membership, corrupted receipts, complete rollback of
+numbering/content/audit/receipt failures, concurrent create/save, and save-versus-
+void in both orders. Check-only CI selects the new suite with an inclusion test;
+no operational lock or release permission changed.
+
+Review is inline/sequential, as selected by the owner. Legacy-input finalization
+to v3, coordinated HTTP/OpenAPI activation and Task 5 recovery/UI remain pending.
+No new endpoint, browser, downstream CTE, migration or dependency is introduced.
+No commit, push, remote CI run, main merge or release is included.
+
+Fresh Node 24.20.0 verification: scoped Receiving/product-profile/lot API 636/636
+(31 files, 123.89 seconds), full contracts 679/679 (32 files), client compatibility
+35/35 (five files), check-only tools 19/19, with no skips. Final focused draft/
+amendment command checks passed 27/27 after strengthening the omitted-versus-null
+replay specimen. That specimen initially reused an already-omitted fixture field;
+it now explicitly supplies null for the conflicting command. Production input
+normalization was not changed. API typecheck/lint/build, scoped tool lint, full
+formatting and diff checks pass. The release-lock checker passes locally and
+read-only inspection confirms zero owned temporary API databases after cleanup.
+The pre-existing Vite configuration warning remains. Full primary-environment
+API/domain/DB suites and new HTTP/MFA/browser/hosted/hardware checks were not run:
+this increment is internal US server work, with no domain/DB source changes.
+Every database fixture migrated only its own disposable US database; the primary
+checkout and environment remain untouched.
+
+#### Original-input finalization bridge checkpoint — 2026-09-08
+
+Task 4 remains partial. Internal `finalizeCommand` now accepts the strict shared
+original/revision input union. New successful operations always freeze v3 and
+remember a receipt-v2 acknowledgement, including when the command uses supported
+original input. The existing explicit-v2 `finalizeRevision` entry remains strict.
+Both entries share the same transactional finalization implementation; the active
+HTTP `finalize` path keeps its old writer, digest and response format until the
+coordinated readiness/transport/recovery switch.
+
+Current QA authorization precedes parsing and operation replay. Original input
+is restricted to revision 1 by the original-target guard after the root lock.
+It cannot authorize an amendment, bypass a void or supersession, or treat current
+finalization as a new success. Explicit revision input retains its required
+root version and predecessor. Every new write checks the saved draft version,
+v4 readiness digest, exact exemption-review set and all existing reference/basis
+guards. An old readiness digest cannot finalize a new v3 operation; a fresh v4
+check is required. A rejected command does not reserve its operation key.
+
+The new finalization replay helper first validates the stored result format and
+correlation, then uses its matching digest branch. Legacy v1/v2 results use the
+unchanged old digest, including omitted/empty review-list equivalence; receipt-v2
+uses explicit command version/kind/target and strict parsed input. New original
+receipts keep omitted versus empty lists distinct. Revision commands cannot
+downgrade into old original keys. Replay does not re-read live references, alter
+historical JSON, recreate lots, move support or emit another audit. Corrupted
+results fail closed with sanitized 503.
+
+The real-database bridge suite covers ordinary/exempt original finalization,
+exact finalization audit and line/lot mappings, atomic source latching and support,
+strict amendment input, old/new replay after actual supersession and void,
+current QA denial, foreign targets, stale/current-reference conflicts and
+corrupted acknowledgements. The v1 case is explicitly a synthetic version-pinned
+historical specimen; it is not evidence of a former production deployment.
+Ordered concurrent tests exercise same/different finalize keys and finalize versus
+save/void in both orders; failure injection proves complete audit/receipt rollback.
+
+Initial RED: 17 missing-command failures. After implementation all 17 and the
+existing 32-case revision suite passed; six additional ordered races passed.
+Type checking exposed conditional-expression narrowing of the input union; a
+typed parsing boundary preserves that union without casts or weaker validation.
+The check-only workflow inclusion contract also failed before selecting the new
+suite and passed afterward. No operational job or permission changed.
+
+Review is inline/sequential under the owner's execution choice. Coordinated
+HTTP/OpenAPI activation, client acknowledgement correlation/current-state recovery
+and Task 5 lifecycle UI remain pending. No new route, browser feature, schema
+migration, dependency, downstream CTE or hosted capability is introduced. No
+commit, push, remote CI run, main merge or release is included.
+
+Fresh Node 24.20.0 verification: scoped Receiving/product-profile/lot API 659/659
+(32 files, 136.03 seconds), full contracts 679/679, five client suites 35/35 and
+check-only tools 19/19, without skips. Final focused bridge checks passed 23/23
+after strengthening actual lot source-lock/revision assertions and strict-v2
+entry rejection of original input. API typecheck/lint/build, dependency builds
+(domain/contracts/DB), scoped tool lint, full formatting and diff checks pass.
+The local release-lock checker passes. Read-only DB inspection found zero owned
+temporary API databases; the base remains `markiro_us_dev` owned by `markiro_us`.
+The existing Vite configuration warning remains. No full primary-environment API,
+full domain/DB package tests or new HTTP/MFA/browser/hosted/hardware checks ran:
+the source change is internal to US Receiving, with no domain/DB change. Every
+API fixture applied the full migration chain only to its owned disposable DB.
+The primary checkout, controller and browser source remain unchanged.
+
 **Files**
 
 - Create API modules `us-receiving-lifecycle.ts`, `us-receiving-history.ts`, `us-receiving-basis.ts`, `us-receiving-chain.ts`, `us-receiving-operations.ts` under `apps/api/src/modules/traceability/receiving/`.
@@ -1471,6 +1705,186 @@ uses the new live response contract. No intermediate deployment is permitted.
 Suggested later commit: `feat(us): implement receiving amendments and voids`.
 
 ### Task 5: Connected lifecycle, recovery and browser proof
+
+#### Original-command acknowledgement checkpoint — 2026-09-08
+
+Task 5 has a preparatory client slice; the coordinated HTTP/live-read/UI switch
+is still pending. `receiving/command-acknowledgement.ts` now validates original
+create/save/finalize acknowledgements in either historical or versioned format.
+The active client delegates its existing legacy validation to these helpers but
+keeps its old response schemas, signatures and routes. It deliberately rejects
+new receipt envelopes until current-state recovery is connected.
+
+The helpers parse the shared strict input/result contracts, verify the exact
+command/key/target and recompute the server's versioned SHA-256 JSON frame with
+native Web Crypto. They check the original lifecycle, draft versions, saved
+content, readiness digest and reviewed line set. Hashing unavailable means no
+match, with no raw error retained. Historical v1/v2 results remain unchanged;
+new versioned finalization requires frozen v3. Omitted/null exemption extensions
+are equivalent only for draft comparison, while new command hashes retain their
+exact parsed shape. Omitted/empty review arrays likewise remain distinct for new
+receipts. Explicit revision commands are intentionally not accepted by these
+original-input helpers; their captured-root/reason/binding validation remains
+part of the lifecycle transport/UI step.
+
+The active client additionally rejects create acknowledgements above draft
+version 1 and save acknowledgements outside expectedVersion/expectedVersion+1.
+Focused RED tests demonstrated both gaps before implementation. Versioned
+positive vectors went RED before support; a schema-valid later pending amendment
+was also rejected only after its dedicated RED regression. The exempt create
+fixture now uses version 1 so its content-comparison assertions cannot pass for
+the wrong reason. Existing snapshot fixtures were not modified.
+
+The 17-case helper suite uses literal server digest vectors including UTF-8,
+independent server-side hashing for variable specimens and real native Web Crypto
+in the DOM test environment. Together with the five existing client suites it
+passes 57/57. The check-only CI selection and its inclusion contract were updated
+through RED/GREEN; 19/19 tool tests and the release-lock checker pass. Review is
+inline/sequential under the owner's selected mode, not an independent review.
+No controller, proxy, server/shared contract, database, screen or styling changed.
+No new HTTP/MFA/live-browser/hosted acceptance, commit, push or deployment occurred.
+
+Final-source verification on Node 24.20.0 passed all 1,278 admin tests across
+111 files without skips (177.45 seconds), including the connected wrong-version
+response/retry case. Admin typecheck/lint, primary and isolated US builds, scoped
+tool lint, full formatting and diff checks pass. The five existing RU hook
+warnings, JSDOM canvas/navigation limitations and build chunk notices remain
+unsuppressed. This is automated client/DOM proof, not a new real-browser journey.
+Unchanged server/domain/contracts/DB suites were not rerun in this client slice.
+
+#### Original workflow live-read/recovery checkpoint — 2026-09-08
+
+This later checkpoint supersedes the preparatory transport status above.
+Existing original create/save/finalize HTTP routes now call the versioned command
+bridges together with live detail/list GETs and readiness v4. OpenAPI documents
+the acknowledgement-versus-current-state distinction; new finalizations freeze
+v3, while exact historical v1/v2 retries remain unchanged. Request bodies remain
+original-only. The controller rejects explicit revision finalization input;
+amend/void and history/basis endpoints are still closed.
+
+The client accepts only correlated command-specific acknowledgements. The editor
+always GETs current state after first success or replay, including finalization.
+A known acknowledgement plus failed GET retains recovery state and blocks edits,
+checks and mutations. Its explicit retry sends only GET. Header and footer label
+the current state unconfirmed rather than presenting an old draft/saved status
+as current. Unknown mutation outcomes keep the existing same-command retry flow.
+Session/tenant cleanup, navigation guards and current permission checks remain.
+New live draft/frozen view types do not cast frozen v3 into historical records.
+Void/amended state has a separate read-only notice, and retained v3 lot bindings
+are not labelled newly created. Existing Markiro identity, shared components,
+tokens and EN/ES styling are preserved.
+
+The local proxy accepts bounded, unique history=current/all and four statuses
+alongside the existing search/limit/offset fields. No new lifecycle mutation path
+is permitted. The registry UI still uses current selection and its existing
+draft/finalized filters; full history controls and exact-revision/basis return
+navigation remain part of the subsequent slice. Original-only editing and
+finalization are disabled for amendment records, even if an internal fixture has
+created one.
+
+RED evidence preceded the transport switch: new client receipts/live reads were
+rejected, successful finalization displayed old state without GET, and the real
+HTTP controller returned bare legacy records. Recovery and retained-lot display
+regressions also went RED before their fixes. Legacy frozen fixtures remain
+immutable; test-only read adapters provide the new envelope without modifying
+historical acknowledgements. Dedicated boundary tests still reject bare legacy
+GET/readiness payloads. Further cases cover acknowledged create/save GET failure,
+schema-valid mismatched lifecycle readiness and stale finalize replay after void.
+
+Verification on Node 24.20.0:
+
+- The final-source full admin suite passed 1287/1287 across 112 files, without
+  skips, in 168.89 seconds. This includes acknowledged create/save/finalize
+  GET-only recovery, unconfirmed-state labels and mismatched readiness targets.
+- All 30 Receiving API files passed 592/592 on owned disposable US databases,
+  including 14 real HTTP/MFA cases. Exact old/new acknowledgements after void,
+  fresh live status and new-command denial are covered. The HTTP file passed
+  again after adding explicit-revision input rejection.
+- Affected product-profile, lot, deployment-entry, US development and US HTTP
+  suites passed 140/140 across five files, without loading the primary environment.
+- The check-only tool tests passed 19/19, including RED/GREEN inclusion of the
+  new live-client suite. The actual proxy smoke passed; unsupported routes,
+  duplicate fields and noncanonical queries remain denied.
+- The real Chromium journey passed twice after the audit-contract migration.
+  The final UI-source run took 35.93 seconds and covered MFA, create/save,
+  ordinary and exempt finalization, exact lost-response replay, read-only recovery,
+  exact audits/latches, frozen references, lot/back and operator denial, EN/ES,
+  light/dark and 1440/1024/390 widths. Safe screenshots:
+  `/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-cRGSHi`.
+  The final recovery screenshot was inspected; prior saved/current ambiguity was
+  corrected before this run.
+- API typecheck/lint/build and admin typecheck/lint, primary and US builds passed.
+  Existing five RU hook warnings, JSDOM limitations, Vite notices and chunk-size
+  warnings are not suppressed. Browser companion lint uses explicit browser
+  globals for its in-page callbacks; no repository lint policy was relaxed.
+- Full repository formatting and diff checks passed. Read-only cleanup checks
+  found zero disposable US profile databases and no listeners on the owned
+  browser-fixture ports 3100/5174. The primary checkout remains unchanged.
+
+Review was inline/sequential under the owner's selected mode, not independent.
+It checked strict original inputs, response correlation, frozen content,
+GET-only recovery, tenant/MFA boundaries, proxy closure and real audit shape.
+No schema, dependency, deployment, hosted service, primary environment or main
+checkout change belongs to this slice. Broader RU API/infrastructure, hardware,
+mail/object storage, native mobile and screen-reader acceptance were not run;
+shared domain/contracts/DB package suites were unchanged and not repeated.
+Task 4/5 and US-03 remain partial: explicit revision-command correlation,
+structured lifecycle conflict presentation, amend/void and history/basis routes,
+amendment editor, full lifecycle navigation and final acceptance remain ahead.
+No commit, push, PR, merge, release or deployment is authorized by this checkpoint.
+
+#### Explicit revision acknowledgement preparation — 2026-09-08
+
+The client-side command validators now accept explicit amendment save and revision
+finalize input only with the record captured before the command. They correlate
+root/event identity, predecessor, immutable amendment reason, event number,
+timezone, creation metadata and expected lifecycle/draft versions. A changed save
+advances the draft version exactly once; a no-op preserves its version and update
+metadata. Saved ordered input is compared with omitted/null exemption compatibility
+without weakening the exact versioned command digest.
+
+New amend/void validators use the same strict schemas and native Web Crypto frame.
+Amend hashes the requested predecessor but acknowledges a distinct server-allocated
+draft, with the same root/reason and copied predecessor line/lot/product/link-mode
+bindings. Cancelled revision numbers are not reused or assumed contiguous. Void
+preserves saved/frozen content and its update metadata, while checking the new
+lifecycle version, reason and current/pending pointers. Finalization checks v3
+confirmation, exact exempt QA review lines and captured retained/created/linked
+bindings; historical v1/v2 content remains readable for amend/void without conversion.
+
+This is preparatory validation, not a new browser workflow. Active public client
+input schemas still reject explicit revision commands before fetch, and no new
+HTTP/proxy path, UI control, state machine or persistent cache is introduced.
+Callers must retain the pre-command context with the exact retry body and perform
+the fresh live GET after a matched acknowledgement; a later current read cannot
+replace that context. Server authorization and lot-identity rules remain authoritative.
+
+TDD evidence: two explicit save/finalize acceptance assertions failed before
+implementation; the five amend/void cases initially failed for absent validators.
+Four schema-valid product/link-mode substitution regressions and the no-op update
+metadata case subsequently failed before their fixes. The new suite contains
+53 cases, including a literal UTF-8 amend digest vector, independent Node hashing,
+original/revision finalization, historical frozen versions, retained own-assigned
+TLC review, missing context/hashing, wrong roots/versions/reasons/keys and exact
+old-command compatibility. Seven focused client/helper files passed 103/103.
+The check-only CI inclusion contract was RED before adding the exact suite and
+GREEN afterward; tools passed 19/19 and the local release-lock checker passed.
+
+Final-source Node 24.20.0 gates: full admin 1340/1340 across 113 files, no skips,
+183.25 seconds; admin typecheck/lint, primary and isolated US builds, scoped tool
+lint, full repository formatting and diff checks passed. The five existing RU
+hook warnings, JSDOM canvas/navigation limitations and build chunk notices remain
+unsuppressed. The primary checkout stayed at
+`c2e0ef01871e89f6ca8a1d519df0b4893d0526a3` with its same six untracked paths;
+the US worktree HEAD remained `08e813f46eb923d04cf585c559c00bb95f49e331`.
+
+Review is inline/sequential under the owner's selected mode, not independent.
+Full UI integration, structured conflicts, amend/void/history/basis HTTP and
+complete lifecycle navigation remain pending. No new real-browser, HTTP/MFA,
+database or hosted proof is claimed by this helper-only increment. No schema,
+backend, dependency, design, primary checkout, commit, push or release change.
+Unchanged backend/shared package suites were not repeated; no database was
+connected or modified and no browser fixture was started in this increment.
 
 **Files**
 
@@ -1787,14 +2201,20 @@ Planning self-review: all ten spec sections map to tasks above; new schema/type
 names and method argument ordering are shared explicitly. The storage task
 includes the compatibility bridge so existing commands do not break between
 schema and lifecycle work. Contract-only downstream facts are not recorded as
-implemented Transformation/Shipping. Tasks 1–2 are complete; Task 3's support-token
-slice is implemented, with root/chain storage still pending. Tasks 4–5 and
-cross-task final acceptance remain unexecuted.
+implemented Transformation/Shipping. Tasks 1–3 are complete. Task 4 has the dated
+internal read/write/compatibility checkpoints above and the coordinated original
+workflow transport/recovery increment. Remaining lifecycle transport and Task 5
+controls plus cross-task final acceptance remain pending.
 
 ## Execution handoff
 
 The owner selected inline sequential execution (option 2) on 2026-09-07, using
 `executing-plans` with the same review checkpoints. Stage 1 (Tasks 1–2: rules and
-contracts) is complete. Task 3 has its compatible support-token slice; the next
-checkpoint is revision root/chain storage and the original-command root-lock
-bridge. This choice does not authorize publication or release.
+contracts) and Task 3 storage are complete. Task 4 remains partial; original
+create/save/finalize acknowledgement bridges and their coordinated HTTP/OpenAPI,
+client live reads and current-state recovery are implemented and browser-verified.
+Explicit revision-command acknowledgement validators are prepared with captured
+context; the active client still enforces original-only inputs.
+Next: their coordinated transport/recovery integration and amend/void/history/basis HTTP,
+then the remaining Task 5 lifecycle controls, amendment editing and full navigation
+proof. This choice does not authorize publication or release.

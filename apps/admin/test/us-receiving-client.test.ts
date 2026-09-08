@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createUsBrowserClient } from "../src/us/client.js";
+import { receivingRecordSchema } from "@markiro/platform-contracts";
+import { liveFixture } from "./support/us-receiving-live-fixture.js";
 
 const id = "a0000000-0000-4000-8000-000000000001";
 const operationKey = "b0000000-0000-4000-8000-000000000001";
@@ -42,6 +44,42 @@ const transport = (value: unknown, status = 200) =>
   vi.fn<typeof fetch>().mockImplementation(async () => Response.json(value, { status }));
 
 describe("US receiving browser boundary", () => {
+  it("rejects a create acknowledgement from a later draft version", async () => {
+    const send = transport({ ...record, draftVersion: 2 });
+    await expect(
+      createUsBrowserClient(send).createReceivingDraft({ operationKey, draft }),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+  it.each([6, 9])(
+    "rejects a save acknowledgement outside its no-op/change versions (%s)",
+    async (draftVersion) => {
+      const send = transport({ ...record, draftVersion });
+      await expect(
+        createUsBrowserClient(send).saveReceivingDraft(id, {
+          operationKey,
+          expectedDraftVersion: 7,
+          draft,
+        }),
+      ).rejects.toMatchObject({ code: "invalid_response" });
+      expect(send).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each([7, 8])(
+    "accepts the saved no-op/change version without rewriting the acknowledgement (%s)",
+    async (draftVersion) => {
+      const result = { ...record, draftVersion };
+      const send = transport(result);
+      await expect(
+        createUsBrowserClient(send).saveReceivingDraft(id, {
+          operationKey,
+          expectedDraftVersion: 7,
+          draft,
+        }),
+      ).resolves.toEqual(result);
+      expect(send).toHaveBeenCalledTimes(1);
+    },
+  );
   it.each([false, true])(
     "accepts only omitted/null extension compatibility in acknowledgements (%s)",
     async (withNull) => {
@@ -134,6 +172,8 @@ describe("US receiving browser boundary", () => {
     const header = Object.fromEntries(Object.entries(record).filter(([key]) => key !== "draft"));
     const summary = {
       ...header,
+      recordVersion: 2,
+      lifecycle: liveFixture(receivingRecordSchema.parse(record)).lifecycle,
       dateReceived: null,
       locationId: null,
       previousSourceLocationId: null,
@@ -147,6 +187,7 @@ describe("US receiving browser boundary", () => {
     expect(Object.fromEntries(url.searchParams)).toEqual({
       search: "REC&A",
       status: "draft",
+      history: "current",
       limit: "50",
       offset: "0",
     });
@@ -161,6 +202,7 @@ describe("US receiving browser boundary", () => {
   });
   it("preserves explicit retry keys and versions on exact isolated draft routes", async () => {
     const send = transport(record);
+    send.mockResolvedValueOnce(Response.json(liveFixture(receivingRecordSchema.parse(record))));
     const client = createUsBrowserClient(send);
     await client.getReceivingDraft(id.toUpperCase());
     await client.createReceivingDraft({ operationKey, draft });

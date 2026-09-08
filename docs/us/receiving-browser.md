@@ -1,32 +1,27 @@
 # US receiving browser
 
-Status: connected locally on 2026-09-07; development-only, release locked. US-03 remains partial.
+Status: connected locally on 2026-09-08; development-only, release locked. US-03 remains partial.
 
-Next increment: the [approved Receiving lifecycle design](../superpowers/specs/2026-09-07-us-03-receiving-lifecycle-design.md)
-covers amendments, voids, revision history and separate current receiving basis.
-The written technical design was owner-approved on 2026-09-07; its
-[implementation plan](../superpowers/plans/2026-09-07-us-03-receiving-lifecycle.md)
-has completed the domain/contract foundation, internal lot support-version bridge,
-revision storage and frozen-v3 constraints. As of 2026-09-08, internal server
-methods also read exact revision history and current lot receiving basis from a
-consistent database snapshot. Their 40 focused cases and the 396-case scoped API
-regression pass; see the plan's read-foundation checkpoint for evidence and limits.
-Internal QA-controlled amend/void commands now also preserve historical receipts,
-audit and lot identity under retries and concurrent changes; the plan's command
-checkpoint records that server-only slice. Internal amendment saving now checks
-exact predecessor bindings, current QA and saved/root versions, without changing
-current receipt support. Internal readiness v4 now checks saved amendments,
-including retained and removed predecessor lots, with current references and fresh
-exemption-review requirements. Internal explicit-v2 finalization now atomically
-freezes v3, replaces the current revision and its receipt support, and records
-the predecessor transition and exact line-to-lot mappings. It is not connected
-to the browser or controller yet. Internal live registry reads now support explicit
-current/all history, status filters and snapshot-consistent summaries, including
-the terminal receipt after a later amendment draft was abandoned. This does not
-change the connected registry or its current transport yet.
-The active HTTP API still emits its existing formats;
-new lifecycle controls and endpoints are not available yet. Storage/server tests
-are not browser acceptance.
+The [approved lifecycle design](../superpowers/specs/2026-09-07-us-03-receiving-lifecycle-design.md)
+and [execution plan](../superpowers/plans/2026-09-07-us-03-receiving-lifecycle.md)
+now have a coordinated original-workflow transport increment. Existing create,
+save and finalize routes return versioned acknowledgements for new commands and
+exact historical results for authorized retries. Record/list reads use the live
+lifecycle envelope, readiness is v4, and new finalizations freeze v3. The client
+correlates acknowledgements with the captured command and always reads current
+state after success. Frozen v1/v2 snapshots are still read without conversion.
+
+Internal amendment saving, QA amend/void, revision history, registry and current
+lot-basis methods are implemented. Their new command/history/basis endpoints,
+amendment editor, lifecycle controls and history/basis navigation remain pending.
+Explicit revision acknowledgement validators are now prepared: they require the
+record captured before sending and correlate root, predecessor, reason, versions,
+saved data and lot bindings. The active client still rejects explicit revision
+inputs before transport; connecting these validators to new commands and their
+current-state recovery remains a coordinated follow-up. The current registry uses the
+server's default current selection; all-history and four-status query contracts
+are available over HTTP, but their complete UI controls are a later increment.
+No amendment or void command is enabled through the browser or public routes.
 
 ## Available behavior
 
@@ -39,6 +34,21 @@ Active reference pickers provide bounded search and pagination for products, loc
 ## Save and recovery boundary
 
 There is no autosave or automatic retry. A save captures an immutable command with a UUID operation key and, for an existing event, the loaded draft version. While a command is settling, mutation/navigation controls are blocked. A lost or invalid acknowledgement retains input and freezes editing; an explicit retry sends the same command. The client rejects even schema-valid responses whose draft does not match the normalized command. A successful server replay does not create another event or audit entry.
+
+Every successful create/save/finalize acknowledgement is followed by a fresh GET,
+including first success and exact historical replay. If the operation is known
+to have succeeded but GET fails, the browser retains the acknowledgement, labels
+current state unconfirmed and blocks edits, checks and writes. “Retry current
+state” repeats only GET; it never resubmits the operation. The fresh record may
+already be amended or void, which is displayed separately from its unchanged
+frozen content. Void draft content is read-only. V3 retained lot bindings are
+identified as retained, not newly created at this revision.
+
+The client also checks the acknowledged version: creation returns version 1;
+saving returns the expected version for a no-op or its immediate successor for a
+change. Any other version is an invalid acknowledgement, not permission to replace
+input with a later server state. These checks do not turn historical results into
+current-state reads.
 
 A version or operation-key conflict never overwrites input. Reloading the saved event requires explicit confirmation; failed or cancelled reload keeps the draft and conflict block. An operation conflict before an event ID is known directs the user back to the registry before creating another event. Unknown document creation results similarly retain the same metadata for explicit retry; duplicate metadata guidance directs the user to search for the existing record.
 

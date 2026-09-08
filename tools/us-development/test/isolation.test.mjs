@@ -48,6 +48,9 @@ test("US receiving storage and contract regressions run unconditionally in the i
   const job = workflows()["us-development.yml"].jobs.isolation;
   assert.equal(job.if, undefined);
   for (const [pkg, file] of [
+    ["admin", "us-receiving-command-acknowledgement.test.ts"],
+    ["admin", "us-receiving-live-client.test.ts"],
+    ["admin", "us-receiving-revision-acknowledgement.test.ts"],
     ["db", "us-receiving-basis-version-migration.e2e.test.ts"],
     ["api", "us-receiving-basis-version.e2e.test.ts"],
     ["db", "us-receiving-roots-migration.e2e.test.ts"],
@@ -60,6 +63,10 @@ test("US receiving storage and contract regressions run unconditionally in the i
     ["api", "us-receiving-lifecycle.e2e.test.ts"],
     ["api", "us-receiving-lifecycle-concurrency.e2e.test.ts"],
     ["api", "us-receiving-lifecycle-compatibility.e2e.test.ts"],
+    ["api", "us-receiving-original-command.e2e.test.ts"],
+    ["api", "us-receiving-command-contracts.e2e.test.ts"],
+    ["api", "us-receiving-draft-command-bridge.e2e.test.ts"],
+    ["api", "us-receiving-finalization-command-bridge.e2e.test.ts"],
     ["api", "us-receiving-amendment-save.e2e.test.ts"],
     ["api", "us-receiving-amendment-save-concurrency.e2e.test.ts"],
     ["api", "us-receiving-revision-readiness.e2e.test.ts"],
@@ -67,6 +74,8 @@ test("US receiving storage and contract regressions run unconditionally in the i
     ["api", "us-receiving-revision-finalization.e2e.test.ts"],
     ["api", "us-receiving-revision-finalization-concurrency.e2e.test.ts"],
     ["platform-contracts", "us-receiving-lifecycle.test.ts"],
+    ["platform-contracts", "us-receiving-lifecycle-errors.test.ts"],
+    ["platform-contracts", "us-receiving-command-contracts.test.ts"],
     ["platform-contracts", "us-receiving-finalization-v3.test.ts"],
     ["platform-contracts", "us-receiving-live-records.test.ts"],
     ["platform-contracts", "us-receiving-registry.test.ts"],
@@ -85,8 +94,10 @@ test("US receiving storage and contract regressions run unconditionally in the i
     assert.equal(step.if, undefined);
     assert.equal(step["continue-on-error"], undefined);
     assert.equal(
-      step.env.US_TEST_DATABASE_URL,
-      "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev",
+      step.env?.US_TEST_DATABASE_URL,
+      pkg === "admin"
+        ? undefined
+        : "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev",
     );
   }
 });

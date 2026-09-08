@@ -8,10 +8,13 @@ import {
 import { ConflictException } from "@nestjs/common";
 import {
   finalizeReceivingRevisionSchema,
+  finalizeReceivingCommandSchema,
+  receivingFinalizeResultSchema,
   platformUuidSchema,
   receivingOperationReceiptV2Schema,
   type ReceivingFinalizationSnapshotV3,
   type ReceivingLiveRecord,
+  type FinalizeReceivingCommandInput,
 } from "@markiro/platform-contracts";
 import { and, eq } from "drizzle-orm";
 import {
@@ -26,12 +29,14 @@ import {
   receivingLifecycleCommandDigest,
   receivingTransaction,
   replayReceivingLifecycle,
+  replayReceivingFinalization,
 } from "./us-receiving-operations";
 import { bumpReceivingBasisVersions, lockReceivingRoot } from "./us-receiving-roots";
 import { readReceivingLiveRecord } from "./us-receiving-history";
 import { readReceivingRevisionContext } from "./us-receiving-revision-readiness";
 import { planReceivingRevisionSnapshot } from "./us-receiving-snapshots";
 import { unavailable } from "./us-receiving-persistence";
+import { assertOriginalReceivingWriteTarget } from "./us-receiving-original-command";
 
 type Context = Awaited<ReturnType<typeof readReceivingRevisionContext>>;
 type Snapshot = Extract<ReceivingLiveRecord["content"], { kind: "finalized" }>["snapshot"];
@@ -151,7 +156,7 @@ async function persistLots(
   }
 }
 
-/** Internal explicit-v2 command. Legacy HTTP input, digests and result formats are untouched. */
+/** Strict explicit-v2 entry remains available for revision-only callers. */
 export async function finalizeReceivingRevision(
   db: Db,
   tenantId: string,
@@ -159,6 +164,43 @@ export async function finalizeReceivingRevision(
   id: unknown,
   input: unknown,
   requestId: string,
+) {
+  return receivingOperationReceiptV2Schema.parse(
+    await executeFinalization(db, tenantId, actorUserId, id, input, requestId, "revision"),
+  );
+}
+
+/** Internal compatibility entry: new writes freeze v3; old successful results replay unchanged. */
+export async function finalizeReceivingCommand(
+  db: Db,
+  tenantId: string,
+  actorUserId: string,
+  id: unknown,
+  input: unknown,
+  requestId: string,
+) {
+  return receivingFinalizeResultSchema.parse(
+    await executeFinalization(db, tenantId, actorUserId, id, input, requestId, "compatible"),
+  );
+}
+
+function parseFinalizationCommand(
+  input: unknown,
+  mode: "revision" | "compatible",
+): FinalizeReceivingCommandInput {
+  return mode === "revision"
+    ? parseMasterDataInput(finalizeReceivingRevisionSchema, input)
+    : parseMasterDataInput(finalizeReceivingCommandSchema, input);
+}
+
+async function executeFinalization(
+  db: Db,
+  tenantId: string,
+  actorUserId: string,
+  id: unknown,
+  input: unknown,
+  requestId: string,
+  mode: "revision" | "compatible",
 ) {
   try {
     return await receivingTransaction(db, async (tx) => {
@@ -169,13 +211,17 @@ export async function finalizeReceivingRevision(
         US_CAPABILITY.QA_MANAGE,
       );
       const eventId = parseMasterDataInput(platformUuidSchema, id);
-      const value = parseMasterDataInput(finalizeReceivingRevisionSchema, input);
+      const value = parseFinalizationCommand(input, mode);
       const command = "receiving.finalize";
       const inputDigest = receivingLifecycleCommandDigest(command, eventId, value);
       const stored = await lockReceivingOperation(tx, tenantId, command, value.operationKey);
       if (stored)
-        return replayReceivingLifecycle(stored, command, eventId, value.operationKey, inputDigest);
+        return mode === "revision"
+          ? replayReceivingLifecycle(stored, command, eventId, value.operationKey, inputDigest)
+          : replayReceivingFinalization(stored, eventId, value, inputDigest);
       const root = await lockReceivingRoot(tx, tenantId, eventId);
+      if (!("commandVersion" in value))
+        await assertOriginalReceivingWriteTarget(tx, tenantId, eventId);
       const events = schema.traceabilityEvents,
         roots = schema.receivingEventRoots;
       await tx
@@ -200,8 +246,9 @@ export async function finalizeReceivingRevision(
       );
       if (
         !decision.ok ||
-        root.lifecycleVersion !== value.expectedLifecycleVersion ||
-        before.lifecycle.previousRevisionId !== value.previousRevisionId
+        ("commandVersion" in value &&
+          (root.lifecycleVersion !== value.expectedLifecycleVersion ||
+            before.lifecycle.previousRevisionId !== value.previousRevisionId))
       )
         throw new ConflictException({
           code: "receiving_lifecycle_conflict",
@@ -212,11 +259,12 @@ export async function finalizeReceivingRevision(
         });
       if (before.draftVersion !== value.expectedDraftVersion)
         throw new ConflictException({ code: "receiving_draft_conflict" });
-      if (value.previousRevisionId !== null)
+      const previousRevisionId = before.lifecycle.previousRevisionId;
+      if (previousRevisionId !== null)
         await tx
           .select({ id: events.id })
           .from(events)
-          .where(and(eq(events.tenantId, tenantId), eq(events.id, value.previousRevisionId)))
+          .where(and(eq(events.tenantId, tenantId), eq(events.id, previousRevisionId)))
           .for("update");
       // Root and both revision rows precede sorted lot and reference locks.
       // The same projection produces the read-only check and this locked digest.
@@ -233,7 +281,7 @@ export async function finalizeReceivingRevision(
       if (context.readiness.inputDigest !== value.expectedInputDigest)
         throw new ConflictException({ code: "receiving_readiness_changed" });
       const required = context.readiness.exemptReviewRequiredLines,
-        reviewed = value.reviewedExemptLines;
+        reviewed = value.reviewedExemptLines ?? [];
       if (
         required.length !== reviewed.length ||
         required.some((line, index) => line !== reviewed[index])

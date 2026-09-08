@@ -54,7 +54,10 @@ export async function exerciseUsReceiving({ page, expect, screenshots, fixture }
     if (attempts.length === 1) {
       const response = await route.fetch();
       assert.equal(response.status(), 201);
-      committed = await response.json();
+      const acknowledgement = await response.json();
+      assert.equal(acknowledgement.receiptVersion, 2);
+      assert.equal(acknowledgement.command, "receiving.create");
+      committed = acknowledgement.record;
       return route.abort("failed");
     }
     return route.continue();
@@ -69,11 +72,11 @@ export async function exerciseUsReceiving({ page, expect, screenshots, fixture }
   assert.equal(attempts.length, 2);
   assert.deepEqual(attempts[0], attempts[1]);
   assert.ok(committed?.id);
-  assert.equal(committed.draft.items.length, 2);
-  assert.equal(committed.draft.items[0].quantity, "500.000");
-  assert.equal(committed.draft.items[0].tlc, "OSS-260907-A1");
-  assert.equal(committed.draft.items[0].source, null);
-  assert.equal(committed.draft.documentIds.length, 1);
+  assert.equal(committed.content.draft.items.length, 2);
+  assert.equal(committed.content.draft.items[0].quantity, "500.000");
+  assert.equal(committed.content.draft.items[0].tlc, "OSS-260907-A1");
+  assert.equal(committed.content.draft.items[0].source, null);
+  assert.equal(committed.content.draft.documentIds.length, 1);
   await expect(
     page.getByRole("heading", { name: committed.eventNumber, exact: true }),
   ).toBeVisible();
@@ -113,6 +116,8 @@ export async function exerciseUsReceiving({ page, expect, screenshots, fixture }
     const result = await checked.json();
     assert.equal(result.eventId, committed.id);
     assert.equal(result.draftVersion, version);
+    assert.equal(result.ruleVersion, "receiving-readiness-v4");
+    assert.equal(result.expectedLifecycleVersion, 1);
     assert.equal(result.state, "blocked");
     assert.match(result.inputDigest, /^[a-f0-9]{64}$/);
     assert.ok(
@@ -210,7 +215,7 @@ export async function exerciseUsReceiving({ page, expect, screenshots, fixture }
   await page.setViewportSize({ width: 1440, height: 900 });
 
   // A second writer saves while this editor holds version 1.
-  const otherDraft = { ...committed.draft, notes: "Saved in another editor" };
+  const otherDraft = { ...committed.content.draft, notes: "Saved in another editor" };
   const concurrent = await page.request.put(
     `http://localhost:5174/api/us/traceability/receiving/${committed.id}`,
     {
@@ -219,7 +224,9 @@ export async function exerciseUsReceiving({ page, expect, screenshots, fixture }
     },
   );
   assert.equal(concurrent.status(), 200);
-  const version2 = await concurrent.json();
+  const saveReceipt = await concurrent.json();
+  assert.equal(saveReceipt.receiptVersion, 2);
+  const version2 = saveReceipt.record;
   await page
     .getByRole("textbox", { name: "Receiving notes", exact: true })
     .fill("My local edits are still here");

@@ -9,6 +9,9 @@ import { createUsBrowserClient } from "../src/us/client.js";
 import { masterDataCopy } from "../src/us/master-data/copy.js";
 import { ReceivingView } from "../src/us/receiving/view.js";
 import { receivingQuantityTotals } from "../src/us/receiving/quantity-totals.js";
+import { liveFinalized } from "./support/us-receiving-command-fixture.js";
+import { liveFixture, liveReadFixtureResponse } from "./support/us-receiving-live-fixture.js";
+import { receivingRecordSchema, type ReceivingRecord } from "@markiro/platform-contracts";
 import {
   complete,
   finalized,
@@ -29,7 +32,8 @@ async function setup(
     handle?: (url: string, init?: RequestInit) => Response | Promise<Response> | undefined;
   } = {},
 ) {
-  const send = vi.fn<typeof fetch>().mockImplementation(async (url, init) => {
+  let current: ReceivingRecord = options.finalized ? finalized : record;
+  const source: typeof fetch = async (url, init) => {
     const custom = options.handle?.(String(url), init);
     if (custom) return custom;
     if (String(url).startsWith(`${path}?`)) {
@@ -50,10 +54,18 @@ async function setup(
         offset: 0,
       });
     }
-    if (url === `${path}/${id}`) return Response.json(options.finalized ? finalized : record);
+    if (url === `${path}/${id}`) return Response.json(current);
     if (String(url).includes("/readiness")) return Response.json(complete);
     if (String(url).endsWith("/finalize")) return Response.json(finalized);
     return Response.json({ items: [], limit: 50, offset: 0 });
+  };
+  const send = vi.fn<typeof fetch>().mockImplementation(async (url, init) => {
+    const response = await source(url, init);
+    if (init?.method !== "GET" && response.ok) {
+      const parsed = receivingRecordSchema.safeParse(await response.clone().json());
+      if (parsed.success) current = parsed.data;
+    }
+    return liveReadFixtureResponse(String(url), init, response);
   });
   const instance = i18next.createInstance();
   await instance.init({
@@ -103,6 +115,106 @@ async function confirm(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("ordinary receiving confirmation", () => {
+  it("labels v3 predecessor lot bindings as retained, never newly created", async () => {
+    if (
+      liveFinalized.content.kind !== "finalized" ||
+      liveFinalized.content.snapshot.snapshotVersion !== 3
+    )
+      throw new Error("Expected frozen v3 specimen");
+    const predecessor = "c0000000-0000-4000-8000-000000000001";
+    const current = {
+      ...liveFinalized,
+      revision: 2,
+      lifecycle: {
+        ...liveFinalized.lifecycle,
+        rootId: predecessor,
+        lifecycleVersion: 4,
+        previousRevisionId: predecessor,
+        amendmentReason: "Correct quantity",
+      },
+      content: {
+        ...liveFinalized.content,
+        snapshot: {
+          ...liveFinalized.content.snapshot,
+          items: liveFinalized.content.snapshot.items.map((item) => ({
+            ...item,
+            lotBinding: {
+              kind: "retained",
+              previousEventId: predecessor,
+              previousLineNo: item.lineNo,
+            },
+          })),
+        },
+      },
+    };
+    await setup({
+      finalized: true,
+      handle: (url, init) =>
+        url === `${path}/${id}` && init?.method === "GET" ? Response.json(current) : undefined,
+    });
+    expect(await screen.findAllByText("Retained from previous revision")).toHaveLength(3);
+    expect(screen.queryByText("Created at finalization")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save draft" })).toBeNull();
+  });
+  it("reads current lifecycle after a historical finalize acknowledgement and renders Void", async () => {
+    let acknowledged = false;
+    const current = {
+      ...liveFinalized,
+      status: "void",
+      lifecycle: {
+        ...liveFinalized.lifecycle,
+        lifecycleVersion: 3,
+        currentEventId: null,
+        voidReason: "Duplicate receipt",
+        voidedAt: "2026-09-08T10:00:00.000Z",
+        voidedBy: "qa-user",
+      },
+    };
+    const { user, send } = await setup({
+      handle: (url, init) => {
+        if (url.endsWith("/finalize")) {
+          acknowledged = true;
+          return Response.json(finalized);
+        }
+        if (url === `${path}/${id}` && init?.method === "GET" && acknowledged)
+          return Response.json(current);
+        return undefined;
+      },
+    });
+    await confirm(user);
+    await user.click(screen.getByRole("button", { name: "Confirm finalization" }));
+    await screen.findByText("Void", { exact: true });
+    expect(screen.getByText("Duplicate receipt")).toBeTruthy();
+    expect(screen.getAllByText("Frozen apples")).toHaveLength(3);
+    expect(screen.queryByRole("button", { name: "Save draft" })).toBeNull();
+    expect(finalizeCalls(send)).toHaveLength(1);
+  });
+  it("retries only the current read when finalization succeeded but its recovery read failed", async () => {
+    let acknowledged = false;
+    let reads = 0;
+    const { user, send } = await setup({
+      handle: (url, init) => {
+        if (url.endsWith("/finalize")) {
+          acknowledged = true;
+          return Response.json(finalized);
+        }
+        if (url === `${path}/${id}` && init?.method === "GET" && acknowledged)
+          return reads++ === 0 ? Response.json({}, { status: 503 }) : Response.json(liveFinalized);
+        return undefined;
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await screen.findByText("Draft saved.");
+    await confirm(user);
+    await user.click(screen.getByRole("button", { name: "Confirm finalization" }));
+    const retry = await screen.findByRole("button", { name: "Retry current state" });
+    expect(screen.queryByText("Draft saved.")).toBeNull();
+    expect(screen.getAllByText(/Current state not confirmed/)).toHaveLength(2);
+    await user.click(retry);
+    await screen.findByText("qa-user");
+    expect(finalizeCalls(send)).toHaveLength(1);
+    expect(reads).toBe(2);
+  });
   it("cannot make a fresh attempt when current-record recovery fails", async () => {
     let gets = 0;
     const { user } = await setup({
@@ -260,7 +372,7 @@ describe("ordinary receiving confirmation", () => {
     expect(screen.queryByRole("button", { name: "Save draft" })).toBeNull();
     expect(screen.getAllByText("Frozen apples")).toHaveLength(3);
     await user.click(screen.getAllByRole("button", { name: "Open current lot" })[0]!);
-    expect(onOpenLot).toHaveBeenCalledWith(lotId, finalized);
+    expect(onOpenLot).toHaveBeenCalledWith(lotId, liveFixture(finalized));
     expect(screen.queryByRole("button", { name: /Amend|Void|Export/ })).toBeNull();
   });
   it("retries an unknown result with exactly the same key and body", async () => {

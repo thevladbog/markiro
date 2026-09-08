@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@markiro/ui";
 import { useTranslation } from "react-i18next";
-import type { ReceivingDraftRecord, ReceivingFinalizedRecord } from "@markiro/platform-contracts";
+import type { ReceivingLiveRecord, ReceivingFinalizeResult } from "@markiro/platform-contracts";
+import type { ReceivingDraftView } from "./live-record.js";
 import { UsClientError, UsReceivingIncompleteError, type UsBrowserClient } from "../client.js";
 import { ReceivingFinalizationDialog } from "./finalization-dialog.js";
 import "./readiness.css";
@@ -26,10 +27,11 @@ export function ReceivingReadinessPanel({
   canManageQa = false,
   beginMutation,
   onFinalizationLocked,
-  onFinalized,
+  onOpenRecord,
+  onAcknowledged,
 }: {
   client: UsBrowserClient;
-  record: ReceivingDraftRecord | null;
+  record: ReceivingDraftView | null;
   dirty: boolean;
   generation: number;
   disabled: boolean;
@@ -39,26 +41,35 @@ export function ReceivingReadinessPanel({
   canManageQa?: boolean;
   beginMutation?: () => () => void;
   onFinalizationLocked?: (locked: boolean) => void;
-  onFinalized?: (record: ReceivingFinalizedRecord) => void;
+  onOpenRecord?: (record: ReceivingLiveRecord) => void;
+  onAcknowledged?: (result: ReceivingFinalizeResult) => Promise<void>;
 }) {
   const { t, i18n } = useTranslation();
   const [check, setCheck] = useState<CheckState | null>(null);
-  const [conflicted, setConflicted] = useState<ReceivingDraftRecord | null>(null);
+  const [conflicted, setConflicted] = useState<ReceivingDraftView | null>(null);
   const [confirmation, setConfirmation] = useState<{ context: string; result: CheckResult } | null>(
     null,
   );
   const [finalizationFailure, setFinalizationFailure] = useState(false);
   const [finalizationIssues, setFinalizationIssues] = useState<CheckResult["issues"]>([]);
   const requestGeneration = useRef(0);
-  const context = `${record?.id}/${record?.draftVersion}/${generation}/${dirty}/${disabled}`;
-  const confirmationContext = `${record?.id}/${record?.draftVersion}/${generation}/${dirty}/${canManageQa}`;
+  const identity = `${record?.id}/${record?.draftVersion}/${record?.lifecycle.lifecycleVersion}/${record?.status}`;
+  const context = `${identity}/${generation}/${dirty}/${disabled}`;
+  const confirmationContext = `${identity}/${generation}/${dirty}/${canManageQa}`;
   const confirmationCurrent = confirmation?.context === confirmationContext;
   const currentContext = useRef(context);
   currentContext.current = context;
   const current = check?.context === context;
   const pending = current && check?.pending === true;
   const conflict = conflicted !== null && conflicted === record;
-  const canCheck = record !== null && !dirty && !disabled && !pending && !conflict;
+  const canCheck =
+    record !== null &&
+    record.status === "draft" &&
+    record.revision === 1 &&
+    !dirty &&
+    !disabled &&
+    !pending &&
+    !conflict;
   const result = check?.result ?? null;
   const errors = result?.issues.filter((issue) => issue.severity === "error").length ?? 0;
   const warnings = result?.issues.filter((issue) => issue.severity === "warning").length ?? 0;
@@ -89,6 +100,12 @@ export function ReceivingReadinessPanel({
     try {
       const response = await client.checkReceivingReadiness(record.id, record.draftVersion);
       if (!accepts()) return;
+      if (
+        response.rootId.toLowerCase() !== record.lifecycle.rootId.toLowerCase() ||
+        response.expectedLifecycleVersion !== record.lifecycle.lifecycleVersion ||
+        response.previousRevisionId !== null
+      )
+        throw new UsClientError("receiving_draft_conflict");
       setCheck({ context, pending: false, result: response, error: null });
     } catch (error) {
       if (!accepts()) return;
@@ -269,7 +286,8 @@ export function ReceivingReadinessPanel({
       record &&
       beginMutation &&
       onFinalizationLocked &&
-      onFinalized ? (
+      onOpenRecord &&
+      onAcknowledged ? (
         <ReceivingFinalizationDialog
           client={client}
           record={record}
@@ -278,7 +296,10 @@ export function ReceivingReadinessPanel({
           onLocked={onFinalizationLocked}
           onClose={() => setConfirmation(null)}
           onReload={onReload}
-          onFinalized={onFinalized}
+          onAcknowledged={async (result) => {
+            setConfirmation(null);
+            await onAcknowledged(result);
+          }}
           onForbidden={onForbidden}
           onSessionLost={onSessionLost}
           onConflict={(error) => {

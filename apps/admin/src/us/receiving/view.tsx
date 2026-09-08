@@ -1,28 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Input, Select, StatusChip, Table, type TableColumn } from "@markiro/ui";
-import type {
-  ReceivingRecord,
-  ReceivingRecordSummary,
-  ReceivingFinalizedRecord,
-} from "@markiro/platform-contracts";
+import type { ReceivingLiveRecord, ReceivingLiveRecordList } from "@markiro/platform-contracts";
 import { useTranslation } from "react-i18next";
 import { UsClientError } from "../client.js";
 import { Pager, type MasterDataViewProps } from "../master-data/workspace-shared.js";
 import { ReceivingEditor } from "./editor.js";
 import { ReceivingFinalizedDetail } from "./finalized-detail.js";
+import {
+  isReceivingDraftView,
+  isReceivingFrozenView,
+  type ReceivingFrozenView,
+} from "./live-record.js";
 import "./receiving.css";
 
 export function ReceivingView(
   props: MasterDataViewProps & {
     timeZone: string;
     canManageQa?: boolean;
-    initialRecord?: ReceivingFinalizedRecord;
-    onOpenLot?: (id: string, record: ReceivingFinalizedRecord) => void;
+    initialRecord?: ReceivingFrozenView;
+    onOpenLot?: (id: string, record: ReceivingFrozenView) => void;
   },
 ) {
   const { client, canWrite, mutationPending, onForbidden, onSessionLost } = props;
   const { t, i18n } = useTranslation();
-  const [rows, setRows] = useState<ReceivingRecordSummary[]>([]);
+  const [rows, setRows] = useState<ReceivingLiveRecordList["items"]>([]);
   const [status, setStatus] = useState<"draft" | "finalized" | "">("");
   const [filter, setFilter] = useState("");
   const [search, setSearch] = useState("");
@@ -31,7 +32,7 @@ export function ReceivingView(
   const [failure, setFailure] = useState(false);
   const [opening, setOpening] = useState(false);
   const [openFailure, setOpenFailure] = useState(false);
-  const [editor, setEditor] = useState<{ initial: ReceivingRecord | null } | null>(
+  const [editor, setEditor] = useState<{ initial: ReceivingLiveRecord | null } | null>(
     props.initialRecord ? { initial: props.initialRecord } : null,
   );
   const [refresh, setRefresh] = useState(0);
@@ -95,7 +96,7 @@ export function ReceivingView(
     setEditor(null);
     setRefresh((n) => n + 1);
   };
-  if (editor?.initial?.status === "finalized")
+  if (editor?.initial && isReceivingFrozenView(editor.initial))
     return (
       <ReceivingFinalizedDetail
         record={editor.initial}
@@ -103,16 +104,21 @@ export function ReceivingView(
         onOpenLot={props.onOpenLot ?? (() => {})}
       />
     );
-  if (editor)
+  if (editor && (!editor.initial || isReceivingDraftView(editor.initial)))
     return (
       <ReceivingEditor
+        key={editor.initial ? `${editor.initial.id}/${editor.initial.status}` : "new"}
         {...props}
+        canWrite={
+          canWrite &&
+          (!editor.initial || (editor.initial.status === "draft" && editor.initial.revision === 1))
+        }
         initial={editor.initial}
         onClose={close}
-        onFinalized={(initial) => setEditor({ initial })}
+        onOpenRecord={(initial) => setEditor({ initial })}
       />
     );
-  const columns: TableColumn<ReceivingRecordSummary>[] = [
+  const columns: TableColumn<ReceivingLiveRecordList["items"][number]>[] = [
     {
       key: "eventNumber",
       title: t("receiving.number"),

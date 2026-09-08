@@ -530,6 +530,23 @@ export type {
 } from "./traceability/receiving-lifecycle.js";
 export type { ReceivingDraftItem, ReceivingDraft } from "./traceability/receiving.js";
 export {
+  receivingLifecycleErrorSchema,
+  type ReceivingLifecycleError,
+  type ReceivingIdentityLockedLine,
+} from "./traceability/receiving-lifecycle-errors.js";
+export {
+  saveReceivingCommandSchema,
+  finalizeReceivingCommandSchema,
+  receivingCreateResultSchema,
+  receivingSaveResultSchema,
+  receivingFinalizeResultSchema,
+  type SaveReceivingCommandInput,
+  type FinalizeReceivingCommandInput,
+  type ReceivingCreateResult,
+  type ReceivingSaveResult,
+  type ReceivingFinalizeResult,
+} from "./traceability/receiving-command-contracts.js";
+export {
   createReceivingDraftSchema,
   listReceivingDraftsQuerySchema,
   receivingDraftListSchema,

@@ -2,17 +2,17 @@ import { z } from "zod";
 import {
   createReceivingDraftSchema,
   finalizeReceivingSchema,
-  receivingFinalizedRecordSchema,
-  receivingRecordSchema,
-  listReceivingRecordsQuerySchema,
-  receivingRecordListSchema,
+  receivingFinalizeResultSchema,
+  receivingCreateResultSchema,
+  receivingSaveResultSchema,
+  receivingLiveRecordSchema,
+  listReceivingLiveRecordsQuerySchema,
+  receivingLiveRecordListSchema,
   receivingReadinessIssueSchema,
   receivingReadinessQuerySchema,
-  receivingReadinessSchema,
+  receivingRevisionReadinessSchema,
   saveReceivingDraftSchema,
-  receivingDraftRecordSchema,
   listReceivingDraftsQuerySchema,
-  receivingDraftListSchema,
   listReferenceDocumentsQuerySchema,
   referenceDocumentInputSchema,
   referenceDocumentListSchema,
@@ -45,19 +45,12 @@ import {
   usTraceabilityAccessSchema,
   usTraceabilityProfileSummarySchema,
   type ListUsLocationsQuery,
-  type ReceivingDraft,
 } from "@markiro/platform-contracts";
-
-function sameReceivingDraftInput(left: ReceivingDraft, right: ReceivingDraft): boolean {
-  const comparable = (draft: ReceivingDraft) => ({
-    ...draft,
-    items: draft.items.map(({ exemptReceipt, ...item }) => ({
-      ...item,
-      exemptReceipt: exemptReceipt ?? null,
-    })),
-  });
-  return JSON.stringify(comparable(left)) === JSON.stringify(comparable(right));
-}
+import {
+  matchesReceivingCreateAcknowledgement,
+  matchesReceivingSaveAcknowledgement,
+  matchesReceivingFinalizeAcknowledgement,
+} from "./receiving/command-acknowledgement.js";
 
 export type UsClientErrorCode =
   | "invalid_input"
@@ -329,39 +322,25 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
       const body = checked(finalizeReceivingSchema, input, "invalid_input");
       const result = await request(
         `${receivingPath}/${eventId}/finalize`,
-        receivingFinalizedRecordSchema,
+        receivingFinalizeResultSchema,
         "POST",
         body,
       );
-      if (
-        result.id.toLowerCase() !== eventId ||
-        result.draftVersion !== body.expectedDraftVersion ||
-        result.snapshot.confirmation.inputDigest !== body.expectedInputDigest
-      )
-        throw new UsClientError("invalid_response");
-      const expectedReviews = body.reviewedExemptLines ?? [];
-      const confirmedReviews =
-        result.snapshot.snapshotVersion === 2
-          ? result.snapshot.confirmation.reviewedExemptLines
-          : [];
-      if (
-        expectedReviews.length !== confirmedReviews.length ||
-        expectedReviews.some((line, index) => line !== confirmedReviews[index])
-      )
+      if (!(await matchesReceivingFinalizeAcknowledgement(result, eventId, body)))
         throw new UsClientError("invalid_response");
       return result;
     },
     async listReceivingRecords(input: unknown = {}) {
-      const query = checked(listReceivingRecordsQuerySchema, input, "invalid_input");
+      const query = checked(listReceivingLiveRecordsQuerySchema, input, "invalid_input");
       const params = new URLSearchParams();
       for (const [key, value] of Object.entries(query)) {
         if (value !== undefined) params.set(key, String(value));
       }
-      return request(`${receivingPath}?${params}`, receivingRecordListSchema);
+      return request(`${receivingPath}?${params}`, receivingLiveRecordListSchema);
     },
     async getReceivingRecord(id: unknown) {
       const eventId = checked(platformUuidSchema, id, "invalid_input");
-      const result = await request(`${receivingPath}/${eventId}`, receivingRecordSchema);
+      const result = await request(`${receivingPath}/${eventId}`, receivingLiveRecordSchema);
       if (result.id.toLowerCase() !== eventId) throw new UsClientError("invalid_response");
       return result;
     },
@@ -374,7 +353,7 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
       );
       const result = await request(
         `${receivingPath}/${eventId}/readiness?${new URLSearchParams({ expectedDraftVersion: String(query.expectedDraftVersion) })}`,
-        receivingReadinessSchema,
+        receivingRevisionReadinessSchema,
       );
       if (
         result.eventId.toLowerCase() !== eventId ||
@@ -385,22 +364,23 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
     },
     async listReceivingDrafts(input: unknown = {}) {
       const query = checked(listReceivingDraftsQuerySchema, input, "invalid_input");
-      const params = new URLSearchParams({ status: "draft" });
+      const params = new URLSearchParams({ status: "draft", history: "current" });
       for (const [key, value] of Object.entries(query)) {
         if (value !== undefined) params.set(key, String(value));
       }
-      return request(`${receivingPath}?${params}`, receivingDraftListSchema);
+      return request(`${receivingPath}?${params}`, receivingLiveRecordListSchema);
     },
     async getReceivingDraft(id: unknown) {
       const eventId = checked(platformUuidSchema, id, "invalid_input");
-      const result = await request(`${receivingPath}/${eventId}`, receivingDraftRecordSchema);
-      if (result.id.toLowerCase() !== eventId) throw new UsClientError("invalid_response");
+      const result = await request(`${receivingPath}/${eventId}`, receivingLiveRecordSchema);
+      if (result.id.toLowerCase() !== eventId || result.status !== "draft")
+        throw new UsClientError("invalid_response");
       return result;
     },
     async createReceivingDraft(input: unknown) {
       const body = checked(createReceivingDraftSchema, input, "invalid_input");
-      const result = await request(receivingPath, receivingDraftRecordSchema, "POST", body);
-      if (!sameReceivingDraftInput(result.draft, body.draft))
+      const result = await request(receivingPath, receivingCreateResultSchema, "POST", body);
+      if (!(await matchesReceivingCreateAcknowledgement(result, body)))
         throw new UsClientError("invalid_response");
       return result;
     },
@@ -409,11 +389,11 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
       const body = checked(saveReceivingDraftSchema, input, "invalid_input");
       const result = await request(
         `${receivingPath}/${eventId}`,
-        receivingDraftRecordSchema,
+        receivingSaveResultSchema,
         "PUT",
         body,
       );
-      if (result.id.toLowerCase() !== eventId || !sameReceivingDraftInput(result.draft, body.draft))
+      if (!(await matchesReceivingSaveAcknowledgement(result, eventId, body)))
         throw new UsClientError("invalid_response");
       return result;
     },

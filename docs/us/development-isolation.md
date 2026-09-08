@@ -97,6 +97,18 @@ The local browser proxy accepts only the exact UUID finalize path without a quer
 
 The exempt Receiving increment reuses the same exact readiness and finalize routes, 16 KiB command limit, current MFA/membership/QA reload and local proxy allowlist. It adds no endpoint, outbound fetch, profile mutation, browser storage, secret, hosted resource or release capability. Receipt extensions are optional for legacy rows but strict when present; new reviewed finalizations use frozen snapshot v2 while explicit v1 reads/replays remain compatible. The real companion uses the existing owned disposable database and servers, creates only synthetic tenant-scoped rows, and leaves the base database and primary environment untouched.
 
+The 2026-09-08 original-workflow transport switch supersedes the earlier response
+formats: existing Receiving create/save/finalize routes now return command-specific
+acknowledgements, detail/list GETs return live envelopes, readiness is v4 and new
+finalizations freeze v3. Exact old v1/v2 command retries and frozen content remain
+unchanged. The proxy permits only bounded, unique search/status/history/limit/offset
+fields, with four statuses and current/all history; no amend/void/history/basis
+endpoint is added. The original-only finalize body remains strict and 16 KiB;
+draft bodies retain their existing 256 KiB limit. Successful acknowledgements
+require a separate GET before editing can reopen. A failed recovery GET never
+causes another mutation. This changes no host, origin, authorization, persistence,
+outbound-service or release permissions.
+
 Service/release readiness deliberately remains unavailable while other business modules are unfinished. The [separate US browser entry](browser-entry.md) now adds an isolated build and server edition attestation; matching environment values alone are not proof of frontend isolation. Local synthetic-owner provisioning is explicit, never automatic. Recovery remains unavailable. Do not connect the RU admin to this API.
 
 Profile tenant and actor are derived from the verified session, never client IDs. Every request reloads membership and resolves the [isolated US capabilities](access-foundation.md); the store checks read/settings capability inside its transaction while locking the membership row. `PUT` accepts only `code`, explicit IANA `timeZone` and optional `retentionYears` (default 5). The server fixes the baseline and timestamps. Identical retries still require settings permission and create no extra audit event; a different configuration returns 409. This is initial provisioning, not profile switching or settings editing. Every HTTP request gets a fresh server-generated request ID; profile creation records that ID in its atomic audit event.

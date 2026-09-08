@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@markiro/ui";
 import { US_CAPABILITY } from "@markiro/domain";
-import type { ReceivingFinalizedRecord } from "@markiro/platform-contracts";
+import type { ReceivingFrozenView } from "../receiving/live-record.js";
 import { useTranslation } from "react-i18next";
 import { UsClientError, type UsBrowserClient } from "../client.js";
 import { LocationsView } from "./locations-view.js";
@@ -39,7 +39,7 @@ export function MasterDataWorkspace({
   const [viewGeneration, setViewGeneration] = useState(0);
   const [receivingLotEntry, setReceivingLotEntry] = useState<{
     lotId: string;
-    record: ReceivingFinalizedRecord;
+    record: ReceivingFrozenView;
   } | null>(null);
   const [mutationPending, setMutationPending] = useState(false);
   const mutationCount = useRef(0);

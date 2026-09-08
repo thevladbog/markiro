@@ -6,6 +6,8 @@ import i18next from "i18next";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReceivingDraftItem } from "@markiro/platform-contracts";
+import { receivingRecordSchema, type ReceivingRecord } from "@markiro/platform-contracts";
+import { liveReadFixtureResponse } from "./support/us-receiving-live-fixture.js";
 import { createUsBrowserClient } from "../src/us/client.js";
 import { masterDataCopy } from "../src/us/master-data/copy.js";
 import { ReceivingExemptionFields } from "../src/us/receiving/exemption-fields.js";
@@ -73,7 +75,10 @@ async function setup(
     handle?: (url: string, init?: RequestInit) => Response | Promise<Response> | undefined;
   } = {},
 ) {
-  const send = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+  let current: ReceivingRecord = receivingRecordSchema.parse(
+    options.finalized ? exemptionFinalized : exemptionRecord,
+  );
+  const source: typeof fetch = async (input, init) => {
     const url = String(input);
     const custom = options.handle?.(url, init);
     if (custom) return custom;
@@ -83,8 +88,7 @@ async function setup(
         limit: 50,
         offset: 0,
       });
-    if (url === `${receivingPath}/${eventId}`)
-      return json(options.finalized ? exemptionFinalized : exemptionRecord);
+    if (url === `${receivingPath}/${eventId}`) return json(current);
     if (url.includes("/readiness")) return json(exemptionReadiness);
     if (url.endsWith("/finalize")) return json(exemptionFinalized);
     if (url === `/api/us/traceability/catalog/products/${productId}`) return json(product);
@@ -99,6 +103,14 @@ async function setup(
     if (url.startsWith("/api/us/traceability/lots?"))
       return json({ items: [], limit: 50, offset: 0 });
     return json({ items: [], limit: 50, offset: 0 });
+  };
+  const send = vi.fn<typeof fetch>(async (url, init) => {
+    const response = await source(url, init);
+    if (init?.method && init.method !== "GET" && response.ok) {
+      const parsed = receivingRecordSchema.safeParse(await response.clone().json());
+      if (parsed.success) current = parsed.data;
+    }
+    return liveReadFixtureResponse(url, init, response);
   });
   const instance = await i18n(options.locale);
   const onSessionLost = vi.fn();

@@ -7,11 +7,14 @@ import { parseEnv } from "node:util";
 import type { INestApplication } from "@nestjs/common";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { createDb, schema } from "@markiro/db";
-import { receivingDraftListSchema, receivingDraftRecordSchema } from "@markiro/platform-contracts";
 import {
-  receivingFinalizedRecordSchema,
-  receivingReadinessSchema,
-  receivingRecordListSchema,
+  receivingCreateResultSchema,
+  receivingFinalizeResultSchema,
+  receivingLiveRecordSchema,
+} from "@markiro/platform-contracts";
+import {
+  receivingRevisionReadinessSchema,
+  receivingLiveRecordListSchema,
 } from "@markiro/platform-contracts";
 import { hashPassword } from "better-auth/crypto";
 import { eq } from "drizzle-orm";
@@ -31,6 +34,12 @@ import {
 
 const base = process.env.US_TEST_DATABASE_URL;
 const password = "Synthetic-US-receiving-password-42!";
+function createdRecord(value: unknown) {
+  const result = receivingCreateResultSchema.parse(value);
+  if (!("receiptVersion" in result) || result.record.content.kind !== "draft")
+    throw new Error("Expected new original draft acknowledgement");
+  return result.record;
+}
 describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
   let fixture: Awaited<ReturnType<typeof createUsProfileTestDatabase>>;
   let app: INestApplication, serverUrl: string, hash: string;
@@ -151,6 +160,32 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
     ).toBe(200);
   });
 
+  it("separates a versioned acknowledgement from the current read and lifecycle readiness", async () => {
+    const body = createBody();
+    const response = await request("/traceability/receiving", "POST", body);
+    expect(response.status).toBe(201);
+    const acknowledgement = receivingCreateResultSchema.parse(await response.json());
+    if (!("receiptVersion" in acknowledgement))
+      throw new Error("Expected versioned acknowledgement");
+    expect(acknowledgement).toMatchObject({ receiptVersion: 2, command: "receiving.create" });
+    const id = acknowledgement.record.id;
+    expect(await (await request(`/traceability/receiving/${id}`)).json()).toMatchObject({
+      recordVersion: 2,
+      id,
+      lifecycle: { rootId: id, lifecycleVersion: 1 },
+      content: { kind: "draft" },
+    });
+    expect(
+      await (
+        await request(`/traceability/receiving/${id}/readiness?expectedDraftVersion=1`)
+      ).json(),
+    ).toMatchObject({
+      ruleVersion: "receiving-readiness-v4",
+      rootId: id,
+      expectedLifecycleVersion: 1,
+      previousRevisionId: null,
+    });
+  });
   it("creates, reads, saves and replays drafts with server request IDs and exact audit", async () => {
     const body = { ...createBody(), draft: { ...empty, documentIds: [context.document] } };
     const response = await request("/traceability/receiving", "POST", body, {
@@ -160,8 +195,13 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     const requestId = response.headers.get("x-request-id");
     expect(requestId).toMatch(/^[0-9a-f-]{36}$/);
-    const created = receivingDraftRecordSchema.parse(await response.json());
-    expect(await (await request(`/traceability/receiving/${created.id}`)).json()).toEqual(created);
+    const acknowledgement = receivingCreateResultSchema.parse(await response.json());
+    const created = createdRecord(acknowledgement);
+    expect(
+      receivingLiveRecordSchema.parse(
+        await (await request(`/traceability/receiving/${created.id}`)).json(),
+      ),
+    ).toEqual(created);
     const saved = await request(`/traceability/receiving/${created.id}`, "PUT", {
       operationKey: randomUUID(),
       expectedDraftVersion: 1,
@@ -169,12 +209,18 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
     });
     expect(saved.status).toBe(200);
     expect(await saved.json()).toMatchObject({
-      id: created.id,
-      draftVersion: 2,
-      revision: 1,
-      status: "draft",
+      receiptVersion: 2,
+      command: "receiving.save",
+      record: {
+        id: created.id,
+        draftVersion: 2,
+        revision: 1,
+        status: "draft",
+      },
     });
-    expect(await (await request("/traceability/receiving", "POST", body)).json()).toEqual(created);
+    expect(await (await request("/traceability/receiving", "POST", body)).json()).toEqual(
+      acknowledgement,
+    );
     const audit = await fixture.db
       .select()
       .from(schema.tenantAuditEvents)
@@ -192,8 +238,90 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
       after: created,
     });
   });
+  it.each(["legacy", "versioned"] as const)(
+    "keeps %s acknowledgements historical after void while GET returns current status",
+    async (format) => {
+      const store = new UsReceivingStore(fixture.db);
+      const complete = await seedCompleteReceiving(fixture.db, context);
+      const create = { operationKey: randomUUID(), draft: complete.draft };
+      const created =
+        format === "legacy"
+          ? await store.createDraft(context.tenant, context.actor, create, "legacy-create")
+          : await (await request("/traceability/receiving", "POST", create)).json();
+      const parsed = receivingCreateResultSchema.parse(created);
+      const id = "receiptVersion" in parsed ? parsed.eventId : parsed.id;
+      const path = `/traceability/receiving/${id}`;
+      const readiness =
+        format === "legacy"
+          ? await store.checkReadiness(context.tenant, context.actor, id, {
+              expectedDraftVersion: 1,
+            })
+          : receivingRevisionReadinessSchema.parse(
+              await (await request(`${path}/readiness?expectedDraftVersion=1`)).json(),
+            );
+      const finalize = {
+        operationKey: randomUUID(),
+        expectedDraftVersion: 1,
+        expectedInputDigest: readiness.inputDigest,
+      };
+      const acknowledged =
+        format === "legacy"
+          ? await store.finalize(context.tenant, context.actor, id, finalize, "legacy-finalize")
+          : await (await request(`${path}/finalize`, "POST", finalize)).json();
+      await store.void(
+        context.tenant,
+        context.actor,
+        id,
+        {
+          commandVersion: 2,
+          operationKey: randomUUID(),
+          expectedLifecycleVersion: 2,
+          expectedDraftVersion: null,
+          reason: "Duplicate delivery",
+        },
+        "synthetic-void",
+      );
+      expect(await (await request("/traceability/receiving", "POST", create)).json()).toEqual(
+        created,
+      );
+      expect(await (await request(`${path}/finalize`, "POST", finalize)).json()).toEqual(
+        acknowledged,
+      );
+      const live = receivingLiveRecordSchema.parse(await (await request(path)).json());
+      expect(live).toMatchObject({
+        id,
+        status: "void",
+        lifecycle: { lifecycleVersion: 3, voidReason: "Duplicate delivery", currentEventId: null },
+      });
+      const receipt = receivingFinalizeResultSchema.parse(acknowledged);
+      const snapshot =
+        "receiptVersion" in receipt && receipt.record.content.kind === "finalized"
+          ? receipt.record.content.snapshot
+          : "snapshot" in receipt
+            ? receipt.snapshot
+            : null;
+      expect(live.content).toMatchObject({ kind: "finalized", snapshot });
+      expect(
+        receivingLiveRecordListSchema.parse(
+          await (await request("/traceability/receiving?history=all&status=void")).json(),
+        ).items,
+      ).toMatchObject([{ id, status: "void" }]);
+      const refused = await request(`${path}/finalize`, "POST", {
+        ...finalize,
+        operationKey: randomUUID(),
+      });
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toEqual({
+        code: "receiving_lifecycle_conflict",
+        rootId: id,
+        lifecycleVersion: 3,
+        currentEventId: null,
+        pendingDraftId: null,
+      });
+    },
+  );
   it("lists draft summaries through strict query parsing without caching or audit", async () => {
-    const created = receivingDraftRecordSchema.parse(
+    const created = createdRecord(
       await (await request("/traceability/receiving", "POST", createBody())).json(),
     );
     const response = await request(
@@ -201,10 +329,12 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
     );
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(receivingDraftListSchema.parse(await response.json())).toEqual({
+    expect(receivingLiveRecordListSchema.parse(await response.json())).toEqual({
       items: [
         {
           id: created.id,
+          recordVersion: 2,
+          lifecycle: created.lifecycle,
           eventNumber: created.eventNumber,
           status: "draft",
           revision: 1,
@@ -234,7 +364,7 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
   });
   it("requires current role and MFA even on retries; readers cannot write", async () => {
     const body = createBody();
-    const created = receivingDraftRecordSchema.parse(
+    const created = createdRecord(
       await (await request("/traceability/receiving", "POST", body)).json(),
     );
     await fixture.db
@@ -256,7 +386,7 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
     ).toBe(401);
   });
   it("reads saved readiness with strict version, current read permission, MFA and no writes", async () => {
-    const created = receivingDraftRecordSchema.parse(
+    const created = createdRecord(
       await (await request("/traceability/receiving", "POST", createBody())).json(),
     );
     const path = `/traceability/receiving/${created.id}/readiness`;
@@ -334,7 +464,7 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
         })
       ).status,
     ).toBe(404);
-    const created = receivingDraftRecordSchema.parse(
+    const created = createdRecord(
       await (await request("/traceability/receiving", "POST", createBody())).json(),
     );
     const stale = await request(`/traceability/receiving/${created.id}`, "PUT", {
@@ -352,7 +482,7 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
     expect(Buffer.byteLength(JSON.stringify(body))).toBeGreaterThan(16384);
     const response = await request("/TRACEABILITY/RECEIVING/", "POST", body);
     expect(response.status).toBe(201);
-    const created = receivingDraftRecordSchema.parse(await response.json());
+    const created = createdRecord(await response.json());
     expect(
       (
         await request(`/traceability/receiving/${created.id}/`, "PUT", {
@@ -432,7 +562,7 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
       content: {
         "application/json": {
           schema: {
-            anyOf: expect.arrayContaining([
+            oneOf: expect.arrayContaining([
               expect.objectContaining({
                 required: ["code", "issues"],
                 properties: expect.objectContaining({
@@ -453,7 +583,7 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
   });
   it("finalizes with HTTP200 and replays with fresh QA and MFA while exposing frozen mixed reads", async () => {
     const complete = await seedCompleteReceiving(fixture.db, context);
-    const created = receivingDraftRecordSchema.parse(
+    const created = createdRecord(
       await (
         await request("/traceability/receiving", "POST", {
           operationKey: randomUUID(),
@@ -462,7 +592,7 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
       ).json(),
     );
     const path = `/traceability/receiving/${created.id}`;
-    const check = receivingReadinessSchema.parse(
+    const check = receivingRevisionReadinessSchema.parse(
       await (await request(`${path}/readiness?expectedDraftVersion=1`)).json(),
     );
     const command = {
@@ -472,23 +602,32 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
     };
     const response = await request(`${path}/finalize`, "POST", command);
     expect(response.status).toBe(200);
-    const result = receivingFinalizedRecordSchema.parse(await response.json());
-    expect(result.finalizedBy).toBe(context.actor);
+    const result = receivingFinalizeResultSchema.parse(await response.json());
+    if (!("receiptVersion" in result) || result.record.content.kind !== "finalized")
+      throw new Error("Expected versioned frozen acknowledgement");
+    expect(result.record.content.finalizedBy).toBe(context.actor);
     expect(response.headers.get("cache-control")).toBe("no-store");
     const replay = await request(`${path}/finalize`, "POST", command);
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual(result);
-    expect(await (await request(path)).json()).toEqual(result);
+    expect(await (await request(path)).json()).toEqual(result.record);
     expect(
-      receivingRecordListSchema.parse(
+      receivingLiveRecordListSchema.parse(
         await (await request("/traceability/receiving?status=finalized")).json(),
       ).items,
     ).toMatchObject([{ id: created.id, status: "finalized" }]);
-    expect((await request("/traceability/receiving?status=void")).status).toBe(400);
+    expect((await request("/traceability/receiving?status=void")).status).toBe(200);
     expect((await request(`${path}/readiness?expectedDraftVersion=1`)).status).toBe(409);
     for (const invalid of [
       { ...command, actor: "forged" },
       { ...command, expectedDraftVersion: 2147483648 },
+      {
+        ...command,
+        commandVersion: 2,
+        expectedLifecycleVersion: 1,
+        previousRevisionId: null,
+        reviewedExemptLines: [],
+      },
     ])
       expect((await request(`${path}/finalize`, "POST", invalid)).status).toBe(400);
     const foreign = await seedReceivingTenant(fixture.db);
@@ -541,11 +680,11 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
         ).status,
       ).toBe(400);
     }
-    const created = receivingDraftRecordSchema.parse(
+    const created = createdRecord(
       await (await request("/traceability/receiving", "POST", create)).json(),
     );
     const path = `/traceability/receiving/${created.id}`;
-    const check = receivingReadinessSchema.parse(
+    const check = receivingRevisionReadinessSchema.parse(
       await (await request(`${path}/readiness?expectedDraftVersion=1`)).json(),
     );
     expect(check).toMatchObject({ state: "complete", exemptReviewRequiredLines: [1] });
@@ -602,15 +741,17 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
       .where(eq(schema.member.id, context.member));
     const response = await request(`${path}/finalize`, "POST", command);
     expect(response.status).toBe(200);
-    const result = receivingFinalizedRecordSchema.parse(await response.json());
-    expect(result.snapshot).toMatchObject({
-      snapshotVersion: 2,
+    const result = receivingFinalizeResultSchema.parse(await response.json());
+    if (!("receiptVersion" in result) || result.record.content.kind !== "finalized")
+      throw new Error("Expected versioned frozen acknowledgement");
+    expect(result.record.content.snapshot).toMatchObject({
+      snapshotVersion: 3,
       items: [
         {
           receiptBasis: {
             kind: "exempt_assigned_tlc",
             reviewedBy: context.actor,
-            reviewedAt: result.finalizedAt,
+            reviewedAt: result.record.content.finalizedAt,
           },
         },
         { receiptBasis: { kind: "ordinary" } },
@@ -648,7 +789,7 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
     }
   });
   it("returns sanitized 503 when a referenced-data read fails instead of a complete result", async () => {
-    const created = receivingDraftRecordSchema.parse(
+    const created = createdRecord(
       await (
         await request("/traceability/receiving", "POST", {
           ...createBody(),

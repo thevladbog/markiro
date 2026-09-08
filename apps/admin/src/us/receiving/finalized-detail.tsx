@@ -1,11 +1,10 @@
 import { useEffect, useRef } from "react";
 import { Button, StatusChip } from "@markiro/ui";
-import type {
-  ReceivingFinalizedRecord,
-  ReceivingFinalizationSnapshot,
-} from "@markiro/platform-contracts";
+import type { ReceivingFinalizationSnapshot } from "@markiro/platform-contracts";
 import { useTranslation } from "react-i18next";
 import { receivingQuantityTotals } from "./quantity-totals.js";
+import type { ReceivingFrozenView } from "./live-record.js";
+import { ReceivingLifecycleNotice } from "./lifecycle-notice.js";
 
 function locationText(location: ReceivingFinalizationSnapshot["locationDescription"]) {
   const address =
@@ -19,16 +18,16 @@ export function ReceivingFinalizedDetail({
   onClose,
   onOpenLot,
 }: {
-  record: ReceivingFinalizedRecord;
+  record: ReceivingFrozenView;
   onClose: () => void;
-  onOpenLot: (id: string, record: ReceivingFinalizedRecord) => void;
+  onOpenLot: (id: string, record: ReceivingFrozenView) => void;
 }) {
   const { t, i18n } = useTranslation();
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     heading.current?.focus();
   }, [record.id]);
-  const snapshot = record.snapshot;
+  const snapshot = record.content.snapshot;
   return (
     <div className="us-rec-page us-rec-frozen">
       <Button type="button" variant="secondary" onClick={onClose}>
@@ -41,8 +40,12 @@ export function ReceivingFinalizedDetail({
           </h1>
           <p>{t("receiving.frozenHint")}</p>
         </div>
-        <StatusChip status="ok" label={t("receiving.finalized")} />
+        <StatusChip
+          status={record.status === "finalized" ? "ok" : "neutral"}
+          label={t(`receiving.${record.status}`)}
+        />
       </header>
+      <ReceivingLifecycleNotice record={record} />
       <section className="us-rec-section">
         <h2>{t("receiving.header")}</h2>
         <dl>
@@ -51,14 +54,14 @@ export function ReceivingFinalizedDetail({
             {snapshot.dateReceived} · {record.timeZone}
           </dd>
           <dt>{t("receiving.finalizedBy")}</dt>
-          <dd>{record.finalizedBy}</dd>
+          <dd>{record.content.finalizedBy}</dd>
           <dt>{t("receiving.finalizedAt")}</dt>
           <dd>
             {new Intl.DateTimeFormat(i18n.language, {
               dateStyle: "medium",
               timeStyle: "short",
               timeZone: record.timeZone,
-            }).format(new Date(record.finalizedAt))}{" "}
+            }).format(new Date(record.content.finalizedAt))}{" "}
             · {record.timeZone}
           </dd>
           <dt>{t("receiving.location")}</dt>
@@ -94,7 +97,7 @@ export function ReceivingFinalizedDetail({
         <ol className="us-rec-history-lines">
           {snapshot.items.map((item, index) => {
             const receiptBasis =
-              snapshot.snapshotVersion === 2 ? snapshot.items[index]?.receiptBasis : null;
+              snapshot.snapshotVersion !== 1 ? snapshot.items[index]?.receiptBasis : null;
             return (
               <li key={item.lineNo} className="us-rec-section">
                 <h3>
@@ -121,9 +124,11 @@ export function ReceivingFinalizedDetail({
                   <dt>{t("receiving.linkMode")}</dt>
                   <dd>
                     {t(
-                      item.lotLinkMode === "create_on_finalize"
-                        ? "receiving.createdLot"
-                        : "receiving.linkedLot",
+                      "lotBinding" in item && item.lotBinding.kind === "retained"
+                        ? "receiving.retainedLot"
+                        : item.lotLinkMode === "create_on_finalize"
+                          ? "receiving.createdLot"
+                          : "receiving.linkedLot",
                     )}
                   </dd>
                   {item.supplierLotReference ? (

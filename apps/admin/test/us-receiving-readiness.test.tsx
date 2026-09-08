@@ -5,6 +5,8 @@ import { StrictMode } from "react";
 import i18next from "i18next";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { receivingRecordSchema, type ReceivingRecord } from "@markiro/platform-contracts";
+import { liveReadFixtureResponse } from "./support/us-receiving-live-fixture.js";
 import { createUsBrowserClient } from "../src/us/client.js";
 import { masterDataCopy } from "../src/us/master-data/copy.js";
 import { MasterDataWorkspace } from "../src/us/master-data/workspace.js";
@@ -57,7 +59,8 @@ async function setup(
     handle?: (url: string, init?: RequestInit) => Response | Promise<Response> | undefined;
   } = {},
 ) {
-  const send = vi.fn<typeof fetch>().mockImplementation(async (url, init) => {
+  let current: ReceivingRecord = receivingRecordSchema.parse(record);
+  const source: typeof fetch = async (url, init) => {
     const custom = options.handle?.(String(url), init);
     if (custom) return custom;
     if (url === "/api/us/traceability/access")
@@ -86,7 +89,7 @@ async function setup(
       });
     }
     if (String(url).startsWith(`${path}/${id}/readiness`)) return Response.json(complete);
-    if (url === `${path}/${id}` && init?.method === "GET") return Response.json(record);
+    if (url === `${path}/${id}` && init?.method === "GET") return Response.json(current);
     if ((url === path || url === `${path}/${id}`) && init?.method !== "GET") {
       const body = JSON.parse(String(init?.body));
       return Response.json({
@@ -96,6 +99,14 @@ async function setup(
       });
     }
     return Response.json({ items: [], limit: 50, offset: 0 });
+  };
+  const send = vi.fn<typeof fetch>(async (url, init) => {
+    const response = await source(url, init);
+    if (init?.method && init.method !== "GET" && response.ok) {
+      const parsed = receivingRecordSchema.safeParse(await response.clone().json());
+      if (parsed.success) current = parsed.data;
+    }
+    return liveReadFixtureResponse(url, init, response);
   });
   const instance = i18next.createInstance();
   await instance.init({
@@ -146,6 +157,30 @@ function checkCalls(send: ReturnType<typeof vi.fn<typeof fetch>>) {
 }
 
 describe("saved receiving readiness", () => {
+  it.each([
+    { rootId: id, expectedLifecycleVersion: 2, previousRevisionId: null },
+    {
+      rootId: "b0000000-0000-4000-8000-000000000001",
+      expectedLifecycleVersion: 1,
+      previousRevisionId: "b0000000-0000-4000-8000-000000000001",
+    },
+  ])(
+    "requires reload for a schema-valid readiness with a different lifecycle: %j",
+    async (lifecycle) => {
+      const { user, send } = await setup({
+        qa: true,
+        handle: (url) =>
+          url.includes("/readiness")
+            ? Response.json({ ...complete, ruleVersion: "receiving-readiness-v4", ...lifecycle })
+            : undefined,
+      });
+      await user.click(screen.getByRole("button", { name: "Check saved draft" }));
+      await screen.findByRole("button", { name: "Reload saved event" });
+      expect(screen.queryByText("Complete — no blockers in this saved-data check.")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Finalize" })).toBeNull();
+      expect(checkCalls(send)).toHaveLength(1);
+    },
+  );
   it.each([
     {
       locale: "en-US" as const,

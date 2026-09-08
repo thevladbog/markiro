@@ -2,15 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { Button, Modal } from "@markiro/ui";
 import type {
   FinalizeReceivingInput,
-  ReceivingDraftRecord,
-  ReceivingFinalizedRecord,
-  ReceivingReadiness,
+  ReceivingFinalizeResult,
+  ReceivingRevisionReadiness,
   ReferenceDocument,
 } from "@markiro/platform-contracts";
 import { useTranslation } from "react-i18next";
 import { UsClientError, type UsBrowserClient } from "../client.js";
 import { ReceivingExemptionReview, type ReceivingExemptionLabels } from "./exemption-review.js";
 import { receivingQuantityTotals } from "./quantity-totals.js";
+import type { ReceivingDraftView } from "./live-record.js";
 
 const emptyLabels: ReceivingExemptionLabels = {
   products: new Map(),
@@ -29,19 +29,19 @@ export function ReceivingFinalizationDialog({
   onLocked,
   onClose,
   onReload,
-  onFinalized,
+  onAcknowledged,
   onConflict,
   onForbidden,
   onSessionLost,
 }: {
   client: UsBrowserClient;
-  record: ReceivingDraftRecord;
-  readiness: ReceivingReadiness;
+  record: ReceivingDraftView;
+  readiness: ReceivingRevisionReadiness;
   beginMutation: () => () => void;
   onLocked: (locked: boolean) => void;
   onClose: () => void;
   onReload: () => Promise<void>;
-  onFinalized: (record: ReceivingFinalizedRecord) => void;
+  onAcknowledged: (result: ReceivingFinalizeResult) => Promise<void>;
   onConflict: (error: UsClientError) => void;
   onForbidden: () => Promise<void>;
   onSessionLost: () => void;
@@ -74,7 +74,7 @@ export function ReceivingFinalizationDialog({
   useEffect(() => {
     let current = true;
     void Promise.all(
-      record.draft.documentIds.map(async (id) => {
+      record.content.draft.documentIds.map(async (id) => {
         const document = await client.getReferenceDocument(id);
         const party = document.partyId ? await client.getParty(document.partyId) : null;
         return { document, issuer: party?.legalName ?? party?.name ?? null };
@@ -93,7 +93,7 @@ export function ReceivingFinalizationDialog({
       current = false;
     };
   }, [client, record, onForbidden, onSessionLost]);
-  const exemptLines = record.draft.items.flatMap((item, index) =>
+  const exemptLines = record.content.draft.items.flatMap((item, index) =>
     item.exemptSupplier ? [index + 1] : [],
   );
   const requiredLines = readiness.exemptReviewRequiredLines;
@@ -101,7 +101,7 @@ export function ReceivingFinalizationDialog({
   const reviewMetadataValid =
     exactRequiredLines &&
     requiredLines.every((line) => {
-      const item = record.draft.items[line - 1];
+      const item = record.content.draft.items[line - 1];
       const sourceLocationId =
         item?.source?.kind === "location"
           ? item.source.locationId
@@ -115,8 +115,8 @@ export function ReceivingFinalizationDialog({
         item.exemptReceipt?.evidenceUrl &&
         item.exemptReceipt.tlcHandling &&
         sourceLocationId &&
-        record.draft.locationId &&
-        record.draft.previousSourceLocationId,
+        record.content.draft.locationId &&
+        record.content.draft.previousSourceLocationId,
       );
     });
   const reviewComplete = equalLines(requiredLines, reviewedLines);
@@ -125,7 +125,7 @@ export function ReceivingFinalizationDialog({
     let current = true;
     setReviewedLines([]);
     setLabelFailure(false);
-    if (!record.draft.items.some((item) => item.exemptSupplier)) {
+    if (!record.content.draft.items.some((item) => item.exemptSupplier)) {
       setLabels(emptyLabels);
       return () => {
         current = false;
@@ -134,7 +134,7 @@ export function ReceivingFinalizationDialog({
     setLabels(null);
     const productIds = [
       ...new Set(
-        record.draft.items.flatMap((item) =>
+        record.content.draft.items.flatMap((item) =>
           item.exemptSupplier && item.productId ? [item.productId] : [],
         ),
       ),
@@ -142,9 +142,9 @@ export function ReceivingFinalizationDialog({
     const locationIds = [
       ...new Set(
         [
-          record.draft.locationId,
-          record.draft.previousSourceLocationId,
-          ...record.draft.items.flatMap((item) => {
+          record.content.draft.locationId,
+          record.content.draft.previousSourceLocationId,
+          ...record.content.draft.items.flatMap((item) => {
             if (!item.exemptSupplier || !item.source) return [];
             return [
               item.source.kind === "location"
@@ -212,7 +212,8 @@ export function ReceivingFinalizationDialog({
     const release = beginMutation();
     try {
       const result = await client.finalizeReceiving(record.id, command.current);
-      if (alive.current) onFinalized(result);
+      // The parent owns recovery even if QA changes while this dialog is settling.
+      await onAcknowledged(result);
     } catch (error) {
       if (!alive.current) return;
       if (error instanceof UsClientError && error.code === "session_required") {
@@ -238,8 +239,8 @@ export function ReceivingFinalizationDialog({
       release();
     }
   }
-  const totals = receivingQuantityTotals(record.draft.items);
-  const created = record.draft.items.filter(
+  const totals = receivingQuantityTotals(record.content.draft.items);
+  const created = record.content.draft.items.filter(
     (item) => item.lotLinkMode === "create_on_finalize",
   ).length;
   return (
@@ -295,13 +296,13 @@ export function ReceivingFinalizationDialog({
       <div className="us-rec-frozen" aria-busy={pending}>
         <strong>{record.eventNumber}</strong>
         <p>
-          {record.draft.dateReceived} · {record.timeZone}
+          {record.content.draft.dateReceived} · {record.timeZone}
         </p>
         <p>
           {t("receiving.confirmCounts", {
-            lines: record.draft.items.length,
+            lines: record.content.draft.items.length,
             created,
-            linked: record.draft.items.length - created,
+            linked: record.content.draft.items.length - created,
           })}
         </p>
         <section>

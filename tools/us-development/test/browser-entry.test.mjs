@@ -106,6 +106,8 @@ test("US proxy never forwards RU routes and preserves configured API Host", asyn
     "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/finalize/extra",
     "/api/us/traceability/receiving?status=voided",
     "/api/us/traceability/receiving?status=draft&status=finalized",
+    "/api/us/traceability/receiving?history=current&history=all",
+    "/api/us/traceability/receiving?history=latest",
     "/api/us/traceability/receiving?limit=50&tenantId=x",
     "/api/us/traceability/receiving?offset=100001",
     "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001?tenantId=x",
@@ -141,6 +143,14 @@ test("US proxy never forwards RU routes and preserves configured API Host", asyn
       "/traceability/receiving?limit=50&offset=0",
     ],
     ["/api/us/traceability/receiving", "/traceability/receiving"],
+    [
+      "/api/us/traceability/receiving?status=void&history=all&search=REC&limit=50&offset=0",
+      "/traceability/receiving?status=void&history=all&search=REC&limit=50&offset=0",
+    ],
+    [
+      "/api/us/traceability/receiving?status=amended&history=current",
+      "/traceability/receiving?status=amended&history=current",
+    ],
     [
       "/api/us/traceability/receiving?status=finalized&limit=50&offset=0",
       "/traceability/receiving?status=finalized&limit=50&offset=0",

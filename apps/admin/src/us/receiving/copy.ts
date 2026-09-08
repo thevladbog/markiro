@@ -1,5 +1,19 @@
 export const receivingCopy = {
   "en-US": {
+    void: "Void",
+    amended: "Amended",
+    lifecycle: "Current receipt status",
+    revision: "Revision",
+    reason: "Reason",
+    changedBy: "Status changed by",
+    changedAt: "Status changed at",
+    voidHint:
+      "This receipt is void and provides no current receiving basis. Lot identities, statuses and source locks are unchanged.",
+    amendedHint:
+      "This revision has been replaced. The frozen content below is historical, not the current receiving basis.",
+    currentUnavailable:
+      "The operation was acknowledged, but the current receipt could not be loaded. Editing remains paused. Retry the read; do not repeat the operation.",
+    retryCurrent: "Retry current state",
     finalize: "Finalize",
     finalized: "Finalized",
     allStatuses: "All statuses",
@@ -26,6 +40,9 @@ export const receivingCopy = {
     openLot: "Open current lot",
     createdLot: "Created at finalization",
     linkedLot: "Linked existing lot",
+    retainedLot: "Retained from previous revision",
+    currentUnconfirmed: "Current state not confirmed",
+    loadedDraftHint: "Previously loaded draft. Refresh the current state before continuing.",
     title: "Receiving",
     intro: "Start a receipt, save what you know, and return when the remaining details arrive.",
     new: "New receiving",
@@ -130,6 +147,20 @@ export const receivingCopy = {
       "The server may already have saved this receipt. Leave this editor? Check the receiving list before creating another receipt.",
   },
   "es-US": {
+    void: "Anulada",
+    amended: "Sustituida",
+    lifecycle: "Estado actual de la recepción",
+    revision: "Revisión",
+    reason: "Motivo",
+    changedBy: "Estado modificado por",
+    changedAt: "Fecha del cambio de estado",
+    voidHint:
+      "Esta recepción está anulada y ya no aporta una base de recepción vigente. Las identidades, los estados y los bloqueos de origen de los lotes no han cambiado.",
+    amendedHint:
+      "Esta revisión fue sustituida. El contenido fijado que aparece a continuación es histórico, no la base de recepción vigente.",
+    currentUnavailable:
+      "Se confirmó la operación, pero no se pudo cargar la recepción actual. La edición sigue en pausa. Repita la consulta, no la operación.",
+    retryCurrent: "Reintentar consulta del estado actual",
     finalize: "Finalizar",
     finalized: "Finalizado",
     allStatuses: "Todos los estados",
@@ -157,6 +188,10 @@ export const receivingCopy = {
     openLot: "Abrir lote actual",
     createdLot: "Creado al finalizar",
     linkedLot: "Lote existente vinculado",
+    retainedLot: "Conservado de la revisión anterior",
+    currentUnconfirmed: "Estado actual sin confirmar",
+    loadedDraftHint:
+      "Borrador cargado anteriormente. Consulta el estado actual antes de continuar.",
     title: "Recepción",
     intro:
       "Inicie una recepción, guarde los datos disponibles y vuelva cuando lleguen los detalles restantes.",

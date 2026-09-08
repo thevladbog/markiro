@@ -32,7 +32,14 @@ export async function exerciseUsReceivingFinalization({ page, expect, screenshot
       data,
     });
     assert.equal(response.ok(), true, `${path}: HTTP ${response.status()}`);
-    return response.json();
+    const value = await response.json();
+    if (path === "receiving") {
+      assert.equal(value.receiptVersion, 2);
+      assert.equal(value.command, "receiving.create");
+      assert.equal(value.record.recordVersion, 2);
+      return value.record;
+    }
+    return value;
   }
   const source = { kind: "location", locationId: location };
   const lot = await post("lots", {
@@ -173,7 +180,9 @@ export async function exerciseUsReceivingFinalization({ page, expect, screenshot
     const response = await route.fetch();
     assert.equal(response.status(), 200);
     if (attempts.length === 1) {
-      finalized = await response.json();
+      const receipt = await response.json();
+      assert.equal(receipt.receiptVersion, 2);
+      finalized = receipt.record;
       return route.abort("failed");
     }
     return route.fulfill({ response });
@@ -182,30 +191,60 @@ export async function exerciseUsReceivingFinalization({ page, expect, screenshot
   await expect(
     page.getByRole("button", { name: "Retry same finalization", exact: true }),
   ).toBeVisible();
+  let currentReads = 0;
+  const currentPattern = `**/api/us/traceability/receiving/${saved.id}`;
+  await page.route(currentPattern, (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    currentReads += 1;
+    return currentReads === 1 ? route.abort("failed") : route.continue();
+  });
   await page.getByRole("button", { name: "Retry same finalization", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Retry current state", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save draft", exact: true })).toBeDisabled();
+  await page.screenshot({
+    path: join(screenshots, "receiving-current-recovery-en.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "Retry current state", exact: true }).click();
   await expect(page.getByText(actor, { exact: true })).toBeVisible();
   await page.unroute(finalizePattern);
+  await page.unroute(currentPattern);
+  assert.equal(currentReads, 2);
   assert.equal(attempts.length, 2);
   assert.deepEqual(attempts[0], attempts[1]);
   assert.ok(finalized);
-  assert.equal(finalized.snapshot.items[1].lotId, lot.id);
-  assert.equal(new Set(finalized.snapshot.items.map((line) => line.lotId)).size, 3);
+  assert.equal(finalized.content.snapshot.items[1].lotId, lot.id);
+  assert.equal(new Set(finalized.content.snapshot.items.map((line) => line.lotId)).size, 3);
   const lots = await fixture.pool.query(
     "SELECT id,source_locked_at,revision FROM traceability_lots WHERE tenant_id=$1 AND id=ANY($2::uuid[])",
-    [tenant, finalized.snapshot.items.map((line) => line.lotId)],
+    [tenant, finalized.content.snapshot.items.map((line) => line.lotId)],
   );
   assert.equal(lots.rows.length, 3);
   for (const row of lots.rows) {
-    assert.equal(row.source_locked_at.toISOString(), finalized.finalizedAt);
+    assert.equal(row.source_locked_at.toISOString(), finalized.content.finalizedAt);
     assert.equal(row.revision, row.id === lot.id ? 2 : 1);
   }
   const audits = await fixture.pool.query(
     'SELECT actor_user_id,organization_id,action,outcome,target_id,"after" FROM tenant_audit_events WHERE organization_id=$1 AND (target_id=$2 OR target_id=ANY($3::text[]))',
-    [tenant, saved.id, finalized.snapshot.items.map((line) => line.lotId)],
+    [tenant, saved.id, finalized.content.snapshot.items.map((line) => line.lotId)],
   );
   const eventAudit = audits.rows.filter((row) => row.action === "traceability.receiving.finalized");
   assert.equal(eventAudit.length, 1);
-  assert.deepEqual(eventAudit[0].after, finalized);
+  assert.deepEqual(eventAudit[0].after, {
+    rootId: finalized.lifecycle.rootId,
+    revision: 1,
+    reason: null,
+    result: "finalized",
+    effect: null,
+    record: finalized,
+    predecessor: null,
+    lineLots: {
+      before: [],
+      after: finalized.content.snapshot.items.map(({ lineNo, lotId }) => ({ lineNo, lotId })),
+    },
+  });
   assert.equal(
     audits.rows.filter((row) => row.action === "traceability.lot.source_locked").length,
     1,

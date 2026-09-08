@@ -101,6 +101,103 @@ describe.skipIf(!url)("Receiving lifecycle real command races", { timeout: 15000
     }
   }
   const rootGate = "SELECT id FROM receiving_event_roots WHERE tenant_id=$1 AND id=$2 FOR UPDATE";
+  it.each([
+    ["save", "legacy"],
+    ["save", "void"],
+    ["finalize", "legacy"],
+    ["finalize", "void"],
+  ] as const)(
+    "serializes original %s versus cancellation when %s commits first",
+    async (command, first) => {
+      const r = await ready();
+      const legacy = () =>
+        command === "save"
+          ? store.saveDraft(
+              c.tenant,
+              c.actor,
+              r.saved.id,
+              {
+                operationKey: randomUUID(),
+                expectedDraftVersion: 1,
+                draft: { ...c.draft, notes: "Saved before cancellation" },
+              },
+              "legacy-writer",
+            )
+          : store.finalize(c.tenant, c.actor, r.saved.id, r.command, "legacy-writer");
+      const cancel = () =>
+        store.void(
+          c.tenant,
+          c.actor,
+          r.saved.id,
+          {
+            ...voidCommand(),
+            expectedLifecycleVersion: 1,
+            expectedDraftVersion: 1,
+          },
+          "canceller",
+        );
+      type CommandResult = Awaited<ReturnType<typeof legacy> | ReturnType<typeof cancel>>;
+      const [a, b] = await compete<CommandResult, CommandResult>(
+        rootGate,
+        [c.tenant, r.saved.id],
+        first === "legacy" ? legacy : cancel,
+        first === "legacy" ? cancel : legacy,
+      );
+      expect(a.error).toBeUndefined();
+      expect(b.error).toMatchObject({
+        status: 409,
+        response: {
+          code:
+            first === "legacy" && command === "save"
+              ? "receiving_draft_conflict"
+              : "receiving_lifecycle_conflict",
+        },
+      });
+      const record = await store.getLiveRecord(c.tenant, c.actor, r.saved.id);
+      expect(record).toMatchObject({
+        status: first === "void" ? "void" : command === "save" ? "draft" : "finalized",
+        draftVersion: first === "legacy" && command === "save" ? 2 : 1,
+        lifecycle: {
+          lifecycleVersion: first === "legacy" && command === "save" ? 1 : 2,
+          currentEventId: first === "legacy" && command === "finalize" ? r.saved.id : null,
+          pendingDraftId: first === "legacy" && command === "save" ? r.saved.id : null,
+        },
+      });
+      const action =
+        first === "void"
+          ? "traceability.receiving.voided"
+          : command === "save"
+            ? "traceability.receiving.draft_saved"
+            : "traceability.receiving.finalized";
+      expect(
+        (
+          await f.pool.query(
+            "SELECT action,actor_user_id,target_id,request_id,outcome FROM tenant_audit_events WHERE organization_id=$1 AND target_type='traceability_event' AND action<>'traceability.receiving.draft_created'",
+            [c.tenant],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          action,
+          actor_user_id: c.actor,
+          target_id: r.saved.id,
+          request_id: first === "void" ? "canceller" : "legacy-writer",
+          outcome: "success",
+        },
+      ]);
+      expect(
+        (
+          await f.pool.query<{ count: number }>(
+            "SELECT count(*)::int AS count FROM receiving_operations WHERE tenant_id=$1",
+            [c.tenant],
+          )
+        ).rows,
+      ).toEqual([{ count: 2 }]);
+      expect((await store.getLotReceivingBasis(c.tenant, c.actor, c.lot, {})).basisVersion).toBe(
+        first === "legacy" && command === "finalize" ? 2 : 1,
+      );
+    },
+  );
   it.each([true, false])(
     "serializes competing amendments (same key=%s) with one allocated revision",
     async (same) => {

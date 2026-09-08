@@ -18,6 +18,7 @@ import { readReceivingDraft, readReceivingRecord, unavailable } from "./us-recei
 import { readReceivingReferenceContext } from "./us-receiving-reference-context";
 import { planReceivingSnapshot } from "./us-receiving-snapshots";
 import { receivingFinalizationCommandDigest } from "./us-receiving-finalization-command";
+import { assertOriginalReceivingWriteTarget } from "./us-receiving-original-command";
 import { lockReceivingOperation } from "./us-receiving-operations";
 import {
   bumpReceivingBasisVersions,
@@ -76,6 +77,7 @@ export async function finalizeReceiving(
             return result.data;
           }
           await lockReceivingRoot(tx, tenantId, eventId);
+          await assertOriginalReceivingWriteTarget(tx, tenantId, eventId);
           const before = await readReceivingDraft(tx, tenantId, eventId, "update");
           if (before.draftVersion !== value.expectedDraftVersion)
             throw new ConflictException({ code: "receiving_draft_conflict" });

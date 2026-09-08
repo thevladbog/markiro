@@ -44,7 +44,14 @@ export async function exerciseUsReceivingExemption({ page, expect, screenshots, 
       data,
     });
     assert.equal(response.ok(), true, `${path}: HTTP ${response.status()}`);
-    return response.json();
+    const value = await response.json();
+    if (path === "receiving") {
+      assert.equal(value.receiptVersion, 2);
+      assert.equal(value.command, "receiving.create");
+      assert.equal(value.record.recordVersion, 2);
+      return value.record;
+    }
+    return value;
   }
 
   const document = await post("reference-documents", {
@@ -156,7 +163,10 @@ export async function exerciseUsReceivingExemption({ page, expect, screenshots, 
   });
   assert.equal(acceptedUnicodeResponse.ok(), true);
   const acceptedUnicode = await acceptedUnicodeResponse.json();
-  assert.equal(acceptedUnicode.draft.items[0].exemptReceipt.proposedTlc, validUnicodeProposal);
+  assert.equal(
+    acceptedUnicode.content.draft.items[0].exemptReceipt.proposedTlc,
+    validUnicodeProposal,
+  );
   await unicodeProposal.pressSequentially("🚀");
   assert.equal(Array.from(await unicodeProposal.inputValue()).length, 121);
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
@@ -167,7 +177,10 @@ export async function exerciseUsReceivingExemption({ page, expect, screenshots, 
   assert.equal(rejectedUnicodeResponse.ok(), true);
   const rejectedUnicode = await rejectedUnicodeResponse.json();
   assert.equal(rejectedUnicode.draftVersion, acceptedUnicode.draftVersion);
-  assert.equal(rejectedUnicode.draft.items[0].exemptReceipt.proposedTlc, validUnicodeProposal);
+  assert.equal(
+    rejectedUnicode.content.draft.items[0].exemptReceipt.proposedTlc,
+    validUnicodeProposal,
+  );
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
   await page.getByRole("button", { name: saved.eventNumber, exact: true }).click();
@@ -398,16 +411,16 @@ export async function exerciseUsReceivingExemption({ page, expect, screenshots, 
   });
   assert.equal(currentResponse.ok(), true);
   const frozen = await currentResponse.json();
-  assert.equal(frozen.snapshot.snapshotVersion, 2);
-  assert.deepEqual(frozen.snapshot.confirmation.reviewedExemptLines, [1, 2]);
-  assert.equal(frozen.snapshot.items[0].tlc, preserved.tlc);
-  assert.equal(frozen.snapshot.items[0].source.referenceValue, sourceReference);
-  assert.equal(frozen.snapshot.items[0].source.resolvedLocationId, previousLocation);
-  assert.equal(frozen.snapshot.items[0].receiptBasis.kind, "exempt_existing_tlc");
-  assert.equal(frozen.snapshot.items[1].tlc, assigned.exemptReceipt.proposedTlc);
-  assert.equal(frozen.snapshot.items[1].source.locationId, receivingLocation);
-  assert.equal(frozen.snapshot.items[1].receiptBasis.kind, "exempt_assigned_tlc");
-  assert.equal(frozen.snapshot.items[1].receiptBasis.receivedTlc, null);
+  assert.equal(frozen.content.snapshot.snapshotVersion, 3);
+  assert.deepEqual(frozen.content.snapshot.confirmation.reviewedExemptLines, [1, 2]);
+  assert.equal(frozen.content.snapshot.items[0].tlc, preserved.tlc);
+  assert.equal(frozen.content.snapshot.items[0].source.referenceValue, sourceReference);
+  assert.equal(frozen.content.snapshot.items[0].source.resolvedLocationId, previousLocation);
+  assert.equal(frozen.content.snapshot.items[0].receiptBasis.kind, "exempt_existing_tlc");
+  assert.equal(frozen.content.snapshot.items[1].tlc, assigned.exemptReceipt.proposedTlc);
+  assert.equal(frozen.content.snapshot.items[1].source.locationId, receivingLocation);
+  assert.equal(frozen.content.snapshot.items[1].receiptBasis.kind, "exempt_assigned_tlc");
+  assert.equal(frozen.content.snapshot.items[1].receiptBasis.receivedTlc, null);
 
   const stored = await fixture.pool.query(
     "SELECT line_no,tlc,exempt_receipt FROM receiving_event_items WHERE tenant_id=$1 AND event_id=$2 ORDER BY line_no",
@@ -416,14 +429,14 @@ export async function exerciseUsReceivingExemption({ page, expect, screenshots, 
   assert.equal(stored.rows[0].tlc, preserved.tlc);
   assert.equal(stored.rows[1].tlc, null);
   assert.deepEqual(stored.rows[1].exempt_receipt, assigned.exemptReceipt);
-  const lotIds = frozen.snapshot.items.map((item) => item.lotId);
+  const lotIds = frozen.content.snapshot.items.map((item) => item.lotId);
   const lots = await fixture.pool.query(
     "SELECT id,product_id,tlc,assignment_basis,source_location_id,source_reference_kind,source_reference_value,source_reference_location_id,source_locked_at,revision FROM traceability_lots WHERE tenant_id=$1 AND id=ANY($2::uuid[]) ORDER BY tlc",
     [tenant, lotIds],
   );
   assert.equal(lots.rows.length, 2);
-  const existingLot = lots.rows.find((row) => row.id === frozen.snapshot.items[0].lotId);
-  const ownLot = lots.rows.find((row) => row.id === frozen.snapshot.items[1].lotId);
+  const existingLot = lots.rows.find((row) => row.id === frozen.content.snapshot.items[0].lotId);
+  const ownLot = lots.rows.find((row) => row.id === frozen.content.snapshot.items[1].lotId);
   assert.deepEqual(
     {
       product: existingLot.product_id,
@@ -462,8 +475,8 @@ export async function exerciseUsReceivingExemption({ page, expect, screenshots, 
       revision: 1,
     },
   );
-  assert.equal(existingLot.source_locked_at.toISOString(), frozen.finalizedAt);
-  assert.equal(ownLot.source_locked_at.toISOString(), frozen.finalizedAt);
+  assert.equal(existingLot.source_locked_at.toISOString(), frozen.content.finalizedAt);
+  assert.equal(ownLot.source_locked_at.toISOString(), frozen.content.finalizedAt);
   const audits = await fixture.pool.query(
     'SELECT actor_user_id,organization_id,action,outcome,target_type,target_id,"after" FROM tenant_audit_events WHERE organization_id=$1 AND (target_id=$2 OR target_id=ANY($3::text[]))',
     [tenant, saved.id, lotIds],
@@ -485,7 +498,19 @@ export async function exerciseUsReceivingExemption({ page, expect, screenshots, 
   );
   assert.deepEqual(
     audits.rows.find((row) => row.action === "traceability.receiving.finalized").after,
-    frozen,
+    {
+      rootId: frozen.lifecycle.rootId,
+      revision: 1,
+      reason: null,
+      result: "finalized",
+      effect: null,
+      record: frozen,
+      predecessor: null,
+      lineLots: {
+        before: [],
+        after: frozen.content.snapshot.items.map(({ lineNo, lotId }) => ({ lineNo, lotId })),
+      },
+    },
   );
 
   await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
@@ -575,6 +600,6 @@ export async function exerciseUsReceivingExemption({ page, expect, screenshots, 
     );
   }
   console.log(
-    "Receiving exemption: native 120/121-code-point entry boundary, mixed preserved/own lines, exact source-reference review and pending-QA notice, receipt-only review, exact lost-response retry, v2 frozen history, stable lot/audit identities, live-reference mutation, operator 403; EN/ES light/dark 1440/1024/390 passed.",
+    "Receiving exemption: native 120/121-code-point entry boundary, mixed preserved/own lines, exact source-reference review and pending-QA notice, receipt-only review, exact lost-response retry, v3 frozen content in live envelopes, stable lot/audit identities, live-reference mutation, operator 403; EN/ES light/dark 1440/1024/390 passed.",
   );
 }

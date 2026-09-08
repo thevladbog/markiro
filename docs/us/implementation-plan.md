@@ -23,10 +23,29 @@ Internal explicit-v2 finalization now writes frozen v3 snapshots and atomically
 replaces receipt support, preserving retained lot identity and historical content.
 Internal live registry reads now select current/pending revisions or explicit all
 history, with independent status filters and consistent summary pagination.
-Complete error/result and original-command compatibility contracts, then coordinated
-HTTP integration remain next; connected UI follows in Task 5.
-New formats are not yet active HTTP responses; legacy frozen
-readers remain unchanged. See the dated storage, read and command checkpoints
+Original save/finalize now reject terminal or amendment targets with typed conflicts
+after current authorization and exact historical replay. Saved results must match
+the requested event, and real save/finalize-versus-void races preserve one winner.
+Strict lifecycle error and command-specific result contracts are now available,
+with original/revision input unions and real-store compatibility coverage.
+Internal original-draft create/save commands now write versioned acknowledgements
+and replay both historical formats without rewriting them. No-op saves leave the
+draft, audit and lot basis unchanged; concurrent receipt collisions retry within
+the same three-attempt limit.
+Internal finalization now also accepts supported original input, rechecks v4
+readiness and writes frozen v3 with a versioned acknowledgement. Its dual reader
+replays old v1/v2 results exactly; original input cannot authorize an amendment.
+Task 4/5 now have the coordinated original-workflow HTTP/OpenAPI and client switch:
+new create/save/finalize acknowledgements, exact historical replay, live record/list
+reads, readiness v4 and frozen v3. Every successful mutation is followed by a
+current GET; if that read fails after a known acknowledgement, editing stays
+blocked and the retry repeats only GET. Historical v1/v2 snapshots remain pinned.
+The existing editor and frozen detail consume the live envelope and distinguish
+void/amended state from frozen content. Explicit revision acknowledgement
+validators now require captured pre-command context and check immutable identity,
+versions, reasons and retained bindings, without activating new public inputs.
+Their transport/recovery integration, amend/void and history/basis endpoints, lifecycle controls, amendment editing and
+full history/basis navigation remain next. Tasks 4/5 and US-03 remain partial. See the dated storage, read and command checkpoints
 in the execution plan for automated proof and remaining limits. Fixed-template Receiving
 CSV follows separately, then US-04 Transformation with the P0 server case bridge.
 
@@ -402,6 +421,54 @@ This closes the scoped exempt receipt UI/finalization path, not US-03 or the MVP
 The final three-finding UI correction wave is also complete. Proposed TLC entry now permits every contract-valid 120-code-point value even when supplementary characters occupy 240 UTF-16 units, while the unchanged contract still rejects 121. Saved QA confirmation distinguishes physical and reference sources and shows the exact reference URL and resolved location separately from exemption evidence. The saved-data readiness card shows the exact current pending-QA lines to every role in EN/ES, with the existing edit/generation invalidation preventing stale notices. Correction tests passed 35/35; the covering Receiving set passed 106/106; the fresh full admin run passed 1,255/1,255 across 110 files. Admin typecheck/lint, the primary build and the separate US build with both edition variables passed. Unaffected backend/domain/DB suites were not repeated.
 
 The final local Chromium source passed 1/1 in 34.36 seconds (35.91 seconds total) after all production formatting edits. Its genuine keyboard path reproduced the old UTF-16 cap under mutation, then proved exact native entry and persistence of 120 supplementary points plus rejection of 121 on final source. It also asserted the exact reference-source database and frozen tuples, null physical-source column, separate evidence, pending line list `1, 2`, existing retry/audit/lot/role safeguards and EN/ES light/dark 1440/1024/390 coverage. Four new source-reference and pending-notice originals under `/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-AuCcFK` were inspected. Production source hashes were unchanged across the run; the owned database and loopback servers were clean afterward. This remains isolated synthetic browser evidence and does not broaden the existing US-03/MVP or external-acceptance limits.
+
+### US branch checkpoint and Receiving command compatibility — 2026-09-08
+
+The owner-requested checkpoint `0cd1999d42891d6502f14c23478c6ec74f16ded0`
+saved the preceding internal Receiving lifecycle development to `codex/us-mvp`.
+Its remote check exposed one environment-dependent frozen-v2 URL assertion:
+Node 24.20.0 accepted the empty ACE host label `xn--`, while local 24.18.0 rejected
+it. The separately approved correction `a88398162900bb6cac24f99fe64b904f2a8d7f93`
+explicitly rejects that empty parsed label, including case/percent-encoded forms,
+without changing valid international URL values or fetching a reference.
+Both commits were pushed and their exact remote SHAs verified. The direct runtime
+regression failed before the correction on Node 24.20.0 Linux, then passed there
+and on local 24.18.0. The [second check-only run](https://github.com/thevladbog/markiro/actions/runs/34171451552)
+passed that gate but exposed eight related failures: the coverage validator still
+relied on native IDNA, and an invalid non-empty Punycode label remained accepted.
+
+The complete correction `08e813f46eb923d04cf585c559c00bb95f49e331` uses a shared
+host validator with the already-resolved `tr46` 6.0.0 package declared directly
+in domain. Only its importer was added to the pnpm-generated lockfile; no resolved
+version changed. The non-transitional IDNA options preserve valid international
+names, contextual joiners and IPv6, without adding DNS length limits, rewriting
+stored URLs or fetching anything. Coverage and TLC/evidence references retain
+their separate existing length, protocol and character rules. A direct Node test
+proved the invalid non-empty Punycode case before the shared fix, then passed on
+Node 24.20.0 Linux and local Node. The full 609-case API regression also passed
+on a checksum-verified temporary Node 24.20.0 runtime; the system Node was unchanged.
+This third commit was pushed and its exact remote SHA verified. Its
+[check-only run](https://github.com/thevladbog/markiro/actions/runs/34172657766)
+succeeded for this exact commit in 8 minutes 39 seconds, including dependency
+installation, entry/build/browser contracts, release isolation and all selected
+US persistence regressions. The existing action-runtime deprecation notice remains;
+no action pin or release capability was changed to suppress it.
+
+Local continued development adds original save/finalize terminal-state protection,
+exact stored-result target correlation and real command-versus-void races.
+Historical successful retries remain unchanged after amendment finalization and
+void. This server slice and its CI test selection remain uncommitted after the
+three pushed checkpoints; see the execution plan's original-command checkpoint.
+Final verification passed 609/609 scoped API, 1009/1009 domain, 622/622 contracts,
+35/35 affected browser-client tests and 19/19 check-only tool tests, without skips.
+Affected API/domain typecheck, lint and builds, tool lint, full formatting and
+diff gates passed. Domain/contracts/tool tests also passed on Node 24.20.0;
+118 URL/snapshot API cases passed again on 24.18.0. Both primary and US browser
+builds passed with the existing chunk-size notices. No new browser journey, full primary API or hosted acceptance
+was performed. The US fixture created/removed only owned disposable databases;
+read-only inspection confirmed zero temporary API test databases afterward.
+No main merge, PR, tag, deployment or operational workflow dispatch was performed;
+release isolation remains locked. Task 4 and US-03 remain partial.
 
 ## 6. Final rule
 
