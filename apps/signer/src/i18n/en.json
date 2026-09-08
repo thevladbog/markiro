@@ -1,4 +1,11 @@
 {
+  "autostart": {
+    "label": "Start when signing in to Windows",
+    "hint": "The agent will run in the tray after you sign in to your account.",
+    "readFailed": "Could not read the startup setting.",
+    "saveFailed": "Could not save the startup setting. Try again.",
+    "retry": "Retry"
+  },
   "app": { "loading": "Loading…" },
   "pairing": {
     "title": "Pair the agent",

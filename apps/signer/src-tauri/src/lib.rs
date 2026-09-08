@@ -1,3 +1,4 @@
+mod autostart;
 mod commands;
 mod tray;
 
@@ -35,13 +36,6 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
-        // Autostart is handled by the NSIS installer's `Run` registry hook
-        // (`windows/installer-hooks.nsh`), which works without the app ever
-        // having run -- the plugin form was registered here too, with its
-        // three `autostart:*` capabilities granted, but `enable()` was never
-        // called from anywhere, so it was a second, permanently-dormant
-        // autostart mechanism. Removed rather than wired up: the NSIS hook
-        // alone is sufficient and needs no webview permission surface.
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
             let version = app.package_info().version.to_string();
@@ -133,6 +127,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::signer_status,
+            commands::signer_autostart_enabled,
+            commands::signer_set_autostart_enabled,
             commands::signer_pair,
             commands::signer_unpair,
             commands::signer_list_certificates,
