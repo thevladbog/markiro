@@ -9,6 +9,61 @@ describe("product label SQLite schema parity", () => {
   afterEach(() => {
     for (const db of databases.splice(0)) db.close();
   });
+  it("upgrades legacy shift mirrors without inventing a print policy and enforces JSON storage", () => {
+    const db = new DatabaseSync(":memory:");
+    databases.push(db);
+    const contextIndex = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.startsWith("ALTER TABLE shift_mirror ADD COLUMN validation_print_context"),
+    );
+    expect(contextIndex).toBeGreaterThan(0);
+    const apply = (statements: readonly string[]) => {
+      for (const statement of statements) {
+        try {
+          db.exec(statement);
+        } catch (error) {
+          if (!(error instanceof Error && /duplicate column name/i.test(error.message)))
+            throw error;
+        }
+      }
+    };
+    apply(STATION_MIGRATIONS.slice(0, contextIndex));
+    db.prepare(
+      "INSERT INTO shift_mirror(id,status,mode,product_id) VALUES ('legacy','active','validation','product')",
+    ).run();
+    apply(STATION_MIGRATIONS.slice(contextIndex));
+    apply(STATION_MIGRATIONS.slice(contextIndex));
+    expect(
+      db.prepare("SELECT validation_print_context FROM shift_mirror WHERE id='legacy'").get()
+        ?.validation_print_context,
+    ).toBeNull();
+    expect(
+      db
+        .prepare("PRAGMA table_info(shift_mirror)")
+        .all()
+        .map((row) => row.name)
+        .sort(),
+    ).toEqual(
+      Object.values(getTableColumns(schema.shiftMirror))
+        .map((column) => column.name)
+        .sort(),
+    );
+    expect(() =>
+      db
+        .prepare("UPDATE shift_mirror SET validation_print_context='not json' WHERE id='legacy'")
+        .run(),
+    ).toThrow(/CHECK constraint/);
+    expect(
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'product_label_mirror_guard_%' ORDER BY name",
+        )
+        .all(),
+    ).toEqual([
+      { name: "product_label_mirror_guard_insert" },
+      { name: "product_label_mirror_guard_update" },
+    ]);
+  });
+
   it("creates matching local command, job, attempt, event and outbox columns", () => {
     const db = new DatabaseSync(":memory:");
     databases.push(db);

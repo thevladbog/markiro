@@ -723,7 +723,10 @@ none не меняют форму учёта. Отсутствующее пол�
 
 ## Task 8: Печатные поля и зеркало станции
 
-**Files:** Create `apps/station/src/lib/product-labels/fields.ts`;
+**Files:** Create `apps/station/src/lib/product-labels/{fields,context}.ts`;
+modify `packages/db/src/sqlite/{schema,migrations}.ts`, `apps/station/src/lib/hardware-config.ts`,
+`apps/station/src/lib/product-labels/validation.ts` и focused tests.
+Barcodes `packages/domain/src/barcodes/{gs1-data-matrix,svg}.ts` используют generic entry bwip-js: полный station entry должен загружаться без Node Buffer (существующий regression test).
 modify `lib/{mirror,shift-bundle,api-client,print-label}.ts`,
 `test/{mirror,shift-bundle,print-label}.test.ts`;
 create `test/product-labels-fields.test.ts`.
@@ -754,15 +757,19 @@ export type PrepareProductLabelInput = Pick<
   eventId: string;
   attemptId: string;
   language: PrinterLanguage;
+  printerDpi: 203 | 300 | null;
   rasterizeText: RasterizeTextFn;
 };
 ```
 
 Job ID и время задаёт caller один раз до записи; helper не читает часы самостоятельно.
 Поле dpi берётся из `policy.snapshot.spec.dpi` и проверяется против текущего
-принтера до acceptance. Ошибка рендера до acceptance не создаёт code/job/попытку.
+принтера до acceptance. В текущем HardwareConfig DPI отсутствует: добавляется optional legacy-compatible printerDpi; неизвестное значение null, не угадывается. Выбор DPI в существующем setup UI добавляется на UI-этапе.
 
-- [ ] Добавить тест неизменяемых полей:
+В shift_mirror добавляется nullable validation_print_context: один JSON с policy и полным контекстом полей (без operatorName, который задаётся в момент скана). Одна запись делает контекст независимым от отдельного обновления product_mirror. SQLite guards не дают старому ответу затереть active policy, включая случай очистки воспроизводимого кэша при наличии durable acceptance.
+Ошибка рендера до acceptance не создаёт code/job/попытку.
+
+- [x] Добавить тест неизменяемых полей:
 
 ```ts
 const fields = duplicateLabelFields(input);
@@ -777,8 +784,8 @@ expect(fields.date).toBe("08.09.2026");
 известный тестовый KM, gtin14 `04600000000015`, shelfLifeDays=30, прочие nullable
 BoxLabelInput поля null. Дополнить тест сменой timezone и повтором на следующий день.
 
-- [ ] Run `pnpm --filter @markiro/station exec vitest run test/product-labels-fields.test.ts`; ожидается missing helper.
-- [ ] Формировать поля так, чтобы уже существующее fallback/date поведение сохранялось:
+- [x] Run `pnpm --filter @markiro/station exec vitest run test/product-labels-fields.test.ts`; ожидается missing helper.
+- [x] Формировать поля так, чтобы уже существующее fallback/date поведение сохранялось:
 
 ```ts
 const base = boxLabelFields({ ...input, sscc: "", itemCount: 1, closedAt: input.acceptedAt });
@@ -789,17 +796,17 @@ return { ...base, "km.code": parseDuplicateKm(input.canonicalRaw).raw, qty: "1",
 для обоих языков TSPL/ZPL, сохраняет Latin-1 bytes как base64 через
 `bytesToBase64`. Вход complete label context валидируется до принятия кода.
 
-- [ ] Добавить optional renderer options последним аргументом `renderLabelBytes`:
+- [x] Добавить optional renderer options последним аргументом `renderLabelBytes`:
       `{kmDataMatrix?:"native"|"raster"}`; существующие callers не меняют вывода.
       Поддержка нового флага не берётся из пользовательского содержимого template spec.
-- [ ] В зеркало записывать policy snapshot одной атомарной публикацией, проверять
+- [x] В зеркало записывать policy snapshot одной атомарной публикацией, проверять
       digest и revision. Если ранее сохранено duplicate_dm, старый ответ без policy
       не заменяет её none. При новой печатной смене не готовый контекст блокирует
       первый скан; обычные смены сохраняют прежнюю обработку ошибок bundle.
-- [ ] Добавить `PRODUCT_LABEL_PROTOCOL` к существующему заголовку capabilities.
+- [x] Добавить `PRODUCT_LABEL_PROTOCOL` к существующему заголовку capabilities.
       Не логировать body повреждённого bundle/raw/bytes. Проверить stale bundle,
       restart без сети, response от старого сервера и попытку перезаписать active revision.
-- [ ] Run fields/mirror/shift-bundle/print-label и station typecheck/build. Commit: `feat(station): persist immutable duplicate label context`.
+- [x] Run fields/mirror/shift-bundle/print-label и station typecheck/build. Commit: `feat(station): persist immutable duplicate label context`.
 
 ## Task 9: Печать, контрольное сканирование и восстановление
 
@@ -1541,3 +1548,11 @@ immutable events. Windows/Tauri pool и физическое отключени�
 Политика сохраняется и возвращается отдельным validationPrint. Создание/изменение planned и запуск используют tenant-scoped locks; запуск повторно проверяет библиотечный шаблон, active сохраняет snapshot. Guard точного protocol до создания/участия/выдачи bundle. Planning-config разрешён станции с ограниченным ответом. Rollout flag default false передан через валидированный env и API module в Compose; recovery уже открытых смен не блокируется выключенным flag.
 
 Проверки: 13 новых lifecycle e2e (включая race PATCH/open и PATCH/enter), 9 boundary unit, env/OpenAPI, отказ старому устройству без побочных записей, tenant/category/purpose/disabled guards. Полный API: **272 suites passed, 2865 tests passed, 25 skipped** (отдельные opt-in внешние/инфраструктурные проверки). API typecheck/lint/build, scoped formatting, diff check прошли. Compose contracts: 14/14. Физические принтеры/сканеры не подключались.
+
+### Task 8 — Неизменяемые поля и локальный контекст
+
+Подготовка полного KM, полей и Latin-1/base64 байтов работает для ZPL/TSPL и 203/300 dpi. Поле аппаратной настройки printerDpi сохраняется, legacy/неизвестное значение null; настройка UI подключается на этапе интерфейсов. Перед приёмкой сверяются dpi, товар, дата и полный контекст.
+
+Политика и данные для печати опубликованы одним JSON в shift_mirror; новый столбец и два SQLite guard-триггера добавлены append-only. Старый ответ не может убрать active policy даже после очистки mirror, если сохранился accepted job. Перезапуск проверен на файле SQLite с двумя чередующимися соединениями. Журнал ошибок загрузки не содержит payload.
+
+RED→GREEN: helper/context отсутствовали, DPI искажение ранее допускалось, настройки не хранили DPI. Полные проверки: Station **87 suites / 1287 tests**, DB **67 / 372**, domain **40 / 622**. Все typecheck/lint/build прошли, API consumers 58/58, форматирование/diff check прошли. Существующая проверка station entry без Buffer выявила Node-specific bwip import; оба barcode модуля переведены на установленный bwip-js/generic, доменные SVG/raster тесты и запуск без Buffer зелёные. Один повтор full Station был ошибочно вызван из корня с --root, что ломает 11 cwd-dependent artifact tests; итоговый полный PASS получен из apps/station без изменения этих тестов. Физическая печать и потеря питания не проверялись.

@@ -34,10 +34,11 @@ export async function renderLabelBytes(
   data: Record<LabelField, string>,
   language: PrinterLanguage,
   rasterizeText: RasterizeTextFn,
+  options: { kmDataMatrix?: "native" | "raster" } = {},
 ): Promise<Uint8Array> {
   const text =
     language === "tspl"
-      ? await generateTspl(spec, data, { rasterizeText })
-      : await generateZpl(spec, data, { rasterizeText });
+      ? await generateTspl(spec, data, { rasterizeText, ...options })
+      : await generateZpl(spec, data, { rasterizeText, ...options });
   return latin1ToBytes(text);
 }

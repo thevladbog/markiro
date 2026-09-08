@@ -63,6 +63,7 @@ export function parseProductLabelAcceptance(input: unknown): PreparedProductLabe
     preparedEvent.operatorId !== value.operatorId ||
     preparedEvent.policyRevision !== policy.policyRevision ||
     preparedEvent.templateDigest !== policy.snapshot.digest ||
+    preparedEvent.dpi !== policy.snapshot.spec.dpi ||
     preparedEvent.payloadDigest !== duplicatePayloadDigest(km.raw) ||
     preparedEvent.bytesDigest !== productLabelBytesDigest(bytes)
   )

@@ -14,6 +14,8 @@ export interface HardwareConfig {
   scanner: { port: string; baud: number } | null;
   printer: PrintTarget | null;
   printerLanguage: PrinterLanguage;
+  /** Absent in legacy settings; duplicate printing requires a known matching resolution. */
+  printerDpi?: 203 | 300 | null;
   /**
    * Opt-in per workstation: after a box closes and prints, require the
    * operator to scan the printed label back before moving on. Off by
@@ -28,6 +30,7 @@ export const DEFAULT_HARDWARE_CONFIG: HardwareConfig = {
   scanner: null,
   printer: null,
   printerLanguage: "zpl",
+  printerDpi: null,
   verifyPrintedLabel: false,
 };
 
@@ -80,6 +83,7 @@ export async function loadHardwareConfig(exec: SqlExecutor): Promise<HardwareCon
       scanner: parseScanner(parsed.scanner),
       printer: parsePrinter(parsed.printer),
       printerLanguage: parsed.printerLanguage === "tspl" ? "tspl" : "zpl",
+      printerDpi: parsed.printerDpi === 203 || parsed.printerDpi === 300 ? parsed.printerDpi : null,
       verifyPrintedLabel: parsed.verifyPrintedLabel === true,
     };
   } catch {

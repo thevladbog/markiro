@@ -3351,6 +3351,38 @@ export const STATION_MIGRATIONS: string[] = [
      INSERT INTO product_label_outbox (credential_ownership, event_id, queued_at)
      VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.eventId'), NEW.accepted_at);
    END;`,
+  `ALTER TABLE shift_mirror ADD COLUMN validation_print_context TEXT
+   CONSTRAINT shift_mirror_validation_print_context_json_check
+   CHECK (validation_print_context IS NULL OR json_valid(validation_print_context));`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_mirror_guard_insert
+   BEFORE INSERT ON shift_mirror
+   WHEN EXISTS (
+     SELECT 1 FROM shift_mirror current
+     WHERE current.id = NEW.id AND current.status <> 'planned'
+       AND json_extract(current.validation_print_context, '$.policy.mode') = 'duplicate_dm'
+       AND (NEW.mode <> 'validation' OR NEW.status = 'planned'
+         OR json_extract(NEW.validation_print_context, '$.policy') IS NOT json_extract(current.validation_print_context, '$.policy'))
+   ) OR EXISTS (
+     SELECT 1 FROM product_label_accept_commands accepted
+     WHERE accepted.shift_id = NEW.id
+       AND (NEW.mode <> 'validation' OR NEW.status = 'planned'
+         OR json_extract(NEW.validation_print_context, '$.policy') IS NOT json_extract(accepted.acceptance_json, '$.policy'))
+   )
+   BEGIN SELECT RAISE(ABORT, 'PRODUCT_LABEL_POLICY_FROZEN'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_mirror_guard_update
+   BEFORE UPDATE ON shift_mirror
+   WHEN (
+     OLD.status <> 'planned'
+     AND json_extract(OLD.validation_print_context, '$.policy.mode') = 'duplicate_dm'
+     AND (NEW.mode <> 'validation' OR NEW.status = 'planned'
+       OR json_extract(NEW.validation_print_context, '$.policy') IS NOT json_extract(OLD.validation_print_context, '$.policy'))
+   ) OR EXISTS (
+     SELECT 1 FROM product_label_accept_commands accepted
+     WHERE accepted.shift_id = NEW.id
+       AND (NEW.mode <> 'validation' OR NEW.status = 'planned'
+         OR json_extract(NEW.validation_print_context, '$.policy') IS NOT json_extract(accepted.acceptance_json, '$.policy'))
+   )
+   BEGIN SELECT RAISE(ABORT, 'PRODUCT_LABEL_POLICY_FROZEN'); END;`,
 ];
 
 export interface StationMigrationEntry {

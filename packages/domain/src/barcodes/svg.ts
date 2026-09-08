@@ -1,4 +1,4 @@
-import bwipjs from "bwip-js";
+import bwipjs from "bwip-js/generic";
 import { DomainError } from "../errors.js";
 import { toGs1Data } from "./gs1-data-matrix.js";
 

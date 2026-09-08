@@ -59,41 +59,52 @@ export const operatorsMirrorB = sqliteTable("operators_mirror_b", {
 });
 
 /** Local mirror of the downloaded shift, incl. the label template spec json. */
-export const shiftMirror = sqliteTable("shift_mirror", {
-  id: text("id").primaryKey(),
-  status: text("status").notNull(),
-  mode: text("mode").notNull(),
-  productId: text("product_id").notNull(),
-  productName: text("product_name"),
-  lineId: text("line_id"),
-  lineName: text("line_name"),
-  counterpartyId: text("counterparty_id"),
-  counterpartyName: text("counterparty_name"),
-  counterpartyGln: text("counterparty_gln"),
-  labelTemplateId: text("label_template_id"),
-  labelTemplateName: text("label_template_name"),
-  labelTemplateSpec: text("label_template_spec"),
-  plannedQty: integer("planned_qty"),
-  plannedDate: text("planned_date"),
-  productionDate: text("production_date"),
-  boxCapacity: integer("box_capacity"),
-  palletCapacity: integer("pallet_capacity"),
-  palletsEnabled: integer("pallets_enabled", { mode: "boolean" }).notNull().default(false),
-  openedAt: text("opened_at"),
-  stationClosePolicy: text("station_close_policy"),
-  stationCloseOwnerDeviceId: text("station_close_owner_device_id"),
-  // This device's box-SSCC issuer prefix (Task 13 review, plan 06c) -- see
-  // migrations.ts's ALTER for why this trails the rest of the table.
-  issuerPrefix: text("issuer_prefix"),
-  // The box label's OWN template spec (CodeRabbit PR33 review, Finding 3) --
-  // entirely separate from labelTemplateSpec above, which is the ITEM
-  // template. See migrations.ts's trailing ALTER for why this trails the
-  // rest of the table too.
-  boxLabelTemplateSpec: text("box_label_template_spec"),
-  // Human-readable shift number (`AUG26-003`, `/S` = station-created) --
-  // composed server-side; see migrations.ts's trailing ALTER.
-  number: text("number"),
-});
+export const shiftMirror = sqliteTable(
+  "shift_mirror",
+  {
+    id: text("id").primaryKey(),
+    status: text("status").notNull(),
+    mode: text("mode").notNull(),
+    productId: text("product_id").notNull(),
+    productName: text("product_name"),
+    lineId: text("line_id"),
+    lineName: text("line_name"),
+    counterpartyId: text("counterparty_id"),
+    counterpartyName: text("counterparty_name"),
+    counterpartyGln: text("counterparty_gln"),
+    labelTemplateId: text("label_template_id"),
+    labelTemplateName: text("label_template_name"),
+    labelTemplateSpec: text("label_template_spec"),
+    plannedQty: integer("planned_qty"),
+    plannedDate: text("planned_date"),
+    productionDate: text("production_date"),
+    boxCapacity: integer("box_capacity"),
+    palletCapacity: integer("pallet_capacity"),
+    palletsEnabled: integer("pallets_enabled", { mode: "boolean" }).notNull().default(false),
+    openedAt: text("opened_at"),
+    stationClosePolicy: text("station_close_policy"),
+    stationCloseOwnerDeviceId: text("station_close_owner_device_id"),
+    // This device's box-SSCC issuer prefix (Task 13 review, plan 06c) -- see
+    // migrations.ts's ALTER for why this trails the rest of the table.
+    issuerPrefix: text("issuer_prefix"),
+    // The box label's OWN template spec (CodeRabbit PR33 review, Finding 3) --
+    // entirely separate from labelTemplateSpec above, which is the ITEM
+    // template. See migrations.ts's trailing ALTER for why this trails the
+    // rest of the table too.
+    boxLabelTemplateSpec: text("box_label_template_spec"),
+    // Human-readable shift number (`AUG26-003`, `/S` = station-created) --
+    // composed server-side; see migrations.ts's trailing ALTER.
+    number: text("number"),
+    /** Atomically published validation policy and its complete product label context. */
+    validationPrintContext: text("validation_print_context"),
+  },
+  (table) => [
+    check(
+      "shift_mirror_validation_print_context_json_check",
+      sql`${table.validationPrintContext} IS NULL OR json_valid(${table.validationPrintContext})`,
+    ),
+  ],
+);
 
 /** Local mirror of the shift's product (for ad-hoc GTIN resolution offline). */
 export const productMirror = sqliteTable("product_mirror", {

@@ -1,4 +1,4 @@
-import bwipjs from "bwip-js";
+import bwipjs from "bwip-js/generic";
 import { DomainError } from "../errors.js";
 import { parseKmSegments } from "../gs1/km.js";
 import { bitmapToZplHex } from "../labels/raster.js";

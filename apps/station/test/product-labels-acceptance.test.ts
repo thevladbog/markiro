@@ -276,6 +276,17 @@ describe("atomic product label acceptance", () => {
     ).rejects.toMatchObject({ code: "PRODUCT_LABEL_ACCEPTANCE_INVALID" });
   });
 
+  it("rejects prepared DPI that differs from the frozen template before writing", async () => {
+    const input = productLabelAcceptanceFixture();
+    await expect(
+      recordProductLabelAcceptance(exec, {
+        ...input,
+        preparedEvent: { ...input.preparedEvent, dpi: 300 },
+      }),
+    ).rejects.toMatchObject({ code: "PRODUCT_LABEL_ACCEPTANCE_INVALID" });
+    expect(await counts()).toEqual(tables.map(() => 0));
+  });
+
   it.each(["codeHash", "canonicalRaw", "bytesBase64", "credentialOwnership"] as const)(
     "rejects corrupt acceptance %s before any write",
     async (field) => {

@@ -1,3 +1,5 @@
+import { DomainError } from "@markiro/domain";
+import { productLabelContextForBundle } from "./product-labels/context.js";
 import type { StationClient } from "./api-client.js";
 import type { CredentialGeneration } from "./credential-recovery.js";
 import {
@@ -80,6 +82,10 @@ async function mirrorShiftBundleBody(
     : `/shifts/${shiftId}/reference-bundle`;
   const bundle = await client.get<StationBundle>(path);
   if (generation?.sealed || !isEntryCurrent()) return false;
+  const printContext = productLabelContextForBundle(bundle);
+  if (printContext?.policy.mode === "duplicate_dm" && bundle.shift.id !== shiftId) {
+    throw new DomainError("PRODUCT_LABEL_CONTEXT_INVALID", "Unexpected duplicate shift bundle");
+  }
   const block = bundle.sscc;
   if (mirrorSsccRange && block) {
     // Revocations first: `addRange` inserts the replacement block, and
@@ -173,8 +179,9 @@ export function mirrorShiftBundle(
   isEntryCurrent: () => boolean = () => true,
 ): Promise<boolean> {
   return trackShiftBundleMirror(shiftId, () =>
-    mirrorShiftBundleBody(client, exec, shiftId, generation, true, isEntryCurrent).catch((err) => {
-      console.error("station: shift bundle download/mirror failed", err);
+    mirrorShiftBundleBody(client, exec, shiftId, generation, true, isEntryCurrent).catch(() => {
+      // Do not log a response body or validation error carrying scanner/print payloads.
+      console.error("station: shift bundle download/mirror failed");
       return false;
     }),
   );
