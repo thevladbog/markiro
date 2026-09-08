@@ -5,7 +5,10 @@ import { useTranslation } from "react-i18next";
 import { UsClientError } from "../client.js";
 import { Pager, type MasterDataViewProps } from "../master-data/workspace-shared.js";
 import { ReceivingEditor } from "./editor.js";
+import { ReceivingAmendmentEditor } from "./amendment-editor.js";
 import { ReceivingFinalizedDetail } from "./finalized-detail.js";
+import { ReceivingLifecycleActions } from "./lifecycle-dialog.js";
+import { ReceivingRevisionNavigation } from "./revision-history.js";
 import {
   isReceivingDraftView,
   isReceivingFrozenView,
@@ -19,12 +22,15 @@ export function ReceivingView(
     canManageQa?: boolean;
     initialRecord?: ReceivingFrozenView;
     onOpenLot?: (id: string, record: ReceivingFrozenView) => void;
+    onEntryBack?: () => void;
+    backLabel?: string;
   },
 ) {
   const { client, canWrite, mutationPending, onForbidden, onSessionLost } = props;
   const { t, i18n } = useTranslation();
   const [rows, setRows] = useState<ReceivingLiveRecordList["items"]>([]);
-  const [status, setStatus] = useState<"draft" | "finalized" | "">("");
+  const [status, setStatus] = useState<ReceivingLiveRecord["status"] | "">("");
+  const [history, setHistory] = useState<"current" | "all">("current");
   const [filter, setFilter] = useState("");
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
@@ -36,6 +42,7 @@ export function ReceivingView(
     props.initialRecord ? { initial: props.initialRecord } : null,
   );
   const [refresh, setRefresh] = useState(0);
+  const openRecord = useCallback((initial: ReceivingLiveRecord) => setEditor({ initial }), []);
   const run = useRef(0);
   const openRun = useRef(0);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -48,6 +55,7 @@ export function ReceivingView(
         search,
         limit: 50,
         offset,
+        history,
         ...(status ? { status } : {}),
       });
       if (run.current === current) setRows(result.items);
@@ -59,7 +67,7 @@ export function ReceivingView(
     } finally {
       if (run.current === current) setPending(false);
     }
-  }, [client, search, status, offset, onForbidden, onSessionLost]);
+  }, [client, search, status, history, offset, onForbidden, onSessionLost]);
   useEffect(() => {
     void load();
     return () => {
@@ -93,6 +101,10 @@ export function ReceivingView(
     }
   }
   const close = () => {
+    if (props.onEntryBack) {
+      props.onEntryBack();
+      return;
+    }
     setEditor(null);
     setRefresh((n) => n + 1);
   };
@@ -101,7 +113,41 @@ export function ReceivingView(
       <ReceivingFinalizedDetail
         record={editor.initial}
         onClose={close}
+        {...(props.backLabel ? { backLabel: props.backLabel } : {})}
         onOpenLot={props.onOpenLot ?? (() => {})}
+        disabled={mutationPending}
+        actions={
+          <>
+            <ReceivingRevisionNavigation
+              key={`${editor.initial.id}/${editor.initial.lifecycle.lifecycleVersion}`}
+              {...props}
+              record={editor.initial}
+              disabled={mutationPending}
+              onOpenRecord={openRecord}
+            />
+            {props.canManageQa ? (
+              <ReceivingLifecycleActions
+                {...props}
+                record={editor.initial}
+                onOpenRecord={openRecord}
+              />
+            ) : null}
+          </>
+        }
+      />
+    );
+  if (
+    editor?.initial &&
+    isReceivingDraftView(editor.initial) &&
+    editor.initial.lifecycle.previousRevisionId !== null
+  )
+    return (
+      <ReceivingAmendmentEditor
+        key={`${editor.initial.id}/${editor.initial.status}/${Boolean(props.canManageQa)}`}
+        {...props}
+        initial={editor.initial}
+        onClose={close}
+        onOpenRecord={openRecord}
       />
     );
   if (editor && (!editor.initial || isReceivingDraftView(editor.initial)))
@@ -115,7 +161,7 @@ export function ReceivingView(
         }
         initial={editor.initial}
         onClose={close}
-        onOpenRecord={(initial) => setEditor({ initial })}
+        onOpenRecord={openRecord}
       />
     );
   const columns: TableColumn<ReceivingLiveRecordList["items"][number]>[] = [
@@ -134,6 +180,11 @@ export function ReceivingView(
           {row.eventNumber}
         </Button>
       ),
+    },
+    {
+      key: "revision",
+      title: t("receiving.revision"),
+      render: (row) => String(row.revision),
     },
     {
       key: "status",
@@ -207,9 +258,17 @@ export function ReceivingView(
         <Select
           label={t("md.status")}
           value={status}
+          disabled={pending || opening || mutationPending}
           onValueChange={(value) => {
-            if (value === "" || value === "draft" || value === "finalized") {
+            if (
+              value === "" ||
+              value === "draft" ||
+              value === "finalized" ||
+              value === "amended" ||
+              value === "void"
+            ) {
               setStatus(value);
+              if (value === "amended") setHistory("all");
               setOffset(0);
             }
           }}
@@ -217,6 +276,24 @@ export function ReceivingView(
             { value: "", label: t("receiving.allStatuses") },
             { value: "draft", label: t("receiving.draft") },
             { value: "finalized", label: t("receiving.finalized") },
+            { value: "amended", label: t("receiving.amended") },
+            { value: "void", label: t("receiving.void") },
+          ]}
+        />
+        <Select
+          label={t("receiving.historySelection")}
+          value={history}
+          disabled={pending || opening || mutationPending}
+          onValueChange={(value) => {
+            if (value === "current" || value === "all") {
+              setHistory(value);
+              setOffset(0);
+              if (value === "current" && status === "amended") setStatus("");
+            }
+          }}
+          options={[
+            { value: "current", label: t("receiving.currentSelection") },
+            { value: "all", label: t("receiving.allHistory") },
           ]}
         />
         <Button

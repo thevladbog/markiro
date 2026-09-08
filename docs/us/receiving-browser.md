@@ -11,17 +11,190 @@ lifecycle envelope, readiness is v4, and new finalizations freeze v3. The client
 correlates acknowledgements with the captured command and always reads current
 state after success. Frozen v1/v2 snapshots are still read without conversion.
 
-Internal amendment saving, QA amend/void, revision history, registry and current
-lot-basis methods are implemented. Their new command/history/basis endpoints,
-amendment editor, lifecycle controls and history/basis navigation remain pending.
-Explicit revision acknowledgement validators are now prepared: they require the
+Amendment saving, QA amend/void, revision history, registry and current lot-basis
+methods are implemented. The development-only API now exposes amend/void/history
+and lot-basis endpoints and accepts strict explicit revision save/finalize inputs.
+The browser client and exact proxy paths now support these commands and bounded
+history/basis reads. QA lifecycle dialogs now start a correction, cancel a saved
+draft or void a current receipt, with explicit current-state recovery. The amendment
+editor now supports retained-line edits, frozen comparison, saved-data checks and
+explicit QA finalization. Exact revision navigation and bounded history controls
+and lot-basis cards are connected. Explicit revision commands require the
 record captured before sending and correlate root, predecessor, reason, versions,
-saved data and lot bindings. The active client still rejects explicit revision
-inputs before transport; connecting these validators to new commands and their
-current-state recovery remains a coordinated follow-up. The current registry uses the
-server's default current selection; all-history and four-status query contracts
-are available over HTTP, but their complete UI controls are a later increment.
-No amendment or void command is enabled through the browser or public routes.
+saved data and lot bindings. Missing, mismatched or stale context is rejected
+before sending; the client clones it before its first await. Validated structured
+conflicts retain their bounded context, not raw server errors. Commands do not
+automatically retry or GET; the connected dialog owns explicit retry and the
+required current-state read. The registry defaults to current selection and now
+exposes all-history and four-status filters, with a separate revision column.
+Current QA users can edit and explicitly save amendment drafts; receiving-write alone does not grant that access.
+No hosted or released API is enabled by these local changes.
+
+## Revision navigation and history — 2026-09-08
+
+Saved receipt views show their revision, correction reason and explicit links to
+current, pending and previous records when those differ from the displayed record.
+History loads only on request, with 50-row pages and a 100,000 offset bound.
+Rows distinguish revision/status and correction/void reasons; the displayed
+revision is marked separately. Opening a row fetches its exact ID and verifies
+the receipt root, number and time zone. It never redirects a historical revision
+silently to the current one. Existing detail views keep original finalization
+facts separate from amendment/void actor, time and reason.
+
+The registry exposes `current`/`all` selection and all four statuses. Selecting
+Amended explicitly selects all history; choosing current selection clears that
+incompatible status. Other statuses filter the selected history without widening
+it. Search and filters survive returning from an opened revision, and changing a
+filter resets its bounded page.
+
+Navigation reuses the workspace lock and dirty-input confirmation. A declined or
+failed navigation keeps local input and the displayed receipt intact. Retry sends
+only the selected GET, never a mutation. History loading, failed validation and
+an empty later page are distinct. Obsolete responses are discarded on unmount;
+read/session denial is delegated to existing access recovery. No persistent cache,
+automatic polling, write permission, API route or release surface is added.
+
+The connected regression suite covers exact historical/current navigation,
+failed-read recovery, unrelated history rejection, dirty-input preservation,
+current/all selection, bounded paging, 401/403 and late replies. Real browser
+proof extends the owned MFA/API/PostgreSQL fixture through
+`tools/us-development/test/receiving-history-flow.mjs`. Detailed check totals and
+safe screenshot evidence are recorded in the execution plan. Existing Markiro
+components/tokens and EN/ES light/dark layouts are retained; no `.pen` change.
+At this checkpoint, lot-basis cards, contextual conflict presentation and wider
+Task 5 acceptance remained open. The subsequent basis increment below supersedes
+only the first item. This is local development evidence, not release acceptance.
+
+Verification: full admin 1393/1393 in 118 files without skips; typecheck/lint,
+primary and US builds, 19 isolation/browser-entry checks and release guard pass.
+After the final mobile token adjustment, focused regression passed 34/34 and
+the US build passed again. The complete Chromium journey passed in 51.46 seconds
+(54.05 total), including 44px mobile button targets in EN/ES light/dark and
+horizontal-overflow checks at 1440/1024/390. Safe screenshots are under
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-aXmhid`;
+the final ES dark mobile image was personally inspected. Existing five primary
+hook warnings and known JSDOM/module/chunk notices remain. No native mobile,
+screen-reader, fluent Spanish or hosted/external acceptance is claimed.
+
+## Amendment check and finalization — 2026-09-08
+
+QA can explicitly check a saved, unchanged correction and finalize that exact
+revision. The check must match the root, predecessor and lifecycle/draft versions;
+edits, reloads and QA changes invalidate transient results. Lifecycle conflicts
+block another command until an explicit current-record reload.
+
+Confirmation distinguishes retained, newly created and newly linked lots and
+explains replacement of the effective receiving basis. Retained identities and
+the frozen predecessor remain unchanged. Exempt lines require a fresh per-revision
+review: closing/reopening confirmation clears its checkboxes. A retained own TLC
+is labelled previously assigned, never presented as a new assignment.
+
+The explicit v2 command captures the predecessor, lifecycle/draft versions,
+readiness digest, review set and operation key. Unknown delivery retries exactly
+that command; an acknowledged result with failed current-state read retries GET
+only. No automatic retry, persistent approval or new API surface is introduced.
+
+Seven focused connected UI tests cover captured commands, wrong-predecessor
+checks, QA loss, typed conflicts, exact retry, GET-only recovery and retained TLC
+review labels. Full admin tests pass 1384/1384 across 117 files without skips;
+typecheck, lint, primary and isolated US builds pass. The existing five primary-app
+hook warnings and environment/build notices remain.
+
+The real local MFA/API/PostgreSQL companion
+`tools/us-development/test/receiving-amendment-finalization-flow.mjs` proves fresh
+review, committed-but-lost finalization/exact replay, unchanged lot records and
+frozen predecessor, replaced receiving basis and one exact before/after audit.
+EN/ES light/dark layouts pass at 1440/1024/390. Safe screenshots from the first
+successful full journey (44.24 seconds; 45.89 total) are under
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-1LcEdY`.
+Its EN light desktop and ES dark mobile confirmation images were personally
+inspected. These are local Chromium checks on fixture-owned synthetic databases,
+not hosted, native-device, screen-reader or fluent Spanish acceptance.
+The unchanged-source journey passed again in 42.20 seconds (43.70 total), with
+safe screenshots under
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-m0yTti`.
+
+This supersedes the check/finalize exclusion in the earlier editor checkpoint
+below. History navigation followed in the subsequent checkpoint above; basis cards
+and contextual conflict presentation remain pending. Tasks 4/5 and US-03 remain
+partial. No release or deployment is enabled.
+
+## Amendment editor and frozen comparison — 2026-09-08
+
+Opening a correction reads its current record and exact frozen predecessor before
+enabling editing. Root, event number, revision, time zone and active pending-pointer
+context must agree. Failed or mismatched reads leave only explicit reload/back.
+QA loss destroys transient editor state; restoring QA reads saved state again.
+
+Retained lines expose quantity, unit, supplier reference, notes and (for exempt
+receipts) rationale/evidence. Lot/product/TLC/source identity, original link mode
+and exemption handling remain frozen summaries. Own assignments retain the absent
+received TLC and original proposal, independent of current header location.
+Reordering preserves `previousLineNo`; added lines carry null; removing a line
+does not remove it from the original comparison. Reference-document links and
+non-identity header facts remain editable. A new exemption review is required
+before eventual correction finalization, not inherited from the original.
+
+Explicit save sends the captured lifecycle/draft versions and stable operation
+key. Unknown delivery retries the same payload; acknowledged saves with failed
+current reads retry GET only. Saving does not alter the current receipt or its
+lot support. At this earlier checkpoint, correction checking and finalization
+were not connected; the subsequent checkpoint above supersedes that restriction.
+
+Comparison is alongside the editor at 1440 and uses keyboard-operable tabs at
+1024/390 without losing unsaved input. Existing Markiro branding/components/tokens
+and light/dark themes are preserved. The real local MFA/API/database journey
+proved committed-but-lost amendment save/replay, a single draft-version advance,
+stable reordered bindings, unchanged frozen original and subsequent cancellation.
+It passed twice: 42.08 seconds (43.79 total) and 44.43 seconds (46.16 total).
+Safe screenshots are under
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-spu6wo` and
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-PdcvKl`.
+The first run's EN light desktop editor and ES dark mobile comparison were
+personally inspected. These are Chromium viewport checks, not native mobile or
+screen-reader acceptance. No hosted/external acceptance or release is implied.
+
+## Lifecycle dialogs and recovery — 2026-09-08
+
+Current QA users can start a correction from the effective finalized receipt or
+void that receipt/saved pending draft. A required reason, captured live record,
+lifecycle version and (for draft void) draft version belong to one explicit
+operation key. The workspace mutation lock is held from opening the dialog until
+the operation's current-state read settles or the user explicitly abandons it.
+Duplicate confirmation, navigation and dismissal during requests are blocked.
+Unknown outcomes offer the exact same command; acknowledged operations with failed
+GET offer only a current-read retry. Rejected commands require a fresh read before
+another operation. QA/session loss clears the protected confirmation, and restored
+QA does not restore the reason or operation. No persistent cache or automatic retry
+is introduced.
+
+Void previews read the current server-derived basis for each distinct frozen lot
+and identify those losing their last support. A failed preview disables confirmation
+until an explicit successful retry. The preview is advisory; the server rechecks
+concurrency and dependencies. Cancelling an amendment preserves the effective
+receipt and basis. Voiding the effective receipt preserves lot identity, status,
+source lock and frozen history. Existing Markiro components/tokens, EN/ES copy and
+light/dark themes are reused without a new visual system.
+
+The connected UI suite covers eight cases, including duplicate-send locking,
+same-command retry, GET-only recovery, failed basis preview, QA loss/restoration,
+401/403 boundaries and rejected-command recovery. The real Chromium companion
+`tools/us-development/test/receiving-lifecycle-flow.mjs` extends the existing MFA
+fixture with committed-but-lost amend delivery, exact replay, draft cancellation,
+effective receipt void, failed current GET/retry, exact audit payloads and unchanged
+lot business records. EN/ES light/dark dialogs were exercised at 1440/1024/390.
+The complete journey passed 1/1 in 39.35 seconds (41.08 total). Safe screenshots
+are under `/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-20aCJw`;
+the ES dark mobile void dialog and EN light desktop correction layout from this
+successful run were personally inspected. No native mobile,
+screen reader, hosted environment or external service was tested.
+
+This dialog checkpoint preceded the editor increment above; Task 5 is still partial.
+Revision links and history filters followed in the checkpoint above. Remaining
+work includes lot basis cards and contextual conflict presentation.
+The current receipt's actions are hidden while an amendment is
+pending; the pending draft can be opened from the existing current registry and
+cancelled. US-03 remains partial and release locked.
 
 ## Available behavior
 
@@ -53,6 +226,24 @@ current-state reads.
 A version or operation-key conflict never overwrites input. Reloading the saved event requires explicit confirmation; failed or cancelled reload keeps the draft and conflict block. An operation conflict before an event ID is known directs the user back to the registry before creating another event. Unknown document creation results similarly retain the same metadata for explicit retry; duplicate metadata guidance directs the user to search for the existing record.
 
 Dirty navigation and page unload warn before discarding input. Language and theme changes preserve the mounted draft. Permission denial refreshes capabilities; session expiry or read-access revocation exits protected content under the existing account-isolation boundary. Unsaved input and pending operation keys are not retained across logout, session loss, page reload or browser closure. After an uncertain result and a new session, inspect the saved receiving registry before creating another event. Cross-session draft recovery is not implemented.
+
+## Lot receiving basis and return navigation — 2026-09-08
+
+The [lot detail](lot-browser.md#current-receiving-basis--2026-09-08) now reads current
+receiving support independently of lot identity/status. Its count describes
+supporting revisions, not receiving lines. Exact revision links fetch and validate
+the selected record's ID, root, number, revision and referenced lot/line bindings.
+If the revision became historical after the basis read, its exact frozen content
+is still shown; navigation never silently substitutes the current revision.
+
+Failed reads keep the lot visible with explicit retry. Receipt views entered from
+a lot offer Back to lot; a further receipt-to-lot visit retains the receipt return
+and original lot context, including failed lot lookups. Existing dirty-editor
+confirmation, pending-operation lock and access/session callbacks remain in use.
+There is no persistent navigation cache, polling, automatic mutation or new route.
+The real read-only browser companion verifies unchanged complete lot/receipt DTOs,
+zero business writes, failure recovery and EN/ES light/dark responsive layouts.
+Detailed verification and remaining Task 5 scope are recorded in the execution plan.
 
 ## Saved-draft data check — 2026-09-07
 

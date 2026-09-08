@@ -50,6 +50,11 @@ test("US receiving storage and contract regressions run unconditionally in the i
   for (const [pkg, file] of [
     ["admin", "us-receiving-command-acknowledgement.test.ts"],
     ["admin", "us-receiving-live-client.test.ts"],
+    ["admin", "us-receiving-lifecycle-client.test.ts"],
+    ["admin", "us-receiving-lifecycle.test.tsx"],
+    ["admin", "us-receiving-amendment-editor.test.tsx"],
+    ["admin", "us-receiving-amendment-finalization.test.tsx"],
+    ["admin", "us-receiving-history.test.tsx"],
     ["admin", "us-receiving-revision-acknowledgement.test.ts"],
     ["db", "us-receiving-basis-version-migration.e2e.test.ts"],
     ["api", "us-receiving-basis-version.e2e.test.ts"],

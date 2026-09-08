@@ -353,4 +353,5 @@ export async function exerciseUsReceivingFinalization({ page, expect, screenshot
   console.log(
     "Receiving finalization: mixed lots, exact audits/latches, lost-response replay, stale digest, frozen references, explicit lot/back including failure, operator denial; EN/ES light/dark 1440/1024/390 passed.",
   );
+  return saved;
 }

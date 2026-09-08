@@ -3,7 +3,12 @@ import { Button } from "@markiro/ui";
 import { useTranslation } from "react-i18next";
 import type { ReceivingLiveRecord, ReceivingFinalizeResult } from "@markiro/platform-contracts";
 import type { ReceivingDraftView } from "./live-record.js";
-import { UsClientError, UsReceivingIncompleteError, type UsBrowserClient } from "../client.js";
+import {
+  UsClientError,
+  UsReceivingIncompleteError,
+  UsReceivingLifecycleError,
+  type UsBrowserClient,
+} from "../client.js";
 import { ReceivingFinalizationDialog } from "./finalization-dialog.js";
 import "./readiness.css";
 
@@ -63,13 +68,7 @@ export function ReceivingReadinessPanel({
   const pending = current && check?.pending === true;
   const conflict = conflicted !== null && conflicted === record;
   const canCheck =
-    record !== null &&
-    record.status === "draft" &&
-    record.revision === 1 &&
-    !dirty &&
-    !disabled &&
-    !pending &&
-    !conflict;
+    record !== null && record.status === "draft" && !dirty && !disabled && !pending && !conflict;
   const result = check?.result ?? null;
   const errors = result?.issues.filter((issue) => issue.severity === "error").length ?? 0;
   const warnings = result?.issues.filter((issue) => issue.severity === "warning").length ?? 0;
@@ -103,7 +102,8 @@ export function ReceivingReadinessPanel({
       if (
         response.rootId.toLowerCase() !== record.lifecycle.rootId.toLowerCase() ||
         response.expectedLifecycleVersion !== record.lifecycle.lifecycleVersion ||
-        response.previousRevisionId !== null
+        response.previousRevisionId?.toLowerCase() !==
+          record.lifecycle.previousRevisionId?.toLowerCase()
       )
         throw new UsClientError("receiving_draft_conflict");
       setCheck({ context, pending: false, result: response, error: null });
@@ -124,7 +124,8 @@ export function ReceivingReadinessPanel({
         code === "receiving_draft_conflict" ||
         code === "receiving_already_finalized" ||
         code === "conflict" ||
-        code === "receiving_draft_not_found";
+        code === "receiving_draft_not_found" ||
+        error instanceof UsReceivingLifecycleError;
       if (stale) setConflicted(record);
       setCheck({ context, pending: false, result: null, error: stale ? "conflict" : "failed" });
     }
@@ -314,7 +315,8 @@ export function ReceivingReadinessPanel({
                 "receiving_operation_conflict",
                 "receiving_draft_not_found",
                 "conflict",
-              ].includes(error.code)
+              ].includes(error.code) ||
+              error instanceof UsReceivingLifecycleError
             )
               setConflicted(record);
           }}

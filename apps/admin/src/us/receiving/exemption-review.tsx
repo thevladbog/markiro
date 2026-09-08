@@ -36,6 +36,7 @@ export function ReceivingExemptionReview({
           const line = index + 1;
           if (!item.exemptSupplier || !required.has(line)) return [];
           const receipt = item.exemptReceipt;
+          const retained = "previousLineNo" in item && item.previousLineNo !== null;
           return [
             <li key={line} className="us-rec-review-line">
               <h4>
@@ -67,8 +68,14 @@ export function ReceivingExemptionReview({
                 </dd>
                 <dt>{t("receiving.receivedTlc")}</dt>
                 <dd>{item.tlc ?? t("receiving.absent")}</dd>
-                <dt>{t("receiving.proposedTlc")}</dt>
-                <dd>{receipt?.proposedTlc ?? t("receiving.absent")}</dd>
+                {!retained || receipt?.tlcHandling === "assign_if_missing" ? (
+                  <>
+                    <dt>
+                      {t(retained ? "receiving.previouslyAssignedTlc" : "receiving.proposedTlc")}
+                    </dt>
+                    <dd>{receipt?.proposedTlc ?? t("receiving.absent")}</dd>
+                  </>
+                ) : null}
                 <dt>{t("receiving.sourceKind")}</dt>
                 <dd>
                   {item.source

@@ -1,17 +1,26 @@
 import { z } from "zod";
 import {
   createReceivingDraftSchema,
-  finalizeReceivingSchema,
+  finalizeReceivingCommandSchema,
   receivingFinalizeResultSchema,
   receivingCreateResultSchema,
   receivingSaveResultSchema,
   receivingLiveRecordSchema,
   listReceivingLiveRecordsQuerySchema,
   receivingLiveRecordListSchema,
-  receivingReadinessIssueSchema,
+  type receivingReadinessIssueSchema,
   receivingReadinessQuerySchema,
   receivingRevisionReadinessSchema,
-  saveReceivingDraftSchema,
+  saveReceivingCommandSchema,
+  amendReceivingSchema,
+  voidReceivingSchema,
+  receivingOperationReceiptV2Schema,
+  receivingRevisionListQuerySchema,
+  receivingRevisionListSchema,
+  receivingBasisQuerySchema,
+  receivingBasisSchema,
+  receivingLifecycleErrorSchema,
+  type ReceivingLifecycleError,
   listReceivingDraftsQuerySchema,
   listReferenceDocumentsQuerySchema,
   referenceDocumentInputSchema,
@@ -50,9 +59,12 @@ import {
   matchesReceivingCreateAcknowledgement,
   matchesReceivingSaveAcknowledgement,
   matchesReceivingFinalizeAcknowledgement,
+  matchesReceivingAmendAcknowledgement,
+  matchesReceivingVoidAcknowledgement,
 } from "./receiving/command-acknowledgement.js";
 
 export type UsClientErrorCode =
+  | ReceivingLifecycleError["code"]
   | "invalid_input"
   | "invalid_response"
   | "session_required"
@@ -99,6 +111,14 @@ export class UsReceivingIncompleteError extends UsClientError {
   constructor(readonly issues: z.infer<typeof receivingReadinessIssueSchema>[]) {
     super("event_incomplete");
     this.name = "UsReceivingIncompleteError";
+  }
+}
+
+/** Strict bounded server context only; never a raw error body or cause. */
+export class UsReceivingLifecycleError extends UsClientError {
+  constructor(readonly detail: ReceivingLifecycleError) {
+    super(detail.code);
+    this.name = "UsReceivingLifecycleError";
   }
 }
 
@@ -182,6 +202,23 @@ function masterDataQuery(query: ListUsLocationsQuery): string {
   return params.toString();
 }
 
+/** Clone before the first await. A later live GET cannot replace command context. */
+function captureReceivingContext(
+  eventId: string,
+  input: { expectedLifecycleVersion: number; expectedDraftVersion?: number | null },
+  captured: unknown,
+) {
+  const record = checked(receivingLiveRecordSchema, captured, "invalid_input");
+  if (
+    record.id.toLowerCase() !== eventId ||
+    record.lifecycle.lifecycleVersion !== input.expectedLifecycleVersion ||
+    (input.expectedDraftVersion !== undefined &&
+      input.expectedDraftVersion !== (record.status === "draft" ? record.draftVersion : null))
+  )
+    throw new UsClientError("invalid_input");
+  return record;
+}
+
 /** Only fixed same-origin US routes; no RU client imports, retries or persistence.
  * The US browser entry must separately attest edition and configure its proxy.
  * Callers must keep enrollment material out of query caches and persistent stores.
@@ -217,14 +254,19 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
       if (!response.ok) {
         if (path === receivingPath || path.startsWith(`${receivingPath}/`)) {
           if (response.status === 409) {
-            const incomplete = z
-              .object({
-                code: z.literal("event_incomplete"),
-                issues: z.array(receivingReadinessIssueSchema).max(5000),
-              })
-              .strict()
-              .safeParse(value);
-            if (incomplete.success) throw new UsReceivingIncompleteError(incomplete.data.issues);
+            const lifecycle = receivingLifecycleErrorSchema.safeParse(value);
+            if (lifecycle.success) {
+              if (lifecycle.data.code === "event_incomplete")
+                throw new UsReceivingIncompleteError(lifecycle.data.issues);
+              if (
+                lifecycle.data.code === "receiving_lifecycle_conflict" ||
+                lifecycle.data.code === "receiving_pending_amendment" ||
+                lifecycle.data.code === "lot_identity_locked" ||
+                lifecycle.data.code === "receiving_downstream_dependencies"
+              )
+                throw new UsReceivingLifecycleError(lifecycle.data);
+              throw new UsClientError(lifecycle.data.code);
+            }
           }
           const safe = (
             response.status === 409
@@ -317,16 +359,80 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
     }
   }
   return {
-    async finalizeReceiving(id: unknown, input: unknown) {
+    async finalizeReceiving(id: unknown, input: unknown, captured?: unknown) {
       const eventId = checked(platformUuidSchema, id, "invalid_input");
-      const body = checked(finalizeReceivingSchema, input, "invalid_input");
+      const body = checked(finalizeReceivingCommandSchema, input, "invalid_input");
+      const before =
+        "commandVersion" in body ? captureReceivingContext(eventId, body, captured) : undefined;
       const result = await request(
         `${receivingPath}/${eventId}/finalize`,
         receivingFinalizeResultSchema,
         "POST",
         body,
       );
-      if (!(await matchesReceivingFinalizeAcknowledgement(result, eventId, body)))
+      if (!(await matchesReceivingFinalizeAcknowledgement(result, eventId, body, before)))
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async amendReceiving(id: unknown, input: unknown, captured: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const body = checked(amendReceivingSchema, input, "invalid_input");
+      const before = captureReceivingContext(eventId, body, captured);
+      const result = await request(
+        `${receivingPath}/${eventId}/amend`,
+        receivingOperationReceiptV2Schema,
+        "POST",
+        body,
+      );
+      if (!(await matchesReceivingAmendAcknowledgement(result, eventId, body, before)))
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async voidReceiving(id: unknown, input: unknown, captured: unknown) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const body = checked(voidReceivingSchema, input, "invalid_input");
+      const before = captureReceivingContext(eventId, body, captured);
+      const result = await request(
+        `${receivingPath}/${eventId}/void`,
+        receivingOperationReceiptV2Schema,
+        "POST",
+        body,
+      );
+      if (!(await matchesReceivingVoidAcknowledgement(result, eventId, body, before)))
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async listReceivingRevisions(id: unknown, input: unknown = {}) {
+      const eventId = checked(platformUuidSchema, id, "invalid_input");
+      const query = checked(receivingRevisionListQuerySchema, input, "invalid_input");
+      const params = new URLSearchParams({
+        limit: String(query.limit),
+        offset: String(query.offset),
+      });
+      const result = await request(
+        `${receivingPath}/${eventId}/revisions?${params}`,
+        receivingRevisionListSchema,
+      );
+      if (result.limit !== query.limit || result.offset !== query.offset)
+        throw new UsClientError("invalid_response");
+      return result;
+    },
+    async getLotReceivingBasis(id: unknown, input: unknown = {}) {
+      const lotId = checked(platformUuidSchema, id, "invalid_input");
+      const query = checked(receivingBasisQuerySchema, input, "invalid_input");
+      const params = new URLSearchParams({
+        limit: String(query.limit),
+        offset: String(query.offset),
+      });
+      const result = await request(
+        `${lotsPath}/${lotId}/receiving-basis?${params}`,
+        receivingBasisSchema,
+      );
+      if (
+        result.lotId.toLowerCase() !== lotId ||
+        result.limit !== query.limit ||
+        result.offset !== query.offset
+      )
         throw new UsClientError("invalid_response");
       return result;
     },
@@ -384,16 +490,18 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
         throw new UsClientError("invalid_response");
       return result;
     },
-    async saveReceivingDraft(id: unknown, input: unknown) {
+    async saveReceivingDraft(id: unknown, input: unknown, captured?: unknown) {
       const eventId = checked(platformUuidSchema, id, "invalid_input");
-      const body = checked(saveReceivingDraftSchema, input, "invalid_input");
+      const body = checked(saveReceivingCommandSchema, input, "invalid_input");
+      const before =
+        "commandVersion" in body ? captureReceivingContext(eventId, body, captured) : undefined;
       const result = await request(
         `${receivingPath}/${eventId}`,
         receivingSaveResultSchema,
         "PUT",
         body,
       );
-      if (!(await matchesReceivingSaveAcknowledgement(result, eventId, body)))
+      if (!(await matchesReceivingSaveAcknowledgement(result, eventId, body, before)))
         throw new UsClientError("invalid_response");
       return result;
     },

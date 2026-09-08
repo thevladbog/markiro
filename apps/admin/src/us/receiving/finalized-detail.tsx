@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Button, StatusChip } from "@markiro/ui";
 import type { ReceivingFinalizationSnapshot } from "@markiro/platform-contracts";
 import { useTranslation } from "react-i18next";
@@ -17,21 +17,27 @@ export function ReceivingFinalizedDetail({
   record,
   onClose,
   onOpenLot,
+  actions,
+  disabled = false,
+  backLabel,
 }: {
   record: ReceivingFrozenView;
   onClose: () => void;
   onOpenLot: (id: string, record: ReceivingFrozenView) => void;
+  actions?: ReactNode;
+  disabled?: boolean;
+  backLabel?: string;
 }) {
   const { t, i18n } = useTranslation();
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     heading.current?.focus();
-  }, [record.id]);
+  }, [record.id, record.status]);
   const snapshot = record.content.snapshot;
   return (
     <div className="us-rec-page us-rec-frozen">
-      <Button type="button" variant="secondary" onClick={onClose}>
-        {t("receiving.back")}
+      <Button type="button" variant="secondary" disabled={disabled} onClick={onClose}>
+        {backLabel ?? t("receiving.back")}
       </Button>
       <header className="us-md-page-header">
         <div>
@@ -46,6 +52,7 @@ export function ReceivingFinalizedDetail({
         />
       </header>
       <ReceivingLifecycleNotice record={record} />
+      {actions}
       <section className="us-rec-section">
         <h2>{t("receiving.header")}</h2>
         <dl>
@@ -189,6 +196,7 @@ export function ReceivingFinalizedDetail({
                   type="button"
                   variant="secondary"
                   onClick={() => onOpenLot(item.lotId, record)}
+                  disabled={disabled}
                 >
                   {t("receiving.openLot")}
                 </Button>

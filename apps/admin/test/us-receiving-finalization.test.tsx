@@ -373,7 +373,12 @@ describe("ordinary receiving confirmation", () => {
     expect(screen.getAllByText("Frozen apples")).toHaveLength(3);
     await user.click(screen.getAllByRole("button", { name: "Open current lot" })[0]!);
     expect(onOpenLot).toHaveBeenCalledWith(lotId, liveFixture(finalized));
-    expect(screen.queryByRole("button", { name: /Amend|Void|Export/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Correct receipt" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    expect(screen.getByRole("button", { name: "Void receipt" })).toHaveProperty("disabled", false);
+    expect(screen.queryByRole("button", { name: /Export/ })).toBeNull();
   });
   it("retries an unknown result with exactly the same key and body", async () => {
     let attempts = 0;

@@ -75,7 +75,46 @@
 .us-lot-picker .us-md-pager {
   margin: 0;
 }
+.us-lot-basis-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.us-lot-basis-header h2 {
+  margin: 0;
+  font: var(--text-h2);
+}
+.us-lot-basis-list {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 0;
+}
+.us-lot-basis-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.us-lot-basis-list span {
+  font: var(--text-body-sm);
+  color: var(--fg-2);
+}
+.us-lot-basis .mk-btn {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
 @media (max-width: 700px) {
+  .us-lot-basis {
+    --control-md: 44px;
+    --control-sm: 44px;
+  }
   .us-lot-facts {
     grid-template-columns: minmax(0, 1fr);
     gap: 18px;

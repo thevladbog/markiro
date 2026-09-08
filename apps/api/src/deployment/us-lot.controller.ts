@@ -21,6 +21,8 @@ import {
   postLotStatusSchema,
   traceabilityLotListSchema,
   traceabilityLotSchema,
+  receivingBasisQuerySchema,
+  receivingBasisSchema,
 } from "@markiro/platform-contracts";
 import { z } from "zod";
 import { ApiZodBody, ApiZodQuery, ApiZodResponse } from "../lib/openapi";
@@ -91,6 +93,22 @@ export class UsLotController {
     const principal = this.principal(request);
     return this.runtime.databaseOperation(() =>
       this.runtime.lots.listLots(principal.tenantId, principal.userId, query),
+    );
+  }
+
+  @Get(":id/receiving-basis")
+  @ApiOperation({
+    summary: "Read current Receiving support for a tenant-scoped lot",
+    description:
+      "Requires current US read capability. Returns bounded supporting current revisions, total support count and basis version from one consistent snapshot. Missing support does not delete the lot or change its status/source lock. Read-only; no audit or command receipt is written.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodQuery(receivingBasisQuerySchema)
+  @ApiZodResponse({ status: 200, schema: receivingBasisSchema })
+  receivingBasis(@Req() request: UsRequest, @Param("id") id: unknown, @Query() query: unknown) {
+    const principal = this.principal(request);
+    return this.runtime.databaseOperation(() =>
+      this.runtime.receiving.getLotReceivingBasis(principal.tenantId, principal.userId, id, query),
     );
   }
 

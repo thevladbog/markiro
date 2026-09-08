@@ -417,7 +417,7 @@ describe("revision save and finalize substitution denial", () => {
     await expect(matchesFinalize(value, id, input, before)).resolves.toBe(false);
   });
 
-  it("leaves active public client input gates original-only until coordinated route/UI activation", async () => {
+  it("rejects explicit public client inputs without captured context before sending", async () => {
     const send = vi.fn<typeof fetch>();
     const client = createUsBrowserClient(send);
     await expect(client.saveReceivingDraft(amendmentId, saveInput)).rejects.toMatchObject({

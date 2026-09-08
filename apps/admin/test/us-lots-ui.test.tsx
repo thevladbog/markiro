@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "@markiro/ui";
 import { StrictMode } from "react";
@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createUsBrowserClient } from "../src/us/client.js";
 import { masterDataCopy } from "../src/us/master-data/copy.js";
 import { MasterDataWorkspace } from "../src/us/master-data/workspace.js";
+import { amendmentFinalized } from "./support/us-receiving-revision-command-fixture.js";
 
 const product = {
   id: "b0000000-0000-4000-8000-000000000001",
@@ -82,6 +83,17 @@ async function setup(
     if (String(url).startsWith(`${path}?`))
       return Response.json({ items: [lot], limit: 50, offset: 0 });
     if (url === `${path}/${lot.id}`) return Response.json(lot);
+    if (String(url).startsWith(`${path}/${lot.id}/receiving-basis?`))
+      return Response.json({
+        lotId: lot.id,
+        basisVersion: 1,
+        state: "missing",
+        supportCount: 0,
+        items: [],
+        limit: 50,
+        offset: 0,
+        hasMore: false,
+      });
     if (url === path) return Response.json({ ...lot, ...JSON.parse(String(init?.body)) });
     if (String(url).startsWith("/api/us/traceability/catalog/products?"))
       return Response.json({ items: [product], limit: 50, offset: 0 });
@@ -136,6 +148,282 @@ async function openLot(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: lot.tlc }));
   await screen.findByRole("heading", { name: lot.tlc });
 }
+
+const basisPath = `${path}/${lot.id}/receiving-basis`;
+const receiptPath = `/api/us/traceability/receiving/${amendmentFinalized.id}`;
+const supportingReceipt = {
+  ...amendmentFinalized,
+  content:
+    amendmentFinalized.content.kind === "finalized"
+      ? {
+          ...amendmentFinalized.content,
+          snapshot: {
+            ...amendmentFinalized.content.snapshot,
+            items: amendmentFinalized.content.snapshot.items.map((item) => ({
+              ...item,
+              lotId: lot.id,
+            })),
+          },
+        }
+      : null,
+};
+const support = {
+  rootId: amendmentFinalized.lifecycle.rootId,
+  eventId: amendmentFinalized.id,
+  eventNumber: "REC-26-0001",
+  revision: 3,
+  lineNos: [1, 2, 3],
+};
+const presentBasis = {
+  lotId: lot.id,
+  basisVersion: 6,
+  state: "present",
+  supportCount: 1,
+  items: [support],
+  limit: 50,
+  offset: 0,
+  hasMore: false,
+};
+
+describe("lot current receiving basis", () => {
+  it("preserves both return contexts when a receipt's lot lookup fails", async () => {
+    let lotUnavailable = false;
+    const { user } = await setup({
+      readOnly: true,
+      handle: (url) => {
+        if (url.startsWith(basisPath)) return Response.json(presentBasis);
+        if (url === receiptPath) return Response.json(supportingReceipt);
+        if (url === `${path}/${lot.id}` && lotUnavailable)
+          return Response.json({}, { status: 503 });
+      },
+    });
+    await openLot(user);
+    await user.click(await screen.findByRole("button", { name: "REC-26-0001 · Revision 3" }));
+    await screen.findByRole("heading", { name: "REC-26-0001" });
+    lotUnavailable = true;
+    const lotLink = screen.getAllByRole("button", { name: "Open current lot" })[0];
+    if (!lotLink) throw new Error("Expected a frozen line lot link");
+    await user.click(lotLink);
+    await screen.findByRole("button", { name: "Try again" });
+    await user.click(screen.getByRole("button", { name: "Back to receiving" }));
+    await screen.findByRole("heading", { name: "REC-26-0001" });
+    lotUnavailable = false;
+    await user.click(screen.getByRole("button", { name: "Back to lot" }));
+    await screen.findByRole("heading", { name: lot.tlc });
+    await screen.findByText("Supporting revisions: 1");
+  });
+
+  it.each([401, 403])(
+    "routes basis access failure %s through the workspace auth boundary",
+    async (status) => {
+      let revoked = false;
+      const { user, onSessionLost } = await setup({
+        handle: (url) => {
+          if (url.startsWith(basisPath)) {
+            revoked = true;
+            return Response.json({}, { status });
+          }
+          if (revoked && url.endsWith("/access")) return Response.json({ capabilities: [] });
+        },
+      });
+      await openLot(user);
+      if (status === 401) await waitFor(() => expect(onSessionLost).toHaveBeenCalledTimes(1));
+      else await waitFor(() => expect(screen.queryByRole("heading", { name: lot.tlc })).toBeNull());
+      expect(screen.queryByText("No current receiving basis")).toBeNull();
+    },
+  );
+
+  it("ignores a delayed basis authorization failure after leaving the lot", async () => {
+    let resolve!: (value: Response) => void;
+    const deferred = new Promise<Response>((done) => {
+      resolve = done;
+    });
+    const { user, onSessionLost } = await setup({
+      handle: (url) => (url.startsWith(basisPath) ? deferred : undefined),
+    });
+    await openLot(user);
+    await screen.findByText("Loading receiving basis…");
+    await user.click(screen.getByRole("button", { name: /Back to lots/ }));
+    await screen.findByRole("button", { name: lot.tlc });
+    await act(async () => {
+      resolve(Response.json({}, { status: 401 }));
+    });
+    expect(onSessionLost).not.toHaveBeenCalled();
+    expect(screen.queryByRole("region", { name: "Current receiving basis" })).toBeNull();
+  });
+
+  it("holds the existing workspace lock while an exact revision is opening", async () => {
+    let resolve!: (value: Response) => void;
+    const deferred = new Promise<Response>((done) => {
+      resolve = done;
+    });
+    const { user, send } = await setup({
+      readOnly: true,
+      handle: (url) => {
+        if (url.startsWith(basisPath)) return Response.json(presentBasis);
+        if (url === receiptPath) return deferred;
+      },
+    });
+    await openLot(user);
+    await user.click(await screen.findByRole("button", { name: "REC-26-0001 · Revision 3" }));
+    expect((screen.getByRole("button", { name: "Lots" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Reload lot" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    await act(async () => {
+      resolve(Response.json({}, { status: 503 }));
+    });
+    await screen.findByText(
+      "This receiving revision could not be opened. Retry the revision or refresh its current basis.",
+    );
+    expect((screen.getByRole("button", { name: "Lots" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    expect(send.mock.calls.filter(([url]) => url === receiptPath)).toHaveLength(1);
+  });
+
+  it("refreshes receiving basis when the lot is reloaded even if its revision did not change", async () => {
+    let supported = true;
+    const { user } = await setup({
+      handle: (url) =>
+        url.startsWith(basisPath) && supported ? Response.json(presentBasis) : undefined,
+    });
+    await openLot(user);
+    await screen.findByText("Supporting revisions: 1");
+    supported = false;
+    await user.click(screen.getByRole("button", { name: "Reload lot" }));
+    await screen.findByText("No current receiving basis");
+    expect(screen.getByText("Active")).toBeTruthy();
+    expect(screen.getByText("Imported")).toBeTruthy();
+  });
+
+  it("keeps missing support separate from active lot status and imported assignment", async () => {
+    const { user, send } = await setup();
+    await openLot(user);
+    const card = await screen.findByRole("region", { name: "Current receiving basis" });
+    expect(await within(card).findByText("No current receiving basis")).toBeTruthy();
+    expect(screen.getByText("Active")).toBeTruthy();
+    expect(screen.getByText("Imported")).toBeTruthy();
+    expect(send.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+  });
+
+  it("counts supporting revisions, not lines, and opens the exact revision with a return to the lot", async () => {
+    const { user, send } = await setup({
+      readOnly: true,
+      handle: (url) => {
+        if (url.startsWith(basisPath)) return Response.json(presentBasis);
+        if (url === receiptPath) return Response.json(supportingReceipt);
+      },
+    });
+    await openLot(user);
+    const card = await screen.findByRole("region", { name: "Current receiving basis" });
+    expect(await within(card).findByText("Supporting revisions: 1")).toBeTruthy();
+    await user.click(within(card).getByRole("button", { name: "REC-26-0001 · Revision 3" }));
+    await screen.findByRole("heading", { name: "REC-26-0001" });
+    await user.click(screen.getByRole("button", { name: "Back to lot" }));
+    await screen.findByRole("heading", { name: lot.tlc });
+    expect(await screen.findByText("Supporting revisions: 1")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Back to lots/ }));
+    await screen.findByRole("button", { name: lot.tlc });
+    expect(send.mock.calls.filter(([url]) => url === receiptPath)).toHaveLength(1);
+    expect(send.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+  });
+
+  it("shows loading then unavailable, never missing, and retries the failed basis read", async () => {
+    let resolve!: (value: Response) => void;
+    let failed = true;
+    const deferred = new Promise<Response>((done) => {
+      resolve = done;
+    });
+    const { user } = await setup({
+      handle: (url) =>
+        url.startsWith(basisPath) ? (failed ? deferred : Response.json(presentBasis)) : undefined,
+    });
+    await openLot(user);
+    expect(await screen.findByText("Loading receiving basis…")).toBeTruthy();
+    expect(screen.queryByText("No current receiving basis")).toBeNull();
+    await act(async () => {
+      resolve(Response.json({}, { status: 503 }));
+    });
+    expect(await screen.findByText("The receiving basis could not be loaded.")).toBeTruthy();
+    expect(screen.queryByText("No current receiving basis")).toBeNull();
+    failed = false;
+    await user.click(screen.getByRole("button", { name: "Refresh receiving basis" }));
+    expect(await screen.findByText("Supporting revisions: 1")).toBeTruthy();
+  });
+
+  it("keeps present state on an empty later page after support changes", async () => {
+    const items = Array.from({ length: 50 }, (_, i) => {
+      const id = `f0000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`;
+      return { ...support, rootId: id, eventId: id, revision: 1 };
+    });
+    const { user, send } = await setup({
+      handle: (url) => {
+        if (!url.startsWith(basisPath)) return;
+        const later = new URL(url, "http://local").searchParams.get("offset") === "50";
+        return Response.json(
+          later
+            ? { ...presentBasis, offset: 50, items: [] }
+            : { ...presentBasis, supportCount: 51, items, hasMore: true },
+        );
+      },
+    });
+    await openLot(user);
+    const card = await screen.findByRole("region", { name: "Current receiving basis" });
+    await within(card).findByText("Supporting revisions: 51");
+    await user.click(within(card).getByRole("button", { name: "Next page" }));
+    expect(await within(card).findByText("Supporting revisions: 1")).toBeTruthy();
+    expect(within(card).queryByText("No current receiving basis")).toBeNull();
+    await user.click(within(card).getByRole("button", { name: "Previous page" }));
+    await within(card).findByText("Supporting revisions: 51");
+    expect(send.mock.calls.some(([url]) => String(url).includes("offset=50"))).toBe(true);
+  });
+
+  it.each(["unavailable", "wrong root", "wrong lot"])(
+    "keeps the lot on %s receipt lookup and permits an exact retry",
+    async (fault) => {
+      let failed = true;
+      const { user } = await setup({
+        readOnly: true,
+        handle: (url) => {
+          if (url.startsWith(basisPath)) return Response.json(presentBasis);
+          if (url === receiptPath) {
+            if (!failed) return Response.json(supportingReceipt);
+            if (fault === "unavailable") return Response.json({}, { status: 503 });
+            if (fault === "wrong lot") return Response.json(amendmentFinalized);
+            return Response.json({
+              ...supportingReceipt,
+              lifecycle: {
+                ...supportingReceipt.lifecycle,
+                rootId: "b0000000-0000-4000-8000-000000000099",
+              },
+            });
+          }
+        },
+      });
+      await openLot(user);
+      const button = await screen.findByRole("button", { name: "REC-26-0001 · Revision 3" });
+      await user.click(button);
+      expect(
+        await screen.findByText(
+          "This receiving revision could not be opened. Retry the revision or refresh its current basis.",
+        ),
+      ).toBeTruthy();
+      expect(screen.getByRole("heading", { name: lot.tlc })).toBeTruthy();
+      failed = false;
+      await user.click(button);
+      await screen.findByRole("heading", { name: "REC-26-0001" });
+    },
+  );
+
+  it("renders the independent missing basis in Spanish", async () => {
+    const { user } = await setup({ locale: "es-US" });
+    await openLot(user);
+    const card = await screen.findByRole("region", { name: "Base de recepción vigente" });
+    expect(await within(card).findByText("Sin base de recepción vigente")).toBeTruthy();
+    expect(screen.getByText("Activo")).toBeTruthy();
+  });
+});
 
 describe("connected US lots", () => {
   it("loads the product label for a newly created lot outside the previous list page", async () => {

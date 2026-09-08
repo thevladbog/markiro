@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Modal } from "@markiro/ui";
 import type {
-  FinalizeReceivingInput,
+  FinalizeReceivingCommandInput,
   ReceivingFinalizeResult,
   ReceivingRevisionReadiness,
   ReferenceDocument,
@@ -58,7 +58,7 @@ export function ReceivingFinalizationDialog({
   const [labelFailure, setLabelFailure] = useState(false);
   const busy = useRef(false);
   const alive = useRef(true);
-  const command = useRef<FinalizeReceivingInput | null>(null);
+  const command = useRef<FinalizeReceivingCommandInput | null>(null);
   const labelRequest = useRef<{
     key: string;
     promise: Promise<ReceivingExemptionLabels>;
@@ -207,11 +207,24 @@ export function ReceivingFinalizationDialog({
       operationKey: crypto.randomUUID(),
       expectedDraftVersion: record.draftVersion,
       expectedInputDigest: readiness.inputDigest,
-      ...(requiredLines.length ? { reviewedExemptLines: reviewedLines } : {}),
+      ...(record.lifecycle.previousRevisionId !== null
+        ? {
+            commandVersion: 2,
+            expectedLifecycleVersion: readiness.expectedLifecycleVersion,
+            previousRevisionId: readiness.previousRevisionId,
+            reviewedExemptLines: [...reviewedLines],
+          }
+        : requiredLines.length
+          ? { reviewedExemptLines: [...reviewedLines] }
+          : {}),
     };
     const release = beginMutation();
     try {
-      const result = await client.finalizeReceiving(record.id, command.current);
+      const result = await client.finalizeReceiving(
+        record.id,
+        command.current,
+        "commandVersion" in command.current ? record : undefined,
+      );
       // The parent owns recovery even if QA changes while this dialog is settling.
       await onAcknowledged(result);
     } catch (error) {
@@ -240,8 +253,13 @@ export function ReceivingFinalizationDialog({
     }
   }
   const totals = receivingQuantityTotals(record.content.draft.items);
+  const retained = record.content.draft.items.filter(
+    (item) => "previousLineNo" in item && item.previousLineNo !== null,
+  ).length;
   const created = record.content.draft.items.filter(
-    (item) => item.lotLinkMode === "create_on_finalize",
+    (item) =>
+      item.lotLinkMode === "create_on_finalize" &&
+      !("previousLineNo" in item && item.previousLineNo !== null),
   ).length;
   return (
     <Modal
@@ -299,12 +317,21 @@ export function ReceivingFinalizationDialog({
           {record.content.draft.dateReceived} · {record.timeZone}
         </p>
         <p>
-          {t("receiving.confirmCounts", {
-            lines: record.content.draft.items.length,
-            created,
-            linked: record.content.draft.items.length - created,
-          })}
+          {t(
+            record.lifecycle.previousRevisionId !== null
+              ? "receiving.confirmAmendmentCounts"
+              : "receiving.confirmCounts",
+            {
+              lines: record.content.draft.items.length,
+              created,
+              retained,
+              linked: record.content.draft.items.length - created - retained,
+            },
+          )}
         </p>
+        {record.lifecycle.previousRevisionId !== null ? (
+          <p className="us-md-notice">{t("receiving.confirmAmendmentScope")}</p>
+        ) : null}
         <section>
           <h3>{t("receiving.totals")}</h3>
           <ul>

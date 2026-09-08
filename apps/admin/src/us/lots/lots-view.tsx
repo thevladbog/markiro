@@ -8,6 +8,8 @@ import { Pager, type MasterDataViewProps } from "../master-data/workspace-shared
 import { LotEditor, type LotEditorMode } from "./lot-editor.js";
 import { allowedLotStatuses, lotSourceLabel } from "./shared.js";
 import { loadLotReferenceLabels } from "./reference-labels.js";
+import { LotReceivingBasisSection } from "./receiving-basis.js";
+import type { ReceivingFrozenView } from "../receiving/live-record.js";
 import "./lots.css";
 
 type Props = MasterDataViewProps & {
@@ -16,6 +18,8 @@ type Props = MasterDataViewProps & {
   timeZone: string;
   entryLotId?: string;
   onEntryBack?: () => void;
+  entryBackLabel?: string;
+  onOpenReceiving: (lotId: string, record: ReceivingFrozenView) => void;
 };
 
 export function LotsView(props: Props) {
@@ -170,7 +174,7 @@ export function LotsView(props: Props) {
     return (
       <div className="us-lot-page">
         <Button type="button" variant="secondary" disabled={mutationPending} onClick={onEntryBack}>
-          {t("receiving.back")}
+          {props.entryBackLabel ?? t("receiving.back")}
         </Button>
         <p role={openFailure ? "alert" : "status"}>
           {t(openFailure ? "receiving.openError" : "md.stale")}
@@ -235,7 +239,7 @@ export function LotsView(props: Props) {
               focusNeeded.current = true;
             }}
           >
-            ← {t(onEntryBack ? "receiving.back" : "lots.back")}
+            ← {props.entryBackLabel ?? t(onEntryBack ? "receiving.back" : "lots.back")}
           </Button>
           <Button
             variant="secondary"
@@ -334,6 +338,13 @@ export function LotsView(props: Props) {
           ) : null}
         </div>
         <p className="us-lot-note">{t("lots.unavailableFeatures")}</p>
+        <LotReceivingBasisSection
+          key={lot.id}
+          {...props}
+          lot={lot}
+          mutationPending={mutationPending || opening}
+          onOpenReceiving={(record) => props.onOpenReceiving(lot.id, record)}
+        />
       </div>
     );
   }

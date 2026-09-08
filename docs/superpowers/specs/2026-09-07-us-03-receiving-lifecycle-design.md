@@ -20,11 +20,16 @@ available internally. Internal original-draft create/save writers now produce v2
 acknowledgements and replay both stored formats exactly. Internal finalization
 also accepts supported original input with v4 readiness, freezes v3 and preserves
 exact historical v1/v2 replay. The original create/save/finalize HTTP writers and
-consumers are switched together; explicit amendment commands, lifecycle controls
-and complete history/basis navigation remain pending.
-Client acknowledgement validators for explicit revision commands are prepared
+consumers are switched together. Explicit amendment commands, QA lifecycle controls,
+retained-line editing/comparison, saved checks/finalization and exact revision
+history navigation and independent lot-basis cards are connected in the local UI.
+Basis loading/error/missing states, bounded pages and exact-revision navigation
+preserve lot status and return context. Contextual conflict presentation and
+remaining Task 5 acceptance remain pending.
+Client acknowledgement validators for explicit revision commands are connected
 with captured pre-command context, including amend target/result distinction,
-retained bindings and immutable void content. This is not route/UI activation.
+retained bindings and immutable void content. These local routes/UI do not enable
+publication or deployment.
 Execution evidence is described in the
 [implementation plan](../plans/2026-09-07-us-03-receiving-lifecycle.md).
 

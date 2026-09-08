@@ -224,3 +224,53 @@ test("US proxy never forwards RU routes and preserves configured API Host", asyn
     assert.equal(match[1].rewrite?.(input) ?? input, output);
   }
 });
+
+test("US lifecycle proxy admits only exact UUID commands and bounded unique history/basis pages", async () => {
+  const { createUsAdminConfig } = await import("../../../apps/admin/vite.us.config.ts");
+  const routes = Object.entries(
+    createUsAdminConfig({ VITE_DEPLOYMENT_EDITION: "US" }, "test").server.proxy,
+  );
+  const id = "a0000000-0000-4000-8000-000000000001";
+  for (const [resource, action] of [
+    ["receiving", "amend"],
+    ["receiving", "void"],
+    ["receiving", "revisions"],
+    ["lots", "receiving-basis"],
+  ]) {
+    const path = `/api/us/traceability/${resource}/${id}/${action}`;
+    const read = action === "revisions" || action === "receiving-basis";
+    const allowed = [
+      "",
+      ...(read ? ["?limit=1", "?offset=100000", "?limit=100&offset=0", "?offset=2&limit=1"] : []),
+    ];
+    for (const suffix of allowed) {
+      const match = routes.find(([pattern]) => new RegExp(pattern).test(path + suffix));
+      assert.ok(match, path + suffix);
+      assert.equal(match[1].rewrite(path + suffix), (path + suffix).replace("/api/us", ""));
+      assert.equal(match[1].changeOrigin, true);
+    }
+    for (const suffix of [
+      "/",
+      "/extra",
+      "?",
+      "?tenantId=x",
+      "?limit=01",
+      "?limit=101",
+      "?offset=100001",
+      "?offset=-1",
+      "?limit=1&limit=2",
+      "?offset=0&offset=1",
+      "?limit=1&offset=0&limit=2",
+      ...(read ? [] : ["?limit=1"]),
+    ])
+      assert.equal(
+        routes.some(([pattern]) => new RegExp(pattern).test(path + suffix)),
+        false,
+        path + suffix,
+      );
+    assert.equal(
+      routes.some(([pattern]) => new RegExp(pattern).test(path.replace(id, "not-a-uuid"))),
+      false,
+    );
+  }
+});

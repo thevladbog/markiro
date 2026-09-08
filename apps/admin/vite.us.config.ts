@@ -19,13 +19,24 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
       .map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`)
       .join("") +
     `(\\?${receivingQueryField}(?:&${receivingQueryField}){0,4})?$`;
+  const uuid = "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}";
+  const pageField = "(?:limit=(?:[1-9]|[1-9][0-9]|100)|offset=(?:0|[1-9][0-9]{0,4}|100000))";
+  const lifecyclePagePath =
+    `^/api/us/traceability/(?:receiving/${uuid}/revisions|lots/${uuid}/receiving-basis)` +
+    ["limit", "offset"].map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`).join("") +
+    `(\\?${pageField}(?:&${pageField})?)?$`;
   const proxy = {
+    [lifecyclePagePath]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
     [receivingListPath]: {
       target: "http://localhost:3100",
       changeOrigin: true,
       rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
     },
-    "^/api/us/traceability/receiving/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}/finalize$":
+    "^/api/us/traceability/receiving/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}/(finalize|amend|void)$":
       {
         target: "http://localhost:3100",
         changeOrigin: true,

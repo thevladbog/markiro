@@ -1999,7 +1999,7 @@ Run `pnpm --filter @markiro/admin exec vitest run test/us-receiving-lifecycle-cl
 and capture RED before adding behavior. Also test wrong event/root/reason/version
 acknowledgements; they cannot clear unsaved input or retained retry identity.
 
-- [ ] **Implement transport validation and exact proxy paths.**
+- [x] **Implement transport validation and exact proxy paths.**
 
 Allow only UUID `/amend` and `/void` without queries; UUID `/revisions` and lot
 UUID `/receiving-basis` with bounded unique limit/offset; Receiving list with
@@ -2014,7 +2014,7 @@ and null-versus-absent exemption compatibility; do not cast v3 into an old type.
 Expose structured lifecycle/binding/dependency errors with their context instead
 of reducing them to a generic network failure.
 
-- [ ] **Connect lifecycle commands with explicit current-state recovery.**
+- [x] **Connect lifecycle commands with explicit current-state recovery.**
 
 Capture command body/key/root/draft version before sending. Distinguish (a) unknown
 mutation outcome, which offers an exact command retry, from (b) acknowledged
@@ -2206,6 +2206,112 @@ internal read/write/compatibility checkpoints above and the coordinated original
 workflow transport/recovery increment. Remaining lifecycle transport and Task 5
 controls plus cross-task final acceptance remain pending.
 
+## Server lifecycle HTTP checkpoint — 2026-09-08
+
+The owner requested a push followed by continued development. The preceding
+original-workflow/recovery and acknowledgement preparation was committed as
+`1803d3ec3863d773a93fe9d572bf64b81d6b6e41` and pushed normally to `codex/us-mvp`.
+GitHub check-only run [34211773006](https://github.com/thevladbog/markiro/actions/runs/34211773006)
+completed successfully for that exact SHA. This checkpoint's new HTTP work remains
+local and is not included in that commit or remote CI result.
+
+The isolated API now exposes amend (201 including replay), void (200), bounded
+revision history and current lot receiving basis. Existing PUT/finalize accept
+strict original/revision unions. The save dispatcher selects the versioned QA
+boundary by presence of `commandVersion`, never by a successful parse with a
+less-privileged fallback; each store reauthorizes before validation and replay.
+The existing finalize bridge likewise owns current QA before strict parsing.
+No store business rules, migrations, client commands or proxy allowlists changed.
+OpenAPI documents schemas, statuses, conflicts and historical receipt versus
+fresh current GET. The new routes stay behind the existing US Host, Origin,
+session/MFA, tenant, body-size, request-ID and sanitized database boundaries.
+
+TDD: the original HTTP implementation failed the two explicit revision chains
+with 400 and the new history/OpenAPI assertions with missing routes. After wiring,
+all 18 real HTTP/MFA tests pass. Ordinary and exempt chains cover explicit initial
+and amendment finalization, retained lots, exact amend/void audits, changed/no-op
+saves, historical receipt replay after void, current GET, support replacement and
+loss, cancelled draft revision gaps, strict pagination, stale versions, key rebinding,
+legacy amendment denial, current role/MFA loss, foreign tenants and storage failure.
+The complete Receiving and affected US API run passed 736/736 across 35 files,
+no skips, in 135.50 seconds. API typecheck/lint/build and 19/19 isolation/tool
+tests passed. The release-lock checker passes; no operational workflow changed.
+
+The unchanged browser journey passed 1/1 against the freshly compiled API in
+35.52 seconds (36.86 seconds including completion), with real MFA and synthetic
+data, EN/ES, light/dark, 1440/1024/390, exact retries/audits/latches and GET-only
+recovery. This is regression proof for the existing original workflow, not
+connected amendment/void UI acceptance. Safe screenshots are in
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-gxqo55`;
+no new manual visual review is claimed.
+
+Actual Vite proxy smoke passed 1/1, including explicit denial of POST amend/void
+and GET history/basis (with and without pagination); existing allowed routes still
+reach the independent API's session guard. Scoped tool lint passed.
+Repository formatting and diff checks passed. Owned browser servers closed;
+read-only inspection found no listeners on ports 3100/5174. The primary checkout
+remained at `c2e0ef01871e89f6ca8a1d519df0b4893d0526a3` with its same six untracked
+paths; no primary source or environment was changed.
+
+Review is inline/sequential, not independent. Shared domain/contracts/DB sources
+were unchanged and their full suites were not repeated after this API-only change;
+pre-push contracts and admin suites passed 679/679 and 1340/1340 respectively.
+The broad primary-environment API suite, hosted services and hardware were not
+exercised. No intermediate deployment is permitted. Task 4/5 and US-03 remain
+partial: client/proxy recovery integration, lifecycle controls, amendment editing,
+full history/basis navigation and cross-task final acceptance are still required.
+
+## Client lifecycle transport checkpoint — 2026-09-08
+
+This follow-up connects the prepared acknowledgement validators to actual client
+methods and supersedes the preceding client/proxy restrictions. Amend/void require
+the captured live record as their third argument; explicit save/finalize also
+require it, while existing two-argument original commands remain compatible.
+The client validates and clones context before its first await, rejecting missing,
+foreign-target or stale lifecycle/draft context before sending. It validates
+command kind/key/digest, target/root, reason, versions and saved/frozen bindings
+before returning a historical acknowledgement. No automatic retry or GET occurs.
+The later UI must retain the command/context and perform explicit current-state
+recovery before showing an editable record.
+
+History and lot-basis methods use strict bounded query/response schemas and
+correlate page parameters; basis also correlates lot identity. History responses
+validate a consistent ascending root snapshot, but do not echo the requested
+anchor UUID; tenant/anchor resolution remains the server's responsibility.
+Strict lifecycle, pending-amendment, identity-lock and downstream dependency
+errors retain bounded typed details. Old simple errors and incomplete-data errors
+keep their existing client types. Unknown fields/raw server payloads are discarded.
+The downstream error is a reserved contract, not implemented Shipping/Transformation.
+
+The local proxy admits only exact UUID amend/void paths without query parameters
+and exact revisions/receiving-basis paths with bounded unique limit/offset fields.
+Unknown, repeated, noncanonical and nested variants remain denied. The real Vite
+proxy smoke passed 1/1: new paths reach the independent session guard (401 without
+a session), while unsafe paths return 404. No auth or release configuration changed.
+
+TDD evidence: the two explicit save/finalize tests failed on original-only input
+validation and new methods were absent; the new proxy test failed on the missing
+amend route. After wiring, 74/74 tests passed across the three focused client and
+acknowledgement files, including 19 new transport cases. The CI inclusion gate
+failed until the new suite was selected in the check-only workflow. All 20 local
+tool/isolation tests passed afterward. Existing UI controls remain original-only;
+this checkpoint does not complete lifecycle dialogs, connected recovery, amendment
+editing, conflict presentation or history/basis navigation. Review is inline under
+the owner's selected execution mode, not independent. No commit/push or deployment.
+
+Node 24.20.0 verification: full admin 1359/1359, 114 files, 184.00 seconds,
+no skips; admin typecheck/lint and both primary/isolated US builds passed.
+Tool lint, release-lock checker, repository formatting and diff checks passed.
+The existing Chromium journey passed 1/1 in 38.77 seconds (40.52 total), using
+real MFA and owned synthetic data, EN/ES, light/dark and 1440/1024/390 viewports.
+It still proves original-workflow retry/GET-only recovery, not new lifecycle UI.
+Safe screenshots: `/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-kncnnq`;
+no manual visual review is claimed. Five existing RU hook warnings, JSDOM limits
+and build chunk notices remain. An import-only lint error introduced while
+replacing duplicate validation was corrected to a type import and lint rerun.
+Backend/shared sources were unchanged this turn, so their full suites were not
+repeated. Hosted services, hardware and new lifecycle UI acceptance remain open.
+
 ## Execution handoff
 
 The owner selected inline sequential execution (option 2) on 2026-09-07, using
@@ -2213,8 +2319,295 @@ The owner selected inline sequential execution (option 2) on 2026-09-07, using
 contracts) and Task 3 storage are complete. Task 4 remains partial; original
 create/save/finalize acknowledgement bridges and their coordinated HTTP/OpenAPI,
 client live reads and current-state recovery are implemented and browser-verified.
-Explicit revision-command acknowledgement validators are prepared with captured
-context; the active client still enforces original-only inputs.
-Next: their coordinated transport/recovery integration and amend/void/history/basis HTTP,
-then the remaining Task 5 lifecycle controls, amendment editing and full navigation
-proof. This choice does not authorize publication or release.
+Explicit revision-command acknowledgement validators are connected to the client
+with captured context; existing original-input calls remain compatible.
+The isolated server now exposes amend/void/history/basis HTTP and explicit revision
+save/finalize inputs; the browser proxy now permits only exact reviewed new paths.
+QA lifecycle dialogs and captured-context current-state recovery are now connected;
+see the next checkpoint. Next: amendment editing/frozen comparison, contextual
+conflicts, remaining history/basis navigation and full Task 5 acceptance. This
+choice does not authorize publication or release.
+
+## Lifecycle dialog checkpoint — 2026-09-08
+
+This bounded Task 5 slice adds `ReceivingLifecycleActions` to current finalized
+details and saved pending drafts. It reuses Markiro shared Modal/Button/Textarea,
+existing layout/tokens and EN/ES copy; no redesign or `.pen` work is included.
+QA alone can start a correction or void/cancel, with required reason, a cloned
+pre-command record, L/D versions and a stable operation key. The parent mutation
+lock begins at dialog opening and remains held through request and recovery.
+Duplicate sends, navigation and in-flight dismissal are blocked synchronously.
+Unknown outcomes retry the same captured command. Acknowledged-but-unread results
+retry only GET. 409 outcomes require reload; 401/403 and QA loss clear protected
+state. No autosave, cross-session cache or automatic resend is added.
+
+Void preview reads each distinct frozen lot's current basis and lists lost-last-
+support lots. Failure disables confirmation and offers explicit preview retry.
+This is not authorization: the server rechecks current state at commit. Pending
+draft cancellation does not remove the effective receipt's support; receipt void
+does not mutate lot identity/status/source lock or historical content.
+
+TDD: six initial connected UI tests failed on absent lifecycle actions, then
+passed after implementation; two further authorization/conflict cases passed.
+The CI inclusion contract failed on the missing new suite, then passed after
+adding it to the existing read-only job. The old finalization test that asserted
+Void was absent was reproduced and updated to require enabled lifecycle actions
+while still forbidding Export. The focused finalization/lifecycle set passed
+26/26. Admin typecheck/lint and both primary/US builds passed; existing five RU
+hook warnings and chunk notices remain. Tool lint uses browser globals for the
+pre-existing page-evaluate code; no lint rule/configuration was changed.
+
+The real companion runs after the existing Receiving journeys and reuses their
+now-finalized synthetic receipt without disturbing earlier count assertions.
+It proves actual amend commit with aborted delivery/exact replay, amendment
+cancellation, current receipt void with failed GET/read-only retry, exact actor/
+tenant/action/target/reason/result audit and unchanged lot business records.
+The first run exposed a test assumption: basisVersion belongs to the basis
+endpoint, not the lot DTO. The assertion was corrected to compare full lot records
+and the independent basis response. The full journey then passed 1/1 in 39.35
+seconds (41.08 total). Dialogs cover EN/ES light/dark 1440/1024/390 and keyboard
+dismissal. Safe screenshot directory:
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-20aCJw`.
+The ES dark mobile void and EN light desktop correction originals from this
+successful run were inspected. No screenshot contained MFA material.
+The unchanged-source critical journey also passed a second consecutive run, 1/1
+in 39.20 seconds (40.90 total), with safe screenshots under
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-ky8xmY`.
+
+Final Node 24.20.0 gates: full admin 1367/1367 across 115 files, 179.31 seconds,
+no skips; typecheck/lint, primary build and isolated US build passed. All 20 local
+tool/isolation tests, release checker, browser-tool lint (explicit browser globals),
+repository formatting and diff checks passed. Existing JSDOM canvas/navigation,
+five primary-app hook, module-type and chunk notices remain. The primary checkout
+was read-only and retained its exact HEAD and six unrelated untracked paths.
+
+Review is inline, not independent, per the owner's selected execution mode.
+This does not complete the larger amendment-editor/history/basis browser gate:
+retained-line editing, frozen comparison, explicit pending/current links, all-
+history filters, basis cards and contextual conflicts remain. No backend/shared
+source changed in this slice; their full suites were not repeated. Hosted, native
+mobile, screen-reader and external-service acceptance remain open. No staging,
+commit, push, PR, merge or deployment was performed.
+
+## Amendment editor and frozen comparison checkpoint — 2026-09-08
+
+The next bounded Task 5 slice connects QA-only correction editing and explicit
+save, not correction check/finalize or complete history/basis navigation. A fresh
+current record and its exact frozen predecessor must pass root/number/revision/
+time-zone and pending-pointer checks before editor mount. Failure blocks editing
+and offers explicit reload; QA loss/remount clears local input and pending state.
+
+Retained line identity is read-only: lot/product/exact TLC/full source tuple,
+original link mode and exemption handling. Editable facts are quantity/UOM,
+supplier reference, notes and exempt reason/evidence, plus header/document links.
+Own-assignment null received TLC/original proposal is preserved without deriving
+source from a changed header. Stable bindings survive reorder; added lines have
+null predecessor binding; removed originals remain visible in frozen comparison.
+Save captures L/D and immutable command context, reuses exact command on unknown
+delivery, and retries only GET after an acknowledged result. No autosave/cache.
+
+The existing editor state machine, shared Markiro components/tokens and EN/ES
+patterns are reused. Comparison is side-by-side at 1440 and keyboard-tabbed at
+1024/390; switching panes preserves unsaved input. No identity/design asset change.
+TDD initially reproduced missing locks/reorder/QA-only save, then the registry
+predecessor boundary. Ten focused cases now cover these plus wrong-root/failed
+predecessor, QA loss/restoration, own-assignment evidence, exact save retry and
+GET-only recovery. Combined amendment/lifecycle/original-editor tests pass 30/30.
+The CI inclusion contract failed without the suite and passed once included in
+the existing read-only US job. No new workflow or publication permission.
+
+Real local Chromium/MFA/API/PostgreSQL proof extends the lifecycle companion:
+edit/reorder, committed-but-lost save delivery, identical replay, one D increment,
+unchanged L and frozen predecessor, then cancellation preserving current support.
+Two full runs passed 1/1: 42.08s (43.79 total), 44.43s (46.16 total). Both cover
+EN/ES light/dark 1440/1024/390 and keyboard tabs. Safe screenshots:
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-spu6wo` and
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-PdcvKl`.
+The first run's EN light desktop correction and ES dark mobile comparison were
+personally inspected. Fixture-owned synthetic databases only; no base migration.
+
+Review is inline under the owner's selected execution mode, not independent.
+Correction check/finalize, contextual conflict presentation, explicit revision
+links/all-history filters/basis cards and full Task 5 acceptance remain pending.
+Tasks 4/5 and US-03 stay partial. No backend/shared source changed in this slice;
+their full package suites are not repeated. No hosted, native-mobile, screen-reader
+or external-service acceptance. No commit/push/PR/merge/deployment.
+
+Final Node 24.20 gates: full admin 1377/1377 in 116 files, 201.95s, no skips;
+focused editor/lifecycle/original 30/30; typecheck, lint, primary and US builds;
+19 browser-entry/isolation contracts, release checker and browser-tool lint;
+repository formatting and diff checks. Existing five primary-app hook warnings,
+JSDOM canvas/navigation, module-type and chunk notices remain. The new exempt
+test's label and narrow state inference were corrected without product changes.
+Primary checkout remains read-only at c2e0ef01871e89f6ca8a1d519df0b4893d0526a3
+with the same six untracked paths. All prior dirty US changes are preserved.
+
+## Amendment check and finalization checkpoint — 2026-09-08
+
+Continued the approved Task 5 slice inline. Saved correction readiness now checks
+the exact predecessor/root and lifecycle version; edits, reloads and QA changes
+invalidate transient results. Typed lifecycle conflicts require explicit reload.
+QA confirmation captures the explicit v2 command, L/D, predecessor, digest,
+operation key and freshly reviewed exempt line set. Unknown delivery retries the
+same command, while acknowledged-result recovery retries current GET only.
+Retained/new-created/new-linked counts are distinct; retained own TLC is labelled
+previously assigned. The consequence notice explains replacement of current basis
+without rewriting retained lot identity or the frozen predecessor. Existing
+Markiro components/tokens, EN/ES and the original finalization bridge are reused.
+
+TDD first reproduced missing amendment checking/finalization and incorrect retained
+TLC review presentation. Seven connected regression cases now pass, including
+wrong-predecessor rejection, QA loss, exact retry, GET-only recovery and structured
+conflicts. The check-only workflow includes the suite; its inclusion contract was
+verified failing before the addition. Full admin: 1384/1384 across 117 files,
+189.91 seconds, no skips. Typecheck/lint and primary/US builds pass; 19 isolation/
+browser-entry contracts and the release checker pass. Existing five primary-app
+hook warnings, JSDOM canvas/navigation, module-type and chunk notices remain.
+
+Real Chromium proof adds fresh correction QA review, dismissal/reopening reset,
+actual committed-but-lost finalization/exact replay, unchanged full lot DTOs and
+frozen predecessor, updated basis versions and one exact before/after audit.
+Two full local journeys passed: 44.24 seconds (45.89 total), then 42.20 seconds
+(43.70 total). EN/ES light/dark layouts cover 1440/1024/390. Safe screenshot dirs:
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-1LcEdY` and
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-m0yTti`.
+The first successful run's EN light desktop and ES dark mobile confirmation
+images were personally inspected. Earlier new-test failures were ambiguous Cancel
+selection and reading checkboxes before label loading; both test waits/selectors
+were corrected without changing product behavior or weakening assertions.
+
+Review is inline, not independent. This slice changes no backend/shared source;
+their full suites were not repeated. Only fixture-owned synthetic databases were
+used. No hosted, native mobile, screen-reader or fluent Spanish acceptance.
+Tasks 4/5 and US-03 remain partial: explicit current/pending/previous links,
+all-history filters, basis cards, contextual conflicts and the remaining broader
+Task 5 acceptance precede CSV. No staging, commit, push, PR, merge or deployment.
+
+Final repository formatting and diff checks pass. No fixture listeners remain on
+3100/5174. The primary checkout remains read-only at
+`c2e0ef01871e89f6ca8a1d519df0b4893d0526a3` with its same six untracked paths;
+US stays at `1803d3ec3863d773a93fe9d572bf64b81d6b6e41` on `codex/us-mvp`,
+with an empty staged diff and all earlier dirty work preserved.
+
+## Exact revision navigation checkpoint — 2026-09-08
+
+Continued Task 5 inline in the existing dirty US worktree. Saved views now show
+revision/correction reason, explicit previous/current/pending links and an
+on-demand revision list. The presentation-only list is separate from its transient
+query/navigation controller, which reuses the existing client, access callbacks,
+workspace lock and dirty-input guard. No second auth state machine or cache.
+Historical selection reads that exact ID and verifies root/number/time zone;
+it never redirects silently to current. Failed or declined navigation keeps
+the displayed receipt and input; retry issues only the chosen GET. History
+validates its root context/version, pages by 50 through offset 100,000 and
+distinguishes loading/error from an empty later page. Unmount discards late reads.
+
+The registry now exposes current/all selection, all four statuses and a separate
+revision column. Selecting amended explicitly selects all; selecting current
+clears amended, while other statuses retain the chosen selection. Return keeps
+the registry filters/search. Existing frozen details retain original finalization
+facts separately from lifecycle actors/times/reasons; void drafts are still drafts.
+No basis cards, contextual-conflict redesign, CSV, API/schema/dependency changes.
+
+Nine connected regression cases pass: exact navigation, GET-only failed lookup,
+wrong-root history, dirty-input decline/failure, status/history coupling, paging,
+401/403 and obsolete history responses. Six initially failed on missing controls.
+The new workflow inclusion contract failed before adding the suite to the
+existing check-only job, then passed. Full admin: 1393/1393 in 118 files, 190.46s,
+no skips. Typecheck/lint, primary and US builds, 19 isolation/browser-entry tests,
+release checker and browser-tool lint pass. Existing five primary-app hook
+warnings, JSDOM canvas/navigation, module-type and chunk notices remain.
+
+Real browser proof extends the owned MFA/API/PostgreSQL fixture, including
+current-to-pending navigation, exact historical selection with one failed GET,
+explicit read retry, keyboard activation, restored filters and unchanged final
+record. Two initial full journeys passed in 47.75s (49.77 total) and 45.63s
+(47.18 total), with EN/ES light/dark coverage at 1440/1024/390. Safe dirs:
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-wmzOpI` and
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-XubeQ1`.
+The first EN desktop/ES dark mobile history screenshots were inspected. This
+identified compact mobile buttons; a new browser assertion reproduced the
+sub-44px target before a scoped mobile override of existing control-size tokens.
+The page number also remains on one line. Final mobile verification follows below.
+
+Inline review uses the agreed sequential mode, not an independent reviewer.
+Tasks 4/5 and US-03 remain partial: independent lot-basis cards, contextual
+conflicts, ordinary TLC native-cap regression and wider Task 5 acceptance remain.
+Only fixture-owned synthetic databases are used. Full backend/shared suites are
+not repeated because this slice changes no backend/shared implementation. No
+hosted, native-device, screen-reader or fluent Spanish acceptance. No staging,
+commit, push, PR, merge, release or deployment; main checkout remains untouched.
+
+After the scoped mobile token change, the focused history/editor/finalization/
+lifecycle regression passed 34/34 in 14.91s and the US build passed again. The
+final full Chromium journey passed 1/1 in 51.46s (54.05 total), including the
+44px assertions for every visible mobile revision control in both locales/themes.
+Safe screenshots:
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-aXmhid`.
+The updated ES dark mobile original was inspected; no remaining defect identified
+in that captured state. Full admin/typecheck/lint/primary build results above
+precede only the scoped CSS/token-class change; no functional source changed
+after them. Browser-tool lint passed after its final assertion edit.
+
+Final repository-wide formatting and diff checks pass. Fixture ports 3100/5174
+have no listeners. The primary checkout retains HEAD
+`c2e0ef01871e89f6ca8a1d519df0b4893d0526a3` and its same six unrelated untracked
+paths. US HEAD remains `1803d3ec3863d773a93fe9d572bf64b81d6b6e41`, staged diff
+empty, earlier dirty changes preserved. No local Graphify graph exists to update.
+
+## Independent lot receiving-basis checkpoint — 2026-09-08
+
+Continued Task 5 inline in the existing dirty US worktree. Lot detail now contains
+a presentation-only `LotReceivingBasis` and a separate transient query/navigation
+section. Current support is read independently of the lot record and assignment
+basis, with authoritative state/count, 50-row pages and an offset bound of 100,000.
+Count means supporting revisions, not lines. An empty later page with positive
+count remains present. Loading, invalid/unavailable and missing states are distinct;
+refresh restarts at page zero and lot reload refreshes support even with unchanged
+lot revision. Late query results are ignored after leaving the detail.
+
+Basis links fetch the exact revision and validate root, event number, revision and
+each referenced line/lot binding. Failed reads keep the lot and permit GET-only
+retry. A revision that became historical is still opened as that exact frozen
+record, without current-record substitution. Existing workspace mutation locks
+also protect pending navigation; auth/session failures use existing callbacks.
+Lot-to-receipt and receipt-to-lot contexts coexist, including failed lot lookups.
+Receipt return labels propagate through frozen, original and amendment views;
+existing editor dirty-navigation confirmation remains active. No lot mutations,
+source unlock, status inference, new auth state machine or persistent cache.
+
+Fourteen connected cases extend the existing `us-lots-ui` suite, already selected
+by the check-only workflow. Eight initially failed because the basis UI was absent.
+During test integration, unsupported DOM matchers and mismatched existing button
+labels were corrected; no product assertion was weakened. Final full admin passed
+1407/1407 across 118 files in 199.34 seconds, without skips. Admin typecheck/lint,
+primary and US builds pass. Nineteen isolation/browser-entry tests and the release
+guard pass. Five existing primary-app hook warnings, JSDOM canvas/navigation,
+module-type and chunk notices remain. Browser companion lint passes.
+
+The read-only `lot-receiving-basis-flow.mjs` extends the existing real MFA/API/
+PostgreSQL fixture. It proves real present/missing support, failed basis/revision
+GET recovery, keyboard activation, return to the exact lot, unchanged full lot/
+receipt DTOs and zero business writes. EN/ES light/dark at 1440/1024/390 have no
+horizontal overflow and mobile basis controls meet 44px. The first full journey
+passed 1/1 in 54.64 seconds (56.55 total). Safe screenshot directory:
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-6vd3ru`.
+The EN light desktop and ES dark mobile present-basis images were personally
+inspected. Existing Markiro components/tokens determine typography and layout;
+no new brand assets, tokens, fonts or `.pen` edits.
+
+Review is inline, not independent, in the owner's agreed sequential mode. This
+slice changes no backend/shared implementation; their full suites were not rerun.
+Only fixture-owned disposable synthetic databases are used. No hosted, physical
+device, screen-reader or fluent Spanish acceptance. Tasks 4/5 and US-03 remain
+partial: contextual conflicts, ordinary TLC native-cap regression and wider Task 5
+acceptance precede CSV. No staging, commit, push, PR, merge, release or deployment.
+
+The second complete Chromium run passed 1/1 in 52.64 seconds (54.25 total), after
+browser-source formatting, with the same assertions and safe screenshots under
+`/var/folders/1t/vr4lx9_x5zj65f1bhlk6q5b40000gn/T/markiro-us-browser-uqPgaU`.
+The ES dark mobile missing-basis image was also inspected. Fixture listeners on
+3100/5174 are closed. The primary checkout remains read-only at
+`c2e0ef01871e89f6ca8a1d519df0b4893d0526a3` with the same six unrelated untracked
+paths. US remains at `1803d3ec3863d773a93fe9d572bf64b81d6b6e41` on `codex/us-mvp`,
+staged diff empty, all prior dirty changes preserved. No Graphify graph exists.

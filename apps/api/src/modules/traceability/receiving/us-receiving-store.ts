@@ -48,7 +48,7 @@ const events = schema.traceabilityEvents,
 export class UsReceivingStore {
   constructor(private readonly db: Db) {}
 
-  // Original-input HTTP uses this bridge; explicit revision input remains internal.
+  // Authorizes before parsing either original or explicit revision HTTP input.
   finalizeCommand(
     tenantId: string,
     actorUserId: string,
@@ -69,7 +69,7 @@ export class UsReceivingStore {
     return finalizeReceivingRevision(this.db, tenantId, actorUserId, id, input, requestId);
   }
 
-  // Live HTTP readiness; amendment editing remains an internal workflow for now.
+  // Live readiness binds both original and amendment commands to current lifecycle state.
   async checkRevisionReadiness(tenantId: string, actorUserId: string, id: unknown, query: unknown) {
     return this.db.transaction(
       async (tx) => {
@@ -129,7 +129,7 @@ export class UsReceivingStore {
     );
   }
 
-  // Additive server foundation; HTTP activation belongs to the complete lifecycle switch.
+  // Current authorized HTTP registry, distinct from historical command receipts.
   async listLiveRecords(tenantId: string, actorUserId: string, query: unknown) {
     return this.db.transaction(
       async (tx) => {

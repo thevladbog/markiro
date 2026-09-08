@@ -41,6 +41,10 @@ export function MasterDataWorkspace({
     lotId: string;
     record: ReceivingFrozenView;
   } | null>(null);
+  const [basisReceivingEntry, setBasisReceivingEntry] = useState<{
+    lotId: string;
+    record: ReceivingFrozenView;
+  } | null>(null);
   const [mutationPending, setMutationPending] = useState(false);
   const mutationCount = useRef(0);
   const [editorDirty, setEditorDirty] = useState(false);
@@ -140,6 +144,7 @@ export function MasterDataWorkspace({
     }
     setView(next);
     setReceivingLotEntry(null);
+    setBasisReceivingEntry(null);
     setViewGeneration((current) => current + 1);
   }
 
@@ -288,7 +293,21 @@ export function MasterDataWorkspace({
             canManageQa={
               !accessError && !accessPending && capabilities.includes(US_CAPABILITY.QA_MANAGE)
             }
-            {...(receivingLotEntry ? { initialRecord: receivingLotEntry.record } : {})}
+            {...(receivingLotEntry
+              ? { initialRecord: receivingLotEntry.record }
+              : basisReceivingEntry
+                ? { initialRecord: basisReceivingEntry.record }
+                : {})}
+            {...(basisReceivingEntry
+              ? {
+                  backLabel: t("lots.backToLot"),
+                  onEntryBack: () => {
+                    setReceivingLotEntry(null);
+                    setView("lots");
+                    setViewGeneration((n) => n + 1);
+                  },
+                }
+              : {})}
             onOpenLot={(lotId, record) => {
               setReceivingLotEntry({ lotId, record });
               setView("lots");
@@ -304,6 +323,12 @@ export function MasterDataWorkspace({
             {...viewProps}
             profileCode={profile.code}
             timeZone={profile.timeZone}
+            onOpenReceiving={(lotId, record) => {
+              setBasisReceivingEntry({ lotId, record });
+              setReceivingLotEntry(null);
+              setView("receiving");
+              setViewGeneration((n) => n + 1);
+            }}
             {...(receivingLotEntry
               ? {
                   entryLotId: receivingLotEntry.lotId,
@@ -312,7 +337,16 @@ export function MasterDataWorkspace({
                     setViewGeneration((n) => n + 1);
                   },
                 }
-              : {})}
+              : basisReceivingEntry
+                ? {
+                    entryLotId: basisReceivingEntry.lotId,
+                    entryBackLabel: t("lots.back"),
+                    onEntryBack: () => {
+                      setBasisReceivingEntry(null);
+                      setViewGeneration((n) => n + 1);
+                    },
+                  }
+                : {})}
             canManageQa={
               !accessError && !accessPending && capabilities.includes(US_CAPABILITY.QA_MANAGE)
             }

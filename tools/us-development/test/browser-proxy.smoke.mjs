@@ -24,6 +24,10 @@ test("actual US Vite proxy reaches only the independent API with its configured 
       "/api/us/traceability/receiving?status=amended&history=current",
       "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001",
       "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/readiness?expectedDraftVersion=1",
+      "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/revisions",
+      "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/revisions?limit=1&offset=0",
+      "/api/us/traceability/lots/a0000000-0000-4000-8000-000000000001/receiving-basis",
+      "/api/us/traceability/lots/a0000000-0000-4000-8000-000000000001/receiving-basis?limit=1&offset=0",
       "/api/us/traceability/reference-documents?limit=50&offset=0",
       "/api/us/traceability/reference-documents/a0000000-0000-4000-8000-000000000001",
       "/api/us/traceability/lots?limit=50&offset=0",
@@ -48,6 +52,9 @@ test("actual US Vite proxy reaches only the independent API with its configured 
       "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/readiness/finalize?expectedDraftVersion=1",
       "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/finalize?x=1",
       "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/finalize/extra",
+      "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/revisions?limit=1&limit=2",
+      "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/amend?x=1",
+      "/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/void/extra",
       "/api/us/traceability/receiving?status=voided",
       "/api/us/traceability/receiving?status=draft&status=finalized",
       "/api/us/traceability/receiving?history=current&history=all",
@@ -59,6 +66,7 @@ test("actual US Vite proxy reaches only the independent API with its configured 
       "/api/us/traceability/parties/a0000000-0000-4000-8000-000000000001/exports",
       "/api/us/traceability/lots/invalid-id",
       "/api/us/traceability/lots/a0000000-0000-4000-8000-000000000001/source/unlock",
+      "/api/us/traceability/lots/a0000000-0000-4000-8000-000000000001/receiving-basis?offset=0&offset=1",
     ]) {
       const response = await fetch(`http://localhost:5174${route}`);
       assert.equal(response.status, 404);
@@ -74,6 +82,19 @@ test("actual US Vite proxy reaches only the independent API with its configured 
     );
     assert.equal(finalize.status, 401);
     await finalize.arrayBuffer();
+    // Exact new command paths reach the existing independent session boundary.
+    for (const command of ["amend", "void"]) {
+      const response = await fetch(
+        `http://localhost:5174/api/us/traceability/receiving/a0000000-0000-4000-8000-000000000001/${command}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: "http://localhost:5174" },
+          body: "{}",
+        },
+      );
+      assert.equal(response.status, 401);
+      await response.arrayBuffer();
+    }
     for (const [command, method] of [
       ["source", "PATCH"],
       ["status", "POST"],

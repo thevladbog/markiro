@@ -109,6 +109,42 @@ require a separate GET before editing can reopen. A failed recovery GET never
 causes another mutation. This changes no host, origin, authorization, persistence,
 outbound-service or release permissions.
 
+### Receiving lifecycle HTTP boundary — 2026-09-08
+
+The later [lifecycle dialog increment](receiving-browser.md#lifecycle-dialogs-and-recovery--2026-09-08)
+connects QA correction/void actions and explicit retry/current-state recovery in
+the local browser only. Its new UI suite is included in the existing check-only
+job. Real browser validation uses only the owned disposable synthetic MFA fixture;
+it changes no runtime composition, migration, credentials, dependency or deployment
+permission. Amendment editing and full history/basis navigation remain incomplete.
+
+The subsequent server increment opens POST `/traceability/receiving/:id/amend`
+(201, including replay), POST `/traceability/receiving/:id/void` (200), GET
+`/traceability/receiving/:id/revisions` and GET
+`/traceability/lots/:id/receiving-basis` only in the isolated development API.
+Existing PUT draft and POST finalize paths now accept their strict original or
+explicit-v2 command unions. Versioned amendment saves and every finalize/amend/void
+reload current QA before parsing or replay; original saves retain receiving-write
+capability. Read paths require current read membership and MFA, with strict bounded
+`limit`/`offset`. Every mutation retains trusted Origin, Host, JSON, server request
+ID and transaction/audit boundaries. New lifecycle bodies remain 16 KiB; only the
+existing full-draft replacement keeps 256 KiB. No new outbound clients or migrations.
+
+This supersedes the preceding original-only server input/route restriction, not
+the browser boundary: the local proxy still denies amend/void/history/basis paths,
+and the active client rejects explicit revision inputs. New browser commands must
+connect captured-context acknowledgement checks and fresh-GET recovery together.
+No intermediate deployment is permitted; release locks remain unchanged.
+
+The subsequent client-transport increment opens only exact UUID amend/void paths
+without queries and UUID revisions/receiving-basis paths with bounded, unique
+limit/offset parameters in the local Vite proxy. Unknown, duplicate, noncanonical
+and nested paths stay denied. Explicit client writes require a captured live
+record before sending and validate their historical acknowledgement against its
+immutable copy. This supersedes the preceding proxy/client restriction, not the
+release lock. No new interface controls are connected, no automatic mutation retry
+or recovery GET is added, and current session/MFA/QA remain server-authoritative.
+
 Service/release readiness deliberately remains unavailable while other business modules are unfinished. The [separate US browser entry](browser-entry.md) now adds an isolated build and server edition attestation; matching environment values alone are not proof of frontend isolation. Local synthetic-owner provisioning is explicit, never automatic. Recovery remains unavailable. Do not connect the RU admin to this API.
 
 Profile tenant and actor are derived from the verified session, never client IDs. Every request reloads membership and resolves the [isolated US capabilities](access-foundation.md); the store checks read/settings capability inside its transaction while locking the membership row. `PUT` accepts only `code`, explicit IANA `timeZone` and optional `retentionYears` (default 5). The server fixes the baseline and timestamps. Identical retries still require settings permission and create no extra audit event; a different configuration returns 409. This is initial provisioning, not profile switching or settings editing. Every HTTP request gets a fresh server-generated request ID; profile creation records that ID in its atomic audit event.
@@ -176,6 +212,32 @@ pnpm --filter @markiro/api exec vitest run test/us-catalog.e2e.test.ts test/us-c
 The local checks pass six DB cases, nine operational cases and real store/HTTP catalog cases; current totals and review status are in the [implementation progress](implementation-plan.md#us-02-catalog-persistence-increment--2026-09-05). The shared column permits null, but RU DTOs, Station payloads/mirrors and GTIN-dependent operations retain strict boundaries. The new update timestamp dates pre-existing products to the migration baseline; it is not reconstructed historical activity. No browser, hardware, provider or hosted acceptance is established by these tests. Broader package-test infrastructure limits remain separate from the successful US-specific checks.
 
 ## Before release enablement
+
+The 2026-09-08 [amendment editor increment](receiving-browser.md#amendment-editor-and-frozen-comparison--2026-09-08)
+adds only US browser editing/comparison, regression selection and local synthetic
+browser checks. At that checkpoint it did not enable correction check/finalize in
+the UI. It changes no release destination or infrastructure. Its two complete browser runs
+used fixture-owned disposable US databases, not the base or primary database.
+
+The subsequent [amendment finalization increment](receiving-browser.md#amendment-check-and-finalization--2026-09-08)
+connects saved-data checks and explicit QA revision finalization through existing
+US-only endpoints. It changes only the isolated UI, regression selection, local
+synthetic browser tests and documentation. No new route, migration, credential,
+dependency, release permission or hosted resource is introduced. Release stays
+locked; browser fixtures own and dispose of their synthetic databases.
+
+The subsequent [revision navigation increment](receiving-browser.md#revision-navigation-and-history--2026-09-08)
+connects existing read-only revision/history endpoints and bounded registry filters.
+It changes only US UI, tests, check-only regression selection and documentation;
+it introduces no mutation, authorization grant, route, infrastructure or release
+capability. Navigation GETs use the existing workspace lock and session recovery.
+
+The subsequent [lot-basis increment](lot-browser.md#current-receiving-basis--2026-09-08)
+connects existing read-only support endpoints to lot details and exact receipt
+navigation. Changes are limited to US UI, tests and documentation. The existing
+check-only job already runs the expanded `us-lots-ui` suite. No server, schema,
+dependency, release workflow, credential or hosted resource changes are included.
+Real browser verification uses only fixture-owned synthetic databases.
 
 The [local synthetic-owner command](local-owner-provisioning.md) is now implemented as an explicit CLI, not a startup action or HTTP route. It creates only the reserved local identity, organization, membership and audit, with no profile or MFA bypass. Base database initialization and actual invocation against that base were not performed; integration tests use disposable databases. The [browser access/profile flow](browser-entry.md) is implemented locally. Recovery, auth-event audit and remaining business modules are still open.
 

@@ -43,9 +43,42 @@ blocked and the retry repeats only GET. Historical v1/v2 snapshots remain pinned
 The existing editor and frozen detail consume the live envelope and distinguish
 void/amended state from frozen content. Explicit revision acknowledgement
 validators now require captured pre-command context and check immutable identity,
-versions, reasons and retained bindings, without activating new public inputs.
-Their transport/recovery integration, amend/void and history/basis endpoints, lifecycle controls, amendment editing and
-full history/basis navigation remain next. Tasks 4/5 and US-03 remain partial. See the dated storage, read and command checkpoints
+versions, reasons and retained bindings.
+The isolated server now exposes amend/void and history/basis endpoints and strict
+explicit revision save/finalize inputs under the existing MFA/capability boundaries.
+The browser client and exact proxy now support these commands and bounded reads,
+requiring captured context for explicit mutation acknowledgements. Structured
+conflicts retain strict bounded details; commands never silently retry or GET.
+QA correction/void dialogs now capture the command and live context, lock duplicate
+actions/navigation, recover unknown outcomes with the same command and retry only
+GET after acknowledgement. Void previews identify lots losing their last basis;
+unavailable previews block confirmation. The real local MFA/browser journey proved
+amend replay, draft cancellation, receipt void, GET-only recovery, exact audits and
+unchanged lot identities/status/source locks, with EN/ES light/dark dialog layouts
+at 1440/1024/390. The amendment editor now verifies the frozen predecessor, allows
+QA-only factual edits and explicit versioned save, retains line identity/bindings
+through reorder/remove/add, and displays immutable comparison alongside the form
+or in narrow-layout tabs. Real committed-but-lost save/replay preserves one draft
+version advance and the unchanged original. EN/ES light/dark browser checks passed
+twice; see [editor scope and evidence](receiving-browser.md#amendment-editor-and-frozen-comparison--2026-09-08).
+Saved correction checks and explicit v2 QA finalization are now connected, including
+fresh per-revision exemption review, retained/new/linked counts, captured-version
+retry and GET-only acknowledged recovery. Full admin tests pass 1384/1384; real
+Chromium proves exact replay, immutable lot/predecessor data, replaced basis and
+exact audit in EN/ES light/dark at 1440/1024/390. See
+[finalization scope and evidence](receiving-browser.md#amendment-check-and-finalization--2026-09-08).
+Exact previous/current/pending navigation and paged revision history are connected,
+with explicit current/all registry selection and all four status filters.
+Failed navigation retains the displayed receipt and dirty input; retries read only
+the selected record. See [history behavior](receiving-browser.md#revision-navigation-and-history--2026-09-08).
+Independent current lot-basis cards are now connected through existing read-only
+endpoints, with authoritative support counts, bounded pages, distinct loading/
+error/missing states and exact revision links. Receipt and lot return contexts
+survive successful and failed lookups; support never changes lot status or source
+locks. See [basis behavior](lot-browser.md#current-receiving-basis--2026-09-08).
+Contextual conflict presentation, the ordinary TLC native-cap regression and
+wider Task 5 acceptance remain next.
+Tasks 4/5 and US-03 remain partial. See the dated storage, read and command checkpoints
 in the execution plan for automated proof and remaining limits. Fixed-template Receiving
 CSV follows separately, then US-04 Transformation with the P0 server case bridge.
 

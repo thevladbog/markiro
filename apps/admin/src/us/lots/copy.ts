@@ -50,7 +50,22 @@ export const lotCopy = {
     currentNames:
       "Product and location names are current reference data, not a historical event snapshot.",
     generic: "General lot traceability only. FTR applicability is not assessed in this profile.",
-    unavailableFeatures: "Event history, genealogy and balances are not connected yet.",
+    unavailableFeatures: "Full event history, genealogy and balances are not connected yet.",
+    receivingBasis: "Current receiving basis",
+    receivingMissing: "No current receiving basis",
+    receivingCount: "Supporting revisions: {{count}}",
+    receivingLines: "Lines: {{lines}}",
+    receivingHint:
+      "Current finalized receipts linked to this lot. This does not change its status or source lock, or confirm inventory or export readiness.",
+    receivingLoading: "Loading receiving basis…",
+    receivingError: "The receiving basis could not be loaded.",
+    receivingRefresh: "Refresh receiving basis",
+    receivingEmptyPage:
+      "No entries on this page. Return to the previous page or refresh the basis.",
+    receivingOpening: "Opening receiving revision…",
+    receivingOpenError:
+      "This receiving revision could not be opened. Retry the revision or refresh its current basis.",
+    backToLot: "Back to lot",
     sourceLocked: "The source is locked after finalized use and cannot be corrected.",
     sourceUnlocked: "The source may be corrected until its first use in a finalized event.",
     loading: "Loading lots…",
@@ -136,7 +151,22 @@ export const lotCopy = {
     generic:
       "Solo trazabilidad general de lotes. La aplicabilidad de FTR no se evalúa en este perfil.",
     unavailableFeatures:
-      "El historial de eventos, la genealogía y los saldos aún no están conectados.",
+      "El historial completo de eventos, la genealogía y los saldos aún no están conectados.",
+    receivingBasis: "Base de recepción vigente",
+    receivingMissing: "Sin base de recepción vigente",
+    receivingCount: "Revisiones de respaldo: {{count}}",
+    receivingLines: "Líneas: {{lines}}",
+    receivingHint:
+      "Recepciones finalizadas vigentes vinculadas a este lote. Esto no cambia su estado ni el bloqueo de su fuente, ni confirma el inventario o la preparación para exportar.",
+    receivingLoading: "Cargando la base de recepción…",
+    receivingError: "No se pudo cargar la base de recepción.",
+    receivingRefresh: "Actualizar la base de recepción",
+    receivingEmptyPage:
+      "No hay entradas en esta página. Vuelva a la página anterior o actualice la base.",
+    receivingOpening: "Abriendo la revisión de recepción…",
+    receivingOpenError:
+      "No se pudo abrir esta revisión de recepción. Reintente la revisión o actualice su base vigente.",
+    backToLot: "Volver al lote",
     sourceLocked:
       "La fuente está bloqueada tras su uso en un evento finalizado y no se puede corregir.",
     sourceUnlocked: "La fuente se puede corregir hasta su primer uso en un evento finalizado.",

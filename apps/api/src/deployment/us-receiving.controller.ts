@@ -19,18 +19,22 @@ import {
   receivingLiveRecordListSchema,
   receivingLiveRecordSchema,
   receivingFinalizeResultSchema,
-  finalizeReceivingSchema,
+  finalizeReceivingCommandSchema,
   receivingCreateResultSchema,
   receivingReadinessQuerySchema,
   receivingRevisionReadinessSchema,
   receivingSaveResultSchema,
   receivingLifecycleErrorSchema,
-  saveReceivingDraftSchema,
+  saveReceivingCommandSchema,
+  amendReceivingSchema,
+  voidReceivingSchema,
+  receivingOperationReceiptV2Schema,
+  receivingRevisionListQuerySchema,
+  receivingRevisionListSchema,
 } from "@markiro/platform-contracts";
 import { ApiZodBody, ApiZodQuery, ApiZodResponse } from "../lib/openapi";
 import { usMasterDataBadRequestSchema, usMasterDataErrorSchema } from "./us-master-data-openapi";
 import { UsRuntime } from "./us-runtime";
-import { parseMasterDataInput } from "../modules/traceability/master-data/us-master-data-support";
 import { UsSessionGuard, type UsRequest } from "./us-profile.controller";
 
 @Controller("traceability/receiving")
@@ -66,7 +70,8 @@ import { UsSessionGuard, type UsRequest } from "./us-profile.controller";
 })
 @ApiResponse({
   status: 413,
-  description: "Receiving POST/PUT JSON exceeds 256 KiB; other requests remain bounded at 16 KiB.",
+  description:
+    "Create and full draft replacement JSON are bounded at 256 KiB; lifecycle commands and other requests remain bounded at 16 KiB.",
   schema: usMasterDataErrorSchema,
 })
 @ApiResponse({
@@ -137,22 +142,33 @@ export class UsReceivingController {
   @ApiOperation({
     summary: "Replace a receiving draft atomically",
     description:
-      "Requires receiving write capability, operationKey and expectedDraftVersion. A changed save increments draftVersion only; revision stays 1. Stale saves return 409. A current unchanged save neither increments nor audits. Rows and document links are full ordered replacements. Returns a historical acknowledgement, not current state; follow with GET even after an exact retry. Amendment writes remain unavailable on this original-only endpoint.",
+      "Original inputs require receiving write capability; explicit v2 amendment inputs require current QA capability and expectedLifecycleVersion. Both require operationKey and expectedDraftVersion. A changed save increments draftVersion only, never revision. A current unchanged save neither increments nor audits. Rows and document links are full ordered replacements. Returns a historical acknowledgement, not current state; follow with GET even after an exact retry.",
   })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
-  @ApiZodBody(saveReceivingDraftSchema)
+  @ApiZodBody(saveReceivingCommandSchema)
   @ApiZodResponse({ status: 200, schema: receivingSaveResultSchema })
+  @ApiZodResponse({ status: 409, schema: receivingLifecycleErrorSchema })
   save(@Req() request: UsRequest, @Param("id") id: unknown, @Body() body: unknown) {
     const principal = this.principal(request);
     const requestId = this.requestId(request);
-    return this.runtime.databaseOperation(() =>
-      this.runtime.receiving.saveOriginalDraftCommand(
-        principal.tenantId,
-        principal.userId,
-        id,
-        body,
-        requestId,
-      ),
+    return this.runtime.databaseOperation(async () =>
+      // Select the trust boundary, not a successfully parsed fallback. Each command
+      // reloads capability before strict input validation and historical replay.
+      typeof body === "object" && body !== null && "commandVersion" in body
+        ? this.runtime.receiving.saveAmendment(
+            principal.tenantId,
+            principal.userId,
+            id,
+            body,
+            requestId,
+          )
+        : this.runtime.receiving.saveOriginalDraftCommand(
+            principal.tenantId,
+            principal.userId,
+            id,
+            body,
+            requestId,
+          ),
     );
   }
 
@@ -180,12 +196,12 @@ export class UsReceivingController {
   @Post(":id/finalize")
   @HttpCode(200)
   @ApiOperation({
-    summary: "Finalize a saved ordinary Receiving draft",
+    summary: "Finalize a saved original or amendment Receiving draft",
     description:
-      "Requires current QA capability, saved version and readiness digest. Atomic lots, source latches, frozen snapshot and audit; exact authorized retries return the original historical acknowledgement, including legacy frozen versions. New results freeze v3; always GET current state after success. Original revisions only; amendment commands are not enabled here. Limited to 16 KiB JSON.",
+      "Requires current QA capability, saved version, readiness digest and receipt-specific exempt reviews. Explicit v2 commands also bind the lifecycle version and predecessor. Atomic lots, source latches, frozen snapshot and audit; exact authorized retries return the original historical acknowledgement, including legacy frozen versions. New results freeze v3; always GET current state after success. Legacy inputs cannot finalize amendments. Limited to 16 KiB JSON.",
   })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
-  @ApiZodBody(finalizeReceivingSchema)
+  @ApiZodBody(finalizeReceivingCommandSchema)
   @ApiZodResponse({ status: 200, schema: receivingFinalizeResultSchema })
   @ApiZodResponse({ status: 409, schema: receivingLifecycleErrorSchema })
   finalize(@Req() request: UsRequest, @Param("id") id: unknown, @Body() body: unknown) {
@@ -196,9 +212,62 @@ export class UsReceivingController {
         principal.tenantId,
         principal.userId,
         id,
-        parseMasterDataInput(finalizeReceivingSchema, body),
+        body,
         requestId,
       ),
+    );
+  }
+
+  @Post(":id/amend")
+  @ApiOperation({
+    summary: "Start a correction of the current finalized Receiving revision",
+    description:
+      "Requires current QA capability, operationKey, expectedLifecycleVersion and reason. Creates one pending amendment with retained lot bindings; the current receipt remains effective. First success and exact authorized historical replay both return 201. Always GET the returned eventId for current state. Limited to 16 KiB JSON.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodBody(amendReceivingSchema)
+  @ApiZodResponse({ status: 201, schema: receivingOperationReceiptV2Schema })
+  @ApiZodResponse({ status: 409, schema: receivingLifecycleErrorSchema })
+  amend(@Req() request: UsRequest, @Param("id") id: unknown, @Body() body: unknown) {
+    const principal = this.principal(request);
+    const requestId = this.requestId(request);
+    return this.runtime.databaseOperation(() =>
+      this.runtime.receiving.amend(principal.tenantId, principal.userId, id, body, requestId),
+    );
+  }
+
+  @Post(":id/void")
+  @HttpCode(200)
+  @ApiOperation({
+    summary: "Void a Receiving draft or current finalized revision",
+    description:
+      "Requires current QA capability, operationKey, reason and expected lifecycle/draft versions; expectedDraftVersion is null for a finalized receipt. Preserves saved or frozen content and all lot business fields. A current receipt with a pending amendment cannot be voided. Exact authorized retries return the historical acknowledgement; always GET current state afterward. Limited to 16 KiB JSON.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodBody(voidReceivingSchema)
+  @ApiZodResponse({ status: 200, schema: receivingOperationReceiptV2Schema })
+  @ApiZodResponse({ status: 409, schema: receivingLifecycleErrorSchema })
+  void(@Req() request: UsRequest, @Param("id") id: unknown, @Body() body: unknown) {
+    const principal = this.principal(request);
+    const requestId = this.requestId(request);
+    return this.runtime.databaseOperation(() =>
+      this.runtime.receiving.void(principal.tenantId, principal.userId, id, body, requestId),
+    );
+  }
+
+  @Get(":id/revisions")
+  @ApiOperation({
+    summary: "Read bounded Receiving revision history from any revision UUID",
+    description:
+      "Requires current US read capability. Includes abandoned drafts and superseded/void revisions in ascending revision order, with the current lifecycle version. Does not fetch every frozen payload or write audit records.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodQuery(receivingRevisionListQuerySchema)
+  @ApiZodResponse({ status: 200, schema: receivingRevisionListSchema })
+  revisions(@Req() request: UsRequest, @Param("id") id: unknown, @Query() query: unknown) {
+    const principal = this.principal(request);
+    return this.runtime.databaseOperation(() =>
+      this.runtime.receiving.listRevisions(principal.tenantId, principal.userId, id, query),
     );
   }
 

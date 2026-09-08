@@ -1,21 +1,32 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { Button, Input, Textarea } from "@markiro/ui";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { Button, DataTabs, Input, Textarea } from "@markiro/ui";
 import {
   receivingDraftSchema,
+  receivingAmendmentDraftSchema,
+  receivingLiveRecordSchema,
+  type ReceivingAmendmentDraft,
   type ReceivingDraft,
   type ReceivingLiveRecord,
   type ReceivingFinalizeResult,
   type ReceivingCommandResult,
 } from "@markiro/platform-contracts";
 import { useTranslation } from "react-i18next";
-import { UsClientError } from "../client.js";
+import { UsClientError, UsReceivingLifecycleError } from "../client.js";
 import type { MasterDataViewProps } from "../master-data/workspace-shared.js";
 import { ReceivingReferencePicker } from "./reference-picker.js";
 import { ReceivingDocumentSection } from "./document-section.js";
 import { ReceivingLineEditor, emptyReceivingLine } from "./line-editor.js";
 import { ReceivingReadinessPanel } from "./readiness-panel.js";
-import { isReceivingDraftView, type ReceivingDraftView } from "./live-record.js";
+import {
+  isReceivingDraftView,
+  type ReceivingDraftView,
+  type ReceivingFrozenView,
+} from "./live-record.js";
+import { ReceivingAmendmentComparison } from "./amendment-comparison.js";
+import { ReceivingRetainedLineEditor } from "./retained-line-editor.js";
 import { ReceivingLifecycleNotice } from "./lifecycle-notice.js";
+import { ReceivingLifecycleActions } from "./lifecycle-dialog.js";
+import { ReceivingRevisionNavigation } from "./revision-history.js";
 
 const emptyDraft: ReceivingDraft = {
   dateReceived: null,
@@ -26,18 +37,24 @@ const emptyDraft: ReceivingDraft = {
   items: [],
   documentIds: [],
 };
+type EditableDraft = Omit<ReceivingDraft, "items"> & {
+  items: Array<ReceivingDraft["items"][number] | ReceivingAmendmentDraft["items"][number]>;
+};
 type Command = {
   id: string | null;
   operationKey: string;
   expectedDraftVersion: number | null;
   draft: ReceivingDraft;
+  captured: ReceivingLiveRecord | null;
 };
 type Props = MasterDataViewProps & {
   initial: ReceivingDraftView | null;
   timeZone: string;
   onClose: () => void;
+  backLabel?: string;
   canManageQa?: boolean;
   onOpenRecord?: (record: ReceivingLiveRecord) => void;
+  predecessor?: ReceivingFrozenView;
 };
 const fieldKeys: Record<string, string> = {
   dateReceived: "date",
@@ -60,19 +77,30 @@ export function ReceivingEditor({
   initial,
   timeZone,
   client,
-  canWrite,
+  canWrite: receivingWrite,
   mutationPending,
   beginMutation,
   onDirtyChange,
   onForbidden,
   onSessionLost,
   onClose,
+  backLabel,
   canManageQa = false,
   onOpenRecord,
+  predecessor,
 }: Props) {
   const { t, i18n } = useTranslation();
   const [record, setRecord] = useState(initial);
-  const [draft, setDraft] = useState(initial?.content.draft ?? emptyDraft);
+  const isAmendment = record !== null && record.lifecycle.previousRevisionId !== null;
+  const canWrite =
+    record?.status === "void"
+      ? false
+      : isAmendment
+        ? canManageQa && predecessor !== undefined
+        : receivingWrite;
+  const panelId = useId();
+  const [pane, setPane] = useState<"draft" | "previous">("draft");
+  const [draft, setDraft] = useState<EditableDraft>(initial?.content.draft ?? emptyDraft);
   const [lineKeys, setLineKeys] = useState(() =>
     (initial?.content.draft.items ?? []).map(() => crypto.randomUUID()),
   );
@@ -161,23 +189,30 @@ export function ReceivingEditor({
     return () => window.removeEventListener("beforeunload", protect);
   }, [dirty, pending, uncertain, recovering, finalizationLocked]);
 
-  function change(next: ReceivingDraft) {
+  function change(next: EditableDraft) {
     setReadinessGeneration((value) => value + 1);
     setDraft(next);
     setSaved(false);
     setIssues([]);
   }
-  function close() {
-    if (busy.current || mutationPending || finalizationLocked) return;
+  function canLeave() {
+    if (busy.current || mutationPending || finalizationLocked) return false;
     if (
       (dirty || uncertain || recovering) &&
       !window.confirm(t(uncertain || recovering ? "receiving.leaveUncertain" : "md.discardConfirm"))
     )
-      return;
-    onClose();
+      return false;
+    return true;
+  }
+  function close() {
+    if (canLeave()) onClose();
   }
   function acceptCurrent(result: ReceivingLiveRecord) {
-    if (!isReceivingDraftView(result) || result.status !== "draft" || result.revision !== 1) {
+    if (
+      !isReceivingDraftView(result) ||
+      result.status !== "draft" ||
+      (record !== null && result.id !== record.id)
+    ) {
       onOpenRecord?.(result);
       return;
     }
@@ -265,7 +300,9 @@ export function ReceivingEditor({
     )
       return;
     if (!command.current) {
-      const parsed = receivingDraftSchema.safeParse(draft);
+      const parsed = (isAmendment ? receivingAmendmentDraftSchema : receivingDraftSchema).safeParse(
+        draft,
+      );
       if (!parsed.success) {
         setFailure("invalid");
         setIssues(
@@ -285,6 +322,7 @@ export function ReceivingEditor({
         operationKey: crypto.randomUUID(),
         expectedDraftVersion: record?.draftVersion ?? null,
         draft: parsed.data,
+        captured: isAmendment && record ? receivingLiveRecordSchema.parse(record) : null,
       };
     }
     const attempt = command.current;
@@ -299,10 +337,21 @@ export function ReceivingEditor({
       const receipt =
         attempt.id === null
           ? await client.createReceivingDraft(input)
-          : await client.saveReceivingDraft(attempt.id, {
-              ...input,
-              expectedDraftVersion: attempt.expectedDraftVersion,
-            });
+          : attempt.captured
+            ? await client.saveReceivingDraft(
+                attempt.id,
+                {
+                  ...input,
+                  commandVersion: 2,
+                  expectedLifecycleVersion: attempt.captured.lifecycle.lifecycleVersion,
+                  expectedDraftVersion: attempt.expectedDraftVersion,
+                },
+                attempt.captured,
+              )
+            : await client.saveReceivingDraft(attempt.id, {
+                ...input,
+                expectedDraftVersion: attempt.expectedDraftVersion,
+              });
       if (!alive.current) return;
       // A replayed create/save receipt is historical. Read current lifecycle before reopening editing.
       acknowledgedEventId.current = {
@@ -334,6 +383,11 @@ export function ReceivingEditor({
         // Keep an earlier uncertain command, even while current permissions are being reloaded.
         if (!uncertain) command.current = null;
         await onForbidden();
+      } else if (error instanceof UsReceivingLifecycleError) {
+        command.current = null;
+        setUncertain(false);
+        setBlocked(true);
+        setFailure("conflict");
       } else if (
         [
           "receiving_draft_conflict",
@@ -381,6 +435,32 @@ export function ReceivingEditor({
     }
   }
   const picker = { client, disabled, onSessionLost, onForbidden };
+  const previousLineNo =
+    currentLine && "previousLineNo" in currentLine ? currentLine.previousLineNo : null;
+  const retained =
+    typeof previousLineNo === "number"
+      ? predecessor?.content.snapshot.items.find((item) => item.lineNo === previousLineNo)
+      : undefined;
+  function moveLine(direction: -1 | 1) {
+    const destination = activeLine + direction;
+    if (disabled || destination < 0 || destination >= draft.items.length) return;
+    const items = [...draft.items];
+    const keys = [...lineKeys];
+    const [item] = items.splice(activeLine, 1);
+    const [key] = keys.splice(activeLine, 1);
+    if (!item || !key) return;
+    items.splice(destination, 0, item);
+    keys.splice(destination, 0, key);
+    change({ ...draft, items });
+    setLineKeys(keys);
+    setActiveLine(destination);
+  }
+  function removeLine() {
+    if (disabled) return;
+    change({ ...draft, items: draft.items.filter((_, index) => index !== activeLine) });
+    setLineKeys(lineKeys.filter((_, index) => index !== activeLine));
+    setActiveLine(Math.max(0, activeLine - 1));
+  }
   return (
     <div className="us-rec-page" aria-busy={pending}>
       <Button
@@ -389,7 +469,7 @@ export function ReceivingEditor({
         disabled={pending || mutationPending || finalizationLocked}
         onClick={close}
       >
-        {t("receiving.back")}
+        {backLabel ?? t("receiving.back")}
       </Button>
       <header className="us-md-page-header">
         <div>
@@ -406,218 +486,348 @@ export function ReceivingEditor({
         </span>
       </header>
       {record ? <ReceivingLifecycleNotice record={record} /> : null}
-      <form className="us-rec-form" noValidate onSubmit={(event) => void save(event)}>
-        {failure ? (
-          <div ref={alert} role="alert" tabIndex={-1} className="us-md-notice us-md-notice--alert">
-            <p>{t(`receiving.${failure}`)}</p>
-            {issues.length ? (
-              <ul>
-                {issues.map((issue, index) => (
-                  <li key={index}>
-                    {issue.line ? `${t("receiving.line", { number: issue.line })}: ` : ""}
-                    {t(`receiving.${issue.key}`)}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {acknowledgedEventId.current ? (
-              <Button
-                type="button"
-                disabled={pending || mutationPending}
-                onClick={() => void recoverAcknowledgement()}
-              >
-                {t("receiving.retryCurrent")}
-              </Button>
-            ) : blocked && record ? (
-              <Button
-                type="button"
-                disabled={pending || mutationPending}
-                onClick={() => void reload()}
-              >
-                {t("receiving.reload")}
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-        {!canWrite ? <p role="status">{t("receiving.readOnly")}</p> : null}
-        <section className="us-rec-section" aria-labelledby="receiving-header">
-          <h2 id="receiving-header">{t("receiving.header")}</h2>
-          <p className="us-rec-hint">
-            {t("receiving.zone", { zone: record?.timeZone ?? timeZone })}
-          </p>
-          <fieldset disabled={disabled} className="us-rec-fields">
-            <Input
-              type="date"
-              label={t("receiving.date")}
-              value={draft.dateReceived ?? ""}
-              onChange={(e) => change({ ...draft, dateReceived: e.target.value || null })}
-            />
-            <Input
-              label={t("receiving.receivedAtNote")}
-              value={draft.receivedAtNote ?? ""}
-              maxLength={2000}
-              onChange={(e) => change({ ...draft, receivedAtNote: e.target.value || null })}
-            />
-            <ReceivingReferencePicker
-              {...picker}
-              kind="location"
-              label={t("receiving.location")}
-              value={draft.locationId ?? ""}
-              roles={["receive_at"]}
-              onChange={(id) => change({ ...draft, locationId: id || null })}
-            />
-            <ReceivingReferencePicker
-              {...picker}
-              kind="location"
-              label={t("receiving.previousSource")}
-              value={draft.previousSourceLocationId ?? ""}
-              onChange={(id) => change({ ...draft, previousSourceLocationId: id || null })}
-            />
-            <Textarea
-              label={t("receiving.notes")}
-              value={draft.notes ?? ""}
-              maxLength={2000}
-              onChange={(e) => change({ ...draft, notes: e.target.value || null })}
-            />
-          </fieldset>
-        </section>
-        <section className="us-rec-section" aria-labelledby="receiving-lines">
-          <div className="us-rec-section-heading">
-            <h2 id="receiving-lines">
-              {t("receiving.lines")} <span>{draft.items.length}</span>
-            </h2>
-            {canWrite ? (
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={disabled || draft.items.length >= 100}
-                onClick={() => {
-                  setActiveLine(draft.items.length);
-                  setLineKeys([...lineKeys, crypto.randomUUID()]);
-                  change({ ...draft, items: [...draft.items, { ...emptyReceivingLine }] });
-                }}
-              >
-                {t("receiving.addLine")}
-              </Button>
-            ) : null}
-          </div>
-          {!draft.items.length ? (
-            <p className="us-rec-hint">{t("receiving.noLines")}</p>
-          ) : (
-            <div className="us-rec-lines">
-              <ol className="us-rec-line-list" aria-label={t("receiving.lines")}>
-                {draft.items.map((item, index) => (
-                  <li key={lineKeys[index]}>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      style={{
-                        display: "grid",
-                        justifyContent: "stretch",
-                        justifyItems: "start",
-                        width: "100%",
-                        padding: 12,
-                        font: "var(--text-meta)",
-                        textAlign: "left",
-                        background:
-                          index === activeLine ? "var(--surface-page)" : "var(--surface-card)",
-                        borderColor: index === activeLine ? "var(--accent-strong)" : "var(--line)",
-                      }}
-                      className={`us-rec-line-link ${index === activeLine ? "is-active" : ""}`}
-                      aria-current={index === activeLine ? "true" : undefined}
-                      onClick={() => setActiveLine(index)}
-                    >
-                      <span>{t("receiving.line", { number: index + 1 })}</span>
-                      <strong>{item.tlc ?? "—"}</strong>
-                      <span>
-                        {item.quantity ?? "—"} {item.unitOfMeasure ?? ""}
-                      </span>
-                    </Button>
-                  </li>
-                ))}
-              </ol>
-              {currentLine ? (
-                <ReceivingLineEditor
-                  key={lineKeys[activeLine]}
-                  {...picker}
-                  number={activeLine + 1}
-                  value={currentLine}
-                  receivingLocationId={draft.locationId}
-                  receivingLocationLabel={receivingLocationLabel}
-                  onChange={(value) =>
-                    change({
-                      ...draft,
-                      items: draft.items.map((item, index) =>
-                        index === activeLine ? value : item,
-                      ),
-                    })
-                  }
-                  onRemove={() => {
-                    change({
-                      ...draft,
-                      items: draft.items.filter((_, index) => index !== activeLine),
-                    });
-                    setLineKeys(lineKeys.filter((_, index) => index !== activeLine));
-                    setActiveLine(Math.max(0, activeLine - 1));
-                  }}
-                />
-              ) : null}
-            </div>
-          )}
-          {draft.items.length >= 100 ? <p>{t("receiving.lineLimit")}</p> : null}
-        </section>
-        <section className="us-rec-section" aria-labelledby="receiving-documents">
-          <h2 id="receiving-documents">{t("receiving.documents")}</h2>
-          <ReceivingDocumentSection
-            {...picker}
-            documentIds={draft.documentIds}
-            onChange={(documentIds) => change({ ...draft, documentIds })}
-            beginMutation={beginMutation}
-            onDirtyChange={documentChanged}
-          />
-        </section>
-        <ReceivingReadinessPanel
-          client={client}
+      {record && onOpenRecord ? (
+        <ReceivingRevisionNavigation
+          key={`navigation/${record.id}/${record.draftVersion}/${record.lifecycle.lifecycleVersion}`}
           record={record}
-          dirty={dirty}
-          generation={readinessGeneration}
-          disabled={pending || mutationPending || uncertain || blocked}
-          onReload={reload}
+          client={client}
+          disabled={pending || mutationPending || finalizationLocked || uncertain || recovering}
+          beginMutation={beginMutation}
+          onOpenRecord={onOpenRecord}
+          onSessionLost={onSessionLost}
+          onForbidden={onForbidden}
+          canNavigate={canLeave}
+        />
+      ) : null}
+      {isAmendment ? (
+        <section className="us-md-notice" aria-label={t("receiving.correctionDraft")}>
+          <p>{t("receiving.correctionHint", { revision: predecessor?.revision ?? "—" })}</p>
+          <p>
+            {t("receiving.reason")}: {record.lifecycle.amendmentReason}
+          </p>
+          <p className="us-rec-hint">{t("receiving.amendmentWorkflow")}</p>
+        </section>
+      ) : null}
+      {record && canManageQa && onOpenRecord ? (
+        <ReceivingLifecycleActions
+          key={`${record.id}/${record.draftVersion}/${record.lifecycle.lifecycleVersion}`}
+          record={record}
+          client={client}
+          mutationPending={mutationPending}
+          beginMutation={beginMutation}
           onForbidden={onForbidden}
           onSessionLost={onSessionLost}
-          canManageQa={canManageQa}
-          beginMutation={beginMutation}
-          onFinalizationLocked={setFinalizationLocked}
-          onAcknowledged={finalizedAcknowledgement}
-          {...(onOpenRecord ? { onOpenRecord } : {})}
+          onOpenRecord={onOpenRecord}
+          disabled={dirty || pending || uncertain || blocked || finalizationLocked || recovering}
         />
-        <footer className="us-rec-save">
-          <div role="status" aria-live="polite">
-            {recovering
-              ? t("receiving.currentUnconfirmed")
-              : pending
-                ? t("receiving.saving")
-                : saved
-                  ? t("receiving.saved")
-                  : dirty
-                    ? t("receiving.unsaved")
-                    : record
-                      ? `${t("receiving.updated")}: ${new Intl.DateTimeFormat(i18n.language, { dateStyle: "medium", timeStyle: "short", timeZone: record.timeZone }).format(new Date(record.updatedAt))}`
-                      : t("receiving.draft")}
+      ) : null}
+      {predecessor ? (
+        <DataTabs
+          className="us-rec-comparison-tabs"
+          label={t("receiving.comparison")}
+          activeId={pane}
+          onChange={setPane}
+          items={[
+            { id: "draft", label: t("receiving.correctionDraft"), panelId: `${panelId}-draft` },
+            {
+              id: "previous",
+              label: t("receiving.previousRevision"),
+              panelId: `${panelId}-previous`,
+            },
+          ]}
+        />
+      ) : null}
+      <div className={predecessor ? "us-rec-amendment-layout" : undefined} data-pane={pane}>
+        <div
+          id={`${panelId}-draft`}
+          className="us-rec-amendment-draft"
+          role={predecessor ? "tabpanel" : undefined}
+          aria-label={predecessor ? t("receiving.correctionDraft") : undefined}
+        >
+          <form className="us-rec-form" noValidate onSubmit={(event) => void save(event)}>
+            {failure ? (
+              <div
+                ref={alert}
+                role="alert"
+                tabIndex={-1}
+                className="us-md-notice us-md-notice--alert"
+              >
+                <p>{t(`receiving.${failure}`)}</p>
+                {issues.length ? (
+                  <ul>
+                    {issues.map((issue, index) => (
+                      <li key={index}>
+                        {issue.line ? `${t("receiving.line", { number: issue.line })}: ` : ""}
+                        {t(`receiving.${issue.key}`)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {acknowledgedEventId.current ? (
+                  <Button
+                    type="button"
+                    disabled={pending || mutationPending}
+                    onClick={() => void recoverAcknowledgement()}
+                  >
+                    {t("receiving.retryCurrent")}
+                  </Button>
+                ) : blocked && record ? (
+                  <Button
+                    type="button"
+                    disabled={pending || mutationPending}
+                    onClick={() => void reload()}
+                  >
+                    {t("receiving.reload")}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {!canWrite ? <p role="status">{t("receiving.readOnly")}</p> : null}
+            <section className="us-rec-section" aria-labelledby="receiving-header">
+              <h2 id="receiving-header">{t("receiving.header")}</h2>
+              <p className="us-rec-hint">
+                {t("receiving.zone", { zone: record?.timeZone ?? timeZone })}
+              </p>
+              <fieldset disabled={disabled} className="us-rec-fields">
+                <Input
+                  type="date"
+                  label={t("receiving.date")}
+                  value={draft.dateReceived ?? ""}
+                  onChange={(e) => change({ ...draft, dateReceived: e.target.value || null })}
+                />
+                <Input
+                  label={t("receiving.receivedAtNote")}
+                  value={draft.receivedAtNote ?? ""}
+                  maxLength={2000}
+                  onChange={(e) => change({ ...draft, receivedAtNote: e.target.value || null })}
+                />
+                <ReceivingReferencePicker
+                  {...picker}
+                  kind="location"
+                  label={t("receiving.location")}
+                  value={draft.locationId ?? ""}
+                  roles={["receive_at"]}
+                  onChange={(id) => change({ ...draft, locationId: id || null })}
+                />
+                <ReceivingReferencePicker
+                  {...picker}
+                  kind="location"
+                  label={t("receiving.previousSource")}
+                  value={draft.previousSourceLocationId ?? ""}
+                  onChange={(id) => change({ ...draft, previousSourceLocationId: id || null })}
+                />
+                <Textarea
+                  label={t("receiving.notes")}
+                  value={draft.notes ?? ""}
+                  maxLength={2000}
+                  onChange={(e) => change({ ...draft, notes: e.target.value || null })}
+                />
+              </fieldset>
+            </section>
+            <section className="us-rec-section" aria-labelledby="receiving-lines">
+              <div className="us-rec-section-heading">
+                <h2 id="receiving-lines">
+                  {t("receiving.lines")} <span>{draft.items.length}</span>
+                </h2>
+                {canWrite ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={disabled || draft.items.length >= 100}
+                    onClick={() => {
+                      setActiveLine(draft.items.length);
+                      setLineKeys([...lineKeys, crypto.randomUUID()]);
+                      change({
+                        ...draft,
+                        items: [
+                          ...draft.items,
+                          isAmendment
+                            ? { ...emptyReceivingLine, previousLineNo: null }
+                            : { ...emptyReceivingLine },
+                        ],
+                      });
+                    }}
+                  >
+                    {t("receiving.addLine")}
+                  </Button>
+                ) : null}
+              </div>
+              {!draft.items.length ? (
+                <p className="us-rec-hint">{t("receiving.noLines")}</p>
+              ) : (
+                <div className="us-rec-lines">
+                  <ol className="us-rec-line-list" aria-label={t("receiving.lines")}>
+                    {draft.items.map((item, index) => (
+                      <li key={lineKeys[index]}>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          style={{
+                            display: "grid",
+                            justifyContent: "stretch",
+                            justifyItems: "start",
+                            width: "100%",
+                            padding: 12,
+                            font: "var(--text-meta)",
+                            textAlign: "left",
+                            background:
+                              index === activeLine ? "var(--surface-page)" : "var(--surface-card)",
+                            borderColor:
+                              index === activeLine ? "var(--accent-strong)" : "var(--line)",
+                          }}
+                          className={`us-rec-line-link ${index === activeLine ? "is-active" : ""}`}
+                          aria-current={index === activeLine ? "true" : undefined}
+                          onClick={() => setActiveLine(index)}
+                        >
+                          <span>{t("receiving.line", { number: index + 1 })}</span>
+                          {isAmendment ? (
+                            <span>
+                              {t(
+                                "previousLineNo" in item && item.previousLineNo !== null
+                                  ? "receiving.retainedLot"
+                                  : "receiving.addedLine",
+                              )}
+                            </span>
+                          ) : null}
+                          <strong>{item.tlc ?? "—"}</strong>
+                          <span>
+                            {item.quantity ?? "—"} {item.unitOfMeasure ?? ""}
+                          </span>
+                        </Button>
+                      </li>
+                    ))}
+                  </ol>
+                  <div className="us-rec-stack">
+                    {isAmendment && currentLine ? (
+                      <div className="us-rec-confirm-actions">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          disabled={disabled || activeLine === 0}
+                          onClick={() => moveLine(-1)}
+                        >
+                          {t("receiving.moveUp")}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          disabled={disabled || activeLine === draft.items.length - 1}
+                          onClick={() => moveLine(1)}
+                        >
+                          {t("receiving.moveDown")}
+                        </Button>
+                      </div>
+                    ) : null}
+                    {currentLine && retained ? (
+                      <ReceivingRetainedLineEditor
+                        value={currentLine}
+                        original={retained}
+                        number={activeLine + 1}
+                        disabled={disabled}
+                        onRemove={removeLine}
+                        onChange={(value) =>
+                          change({
+                            ...draft,
+                            items: draft.items.map((item, index) =>
+                              index === activeLine ? { ...value, previousLineNo } : item,
+                            ),
+                          })
+                        }
+                      />
+                    ) : currentLine && previousLineNo !== null ? (
+                      <p role="alert">{t("receiving.predecessorUnavailable")}</p>
+                    ) : currentLine ? (
+                      <ReceivingLineEditor
+                        key={lineKeys[activeLine]}
+                        {...picker}
+                        number={activeLine + 1}
+                        value={currentLine}
+                        receivingLocationId={draft.locationId}
+                        receivingLocationLabel={receivingLocationLabel}
+                        onChange={(value) =>
+                          change({
+                            ...draft,
+                            items: draft.items.map((item, index) =>
+                              index === activeLine
+                                ? isAmendment
+                                  ? { ...value, previousLineNo: null }
+                                  : value
+                                : item,
+                            ),
+                          })
+                        }
+                        onRemove={removeLine}
+                      />
+                    ) : null}
+                  </div>
+                </div>
+              )}
+              {draft.items.length >= 100 ? <p>{t("receiving.lineLimit")}</p> : null}
+            </section>
+            <section className="us-rec-section" aria-labelledby="receiving-documents">
+              <h2 id="receiving-documents">{t("receiving.documents")}</h2>
+              <ReceivingDocumentSection
+                {...picker}
+                documentIds={draft.documentIds}
+                onChange={(documentIds) => change({ ...draft, documentIds })}
+                beginMutation={beginMutation}
+                onDirtyChange={documentChanged}
+              />
+            </section>
+            <ReceivingReadinessPanel
+              client={client}
+              record={record}
+              dirty={dirty}
+              generation={readinessGeneration}
+              disabled={pending || mutationPending || uncertain || blocked}
+              onReload={reload}
+              onForbidden={onForbidden}
+              onSessionLost={onSessionLost}
+              canManageQa={canManageQa}
+              beginMutation={beginMutation}
+              onFinalizationLocked={setFinalizationLocked}
+              onAcknowledged={finalizedAcknowledgement}
+              {...(onOpenRecord ? { onOpenRecord } : {})}
+            />
+            <footer className="us-rec-save">
+              <div role="status" aria-live="polite">
+                {recovering
+                  ? t("receiving.currentUnconfirmed")
+                  : pending
+                    ? t("receiving.saving")
+                    : saved
+                      ? t("receiving.saved")
+                      : dirty
+                        ? t("receiving.unsaved")
+                        : record
+                          ? `${t("receiving.updated")}: ${new Intl.DateTimeFormat(i18n.language, { dateStyle: "medium", timeStyle: "short", timeZone: record.timeZone }).format(new Date(record.updatedAt))}`
+                          : t("receiving.draft")}
+              </div>
+              {documentDirty ? <p>{t("receiving.documentPending")}</p> : null}
+              {canWrite ? (
+                <Button
+                  type="submit"
+                  disabled={
+                    pending || mutationPending || blocked || documentDirty || finalizationLocked
+                  }
+                >
+                  {t(uncertain ? "receiving.retrySave" : "receiving.save")}
+                </Button>
+              ) : null}
+            </footer>
+          </form>
+        </div>
+        {predecessor ? (
+          <div
+            id={`${panelId}-previous`}
+            className="us-rec-amendment-previous"
+            role="tabpanel"
+            aria-label={t("receiving.previousRevision")}
+          >
+            <ReceivingAmendmentComparison predecessor={predecessor} draft={draft} />
           </div>
-          {documentDirty ? <p>{t("receiving.documentPending")}</p> : null}
-          {canWrite ? (
-            <Button
-              type="submit"
-              disabled={
-                pending || mutationPending || blocked || documentDirty || finalizationLocked
-              }
-            >
-              {t(uncertain ? "receiving.retrySave" : "receiving.save")}
-            </Button>
-          ) : null}
-        </footer>
-      </form>
+        ) : null}
+      </div>
     </div>
   );
 }

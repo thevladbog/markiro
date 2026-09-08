@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { expectUsBrand } from "./brand-flow.mjs";
 import { exerciseUsReceivingFinalization } from "./receiving-finalization-flow.mjs";
 import { exerciseUsReceivingExemption } from "./receiving-exemption-flow.mjs";
+import { exerciseUsReceivingLifecycle } from "./receiving-lifecycle-flow.mjs";
+import { exerciseUsReceivingAmendmentFinalization } from "./receiving-amendment-finalization-flow.mjs";
 
 /** Real saved drafts; only the first response is intentionally lost after server commit. */
 export async function exerciseUsReceiving({ page, expect, screenshots, fixture }) {
@@ -276,6 +278,8 @@ export async function exerciseUsReceiving({ page, expect, screenshots, fixture }
   assert.deepEqual(events.rows, [{ id: committed.id }]);
   await page.getByRole("button", { name: "Back to receiving", exact: true }).click();
   await page.getByRole("button", { name: "← Profile", exact: true }).click();
-  await exerciseUsReceivingFinalization({ page, expect, screenshots, fixture });
+  const original = await exerciseUsReceivingFinalization({ page, expect, screenshots, fixture });
   await exerciseUsReceivingExemption({ page, expect, screenshots, fixture });
+  await exerciseUsReceivingLifecycle({ page, expect, screenshots, fixture, original });
+  await exerciseUsReceivingAmendmentFinalization({ page, expect, screenshots, fixture, original });
 }

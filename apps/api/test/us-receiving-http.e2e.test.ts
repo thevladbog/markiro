@@ -11,6 +11,10 @@ import {
   receivingCreateResultSchema,
   receivingFinalizeResultSchema,
   receivingLiveRecordSchema,
+  receivingOperationReceiptV2Schema,
+  receivingRevisionListSchema,
+  receivingBasisSchema,
+  receivingLifecycleErrorSchema,
 } from "@markiro/platform-contracts";
 import {
   receivingRevisionReadinessSchema,
@@ -102,6 +106,32 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
     );
   }
   const createBody = () => ({ operationKey: randomUUID(), draft: empty });
+  async function revisionCommand(id: string, expectedDraftVersion = 1) {
+    const response = await request(
+      `/traceability/receiving/${id}/readiness?expectedDraftVersion=${expectedDraftVersion}`,
+    );
+    expect(response.status).toBe(200);
+    const readiness = receivingRevisionReadinessSchema.parse(await response.json());
+    return {
+      commandVersion: 2,
+      operationKey: randomUUID(),
+      expectedDraftVersion,
+      expectedLifecycleVersion: readiness.expectedLifecycleVersion,
+      previousRevisionId: readiness.previousRevisionId,
+      expectedInputDigest: readiness.inputDigest,
+      reviewedExemptLines: readiness.exemptReviewRequiredLines,
+    };
+  }
+  async function receipt(path: string, method: string, body: unknown, status = 200) {
+    const response = await request(path, method, body, { "x-request-id": "forged" });
+    expect(response.status).toBe(status);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-request-id")).toMatch(/^[0-9a-f-]{36}$/);
+    return {
+      value: receivingOperationReceiptV2Schema.parse(await response.json()),
+      requestId: response.headers.get("x-request-id"),
+    };
+  }
 
   beforeAll(async () => {
     if (!base) throw new Error("Missing isolated US database");
@@ -526,13 +556,410 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
       ).status,
     ).toBe(400);
   });
-  it("keeps unsupported lifecycle/delete routes closed and documents the list and editor routes", async () => {
-    const id = randomUUID();
-    for (const path of [
-      `/traceability/receiving/${id}/amend`,
-      `/traceability/receiving/${id}/void`,
-      "/traceability/receiving/import",
+  it.each(["ordinary", "exempt"] as const)(
+    "runs the %s revision lifecycle through HTTP without rewriting lots or historical acknowledgements",
+    async (kind) => {
+      const complete = await (kind === "exempt" ? seedExemptReceiving : seedCompleteReceiving)(
+        fixture.db,
+        context,
+      );
+      const created = createdRecord(
+        await (
+          await request("/traceability/receiving", "POST", {
+            operationKey: randomUUID(),
+            draft: complete.draft,
+          })
+        ).json(),
+      );
+      const rootPath = `/traceability/receiving/${created.id}`;
+      const originalCommand = await revisionCommand(created.id);
+      const original = await receipt(`${rootPath}/finalize`, "POST", originalCommand);
+      const businessLots = async () =>
+        (
+          await fixture.pool.query(
+            "SELECT to_jsonb(l)-'receiving_basis_version' AS lot FROM traceability_lots l WHERE tenant_id=$1 ORDER BY id",
+            [context.tenant],
+          )
+        ).rows;
+      const beforeLots = await businessLots();
+      const basisPath = `/traceability/lots/${context.lot}/receiving-basis`;
+      const basis = receivingBasisSchema.parse(await (await request(basisPath)).json());
+      expect(basis).toMatchObject({ state: "present", supportCount: 1 });
+      const amendCommand = {
+        commandVersion: 2,
+        operationKey: randomUUID(),
+        expectedLifecycleVersion: 2,
+        reason: "  Correct receipt notes  ",
+      };
+      const amended = await receipt(`${rootPath}/amend`, "POST", amendCommand, 201);
+      expect(amended.value.record).toMatchObject({
+        revision: 2,
+        draftVersion: 1,
+        status: "draft",
+        lifecycle: {
+          rootId: created.id,
+          lifecycleVersion: 3,
+          currentEventId: created.id,
+          pendingDraftId: amended.value.eventId,
+          previousRevisionId: created.id,
+          amendmentReason: "Correct receipt notes",
+        },
+      });
+      if (amended.value.record.content.kind !== "draft")
+        throw new Error("Expected amendment draft");
+      const amendmentPath = `/traceability/receiving/${amended.value.eventId}`;
+      const saveCommand = {
+        commandVersion: 2,
+        operationKey: randomUUID(),
+        expectedLifecycleVersion: 3,
+        expectedDraftVersion: 1,
+        draft: { ...amended.value.record.content.draft, notes: "Corrected receipt notes" },
+      };
+      const saved = await receipt(amendmentPath, "PUT", saveCommand);
+      expect(saved.value.record).toMatchObject({ draftVersion: 2, revision: 2 });
+      const finalizeCommand = await revisionCommand(amended.value.eventId, 2);
+      const finalized = await receipt(`${amendmentPath}/finalize`, "POST", finalizeCommand);
+      expect(finalized.value.record).toMatchObject({
+        status: "finalized",
+        lifecycle: {
+          lifecycleVersion: 4,
+          currentEventId: amended.value.eventId,
+          pendingDraftId: null,
+        },
+      });
+      expect(await businessLots()).toEqual(beforeLots);
+      const currentBasis = receivingBasisSchema.parse(await (await request(basisPath)).json());
+      expect(currentBasis).toMatchObject({
+        state: "present",
+        supportCount: 1,
+        items: [{ rootId: created.id, eventId: amended.value.eventId, revision: 2 }],
+      });
+      const history = receivingRevisionListSchema.parse(
+        await (await request(`${rootPath}/revisions?limit=1&offset=1`)).json(),
+      );
+      expect(history).toMatchObject({
+        lifecycleVersion: 4,
+        limit: 1,
+        offset: 1,
+        items: [{ id: amended.value.eventId, revision: 2, status: "finalized" }],
+      });
+      expect(await (await request(rootPath)).json()).toMatchObject({
+        status: "amended",
+        content: original.value.record.content,
+      });
+      const voidCommand = {
+        commandVersion: 2,
+        operationKey: randomUUID(),
+        expectedLifecycleVersion: 4,
+        expectedDraftVersion: null,
+        reason: "Receipt withdrawn",
+      };
+      const voided = await receipt(`${amendmentPath}/void`, "POST", voidCommand);
+      expect(voided.value.record).toMatchObject({
+        status: "void",
+        lifecycle: { lifecycleVersion: 5, currentEventId: null, pendingDraftId: null },
+        content: finalized.value.record.content,
+      });
+      expect(await businessLots()).toEqual(beforeLots);
+      const missing = receivingBasisSchema.parse(await (await request(basisPath)).json());
+      expect(missing).toMatchObject({ state: "missing", supportCount: 0, items: [] });
+      expect(missing.basisVersion).toBe(currentBasis.basisVersion + 1);
+      const audits = async () =>
+        (
+          await fixture.pool.query(
+            "SELECT organization_id,actor_user_id,action,outcome,target_type,target_id,before,after,request_id FROM tenant_audit_events WHERE organization_id=$1 ORDER BY id",
+            [context.tenant],
+          )
+        ).rows;
+      const beforeReplay = await audits();
+      for (const [commandPath, method, body, result, status] of [
+        [`${rootPath}/finalize`, "POST", originalCommand, original, 200],
+        [`${rootPath}/amend`, "POST", amendCommand, amended, 201],
+        [amendmentPath, "PUT", saveCommand, saved, 200],
+        [`${amendmentPath}/finalize`, "POST", finalizeCommand, finalized, 200],
+        [`${amendmentPath}/void`, "POST", voidCommand, voided, 200],
+      ] as const) {
+        expect((await receipt(commandPath, method, body, status)).value).toEqual(result.value);
+      }
+      expect(await audits()).toEqual(beforeReplay);
+      expect(await (await request(amendmentPath)).json()).toEqual(voided.value.record);
+      for (const [action, result, before, reason, outcome] of [
+        [
+          "traceability.receiving.amendment_started",
+          amended,
+          original.value.record,
+          "Correct receipt notes",
+          "draft_started",
+        ],
+        [
+          "traceability.receiving.voided",
+          voided,
+          finalized.value.record,
+          "Receipt withdrawn",
+          "voided",
+        ],
+      ] as const) {
+        expect(beforeReplay.filter((entry) => entry.action === action)).toEqual([
+          {
+            organization_id: context.tenant,
+            actor_user_id: context.actor,
+            action,
+            outcome: "success",
+            target_type: "traceability_event",
+            target_id: amended.value.eventId,
+            before,
+            after: {
+              rootId: created.id,
+              revision: 2,
+              reason,
+              result: outcome,
+              record: result.value.record,
+            },
+            request_id: result.requestId,
+          },
+        ]);
+      }
+      await fixture.db
+        .update(schema.member)
+        .set({ role: "traceability_operator" })
+        .where(eq(schema.member.id, context.member));
+      for (const [commandPath, method, body] of [
+        [`${rootPath}/amend`, "POST", amendCommand],
+        [amendmentPath, "PUT", saveCommand],
+        [`${amendmentPath}/finalize`, "POST", finalizeCommand],
+        [`${amendmentPath}/void`, "POST", voidCommand],
+      ] as const)
+        expect((await request(commandPath, method, body)).status).toBe(403);
+      expect(await audits()).toEqual(beforeReplay);
+    },
+  );
+  it("protects lifecycle reads and writes with tenant, strict input, current MFA and transport boundaries", async () => {
+    const foreign = await seedReceivingTenant(fixture.db);
+    const other = await new UsReceivingStore(fixture.db).createDraft(
+      foreign.tenant,
+      foreign.actor,
+      createBody(),
+      "foreign",
+    );
+    const command = {
+      commandVersion: 2,
+      operationKey: randomUUID(),
+      expectedLifecycleVersion: 1,
+      reason: "Cancel draft",
+    };
+    for (const [path, method, body] of [
+      [`/traceability/receiving/${other.id}/amend`, "POST", command],
+      [`/traceability/receiving/${other.id}/void`, "POST", { ...command, expectedDraftVersion: 1 }],
+      [`/traceability/receiving/${other.id}/revisions`, "GET", undefined],
+      [`/traceability/lots/${foreign.lot}/receiving-basis`, "GET", undefined],
+    ] as const)
+      expect((await request(path, method, body)).status).toBe(404);
+    const created = createdRecord(
+      await (await request("/traceability/receiving", "POST", createBody())).json(),
+    );
+    const path = `/traceability/receiving/${created.id}`;
+    const reads = [`${path}/revisions`, `/traceability/lots/${context.lot}/receiving-basis`];
+    for (const read of reads) {
+      expect((await request(read)).status).toBe(200);
+      for (const query of [
+        "limit=1&limit=2",
+        "offset=0&offset=1",
+        "limit=01",
+        "offset=-1",
+        "tenantId=forged",
+        "limit=101",
+      ])
+        expect((await request(`${read}?${query}`)).status).toBe(400);
+    }
+    for (const suffix of ["amend", "void"]) {
+      const body = suffix === "void" ? { ...command, expectedDraftVersion: 1 } : command;
+      expect(
+        (await request(`/traceability/receiving/not-a-uuid/${suffix}`, "POST", body)).status,
+      ).toBe(400);
+      for (const change of [
+        { tenantId: foreign.tenant },
+        { actor: "forged" },
+        { commandVersion: 3 },
+        { reason: " " },
+      ])
+        expect((await request(`${path}/${suffix}`, "POST", { ...body, ...change })).status).toBe(
+          400,
+        );
+      for (const [headers, status] of [
+        [{ host: "foreign.example" }, 403],
+        [{ origin: "http://localhost:5173" }, 403],
+        [{ "content-type": "text/plain" }, 415],
+        [{ "content-encoding": "gzip" }, 415],
+      ] as const)
+        expect((await request(`${path}/${suffix}`, "POST", body, headers)).status).toBe(status);
+      expect(
+        (await request(`${path}/${suffix}`, "POST", { ...body, padding: "x".repeat(16384) }))
+          .status,
+      ).toBe(413);
+    }
+    const stale = await request(`${path}/void`, "POST", { ...command, expectedDraftVersion: 2 });
+    expect(stale.status).toBe(409);
+    expect(receivingLifecycleErrorSchema.parse(await stale.json())).toMatchObject({
+      code: "receiving_draft_conflict",
+    });
+    const voidCommand = { ...command, expectedDraftVersion: 1 };
+    const voided = await receipt(`${path}/void`, "POST", voidCommand);
+    expect(voided.value.record).toMatchObject({
+      status: "void",
+      lifecycle: { lifecycleVersion: 2 },
+    });
+    const rebound = await request(`${path}/void`, "POST", {
+      ...voidCommand,
+      reason: "Different intent",
+    });
+    expect(rebound.status).toBe(409);
+    expect(receivingLifecycleErrorSchema.parse(await rebound.json())).toMatchObject({
+      code: "receiving_operation_conflict",
+    });
+    await fixture.pool.query(
+      "DELETE FROM us_session_assurances WHERE session_id IN (SELECT id FROM session WHERE user_id=$1)",
+      [context.actor],
+    );
+    for (const read of reads) {
+      expect((await request(read)).status).toBe(403);
+      expect((await request(read, "GET", undefined, { cookie: "" })).status).toBe(401);
+    }
+    expect((await request(`${path}/void`, "POST", voidCommand)).status).toBe(403);
+  });
+  it("cancels a pending amendment without losing current support and rejects stale or legacy revision writes", async () => {
+    const complete = await seedCompleteReceiving(fixture.db, context);
+    const created = createdRecord(
+      await (
+        await request("/traceability/receiving", "POST", {
+          operationKey: randomUUID(),
+          draft: complete.draft,
+        })
+      ).json(),
+    );
+    const path = `/traceability/receiving/${created.id}`;
+    await receipt(`${path}/finalize`, "POST", await revisionCommand(created.id));
+    const command = {
+      commandVersion: 2,
+      operationKey: randomUUID(),
+      expectedLifecycleVersion: 2,
+      reason: "Correct receipt",
+    };
+    const pending = await receipt(`${path}/amend`, "POST", command, 201);
+    if (pending.value.record.content.kind !== "draft") throw new Error("Expected amendment draft");
+    const pendingPath = `/traceability/receiving/${pending.value.eventId}`;
+    const basisPath = `/traceability/lots/${context.lot}/receiving-basis`;
+    const basis = await (await request(basisPath)).json();
+    const save = {
+      commandVersion: 2,
+      operationKey: randomUUID(),
+      expectedLifecycleVersion: 3,
+      expectedDraftVersion: 1,
+      draft: pending.value.record.content.draft,
+    };
+    const beforeAudit = await fixture.db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(eq(schema.tenantAuditEvents.organizationId, context.tenant));
+    expect((await receipt(pendingPath, "PUT", save)).value.record).toEqual(pending.value.record);
+    expect(
+      await fixture.db
+        .select()
+        .from(schema.tenantAuditEvents)
+        .where(eq(schema.tenantAuditEvents.organizationId, context.tenant)),
+    ).toEqual(beforeAudit);
+    const finalize = await revisionCommand(pending.value.eventId);
+    const { commandVersion, expectedLifecycleVersion, previousRevisionId, ...legacyFinalize } =
+      finalize;
+    void commandVersion;
+    void expectedLifecycleVersion;
+    void previousRevisionId;
+    for (const [target, method, body, code] of [
+      [
+        `${path}/amend`,
+        "POST",
+        { ...command, operationKey: randomUUID() },
+        "receiving_lifecycle_conflict",
+      ],
+      [
+        `${path}/void`,
+        "POST",
+        {
+          ...command,
+          operationKey: randomUUID(),
+          expectedLifecycleVersion: 3,
+          expectedDraftVersion: null,
+        },
+        "receiving_pending_amendment",
+      ],
+      [
+        pendingPath,
+        "PUT",
+        { ...save, operationKey: randomUUID(), expectedLifecycleVersion: 2 },
+        "receiving_lifecycle_conflict",
+      ],
+      [
+        pendingPath,
+        "PUT",
+        { ...save, operationKey: randomUUID(), expectedDraftVersion: 2 },
+        "receiving_draft_conflict",
+      ],
+      [`${pendingPath}/finalize`, "POST", legacyFinalize, "receiving_lifecycle_conflict"],
+    ] as const) {
+      const rejected = await request(target, method, body);
+      expect(rejected.status).toBe(409);
+      expect(receivingLifecycleErrorSchema.parse(await rejected.json())).toMatchObject({ code });
+    }
+    const voidCommand = {
+      commandVersion: 2,
+      operationKey: randomUUID(),
+      expectedLifecycleVersion: 3,
+      expectedDraftVersion: 1,
+      reason: "Cancel correction",
+    };
+    const cancelled = await receipt(`${pendingPath}/void`, "POST", voidCommand);
+    expect(cancelled.value.record).toMatchObject({
+      status: "void",
+      content: pending.value.record.content,
+      lifecycle: { lifecycleVersion: 4, currentEventId: created.id, pendingDraftId: null },
+    });
+    expect(await (await request(basisPath)).json()).toEqual(basis);
+    const next = await receipt(
+      `${path}/amend`,
+      "POST",
+      { ...command, operationKey: randomUUID(), expectedLifecycleVersion: 4 },
+      201,
+    );
+    expect(next.value.record.revision).toBe(3);
+    expect((await receipt(`${pendingPath}/void`, "POST", voidCommand)).value).toEqual(
+      cancelled.value,
+    );
+    const history = receivingRevisionListSchema.parse(
+      await (await request(`${pendingPath}/revisions`)).json(),
+    );
+    expect(history.items.map(({ revision, status }) => ({ revision, status }))).toEqual([
+      { revision: 1, status: "finalized" },
+      { revision: 2, status: "void" },
+      { revision: 3, status: "draft" },
+    ]);
+    await fixture.db
+      .update(schema.member)
+      .set({ role: "traceability_operator" })
+      .where(eq(schema.member.id, context.member));
+    // Versioned input must select QA authorization before validation, never fall
+    // back to the less privileged original-save parser when it is malformed.
+    for (const malformed of [
+      { commandVersion: 3 },
+      { commandVersion: null },
+      { commandVersion: 2 },
     ])
+      expect((await request(pendingPath, "PUT", malformed)).status).toBe(403);
+    await fixture.db.delete(schema.member).where(eq(schema.member.id, context.member));
+    for (const read of [`${path}/revisions`, basisPath])
+      expect((await request(read)).status).toBe(403);
+  });
+  it("keeps import/delete routes closed and documents the lifecycle routes", async () => {
+    const id = randomUUID();
+    for (const path of ["/traceability/receiving/import"])
       expect((await request(path, "POST", {})).status).toBe(404);
     expect((await request(`/traceability/receiving/${id}`, "DELETE", {})).status).toBe(404);
     const api = SwaggerModule.createDocument(
@@ -580,6 +1007,16 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
         expect.objectContaining({ in: "query", name: "expectedDraftVersion", required: true }),
       ]),
     );
+    for (const [path, method, status] of [
+      ["/traceability/receiving/{id}/amend", "post", "201"],
+      ["/traceability/receiving/{id}/void", "post", "200"],
+      ["/traceability/receiving/{id}/revisions", "get", "200"],
+      ["/traceability/lots/{id}/receiving-basis", "get", "200"],
+    ] as const) {
+      expect(Object.keys(api.paths[path] ?? {})).toEqual([method]);
+      expect(api.paths[path]?.[method]?.responses).toHaveProperty(status);
+      expect(api.paths[path]?.[method]?.security).toEqual([{ "markiro-us.session_token": [] }]);
+    }
   });
   it("finalizes with HTTP200 and replays with fresh QA and MFA while exposing frozen mixed reads", async () => {
     const complete = await seedCompleteReceiving(fixture.db, context);
@@ -626,7 +1063,6 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
         commandVersion: 2,
         expectedLifecycleVersion: 1,
         previousRevisionId: null,
-        reviewedExemptLines: [],
       },
     ])
       expect((await request(`${path}/finalize`, "POST", invalid)).status).toBe(400);
@@ -765,6 +1201,15 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
     expect((await request(`${path}/finalize`, "POST", command)).status).toBe(403);
   });
   it("fails closed when storage is unavailable without exposing SQL", async () => {
+    const created = createdRecord(
+      await (await request("/traceability/receiving", "POST", createBody())).json(),
+    );
+    const lifecycle = {
+      commandVersion: 2,
+      operationKey: randomUUID(),
+      expectedLifecycleVersion: 1,
+      reason: "Unavailable storage",
+    };
     await fixture.pool.query(
       "ALTER TABLE traceability_events RENAME TO us_test_missing_receiving_events",
     );
@@ -772,6 +1217,14 @@ describe.skipIf(!base)("US receiving HTTP with real MFA", () => {
       for (const [path, method, body] of [
         ["/traceability/receiving", "POST", createBody()],
         [`/traceability/receiving/${randomUUID()}`, "GET", undefined],
+        [`/traceability/receiving/${created.id}/revisions`, "GET", undefined],
+        [`/traceability/lots/${context.lot}/receiving-basis`, "GET", undefined],
+        [`/traceability/receiving/${created.id}/amend`, "POST", lifecycle],
+        [
+          `/traceability/receiving/${created.id}/void`,
+          "POST",
+          { ...lifecycle, expectedDraftVersion: 1 },
+        ],
         [
           `/traceability/receiving/${randomUUID()}/readiness?expectedDraftVersion=1`,
           "GET",

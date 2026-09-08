@@ -1,5 +1,69 @@
 export const receivingCopy = {
   "en-US": {
+    revisionNavigation: "Receipt revisions",
+    revisionHistory: "Revision history",
+    showHistory: "Show revision history",
+    hideHistory: "Hide revision history",
+    historySelection: "History selection",
+    currentSelection: "Current receipts and drafts",
+    allHistory: "All revisions",
+    openRevision: "Open revision {{revision}}",
+    viewingRevision: "Viewing this revision",
+    openCurrentReceipt: "Open current receipt",
+    openPendingCorrection: "Open pending correction",
+    openPreviousRevision: "Open previous revision",
+    correctionReason: "Correction reason",
+    historyEmptyPage: "No revisions on this page.",
+    historyFailed: "Revision history could not be verified. Retry the read.",
+    openingRevision: "Loading selected revision…",
+    revisionOpenFailed:
+      "The selected revision could not be loaded. Your current view is unchanged.",
+    retryRevision: "Retry selected revision",
+    correctionDraft: "Correction draft",
+    previousRevision: "Previous revision",
+    comparison: "Revision comparison",
+    comparisonHint:
+      "Frozen original. Removing a line from the correction does not erase this history.",
+    correctionHint:
+      "Correcting revision {{revision}}. The previous receipt remains effective until this correction is finalized.",
+    amendmentWorkflow:
+      "Save changes, check the saved draft, then confirm finalization with QA access.",
+    confirmAmendmentCounts:
+      "Lines: {{lines}} · Retained lots: {{retained}} · New lots: {{created}} · Linked lots: {{linked}}",
+    confirmAmendmentScope:
+      "This correction will replace the current receiving basis. Retained lot identities and the frozen previous revision will not change.",
+    retainedIdentityHint: "Lot identity is retained from the previous revision.",
+    removedFromCorrection: "Removed from correction",
+    addedLine: "Added line",
+    moveUp: "Move line up",
+    moveDown: "Move line down",
+    sourceDescription: "Frozen source description",
+    ordinaryBasis: "Ordinary receipt",
+    freshExemptionReview: "This line will require a new QA review before finalization.",
+    predecessorUnavailable:
+      "The previous revision could not be verified. Editing remains unavailable.",
+    loadingPredecessor: "Loading the correction and previous revision…",
+    correctReceipt: "Correct receipt",
+    startCorrection: "Start correction",
+    voidReceipt: "Void receipt",
+    confirmVoid: "Confirm void",
+    retryOperation: "Retry same operation",
+    amendConsequence:
+      "Create a separate correction draft. This receipt remains effective until the correction is finalized; its frozen content is preserved.",
+    voidConsequence:
+      "This receipt will no longer provide receiving basis. Lot identities, statuses and source locks will not change. Frozen history is preserved.",
+    voidDraftConsequence:
+      "Cancel this saved draft. Any current finalized receipt remains effective. Lot identities, statuses and source locks will not change.",
+    checkingBasis: "Checking current receiving basis…",
+    losingBasis: "Lots losing their last receiving basis",
+    noLostBasis: "No lots lose their last receiving basis in this preview.",
+    basisPreviewHint: "Preview only. The server checks current state again when you confirm.",
+    basisPreviewFailed: "Receiving basis could not be checked. Retry before confirming.",
+    retryBasisPreview: "Retry basis check",
+    operationUnknown:
+      "The outcome is not confirmed. Keep this dialog open and retry the same operation; do not create a new request.",
+    operationRejected:
+      "The operation was rejected or the record changed. Reload current state before starting another operation.",
     void: "Void",
     amended: "Amended",
     lifecycle: "Current receipt status",
@@ -94,6 +158,7 @@ export const receivingCopy = {
     preserveExisting: "Existing TLC",
     assignIfMissing: "No TLC assigned",
     proposedTlc: "Proposed TLC for own assignment",
+    previouslyAssignedTlc: "Previously assigned TLC",
     receivedTlc: "Received TLC",
     ownSource: "Physical TLC source at finalization",
     ownSourceMismatch:
@@ -147,6 +212,72 @@ export const receivingCopy = {
       "The server may already have saved this receipt. Leave this editor? Check the receiving list before creating another receipt.",
   },
   "es-US": {
+    revisionNavigation: "Revisiones de la recepción",
+    revisionHistory: "Historial de revisiones",
+    showHistory: "Mostrar historial de revisiones",
+    hideHistory: "Ocultar historial de revisiones",
+    historySelection: "Selección del historial",
+    currentSelection: "Recepciones vigentes y borradores",
+    allHistory: "Todas las revisiones",
+    openRevision: "Abrir revisión {{revision}}",
+    viewingRevision: "Revisión abierta",
+    openCurrentReceipt: "Abrir recepción vigente",
+    openPendingCorrection: "Abrir corrección pendiente",
+    openPreviousRevision: "Abrir revisión anterior",
+    correctionReason: "Motivo de la corrección",
+    historyEmptyPage: "No hay revisiones en esta página.",
+    historyFailed:
+      "No se pudo verificar el historial de revisiones. Vuelve a intentar la consulta.",
+    openingRevision: "Cargando la revisión seleccionada…",
+    revisionOpenFailed:
+      "No se pudo cargar la revisión seleccionada. La vista actual no ha cambiado.",
+    retryRevision: "Reintentar revisión seleccionada",
+    correctionDraft: "Borrador de corrección",
+    previousRevision: "Revisión anterior",
+    comparison: "Comparación de revisiones",
+    comparisonHint:
+      "Original conservado. Quitar una línea de la corrección no borra este historial.",
+    correctionHint:
+      "Corrigiendo la revisión {{revision}}. La recepción anterior sigue vigente hasta finalizar esta corrección.",
+    amendmentWorkflow:
+      "Guarda los cambios, revisa el borrador guardado y confirma la finalización con acceso de QA.",
+    confirmAmendmentCounts:
+      "Líneas: {{lines}} · Lotes conservados: {{retained}} · Lotes nuevos: {{created}} · Lotes vinculados: {{linked}}",
+    confirmAmendmentScope:
+      "Esta corrección reemplazará el respaldo de recepción vigente. No cambiarán las identidades de los lotes conservados ni la revisión anterior preservada.",
+    retainedIdentityHint: "Se conserva la identidad del lote de la revisión anterior.",
+    removedFromCorrection: "Eliminada de la corrección",
+    addedLine: "Línea añadida",
+    moveUp: "Subir línea",
+    moveDown: "Bajar línea",
+    sourceDescription: "Descripción histórica del origen",
+    ordinaryBasis: "Recepción ordinaria",
+    freshExemptionReview: "Esta línea requerirá una nueva revisión de QA antes de finalizar.",
+    predecessorUnavailable:
+      "No se pudo verificar la revisión anterior. La edición sigue deshabilitada.",
+    loadingPredecessor: "Cargando la corrección y la revisión anterior…",
+    correctReceipt: "Corregir recepción",
+    startCorrection: "Iniciar corrección",
+    voidReceipt: "Anular recepción",
+    confirmVoid: "Confirmar anulación",
+    retryOperation: "Reintentar la misma operación",
+    amendConsequence:
+      "Crear un borrador de corrección independiente. Esta recepción sigue vigente hasta finalizar la corrección; su contenido histórico se conserva.",
+    voidConsequence:
+      "Esta recepción dejará de aportar respaldo de recepción. No cambiarán las identidades, los estados ni los bloqueos de origen de los lotes. El historial se conserva.",
+    voidDraftConsequence:
+      "Cancelar este borrador guardado. Cualquier recepción finalizada vigente permanece activa. No cambiarán las identidades, los estados ni los bloqueos de origen de los lotes.",
+    checkingBasis: "Comprobando el respaldo de recepción vigente…",
+    losingBasis: "Lotes que pierden su último respaldo de recepción",
+    noLostBasis: "Ningún lote pierde su último respaldo de recepción en esta vista previa.",
+    basisPreviewHint: "Solo vista previa. El servidor vuelve a comprobar el estado al confirmar.",
+    basisPreviewFailed:
+      "No se pudo comprobar el respaldo de recepción. Reintenta antes de confirmar.",
+    retryBasisPreview: "Reintentar comprobación",
+    operationUnknown:
+      "El resultado no está confirmado. Mantén abierto este diálogo y reintenta la misma operación; no crees una solicitud nueva.",
+    operationRejected:
+      "La operación fue rechazada o el registro cambió. Recarga el estado actual antes de iniciar otra operación.",
     void: "Anulada",
     amended: "Sustituida",
     lifecycle: "Estado actual de la recepción",
@@ -245,6 +376,7 @@ export const receivingCopy = {
     preserveExisting: "TLC existente",
     assignIfMissing: "No se asignó un TLC",
     proposedTlc: "TLC propuesto para asignación propia",
+    previouslyAssignedTlc: "TLC asignado anteriormente",
     receivedTlc: "TLC recibido",
     ownSource: "Origen físico del TLC al finalizar",
     ownSourceMismatch:
