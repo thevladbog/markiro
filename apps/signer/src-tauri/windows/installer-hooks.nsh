@@ -11,7 +11,7 @@
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "MarkiroSigner"
   ${Else}
     ; Quote the path to prevent an unquoted-path hijack; update it on repair.
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "MarkiroSigner" '"$INSTDIR\Markiro Signer.exe"'
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "MarkiroSigner" '"$INSTDIR\${MAINBINARYNAME}.exe"'
   ${EndIf}
   Pop $0
 !macroend

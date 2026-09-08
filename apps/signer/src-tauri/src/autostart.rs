@@ -24,23 +24,32 @@ mod windows {
     fn set_at(root: &RegKey, enabled: bool, executable: &std::ffi::OsStr) -> io::Result<()> {
         let (run, _) = root.create_subkey(RUN_KEY)?;
         let (settings, _) = root.create_subkey(SETTINGS_KEY)?;
+        set_registration(&run, &settings, enabled, executable)
+    }
+
+    fn set_registration(
+        run: &RegKey,
+        settings: &RegKey,
+        enabled: bool,
+        executable: &std::ffi::OsStr,
+    ) -> io::Result<()> {
         if enabled {
             // Preserve Unicode paths and quote the executable (including spaces).
             let mut command = std::ffi::OsString::from("\"");
             command.push(executable);
             command.push("\"");
             run.set_value(RUN_VALUE, &command)?;
+            settings.set_value(SETTINGS_VALUE, &1u32)
         } else {
+            // Persist the opt-out first: even if deletion is denied, NSIS must
+            // not re-enable startup on the next update. The UI still reads Run.
+            settings.set_value(SETTINGS_VALUE, &0u32)?;
             match run.delete_value(RUN_VALUE) {
-                Ok(()) => {}
-                Err(error) if error.kind() == ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(error),
             }
         }
-        // The installer must distinguish an explicit opt-out from a fresh install.
-        // The UI reads Run, so a failed preference write cannot pretend that the
-        // OS registration was rolled back.
-        settings.set_value(SETTINGS_VALUE, &u32::from(enabled))
     }
 
     pub fn enabled() -> io::Result<bool> {
@@ -59,6 +68,33 @@ mod windows {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn disable_persists_opt_out_even_when_run_deletion_is_denied() {
+            let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+            let path = format!(
+                r"Software\MarkiroSignerTests\{}-delete-denied",
+                std::process::id()
+            );
+            let (root, _) = hkcu.create_subkey(&path).unwrap();
+            let executable = std::ffi::OsStr::new(r"C:\Apps\markiro-signer.exe");
+            set_at(&root, true, executable).unwrap();
+            let run = root.open_subkey_with_flags(RUN_KEY, KEY_READ).unwrap();
+            let settings = root
+                .open_subkey_with_flags(SETTINGS_KEY, KEY_ALL_ACCESS)
+                .unwrap();
+
+            // The read-only handle deterministically denies deletion without
+            // changing ACLs or the user's real startup configuration.
+            let error = set_registration(&run, &settings, false, executable).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+            assert_eq!(settings.get_value::<u32, _>(SETTINGS_VALUE).unwrap(), 0);
+            assert!(enabled_at(&root).unwrap());
+            drop(settings);
+            drop(run);
+            drop(root);
+            hkcu.delete_subkey_all(path).unwrap();
+        }
 
         #[test]
         fn registration_round_trip_preserves_opt_out_and_other_entries() {
