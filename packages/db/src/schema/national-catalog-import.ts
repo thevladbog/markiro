@@ -501,3 +501,32 @@ export const nationalCatalogRequestLeases = pgTable(
   },
   (t) => [check("nc_request_leases_fence_ck", sql`${t.fence} >= 0`)],
 );
+
+/** Mutable durable preparation intent, separate from immutable issued comparisons. */
+export const nationalCatalogImportPreparations = pgTable(
+  "national_catalog_import_preparations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    sessionId: uuid("session_id").notNull(),
+    actorId: actorId(),
+    requestId: uuid("request_id").notNull(),
+    requestHash: hash("request_hash").notNull(),
+    request: jsonb("request").notNull(),
+    checkpoint: jsonb("checkpoint").notNull(),
+    expiresAt: at("expires_at").notNull(),
+    createdAt: at("created_at").notNull().defaultNow(),
+    updatedAt: at("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    unique("nc_import_preparations_tenant_id_uq").on(t.tenantId, t.id),
+    unique("nc_import_preparations_session_id_uq").on(t.tenantId, t.sessionId, t.id),
+    unique("nc_import_preparations_request_uq").on(t.tenantId, t.sessionId, t.requestId),
+    foreignKey({
+      name: "nc_import_preparations_session_fk",
+      columns: [t.tenantId, t.sessionId],
+      foreignColumns: [nationalCatalogImportSessions.tenantId, nationalCatalogImportSessions.id],
+    }),
+    index("nc_import_preparations_repair_idx").on(t.expiresAt, t.updatedAt),
+  ],
+);

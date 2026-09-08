@@ -101,3 +101,21 @@ it("retains session ownership and an accepted candidate reference throughout the
     expect(keys).toEqual(expect.arrayContaining([...expected]));
   }
 });
+
+it("persists preparation identity and repair state scoped to its session", () => {
+  const config = getTableConfig(table("nationalCatalogImportPreparations"));
+  expect(config.uniqueConstraints.map((key) => key.columns.map((c) => c.name).join(","))).toContain(
+    "tenant_id,session_id,request_id",
+  );
+  expect(
+    config.foreignKeys.map((key) =>
+      key
+        .reference()
+        .columns.map((c) => c.name)
+        .join(","),
+    ),
+  ).toContain("tenant_id,session_id");
+  expect(config.columns.map((c) => c.name)).toEqual(
+    expect.arrayContaining(["request_hash", "request", "checkpoint", "actor_id", "expires_at"]),
+  );
+});

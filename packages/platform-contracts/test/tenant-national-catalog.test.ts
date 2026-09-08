@@ -11,6 +11,7 @@ import {
   importItemsQuerySchema,
   importItemsResponseSchema,
   importPrepareResponseSchema,
+  importPreparationRetrySchema,
   importPrepareSchema,
   importPreviewSchema,
   importResultSchema,
@@ -46,6 +47,18 @@ const validItem = {
   reason: null,
 } as const;
 
+const validPreparation = {
+  id: ID_1,
+  requestId: ID_2,
+  state: "ready",
+  total: 1,
+  completed: 1,
+  failures: [],
+  nextRetryAt: null,
+  reason: null,
+  expiresAt: UTC_DATE,
+};
+
 const validPreview = {
   id: ID_1,
   itemId: ID_2,
@@ -69,6 +82,8 @@ const validPreview = {
       previewPath: "/tenant/national-catalog/previews/3",
       state: "ready",
       primary: true,
+      selectedByDefault: true,
+      reason: null,
     },
   ],
   linkAction: "attach",
@@ -135,17 +150,23 @@ describe("tenant National Catalog import input contracts", () => {
   it("validates prepare limits, trimmed manual names, and one category choice per item", () => {
     expect(
       importPrepareSchema.parse({
+        requestId: ID_3,
         itemIds: ids(100),
         manualNames: [{ itemId: ID_1, name: "  Товар  " }],
         categoryChoices: [],
       }).manualNames,
     ).toEqual([{ itemId: ID_1, name: "Товар" }]);
     expect(
-      importPrepareSchema.safeParse({ itemIds: ids(101), manualNames: [], categoryChoices: [] })
-        .success,
+      importPrepareSchema.safeParse({
+        requestId: ID_3,
+        itemIds: ids(101),
+        manualNames: [],
+        categoryChoices: [],
+      }).success,
     ).toBe(false);
     expect(
       importPrepareSchema.safeParse({
+        requestId: ID_3,
         itemIds: [ID_1],
         manualNames: [
           { itemId: ID_1, name: "Первый" },
@@ -156,6 +177,7 @@ describe("tenant National Catalog import input contracts", () => {
     ).toBe(false);
     expect(
       importPrepareSchema.safeParse({
+        requestId: ID_3,
         itemIds: [ID_1],
         manualNames: [{ itemId: ID_1, name: ` ${"a".repeat(200)} ` }],
         categoryChoices: [],
@@ -163,6 +185,7 @@ describe("tenant National Catalog import input contracts", () => {
     ).toBe(true);
     expect(
       importPrepareSchema.safeParse({
+        requestId: ID_3,
         itemIds: [ID_1],
         manualNames: [{ itemId: ID_1, name: "a".repeat(201) }],
         categoryChoices: [],
@@ -170,6 +193,7 @@ describe("tenant National Catalog import input contracts", () => {
     ).toBe(false);
     expect(
       importPrepareSchema.safeParse({
+        requestId: ID_3,
         itemIds: [ID_1],
         manualNames: [{ itemId: ID_1, name: " ".repeat(3) }],
         categoryChoices: [],
@@ -177,6 +201,7 @@ describe("tenant National Catalog import input contracts", () => {
     ).toBe(false);
     expect(
       importPrepareSchema.safeParse({
+        requestId: ID_3,
         itemIds: [ID_1],
         manualNames: [],
         categoryChoices: [
@@ -307,9 +332,15 @@ describe("tenant National Catalog import output contracts", () => {
     expect(
       importItemsResponseSchema.safeParse({ items: [validItem], nextCursor: null }).success,
     ).toBe(true);
-    expect(importPrepareResponseSchema.safeParse({ items: [validPreview] }).success).toBe(true);
     expect(
       importPrepareResponseSchema.safeParse({
+        preparation: validPreparation,
+        items: [validPreview],
+      }).success,
+    ).toBe(true);
+    expect(
+      importPrepareResponseSchema.safeParse({
+        preparation: validPreparation,
         items: [{ ...validPreview, photos: [{ ...validPreview.photos[0], url: "https://x" }] }],
       }).success,
     ).toBe(false);
@@ -370,4 +401,53 @@ it("bounds session list queries before SQL", () => {
   expect(importItemsQuerySchema.safeParse({ ...query, search: "x".repeat(501) }).success).toBe(
     false,
   );
+});
+
+it("requires durable request identity and safe preparation/photo state", () => {
+  expect(
+    importPrepareSchema.safeParse({ itemIds: [ID_1], manualNames: [], categoryChoices: [] })
+      .success,
+  ).toBe(false);
+  expect(
+    importPrepareResponseSchema.safeParse({
+      preparation: {
+        ...validPreparation,
+        state: "partial",
+        completed: 0,
+        failures: [{ itemId: ID_2, reason: "not_found", retryable: false }],
+      },
+      items: [],
+    }).success,
+  ).toBe(true);
+  expect(
+    importPrepareResponseSchema.safeParse({
+      preparation: { ...validPreparation, requestHash: "secret" },
+      items: [],
+    }).success,
+  ).toBe(false);
+  expect(
+    importPreviewSchema.safeParse({
+      ...validPreview,
+      photos: [
+        {
+          ...validPreview.photos[0],
+          state: "failed",
+          previewPath: null,
+          reason: "invalid_barcode",
+          selectedByDefault: false,
+        },
+      ],
+    }).success,
+  ).toBe(true);
+  expect(
+    importPreviewSchema.safeParse({
+      ...validPreview,
+      photos: [{ ...validPreview.photos[0], reason: "https://secret" }],
+    }).success,
+  ).toBe(false);
+});
+
+it("accepts only an explicit empty retry command", () => {
+  expect(importPreparationRetrySchema.safeParse({}).success).toBe(true);
+  expect(importPreparationRetrySchema.safeParse({ attempt: 0 }).success).toBe(false);
 });

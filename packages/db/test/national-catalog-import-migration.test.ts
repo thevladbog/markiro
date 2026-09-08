@@ -451,4 +451,28 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
       ]),
     ).rejects.toMatchObject({ code: "23514" });
   });
+  it("keeps preparation request IDs idempotent per session and denies cross-tenant sessions", async () => {
+    const preparedSession = randomUUID();
+    const requestId = randomUUID();
+    await pool.query(
+      `INSERT INTO national_catalog_import_sessions(id,tenant_id,actor_id,environment,mode,through_at,expires_at) VALUES($1,$2,$3,'sandbox','gtins',now(),now()+interval '24 hours')`,
+      [preparedSession, tenant, actor],
+    );
+    const insert = `INSERT INTO national_catalog_import_preparations(tenant_id,session_id,actor_id,request_id,request_hash,request,checkpoint,expires_at) VALUES($1,$2,$3,$4,$5,'{}','{}',now()+interval '24 hours')`;
+    await pool.query(insert, [tenant, preparedSession, actor, requestId, sourceHash]);
+    await expect(
+      pool.query(insert, [tenant, preparedSession, actor, requestId, sourceHash]),
+    ).rejects.toMatchObject({ code: "23505" });
+    await expect(
+      pool.query(insert, [otherTenant, preparedSession, actor, randomUUID(), sourceHash]),
+    ).rejects.toMatchObject({ code: "23503" });
+    expect(
+      (
+        await pool.query(
+          `SELECT count(*)::int AS count FROM national_catalog_import_preparations WHERE tenant_id=$1 AND session_id=$2`,
+          [tenant, preparedSession],
+        )
+      ).rows,
+    ).toEqual([{ count: 1 }]);
+  });
 });

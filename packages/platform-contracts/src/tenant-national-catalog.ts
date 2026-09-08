@@ -164,6 +164,7 @@ const categoryChoiceSchema = z
 
 export const importPrepareSchema = z
   .object({
+    requestId: platformUuidSchema,
     itemIds: z.array(platformUuidSchema).min(1).max(MAX_APPLY_ITEMS),
     manualNames: z.array(manualNameSchema).max(MAX_APPLY_ITEMS),
     categoryChoices: z.array(categoryChoiceSchema).max(MAX_APPLY_ITEMS),
@@ -171,6 +172,10 @@ export const importPrepareSchema = z
   .strict()
   .superRefine((value, context) => {
     addDuplicateIssue(value.itemIds, context, ["itemIds"]);
+    for (const choice of [...value.manualNames, ...value.categoryChoices]) {
+      if (!value.itemIds.includes(choice.itemId))
+        context.addIssue({ code: "custom", message: "Choice item is not requested" });
+    }
     addDuplicateIssue(
       value.manualNames.map(({ itemId }) => itemId),
       context,
@@ -198,12 +203,26 @@ const importFieldSchema = z
   .strict();
 export type ImportField = z.infer<typeof importFieldSchema>;
 
+export const importPhotoReasonSchema = z.enum([
+  "invalid_collection",
+  "invalid_record",
+  "invalid_url",
+  "invalid_barcode",
+  "unsupported_media",
+  "barcode_mismatch",
+  "download_failed",
+  "image_conflict",
+  "image_unavailable",
+]);
+
 const importPhotoSchema = z
   .object({
     candidateId: platformUuidSchema,
     previewPath: z.string().nullable(),
     state: z.enum(["pending", "ready", "failed"]),
     primary: z.boolean(),
+    selectedByDefault: z.boolean(),
+    reason: importPhotoReasonSchema.nullable(),
   })
   .strict();
 export type ImportPhoto = z.infer<typeof importPhotoSchema>;
@@ -317,7 +336,36 @@ export const importItemsResponseSchema = z
   .strict();
 export type ImportItemsResponse = z.infer<typeof importItemsResponseSchema>;
 
+export const importPreparationSchema = z
+  .object({
+    id: platformUuidSchema,
+    requestId: platformUuidSchema,
+    state: z.enum(["queued", "loading", "ready", "partial", "blocked", "failed"]),
+    total: z.number().int().min(1).max(MAX_APPLY_ITEMS),
+    completed: z.number().int().min(0).max(MAX_APPLY_ITEMS),
+    failures: z
+      .array(
+        z
+          .object({
+            itemId: platformUuidSchema,
+            reason: nullableReasonSchema.unwrap(),
+            retryable: z.boolean(),
+          })
+          .strict(),
+      )
+      .max(MAX_APPLY_ITEMS),
+    nextRetryAt: utcDateTimeSchema.nullable(),
+    reason: nullableReasonSchema,
+    expiresAt: utcDateTimeSchema,
+  })
+  .strict();
+export type ImportPreparation = z.infer<typeof importPreparationSchema>;
+export const importPreparationRetrySchema = z.object({}).strict();
+
 export const importPrepareResponseSchema = z
-  .object({ items: z.array(importPreviewSchema) })
+  .object({
+    preparation: importPreparationSchema,
+    items: z.array(importPreviewSchema).max(MAX_APPLY_ITEMS),
+  })
   .strict();
 export type ImportPrepareResponse = z.infer<typeof importPrepareResponseSchema>;

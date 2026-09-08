@@ -827,6 +827,13 @@
       "when": 1788903699965,
       "tag": "0117_outstanding_invisible_woman",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1788909383048,
+      "tag": "0118_tired_lorna_dane",
+      "breakpoints": true
     }
   ]
 }
