@@ -222,8 +222,9 @@ export class NationalCatalogImportRepository {
             : local
               ? "existing"
               : "new";
-        row.selectable =
-          !local?.archived && !row.statusKeys?.includes("archived") && row.match !== "other_link";
+        // Selecting an accessible candidate permits a replacement preview only;
+        // the existing link still requires explicit confirmation in apply.
+        row.selectable = !local?.archived && !row.statusKeys?.includes("archived");
         row.reason = local?.archived
           ? "archived_local"
           : row.statusKeys?.includes("archived")

@@ -827,27 +827,69 @@ describe.skipIf(!process.env.DATABASE_URL)("durable National Catalog sessions", 
     await service.cancel(actor, session.id);
     await expect(check()).rejects.toMatchObject({ status: 410 });
   });
-  it("does not call a card linked when its bound GTIN differs from the current product", async () => {
-    const productId = randomUUID();
-    await db
-      .insert(schema.products)
-      .values({ id: productId, tenantId: actor.tenantId, gtin14: GTIN, name: "Changed GTIN" });
-    await db.insert(schema.nationalCatalogProductLinks).values({
-      tenantId: actor.tenantId,
-      productId,
-      environment: "sandbox",
-      cardId: "1",
-      boundGtin14: gtin(42),
-      confirmedBy: actor.userId,
-    });
-    const session = await service.start(actor, { mode: "gtins", text: GTIN });
-    detail.mockResolvedValueOnce(feed([product(1)]));
-    await service.resume(actor.tenantId, session.id);
-    expect((await service.items(actor.tenantId, session.id, query)).items[0]).toMatchObject({
-      productId,
-      match: "other_link",
-      selectable: false,
-      reason: "other_link",
-    });
-  });
+  it.each(["card", "bound_gtin", "environment"] as const)(
+    "allows explicit replacement selection for a different link %s without mutating it",
+    async (difference) => {
+      const productId = randomUUID();
+      await db.insert(schema.products).values({
+        id: productId,
+        tenantId: actor.tenantId,
+        gtin14: GTIN,
+        name: "Existing product",
+      });
+      await db.insert(schema.nationalCatalogProductLinks).values({
+        tenantId: actor.tenantId,
+        productId,
+        environment: difference === "environment" ? "production" : "sandbox",
+        cardId: difference === "card" ? "2" : "1",
+        boundGtin14: difference === "bound_gtin" ? gtin(42) : GTIN,
+        confirmedBy: actor.userId,
+      });
+      const readLink = () =>
+        db
+          .select()
+          .from(schema.nationalCatalogProductLinks)
+          .where(
+            and(
+              eq(schema.nationalCatalogProductLinks.tenantId, actor.tenantId),
+              eq(schema.nationalCatalogProductLinks.productId, productId),
+            ),
+          );
+      const readProduct = () =>
+        db
+          .select()
+          .from(schema.products)
+          .where(
+            and(eq(schema.products.tenantId, actor.tenantId), eq(schema.products.id, productId)),
+          );
+      const previousLink = await readLink();
+      const previousProduct = await readProduct();
+      const session = await service.start(actor, { mode: "gtins", text: GTIN });
+      detail.mockResolvedValueOnce(feed([product(1)]));
+      await service.resume(actor.tenantId, session.id);
+      const candidate = (await service.items(actor.tenantId, session.id, query)).items[0]!;
+      expect(candidate).toMatchObject({
+        productId,
+        cardId: "1",
+        match: "other_link",
+        selectable: true,
+        reason: "other_link",
+        selected: false,
+      });
+      const current = await service.read(actor.tenantId, session.id);
+      await expect(
+        service.select(actor, session.id, {
+          expectedRevision: current.revision,
+          itemIds: [candidate.id],
+        }),
+      ).resolves.toMatchObject({ selected: 1, selectedItemIds: [candidate.id] });
+      expect((await service.items(actor.tenantId, session.id, query)).items[0]).toMatchObject({
+        match: "other_link",
+        reason: "other_link",
+        selected: true,
+      });
+      expect(await readLink()).toEqual(previousLink);
+      expect(await readProduct()).toEqual(previousProduct);
+    },
+  );
 });
