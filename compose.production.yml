@@ -28,6 +28,7 @@ services:
       NODE_OPTIONS: "--max-old-space-size=2048"
       PORT: "3000"
       TRUST_PROXY_HOPS: "1"
+      VALIDATION_DM_DUPLICATE_ENABLED: ${VALIDATION_DM_DUPLICATE_ENABLED:-false}
     depends_on:
       migrate:
         condition: service_completed_successfully

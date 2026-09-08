@@ -115,7 +115,7 @@ export class AppModule {
         ProductRegulatoryModule,
         NationalCatalogModule.forRoot(env),
         LinesModule,
-        ShiftsModule,
+        ShiftsModule.forRoot(env.VALIDATION_DM_DUPLICATE_ENABLED),
         DashboardModule,
         InventoriesModule,
         ChzExportsModule.forRoot(env),

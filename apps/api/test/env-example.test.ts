@@ -60,6 +60,13 @@ function parseExampleEnv(text: string): NodeJS.ProcessEnv {
 const EXAMPLE_ENV = parseExampleEnv(readFileSync(EXAMPLE_PATH, "utf8"));
 
 describe(".env.example", () => {
+  it("keeps duplicate printing disabled until hardware acceptance", () => {
+    expect(loadEnv(EXAMPLE_ENV).VALIDATION_DM_DUPLICATE_ENABLED).toBe(false);
+    const production = parseExampleEnv(
+      readFileSync(join(__dirname, "../../../.env.production.example"), "utf8"),
+    );
+    expect(production.VALIDATION_DM_DUPLICATE_ENABLED).toBe("");
+  });
   it("boots the API exactly as `cp .env.example .env` leaves it", () => {
     expect(() => loadEnv(EXAMPLE_ENV)).not.toThrow();
   });

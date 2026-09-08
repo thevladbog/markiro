@@ -6,12 +6,14 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { and, desc, eq, gte, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   formatShiftNumber,
+  PRODUCT_LABEL_PROTOCOL,
   isBoxLabelTemplateEligible,
   productLabelTemplateListSchema,
   parseLabelTemplate,
@@ -51,21 +53,33 @@ import type {
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
 
+import {
+  assertProductLabelCapability,
+  assertValidationPrintCompatible,
+  snapshotValidationPrintPolicy,
+  validationPrintFromStorage,
+  validationPrintToStorage,
+  validationPrintInput,
+  VALIDATION_DM_DUPLICATE_ENABLED,
+  type ValidationPrintStorage,
+} from "./validation-print-policy";
+
 type ShiftRow = typeof schema.shifts.$inferSelect;
 type CurrentShiftRow = Omit<ShiftRow, "labelTemplateId">;
 type ProductRow = Omit<typeof schema.products.$inferSelect, "defaultLabelTemplateId"> & {
   productGroupName: string | null;
 };
-type JoinedShiftRow = Omit<ShiftDto, "image" | "number"> & {
-  numberMonthKey: string;
-  numberSeq: number;
-  imageChecksum: string | null;
-  imageByteSize: number | null;
-  imageWidth: number | null;
-  imageHeight: number | null;
-  stationClosePolicy: "single_device" | "admin_only";
-  stationCloseOwnerDeviceId: string | null;
-};
+type JoinedShiftRow = Omit<ShiftDto, "image" | "number" | "validationPrint"> &
+  ValidationPrintStorage & {
+    numberMonthKey: string;
+    numberSeq: number;
+    imageChecksum: string | null;
+    imageByteSize: number | null;
+    imageWidth: number | null;
+    imageHeight: number | null;
+    stationClosePolicy: "single_device" | "admin_only";
+    stationCloseOwnerDeviceId: string | null;
+  };
 export type EffectiveListShiftsQuery = ListShiftsQueryDto & { includeUnassigned?: boolean };
 
 type ProductionDateChange = {
@@ -173,6 +187,9 @@ export class ShiftsService {
     private readonly operatorsService: OperatorsService,
     private readonly sscc: SsccService,
     private readonly entitlements: EntitlementsService,
+    @Optional()
+    @Inject(VALIDATION_DM_DUPLICATE_ENABLED)
+    private readonly duplicateEnabled: boolean = false,
   ) {}
 
   /** List a tenant's shifts, joined with product/line/counterparty names. */
@@ -234,7 +251,11 @@ export class ShiftsService {
   async getPlanningConfig(tenantId: string, productId?: string): Promise<ShiftPlanningConfigDto> {
     const chzProductGroupCode = await this.productGroupCodeForPicker(tenantId, productId);
     const resolved = await resolveDefaultBoxLabelTemplate(this.db, tenantId, chzProductGroupCode);
-    return { defaultBoxLabelTemplateId: resolved.templateId, defaultSource: resolved.source };
+    return {
+      defaultBoxLabelTemplateId: resolved.templateId,
+      defaultSource: resolved.source,
+      validationPrintProtocol: this.duplicateEnabled ? PRODUCT_LABEL_PROTOCOL : null,
+    };
   }
 
   async listBoxLabelTemplates(
@@ -577,7 +598,12 @@ export class ShiftsService {
     tenantId: string,
     data: CreateShiftDto,
     createdFrom: ShiftOrigin = "admin",
+    capabilities?: string,
   ): Promise<ShiftDto> {
+    const printInput = data.validationPrint ?? { mode: "none" };
+    assertValidationPrintCompatible(data.mode, printInput);
+    if (createdFrom === "station") assertProductLabelCapability(printInput, capabilities);
+    if (printInput.mode === "duplicate_dm") this.assertDuplicateEnabled();
     if (data.palletsEnabled === true) {
       await this.entitlements.assertFeatureAccess(tenantId, "pallets");
     }
@@ -618,6 +644,13 @@ export class ShiftsService {
 
     try {
       const [row] = await this.db.transaction(async (tx) => {
+        const validationPrint = await snapshotValidationPrintPolicy(
+          tx,
+          tenantId,
+          data.productId,
+          data.mode,
+          printInput,
+        );
         const [counter] = await tx
           .insert(schema.shiftNumberCounters)
           .values({ tenantId, monthKey, lastSeq: 1 })
@@ -634,6 +667,7 @@ export class ShiftsService {
           .values({
             tenantId,
             productId: data.productId,
+            ...validationPrintToStorage(validationPrint),
             lineId: data.lineId ?? null,
             counterpartyId: counterpartyId ?? null,
             // The issuer is always explicit (unlike the org-defaulted box
@@ -712,6 +746,12 @@ export class ShiftsService {
           .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, id)))
           .for("update");
         if (!current) return { kind: "not_found" };
+        if (current.status !== "planned" && data.validationPrint !== undefined) {
+          throw new ConflictException({
+            code: "VALIDATION_PRINT_POLICY_FROZEN",
+            message: "Print settings are fixed after the shift starts",
+          });
+        }
 
         const productionDateChange: ProductionDateChange | null =
           data.productionDate !== undefined && data.productionDate !== current.productionDate
@@ -863,6 +903,21 @@ export class ShiftsService {
         }
 
         const mode = data.mode !== undefined ? data.mode : current.mode;
+        const previousPrint = validationPrintFromStorage(current);
+        const printInput = data.validationPrint ?? validationPrintInput(previousPrint);
+        assertValidationPrintCompatible(mode, printInput);
+        if (data.validationPrint?.mode === "duplicate_dm") this.assertDuplicateEnabled();
+        const validationPrint =
+          data.validationPrint === undefined
+            ? previousPrint
+            : await snapshotValidationPrintPolicy(
+                tx,
+                tenantId,
+                current.productId,
+                mode,
+                printInput,
+                previousPrint,
+              );
         const lineId = data.lineId !== undefined ? data.lineId : current.lineId;
         const counterpartyId =
           data.counterpartyId !== undefined ? data.counterpartyId : current.counterpartyId;
@@ -890,6 +945,7 @@ export class ShiftsService {
         const [updated] = await tx
           .update(schema.shifts)
           .set({
+            ...validationPrintToStorage(validationPrint),
             mode,
             lineId,
             counterpartyId,
@@ -1011,33 +1067,47 @@ export class ShiftsService {
   }
 
   /** Open a planned shift: planned -> active, stamps openedAt. 409 otherwise. */
-  async openShift(tenantId: string, id: string, deviceId?: string): Promise<ShiftDto> {
-    if (deviceId) return this.enterShift(tenantId, id, deviceId);
-    const current = await this.findRow(tenantId, id);
-    if (!current) throw new NotFoundException();
-    if (current.status !== "planned") {
-      throw new ConflictException("Shift can only be opened while planned");
-    }
-    if (current.palletsEnabled) {
-      await this.entitlements.assertFeatureAccess(tenantId, "pallets");
-    }
-    const [row] = await this.db
-      .update(schema.shifts)
-      .set({ status: "active", openedAt: new Date() })
-      .where(
-        and(
-          eq(schema.shifts.tenantId, tenantId),
-          eq(schema.shifts.id, id),
-          eq(schema.shifts.status, "planned"),
-        ),
-      )
-      .returning();
-    if (!row) throw new ConflictException("Shift can only be opened while planned");
-    return this.getShift(tenantId, row.id);
+  async openShift(
+    tenantId: string,
+    id: string,
+    deviceId?: string,
+    capabilities?: string,
+  ): Promise<ShiftDto> {
+    if (deviceId) return this.enterShift(tenantId, id, deviceId, capabilities);
+    await this.db.transaction(async (tx) => {
+      const [current] = await tx
+        .select(CURRENT_SHIFT_STORAGE_SELECTION)
+        .from(schema.shifts)
+        .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, id)))
+        .for("update");
+      if (!current) throw new NotFoundException();
+      if (current.status !== "planned")
+        throw new ConflictException("Shift can only be opened while planned");
+      if (current.palletsEnabled) await this.entitlements.assertFeatureAccess(tenantId, "pallets");
+      const previous = validationPrintFromStorage(current);
+      const policy = await snapshotValidationPrintPolicy(
+        tx,
+        tenantId,
+        current.productId,
+        current.mode,
+        validationPrintInput(previous),
+        previous,
+      );
+      await tx
+        .update(schema.shifts)
+        .set({ status: "active", openedAt: new Date(), ...validationPrintToStorage(policy) })
+        .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, id)));
+    });
+    return this.getShift(tenantId, id);
   }
 
   /** Register a station's participation and atomically derive close authority. */
-  async enterShift(tenantId: string, id: string, deviceId: string): Promise<ShiftDto> {
+  async enterShift(
+    tenantId: string,
+    id: string,
+    deviceId: string,
+    capabilities?: string,
+  ): Promise<ShiftDto> {
     await this.db.transaction(async (tx) => {
       const [device] = await tx
         .select({ id: schema.stationDevices.id })
@@ -1053,23 +1123,27 @@ export class ShiftsService {
       if (!device) throw new NotFoundException("Station device not found");
 
       const [shift] = await tx
-        .select({
-          id: schema.shifts.id,
-          status: schema.shifts.status,
-          palletsEnabled: schema.shifts.palletsEnabled,
-          stationClosePolicy: schema.shifts.stationClosePolicy,
-          stationCloseOwnerDeviceId: schema.shifts.stationCloseOwnerDeviceId,
-        })
+        .select(CURRENT_SHIFT_STORAGE_SELECTION)
         .from(schema.shifts)
         .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, id)))
         .for("update");
       if (!shift) throw new NotFoundException();
+      const previous = validationPrintFromStorage(shift);
+      assertProductLabelCapability(previous, capabilities);
       if (shift.status === "closed") throw new ConflictException("Closed shifts cannot be entered");
       if (shift.status === "planned") {
         if (shift.palletsEnabled) await this.entitlements.assertFeatureAccess(tenantId, "pallets");
+        const policy = await snapshotValidationPrintPolicy(
+          tx,
+          tenantId,
+          shift.productId,
+          shift.mode,
+          validationPrintInput(previous),
+          previous,
+        );
         await tx
           .update(schema.shifts)
-          .set({ status: "active", openedAt: new Date() })
+          .set({ status: "active", openedAt: new Date(), ...validationPrintToStorage(policy) })
           .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, id)));
       }
 
@@ -1114,8 +1188,18 @@ export class ShiftsService {
    * device). It gates the box serial block below: `sscc_blocks.device_id`
    * carries a NOT NULL FK, so a block can only ever be cut for a real device.
    */
-  async getBundle(tenantId: string, id: string, deviceId: string | null): Promise<ShiftBundleDto> {
-    const referenceBundle = await this.getReferenceBundle(tenantId, id);
+  async getBundle(
+    tenantId: string,
+    id: string,
+    deviceId: string | null,
+    capabilities?: string,
+  ): Promise<ShiftBundleDto> {
+    const referenceBundle = await this.getReferenceBundle(
+      tenantId,
+      id,
+      deviceId !== null,
+      capabilities,
+    );
     const allocation =
       referenceBundle.shift.mode === "aggregation" && deviceId
         ? await this.bundleSscc(tenantId, referenceBundle.shift.id, deviceId)
@@ -1124,12 +1208,17 @@ export class ShiftsService {
   }
 
   /**
-   * Reference-only bundle for recovery. This method intentionally accepts no
-   * device id and never enters `bundleSscc`, so it cannot allocate, replace,
-   * or reconcile server-side SSCC state.
+   * Reference-only recovery never enters `bundleSscc`; station callers must
+   * still understand the frozen print policy before receiving the bundle.
    */
-  async getReferenceBundle(tenantId: string, id: string): Promise<ShiftReferenceBundleDto> {
+  async getReferenceBundle(
+    tenantId: string,
+    id: string,
+    stationCaller = false,
+    capabilities?: string,
+  ): Promise<ShiftReferenceBundleDto> {
     const shift = await this.getShift(tenantId, id); // 404 if cross-tenant/missing
+    if (stationCaller) assertProductLabelCapability(shift.validationPrint, capabilities);
 
     const productRow = await this.findProductRow(tenantId, shift.productId);
     if (!productRow) throw new NotFoundException("Shift product missing");
@@ -1164,6 +1253,7 @@ export class ShiftsService {
       productId: shift.productId,
       productName: shift.productName,
       productPrintName: shift.productPrintName,
+      validationPrint: shift.validationPrint,
       image: shift.image ?? null,
       lineId: shift.lineId,
       lineName: shift.lineName,
@@ -1438,9 +1528,22 @@ export class ShiftsService {
     }
   }
 
+  private assertDuplicateEnabled(): void {
+    if (!this.duplicateEnabled)
+      throw new ConflictException({
+        code: "VALIDATION_PRINT_DISABLED",
+        message: "Duplicate printing is not enabled",
+      });
+  }
+
   private joinedSelection() {
     return {
       id: schema.shifts.id,
+      validationPrintMode: schema.shifts.validationPrintMode,
+      validationPrintVerification: schema.shifts.validationPrintVerification,
+      validationPrintTemplateId: schema.shifts.validationPrintTemplateId,
+      validationPrintSnapshot: schema.shifts.validationPrintSnapshot,
+      validationPrintPolicyRevision: schema.shifts.validationPrintPolicyRevision,
       status: schema.shifts.status,
       mode: schema.shifts.mode,
       productId: schema.shifts.productId,
@@ -1477,6 +1580,11 @@ export class ShiftsService {
 
   private mapShiftRow(row: JoinedShiftRow): ShiftDto {
     const {
+      validationPrintMode,
+      validationPrintVerification,
+      validationPrintTemplateId,
+      validationPrintSnapshot,
+      validationPrintPolicyRevision,
       numberMonthKey,
       numberSeq,
       imageChecksum,
@@ -1495,6 +1603,13 @@ export class ShiftsService {
           : undefined;
     return {
       ...shift,
+      validationPrint: validationPrintFromStorage({
+        validationPrintMode,
+        validationPrintVerification,
+        validationPrintTemplateId,
+        validationPrintSnapshot,
+        validationPrintPolicyRevision,
+      }),
       number: formatShiftNumber({
         monthKey: numberMonthKey,
         seq: numberSeq,

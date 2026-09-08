@@ -191,8 +191,16 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     await agent.get("/org/profile").expect(403);
 
     const response = await agent.get("/shifts/planning-config").expect(200);
-    expect(response.body).toEqual({ defaultBoxLabelTemplateId, defaultSource: "organization" });
-    expect(Object.keys(response.body)).toEqual(["defaultBoxLabelTemplateId", "defaultSource"]);
+    expect(response.body).toEqual({
+      defaultBoxLabelTemplateId,
+      defaultSource: "organization",
+      validationPrintProtocol: null,
+    });
+    expect(Object.keys(response.body)).toEqual([
+      "defaultBoxLabelTemplateId",
+      "defaultSource",
+      "validationPrintProtocol",
+    ]);
   });
 
   // ---------------------------------------------------------------------
@@ -1641,9 +1649,9 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const apiKey = device.apiKey;
     const server = app!.getHttpServer();
 
-    // Session-only: not part of the station's six routes.
+    // Session-only administrative mutations and shift detail.
     await request(server).get(`/shifts/${id}`).set("x-api-key", apiKey).expect(403);
-    await request(server).get("/shifts/planning-config").set("x-api-key", apiKey).expect(403);
+
     await request(server)
       .patch(`/shifts/${id}`)
       .set("x-api-key", apiKey)
@@ -1657,6 +1665,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     await request(server).delete(`/shifts/${id}`).set("x-api-key", apiKey).expect(403);
 
     // Regression guard: the station's own routes stay reachable by the same key.
+    await request(server).get("/shifts/planning-config").set("x-api-key", apiKey).expect(200);
     await request(server).get("/shifts").set("x-api-key", apiKey).expect(200);
     const stationCreated = await request(server)
       .post("/shifts")
@@ -1857,16 +1866,19 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
 
     const beerConfig = await agent.get(`/shifts/planning-config?productId=${beer}`).expect(200);
     expect(beerConfig.body).toEqual({
+      validationPrintProtocol: null,
       defaultBoxLabelTemplateId: beerDefault,
       defaultSource: "category",
     });
     const milkConfig = await agent.get(`/shifts/planning-config?productId=${milk}`).expect(200);
     expect(milkConfig.body).toEqual({
+      validationPrintProtocol: null,
       defaultBoxLabelTemplateId: orgDefault,
       defaultSource: "organization",
     });
     const orgConfig = await agent.get("/shifts/planning-config").expect(200);
     expect(orgConfig.body).toEqual({
+      validationPrintProtocol: null,
       defaultBoxLabelTemplateId: orgDefault,
       defaultSource: "organization",
     });

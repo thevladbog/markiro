@@ -11,6 +11,22 @@ const requiredEnv = {
   BETTER_AUTH_URL: "http://localhost:3000",
 };
 
+describe("validation duplicate rollout gate", () => {
+  it.each([undefined, "", "false"])("defaults safely to disabled: %s", (value) => {
+    expect(
+      loadEnv({ ...requiredEnv, VALIDATION_DM_DUPLICATE_ENABLED: value })
+        .VALIDATION_DM_DUPLICATE_ENABLED,
+    ).toBe(false);
+  });
+  it("requires an explicit true and rejects ambiguous flags", () => {
+    expect(
+      loadEnv({ ...requiredEnv, VALIDATION_DM_DUPLICATE_ENABLED: "true" })
+        .VALIDATION_DM_DUPLICATE_ENABLED,
+    ).toBe(true);
+    expect(() => loadEnv({ ...requiredEnv, VALIDATION_DM_DUPLICATE_ENABLED: "1" })).toThrow();
+  });
+});
+
 describe("National Catalog environment", () => {
   it("accepts trimmed optional configuration and defaults its bounded timeout", () => {
     const env = loadEnv({

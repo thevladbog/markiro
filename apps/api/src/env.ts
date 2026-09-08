@@ -195,6 +195,9 @@ const EnvSchema = z
     SMTP_FROM_NAME: z.string().min(1),
     SMTP_REPLY_TO: z.email().optional(),
     MAIL_PAYLOAD_ENCRYPTION_KEY: encryptionKeySchema,
+    VALIDATION_DM_DUPLICATE_ENABLED: explicitBooleanSchema
+      .optional()
+      .transform((value) => value ?? false),
     LANDING_DEMO_SUBMISSION_ENABLED: explicitBooleanSchema
       .optional()
       .transform((value) => value ?? false),
@@ -311,6 +314,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     "SMTP_USER",
     "SMTP_PASSWORD",
     "SMTP_REPLY_TO",
+    "VALIDATION_DM_DUPLICATE_ENABLED",
     "LANDING_DEMO_SUBMISSION_ENABLED",
     "LANDING_ORIGIN",
     "LANDING_DEMO_RECIPIENT",

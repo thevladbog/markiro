@@ -654,7 +654,8 @@ enabled=true и текущая категория товара; disabled/cross-t
 ## Task 7: Политика смены, снимок и capability gates
 
 **Files:** Create `apps/api/src/modules/shifts/validation-print-policy.ts`;
-modify `modules/shifts/{dto,shifts.controller,shifts.service}.ts`,
+modify `modules/shifts/{dto,shifts.controller,shifts.service,shifts.module}.ts`,
+`apps/api/src/{app.module,cors}.ts`, `docs/device-key-surface.md`,
 `apps/api/test/{shifts.service,shifts.e2e,shifts-bundle.e2e,shifts-openapi}.test.ts`;
 create `apps/api/test/validation-print-policy.test.ts`; modify `apps/api/src/env.ts`,
 `apps/api/test/{env,env-example}.test.ts`, `.env.example`, `.env.production.example`.
@@ -672,10 +673,11 @@ recovery и sync существующих заданий не блокируют
 Compose передаёт `VALIDATION_DM_DUPLICATE_ENABLED` с default false, как остальные
 явно разрешённые API environment fields; значение на production не меняется
 в рамках реализации. Contract test проверяет передачу и безопасный default.
+`GET /shifts/planning-config` разрешён станции через существующий shared-read guard и точный CORS маршрут: оператор использует тот же ограниченный planning contract; полный org/profile остаётся cabinet-only. Флаг передаётся через ShiftsModule.forRoot из валидированного env.
 Create/PATCH принимают только `ValidationPrintInput`; ShiftDto/bundle возвращают
 `ValidationPrintPolicy`. Все обращения к snapshot/digest проходят server schema.
 
-- [ ] Добавить boundary tests:
+- [x] Добавить boundary tests:
 
 ```ts
 expect(() =>
@@ -695,8 +697,8 @@ expect(() =>
 имени и spec задачи 2, digest через `productLabelValueDigest` и фиксированного
 UUID policyRevision. Не подменять enabled policy обычной для получения PASS.
 
-- [ ] Run `pnpm --filter @markiro/api exec vitest run test/validation-print-policy.test.ts`; ожидается missing module.
-- [ ] В planned create/update сервер получает пригодный шаблон, строит snapshot и revision. При открытии — повторно проверяет и фиксирует актуальный snapshot под тем же tenant-scoped shift row lock, что смена статуса. Для active PATCH добавляется запрет:
+- [x] Run `pnpm --filter @markiro/api exec vitest run test/validation-print-policy.test.ts`; ожидается missing module.
+- [x] В planned create/update сервер получает пригодный шаблон, строит snapshot и revision. При открытии — повторно проверяет и фиксирует актуальный snapshot под тем же tenant-scoped shift row lock, что смена статуса. Для active PATCH добавляется запрет:
 
 ```ts
 if (current.status !== "planned" && data.validationPrint !== undefined) {
@@ -708,16 +710,16 @@ if (current.status !== "planned" && data.validationPrint !== undefined) {
 явно стать none; не оставлять скрытую duplicate policy. Старые requests/rows
 none не меняют форму учёта. Отсутствующее поле PATCH сохраняет текущее значение.
 
-- [ ] Добавить capability guard для station callers в create нового режима,
+- [x] Добавить capability guard для station callers в create нового режима,
       open, enter, bundle и reference-bundle; кабинет сохраняет свои permission checks.
       Старому устройству возвращать `STATION_UPDATE_REQUIRED`, без участия в смене и
       без SSCC allocation. В bundle — новый явно именованный policy snapshot,
       legacy `labelTemplate=null` и существующий boxLabelTemplate сохраняются.
-- [ ] E2E: snapshot не меняется после изменения/выключения библиотечного шаблона;
+- [x] E2E: snapshot не меняется после изменения/выключения библиотечного шаблона;
       active policy freeze выдерживает race PATCH/open; вход старого клиента не
       создаёт participation; новый mode не потребляет SSCC; новая станция и админ
       создают одинаковую конфигурацию. Обновить DTO/OpenAPI tests и backward cases.
-- [ ] Run focused API suites и package gates. Commit: `feat(api): snapshot validation print policy and gate station capabilities`.
+- [x] Run focused API suites и package gates. Commit: `feat(api): snapshot validation print policy and gate station capabilities`.
 
 ## Task 8: Печатные поля и зеркало станции
 
@@ -1533,3 +1535,9 @@ immutable events. Windows/Tauri pool и физическое отключени�
 ### Task 6 — API шаблонов
 
 Добавлены назначение, неизменяемость purpose и spec-free station picker. Дубликаты исключены из выбора/дефолтов коробов и инвентаризации. RED→GREEN для DTO и e2e. Целевые 255 тестов прошли; полный API: 2807 passed, 50 skipped, 5 failed. Все 5 причин устранены/перепроверены: два fixture без purpose, ожидаемый список авторизации без нового route, отсутствующий тестовый CHZ encryption key (два теста; production-код не менялся). Повтор трёх затронутых suites: 47/47. API typecheck, lint, build прошли. Полный повтор будет выполнен после следующего изменения API. Пропуски: отдельные внешние/инфраструктурные opt-in suites.
+
+### Task 7 — Политика смены и совместимость
+
+Политика сохраняется и возвращается отдельным validationPrint. Создание/изменение planned и запуск используют tenant-scoped locks; запуск повторно проверяет библиотечный шаблон, active сохраняет snapshot. Guard точного protocol до создания/участия/выдачи bundle. Planning-config разрешён станции с ограниченным ответом. Rollout flag default false передан через валидированный env и API module в Compose; recovery уже открытых смен не блокируется выключенным flag.
+
+Проверки: 13 новых lifecycle e2e (включая race PATCH/open и PATCH/enter), 9 boundary unit, env/OpenAPI, отказ старому устройству без побочных записей, tenant/category/purpose/disabled guards. Полный API: **272 suites passed, 2865 tests passed, 25 skipped** (отдельные opt-in внешние/инфраструктурные проверки). API typecheck/lint/build, scoped formatting, diff check прошли. Compose contracts: 14/14. Физические принтеры/сканеры не подключались.

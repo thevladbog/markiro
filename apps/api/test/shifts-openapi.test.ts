@@ -85,6 +85,7 @@ const shiftProperties = [
   "counterpartyName",
   "ssccIssuerCounterpartyId",
   "boxLabelTemplateId",
+  "validationPrint",
   "plannedQty",
   "plannedDate",
   "productionDate",
@@ -120,6 +121,35 @@ describe("shifts OpenAPI contract", () => {
     const app = moduleRef.createNestApplication();
     try {
       const document = SwaggerModule.createDocument(app, new DocumentBuilder().build());
+      const planning = responseSchema(document, "/shifts/planning-config", "get", "200");
+      expectRequired(planning, [
+        "defaultBoxLabelTemplateId",
+        "defaultSource",
+        "validationPrintProtocol",
+      ]);
+      expect(property(planning, "validationPrintProtocol")).toMatchObject({
+        enum: ["validation-dm-duplicate-v1"],
+        nullable: true,
+      });
+      for (const [route, method] of [
+        ["/shifts", "post"],
+        ["/shifts/{id}/open", "post"],
+        ["/shifts/{id}/enter", "post"],
+        ["/shifts/{id}/bundle", "get"],
+        ["/shifts/{id}/reference-bundle", "get"],
+      ] as const) {
+        const op = operation(document, route, method);
+        expect(op.parameters).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              name: "x-station-capabilities",
+              in: "header",
+              required: false,
+            }),
+          ]),
+        );
+        expect(op.responses).toHaveProperty("409");
+      }
       const path = "/shifts/product-label-templates";
       const schema = responseSchema(document, path, "get", "200");
       expectProperties(schema, ["items"]);
@@ -166,6 +196,7 @@ describe("shifts OpenAPI contract", () => {
         "counterpartyId",
         "ssccIssuerCounterpartyId",
         "boxLabelTemplateId",
+        "validationPrint",
         "plannedQty",
         "plannedDate",
         "productionDate",
@@ -183,6 +214,7 @@ describe("shifts OpenAPI contract", () => {
         "counterpartyId",
         "ssccIssuerCounterpartyId",
         "boxLabelTemplateId",
+        "validationPrint",
         "plannedQty",
         "plannedDate",
         "productionDate",

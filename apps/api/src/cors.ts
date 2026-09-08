@@ -60,6 +60,7 @@ function isStationRequest(req: Request): boolean {
     ((method === "GET" || method === "POST") && path === "/shifts") ||
     (method === "GET" && path === "/shifts/box-label-templates") ||
     (method === "GET" && path === "/shifts/product-label-templates") ||
+    (method === "GET" && path === "/shifts/planning-config") ||
     (method === "GET" && path === "/products") ||
     (method === "POST" && path === "/products/gtin-check")
   ) {
