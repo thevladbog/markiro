@@ -9,6 +9,12 @@ import {
 } from "../src/modules/national-catalog/national-catalog.client";
 
 const auth = { baseUrl: "https://catalog.example.test", token: "catalog-token" };
+const listRequest = {
+  updatedFrom: "2026-09-01 00:00:00",
+  updatedTo: "2026-09-08 12:00:00",
+  offset: 0,
+  limit: 2,
+};
 
 function contentHash(payload: unknown): string {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
@@ -94,6 +100,231 @@ const productPayload = {
 };
 
 describe("NationalCatalogClient", () => {
+  it("does not interpret an oversized period as an empty catalogue", async () => {
+    const client = new NationalCatalogClient(
+      dependencies(async () => new Response("", { status: 413 })),
+    );
+
+    await expect(
+      client.listOwnProducts(auth, {
+        updatedFrom: "1970-01-01 00:00:00",
+        updatedTo: "2026-09-08 12:00:00",
+        offset: 0,
+        limit: 1000,
+      }),
+    ).resolves.toEqual({ status: "selection_too_large" });
+  });
+
+  it("reads an own-product page with raw statuses and one GTIN per provider row", async () => {
+    const rows = [
+      {
+        good_id: 720679,
+        gtin: "0000000000001",
+        good_name: "Чешки детские",
+        brand_name: "Фабрика",
+        good_status: "provider-future-status",
+        good_detailed_status: ["draft", "notsigned", "provider-future-detail"],
+        provider_only: "kept in raw",
+      },
+      {
+        good_id: 720679,
+        gtin: "04600000000017",
+        good_name: "Чешки детские",
+        brand_name: "Фабрика",
+        good_status: null,
+        good_detailed_status: ["published"],
+      },
+    ];
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const payload = {
+      result: { goods: rows, total: 3, offset: 0, limit: 2 },
+    };
+    const client = new NationalCatalogClient(
+      dependencies(async (url, init) => {
+        calls.push({ url: String(url), init: init as RequestInit });
+        return new Response(JSON.stringify(payload), { status: 200 });
+      }),
+    );
+
+    await expect(client.listOwnProducts(auth, listRequest)).resolves.toEqual({
+      status: "ok",
+      etag: null,
+      contentHash: contentHash(payload),
+      usage: { total: null, method: null },
+      value: {
+        rows: [
+          {
+            cardId: "720679",
+            gtins: ["0000000000001"],
+            name: "Чешки детские",
+            brand: "Фабрика",
+            status: "provider-future-status",
+            detailedStatuses: ["draft", "unsigned", "provider-future-detail"],
+            raw: rows[0],
+          },
+          {
+            cardId: "720679",
+            gtins: ["04600000000017"],
+            name: "Чешки детские",
+            brand: "Фабрика",
+            status: null,
+            detailedStatuses: ["published"],
+            raw: rows[1],
+          },
+        ],
+        nextOffset: 2,
+      },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe(
+      "https://catalog.example.test/v4/product-list?from_date=2026-09-01+00%3A00%3A00&to_date=2026-09-08+12%3A00%3A00&offset=0&limit=2",
+    );
+    const headers = new Headers(calls[0]?.init.headers);
+    expect(headers.get("Authorization")).toBe("Bearer catalog-token");
+    expect(calls[0]?.url).not.toContain("catalog-token");
+  });
+
+  it("marks an own-product page complete only when returned rows reach the total", async () => {
+    const payload = {
+      result: {
+        goods: [
+          {
+            good_id: 2,
+            gtin: "invalid-but-visible",
+            good_name: null,
+            brand_name: null,
+            good_status: null,
+            good_detailed_status: [],
+          },
+        ],
+        total: 2,
+        offset: 1,
+        limit: 1,
+      },
+    };
+    const client = new NationalCatalogClient(
+      dependencies(async () => new Response(JSON.stringify(payload), { status: 200 })),
+    );
+
+    await expect(
+      client.listOwnProducts(auth, { ...listRequest, offset: 1, limit: 1 }),
+    ).resolves.toMatchObject({
+      status: "ok",
+      value: {
+        rows: [{ cardId: "2", gtins: ["invalid-but-visible"] }],
+        nextOffset: null,
+      },
+    });
+  });
+
+  it("rejects inconsistent, oversized, and malformed own-product pages", async () => {
+    const row = {
+      good_id: 1,
+      gtin: "0000000000001",
+      good_name: null,
+      brand_name: null,
+      good_status: null,
+      good_detailed_status: [],
+    };
+    const invalidResults: unknown[] = [
+      { goods: [], total: 1, offset: 0, limit: 2 },
+      { goods: [row], total: 1, offset: 1, limit: 2 },
+      { goods: [row], total: 1, offset: 0, limit: 1 },
+      { goods: [row], total: 10_001, offset: 0, limit: 2 },
+      { goods: [row], total: 1, offset: 0, limit: 3 },
+      { goods: [row, row, row], total: 3, offset: 0, limit: 2 },
+      { goods: [{ ...row, good_id: 0 }], total: 1, offset: 0, limit: 2 },
+      { goods: [{ ...row, good_id: Number.MAX_SAFE_INTEGER + 1 }], total: 1, offset: 0, limit: 2 },
+      { goods: [{ ...row, gtin: ["0000000000001"] }], total: 1, offset: 0, limit: 2 },
+      { goods: [{ ...row, good_detailed_status: "published" }], total: 1, offset: 0, limit: 2 },
+    ];
+
+    for (const result of invalidResults) {
+      const client = new NationalCatalogClient(
+        dependencies(async () => new Response(JSON.stringify({ result }), { status: 200 })),
+      );
+      await expect(client.listOwnProducts(auth, listRequest)).resolves.toEqual({
+        status: "invalid_response",
+      });
+    }
+  });
+
+  it("rejects invalid own-product request bounds before making a request", async () => {
+    let calls = 0;
+    const client = new NationalCatalogClient(
+      dependencies(async () => {
+        calls += 1;
+        return new Response("", { status: 200 });
+      }),
+    );
+    const invalidRequests = [
+      { ...listRequest, updatedFrom: "2026-09-01" },
+      { ...listRequest, updatedTo: "not-a-date" },
+      { ...listRequest, updatedFrom: "2026-09-09 00:00:00" },
+      { ...listRequest, offset: -1 },
+      { ...listRequest, offset: 0.5 },
+      { ...listRequest, limit: 0 },
+      { ...listRequest, limit: 1001 },
+      { ...listRequest, offset: 9001, limit: 1000 },
+    ];
+
+    for (const request of invalidRequests) {
+      await expect(client.listOwnProducts(auth, request)).rejects.toThrow();
+    }
+    expect(calls).toBe(0);
+  });
+
+  it("maps own-product authorization, absence, rate, and availability failures", async () => {
+    const cases = [
+      { response: new Response(null, { status: 401 }), expected: { status: "unauthorized" } },
+      {
+        response: new Response(JSON.stringify({ message: "denied" }), { status: 403 }),
+        expected: { status: "forbidden", message: "denied" },
+      },
+      { response: new Response(null, { status: 404 }), expected: { status: "not_found" } },
+      {
+        response: new Response(null, { status: 429, headers: { "Retry-After": "19" } }),
+        expected: { status: "rate_limited", retryAfterSeconds: 19 },
+      },
+      { response: new Response(null, { status: 500 }), expected: { status: "unavailable" } },
+      { response: new Response(null, { status: 503 }), expected: { status: "unavailable" } },
+    ];
+
+    for (const { response, expected } of cases) {
+      const client = new NationalCatalogClient(dependencies(async () => response));
+      await expect(client.listOwnProducts(auth, listRequest)).resolves.toEqual(expected);
+    }
+  });
+
+  it("keeps selection-too-large handling specific to the own-product list", async () => {
+    const client = new NationalCatalogClient(
+      dependencies(async () => new Response("", { status: 413 })),
+    );
+
+    await expect(client.listCategories(auth)).resolves.toEqual({ status: "invalid_response" });
+    await expect(client.getFeedProducts(auth, ["0000000000001"])).resolves.toEqual({
+      status: "invalid_response",
+    });
+  });
+
+  it("rejects an own-product response declared above its method byte limit", async () => {
+    const client = new NationalCatalogClient(
+      dependencies(
+        async () =>
+          new Response("{}", {
+            status: 200,
+            headers: {
+              "Content-Length": String(NATIONAL_CATALOG_RESPONSE_BYTE_LIMITS.list + 1),
+            },
+          }),
+      ),
+    );
+
+    await expect(client.listOwnProducts(auth, listRequest)).resolves.toEqual({
+      status: "invalid_response",
+    });
+  });
+
   it("reads categories with the bearer, ETag cache validator, and a normalized result", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const client = new NationalCatalogClient(
@@ -660,6 +891,262 @@ describe("NationalCatalogClient", () => {
       "https://catalog.example.test/v3/feed-product?gtin=0000000000001",
       "https://catalog.example.test/v3/product?gtin=04600000000017",
     ]);
+  });
+
+  it("reads owned cards by plural good_ids without falling back to a GTIN selector", async () => {
+    const calls: string[] = [];
+    const client = new NationalCatalogClient(
+      dependencies(async (url) => {
+        calls.push(String(url));
+        return new Response(JSON.stringify(productPayload), { status: 200 });
+      }),
+    );
+
+    await expect(client.getFeedProductsByIds(auth, ["720679", "720680"])).resolves.toMatchObject({
+      status: "ok",
+    });
+    await expect(client.getFeedProductsByIds(auth, ["720679"])).resolves.toMatchObject({
+      status: "ok",
+    });
+    expect(calls).toEqual([
+      "https://catalog.example.test/v3/feed-product?good_ids=720679%3B720680",
+      "https://catalog.example.test/v3/feed-product?good_ids=720679",
+    ]);
+    expect(calls.every((url) => !url.includes("gtin"))).toBe(true);
+  });
+
+  it("rejects empty, malformed, unsafe, and over-limit card ID batches before any request", async () => {
+    let calls = 0;
+    const client = new NationalCatalogClient(
+      dependencies(async () => {
+        calls += 1;
+        return new Response(JSON.stringify(productPayload), { status: 200 });
+      }),
+    );
+
+    for (const cardIds of [
+      [],
+      ["0"],
+      ["01"],
+      ["1.5"],
+      ["not-an-id"],
+      [String(Number.MAX_SAFE_INTEGER + 1)],
+      Array.from({ length: 26 }, (_, index) => String(index + 1)),
+    ]) {
+      await expect(client.getFeedProductsByIds(auth, cardIds)).rejects.toThrow();
+    }
+    expect(calls).toBe(0);
+  });
+
+  it("accepts exactly 25 card IDs in one feed-product request", async () => {
+    const cardIds = Array.from({ length: 25 }, (_, index) => String(index + 1));
+    const calls: string[] = [];
+    const client = new NationalCatalogClient(
+      dependencies(async (url) => {
+        calls.push(String(url));
+        return new Response(JSON.stringify(productPayload), { status: 200 });
+      }),
+    );
+
+    await expect(client.getFeedProductsByIds(auth, cardIds)).resolves.toMatchObject({
+      status: "ok",
+    });
+    expect(calls).toHaveLength(1);
+    const url = new URL(calls[0] as string);
+    expect(url.searchParams.get("good_ids")).toBe(cardIds.join(";"));
+    expect(url.searchParams.has("gtin")).toBe(false);
+    expect(url.searchParams.has("gtins")).toBe(false);
+  });
+
+  it("normalizes detailed statuses and usable photos while retaining per-photo issues", async () => {
+    const payload = {
+      ...productPayload,
+      result: [
+        {
+          ...productPayload.result[0],
+          good_detailed_status: ["published", "notsigned", "provider-future-detail"],
+          good_img: "https://cdn.example.test/main.jpg",
+          good_images: [
+            {
+              photo_type: "side",
+              photo_date: "2026-09-08",
+              photo_url: "https://cdn.example.test/side.jpg",
+              barcode: null,
+            },
+            {
+              photo_type: "front",
+              photo_date: "2026-09-08",
+              photo_url: "https://cdn.example.test/main.jpg",
+              barcode: "0000000000001",
+            },
+            {
+              photo_type: "3ds",
+              photo_url: ["https://cdn.example.test/3ds-1.jpg"],
+              barcode: null,
+            },
+            {
+              photo_type: "detail",
+              photo_url: "https://cdn.example.test/invalid-barcode.jpg",
+              barcode: "not-a-barcode",
+            },
+            "not-a-photo-record",
+            {
+              photo_type: "detail",
+              photo_url: "http://cdn.example.test/insecure.jpg",
+              barcode: null,
+            },
+          ],
+        },
+      ],
+    };
+    const client = new NationalCatalogClient(
+      dependencies(async () => new Response(JSON.stringify(payload), { status: 200 })),
+    );
+
+    await expect(client.getFeedProductsByIds(auth, ["720679"])).resolves.toMatchObject({
+      status: "ok",
+      value: {
+        products: [
+          {
+            detailedStatuses: ["published", "unsigned", "provider-future-detail"],
+            images: [
+              {
+                sourceId: "good_images:0",
+                url: "https://cdn.example.test/side.jpg",
+                barcode: null,
+                primary: false,
+              },
+              {
+                sourceId: "good_images:1",
+                url: "https://cdn.example.test/main.jpg",
+                barcode: "0000000000001",
+                primary: true,
+              },
+            ],
+            imageIssues: [
+              { sourceId: "good_images:2", reason: "unsupported_media" },
+              { sourceId: "good_images:3", reason: "invalid_barcode" },
+              { sourceId: "good_images:4", reason: "invalid_record" },
+              { sourceId: "good_images:5", reason: "invalid_url" },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  it("keeps a valid card and default image when the optional gallery container is malformed", async () => {
+    const payload = {
+      ...productPayload,
+      result: [
+        {
+          ...productPayload.result[0],
+          good_img: "https://cdn.example.test/main.jpg",
+          good_images: { photo_url: "https://cdn.example.test/not-a-list.jpg" },
+        },
+      ],
+    };
+    const client = new NationalCatalogClient(
+      dependencies(async () => new Response(JSON.stringify(payload), { status: 200 })),
+    );
+
+    await expect(client.getFeedProducts(auth, ["0000000000001"])).resolves.toMatchObject({
+      status: "ok",
+      value: {
+        products: [
+          {
+            images: [
+              {
+                sourceId: "good_img",
+                url: "https://cdn.example.test/main.jpg",
+                barcode: null,
+                primary: true,
+              },
+            ],
+            imageIssues: [{ sourceId: "good_images", reason: "invalid_collection" }],
+          },
+        ],
+      },
+    });
+  });
+
+  it("does not re-admit a default image whose gallery barcode is invalid", async () => {
+    const payload = {
+      ...productPayload,
+      result: [
+        {
+          ...productPayload.result[0],
+          good_img: "https://cdn.example.test/main.jpg",
+          good_images: [
+            {
+              photo_type: "front",
+              photo_url: "https://cdn.example.test/main.jpg",
+              barcode: "explicitly-invalid",
+            },
+          ],
+        },
+      ],
+    };
+    const client = new NationalCatalogClient(
+      dependencies(async () => new Response(JSON.stringify(payload), { status: 200 })),
+    );
+
+    await expect(client.getFeedProducts(auth, ["0000000000001"])).resolves.toMatchObject({
+      status: "ok",
+      value: {
+        products: [
+          {
+            images: [],
+            imageIssues: [{ sourceId: "good_images:0", reason: "invalid_barcode" }],
+          },
+        ],
+      },
+    });
+  });
+
+  it("preserves an explicit conflicting photo barcode when it shares the default URL", async () => {
+    const payload = {
+      ...productPayload,
+      result: [
+        {
+          ...productPayload.result[0],
+          good_img: "https://cdn.example.test/main.jpg",
+          good_images: [
+            {
+              photo_type: "front",
+              photo_url: "https://cdn.example.test/main.jpg",
+              barcode: null,
+            },
+            {
+              photo_type: "front",
+              photo_url: "https://cdn.example.test/main.jpg",
+              barcode: "9999999999999",
+            },
+          ],
+        },
+      ],
+    };
+    const client = new NationalCatalogClient(
+      dependencies(async () => new Response(JSON.stringify(payload), { status: 200 })),
+    );
+
+    await expect(client.getFeedProducts(auth, ["0000000000001"])).resolves.toMatchObject({
+      status: "ok",
+      value: {
+        products: [
+          {
+            images: [
+              {
+                sourceId: "good_images:1",
+                url: "https://cdn.example.test/main.jpg",
+                barcode: "9999999999999",
+                primary: true,
+              },
+            ],
+          },
+        ],
+      },
+    });
   });
 
   it("normalizes production numeric placeholders for owned and published card reads", async () => {

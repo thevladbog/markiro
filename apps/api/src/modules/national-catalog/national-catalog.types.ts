@@ -105,13 +105,31 @@ export interface NationalCatalogProductAttribute {
   multiplier: number | null;
 }
 
+export interface NationalCatalogProductImage {
+  sourceId: string;
+  url: string;
+  barcode: string | null;
+  primary: boolean;
+}
+
+export type NationalCatalogProductImageIssueReason =
+  "invalid_collection" | "invalid_record" | "invalid_url" | "invalid_barcode" | "unsupported_media";
+
+export interface NationalCatalogProductImageIssue {
+  sourceId: string;
+  reason: NationalCatalogProductImageIssueReason;
+}
+
 export interface NationalCatalogProduct {
   id: number;
   name: string | null;
   status: string | null;
+  detailedStatuses: string[];
   identifiers: NationalCatalogProductIdentifier[];
   categories: NationalCatalogProductCategory[];
   attributes: NationalCatalogProductAttribute[];
+  images: NationalCatalogProductImage[];
+  imageIssues: NationalCatalogProductImageIssue[];
   raw: Record<string, unknown>;
 }
 
@@ -126,6 +144,28 @@ export interface NationalCatalogAttributesResponse {
 export interface NationalCatalogProductsResponse {
   products: NationalCatalogProduct[];
 }
+
+export type NationalCatalogListRequest = {
+  updatedFrom: string;
+  updatedTo: string;
+  offset: number;
+  limit: number;
+};
+
+export type NationalCatalogListRow = {
+  cardId: string;
+  gtins: string[];
+  name: string | null;
+  brand: string | null;
+  status: string | null;
+  detailedStatuses: string[];
+  raw: Record<string, unknown>;
+};
+
+export type NationalCatalogListPage = {
+  rows: NationalCatalogListRow[];
+  nextOffset: number | null;
+};
 
 export interface NationalCatalogEtagsRequest extends NationalCatalogRequestOptions {
   brandId?: number;
@@ -174,3 +214,6 @@ export type NationalCatalogResult<T> =
   | { status: "rate_limited"; retryAfterSeconds: number | null }
   | { status: "invalid_response" }
   | { status: "unavailable" };
+
+export type NationalCatalogListResult =
+  NationalCatalogResult<NationalCatalogListPage> | { status: "selection_too_large" };
