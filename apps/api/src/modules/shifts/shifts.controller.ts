@@ -20,7 +20,11 @@ import {
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger";
-import { CABINET_CAPABILITY } from "@markiro/domain";
+import {
+  CABINET_CAPABILITY,
+  productLabelTemplateListSchema,
+  type ProductLabelTemplateList,
+} from "@markiro/domain";
 import {
   ApiCabinetAuth,
   ApiCabinetOrStationAuth,
@@ -29,6 +33,7 @@ import {
   ApiZodBody,
   ApiZodQuery,
   ApiZodValidationError,
+  zodApiSchema,
 } from "../../lib/openapi";
 import { AllowStationOrPermissions, RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
@@ -68,6 +73,8 @@ import {
   type UpdateShiftDto,
   boxLabelTemplateProductQuerySchema,
   type BoxLabelTemplateProductQueryDto,
+  productLabelTemplateProductQuerySchema,
+  type ProductLabelTemplateProductQueryDto,
 } from "./dto";
 import { ShiftsService, type EffectiveListShiftsQuery } from "./shifts.service";
 
@@ -99,6 +106,26 @@ export class ShiftsController {
         ? { ...query, lineId: req.deviceLineId, includeUnassigned: true }
         : query;
     return this.shiftsService.listShifts(req.tenantId!, effectiveQuery);
+  }
+
+  @Get("product-label-templates")
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "List product duplicate label template options",
+    description:
+      "Enabled templates for the tenant and the product's category. Returns summaries without template specs.",
+  })
+  @ApiCabinetOrStationAuth()
+  @ApiZodQuery(productLabelTemplateProductQuerySchema)
+  @ApiOkResponse({ schema: zodApiSchema(productLabelTemplateListSchema) })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 429)
+  async listProductLabelTemplates(
+    @Req() req: RequestWithTenant,
+    @Query(new ZodValidationPipe(productLabelTemplateProductQuerySchema))
+    query: ProductLabelTemplateProductQueryDto,
+  ): Promise<ProductLabelTemplateList> {
+    return this.shiftsService.listProductLabelTemplates(req.tenantId!, query.productId);
   }
 
   @Get("planning-config")

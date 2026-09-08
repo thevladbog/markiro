@@ -1,7 +1,11 @@
 import { BadRequestException } from "@nestjs/common";
 import { and, eq, inArray } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { resolveBoxLabelTemplateDefault, type BoxLabelTemplateDefault } from "@markiro/domain";
+import {
+  resolveBoxLabelTemplateDefault,
+  type BoxLabelTemplateDefault,
+  type LabelTemplatePurpose,
+} from "@markiro/domain";
 
 /**
  * Database-backed helpers over the domain's box-label eligibility rules.
@@ -11,6 +15,7 @@ import { resolveBoxLabelTemplateDefault, type BoxLabelTemplateDefault } from "@m
 export type EligibilityDb = Pick<Db, "select">;
 
 export interface LabelTemplateEligibilityRow {
+  purpose: LabelTemplatePurpose;
   id: string;
   enabled: boolean;
   chzProductGroupCodes: number[] | null;
@@ -18,6 +23,7 @@ export interface LabelTemplateEligibilityRow {
 
 const ELIGIBILITY_SELECTION = {
   id: schema.labelTemplates.id,
+  purpose: schema.labelTemplates.purpose,
   enabled: schema.labelTemplates.enabled,
   chzProductGroupCodes: schema.labelTemplates.chzProductGroupCodes,
 };

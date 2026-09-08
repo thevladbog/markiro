@@ -139,7 +139,11 @@ export class OrgProfileService {
           if (!template) {
             throw new BadRequestException("Unknown box label template for this organization");
           }
-          if (!template.enabled || template.chzProductGroupCodes !== null) {
+          if (
+            template.purpose !== "box" ||
+            !template.enabled ||
+            template.chzProductGroupCodes !== null
+          ) {
             throw new BadRequestException({
               code: "BOX_LABEL_TEMPLATE_NOT_ELIGIBLE",
               message: "The organisation default must be an enabled template for all categories",

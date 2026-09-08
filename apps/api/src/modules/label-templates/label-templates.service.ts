@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -7,7 +8,13 @@ import {
 } from "@nestjs/common";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { isBoxLabelTemplateEligible, type LabelTemplateSpec } from "@markiro/domain";
+import {
+  assertDuplicateTemplate,
+  DomainError,
+  isBoxLabelTemplateEligible,
+  type LabelTemplatePurpose,
+  type LabelTemplateSpec,
+} from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import {
   assertKnownProductGroupCodes,
@@ -30,6 +37,7 @@ const LABEL_TEMPLATE_REFERENCE_CONSTRAINTS = new Set([
   "products_tenant_default_label_template_fk",
   "shifts_tenant_label_template_fk",
   "shifts_tenant_box_label_template_fk",
+  "shifts_tenant_validation_print_template_fk",
   "inventories_tenant_box_label_template_fk",
 ]);
 
@@ -76,6 +84,7 @@ export class LabelTemplatesService {
     tenantId: string,
     data: CreateLabelTemplateDto,
   ): Promise<LabelTemplateDto> {
+    this.assertPurposeSpec(data.purpose, data.spec);
     if (data.chzProductGroupCodes !== null) {
       await assertKnownProductGroupCodes(this.db, data.chzProductGroupCodes);
     }
@@ -84,6 +93,7 @@ export class LabelTemplatesService {
       .values({
         tenantId,
         name: data.name,
+        purpose: data.purpose,
         spec: data.spec,
         enabled: data.enabled,
         chzProductGroupCodes: data.chzProductGroupCodes,
@@ -116,6 +126,13 @@ export class LabelTemplatesService {
       if (!current) {
         throw new NotFoundException("Label template not found or does not belong to this tenant");
       }
+      if (data.purpose !== undefined && data.purpose !== current.purpose) {
+        throw new ConflictException({
+          code: "LABEL_TEMPLATE_PURPOSE_IMMUTABLE",
+          message: "Label template purpose cannot change",
+        });
+      }
+      if (data.spec !== undefined) this.assertPurposeSpec(current.purpose, data.spec);
       if (data.chzProductGroupCodes) {
         await assertKnownProductGroupCodes(tx, data.chzProductGroupCodes);
       }
@@ -127,7 +144,11 @@ export class LabelTemplatesService {
           : current.chzProductGroupCodes;
       if (data.enabled !== undefined || data.chzProductGroupCodes !== undefined) {
         const usage = await findLabelTemplateDefaultUsage(tx, tenantId, id);
-        const next = { enabled: nextEnabled, chzProductGroupCodes: nextCodes };
+        const next = {
+          purpose: current.purpose,
+          enabled: nextEnabled,
+          chzProductGroupCodes: nextCodes,
+        };
         const organizationDefault =
           usage.organizationDefault && (!nextEnabled || nextCodes !== null);
         const categoryDefaults = usage.categoryDefaults.filter(
@@ -198,6 +219,16 @@ export class LabelTemplatesService {
     }
   }
 
+  private assertPurposeSpec(purpose: LabelTemplatePurpose, spec: LabelTemplateSpec): void {
+    if (purpose !== "product_duplicate") return;
+    try {
+      assertDuplicateTemplate(spec);
+    } catch (error) {
+      if (!(error instanceof DomainError)) throw error;
+      throw new BadRequestException({ code: error.code, message: error.message });
+    }
+  }
+
   private async findRow(tenantId: string, id: string): Promise<LabelTemplateRow | undefined> {
     const [row] = await this.db
       .select()
@@ -210,6 +241,7 @@ export class LabelTemplatesService {
     return {
       id: row.id,
       name: row.name,
+      purpose: row.purpose,
       spec: row.spec as LabelTemplateSpec,
       enabled: row.enabled,
       chzProductGroupCodes: row.chzProductGroupCodes,
@@ -223,6 +255,7 @@ export class LabelTemplatesService {
     return {
       id: row.id,
       name: row.name,
+      purpose: row.purpose,
       widthMm: spec.widthMm,
       heightMm: spec.heightMm,
       dpi: spec.dpi,

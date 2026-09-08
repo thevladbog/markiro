@@ -619,7 +619,7 @@ test `apps/api/test/label-templates.{service,e2e}.test.ts`,
 `ShiftsService.listProductLabelTemplates(tenantId: string, productId: string)`
 проверяет tenant/product/category. Нет наследования box defaults.
 
-- [ ] Расширить DTO test, используя реальный минимальный spec из `buildDuplicateLabelTemplate()`:
+- [x] Расширить DTO test, используя реальный минимальный spec из `buildDuplicateLabelTemplate()`:
 
 ```ts
 const created = createLabelTemplateSchema.parse({
@@ -633,9 +633,9 @@ expect(
 ).toBe("box");
 ```
 
-- [ ] Run `pnpm --filter @markiro/api exec vitest run test/label-templates.service.test.ts`; ожидается отсутствие purpose в parsed/returned объектах.
-- [ ] Пробросить purpose в create/list/get; в PATCH запретить изменение назначения существующей строки. Валидировать spec по сохранённому purpose, включая старый PATCH без поля purpose. Не разрешать старому клиенту повредить product_duplicate шаблон.
-- [ ] В server predicate и все projections выбора box-шаблона включить назначение; обязательный guard:
+- [x] Run `pnpm --filter @markiro/api exec vitest run test/label-templates.service.test.ts`; ожидается отсутствие purpose в parsed/returned объектах.
+- [x] Пробросить purpose в create/list/get; в PATCH запретить изменение назначения существующей строки. Валидировать spec по сохранённому purpose, включая старый PATCH без поля purpose. Не разрешать старому клиенту повредить product_duplicate шаблон.
+- [x] В server predicate и все projections выбора box-шаблона включить назначение; обязательный guard:
 
 ```ts
 if (template.purpose !== "box") {
@@ -648,8 +648,8 @@ if (template.purpose !== "box") {
 enabled=true и текущая категория товара; disabled/cross-tenant/другая категория
 не возвращаются. Зарегистрировать статический route до `:id`.
 
-- [ ] E2E assertions: назначить duplicate шаблон дефолтом короба → 400; назначить чужой шаблон смене → 404/tenant-safe error; выключенный/другая категория → явный отказ; обычные box listings/20 defaults неизменны. Проверить OpenAPI purpose и новый endpoint.
-- [ ] Run API label-template/shifts-bundle/org-profile suites, typecheck/lint/build. Commit: `feat(api): expose product duplicate templates without changing box defaults`.
+- [x] E2E assertions: назначить duplicate шаблон дефолтом короба → 400; назначить чужой шаблон смене → 404/tenant-safe error; выключенный/другая категория → явный отказ; обычные box listings/20 defaults неизменны. Проверить OpenAPI purpose и новый endpoint.
+- [x] Run API label-template/shifts-bundle/org-profile suites, typecheck/lint/build. Commit: `feat(api): expose product duplicate templates without changing box defaults`.
 
 ## Task 7: Политика смены, снимок и capability gates
 
@@ -1529,3 +1529,7 @@ App-тесты уточнены: перехват INSERT теперь отлич
 Операция чтения job использует единый SQL snapshot и сверяет projection с
 immutable events. Windows/Tauri pool и физическое отключение питания пока
 не проверялись: тестовый SQLite helper отключает fsync, это не аппаратная приёмка.
+
+### Task 6 — API шаблонов
+
+Добавлены назначение, неизменяемость purpose и spec-free station picker. Дубликаты исключены из выбора/дефолтов коробов и инвентаризации. RED→GREEN для DTO и e2e. Целевые 255 тестов прошли; полный API: 2807 passed, 50 skipped, 5 failed. Все 5 причин устранены/перепроверены: два fixture без purpose, ожидаемый список авторизации без нового route, отсутствующий тестовый CHZ encryption key (два теста; production-код не менялся). Повтор трёх затронутых suites: 47/47. API typecheck, lint, build прошли. Полный повтор будет выполнен после следующего изменения API. Пропуски: отдельные внешние/инфраструктурные opt-in suites.

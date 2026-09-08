@@ -105,6 +105,38 @@ const requiredShiftProperties = shiftProperties.filter(
 );
 
 describe("shifts OpenAPI contract", () => {
+  it("documents the product-specific duplicate template picker without exposing specs", async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [ShiftsController],
+      providers: [{ provide: ShiftsService, useValue: {} }],
+    })
+      .overrideGuard(TenantGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(AuthorizationGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(SubscriptionAccessGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app = moduleRef.createNestApplication();
+    try {
+      const document = SwaggerModule.createDocument(app, new DocumentBuilder().build());
+      const path = "/shifts/product-label-templates";
+      const schema = responseSchema(document, path, "get", "200");
+      expectProperties(schema, ["items"]);
+      const item = property(schema, "items").items;
+      if (!item) throw new Error("Missing template item schema");
+      expectProperties(item, ["id", "name", "widthMm", "heightMm", "dpi"]);
+      expectRequired(item, ["id", "name", "widthMm", "heightMm", "dpi"]);
+      expect(operation(document, path, "get").parameters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "productId", in: "query", required: true }),
+        ]),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it("documents productionDate on create and update request bodies", async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [ShiftsController],

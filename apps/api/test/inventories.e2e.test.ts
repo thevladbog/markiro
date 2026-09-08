@@ -10,7 +10,11 @@ import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { schema, type Db } from "@markiro/db";
-import { INVENTORY_CHZ_STATUSES, type InventoryChzStatus } from "@markiro/domain";
+import {
+  buildDuplicateLabelTemplate,
+  INVENTORY_CHZ_STATUSES,
+  type InventoryChzStatus,
+} from "@markiro/domain";
 
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -1707,6 +1711,26 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       .send(createBody(productId, lineId, "repack", beerOnly))
       .expect(422);
     expect(scopedRes.body.code).toBe("INVENTORY_BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
+  });
+
+  it("rejects a product duplicate template for an inventory repack box", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId } = await seedPreparation(agent, { mode: "repack" });
+    const id = randomUUID();
+    await db
+      .insert(schema.labelTemplates)
+      .values({
+        id,
+        tenantId,
+        name: "Duplicate",
+        purpose: "product_duplicate",
+        spec: buildDuplicateLabelTemplate(),
+      });
+    const response = await agent
+      .post("/inventories")
+      .send(createBody(productId, lineId, "repack", id))
+      .expect(422);
+    expect(response.body.code).toBe("INVENTORY_BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
   });
 
   it("keeps an inventory editable after its template was disabled, but blocks switching to an ineligible one", async () => {

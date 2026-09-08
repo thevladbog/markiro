@@ -191,6 +191,11 @@ export const boxLabelTemplateProductQuerySchema = z.object({
 });
 export type BoxLabelTemplateProductQueryDto = z.infer<typeof boxLabelTemplateProductQuerySchema>;
 
+export const productLabelTemplateProductQuerySchema = z.object({ productId: z.uuid() });
+export type ProductLabelTemplateProductQueryDto = z.infer<
+  typeof productLabelTemplateProductQuerySchema
+>;
+
 /** GET /shifts/planning-config response — the operations-readable planning subset only. */
 export interface ShiftPlanningConfigDto {
   defaultBoxLabelTemplateId: string | null;

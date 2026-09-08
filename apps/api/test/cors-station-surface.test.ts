@@ -43,6 +43,7 @@ const documentedStationSurface = [
   ["GET", "/shifts"],
   ["POST", "/shifts"],
   ["GET", "/shifts/box-label-templates"],
+  ["GET", "/shifts/product-label-templates"],
   ["GET", "/shifts/shift-1/bundle"],
   ["GET", "/shifts/shift-1/reference-bundle"],
   ["POST", "/shifts/shift-1/open"],

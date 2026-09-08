@@ -10,7 +10,14 @@ import {
 } from "@nestjs/common";
 import { and, desc, eq, gte, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { formatShiftNumber, isBoxLabelTemplateEligible, shiftMonthKey } from "@markiro/domain";
+import {
+  formatShiftNumber,
+  isBoxLabelTemplateEligible,
+  productLabelTemplateListSchema,
+  parseLabelTemplate,
+  shiftMonthKey,
+  type ProductLabelTemplateList,
+} from "@markiro/domain";
 import type { LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import {
@@ -241,19 +248,26 @@ export class ShiftsService {
         id: schema.labelTemplates.id,
         name: schema.labelTemplates.name,
         spec: schema.labelTemplates.spec,
+        purpose: schema.labelTemplates.purpose,
         enabled: schema.labelTemplates.enabled,
         chzProductGroupCodes: schema.labelTemplates.chzProductGroupCodes,
       })
       .from(schema.labelTemplates)
       .where(
-        and(eq(schema.labelTemplates.tenantId, tenantId), eq(schema.labelTemplates.enabled, true)),
+        and(
+          eq(schema.labelTemplates.tenantId, tenantId),
+          eq(schema.labelTemplates.enabled, true),
+          eq(schema.labelTemplates.purpose, "box"),
+        ),
       )
       .orderBy(schema.labelTemplates.name, schema.labelTemplates.id);
     const items = rows
       // Without a product every enabled template is offered (legacy stations);
       // with one, only templates covering its category.
       .filter(
-        (row) => productId === undefined || isBoxLabelTemplateEligible(row, chzProductGroupCode),
+        (row) =>
+          row.purpose === "box" &&
+          (productId === undefined || isBoxLabelTemplateEligible(row, chzProductGroupCode)),
       )
       .map((row): ShiftBoxLabelTemplateOptionDto => {
         const spec = row.spec as LabelTemplateSpec;
@@ -277,6 +291,47 @@ export class ShiftsService {
     };
   }
 
+  async listProductLabelTemplates(
+    tenantId: string,
+    productId: string,
+  ): Promise<ProductLabelTemplateList> {
+    const category = await this.productGroupCodeForPicker(tenantId, productId);
+    const rows = await this.db
+      .select({
+        id: schema.labelTemplates.id,
+        name: schema.labelTemplates.name,
+        spec: schema.labelTemplates.spec,
+        chzProductGroupCodes: schema.labelTemplates.chzProductGroupCodes,
+      })
+      .from(schema.labelTemplates)
+      .where(
+        and(
+          eq(schema.labelTemplates.tenantId, tenantId),
+          eq(schema.labelTemplates.purpose, "product_duplicate"),
+          eq(schema.labelTemplates.enabled, true),
+        ),
+      )
+      .orderBy(schema.labelTemplates.name, schema.labelTemplates.id);
+    return productLabelTemplateListSchema.parse({
+      items: rows
+        .filter(
+          (row) =>
+            row.chzProductGroupCodes === null ||
+            (category !== null && row.chzProductGroupCodes.includes(category)),
+        )
+        .map((row) => {
+          const spec = parseLabelTemplate(row.spec);
+          return {
+            id: row.id,
+            name: row.name,
+            widthMm: spec.widthMm,
+            heightMm: spec.heightMm,
+            dpi: spec.dpi,
+          };
+        }),
+    });
+  }
+
   /** `null` without a product (organisation-level answer); 404 for a product outside the tenant. */
   private async productGroupCodeForPicker(
     tenantId: string,
@@ -298,6 +353,12 @@ export class ShiftsService {
     // always answered; a known template that does not fit is a 422.
     if (!template) {
       throw new BadRequestException("Unknown box label template for this organization");
+    }
+    if (template.purpose !== "box") {
+      throw new BadRequestException({
+        code: "BOX_LABEL_TEMPLATE_NOT_ELIGIBLE",
+        message: "A product duplicate template cannot label a box",
+      });
     }
     if (!isBoxLabelTemplateEligible(template, chzProductGroupCode)) {
       throw new UnprocessableEntityException({
