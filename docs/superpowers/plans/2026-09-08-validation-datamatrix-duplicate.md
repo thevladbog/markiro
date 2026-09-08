@@ -1379,6 +1379,11 @@ expect(body.items[0]).toMatchObject({ attemptNo: 2, verificationOutcome: "verifi
 
 ## Task 16: Браузерная, аппаратная приёмка и подготовка выпуска
 
+Статус 2026-09-08: программная часть выполнена; физический протокол — `not_run`,
+оборудование не подключалось. Применена предусмотренная ниже ветка без оборудования.
+Режим на линии выключен; расширенный общий API gate содержит существующий
+сбой инвентаризации, воспроизведённый на исходной версии и описанный в отчёте.
+
 **Files:** Create `tools/production-browser/product-labels.playwright.config.ts`,
 `tools/production-browser/product-labels-tests/{admin,station}.spec.ts`,
 `docs/acceptance/validation-dm-duplicate.md`;
@@ -1395,7 +1400,7 @@ Config запускает реальные admin/station entrypoints на дву
 Фикстуры API/SQLite/print задаются через текущий acceptance harness; mock transport
 обязан называться mock в результате. Страницы используют реальные компоненты.
 
-- [ ] Сначала browser assertion required-state и геометрии:
+- [x] Сначала browser assertion required-state и геометрии:
 
 ```ts
 await page.setViewportSize({ width: 1280, height: 800 });
@@ -1409,14 +1414,14 @@ expect(pause?.height).toBeGreaterThanOrEqual(64);
 Перед проверкой harness открывает смену и отправляет fixture scan через текущий
 scanner adapter. В admin использовать 1920×1080; включить RU/EN и обе темы.
 
-- [ ] Run `pnpm --dir tools/production-browser run test:product-labels`; сначала
+- [x] Run `pnpm --dir tools/production-browser run test:product-labels`; сначала
       подтвердить fail на отсутствующем gallery state/flow, затем добавить конкретные
       fixture entrypoints/config. Не заменять пользовательский маршрут картинкой.
-- [ ] Пройти оба места создания, печать off/required/none, ошибку транспорта,
+- [x] Пройти оба места создания, печать off/required/none, ошибку транспорта,
       recovery, несовпадение хвоста, explicit reason/reprint, restart, историю и freeze.
       Снять screenshots новых шагов NewShift и всех согласованных WorkScreen states.
       Сверить с Pencil exports; проверять overflow, действия, фокус и клавиатуру.
-- [ ] Запустить финальные gates в порядке зависимостей. После DB migration/build
+- [x] Запустить финальные gates в порядке зависимостей. После DB migration/build
       выполнить focused API DB suites с development env; затем общий serial gate:
 
 ```bash
@@ -1433,7 +1438,7 @@ Env загружается по AGENTS.md без вывода значений. 
 изменить Tauri/Rust; неизменённый shell всё равно проходит ручную Windows-приёмку.
 После кода при наличии локального graph выполнить `graphify update .`.
 
-- [ ] В acceptance doc записать отдельные результаты software/browser/hardware:
+- [x] В acceptance doc записать отдельные результаты software/browser/hardware:
       дата, commit, Windows/Tauri version, printer model/firmware, scanner model,
       transport USB/network, language ZPL/TSPL, DPI 203/300, размер 58×40, test IDs,
       результат canonical byte comparison. Исходные реальные KM и keys не коммитить.
@@ -1444,22 +1449,22 @@ Env загружается по AGENTS.md без вывода значений. 
       reprint. Отдельно снять питание/связь до/во время/после send и подтвердить
       отсутствие автоматического повтора. Windows-проверка применяет настоящий пул
       Tauri SQL с той же fault/restart матрицей задачи 5.
-- [ ] При отсутствии оборудования сохранить hardware=not_run и не включать новый
+- [x] При отсутствии оборудования сохранить hardware=not_run и не включать новый
       режим на линии. Браузерный mock и host test не подтверждают этикетку. Запуск
       физической приёмки можно провести сразу после задачи 2, повторить после сквозной
       интеграции; неизвестные модели принтеров не объявлять поддержанными.
-- [ ] Зафиксировать порядок выпуска: совместимые миграции/API → совместимая Station
+- [x] Зафиксировать порядок выпуска: совместимые миграции/API → совместимая Station
       → включение создания duplicate смен. Planning config задачи 7 не рекламирует
       протокол до завершения приёмки; используется добавленный в задаче 7 boolean
       `VALIDATION_DM_DUPLICATE_ENABLED` с default false.
       Выключенный gate запрещает создание/включение новой политики, но продолжает
       bundle/recovery/sync уже существующих заданий. Disabled gate + ordinary shifts
       работают как раньше. Добавить соответствующие config/API tests.
-- [ ] Rollback test: сервер без receipt не удаляет local events; отключение gate
+- [x] Rollback test: сервер без receipt не удаляет local events; отключение gate
       не стирает jobs и не обходит required. Запрет downgrade старого Station binary
       описать в runbook: восстановление только совместимым исправлением. Не добавлять
       вымышленную защиту, которой старый бинарник технически не умеет пользоваться.
-- [ ] Обновить архитектуру фактическими решениями, review scoped diff и acceptance
+- [x] Обновить архитектуру фактическими решениями, review scoped diff и acceptance
       report. Commit: `test(product-labels): verify duplicate print flow and document rollout`.
       Публикация ветки, PR и выпуск выполняются только по отдельному поручению.
 
@@ -1625,3 +1630,43 @@ Station: 32/32 (retention + recovery + sync); types/lint/build этих паке
 прошли. Admin lint сохранил пять прежних предупреждений в boxes/conflicts.
 Domain: полный набор 622 теста, source/test types, lint/build прошли.
 Полные наборы API/Admin/Station повторяются общим финальным прогоном задачи 16.
+
+### Task 16 — Браузерная приёмка и итог
+
+Добавлены изолированные browser entrypoints, два отдельных loopback сервера и
+23 сценария Chromium. Кабинет проверен на 1920×1080, Station на 1280×800,
+настройки принтера дополнительно на 1024×768. Оба места создания проходят
+required/none/off через реальные формы. WorkScreen использует настоящий журнал
+SQLite с двумя чередующимися соединениями; API, сканер и транспорт принтера
+синтетические. Проверены full-tail mismatch, restart без auto resend, explicit
+reason, идентичность реально переданных mock-байтов и отсутствие второй приёмки.
+Галерея покрывает 14 состояний × RU/EN × две темы, без выхода за viewport.
+
+RED→GREEN: required dialog раньше ограничивался контейнером 720 px; DPI и язык
+принтера не помещались/обрезались; у карточки дубликата отсутствовал отступ;
+первоначальная подсказка none показывала required. Исправлены только затронутые
+контейнеры и привязка подсказки к frozen policy. Визуально просмотрены реальные
+скриншоты; референс Pencil прочитан через MCP, без редактирования холста.
+
+Итог: Domain 622, DB 372, contracts 81, UI 171, Email 23, Legal 146,
+API 2897 passed / 25 skipped, Admin 1002, Station 1388, Kiosk 617,
+SaaS Admin 241, Signer UI 34, Landing 160. Types/lint/build пакетов прошли
+после исправления английских plural keys и тестовой конфигурации Vite.
+Browser 23/23, отдельный browser typecheck и production contracts 536/536 прошли.
+Проверки выполнялись напрямую установленными инструментами из-за существующей
+ошибки packageManager в lockfile; lockfile не менялся. Форматирование и diff
+проверены перед коммитом. Rust не менялся, графа Graphify в рабочей копии нет.
+
+Из 25 пропущенных API тестов отдельно запущены 22 inventory-теста на временной
+локальной БД: 21 passed, 1 failed. Старый сценарий конкурирующей переупаковки
+падает по FK, если более ранний победитель приходит после уже размещённого
+позднего скана с другой датой. Порядок B → A детерминированно воспроизвёл сбой
+на исходном c2e0ef018; временный probe удалён. Inventory production-код и его
+тест не менялись. Этот расширенный gate не объявлен зелёным. Ещё три opt-in
+проверки Mailpit/MinIO, provisioning CLI и live National Catalog не запускались.
+
+Аппаратная матрица существующего разнородного парка — not_run. Windows/Tauri,
+физический GS/FNC1, сканеры, принтеры и реальная потеря питания требуют отдельной
+приёмки. Флаг default false сохранён, порядок выпуска/отката описан в
+`docs/acceptance/validation-dm-duplicate.md`. Ветка и рабочая копия сохраняются
+локально; push, PR, установка на линии и включение режима не выполнялись.

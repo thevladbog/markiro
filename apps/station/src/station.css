@@ -2465,6 +2465,27 @@ body,
   background: var(--surface-card);
 }
 
+.setup-card--printer-config {
+  padding: var(--sp-3);
+  gap: var(--sp-2);
+}
+
+.setup-split:has(> .setup-card--printer-config) {
+  grid-template-columns: minmax(560px, 1fr) minmax(0, 1fr);
+}
+
+.setup-card--printer-config .setup-choice-group__options--transport {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.setup-printer-format {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: end;
+}
+
 .setup-card__title {
   margin: 0;
   font: 700 19px/24px var(--font-ui);
@@ -2780,8 +2801,8 @@ body,
 
   .setup-card--printer-config {
     padding: var(--sp-2);
-    gap: var(--sp-2);
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--sp-1);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .setup-card--printer-config > .setup-card__title,
@@ -2794,8 +2815,8 @@ body,
     grid-column: 1;
   }
 
-  .setup-card--printer-config > .setup-choice-group--printer-language {
-    grid-column: 2;
+  .setup-card--printer-config > .setup-printer-format {
+    grid-column: 1;
   }
 
   .setup-choice-group__options--transport {
@@ -4912,7 +4933,20 @@ body,
 }
 
 .work-product-label {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
+  padding: var(--sp-4);
+  gap: var(--sp-3);
+}
+.work-product-label h2 {
+  margin: 0;
+  font: var(--floor-lg);
+}
+.work-product-label p {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
 }
 .work-product-label__readout {
   display: flex;

@@ -12,9 +12,11 @@ export function productLabelStatusKey(job: ProductLabelJobView | null): string {
 export function ProductLabelInstrument({
   job,
   busy,
+  verification,
 }: {
   job: ProductLabelJobView | null;
   busy: boolean;
+  verification: ProductLabelJobView["verification"] | null;
 }) {
   const { t } = useTranslation();
   return (
@@ -25,7 +27,11 @@ export function ProductLabelInstrument({
         {job ? <code>…{job.codeSuffix}</code> : null}
       </div>
       <p>
-        {t(job?.verification === "none" ? "productLabels.noneHint" : "productLabels.requiredHint")}
+        {t(
+          (job?.verification ?? verification) === "none"
+            ? "productLabels.noneHint"
+            : "productLabels.requiredHint",
+        )}
       </p>
     </section>
   );

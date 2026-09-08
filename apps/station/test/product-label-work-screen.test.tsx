@@ -85,6 +85,18 @@ async function setup(verification: "none" | "required" = "required") {
   return { h, view, exit, scan, idle, callbacks, element };
 }
 describe("duplicate printing through the real WorkScreen scanner", () => {
+  it.each(["none", "required"] as const)(
+    "shows the frozen %s verification policy before the first scan",
+    async (verification) => {
+      await setup(verification);
+      const hint =
+        verification === "none" ? "productLabels.noneHint" : "productLabels.requiredHint";
+      const otherHint =
+        verification === "none" ? "productLabels.requiredHint" : "productLabels.noneHint";
+      expect(screen.getByText(i18n.t(hint))).toBeTruthy();
+      expect(screen.queryByText(i18n.t(otherHint))).toBeNull();
+    },
+  );
   it("does not confirm from an original burst; compares the full tail and counts only the original", async () => {
     const { h, scan, idle, callbacks } = await setup();
     expect(callbacks.size).toBe(1);

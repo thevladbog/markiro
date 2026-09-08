@@ -2125,7 +2125,9 @@
         "rejected": {
           "invalid": "Code could not be read in full",
           "mismatch": "Code differs from the original"
-        }
+        },
+        "attempts_few": "{{count}} attempts",
+        "attempts_many": "{{count}} attempts"
       }
     },
     "boxes": {

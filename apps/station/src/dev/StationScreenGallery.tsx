@@ -1606,7 +1606,12 @@ function WorkFixture({
               labels={workLabels.status}
               showVerdict={!aggregation && !productLabel}
             />
-            {productLabel ? <ProductLabelInstrument {...productLabel} /> : null}
+            {productLabel ? (
+              <ProductLabelInstrument
+                {...productLabel}
+                verification={productLabel.job?.verification ?? "required"}
+              />
+            ) : null}
             {aggregation ? (
               <BoxFillInstrument
                 box={{ boxId: "gallery-box-1", itemCount: boxItemCount }}
@@ -2180,7 +2185,11 @@ function SetupFixture({ tab, locale }: { tab: string; locale: GalleryLocale }) {
   }, [tab, locale]);
 
   return (
-    <div ref={rootRef} className="gallery-workstation-setup">
+    <div
+      ref={rootRef}
+      className="gallery-workstation-setup"
+      style={{ height: "100%", minHeight: 0 }}
+    >
       <WorkstationSetup
         hw={hw}
         exec={exec}

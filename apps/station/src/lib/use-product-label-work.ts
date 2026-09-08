@@ -316,6 +316,7 @@ export function useProductLabelWork(input: {
   const [loaded, setLoaded] = useState<{
     key: object;
     work: ProductLabelWork | null;
+    verification: ProductLabelJobView["verification"] | null;
     error: boolean;
   } | null>(null);
   const key = useMemo(() => ({ exec, shiftId, generation }), [exec, shiftId, generation]);
@@ -342,7 +343,7 @@ export function useProductLabelWork(input: {
         const context = await readDuplicateLabelContext(exec, shiftId);
         if (!active || !credentialGenerationIsCurrent(generation)) return;
         if (!context) {
-          setLoaded({ key, work: null, error: false });
+          setLoaded({ key, work: null, verification: null, error: false });
           return;
         }
         if (!owner) throw new Error("Credential owner missing");
@@ -409,9 +410,14 @@ export function useProductLabelWork(input: {
         });
         await controller.open();
         if (active && credentialGenerationIsCurrent(generation))
-          setLoaded({ key, work: controller, error: false });
+          setLoaded({
+            key,
+            work: controller,
+            verification: context.policy.verification,
+            error: false,
+          });
       } catch {
-        if (active) setLoaded({ key, work: null, error: true });
+        if (active) setLoaded({ key, work: null, verification: null, error: true });
       } finally {
         lease.release();
       }
@@ -433,6 +439,7 @@ export function useProductLabelWork(input: {
   return {
     work,
     state,
+    verification: available?.verification ?? null,
     loading: Boolean(generation && !available),
     error: available?.error ?? false,
   };

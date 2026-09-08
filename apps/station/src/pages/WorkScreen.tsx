@@ -1691,6 +1691,7 @@ export function WorkScreen({
                 <ProductLabelInstrument
                   job={productLabels.state.job}
                   busy={productLabels.state.busy}
+                  verification={productLabels.verification}
                 />
               ) : null}
               {issuerPrefix !== null ? (
@@ -1748,26 +1749,26 @@ export function WorkScreen({
         closeDisabled={closeRequestPending || productLabelsBlocked}
       />
 
-      <div className="work-screen__overlays">
-        {productLabels.work && productLabelsBlocked && !showExceptions ? (
-          <ProductLabelVerification
-            state={productLabels.state}
-            work={productLabels.work}
-            onPause={() => void pauseProductLabels()}
-            {...(onOpenPrinterSetup ? { onSetup: onOpenPrinterSetup } : {})}
-          />
-        ) : null}
-        {productLabels.error ? (
-          <FullScreenDialog
-            open
-            title={t("productLabels.storageError")}
-            backLabel={t("productLabels.pause")}
-            onClose={() => void pauseProductLabels()}
-          >
-            <Alert tone="error" title={t("productLabels.storageError")} />
-          </FullScreenDialog>
-        ) : null}
+      {productLabels.work && productLabelsBlocked && !showExceptions ? (
+        <ProductLabelVerification
+          state={productLabels.state}
+          work={productLabels.work}
+          onPause={() => void pauseProductLabels()}
+          {...(onOpenPrinterSetup ? { onSetup: onOpenPrinterSetup } : {})}
+        />
+      ) : null}
+      {productLabels.error ? (
+        <FullScreenDialog
+          open
+          title={t("productLabels.storageError")}
+          backLabel={t("productLabels.pause")}
+          onClose={() => void pauseProductLabels()}
+        >
+          <Alert tone="error" title={t("productLabels.storageError")} />
+        </FullScreenDialog>
+      ) : null}
 
+      <div className="work-screen__overlays">
         {overlayState === "exit-pending" ? (
           <Alert tone="warn" style={{ position: "relative", zIndex: 1 }}>
             <p>{t("work.exitPending", { count: pendingSync })}</p>

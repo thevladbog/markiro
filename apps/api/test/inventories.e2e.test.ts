@@ -1717,15 +1717,13 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     const { tenantId, productId, lineId } = await seedPreparation(agent, { mode: "repack" });
     const id = randomUUID();
-    await db
-      .insert(schema.labelTemplates)
-      .values({
-        id,
-        tenantId,
-        name: "Duplicate",
-        purpose: "product_duplicate",
-        spec: buildDuplicateLabelTemplate(),
-      });
+    await db.insert(schema.labelTemplates).values({
+      id,
+      tenantId,
+      name: "Duplicate",
+      purpose: "product_duplicate",
+      spec: buildDuplicateLabelTemplate(),
+    });
     const response = await agent
       .post("/inventories")
       .send(createBody(productId, lineId, "repack", id))
