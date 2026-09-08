@@ -1,0 +1,324 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  catalogCapabilitiesSchema,
+  chzSummarySchema,
+  IMPORT_GTIN_MAX_TOKENS,
+  IMPORT_GTIN_TEXT_MAX_CHARS,
+  importApplySchema,
+  importDecisionSchema,
+  importItemSchema,
+  importItemsQuerySchema,
+  importItemsResponseSchema,
+  importPrepareResponseSchema,
+  importPrepareSchema,
+  importPreviewSchema,
+  importResultSchema,
+  importSelectionSchema,
+  importSessionSchema,
+  importStartSchema,
+} from "../src/index.js";
+
+const ID_1 = "00000000-0000-4000-8000-000000000001";
+const ID_2 = "00000000-0000-4000-8000-000000000002";
+const ID_3 = "00000000-0000-4000-8000-000000000003";
+const UTC_DATE = "2026-09-08T12:30:00.000Z";
+
+const ids = (count: number) =>
+  Array.from(
+    { length: count },
+    (_, index) =>
+      `00000000-0000-4000-8${String(index).padStart(3, "0")}-${String(index + 1).padStart(12, "0")}`,
+  );
+
+const validItem = {
+  id: ID_1,
+  gtin14: "04006381333931",
+  input: "4006381333931",
+  cardId: "provider-card-1",
+  name: "Товар",
+  brand: "Марка",
+  statusKeys: ["published"],
+  selected: true,
+  match: "new",
+  productId: null,
+  selectable: true,
+  reason: null,
+} as const;
+
+const validPreview = {
+  id: ID_1,
+  itemId: ID_2,
+  productId: null,
+  expiresAt: UTC_DATE,
+  fields: [
+    {
+      id: ID_3,
+      label: "Название",
+      before: null,
+      after: "Товар",
+      applicable: true,
+      reason: null,
+      source: "national_catalog",
+      selectedByDefault: true,
+    },
+  ],
+  photos: [
+    {
+      candidateId: ID_3,
+      previewPath: "/tenant/national-catalog/previews/3",
+      state: "ready",
+      primary: true,
+    },
+  ],
+  linkAction: "attach",
+  categoryOptions: [{ optionId: ID_3, label: "Одежда", selected: true }],
+  canApply: true,
+  reason: null,
+} as const;
+
+describe("tenant National Catalog import input contracts", () => {
+  it("accepts both start modes and rejects empty GTIN input and unknown fields", () => {
+    expect(importStartSchema.safeParse({ mode: "own_catalog" }).success).toBe(true);
+    expect(importStartSchema.safeParse({ mode: "gtins", text: "4006381333931" }).success).toBe(
+      true,
+    );
+    expect(importStartSchema.safeParse({ mode: "gtins", text: " \n,;\t" }).success).toBe(false);
+    expect(
+      importStartSchema.safeParse({ mode: "own_catalog", environment: "sandbox" }).success,
+    ).toBe(false);
+  });
+
+  it("enforces separate character and token limits for GTIN input", () => {
+    expect(
+      importStartSchema.safeParse({ mode: "gtins", text: "1".repeat(IMPORT_GTIN_TEXT_MAX_CHARS) })
+        .success,
+    ).toBe(true);
+
+    const tooLong = importStartSchema.safeParse({
+      mode: "gtins",
+      text: "1".repeat(IMPORT_GTIN_TEXT_MAX_CHARS + 1),
+    });
+    expect(tooLong.success).toBe(false);
+    if (!tooLong.success) {
+      expect(tooLong.error.issues.map((issue) => issue.message)).toContain(
+        "IMPORT_GTIN_TEXT_LIMIT_EXCEEDED",
+      );
+    }
+
+    const atTokenLimit = Array.from({ length: IMPORT_GTIN_MAX_TOKENS }, () => "1").join(",");
+    expect(importStartSchema.safeParse({ mode: "gtins", text: atTokenLimit }).success).toBe(true);
+    const tooManyTokens = importStartSchema.safeParse({ mode: "gtins", text: `${atTokenLimit},1` });
+    expect(tooManyTokens.success).toBe(false);
+    if (!tooManyTokens.success) {
+      expect(tooManyTokens.error.issues.map((issue) => issue.message)).toContain(
+        "IMPORT_GTIN_TOKEN_LIMIT_EXCEEDED",
+      );
+    }
+  });
+
+  it("allows clearing selection and enforces unique selection limits", () => {
+    expect(importSelectionSchema.safeParse({ expectedRevision: 0, itemIds: [] }).success).toBe(
+      true,
+    );
+    expect(
+      importSelectionSchema.safeParse({ expectedRevision: 1, itemIds: ids(100) }).success,
+    ).toBe(true);
+    expect(
+      importSelectionSchema.safeParse({ expectedRevision: 1, itemIds: ids(101) }).success,
+    ).toBe(false);
+    expect(
+      importSelectionSchema.safeParse({ expectedRevision: 1, itemIds: [ID_1, ID_1] }).success,
+    ).toBe(false);
+  });
+
+  it("validates prepare limits, trimmed manual names, and one category choice per item", () => {
+    expect(
+      importPrepareSchema.parse({
+        itemIds: ids(100),
+        manualNames: [{ itemId: ID_1, name: "  Товар  " }],
+        categoryChoices: [],
+      }).manualNames,
+    ).toEqual([{ itemId: ID_1, name: "Товар" }]);
+    expect(
+      importPrepareSchema.safeParse({ itemIds: ids(101), manualNames: [], categoryChoices: [] })
+        .success,
+    ).toBe(false);
+    expect(
+      importPrepareSchema.safeParse({
+        itemIds: [ID_1],
+        manualNames: [
+          { itemId: ID_1, name: "Первый" },
+          { itemId: ID_1, name: "Второй" },
+        ],
+        categoryChoices: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      importPrepareSchema.safeParse({
+        itemIds: [ID_1],
+        manualNames: [{ itemId: ID_1, name: " ".repeat(3) }],
+        categoryChoices: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      importPrepareSchema.safeParse({
+        itemIds: [ID_1],
+        manualNames: [],
+        categoryChoices: [
+          { itemId: ID_1, optionId: ID_2 },
+          { itemId: ID_1, optionId: ID_3 },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a caller-controlled photo URL and duplicate accepted entry IDs", () => {
+    expect(
+      importDecisionSchema.safeParse({
+        previewId: ID_1,
+        acceptedEntryIds: [],
+        linkAction: "attach",
+        photo: { kind: "candidate", candidateId: ID_2, url: "https://attacker.example/photo" },
+      }).success,
+    ).toBe(false);
+    expect(
+      importDecisionSchema.safeParse({
+        previewId: ID_1,
+        acceptedEntryIds: [ID_2, ID_2],
+        linkAction: "attach",
+        photo: { kind: "keep" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("enforces 1-100 decisions and rejects repeated preview IDs", () => {
+    const decision = (previewId: string) => ({
+      previewId,
+      acceptedEntryIds: [],
+      linkAction: "attach" as const,
+      photo: { kind: "keep" as const },
+    });
+    expect(importApplySchema.safeParse({ requestId: ID_1, decisions: [] }).success).toBe(false);
+    expect(
+      importApplySchema.safeParse({ requestId: ID_1, decisions: ids(100).map(decision) }).success,
+    ).toBe(true);
+    expect(
+      importApplySchema.safeParse({ requestId: ID_1, decisions: ids(101).map(decision) }).success,
+    ).toBe(false);
+    expect(
+      importApplySchema.safeParse({
+        requestId: ID_1,
+        decisions: [decision(ID_2), decision(ID_2)],
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("tenant National Catalog import output contracts", () => {
+  it("validates normalized GTIN-14 values and strict item output", () => {
+    expect(importItemSchema.safeParse(validItem).success).toBe(true);
+    expect(importItemSchema.safeParse({ ...validItem, gtin14: "4006381333931" }).success).toBe(
+      false,
+    );
+    expect(importItemSchema.safeParse({ ...validItem, gtin14: "04006381333930" }).success).toBe(
+      false,
+    );
+    expect(importItemSchema.safeParse({ ...validItem, providerPayload: {} }).success).toBe(false);
+  });
+
+  it("accepts only UTC ISO timestamps in sessions, previews, and summaries", () => {
+    const session = {
+      id: ID_1,
+      revision: 0,
+      mode: "gtins",
+      state: "ready",
+      loaded: 1,
+      selected: 1,
+      startedAt: UTC_DATE,
+      throughAt: UTC_DATE,
+      expiresAt: UTC_DATE,
+      complete: true,
+      reason: null,
+    } as const;
+    expect(importSessionSchema.safeParse(session).success).toBe(true);
+    expect(
+      importSessionSchema.safeParse({ ...session, startedAt: "2026-09-08T15:30:00.000+03:00" })
+        .success,
+    ).toBe(false);
+    expect(importPreviewSchema.safeParse(validPreview).success).toBe(true);
+    expect(
+      importPreviewSchema.safeParse({ ...validPreview, expiresAt: "2026-09-08 12:30:00" }).success,
+    ).toBe(false);
+    expect(
+      chzSummarySchema.safeParse({
+        linkId: ID_1,
+        revision: 1,
+        statusKeys: ["published"],
+        rawStatus: "published",
+        rawDetailedStatuses: [],
+        lastSuccessAt: UTC_DATE,
+        lastAttemptAt: null,
+        refreshing: false,
+        lastOutcome: "ok",
+        hasChanges: false,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("validates list, prepare, capability, query, and result envelopes deeply", () => {
+    expect(
+      importItemsResponseSchema.safeParse({ items: [validItem], nextCursor: null }).success,
+    ).toBe(true);
+    expect(importPrepareResponseSchema.safeParse({ items: [validPreview] }).success).toBe(true);
+    expect(
+      importPrepareResponseSchema.safeParse({
+        items: [{ ...validPreview, photos: [{ ...validPreview.photos[0], url: "https://x" }] }],
+      }).success,
+    ).toBe(false);
+    expect(
+      catalogCapabilitiesSchema.safeParse({ ownCatalog: true, gtinLookup: true, photos: false })
+        .success,
+    ).toBe(true);
+    expect(
+      importItemsQuerySchema.safeParse({
+        cursor: null,
+        search: "рубашка",
+        statuses: ["draft", "published"],
+        includeArchived: false,
+        limit: 1000,
+      }).success,
+    ).toBe(true);
+    expect(
+      importResultSchema.safeParse({
+        operationId: ID_1,
+        state: "finished",
+        items: [
+          {
+            previewId: ID_2,
+            productId: ID_3,
+            product: "applied",
+            image: "unchanged",
+            reason: null,
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      importResultSchema.safeParse({
+        operationId: ID_1,
+        state: "finished",
+        items: [
+          {
+            previewId: ID_2,
+            productId: ID_3,
+            product: "applied",
+            image: "unchanged",
+            reason: null,
+            raw: {},
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+});
