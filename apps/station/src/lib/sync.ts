@@ -1,4 +1,22 @@
-import { MAX_BOX_CLOSURES_PER_SYNC_BATCH } from "@markiro/domain";
+import {
+  MAX_BOX_CLOSURES_PER_SYNC_BATCH,
+  MAX_PRODUCT_LABEL_EVENTS,
+  productLabelValueDigest,
+  type ProductLabelRejectionCode,
+} from "@markiro/domain";
+import {
+  ackProductLabelEvents,
+  readPendingProductLabelEvents,
+  validateProductLabelReceipt,
+  productLabelPendingStats,
+  productLabelSetSignature,
+} from "./product-labels/sync.js";
+import {
+  clearProductLabelBatchPin,
+  readProductLabelBatchPin,
+  saveProductLabelBatchPin,
+  PRODUCT_LABEL_CEILING_KEY,
+} from "./product-labels/sync-batch.js";
 import { isStationCredentialRejection, type StationClient } from "./api-client.js";
 import {
   conflictCount,
@@ -10,6 +28,7 @@ import {
 import {
   acquireCredentialCommitLease,
   createCredentialGeneration,
+  credentialGenerationOwnership,
   rejectCredentialGeneration,
   type CredentialGeneration,
   type CredentialRejectedEvent,
@@ -141,6 +160,7 @@ interface BatchResponse {
   conflicts?: BatchConflict[];
   ssccBlock?: BatchSsccBlock;
   denied?: DeniedStationRecord[];
+  productLabelReceipt?: unknown;
 }
 
 interface ConflictStatusResponse {
@@ -154,10 +174,10 @@ interface CodeReleaseResponse {
 }
 
 interface DeniedStationRecord {
-  recordKind: "item" | "box" | "exception";
+  recordKind: "item" | "box" | "exception" | "product_label_event";
   recordIndex: number;
   shiftId: string;
-  code: "subscription_read_only" | "legacy_unbound_replay";
+  code: ProductLabelRejectionCode | "legacy_unbound_replay";
 }
 
 /**
@@ -286,11 +306,19 @@ function isDeniedStationRecord(value: unknown): value is DeniedStationRecord {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
   return (
-    ["item", "box", "exception"].includes(String(record.recordKind)) &&
+    ["item", "box", "exception", "product_label_event"].includes(String(record.recordKind)) &&
     Number.isInteger(record.recordIndex) &&
     Number(record.recordIndex) >= 0 &&
     typeof record.shiftId === "string" &&
-    ["subscription_read_only", "legacy_unbound_replay"].includes(String(record.code))
+    [
+      "subscription_read_only",
+      "legacy_unbound_replay",
+      "parent_missing",
+      "policy_mismatch",
+      "ownership_conflict",
+      "invalid_transition",
+      "sequence_gap",
+    ].includes(String(record.code))
   );
 }
 
@@ -545,7 +573,11 @@ function boxSetSignature(boxes: BoxClosureRow[]): string {
  * `=`. `IS` is null-safe, so `print_verified_at IS NULL` correctly matches
  * a still-null column.
  */
-async function ackBoxes(exec: SqlExecutor, boxes: BoxClosureRow[], ackedAt: string): Promise<void> {
+async function ackBoxes(
+  exec: SqlExecutor,
+  boxes: Array<Pick<BoxClosureRow, "boxId" | "printVerifiedAt" | "printSkippedAt">>,
+  ackedAt: string,
+): Promise<void> {
   for (const box of boxes) {
     await exec.run(
       `UPDATE boxes_mirror SET acked_at = ?
@@ -700,6 +732,7 @@ async function clearPersistedCeiling(exec: SqlExecutor, key: string): Promise<vo
 export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   const now = deps.now ?? (() => Date.now());
   const credentialGeneration = deps.credentialGeneration ?? createCredentialGeneration();
+  const productLabelOwnership = credentialGenerationOwnership(credentialGeneration);
   let draining = false;
   let stopped = false;
   let paused = false;
@@ -742,6 +775,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   // Exception facts need the same persisted exact-set guarantee: otherwise
   // a restart can replay an acknowledged audit fact under a newly-grown key.
   let pendingExceptionCeiling: number | null = null;
+  let pendingProductLabelCeiling: number | null = null;
+  let productLabelCeilingLoaded = false;
   let exceptionCeilingLoaded = false;
   let pendingBatchId: string | null = null;
   let batchIdLoaded = false;
@@ -788,6 +823,17 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     return pendingBatchId;
   }
 
+  async function ensurePendingProductLabelCeiling(): Promise<number | null> {
+    if (!productLabelCeilingLoaded) {
+      pendingProductLabelCeiling = await loadPersistedCeiling(deps.exec, PRODUCT_LABEL_CEILING_KEY);
+      // A pre-feature pinned batch must not acquire new label events during an upgrade retry.
+      if (pendingProductLabelCeiling === null && (await ensurePendingBatchId()) !== null)
+        pendingProductLabelCeiling = 0;
+      productLabelCeilingLoaded = true;
+    }
+    return pendingProductLabelCeiling;
+  }
+
   function settleIdle() {
     const resolvers = idleResolvers;
     idleResolvers = [];
@@ -812,6 +858,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   }
 
   async function publishState(): Promise<void> {
+    const owner = await productLabelOwnership;
+    const labels = owner
+      ? await productLabelPendingStats(deps.exec, owner)
+      : { count: 0, oldest: null };
     const [scanPending, exceptionPending, closePending, boxPendingRows] = await Promise.all([
       outboxDepth(deps.exec),
       exceptionDepth(deps.exec),
@@ -824,7 +874,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       ),
     ]);
     const boxPending = boxPendingRows[0]?.n ?? 0;
-    const pending = scanPending + exceptionPending + (closePending[0]?.n ?? 0) + boxPending;
+    const pending =
+      scanPending + exceptionPending + (closePending[0]?.n ?? 0) + boxPending + labels.count;
     // Nothing queued is never "stuck", however long the link has been down.
     let stuck = false;
     if (pending > 0) {
@@ -843,6 +894,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         [
           oldestScan,
           oldestException,
+          labels.oldest,
           closePending[0]?.oldest ?? null,
           boxPendingRows[0]?.oldest ?? null,
         ]
@@ -895,7 +947,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           if (credentialGeneration.sealed) break;
         }
         const ceiling = await ensurePendingCeiling();
-        let batch = await readBatch(deps.exec, BATCH_SIZE, ceiling);
+        const owner = await productLabelOwnership;
+        let labelPin = await readProductLabelBatchPin(deps.exec, owner);
+        let batch = labelPin ? [] : await readBatch(deps.exec, BATCH_SIZE, ceiling);
         // Boxes ride along independently of the outbox ceiling above (see
         // `readClosedUnackedBoxes`'s doc comment) -- a shift's last box can
         // close with nothing left queued, and that closure must still reach
@@ -908,14 +962,15 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         // this device can never assemble a payload the server's own
         // `syncBatchSchema.boxes.max()` would reject outright.
         const boxCeiling = await ensurePendingBoxCeiling();
-        const boxes = await readClosedUnackedBoxes(
-          deps.exec,
-          MAX_BOX_CLOSURES_PER_SYNC_BATCH,
-          boxCeiling,
-        );
+        const boxes = labelPin
+          ? []
+          : await readClosedUnackedBoxes(deps.exec, MAX_BOX_CLOSURES_PER_SYNC_BATCH, boxCeiling);
         const exceptionCeiling = await ensurePendingExceptionCeiling();
         await ensurePendingBatchId();
-        let exceptions = await readExceptions(deps.exec, BATCH_SIZE, exceptionCeiling);
+        let exceptions = labelPin
+          ? []
+          : await readExceptions(deps.exec, BATCH_SIZE, exceptionCeiling);
+        const labelCeiling = await ensurePendingProductLabelCeiling();
 
         if (pauseInvalidated() || credentialGeneration.sealed) break;
 
@@ -941,11 +996,36 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             batch = [];
           }
         }
-        if (batch.length === 0 && boxes.length === 0 && exceptions.length === 0) {
+        const readLease = acquireCredentialCommitLease(credentialGeneration);
+        if (!readLease) break;
+        let labelRows;
+        try {
+          labelRows =
+            owner && !labelPin
+              ? await readPendingProductLabelEvents(
+                  deps.exec,
+                  owner,
+                  MAX_PRODUCT_LABEL_EVENTS,
+                  labelCeiling,
+                  batch.at(-1)?.id ?? 0,
+                )
+              : [];
+        } finally {
+          readLease.release();
+        }
+        let labelEvents = labelPin?.request.productLabelEvents ?? labelRows.map((row) => row.event);
+        if (pauseInvalidated() || credentialGeneration.sealed) break;
+        if (
+          batch.length === 0 &&
+          boxes.length === 0 &&
+          exceptions.length === 0 &&
+          labelEvents.length === 0
+        ) {
           if (
             ceiling !== null ||
             boxCeiling !== null ||
             exceptionCeiling !== null ||
+            labelCeiling !== null ||
             pendingBatchId !== null
           ) {
             // Only reachable with a stale ceiling if the rows it pinned were
@@ -963,10 +1043,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               pendingCeiling = null;
               pendingBoxCeiling = null;
               pendingExceptionCeiling = null;
+              pendingProductLabelCeiling = null;
               pendingBatchId = null;
               await clearPersistedCeiling(deps.exec, CEILING_META_KEY);
               await clearPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
               await clearPersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY);
+              await clearPersistedCeiling(deps.exec, PRODUCT_LABEL_CEILING_KEY);
               await clearPersistedCeiling(deps.exec, BATCH_ID_META_KEY);
             } finally {
               staleLease.release();
@@ -980,10 +1062,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         // A zero ceiling explicitly pins an EMPTY channel. This matters when
         // another channel forms the batch: after a crash, a null ceiling
         // would read fresh rows into the already-persisted batch identity.
-        const maxId = batch.length > 0 ? batch[batch.length - 1]!.id : null;
-        const newBoxCeiling = boxes.length > 0 ? boxes[boxes.length - 1]!.rowid : null;
-        const newExceptionCeiling =
-          exceptions.length > 0 ? exceptions[exceptions.length - 1]!.id : null;
+        let maxId = labelPin ? labelPin.scanCeiling : (batch.at(-1)?.id ?? null);
+        let newBoxCeiling = labelPin ? labelPin.boxCeiling : (boxes.at(-1)?.rowid ?? null);
+        let newExceptionCeiling = labelPin
+          ? labelPin.exceptionCeiling
+          : (exceptions.at(-1)?.id ?? null);
+        let ackBoxRows: Array<Pick<BoxClosureRow, "boxId" | "printVerifiedAt" | "printSkippedAt">> =
+          labelPin?.boxes ?? boxes;
+        let newLabelCeiling = labelPin?.labelCeiling ?? labelRows.at(-1)?.id ?? null;
         // Pin BEFORE sending — in memory AND in `station_meta` (a single
         // upsert; never a multi-statement transaction, see the module doc
         // comment) — so that if the post fails, or the whole process dies
@@ -1001,12 +1087,18 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             pendingCeiling = maxId ?? 0;
             pendingBoxCeiling = newBoxCeiling ?? 0;
             pendingExceptionCeiling = newExceptionCeiling ?? 0;
+            pendingProductLabelCeiling = newLabelCeiling ?? 0;
             await savePersistedCeiling(deps.exec, CEILING_META_KEY, pendingCeiling);
             await savePersistedCeiling(deps.exec, BOX_CEILING_META_KEY, pendingBoxCeiling);
             await savePersistedCeiling(
               deps.exec,
               EXCEPTION_CEILING_META_KEY,
               pendingExceptionCeiling,
+            );
+            await savePersistedCeiling(
+              deps.exec,
+              PRODUCT_LABEL_CEILING_KEY,
+              pendingProductLabelCeiling,
             );
             const instId = await ensureInstallId();
             // A batch's box set (when non-empty) is folded into `batchId`
@@ -1031,26 +1123,63 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             const exceptionSuffix =
               newExceptionCeiling !== null ? `:exception:${newExceptionCeiling}` : "";
             const generatedBatchId =
-              maxId !== null
-                ? `${deps.machineId}:${instId}:${maxId}${boxSuffix}${exceptionSuffix}`
-                : `${deps.machineId}:${instId}${boxSuffix}${exceptionSuffix}`;
+              labelEvents.length > 0
+                ? `product-label:${productLabelValueDigest({ machineId: deps.machineId, instId, maxId, boxSuffix, exceptionSuffix, labels: productLabelSetSignature(labelEvents) })}`
+                : maxId !== null
+                  ? `${deps.machineId}:${instId}:${maxId}${boxSuffix}${exceptionSuffix}`
+                  : `${deps.machineId}:${instId}${boxSuffix}${exceptionSuffix}`;
             batchId = (await ensurePendingBatchId()) ?? generatedBatchId;
             if (pendingBatchId === null) {
               pendingBatchId = batchId;
               await savePersistedValue(deps.exec, BATCH_ID_META_KEY, batchId);
             }
             serialsLeft = await computeSerialsLeft(deps.exec);
+            if (labelEvents.length > 0 && owner) {
+              if (!labelPin && newLabelCeiling !== null)
+                labelPin = await saveProductLabelBatchPin(deps.exec, {
+                  credentialOwnership: owner,
+                  request: {
+                    batchId,
+                    items: toPayload(batch),
+                    boxes: toBoxPayload(boxes),
+                    exceptions: toExceptionPayload(exceptions),
+                    productLabelEvents: labelEvents,
+                    serialsLeft,
+                  },
+                  scanCeiling: maxId,
+                  boxCeiling: newBoxCeiling,
+                  exceptionCeiling: newExceptionCeiling,
+                  labelCeiling: newLabelCeiling,
+                  boxes: ackBoxRows.map((box) => ({
+                    boxId: box.boxId,
+                    printVerifiedAt: box.printVerifiedAt,
+                    printSkippedAt: box.printSkippedAt,
+                  })),
+                });
+              if (labelPin) {
+                batchId = labelPin.request.batchId;
+                labelEvents = labelPin.request.productLabelEvents;
+                maxId = labelPin.scanCeiling;
+                newBoxCeiling = labelPin.boxCeiling;
+                newExceptionCeiling = labelPin.exceptionCeiling;
+                newLabelCeiling = labelPin.labelCeiling;
+                ackBoxRows = labelPin.boxes;
+              }
+            }
           } finally {
             preparationLease.release();
           }
           if (pauseInvalidated() || credentialGeneration.sealed) break;
-          const res = await deps.client.post<BatchResponse>("/station/scans", {
-            batchId,
-            items: toPayload(batch),
-            boxes: toBoxPayload(boxes),
-            exceptions: toExceptionPayload(exceptions),
-            serialsLeft,
-          });
+          const res = await deps.client.post<BatchResponse>(
+            "/station/scans",
+            labelPin?.request ?? {
+              batchId,
+              items: toPayload(batch),
+              boxes: toBoxPayload(boxes),
+              exceptions: toExceptionPayload(exceptions),
+              serialsLeft,
+            },
+          );
           // Another engine sharing this key may have received the terminal
           // 401 while this request was in flight. Its response is now stale:
           // do not record conflicts/ranges, ack facts, or clear retry state.
@@ -1061,6 +1190,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             // same failure path as a network error: do not ack.
             throw new Error("station: unexpected /station/scans response shape");
           }
+          const labelReceipt =
+            labelEvents.length > 0
+              ? validateProductLabelReceipt(labelEvents, res.productLabelReceipt)
+              : null;
           const commitLease = acquireCredentialCommitLease(credentialGeneration);
           if (!commitLease) break;
           try {
@@ -1181,12 +1314,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               await ackThrough(deps.exec, maxId);
               if (!commitIsCurrent()) break drainLoop;
             }
-            if (boxes.length > 0) {
+            if (ackBoxRows.length > 0) {
               // `boxes` itself -- not just the ids -- so the ack can gate each
               // row on the outcome fields actually read into THIS payload
               // (Finding 6): see `ackBoxes`'s own doc comment.
               if (!commitIsCurrent()) break drainLoop;
-              await ackBoxes(deps.exec, boxes, new Date(now()).toISOString());
+              await ackBoxes(deps.exec, ackBoxRows, new Date(now()).toISOString());
               if (!commitIsCurrent()) break drainLoop;
             }
             if (newExceptionCeiling !== null) {
@@ -1194,12 +1327,17 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               await ackExceptionsThrough(deps.exec, newExceptionCeiling);
               if (!commitIsCurrent()) break drainLoop;
             }
+            if (labelReceipt && owner) {
+              await ackProductLabelEvents(deps.exec, owner, labelEvents, labelReceipt);
+              if (!commitIsCurrent()) break drainLoop;
+            }
             // Clear the identity first, then its ceilings. A crash in between
             // leaves stale ceilings that exclude newer rows and are safely
             // discarded by the empty-prefix branch above. The reverse order
             // could expose newer rows under an already-applied batch id.
             if (!commitIsCurrent()) break drainLoop;
-            await clearPersistedCeiling(deps.exec, BATCH_ID_META_KEY);
+            if (labelPin) await clearProductLabelBatchPin(deps.exec);
+            else await clearPersistedCeiling(deps.exec, BATCH_ID_META_KEY);
             if (!commitIsCurrent()) break drainLoop;
             pendingBatchId = null;
             if (pendingCeiling !== null) {
@@ -1214,9 +1352,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               await clearPersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY);
               if (!commitIsCurrent()) break drainLoop;
             }
+            if (pendingProductLabelCeiling !== null)
+              await clearPersistedCeiling(deps.exec, PRODUCT_LABEL_CEILING_KEY);
             pendingCeiling = null;
             pendingBoxCeiling = null;
             pendingExceptionCeiling = null;
+            pendingProductLabelCeiling = null;
             lastSuccessAt = now();
             backoffMs = BACKOFF_START_MS;
           } finally {
@@ -1235,7 +1376,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           // exception handled above: retrying a rejected key can never heal,
           // so the queue is sealed for same-device re-pair instead. No batch
           // is quarantined or dropped on either path.
-          console.error("station: sync batch failed", err);
+          if (labelEvents.length > 0) console.error("station: product label sync batch failed");
+          else console.error("station: sync batch failed", err);
           scheduleRetry();
           break;
         }

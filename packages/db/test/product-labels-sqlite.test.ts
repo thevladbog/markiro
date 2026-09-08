@@ -81,6 +81,7 @@ describe("product label SQLite schema parity", () => {
       ["product_label_events", schema.productLabelEvents],
       ["product_label_outbox", schema.productLabelOutbox],
       ["product_label_event_commands", schema.productLabelEventCommands],
+      ["product_label_receipts", schema.productLabelReceipts],
     ] as const;
     for (const [name, table] of tables) {
       const actual = db
@@ -96,6 +97,7 @@ describe("product label SQLite schema parity", () => {
       "product_label_events",
       "product_label_outbox",
       "product_label_event_commands",
+      "product_label_receipts",
     ]) {
       expect(db.prepare(`PRAGMA foreign_key_list(${table})`).all()).toEqual(
         expect.arrayContaining([

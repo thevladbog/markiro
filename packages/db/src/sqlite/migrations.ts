@@ -3435,6 +3435,29 @@ export const STATION_MIGRATIONS: string[] = [
      INSERT INTO product_label_outbox(credential_ownership,event_id,queued_at)
      VALUES(NEW.credential_ownership,NEW.event_id,json_extract(NEW.event_json,'$.occurredAt'));
    END;`,
+  `CREATE TABLE IF NOT EXISTS product_label_receipts (
+     credential_ownership TEXT NOT NULL, event_id TEXT NOT NULL, event_json TEXT NOT NULL,
+     outcome TEXT NOT NULL, rejection_code TEXT, received_at TEXT NOT NULL,
+     PRIMARY KEY (credential_ownership,event_id),
+     FOREIGN KEY (credential_ownership,event_id) REFERENCES product_label_events(credential_ownership,event_id) ON DELETE CASCADE,
+     CONSTRAINT product_label_receipts_outcome_check CHECK (
+       (outcome='accepted' AND rejection_code IS NULL) OR
+       (outcome='quarantined' AND rejection_code IS NOT NULL AND rejection_code IN ('parent_missing','policy_mismatch','ownership_conflict','invalid_transition','sequence_gap','subscription_read_only','storage_invalid')))
+   );`,
+  `CREATE INDEX IF NOT EXISTS product_label_receipts_owner_time_idx ON product_label_receipts(credential_ownership,received_at);`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_receipt_guard BEFORE INSERT ON product_label_receipts
+   BEGIN
+     SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM product_label_events event WHERE event.credential_ownership=NEW.credential_ownership AND event.event_id=NEW.event_id AND event.event_json=NEW.event_json)
+       OR EXISTS (SELECT 1 FROM product_label_receipts receipt WHERE receipt.credential_ownership=NEW.credential_ownership AND receipt.event_id=NEW.event_id AND (receipt.event_json IS NOT NEW.event_json OR receipt.outcome IS NOT NEW.outcome OR receipt.rejection_code IS NOT NEW.rejection_code))
+       THEN RAISE(ABORT,'PRODUCT_LABEL_RECEIPT_MISMATCH') END;
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_receipt_apply AFTER INSERT ON product_label_receipts
+   BEGIN
+     UPDATE product_label_jobs SET ownership_conflict=1
+       WHERE NEW.rejection_code='ownership_conflict' AND credential_ownership=NEW.credential_ownership
+         AND job_id IN (SELECT job_id FROM product_label_events WHERE credential_ownership=NEW.credential_ownership AND event_id=NEW.event_id);
+     DELETE FROM product_label_outbox WHERE credential_ownership=NEW.credential_ownership AND event_id=NEW.event_id;
+   END;`,
 ];
 
 export interface StationMigrationEntry {

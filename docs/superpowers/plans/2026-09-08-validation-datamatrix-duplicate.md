@@ -1019,7 +1019,8 @@ digest остаётся тем же отказом, даже если пришё
 
 ## Task 11: Новый канал outbox, стабильный batch и ACK
 
-**Files:** Create `apps/station/src/lib/product-labels/sync.ts`;
+**Files:** Create `apps/station/src/lib/product-labels/{sync,sync-batch}.ts`;
+modify `packages/db/src/sqlite/{schema,migrations}.ts` и parity tests;
 modify `lib/sync.ts`, `lib/credential-recovery.ts`,
 `test/sync.test.ts`, `test/credential-recovery.test.ts`;
 create `test/product-labels-sync.test.ts`.
@@ -1042,9 +1043,13 @@ export function ackProductLabelEvents(
 export function productLabelSetSignature(events: ProductLabelEvent[]): string;
 ```
 
-`productLabelReceiptSchema` и тип receipt импортируются из domain задачи 1.
+`productLabelReceiptSchema` и тип receipt импортируются из domain задачи 1. readPendingProductLabelEvents принимает дополнительный optional scanCeiling для отбора зависимых фактов.
 
-- [ ] В существующем SyncEngine test fixture сохранить event, потерять ответ и
+Уточнение по коду и fault tests: одних ceilings недостаточно после частичного локального ACK старых каналов. Пакет с productLabelEvents дополнительно сохраняет digest-bound полный request и ACK metadata в sync_pending_product_label_batch; при retry используется именно он. Новые batch IDs имеют компактный digest с подписью событий, старый формат без нового канала сохранён. SQL удаляет envelope и все его identity/ceiling keys одним statement после завершения ACK. Отсутствующая квитанция проверяется до любого ACK.
+
+Новая локальная product_label_receipts сохраняет неизменяемую квитанцию и исходный event JSON для SQL CAS. Один bulk INSERT с guard/apply triggers одновременно фиксирует результат, ownership conflict и удаляет только подтверждённые outbox rows. local storage_invalid сохраняется отдельно от server reasons. Полные KM/pinned requests не выводятся в error logs нового канала.
+
+- [x] В существующем SyncEngine test fixture сохранить event, потерять ответ и
       записать более поздний verified. Основная проверка:
 
 ```ts
@@ -1069,14 +1074,14 @@ verified и продвигает test clock за retry deadline. Повтор и
 Если ownership null (unbound generation), новый канал не открывается: сначала
 требуется текущая привязка. Не подставлять пустую строку и не читать все owners.
 
-- [ ] Run `pnpm --filter @markiro/station exec vitest run test/product-labels-sync.test.ts`; ожидается отсутствие нового канала в body.
-- [ ] Добавить persisted `sync_pending_product_label_ceiling`, включая 0 для пустого
+- [x] Run `pnpm --filter @markiro/station exec vitest run test/product-labels-sync.test.ts`; ожидается отсутствие нового канала в body.
+- [x] Добавить persisted `sync_pending_product_label_ceiling`, включая 0 для пустого
       канала; добавить signature в batchId в пределах существующих 200 символов.
       pin выполняется до отправки; добавленные после pin события не попадают в retry.
       Parent scan отправляется раньше либо в том же batch: если его outbox row ещё
       за пределом batch, зависимые print events пока не выбирать. Повреждённый local
       event quarantine до сериализации, без блокировки остальных очередей.
-- [ ] Новый канал ACK только при валидной явной квитанции:
+- [x] Новый канал ACK только при валидной явной квитанции:
 
 ```ts
 if (sentProductLabelEvents.length > 0) {
@@ -1091,15 +1096,15 @@ Receipt обязан точно покрыть отправленные IDs бе
 ни печатные факты, ни pinned batch. Карантин сохраняет причину; immutable event
 не переписывается. Доставка не вызывает transport print.
 
-- [ ] Встроить счётчики нового outbox в SyncState/SealedWorkSummary и pause/drain.
+- [x] Встроить счётчики нового outbox в SyncState/SealedWorkSummary и pause/drain.
       Старая credential generation не может ACK или отправить события нового владельца.
       Не удалять новый журнал при clearRejectedCredentialState; он хранит свои
       snapshot/ownership и не зависит от очищаемого shift_mirror.
-- [ ] Проверить empty-channel pin, event-only batch, restart между pin и post,
+- [x] Проверить empty-channel pin, event-only batch, restart между pin и post,
       partial receipt, old server response, late ACK после seal, rejected parent,
       сохранение более позднего verified и отсутствие незавершённой работы в другой
       credential generation. Run sync/recovery suites и station gates.
-- [ ] Commit: `feat(station): deliver product label history with replay-safe acknowledgements`.
+- [x] Commit: `feat(station): deliver product label history with replay-safe acknowledgements`.
 
 ## Task 12: Настройки и шаблоны в кабинете
 
@@ -1577,3 +1582,9 @@ RED→GREEN: отсутствовали printing/recovery. Атомарный ж
 Пустой новый канал не меняет исторический payload digest. Exact replay сохраняет receipt; изменённый payload/event ID отклоняет transaction. lateDataAt обновляется только для нового факта. Только POST /station/scans получает parser limit 2 MiB для совмещённых bounded каналов, остальные маршруты остаются с прежним лимитом.
 
 Проверки: RED→GREEN для DTO, 24 e2e (включая 100 событий, cross-tenant/device, mixed errors, rollback, concurrent replay, reprint attribution, subscription renewal) и parser. Focused семи suites до двух последних проверок: 127/127. Полный API: 2892 passed, 25 skipped, один отказ inventory guard из-за нового bare Express теста без явной привязки 127.0.0.1. Test harness исправлен по существующему стандарту; повтор parser+inventory 3/3, typecheck/lint PASS. Production-код прошёл полный прогон; typecheck/lint/build прошли. Повтор parser без разрешения локального порта сначала дал EPERM, с разрешённым loopback прошёл. Scoped formatting и diff check прошли. Физическая/браузерная приёмка ещё не выполнялась.
+
+### Task 11 — Очередь и точное подтверждение
+
+RED→GREEN: новый канал отсутствовал; при пропущенной квитанции старый engine удалял scans, поздний verified не доставлялся, recovery count не учитывал labels. Добавлены event receipts и атомарные SQLite triggers, parent-aware выборка, full request pin и безопасное завершение ACK. Проверены partial ACK + restart, failure clearing pin, потеря ответа, поздний verified, старый pinned batch с нулевым новым каналом, parent за пределом первых 100 scans, чужой/unbound/sealed owner, повреждённый local event, missing/foreign/duplicate/overlap receipt, сохранение при очистке cache.
+
+Проверки: новая sync suite 17/17; вместе с существующими sync/recovery **109/109**. Полный Station **90 suites / 1335 tests**, DB **67 / 372**, typecheck/lint/build и schema parity прошли. Три старых точных fixture расширены нейтральным нулевым полем/ceiling без ослабления assertions. Scoped formatting и diff check прошли. Проверка реального Windows/Tauri pool, принтера, сканера и обрыва питания остаётся внешней.

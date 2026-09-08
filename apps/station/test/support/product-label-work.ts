@@ -11,13 +11,16 @@ import type { ProductLabelPrintingDeps } from "../../src/lib/product-labels/type
 import { makeRotatingExec, openFileDatabase } from "./sqlite-exec.js";
 import { productLabelAcceptanceFixture } from "./product-labels.js";
 
-export async function openProductLabelWork(verification: VerificationPolicy = "required") {
+export async function openProductLabelWork(
+  verification: VerificationPolicy = "required",
+  ownership?: string,
+) {
   const directory = mkdtempSync(join(tmpdir(), "markiro-label-work-"));
   const path = join(directory, "station.sqlite");
   let databases = [openFileDatabase(path), openFileDatabase(path)];
   let exec = makeRotatingExec(databases);
   await applyMigrations(exec);
-  const f = productLabelAcceptanceFixture({ verification });
+  const f = productLabelAcceptanceFixture({ verification, ...(ownership ? { ownership } : {}) });
   const context = {
     productName: "Кега",
     productPrintName: null,

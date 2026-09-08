@@ -1044,3 +1044,28 @@ export const productLabelEventCommands = sqliteTable(
     ),
   ],
 );
+
+/** Immutable local delivery verdict; insertion atomically removes only this event from outbox. */
+export const productLabelReceipts = sqliteTable(
+  "product_label_receipts",
+  {
+    credentialOwnership: text("credential_ownership").notNull(),
+    eventId: text("event_id").notNull(),
+    eventJson: text("event_json").notNull(),
+    outcome: text("outcome").notNull(),
+    rejectionCode: text("rejection_code"),
+    receivedAt: text("received_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.credentialOwnership, t.eventId] }),
+    foreignKey({
+      columns: [t.credentialOwnership, t.eventId],
+      foreignColumns: [productLabelEvents.credentialOwnership, productLabelEvents.eventId],
+    }).onDelete("cascade"),
+    index("product_label_receipts_owner_time_idx").on(t.credentialOwnership, t.receivedAt),
+    check(
+      "product_label_receipts_outcome_check",
+      sql`(${t.outcome} = 'accepted' AND ${t.rejectionCode} IS NULL) OR (${t.outcome} = 'quarantined' AND ${t.rejectionCode} IS NOT NULL AND ${t.rejectionCode} IN ('parent_missing','policy_mismatch','ownership_conflict','invalid_transition','sequence_gap','subscription_read_only','storage_invalid'))`,
+    ),
+  ],
+);

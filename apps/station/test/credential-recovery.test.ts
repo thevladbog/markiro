@@ -353,6 +353,7 @@ describe("credential rejection recovery", () => {
     await expect(readSealedWorkSummary(exec)).resolves.toEqual({
       scans: 2,
       inventoryScans: 1,
+      productLabels: 0,
       boxes: 1,
       exceptions: 1,
       total: 5,
@@ -396,6 +397,7 @@ describe("credential rejection recovery", () => {
     await expect(summary).resolves.toEqual({
       scans: 1,
       inventoryScans: 0,
+      productLabels: 0,
       boxes: 0,
       exceptions: 0,
       total: 1,
