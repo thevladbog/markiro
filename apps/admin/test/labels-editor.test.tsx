@@ -46,9 +46,18 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { parseLabelTemplate, type RasterResult, type RasterizeTextFn } from "@markiro/domain";
+import {
+  buildGfaCommand,
+  buildBitmapCommand,
+  mmToDots,
+  rasterizeGs1DataMatrix,
+  parseLabelTemplate,
+  type RasterResult,
+  type RasterizeTextFn,
+} from "@markiro/domain";
 
 import { buildZplBlob, latin1ToUint8Array } from "../src/pages/labels/editor/download.js";
+import { labelPreviewData } from "../src/pages/labels/preview-data.js";
 import { LabelEditorPage } from "../src/pages/labels/editor/index.js";
 import { decodeRasterToRgba, rasterDestXPx } from "../src/pages/labels/editor/raster-preview.js";
 
@@ -1003,3 +1012,128 @@ describe("Scope and enablement", () => {
     expect(await screen.findByText(hint)).toBeDefined();
   });
 });
+
+it("builds a 58 by 40 product duplicate template when its purpose is selected", async () => {
+  const fetchMock = stubCreateFetch("duplicate-1");
+  renderCreateFlow();
+  await chooseOption(userEvent.setup(), "Назначение", "Дубликат товара");
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+  await waitFor(() =>
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true),
+  );
+  const call = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+  const body = JSON.parse(String(call?.[1]?.body));
+  expect(body.purpose).toBe("product_duplicate");
+  expect(body.spec).toMatchObject({
+    widthMm: 58,
+    heightMm: 40,
+    elements: expect.arrayContaining([
+      expect.objectContaining({
+        kind: "barcode",
+        data: "km.code",
+        format: "datamatrix",
+        sizeMm: 24,
+      }),
+    ]),
+  });
+});
+
+it("refuses to save an imported layout without a product code as a product duplicate", async () => {
+  const fetchMock = stubCreateFetch("invalid");
+  renderCreateFlow();
+  await chooseOption(userEvent.setup(), "Назначение", "Дубликат товара");
+  importZpl(IMPORT_ZPL);
+  expect(
+    screen.getByText(
+      "Нужен один Data Matrix с полным кодом продукции внутри этикетки. Поле SSCC недопустимо.",
+    ),
+  ).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([]);
+});
+
+it("keeps existing purpose immutable and copies to a new template before changing purpose", async () => {
+  const writes: Array<{ method: string; path: string; body: unknown }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string, init?: RequestInit) => {
+      if (init?.method === "POST" || init?.method === "PATCH") {
+        const body: unknown = JSON.parse(String(init.body));
+        writes.push({ method: init.method, path, body });
+        return jsonResponse(201, { id: "copy" });
+      }
+      return jsonResponse(200, {
+        id: "original",
+        name: "Короб оригинал",
+        purpose: "box",
+        spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+        enabled: true,
+        chzProductGroupCodes: null,
+      });
+    }),
+  );
+  renderEditFlow("original");
+  const purpose = await screen.findByRole("combobox", { name: "Назначение" });
+  expect(purpose.hasAttribute("disabled")).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Создать копию" }));
+  expect(purpose.hasAttribute("disabled")).toBe(false);
+  await chooseOption(userEvent.setup(), "Назначение", "Дубликат товара");
+  expect(screen.getByRole("button", { name: "Сохранить" }).hasAttribute("disabled")).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Использовать шаблон 58 × 40" }));
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+  await waitFor(() =>
+    expect(writes).toEqual([
+      {
+        method: "POST",
+        path: "/api/label-templates",
+        body: expect.objectContaining({
+          purpose: "product_duplicate",
+          name: "Короб оригинал — копия",
+        }),
+      },
+    ]),
+  );
+});
+
+it.each([
+  { dpi: 203, format: "zpl", label: "Скачать ZPL" },
+  { dpi: 300, format: "zpl", label: "Скачать ZPL" },
+  { dpi: 203, format: "tspl", label: "Скачать TSPL (TSC)" },
+  { dpi: 300, format: "tspl", label: "Скачать TSPL (TSC)" },
+] as const)(
+  "downloads the preview's actual GS1 bitmap at $dpi dpi in $format",
+  async ({ dpi, format, label }) => {
+    const blobs: Blob[] = [];
+    vi.spyOn(URL, "createObjectURL").mockImplementation((value) => {
+      if (!(value instanceof Blob)) throw new Error("Expected a downloadable label");
+      blobs.push(value);
+      return "blob:mock-url";
+    });
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    const raster = vi.fn(fakeRasterizeText);
+    renderCreateFlow({ rasterizeText: raster });
+    await chooseOption(userEvent.setup(), "Назначение", "Дубликат товара");
+    if (dpi === 300) await chooseOption(userEvent.setup(), "DPI", "300");
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    await waitFor(() => expect(blobs).toHaveLength(1));
+    const blob = blobs[0];
+    if (!blob) throw new Error("Missing downloaded label");
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const text = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+    const dm = rasterizeGs1DataMatrix(
+      labelPreviewData("product_duplicate")["km.code"],
+      mmToDots(24, dpi),
+    );
+    expect(text).toContain(
+      format === "zpl"
+        ? `^FO${mmToDots(32, dpi)},${mmToDots(8, dpi)}${buildGfaCommand(dm)}^FS`
+        : buildBitmapCommand(mmToDots(32, dpi), mmToDots(8, dpi), dm),
+    );
+    expect(text).not.toContain("^BX");
+    expect(text).not.toContain("DMATRIX");
+    expect(raster).toHaveBeenCalledWith(
+      "Кега · демонстрационная этикетка",
+      expect.objectContaining({ maxWidthPx: mmToDots(28, dpi), maxLines: 3, bold: true }),
+    );
+  },
+);

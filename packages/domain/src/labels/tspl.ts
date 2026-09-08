@@ -58,6 +58,7 @@ import {
 } from "./model.js";
 import { buildBitmapCommand, rasterAlignOffsetDots, type RasterizeTextFn } from "./raster-types.js";
 import { needsImageRendering } from "./text.js";
+import { rasterizeGs1DataMatrix } from "../barcodes/gs1-data-matrix.js";
 import { estimatedTextWidthMm, LINE_HEIGHT_EM, ptToMm, wrapTextToWidth } from "./wrap.js";
 
 export { buildBitmapCommand, rasterAlignOffsetDots } from "./raster-types.js";
@@ -67,6 +68,8 @@ export { needsImageRendering } from "./text.js";
 
 export interface GenerateTsplDeps {
   rasterizeText?: RasterizeTextFn;
+  /** Product-duplicate layouts use sizeMm as the complete symbol square, including quiet zone. */
+  kmDataMatrix?: "native" | "raster";
 }
 
 /**
@@ -493,14 +496,32 @@ export async function generateTspl(
         lines.push(
           await renderTextLikeElement(
             element,
-            labelFieldDisplayValue(element.field, data),
+            labelFieldDisplayValue(element.field, data, element.textFormat),
             spec,
             deps,
           ),
         );
         break;
       case "barcode":
-        lines.push(renderBarcodeElement(element, data, spec.dpi));
+        if (
+          element.format === "datamatrix" &&
+          element.data === "km.code" &&
+          deps.kmDataMatrix === "raster"
+        ) {
+          const raster = rasterizeGs1DataMatrix(
+            data["km.code"],
+            mmToDots(element.sizeMm, spec.dpi),
+          );
+          lines.push(
+            buildBitmapCommand(
+              mmToDots(element.xMm, spec.dpi),
+              mmToDots(element.yMm, spec.dpi),
+              raster,
+            ),
+          );
+        } else {
+          lines.push(renderBarcodeElement(element, data, spec.dpi));
+        }
         break;
       case "line":
         lines.push(renderLineElement(element, spec.dpi));

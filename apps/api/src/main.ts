@@ -14,6 +14,7 @@ import {
   STATION_API_KEY_SECURITY,
 } from "./lib/openapi";
 import { excludeExchangeRoute } from "./modules/exchange/exchange.module";
+import { stationScansBodyParser } from "./modules/station-scans/body-parser";
 import { mountOpenApiDocs } from "./openapi-docs";
 import { mountPlatformAuth, setupPlatformAuth } from "./platform-auth/platform-auth.setup";
 import { addPlatformSessionSecurity } from "./platform-http/platform-openapi";
@@ -78,6 +79,7 @@ async function bootstrap() {
   // `excludeExchangeRoute`'s own comment for why registration order alone
   // cannot be trusted to keep a mismatched `Content-Type: application/json`
   // request out of this parser.
+  server.use(stationScansBodyParser);
   server.use(excludeExchangeRoute(express.json()));
 
   // Without this, SIGINT/SIGTERM kill the process directly and Nest never

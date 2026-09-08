@@ -1,6 +1,14 @@
 import { z } from "zod";
 import type { SchemaObject } from "@nestjs/swagger";
-import type { BoxLabelTemplateDefaultSource, LabelTemplateSpec } from "@markiro/domain";
+import {
+  validationPrintInputSchema,
+  validationPrintPolicySchema,
+  PRODUCT_LABEL_PROTOCOL,
+  type ValidationPrintPolicy,
+  type BoxLabelTemplateDefaultSource,
+  type LabelTemplateSpec,
+} from "@markiro/domain";
+import { zodApiSchema } from "../../lib/openapi";
 import type { OperatorMirrorRecord } from "@markiro/db";
 import type { ProductDto, ProductImageDescriptor } from "../products/dto";
 
@@ -53,6 +61,7 @@ const productionDateSchema = civilDateSchema("productionDate");
 export const createShiftSchema = z.object({
   productId: z.string().uuid(),
   mode: z.enum(SHIFT_MODES),
+  validationPrint: validationPrintInputSchema.optional(),
   lineId: z.string().uuid().nullable().optional(),
   counterpartyId: z.string().uuid().nullable().optional(),
   /**
@@ -82,6 +91,7 @@ export type CreateShiftDto = z.infer<typeof createShiftSchema>;
  */
 export const updateShiftSchema = z.object({
   mode: z.enum(SHIFT_MODES).optional(),
+  validationPrint: validationPrintInputSchema.optional(),
   lineId: z.string().uuid().nullable().optional(),
   counterpartyId: z.string().uuid().nullable().optional(),
   ssccIssuerCounterpartyId: z.string().uuid().nullable().optional(),
@@ -125,6 +135,7 @@ export interface ShiftDto {
   number: string;
   status: ShiftStatus;
   mode: ShiftMode;
+  validationPrint: ValidationPrintPolicy;
   productId: string;
   productName: string | null;
   /** Short operator-facing product name; null = use `productName`. */
@@ -191,8 +202,14 @@ export const boxLabelTemplateProductQuerySchema = z.object({
 });
 export type BoxLabelTemplateProductQueryDto = z.infer<typeof boxLabelTemplateProductQuerySchema>;
 
+export const productLabelTemplateProductQuerySchema = z.object({ productId: z.uuid() });
+export type ProductLabelTemplateProductQueryDto = z.infer<
+  typeof productLabelTemplateProductQuerySchema
+>;
+
 /** GET /shifts/planning-config response — the operations-readable planning subset only. */
 export interface ShiftPlanningConfigDto {
+  validationPrintProtocol: typeof PRODUCT_LABEL_PROTOCOL | null;
   defaultBoxLabelTemplateId: string | null;
   /** Which default answered: the product's category, the organisation, or none. */
   defaultSource: BoxLabelTemplateDefaultSource | null;
@@ -319,6 +336,7 @@ export const createShiftOpenApiSchema = {
   properties: {
     productId: { type: "string", format: "uuid" },
     mode: { type: "string", enum: [...SHIFT_MODES] },
+    validationPrint: zodApiSchema(validationPrintInputSchema),
     lineId: nullableUuidOpenApiSchema,
     counterpartyId: nullableUuidOpenApiSchema,
     ssccIssuerCounterpartyId: nullableUuidOpenApiSchema,
@@ -338,6 +356,7 @@ export const updateShiftOpenApiSchema = {
   required: [],
   properties: {
     mode: { type: "string", enum: [...SHIFT_MODES] },
+    validationPrint: zodApiSchema(validationPrintInputSchema),
     lineId: nullableUuidOpenApiSchema,
     counterpartyId: nullableUuidOpenApiSchema,
     ssccIssuerCounterpartyId: nullableUuidOpenApiSchema,
@@ -360,8 +379,9 @@ const defaultSourceOpenApiSchema: SchemaObject = {
 export const shiftPlanningConfigOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["defaultBoxLabelTemplateId", "defaultSource"],
+  required: ["defaultBoxLabelTemplateId", "defaultSource", "validationPrintProtocol"],
   properties: {
+    validationPrintProtocol: { type: "string", enum: [PRODUCT_LABEL_PROTOCOL], nullable: true },
     defaultBoxLabelTemplateId: nullableUuidOpenApiSchema,
     defaultSource: defaultSourceOpenApiSchema,
   },
@@ -434,6 +454,7 @@ const shiftRequiredFields = [
   "productId",
   "productName",
   "productPrintName",
+  "validationPrint",
   "lineId",
   "lineName",
   "counterpartyId",
@@ -463,6 +484,7 @@ export const shiftOpenApiSchema = {
     number: { type: "string" },
     status: { type: "string", enum: [...SHIFT_STATUSES] },
     mode: { type: "string", enum: [...SHIFT_MODES] },
+    validationPrint: zodApiSchema(validationPrintPolicySchema),
     productId: { type: "string", format: "uuid" },
     productName: { type: "string", nullable: true },
     productPrintName: { type: "string", nullable: true },

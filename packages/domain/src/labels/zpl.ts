@@ -1,4 +1,5 @@
 import { DomainError } from "../errors.js";
+import { rasterizeGs1DataMatrix } from "../barcodes/gs1-data-matrix.js";
 import {
   labelFieldDisplayValue,
   mmToDots,
@@ -23,6 +24,8 @@ export { needsImageRendering } from "./text.js";
 
 export interface GenerateZplDeps {
   rasterizeText?: RasterizeTextFn;
+  /** Opt-in duplicate layout: sizeMm is the full symbol square, not a module size. */
+  kmDataMatrix?: "native" | "raster";
 }
 
 /** `^FH`'s configurable hex-indicator character, used throughout this module. */
@@ -364,14 +367,28 @@ export async function generateZpl(
         lines.push(
           await renderTextLikeElement(
             element,
-            labelFieldDisplayValue(element.field, data),
+            labelFieldDisplayValue(element.field, data, element.textFormat),
             spec,
             deps,
           ),
         );
         break;
       case "barcode":
-        lines.push(renderBarcodeElement(element, data, spec.dpi));
+        if (
+          element.format === "datamatrix" &&
+          element.data === "km.code" &&
+          deps.kmDataMatrix === "raster"
+        ) {
+          const raster = rasterizeGs1DataMatrix(
+            data["km.code"],
+            mmToDots(element.sizeMm, spec.dpi),
+          );
+          lines.push(
+            `^FO${mmToDots(element.xMm, spec.dpi)},${mmToDots(element.yMm, spec.dpi)}${buildGfaCommand(raster)}^FS`,
+          );
+        } else {
+          lines.push(renderBarcodeElement(element, data, spec.dpi));
+        }
         break;
       case "line":
         lines.push(renderLineElement(element, spec.dpi));

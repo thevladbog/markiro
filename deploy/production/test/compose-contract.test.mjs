@@ -406,3 +406,11 @@ test("production environment example is a blank loadEnv inventory", async () => 
     if (/^[A-Z0-9_]+=/.test(line)) assert.match(line, /^[A-Z0-9_]+=$/);
   }
 });
+
+test("duplicate Data Matrix printing stays disabled without an explicit rollout flag", async () => {
+  const model = loadYaml(await readFile(productionCompose, "utf8"));
+  assert.equal(
+    model.services.api.environment.VALIDATION_DM_DUPLICATE_ENABLED,
+    "${VALIDATION_DM_DUPLICATE_ENABLED:-false}",
+  );
+});

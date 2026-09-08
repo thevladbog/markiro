@@ -190,6 +190,15 @@ function EditShiftPanel() {
         ? {
             productId: shift.productId,
             mode: shift.mode,
+            validationPrintMode: shift.validationPrint?.mode ?? "none",
+            verificationRequired:
+              shift.validationPrint?.mode === "duplicate_dm"
+                ? shift.validationPrint.verification === "required"
+                : true,
+            productLabelTemplateId:
+              shift.validationPrint?.mode === "duplicate_dm"
+                ? shift.validationPrint.templateId
+                : "",
             plannedQty: shift.plannedQty === null ? "" : String(shift.plannedQty),
             plannedDate: shift.plannedDate ?? localCalendarDate(shift.openedAt) ?? "",
             productionDate: shift.productionDate ?? "",
@@ -211,6 +220,7 @@ function EditShiftPanel() {
       shift?.counterpartyId,
       shift?.lineId,
       shift?.mode,
+      shift?.validationPrint,
       shift?.openedAt,
       shift?.palletCapacity,
       shift?.palletsEnabled,
@@ -263,6 +273,9 @@ function EditShiftPanel() {
       <ShiftForm
         mode="edit"
         editStatus={shift.status}
+        {...(shift.validationPrint?.mode === "duplicate_dm"
+          ? { frozenTemplateName: shift.validationPrint.snapshot.name }
+          : {})}
         title={`${t("pages.shifts.form.editTitle")} · ${shift.number}`}
         initialValues={initialValues}
         products={context.products}

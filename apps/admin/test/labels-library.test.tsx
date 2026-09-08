@@ -324,3 +324,14 @@ describe("LabelTemplatesPage", () => {
     expect(screen.queryByRole("button", { name: "Выключить" })).toBeNull();
   });
 });
+
+it("distinguishes product duplicate templates from box templates", async () => {
+  const items = [
+    { ...BOX_SUMMARY, purpose: "box" },
+    { ...UNIT_SUMMARY, purpose: "product_duplicate" },
+  ];
+  stubFetch(items);
+  renderPage();
+  expect(await screen.findByText("Дубликат товара")).toBeDefined();
+  expect(screen.getByText("Короб")).toBeDefined();
+});

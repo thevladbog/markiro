@@ -86,6 +86,7 @@ export async function closeShiftOffline(
     deviceId: string;
     operatorId: string | null;
     reasonCode?: string | null;
+    credentialOwnership?: string;
   },
   now: () => Date = () => new Date(),
 ): Promise<OfflineShiftCloseSummary> {
@@ -99,6 +100,24 @@ export async function closeShiftOffline(
     input.shiftId,
   ]);
   if (!shift) throw new Error("Shift is not available offline");
+
+  const [printPolicy] = await exec.all<{ enabled: number }>(
+    "SELECT json_extract(validation_print_context,'$.policy.mode')='duplicate_dm' AS enabled FROM shift_mirror WHERE id=?",
+    [input.shiftId],
+  );
+  if (printPolicy?.enabled === 1) {
+    if (!input.credentialOwnership) throw new Error("PRODUCT_LABEL_CREDENTIAL_REQUIRED");
+    const [foreign] = await exec.all<{ job_id: string }>(
+      "SELECT job_id FROM product_label_jobs WHERE shift_id=? AND credential_ownership<>? LIMIT 1",
+      [input.shiftId, input.credentialOwnership],
+    );
+    if (foreign) throw new Error("PRODUCT_LABEL_CREDENTIAL_MISMATCH");
+    const [pending] = await exec.all<{ job_id: string }>(
+      "SELECT job_id FROM product_label_jobs WHERE shift_id=? AND status<>'completed' LIMIT 1",
+      [input.shiftId],
+    );
+    if (pending) throw new Error("PRODUCT_LABEL_UNRESOLVED");
+  }
 
   const storedClose = await loadStoredClose(exec, input.shiftId);
   if (storedClose) {

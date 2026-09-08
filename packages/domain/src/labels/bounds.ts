@@ -67,7 +67,9 @@ function resolveTextForBounds(
   element: LabelTextElement | LabelFieldElement,
   data: Record<LabelField, string>,
 ): string {
-  return element.kind === "text" ? element.text : labelFieldDisplayValue(element.field, data);
+  return element.kind === "text"
+    ? element.text
+    : labelFieldDisplayValue(element.field, data, element.textFormat);
 }
 
 function resolveBarcodeTextForBounds(
@@ -124,7 +126,11 @@ function linearBarcodeWidthMm(
  * `data` is REQUIRED and must be the SAME data the caller renders with:
  * bounds and rendered size have to agree.
  */
-export function elementBoundsMm(element: LabelElement, data: Record<LabelField, string>): BoundsMm {
+export function elementBoundsMm(
+  element: LabelElement,
+  data: Record<LabelField, string>,
+  options: { kmDataMatrix?: "native" | "raster" } = {},
+): BoundsMm {
   switch (element.kind) {
     case "text":
     case "field": {
@@ -141,6 +147,13 @@ export function elementBoundsMm(element: LabelElement, data: Record<LabelField, 
       return { x: element.xMm, y: element.yMm, w, h };
     }
     case "barcode": {
+      if (
+        element.format === "datamatrix" &&
+        element.data === "km.code" &&
+        options.kmDataMatrix === "raster"
+      ) {
+        return { x: element.xMm, y: element.yMm, w: element.sizeMm, h: element.sizeMm };
+      }
       if (element.format === "datamatrix" || element.format === "qr") {
         const side = TOTAL_MODULES * element.sizeMm;
         return { x: element.xMm, y: element.yMm, w: side, h: side };

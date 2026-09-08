@@ -189,6 +189,17 @@ export const shifts = pgTable(
      */
     ssccIssuerCounterpartyId: uuid("sscc_issuer_counterparty_id"),
     boxLabelTemplateId: uuid("box_label_template_id"),
+    validationPrintMode: text("validation_print_mode")
+      .$type<"none" | "duplicate_dm">()
+      .notNull()
+      .default("none"),
+    validationPrintVerification: text("validation_print_verification")
+      .$type<"none" | "required">()
+      .notNull()
+      .default("none"),
+    validationPrintTemplateId: uuid("validation_print_template_id"),
+    validationPrintSnapshot: jsonb("validation_print_snapshot").$type<Record<string, unknown>>(),
+    validationPrintPolicyRevision: uuid("validation_print_policy_revision"),
     status: shiftStatus("status").notNull().default("planned"),
     mode: shiftMode("mode").notNull(),
     plannedQty: integer("planned_qty"),
@@ -236,6 +247,26 @@ export const shifts = pgTable(
   },
   (t) => [
     unique("shifts_tenant_id_uq").on(t.tenantId, t.id),
+    check(
+      "shifts_validation_print_policy_check",
+      sql`
+      (${t.validationPrintMode} = 'none'
+        AND ${t.validationPrintVerification} = 'none'
+        AND ${t.validationPrintTemplateId} IS NULL
+        AND ${t.validationPrintSnapshot} IS NULL
+        AND ${t.validationPrintPolicyRevision} IS NULL)
+      OR (${t.mode} = 'validation' AND ${t.validationPrintMode} = 'duplicate_dm'
+        AND ${t.validationPrintVerification} IN ('none', 'required')
+        AND ${t.validationPrintTemplateId} IS NOT NULL
+        AND ${t.validationPrintSnapshot} IS NOT NULL
+        AND ${t.validationPrintPolicyRevision} IS NOT NULL)
+    `,
+    ),
+    foreignKey({
+      name: "shifts_tenant_validation_print_template_fk",
+      columns: [t.tenantId, t.validationPrintTemplateId],
+      foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
+    }),
     uniqueIndex("shifts_tenant_month_seq_uq").on(t.tenantId, t.numberMonthKey, t.numberSeq),
     // Composite FKs: product/line/counterparty must belong to the same
     // tenant as the shift referencing them. line_id/counterparty_id are
@@ -583,7 +614,7 @@ export const stationSyncQuarantine = pgTable(
     check("station_sync_quarantine_digest_check", sql`${t.payloadDigest} ~ '^[0-9a-f]{64}$'`),
     check(
       "station_sync_quarantine_record_kind_check",
-      sql`${t.recordKind} IN ('item', 'box', 'exception')`,
+      sql`${t.recordKind} IN ('item', 'box', 'exception', 'product_label_event')`,
     ),
     check("station_sync_quarantine_record_index_check", sql`${t.recordIndex} >= 0`),
     check("station_sync_quarantine_reason_check", sql`char_length(${t.reason}) BETWEEN 1 AND 64`),

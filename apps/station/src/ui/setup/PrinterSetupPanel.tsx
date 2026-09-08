@@ -20,6 +20,8 @@ export interface PrinterSetupPanelProps {
   usbPrinters: readonly UsbPrinterInfo[];
   usbPrinter: string;
   language: PrinterLanguage;
+  printerDpi?: 203 | 300 | null;
+  onPrinterDpiChange?: (dpi: 203 | 300 | null) => void;
   verifyPrintedLabel: boolean;
   disabled: boolean;
   busy: boolean;
@@ -46,6 +48,8 @@ export function PrinterSetupPanel({
   usbPrinters,
   usbPrinter,
   language,
+  printerDpi = null,
+  onPrinterDpiChange,
   verifyPrintedLabel,
   disabled,
   busy,
@@ -175,23 +179,40 @@ export function PrinterSetupPanel({
           )}
         </div>
 
-        <fieldset className="setup-choice-group setup-choice-group--printer-language">
-          <legend>{t("setup.printerLanguage")}</legend>
-          <div className="setup-choice-group__options setup-choice-group__options--compact">
-            {(["zpl", "tspl"] as const).map((value) => (
-              <label className="setup-touch-choice" key={value}>
-                <input
-                  type="radio"
-                  name="printer-language"
-                  checked={language === value}
-                  disabled={disabled}
-                  onChange={() => onLanguageChange(value)}
-                />
-                <span>{value === "zpl" ? t("setup.languageZpl") : t("setup.languageTspl")}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
+        <div className="setup-printer-format">
+          <fieldset className="setup-choice-group setup-choice-group--printer-language">
+            <legend>{t("setup.printerLanguage")}</legend>
+            <div className="setup-choice-group__options setup-choice-group__options--compact">
+              {(["zpl", "tspl"] as const).map((value) => (
+                <label className="setup-touch-choice" key={value}>
+                  <input
+                    type="radio"
+                    name="printer-language"
+                    checked={language === value}
+                    disabled={disabled}
+                    onChange={() => onLanguageChange(value)}
+                  />
+                  <span>{value === "zpl" ? t("setup.languageZpl") : t("setup.languageTspl")}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <Select
+            size="floor"
+            label={t("setup.printerResolution")}
+            value={printerDpi?.toString() ?? ""}
+            disabled={disabled || transport === "none"}
+            options={[
+              { value: "", label: t("setup.printerResolutionUnknown") },
+              { value: "203", label: "203 dpi" },
+              { value: "300", label: "300 dpi" },
+            ]}
+            onValueChange={(value) =>
+              onPrinterDpiChange?.(value === "203" ? 203 : value === "300" ? 300 : null)
+            }
+          />
+        </div>
 
         <label className="setup-touch-choice setup-touch-choice--checkbox">
           <input

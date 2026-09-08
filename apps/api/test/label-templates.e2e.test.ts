@@ -11,6 +11,7 @@ import { loadEnv } from "../src/env";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { createTestStationDevice } from "./support/auth";
+import { buildDuplicateLabelTemplate } from "@markiro/domain";
 
 /**
  * A minimal, valid `LabelTemplateSpec` (see packages/domain/src/labels/model.ts)
@@ -94,6 +95,62 @@ describe.skipIf(!ready)("label-templates e2e", () => {
 
   it("GET /label-templates is unauthorized without a session", async () => {
     await request(app!.getHttpServer()).get("/label-templates").expect(401);
+  });
+
+  it("keeps duplicate purpose immutable and validates old-client spec updates by stored purpose", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const spec = buildDuplicateLabelTemplate();
+    const created = await agent
+      .post("/label-templates")
+      .send({ name: "Duplicate", purpose: "product_duplicate", spec })
+      .expect(201);
+    const id: string = created.body.id;
+    expect(created.body.purpose).toBe("product_duplicate");
+    await agent
+      .post("/label-templates")
+      .send({ name: "Invalid duplicate", purpose: "product_duplicate", spec: VALID_SPEC })
+      .expect(400);
+    await agent.patch(`/label-templates/${id}`).send({ spec: VALID_SPEC }).expect(400);
+    const changed = await agent
+      .patch(`/label-templates/${id}`)
+      .send({ purpose: "box" })
+      .expect(409);
+    expect(changed.body.code).toBe("LABEL_TEMPLATE_PURPOSE_IMMUTABLE");
+    await agent
+      .patch(`/label-templates/${id}`)
+      .send({ name: "Renamed", purpose: "product_duplicate" })
+      .expect(200);
+    const saved = await agent.get(`/label-templates/${id}`).expect(200);
+    expect(saved.body).toMatchObject({ name: "Renamed", purpose: "product_duplicate", spec });
+    const list = await agent.get("/label-templates").expect(200);
+    expect(list.body.items).toEqual([
+      expect.objectContaining({ id, purpose: "product_duplicate" }),
+    ]);
+  });
+
+  it("rejects duplicate templates as both organization and category box defaults", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const created = await agent
+      .post("/label-templates")
+      .send({
+        name: "Duplicate",
+        purpose: "product_duplicate",
+        spec: buildDuplicateLabelTemplate(),
+      })
+      .expect(201);
+    const id: string = created.body.id;
+    const globalDefault = await agent
+      .put("/org/profile")
+      .send({ defaultBoxLabelTemplateId: id })
+      .expect(400);
+    expect(globalDefault.body.code).toBe("BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
+    const categoryDefault = await agent
+      .put("/org/profile")
+      .send({ categoryBoxLabelTemplateDefaults: [{ chzProductGroupCode: 15, templateId: id }] })
+      .expect(400);
+    expect(categoryDefault.body.code).toBe("BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
   });
 
   it("CRUD happy path: create, list summary, get full, patch, delete", async () => {

@@ -224,9 +224,12 @@ const OPERATIONAL_CONTROLLERS: readonly [
     ShiftsController,
     {
       listShifts: sharedReadPolicy,
-      getPlanningConfig: readPolicy,
+      getPlanningConfig: sharedReadPolicy,
       listBoxLabelTemplates: sharedReadPolicy,
+      listProductLabelTemplates: sharedReadPolicy,
       getShiftSummary: readPolicy,
+      getProductLabels: readPolicy,
+      getProductLabelEvents: readPolicy,
       getShift: readPolicy,
       createShift: sharedWritePolicy,
       updateShift: writePolicy,

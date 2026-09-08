@@ -16,7 +16,7 @@
  */
 import { useEffect, useRef } from "react";
 
-import { sampleLabelData } from "@markiro/domain";
+import { labelPreviewData, labelRenderOptions } from "./preview-data.js";
 
 import { draw } from "./renderer.js";
 import { useLabelTemplate } from "./api.js";
@@ -53,7 +53,7 @@ export function TemplateThumb({ id, widthMm, heightMm }: TemplateThumbProps) {
     if (!canvas || !data) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    draw(data.spec, ctx, scale, sampleLabelData());
+    draw(data.spec, ctx, scale, labelPreviewData(data.purpose), labelRenderOptions(data.purpose));
   });
 
   return (

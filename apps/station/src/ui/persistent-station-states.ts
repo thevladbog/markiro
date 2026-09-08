@@ -1,3 +1,8 @@
+import type {
+  VerificationPolicy,
+  ProductLabelJobStatus,
+  VerificationOutcome,
+} from "@markiro/domain";
 import type { SignalTone } from "@markiro/ui";
 
 import type { CredentialRecoveryPhase, LegacyIdentityState, StationView } from "../App.js";
@@ -21,6 +26,26 @@ import type { BoxFillPersistentState } from "./work/BoxFillInstrument.js";
  * therefore fails typecheck until its gallery contract is decided here.
  */
 export const PERSISTENT_STATION_STATE_GALLERY = {
+  productLabelJob: {
+    prepared: "validation-print-prepared",
+    sending: "validation-print-sending",
+    awaiting_verification: "validation-print-required",
+    completed: "validation-print-none",
+    attention: "validation-print-unknown",
+  } as const satisfies Record<ProductLabelJobStatus, string>,
+  productLabelOutcome: {
+    pending: "validation-print-required",
+    verified: "validation-print-verified",
+    not_required: "validation-print-none",
+  } as const satisfies Record<VerificationOutcome, string>,
+  productLabelRecovery: {
+    waiting: "validation-print-waiting",
+    mismatch: "validation-print-mismatch",
+    invalid: "validation-print-invalid",
+    reprint: "validation-print-reason",
+    failed: "validation-print-failed",
+  } as const,
+
   stationView: {
     loading: "app-loading",
     pairing: "pairing-waiting",
@@ -64,7 +89,13 @@ export const PERSISTENT_STATION_STATE_GALLERY = {
     found: "new-shift-found",
     notFound: "new-shift-not-found",
     template: "new-shift-template",
+    validationPrint: "validation-print-create-required",
+    productTemplate: "validation-print-create-template",
   } as const satisfies Record<NewShiftView, string>,
+  newShiftVerification: {
+    required: "validation-print-create-required",
+    none: "validation-print-create-none",
+  } as const satisfies Record<VerificationPolicy, string>,
   shiftSelection: {
     loading: "shift-loading",
     "read-error": "shift-read-error",

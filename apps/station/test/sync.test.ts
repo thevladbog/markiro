@@ -836,6 +836,7 @@ describe("sync engine", () => {
         { key: "sync_pending_box_ceiling", value: "0" },
         { key: "sync_pending_ceiling", value: "2" },
         { key: "sync_pending_exception_ceiling", value: "0" },
+        { key: "sync_pending_product_label_ceiling", value: "0" },
       ]);
       engine.stop();
     } finally {

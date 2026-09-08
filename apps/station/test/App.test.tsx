@@ -132,6 +132,12 @@ import * as WorkScreenModule from "../src/pages/WorkScreen.js";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import { inventorySnapshotContentDigest, inventorySnapshotPageDigest } from "@markiro/domain";
 
+import { openProductLabelWork } from "./support/product-label-work.js";
+import {
+  createCredentialGeneration,
+  credentialGenerationOwnership,
+} from "../src/lib/credential-recovery.js";
+
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
@@ -928,15 +934,15 @@ async function renderActiveShiftForOperatorSwitch(
     }
     if (cmd === "plugin:sql|execute") {
       const { query, values = [] } = (payload ?? {}) as { query: string; values?: unknown[] };
-      if (query.includes("INSERT INTO codes_mirror")) boxItemCount += 1;
-      if (query.includes("INSERT INTO scan_events_mirror")) {
+      if (/^\s*INSERT INTO codes_mirror\b/i.test(query)) boxItemCount += 1;
+      if (/^\s*INSERT INTO scan_events_mirror\b/i.test(query)) {
         journalOperatorIds.push(values[5] as string);
         if (journalOperatorIds.length === 1) {
           markFirstJournalStarted();
           return firstJournalGate;
         }
       }
-      if (query.includes("INSERT INTO outbox")) outboxOperatorIds.push(values[9] as string);
+      if (/^\s*INSERT INTO outbox\b/i.test(query)) outboxOperatorIds.push(values[9] as string);
     }
     return baseInvoke(cmd, payload);
   });
@@ -2543,7 +2549,7 @@ describe("App", () => {
       expect(paths).not.toContain("POST /shifts/shift-1/open");
       expect(
         recovery.executed.filter(({ query }) =>
-          /INSERT INTO boxes_mirror|UPDATE boxes_mirror\s+SET sscc|UPDATE sscc_pool\s+SET next_serial = next_serial \+ 1|INSERT INTO scan_events_mirror|INSERT INTO outbox/.test(
+          /^\s*(?:INSERT INTO boxes_mirror\b|UPDATE boxes_mirror\s+SET sscc\b|UPDATE sscc_pool\s+SET next_serial = next_serial \+ 1|INSERT INTO scan_events_mirror\b|INSERT INTO outbox\b)/i.test(
             query,
           ),
         ),
@@ -4501,6 +4507,7 @@ describe("App", () => {
   // re-rendered NewShift instead of shift selection -- the opposite of what
   // the exit control promises ("return to shift selection").
   it("returns to shift selection, not the new-shift form, after exiting a shift entered via NewShift (Finding 5)", async () => {
+    lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
     // mirrorShiftBundle's own download (GET /shifts/:id/bundle) is not
     // meaningfully mocked below, so it fails and logs -- expected and
     // harmless (see shift-bundle.ts's doc comment on why that path is
@@ -4767,7 +4774,8 @@ describe("App", () => {
       // One failed classification read, one successful retry read, and one
       // strict recovery classifier read that confirms this validation shift
       // has no pending box recovery.
-      expect(shiftMirrorReads).toBe(3);
+      // The duplicate-label controller also reads the immutable print context before intake.
+      expect(shiftMirrorReads).toBe(4);
     } finally {
       consoleErrorSpy.mockRestore();
     }
@@ -5169,4 +5177,55 @@ describe("App", () => {
       consoleErrorSpy.mockRestore();
     }
   });
+});
+
+it("gates startup on the current credential's saved label and resumes a remotely closed shift offline", async () => {
+  lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+  const owner = await credentialGenerationOwnership(createCredentialGeneration("mk_key"));
+  const h = await openProductLabelWork("required", owner ?? undefined);
+  await h.exec.run("UPDATE shift_mirror SET status='closed' WHERE id=?", [h.input.shiftId]);
+  const pinHash = await hashSecret(OPERATOR_PIN);
+  mockInvokeForFloor(pinHash, {
+    scanner: null,
+    printer: null,
+    printerLanguage: "zpl",
+    verifyPrintedLabel: false,
+  });
+  const baseInvoke = invokeMock.getMockImplementation();
+  if (!baseInvoke) throw new Error("floor harness missing");
+  invokeMock.mockImplementation((cmd, payload) => {
+    if (cmd === "plugin:sql|select") {
+      const { query, values } = payload as { query: string; values?: unknown[] };
+      if (
+        query.includes("product_label_") ||
+        query.includes("FROM shift_mirror") ||
+        query.includes("FROM products_mirror")
+      )
+        return h.exec.all(query, values);
+    }
+    return baseInvoke(cmd, payload);
+  });
+  const fetch = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(() =>
+    Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 })),
+  );
+  vi.stubGlobal("fetch", fetch);
+  const view = render(<App />);
+  try {
+    await signInAsOperator();
+    const recovery = await screen.findByRole("dialog", {
+      name: "This station has an unfinished label",
+    });
+    expect(screen.queryByRole("button", { name: "New shift" })).toBeNull();
+    fireEvent.click(within(recovery).getByRole("button", { name: "Resume saved label" }));
+    await screen.findByRole("button", { name: "Send saved label" });
+    expect(
+      screen.getByText("This shift is closed. Finish this label; new units cannot be accepted."),
+    ).toBeDefined();
+    expect(hardwareMock.print).not.toHaveBeenCalled();
+    expect(fetch.mock.calls.some(([url]) => String(url).includes("/bundle"))).toBe(false);
+  } finally {
+    view.unmount();
+    await Promise.resolve();
+    h.close();
+  }
 });

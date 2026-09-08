@@ -1770,6 +1770,17 @@
           "cancel": "Stay",
           "discard": "Discard changes"
         }
+      },
+      "purpose": {
+        "label": "Purpose",
+        "box": "Box",
+        "duplicate": "Product duplicate",
+        "invalid": "One Data Matrix containing the full product code must fit inside the label. SSCC is not allowed.",
+        "sample": "Synthetic sample code. The line prints the code received from the scanner.",
+        "copy": "Create a copy",
+        "copyName": "{{name}} — copy",
+        "copyHint": "A new template will be created. Check its purpose and content before saving.",
+        "reset": "Use the 58 × 40 template"
       }
     },
     "lines": {
@@ -2055,6 +2066,68 @@
         "deleteError": "Could not delete the shift",
         "closeSuccess": "Shift closed",
         "closeError": "Could not close the shift"
+      },
+      "duplicate": {
+        "printLabel": "Label printing",
+        "off": "No printing",
+        "on": "Duplicate Data Matrix",
+        "title": "Duplicate printing",
+        "template": "Product label template",
+        "templatePlaceholder": "Select a template",
+        "templateOption": "{{name}} · {{widthMm}} × {{heightMm}} mm · {{dpi}} dpi",
+        "templateRequired": "Select a product label template",
+        "noTemplates": "No duplicate templates are available for this product. Add or enable a suitable template in the label library.",
+        "verification": "Require label verification",
+        "requiredHint": "The operator must scan the new label before accepting the next unit.",
+        "noneHint": "After sending to the printer, the next unit can be scanned",
+        "copyHint": "The full product code is copied to the outer packaging. The product quantity stays the same.",
+        "frozen": "Printing and verification settings were frozen when the shift opened.",
+        "frozenTemplate": "Template frozen when the shift opened"
+      },
+      "productLabels": {
+        "title": "Label history",
+        "hint": "Sending to a printer does not confirm physical printing. Verification is recorded only after scanning the label.",
+        "readError": "Could not load print history",
+        "retry": "Retry",
+        "more": "Load more",
+        "empty": "No labels yet",
+        "sentAttempts": "Sent to printer",
+        "verifiedAttempts": "Verified labels",
+        "unresolvedJobs": "Unfinished jobs",
+        "reprintAttempts": "Reprint attempts",
+        "ownershipConflict": "Code ownership conflict",
+        "attemptHistory": "Attempt history",
+        "attempts_one": "{{count}} attempt",
+        "attempts_other": "{{count}} attempts",
+        "original": "First print",
+        "states": {
+          "prepared": "Ready to send",
+          "sending": "Sending",
+          "awaiting_verification": "Awaiting verification",
+          "attention": "Needs attention",
+          "verified": "Label verified",
+          "sent": "Sent to printer"
+        },
+        "events": {
+          "prepared": "Label prepared",
+          "sending": "Sending started",
+          "sent": "Sent to printer",
+          "failed_before_send": "Not sent",
+          "delivery_unknown": "Delivery unknown",
+          "verified": "Label verified",
+          "verification_rejected": "Verification failed"
+        },
+        "reasons": {
+          "not_printed": "Label did not print",
+          "damaged": "Label damaged",
+          "lost": "Label lost"
+        },
+        "rejected": {
+          "invalid": "Code could not be read in full",
+          "mismatch": "Code differs from the original"
+        },
+        "attempts_few": "{{count}} attempts",
+        "attempts_many": "{{count}} attempts"
       }
     },
     "boxes": {

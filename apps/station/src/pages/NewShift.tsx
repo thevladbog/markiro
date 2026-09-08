@@ -1,8 +1,20 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, DatePicker, Input, Pager } from "@markiro/ui";
-import { classifyScan, DomainError, normalizeToGtin14 } from "@markiro/domain";
+import {
+  classifyScan,
+  DomainError,
+  normalizeToGtin14,
+  PRODUCT_LABEL_PROTOCOL,
+  productLabelTemplateListSchema,
+  productLabelValueDigest,
+  validationPrintInputSchema,
+  validationPrintPolicySchema,
+  type ProductLabelTemplateList,
+  type ValidationPrintInput,
+} from "@markiro/domain";
 import { StationApiError, type StationClient } from "../lib/api-client.js";
+import { DEFAULT_HARDWARE_CONFIG, type HardwareConfig } from "../lib/hardware-config.js";
 import { paginate } from "../lib/pagination.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import type { AcquireShiftEntry, ShiftEntryLease } from "../lib/shift-entry-lease.js";
@@ -37,10 +49,31 @@ export interface NewShiftProps {
     lease?: ShiftEntryLease,
   ) => void | Promise<void>;
   onBack: () => void;
+  hardwareConfig?: HardwareConfig;
+  onSetup?: (draft: NewShiftDraft) => void;
+  initialDraft?: NewShiftDraft;
+  isCurrent?: () => boolean;
 }
 
-export type NewShiftView = "input" | "found" | "notFound" | "template";
+export type NewShiftView =
+  "input" | "found" | "notFound" | "template" | "validationPrint" | "productTemplate";
 export type NewShiftMode = "validation" | "aggregation";
+
+interface CreatedPrintShift {
+  created: { id: string; productionDate?: string | null };
+  requestDigest: string;
+}
+
+/** In-memory handoff to printer settings; revalidated against the server before start. */
+export interface NewShiftDraft {
+  product: ResolvedProduct;
+  productionDate: string;
+  printEnabled: boolean;
+  verificationRequired: boolean;
+  productTemplateId: string | null;
+  productTemplates: ProductLabelTemplateList["items"];
+  createdPrintShift: CreatedPrintShift | null;
+}
 
 function currentLocalDate(now = new Date()): string {
   return [
@@ -50,15 +83,42 @@ function currentLocalDate(now = new Date()): string {
   ].join("-");
 }
 
-export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack }: NewShiftProps) {
+export function NewShift({
+  client,
+  source,
+  acquireShiftEntry,
+  onStarted,
+  onBack,
+  hardwareConfig = DEFAULT_HARDWARE_CONFIG,
+  onSetup,
+  isCurrent,
+  initialDraft,
+}: NewShiftProps) {
   const { i18n, t } = useTranslation();
   const [raw, setRaw] = useState("");
-  const [view, setView] = useState<NewShiftView>("input");
+  const [view, setView] = useState<NewShiftView>(initialDraft ? "productTemplate" : "input");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [product, setProduct] = useState<ResolvedProduct | null>(null);
+  const [product, setProduct] = useState<ResolvedProduct | null>(initialDraft?.product ?? null);
+  const [printEnabled, setPrintEnabled] = useState(initialDraft?.printEnabled ?? false);
+  const [verificationRequired, setVerificationRequired] = useState(
+    initialDraft?.verificationRequired ?? true,
+  );
+  const [printProtocol, setPrintProtocol] = useState<string | null>(null);
+  const [printSettingsLoaded, setPrintSettingsLoaded] = useState(false);
+  const [productTemplates, setProductTemplates] = useState<ProductLabelTemplateList["items"]>(
+    initialDraft?.productTemplates ?? [],
+  );
+  const [productTemplateId, setProductTemplateId] = useState<string | null>(
+    initialDraft?.productTemplateId ?? null,
+  );
+  const [printerError, setPrinterError] = useState(false);
+  const operationBusy = useRef(false);
+  const createdPrintShift = useRef<CreatedPrintShift | null>(
+    initialDraft?.createdPrintShift ?? null,
+  );
   const [mode, setMode] = useState<NewShiftMode>("validation");
-  const [productionDate, setProductionDate] = useState("");
+  const [productionDate, setProductionDate] = useState(initialDraft?.productionDate ?? "");
   const [unknownGtin, setUnknownGtin] = useState<string>("");
   const [templates, setTemplates] = useState<BoxLabelTemplateOption[]>([]);
   const [defaultTemplateId, setDefaultTemplateId] = useState<string | null>(null);
@@ -103,7 +163,12 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
           setView("notFound");
           return;
         }
+        if (!mounted.current || (isCurrent && !isCurrent())) return;
         setProduct(match);
+        setPrintEnabled(false);
+        setVerificationRequired(true);
+        setProductTemplateId(null);
+        setPrintProtocol(null);
         setView("found");
       } catch (err) {
         setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
@@ -112,7 +177,7 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
         setBusy(false);
       }
     },
-    [client, t],
+    [client, t, isCurrent],
   );
 
   useEffect(() => {
@@ -165,8 +230,75 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
     }
   }
 
+  async function openPrintSettings() {
+    if (!product || busy || operationBusy.current || (isCurrent && !isCurrent())) return;
+    const operation = ++shiftEntryOperation.current;
+    const current = () =>
+      mounted.current && operation === shiftEntryOperation.current && (isCurrent?.() ?? true);
+    setView("validationPrint");
+    setError(null);
+    setPrinterError(false);
+    setPrintProtocol(null);
+    setPrintSettingsLoaded(false);
+    setBusy(true);
+    operationBusy.current = true;
+    try {
+      const config = await client.get<{ validationPrintProtocol?: string | null }>(
+        `/shifts/planning-config?productId=${encodeURIComponent(product.id)}`,
+      );
+      if (!current()) return;
+      setPrintProtocol(config.validationPrintProtocol ?? null);
+      setPrintSettingsLoaded(true);
+      if (config.validationPrintProtocol !== PRODUCT_LABEL_PROTOCOL) setPrintEnabled(false);
+    } catch {
+      if (current()) setError(t("shifts.printSettingsLoadFailed"));
+    } finally {
+      operationBusy.current = false;
+      if (current()) setBusy(false);
+    }
+  }
+
+  async function openProductTemplateStep() {
+    if (!product || busy || operationBusy.current || (isCurrent && !isCurrent())) return;
+    const operation = ++shiftEntryOperation.current;
+    const current = () =>
+      mounted.current && operation === shiftEntryOperation.current && (isCurrent?.() ?? true);
+    setError(null);
+    setPrinterError(false);
+    setBusy(true);
+    operationBusy.current = true;
+    try {
+      const result = productLabelTemplateListSchema.parse(
+        await client.get<unknown>(
+          `/shifts/product-label-templates?productId=${encodeURIComponent(product.id)}`,
+        ),
+      );
+      if (!current()) return;
+      setProductTemplates(result.items);
+      setProductTemplateId((previous) =>
+        result.items.some((item) => item.id === previous) ? previous : null,
+      );
+      setTemplatePage(1);
+      setTemplateSearch("");
+      setView("productTemplate");
+    } catch {
+      if (current()) setError(t("shifts.templatesLoadFailed"));
+    } finally {
+      operationBusy.current = false;
+      if (current()) setBusy(false);
+    }
+  }
+
   async function start() {
-    if (!product || busy) return;
+    if (!product || busy || operationBusy.current || (isCurrent && !isCurrent())) return;
+    if (
+      mode === "validation" &&
+      printEnabled &&
+      (view === "validationPrint" || !productTemplateId)
+    ) {
+      await openProductTemplateStep();
+      return;
+    }
     if (mode === "aggregation" && view === "found") {
       await openTemplateStep();
       return;
@@ -175,36 +307,121 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
     const operation = ++shiftEntryOperation.current;
     let lease: ShiftEntryLease | null = null;
     const current = (): boolean =>
-      mounted.current && shiftEntryOperation.current === operation && (lease?.isCurrent() ?? true);
+      mounted.current &&
+      shiftEntryOperation.current === operation &&
+      (lease?.isCurrent() ?? true) &&
+      (isCurrent?.() ?? true);
     setError(null);
+    setPrinterError(false);
     setBusy(true);
+    operationBusy.current = true;
     try {
       if (acquireShiftEntry) {
         lease = await acquireShiftEntry();
         if (!current()) return;
       }
+      let validationPrint: ValidationPrintInput = { mode: "none" };
+      if (mode === "validation" && printEnabled) {
+        const config = await client.get<{ validationPrintProtocol?: string | null }>(
+          `/shifts/planning-config?productId=${encodeURIComponent(product.id)}`,
+        );
+        if (!current()) return;
+        if (config.validationPrintProtocol !== PRODUCT_LABEL_PROTOCOL) {
+          setError(t("shifts.printUnavailable"));
+          return;
+        }
+        const latest = productLabelTemplateListSchema.parse(
+          await client.get<unknown>(
+            `/shifts/product-label-templates?productId=${encodeURIComponent(product.id)}`,
+          ),
+        );
+        if (!current()) return;
+        const selected = latest.items.find((template) => template.id === productTemplateId);
+        if (!selected) {
+          setProductTemplates(latest.items);
+          setProductTemplateId(null);
+          setError(t("shifts.productTemplateUnavailable"));
+          return;
+        }
+        if (
+          !hardwareConfig.printer ||
+          !hardwareConfig.printerDpi ||
+          !["zpl", "tspl"].includes(hardwareConfig.printerLanguage)
+        ) {
+          setPrinterError(true);
+          setError(t("shifts.printHardwareRequired"));
+          return;
+        }
+        if (hardwareConfig.printerDpi !== selected.dpi) {
+          setPrinterError(true);
+          setError(t("shifts.printDpiMismatch"));
+          return;
+        }
+        validationPrint = validationPrintInputSchema.parse({
+          mode: "duplicate_dm",
+          templateId: selected.id,
+          verification: verificationRequired ? "required" : "none",
+        });
+      }
       const requestedProductionDate = productionDate || null;
-      const created = await client.post<{
-        id: string;
-        productionDate?: string | null;
-      }>("/shifts", {
+      const createInput = {
         productId: product.id,
         mode,
         plannedDate: currentLocalDate(),
         productionDate: requestedProductionDate,
-        // Validation shifts print nothing; an aggregation shift snapshots
-        // exactly the template the operator saw.
+        // Unchanged validation keeps the legacy no-print payload. Explicit
+        // settings use the shared policy input, including an explicit opt-out.
+        ...(printEnabled || view === "validationPrint" ? { validationPrint } : {}),
         ...(mode === "aggregation" ? { boxLabelTemplateId: selectedTemplateId } : {}),
-      });
+      };
+      const requestDigest = productLabelValueDigest(createInput);
+      if (createdPrintShift.current && createdPrintShift.current.requestDigest !== requestDigest) {
+        setError(t("shifts.printPolicyNotConfirmed"));
+        return;
+      }
+      const created =
+        createdPrintShift.current?.created ??
+        (await client.post<{ id: string; productionDate?: string | null }>("/shifts", createInput));
       if (!current()) return;
+      if (validationPrint.mode === "duplicate_dm")
+        createdPrintShift.current = { created, requestDigest };
       if (requestedProductionDate !== null && created.productionDate !== requestedProductionDate) {
         setError(t("shifts.productionDateNotConfirmed"));
         return;
       }
-      const opened = await client.post<{ id: string; status: string; mode: string }>(
-        `/shifts/${created.id}/open`,
-      );
+      const opened = await client.post<{
+        id: string;
+        status: string;
+        mode: string;
+        validationPrint?: unknown;
+      }>(`/shifts/${created.id}/open`);
       if (!current()) return;
+      if (validationPrint.mode === "none" && opened.validationPrint !== undefined) {
+        const authoritative = validationPrintPolicySchema.safeParse(opened.validationPrint);
+        if (!authoritative.success || authoritative.data.mode !== "none") {
+          setError(t("shifts.printPolicyNotConfirmed"));
+          return;
+        }
+      }
+      if (validationPrint.mode === "duplicate_dm") {
+        const authoritative = validationPrintPolicySchema.safeParse(opened.validationPrint);
+        if (
+          !authoritative.success ||
+          authoritative.data.mode !== "duplicate_dm" ||
+          authoritative.data.templateId !== validationPrint.templateId ||
+          authoritative.data.verification !== validationPrint.verification ||
+          opened.mode !== "validation" ||
+          opened.status !== "active"
+        ) {
+          setError(t("shifts.printPolicyNotConfirmed"));
+          return;
+        }
+        if (authoritative.data.snapshot.spec.dpi !== hardwareConfig.printerDpi) {
+          setPrinterError(true);
+          setError(t("shifts.printDpiMismatch"));
+          return;
+        }
+      }
       if (lease) await onStarted(opened, lease);
       else await onStarted(opened);
       if (!current()) return;
@@ -217,6 +434,7 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
       );
     } finally {
       lease?.release();
+      operationBusy.current = false;
       if (mounted.current && shiftEntryOperation.current === operation) setBusy(false);
     }
   }
@@ -264,25 +482,20 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
     );
   }
 
-  if (view === "template" && product) {
-    const needle = templateSearch.trim().toLocaleLowerCase();
-    const visibleTemplates = needle
-      ? templates.filter((option) => option.name.toLocaleLowerCase().includes(needle))
-      : templates;
-    const currentPage = paginate(visibleTemplates, templatePage, TEMPLATE_PAGE_SIZE);
+  if (view === "validationPrint" && product) {
     return (
       <StationScreen
-        title={t("shifts.new")}
+        title={t("shifts.printSettingsTitle")}
         actions={
           <FloorFooter ariaLabel={t("shifts.newActions")}>
             <Button
+              data-testid="new-shift-print-continue"
               size="floor"
               fullWidth
               loading={busy}
-              disabled={!selectedTemplateId}
               onClick={() => void start()}
             >
-              {t("shifts.start")}
+              {t(printEnabled ? "shifts.selectProductTemplate" : "shifts.start")}
             </Button>
             <Button
               size="floor"
@@ -299,12 +512,126 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
           </FloorFooter>
         }
       >
+        <section className="new-shift__panel new-shift__print-settings">
+          <Card className="new-shift__product" padding="var(--sp-3)">
+            <h2>{product.name}</h2>
+            <div className="new-shift__code">{product.gtin14}</div>
+          </Card>
+          <div className="new-shift__print-choices">
+            <label className="setup-touch-choice setup-touch-choice--checkbox">
+              <input
+                type="checkbox"
+                name="duplicate-print"
+                checked={printEnabled}
+                disabled={busy || printProtocol !== PRODUCT_LABEL_PROTOCOL}
+                onChange={(event) => {
+                  setPrintEnabled(event.target.checked);
+                  if (!event.target.checked) setProductTemplateId(null);
+                }}
+              />
+              <span>{t("shifts.printDuplicate")}</span>
+            </label>
+            {printEnabled ? (
+              <div className="new-shift__verification-choice">
+                <label className="setup-touch-choice setup-touch-choice--checkbox">
+                  <input
+                    type="checkbox"
+                    name="duplicate-verification"
+                    checked={verificationRequired}
+                    disabled={busy}
+                    onChange={(event) => setVerificationRequired(event.target.checked)}
+                  />
+                  <span>{t("shifts.requireProductLabelVerification")}</span>
+                </label>
+                <p>
+                  {t(verificationRequired ? "shifts.printRequiredHint" : "shifts.printNoneHint")}
+                </p>
+              </div>
+            ) : (
+              <p className="new-shift__print-hint">{t("shifts.printCopyHint")}</p>
+            )}
+          </div>
+          {!busy && printSettingsLoaded && printProtocol !== PRODUCT_LABEL_PROTOCOL ? (
+            <Alert tone="info">{t("shifts.printUnavailable")}</Alert>
+          ) : null}
+          {error ? (
+            <Button size="floor" variant="secondary" onClick={() => void openPrintSettings()}>
+              {t("shifts.retryPrintSettings")}
+            </Button>
+          ) : null}
+          {messageSlot}
+        </section>
+      </StationScreen>
+    );
+  }
+
+  if ((view === "template" || view === "productTemplate") && product) {
+    const productLabels = view === "productTemplate";
+    const choices = productLabels ? productTemplates : templates;
+    const selectedId = productLabels ? productTemplateId : selectedTemplateId;
+    const templateTitle = productLabels ? "shifts.productTemplateLabel" : "shifts.templateLabel";
+    const needle = templateSearch.trim().toLocaleLowerCase();
+    const visibleTemplates = needle
+      ? choices.filter((option) => option.name.toLocaleLowerCase().includes(needle))
+      : choices;
+    const currentPage = paginate(visibleTemplates, templatePage, TEMPLATE_PAGE_SIZE);
+    return (
+      <StationScreen
+        title={t("shifts.new")}
+        actions={
+          <FloorFooter ariaLabel={t("shifts.newActions")}>
+            <Button
+              size="floor"
+              fullWidth
+              loading={busy}
+              disabled={!selectedId}
+              onClick={() => void start()}
+            >
+              {t("shifts.start")}
+            </Button>
+            {printerError && onSetup ? (
+              <Button
+                size="floor"
+                fullWidth
+                variant="secondary"
+                disabled={busy}
+                onClick={() =>
+                  onSetup({
+                    product,
+                    productionDate,
+                    printEnabled,
+                    verificationRequired,
+                    productTemplateId,
+                    productTemplates,
+                    createdPrintShift: createdPrintShift.current,
+                  })
+                }
+              >
+                {t("shifts.printerSettings")}
+              </Button>
+            ) : null}
+            <Button
+              size="floor"
+              fullWidth
+              variant="secondary"
+              disabled={busy}
+              onClick={() => {
+                setError(null);
+                if (productLabels) void openPrintSettings();
+                else setView("found");
+              }}
+            >
+              {t("shifts.back")}
+            </Button>
+          </FloorFooter>
+        }
+      >
         <section
           className="new-shift__panel new-shift__panel--template"
           data-testid="new-shift-template"
         >
-          <h2 className="new-shift__template-title">{t("shifts.templateLabel")}</h2>
-          {templates.length === 0 ? (
+          <h2 className="new-shift__template-title">{t(templateTitle)}</h2>
+          {choices.length === 0 ? (
             <div className="new-shift__center">
               <p>{t("shifts.templatesEmpty")}</p>
             </div>
@@ -327,13 +654,9 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
                   <p>{t("shifts.templateSearchEmpty")}</p>
                 </div>
               ) : null}
-              <div
-                className="new-shift__templates"
-                role="group"
-                aria-label={t("shifts.templateLabel")}
-              >
+              <div className="new-shift__templates" role="group" aria-label={t(templateTitle)}>
                 {currentPage.items.map((option) => {
-                  const selected = option.id === selectedTemplateId;
+                  const selected = option.id === selectedId;
                   return (
                     <button
                       key={option.id}
@@ -345,7 +668,11 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
                       }
                       aria-pressed={selected}
                       disabled={busy}
-                      onClick={() => setSelectedTemplateId(option.id)}
+                      onClick={() =>
+                        productLabels
+                          ? setProductTemplateId(option.id)
+                          : setSelectedTemplateId(option.id)
+                      }
                     >
                       <span className="new-shift__template-name">{option.name}</span>
                       <span className="new-shift__template-meta">
@@ -355,7 +682,7 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
                           dpi: option.dpi,
                         })}
                       </span>
-                      {option.id === defaultTemplateId ? (
+                      {!productLabels && option.id === defaultTemplateId ? (
                         <span className="new-shift__template-badge">
                           {t("shifts.templateDefault")}
                         </span>
@@ -419,11 +746,29 @@ export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack 
               fullWidth
               variant={mode === "aggregation" ? "primary" : "secondary"}
               aria-pressed={mode === "aggregation"}
-              onClick={() => setMode("aggregation")}
+              onClick={() => {
+                setMode("aggregation");
+                setPrintEnabled(false);
+                setProductTemplateId(null);
+              }}
             >
               {t("shifts.modeAggregation")}
             </Button>
           </div>
+          {mode === "validation" ? (
+            <Button
+              size="floor"
+              fullWidth
+              variant="secondary"
+              disabled={busy}
+              onClick={() => void openPrintSettings()}
+              data-testid="new-shift-print-settings"
+            >
+              {t("shifts.printSettingsEntry", {
+                mode: t(printEnabled ? "shifts.printDuplicateShort" : "shifts.printOff"),
+              })}
+            </Button>
+          ) : null}
           <DatePicker
             label={t("shifts.productionDate")}
             hint={t("shifts.productionDateHint")}

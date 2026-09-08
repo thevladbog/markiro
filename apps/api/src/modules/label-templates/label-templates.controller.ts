@@ -117,7 +117,8 @@ export class LabelTemplatesController {
   @RequireFeature("labelEditor")
   @ApiOperation({
     summary: "Update a label template",
-    description: "Partial update; untouched fields are preserved.",
+    description:
+      "Partial update; untouched fields are preserved. Purpose is immutable, and product duplicate specs retain their required Data Matrix.",
   })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiZodBody(updateLabelTemplateSchema)
@@ -126,8 +127,21 @@ export class LabelTemplatesController {
   @ApiResponse({
     status: 409,
     description:
-      "The template is an organisation or category default and would stop being eligible.",
-    schema: labelTemplateIsDefaultOpenApiSchema,
+      "The template would stop being eligible as a default, or its immutable purpose would change.",
+    schema: {
+      oneOf: [
+        labelTemplateIsDefaultOpenApiSchema,
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["code", "message"],
+          properties: {
+            code: { type: "string", enum: ["LABEL_TEMPLATE_PURPOSE_IMMUTABLE"] },
+            message: { type: "string" },
+          },
+        },
+      ],
+    },
   })
   @ApiHttpErrors(401, 403, 404)
   async updateLabelTemplate(

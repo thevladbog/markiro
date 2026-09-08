@@ -24,7 +24,7 @@ import type { ProductDto } from "../catalog/api.js";
 import { isBoxLabelTemplateEligible } from "@markiro/domain";
 
 import type { LabelTemplateSummaryDto } from "../labels/api.js";
-import { useShiftPlanningConfig } from "./api.js";
+import { useProductLabelTemplates, useShiftPlanningConfig } from "./api.js";
 import type { CreateShiftInput, LineDto, ShiftStatus, UpdateShiftInput } from "./api.js";
 
 const SHIFT_MODES = ["validation", "aggregation"] as const;
@@ -45,6 +45,9 @@ const SHIFT_MODES = ["validation", "aggregation"] as const;
 const shiftFormSchema = z.object({
   productId: z.string().trim().min(1, "pages.shifts.form.errors.productRequired"),
   mode: z.enum(SHIFT_MODES),
+  validationPrintMode: z.enum(["none", "duplicate_dm"]).optional(),
+  verificationRequired: z.boolean().optional(),
+  productLabelTemplateId: z.string().optional(),
   plannedQty: z
     .string()
     .trim()
@@ -82,6 +85,7 @@ export interface ShiftFormProps {
   /** Overrides the default create/edit title, e.g. to append the shift's number in edit mode. */
   title?: string;
   initialValues?: ShiftFormValues;
+  frozenTemplateName?: string;
   /** All products (both draft and active) -- draft ones render disabled with a hint. */
   products: ProductDto[];
   lines: LineDto[];
@@ -102,6 +106,9 @@ export const BOX_TEMPLATE_SELECTION = {
 const EMPTY_VALUES: ShiftFormValues = {
   productId: "",
   mode: "validation",
+  validationPrintMode: "none",
+  verificationRequired: true,
+  productLabelTemplateId: "",
   plannedQty: "",
   plannedDate: "",
   productionDate: "",
@@ -126,6 +133,7 @@ export function ShiftForm({
   editStatus,
   title: titleOverride,
   initialValues,
+  frozenTemplateName,
   products,
   lines,
   counterparties,
@@ -179,18 +187,38 @@ export function ShiftForm({
   const hasProduct = productId !== "";
   const selectedProduct = products.find((product) => product.id === productId) ?? null;
   const productGroupCode = selectedProduct?.chzProductGroupCode ?? null;
+  const printMode = watch("validationPrintMode") ?? "none";
+  const verificationRequired = watch("verificationRequired") ?? true;
+  const productLabelTemplateId = watch("productLabelTemplateId") ?? "";
+  const duplicateEnabled = shiftMode === "validation" && printMode === "duplicate_dm";
+  const productLabels = useProductLabelTemplates(
+    duplicateEnabled && !activeEdit && hasProduct ? productId : null,
+    productGroupCode,
+  );
+  const templateContextRef = useRef({ productId, productGroupCode });
+  useEffect(() => {
+    const previous = templateContextRef.current;
+    templateContextRef.current = { productId, productGroupCode };
+    if (
+      previous.productId === productId &&
+      previous.productGroupCode !== productGroupCode &&
+      !activeEdit
+    ) {
+      setValue("productLabelTemplateId", "", { shouldDirty: true });
+    }
+  }, [productId, productGroupCode, activeEdit, setValue]);
   const planning = useShiftPlanningConfig(hasProduct ? productId : null);
   const resolvedDefaultId = planning.data?.defaultBoxLabelTemplateId ?? null;
   const resolvedDefaultSource = planning.data?.defaultSource ?? null;
   // A product the list cannot resolve (e.g. an old shift whose product is no
-  // longer listed) gets the unfiltered enabled list rather than nothing.
+  // longer listed) gets all enabled box templates.
   const eligibleTemplates = !hasProduct
     ? []
     : selectedProduct
       ? formContext.labelTemplates.filter((template) =>
           isBoxLabelTemplateEligible(template, productGroupCode),
         )
-      : formContext.labelTemplates;
+      : formContext.labelTemplates.filter((template) => template.purpose !== "product_duplicate");
 
   const isDirtyRef = useRef(false);
 
@@ -265,6 +293,29 @@ export function ShiftForm({
   }, [formMode, lines, setValue]);
 
   const submit = handleSubmit(async (values) => {
+    if (
+      !activeEdit &&
+      values.mode === "validation" &&
+      values.validationPrintMode === "duplicate_dm"
+    ) {
+      const selectedTemplate = productLabels.data?.items.find(
+        (template) => template.id === values.productLabelTemplateId,
+      );
+      if (
+        productLabels.isFetching ||
+        productLabels.isError ||
+        !selectedTemplate ||
+        (planning.data?.validationPrintProtocol !== "validation-dm-duplicate-v1" &&
+          initialValues?.validationPrintMode !== "duplicate_dm")
+      ) {
+        setError("productLabelTemplateId", {
+          type: "manual",
+          message: "pages.shifts.duplicate.templateRequired",
+        });
+        return;
+      }
+    }
+
     // The default may still be resolving (or have failed) for a freshly chosen
     // product; wait for or retry it rather than snapshotting a stale or empty
     // answer.
@@ -445,6 +496,8 @@ export function ShiftForm({
               {...errorProp(translateFieldError(t, errors.productId?.message))}
               onValueChange={(value) => {
                 setValue("productId", value, { shouldDirty: true, shouldValidate: true });
+                setValue("productLabelTemplateId", "", { shouldDirty: true });
+                clearErrors("productLabelTemplateId");
                 // A template chosen for the previous product may not cover
                 // the new product's category; fall back to the default then.
                 const nextProduct = products.find((product) => product.id === value) ?? null;
@@ -482,12 +535,45 @@ export function ShiftForm({
                   disabled={activeEdit}
                   onValueChange={(value) => {
                     field.onChange(value);
+                    if (value === "aggregation") {
+                      setValue("validationPrintMode", "none", { shouldDirty: true });
+                      setValue("productLabelTemplateId", "", { shouldDirty: true });
+                      clearErrors("productLabelTemplateId");
+                    }
                     if (value === "validation") clearErrors("boxLabelTemplateSelection");
                   }}
                 />
               )}
             />
           </div>
+          {shiftMode === "validation" ? (
+            <RadioGroup
+              label={t("pages.shifts.duplicate.printLabel")}
+              value={printMode}
+              disabled={activeEdit}
+              options={[
+                { value: "none", label: t("pages.shifts.duplicate.off") },
+                {
+                  value: "duplicate_dm",
+                  label: t("pages.shifts.duplicate.on"),
+                  disabled:
+                    planning.data?.validationPrintProtocol !== "validation-dm-duplicate-v1" &&
+                    initialValues?.validationPrintMode !== "duplicate_dm",
+                },
+              ]}
+              onValueChange={(value) => {
+                setValue(
+                  "validationPrintMode",
+                  value === "duplicate_dm" ? "duplicate_dm" : "none",
+                  { shouldDirty: true },
+                );
+                if (value === "duplicate_dm" && getValues("verificationRequired") === undefined)
+                  setValue("verificationRequired", true);
+                if (value === "none") setValue("productLabelTemplateId", "", { shouldDirty: true });
+                clearErrors("productLabelTemplateId");
+              }}
+            />
+          ) : null}
         </section>
 
         <section className="mk-shift-form__section">
@@ -584,30 +670,106 @@ export function ShiftForm({
           </div>
         </section>
 
-        <section className="mk-shift-form__section">
-          <h3>{t("pages.shifts.sections.templates")}</h3>
-          <div className="mk-shift-form__grid">
+        {duplicateEnabled ? (
+          <section className="mk-shift-form__section">
+            <h3>{t("pages.shifts.duplicate.title")}</h3>
             <Select
-              label={t("pages.shifts.form.boxLabelTemplateLabel")}
-              options={boxLabelTemplateOptions}
-              value={boxLabelTemplateSelection}
-              searchable
-              searchLabel={t("pages.shifts.form.boxLabelTemplateSearch")}
-              searchPlaceholder={t("pages.shifts.form.boxLabelTemplateSearch")}
-              {...(hasProduct && eligibleTemplates.length === 0 && !planning.isLoading
-                ? { hint: t("pages.shifts.form.boxLabelTemplateNoneEligible") }
-                : {})}
-              {...errorProp(translateFieldError(t, errors.boxLabelTemplateSelection?.message))}
+              label={t("pages.shifts.duplicate.template")}
+              value={productLabelTemplateId}
+              disabled={activeEdit || productLabels.isFetching}
+              placeholder={t("pages.shifts.duplicate.templatePlaceholder")}
+              options={[
+                ...(productLabels.data?.items ?? []).map((template) => ({
+                  value: template.id,
+                  label: t("pages.shifts.duplicate.templateOption", template),
+                })),
+                ...(productLabelTemplateId &&
+                !productLabels.data?.items.some(
+                  (template) => template.id === productLabelTemplateId,
+                )
+                  ? [
+                      {
+                        value: productLabelTemplateId,
+                        label:
+                          (activeEdit ? frozenTemplateName : undefined) ??
+                          t(
+                            activeEdit
+                              ? "pages.shifts.duplicate.frozenTemplate"
+                              : "pages.shifts.form.boxLabelTemplateUnavailable",
+                          ),
+                        disabled: true,
+                      },
+                    ]
+                  : []),
+              ]}
+              {...errorProp(translateFieldError(t, errors.productLabelTemplateId?.message))}
               onValueChange={(value) => {
-                clearErrors("boxLabelTemplateSelection");
-                setValue("boxLabelTemplateSelection", value, {
-                  shouldDirty: true,
-                  shouldValidate: true,
-                });
+                setValue("productLabelTemplateId", value, { shouldDirty: true });
+                clearErrors("productLabelTemplateId");
               }}
             />
-          </div>
-        </section>
+            {!activeEdit && productLabels.isError ? (
+              <Alert tone="error">
+                {t("common.loadError")}{" "}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void productLabels.refetch()}
+                >
+                  {t("pages.shifts.form.retry")}
+                </Button>
+              </Alert>
+            ) : null}
+            {!activeEdit && productLabels.isSuccess && productLabels.data.items.length === 0 ? (
+              <Alert tone="info">{t("pages.shifts.duplicate.noTemplates")}</Alert>
+            ) : null}
+            <Checkbox
+              label={t("pages.shifts.duplicate.verification")}
+              checked={verificationRequired}
+              disabled={activeEdit}
+              onCheckedChange={(value) =>
+                setValue("verificationRequired", value, { shouldDirty: true })
+              }
+            />
+            <p className="mk-shift-form__hint">
+              {t(
+                verificationRequired
+                  ? "pages.shifts.duplicate.requiredHint"
+                  : "pages.shifts.duplicate.noneHint",
+              )}
+            </p>
+            <p className="mk-shift-form__hint">
+              {t(activeEdit ? "pages.shifts.duplicate.frozen" : "pages.shifts.duplicate.copyHint")}
+            </p>
+          </section>
+        ) : null}
+
+        {!duplicateEnabled ? (
+          <section className="mk-shift-form__section">
+            <h3>{t("pages.shifts.sections.templates")}</h3>
+            <div className="mk-shift-form__grid">
+              <Select
+                label={t("pages.shifts.form.boxLabelTemplateLabel")}
+                options={boxLabelTemplateOptions}
+                value={boxLabelTemplateSelection}
+                searchable
+                searchLabel={t("pages.shifts.form.boxLabelTemplateSearch")}
+                searchPlaceholder={t("pages.shifts.form.boxLabelTemplateSearch")}
+                {...(hasProduct && eligibleTemplates.length === 0 && !planning.isLoading
+                  ? { hint: t("pages.shifts.form.boxLabelTemplateNoneEligible") }
+                  : {})}
+                {...errorProp(translateFieldError(t, errors.boxLabelTemplateSelection?.message))}
+                onValueChange={(value) => {
+                  clearErrors("boxLabelTemplateSelection");
+                  setValue("boxLabelTemplateSelection", value, {
+                    shouldDirty: true,
+                    shouldValidate: true,
+                  });
+                }}
+              />
+            </div>
+          </section>
+        ) : null}
 
         {shiftMode === "aggregation" && (
           <section className="mk-shift-form__section">
@@ -742,6 +904,17 @@ function toPayload(
       activePayload.boxLabelTemplateId = resolvedBoxLabelTemplateId;
     }
     return activePayload;
+  }
+
+  if (values.validationPrintMode !== undefined) {
+    payload.validationPrint =
+      values.mode === "validation" && values.validationPrintMode === "duplicate_dm"
+        ? {
+            mode: "duplicate_dm",
+            templateId: values.productLabelTemplateId ?? "",
+            verification: values.verificationRequired === false ? "none" : "required",
+          }
+        : { mode: "none" };
   }
 
   if (touched.counterparty) {

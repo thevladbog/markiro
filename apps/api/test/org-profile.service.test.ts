@@ -232,6 +232,7 @@ function profileReadDatabase(queryResults: unknown[][]): OrgProfileDatabase {
 
 /** The template rows the transaction's eligibility lookup (`select … for share`) answers with. */
 const ELIGIBLE_TEMPLATE = {
+  purpose: "box",
   id: "a0000000-0000-4000-8000-000000000001",
   enabled: true,
   chzProductGroupCodes: null,

@@ -66,6 +66,11 @@ const SHIFT_ROW: typeof schema.shifts.$inferSelect = {
   labelTemplateId: null,
   ssccIssuerCounterpartyId: null,
   boxLabelTemplateId: null,
+  validationPrintMode: "none",
+  validationPrintVerification: "none",
+  validationPrintTemplateId: null,
+  validationPrintSnapshot: null,
+  validationPrintPolicyRevision: null,
   plannedQty: null,
   plannedDate: null,
   productionDate: null,
@@ -238,7 +243,7 @@ function updateDb(current: typeof SHIFT_ROW) {
       from: (table: unknown) =>
         chain(
           table === schema.labelTemplates
-            ? [{ id: "box-template-2", enabled: true, chzProductGroupCodes: null }]
+            ? [{ id: "box-template-2", purpose: "box", enabled: true, chzProductGroupCodes: null }]
             : table === schema.products
               ? [{ chzProductGroupCode: 8 }]
               : [stored],

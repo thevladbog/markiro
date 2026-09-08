@@ -145,6 +145,13 @@ function TemplateCard({
           })}
         </Badge>
         <Badge>{t("pages.labels.dpiBadge", { dpi: item.dpi })}</Badge>
+        <Badge>
+          {t(
+            item.purpose === "product_duplicate"
+              ? "pages.labels.purpose.duplicate"
+              : "pages.labels.purpose.box",
+          )}
+        </Badge>
         <Badge
           {...(scope.title ? { title: scope.title } : {})}
           style={{

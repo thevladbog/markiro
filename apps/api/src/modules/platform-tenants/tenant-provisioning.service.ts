@@ -2,7 +2,11 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { DEFAULT_BOX_LABEL_TEMPLATE_NAME, buildDefaultLabelTemplates } from "@markiro/domain";
+import {
+  DEFAULT_BOX_LABEL_TEMPLATE_NAME,
+  buildDefaultLabelTemplates,
+  buildDuplicateLabelTemplates,
+} from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
@@ -137,6 +141,15 @@ export class TenantProvisioningService {
         throw new Error(
           `No seeded label template matched DEFAULT_BOX_LABEL_TEMPLATE_NAME (${DEFAULT_BOX_LABEL_TEMPLATE_NAME})`,
         );
+      }
+      for (const { name, spec } of buildDuplicateLabelTemplates()) {
+        await tx.insert(schema.labelTemplates).values({
+          id: createId(),
+          tenantId: tenant.id,
+          name,
+          purpose: "product_duplicate",
+          spec,
+        });
       }
       await tx.insert(schema.orgProfiles).values({
         tenantId: tenant.id,

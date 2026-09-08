@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { request as expressRequest } from "express";
 
 import { createShiftSchema, updateShiftSchema, type ShiftDto } from "../src/modules/shifts/dto";
 import { ShiftsController } from "../src/modules/shifts/shifts.controller";
@@ -10,6 +11,13 @@ const shiftFixture: ShiftDto = {
   number: "AUG26-001/S",
   status: "planned",
   mode: "validation",
+  validationPrint: {
+    mode: "none",
+    verification: "none",
+    templateId: null,
+    snapshot: null,
+    policyRevision: null,
+  },
   productId: "22222222-2222-4222-8222-222222222222",
   productName: "Fixture product",
   productPrintName: null,
@@ -102,6 +110,8 @@ describe("ShiftsController.createShift", () => {
       authKind: "station",
       deviceLineId: "11111111-1111-4111-8111-111111111111",
     } as RequestWithTenant;
+    request.headers = { "x-station-capabilities": "validation-dm-duplicate-v1" };
+    request.get = expressRequest.get;
 
     const body = createShiftSchema.parse({
       productId: "22222222-2222-4222-8222-222222222222",
@@ -123,6 +133,7 @@ describe("ShiftsController.createShift", () => {
         productionDate: "2026-08-13",
       },
       "station",
+      "validation-dm-duplicate-v1",
     );
   });
 });
@@ -140,9 +151,16 @@ describe("ShiftsController.enterShift", () => {
       authKind: "station",
       deviceId: "device-1",
     } as RequestWithTenant;
+    request.headers = { "x-station-capabilities": "validation-dm-duplicate-v1" };
+    request.get = expressRequest.get;
 
     await controller.enterShift(request, "shift-1");
 
-    expect(enterShift).toHaveBeenCalledWith("tenant-1", "shift-1", "device-1");
+    expect(enterShift).toHaveBeenCalledWith(
+      "tenant-1",
+      "shift-1",
+      "device-1",
+      "validation-dm-duplicate-v1",
+    );
   });
 });

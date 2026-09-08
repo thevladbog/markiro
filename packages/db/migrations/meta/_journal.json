@@ -792,6 +792,27 @@
       "when": 1788542179456,
       "tag": "0112_requeue_beer_statuses_after_cis_fix",
       "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1788825062638,
+      "tag": "0113_validation_dm_duplicate",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1788848497691,
+      "tag": "0114_duplicate_label_stock_layout",
+      "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1788858864496,
+      "tag": "0115_duplicate_label_resolutions",
+      "breakpoints": true
     }
   ]
 }

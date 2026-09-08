@@ -5,6 +5,7 @@ import {
   labelTemplateSpecSchema,
   parseLabelTemplate,
   type LabelTemplateSpec,
+  type LabelTemplatePurpose,
 } from "@markiro/domain";
 import { zodApiSchema } from "../../lib/openapi";
 
@@ -43,6 +44,8 @@ function parseSpecOrAddIssues(spec: unknown, ctx: z.RefinementCtx): LabelTemplat
 }
 
 /** Non-empty, duplicate-free ЧЗ product-group codes; `null` means every category. */
+const purposeSchema = z.enum(["box", "product_duplicate"]);
+
 const productGroupCodesSchema = z
   .array(z.number().int().positive())
   .min(1, "chzProductGroupCodes must list at least one product group")
@@ -62,11 +65,13 @@ export const createLabelTemplateSchema = z
   .object({
     name: z.string().min(1).max(200),
     spec: z.unknown(),
+    purpose: purposeSchema.default("box"),
     enabled: z.boolean().optional(),
     chzProductGroupCodes: productGroupCodesSchema.optional(),
   })
   .transform((data, ctx) => ({
     name: data.name,
+    purpose: data.purpose,
     spec: parseSpecOrAddIssues(data.spec, ctx),
     enabled: data.enabled ?? true,
     chzProductGroupCodes: data.chzProductGroupCodes ?? null,
@@ -78,17 +83,20 @@ export const updateLabelTemplateSchema = z
   .object({
     name: z.string().min(1).max(200).optional(),
     spec: z.unknown().optional(),
+    purpose: purposeSchema.optional(),
     enabled: z.boolean().optional(),
     chzProductGroupCodes: productGroupCodesSchema.optional(),
   })
   .transform((data, ctx) => {
     const result: {
       name?: string;
+      purpose?: LabelTemplatePurpose;
       spec?: LabelTemplateSpec;
       enabled?: boolean;
       chzProductGroupCodes?: number[] | null;
     } = {};
     if (data.name !== undefined) result.name = data.name;
+    if (data.purpose !== undefined) result.purpose = data.purpose;
     if (data.spec !== undefined) result.spec = parseSpecOrAddIssues(data.spec, ctx);
     if (data.enabled !== undefined) result.enabled = data.enabled;
     if (data.chzProductGroupCodes !== undefined) {
@@ -100,6 +108,7 @@ export type UpdateLabelTemplateDto = z.infer<typeof updateLabelTemplateSchema>;
 
 /** Full response DTO for a label template (GET /:id, POST, PATCH). */
 export interface LabelTemplateDto {
+  purpose: LabelTemplatePurpose;
   id: string;
   name: string;
   spec: LabelTemplateSpec;
@@ -112,6 +121,7 @@ export interface LabelTemplateDto {
 
 /** Projected summary DTO for the list endpoint -- avoids shipping full specs to the library screen. */
 export interface LabelTemplateSummaryDto {
+  purpose: LabelTemplatePurpose;
   id: string;
   name: string;
   widthMm: number;
@@ -155,11 +165,21 @@ const labelTemplateSpecOpenApiSchema: SchemaObject = {
 export const labelTemplateOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "name", "spec", "enabled", "chzProductGroupCodes", "createdAt", "updatedAt"],
+  required: [
+    "id",
+    "name",
+    "spec",
+    "purpose",
+    "enabled",
+    "chzProductGroupCodes",
+    "createdAt",
+    "updatedAt",
+  ],
   properties: {
     id: uuidSchema,
     name: { type: "string", minLength: 1, maxLength: 200 },
     spec: labelTemplateSpecOpenApiSchema,
+    purpose: { type: "string", enum: ["box", "product_duplicate"] },
     enabled: { type: "boolean" },
     chzProductGroupCodes: productGroupCodesOpenApiSchema,
     createdAt: dateTimeSchema,
@@ -177,6 +197,7 @@ export const labelTemplateSummaryOpenApiSchema: SchemaObject = {
     "heightMm",
     "dpi",
     "language",
+    "purpose",
     "enabled",
     "chzProductGroupCodes",
     "updatedAt",
@@ -188,6 +209,7 @@ export const labelTemplateSummaryOpenApiSchema: SchemaObject = {
     heightMm: { type: "number", minimum: 10, maximum: 300 },
     dpi: { type: "integer", enum: [203, 300] },
     language: { type: "string", enum: ["zpl", "tspl"] },
+    purpose: { type: "string", enum: ["box", "product_duplicate"] },
     enabled: { type: "boolean" },
     chzProductGroupCodes: productGroupCodesOpenApiSchema,
     updatedAt: dateTimeSchema,

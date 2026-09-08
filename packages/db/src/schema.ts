@@ -3,6 +3,7 @@ export * from "./schema/platform.js";
 export * from "./schema/codes.js";
 export * from "./schema/org-profile.js";
 export * from "./schema/labels.js";
+export * from "./schema/product-labels.js";
 export * from "./schema/pickup.js";
 export * from "./schema/integrations.js";
 export * from "./schema/media.js";

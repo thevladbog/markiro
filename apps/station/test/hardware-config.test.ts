@@ -32,16 +32,38 @@ const CONFIG: HardwareConfig = {
   scanner: { port: "COM3", baud: 9600 },
   printer: { kind: "tcp", host: "10.0.0.7", port: 9100 },
   printerLanguage: "tspl",
+  printerDpi: 203,
   verifyPrintedLabel: true,
 };
 
 describe("hardware config", () => {
+  it.each([203, 300] as const)(
+    "persists the configured printer resolution %s",
+    async (printerDpi) => {
+      const exec = await makeExec();
+      await saveHardwareConfig(exec, { ...CONFIG, printerDpi });
+      expect((await loadHardwareConfig(exec)).printerDpi).toBe(printerDpi);
+    },
+  );
+  it.each([undefined, 600, "300"])(
+    "does not guess resolution for legacy or invalid hardware settings: %s",
+    async (printerDpi) => {
+      const exec = await makeExec();
+      await exec.run("INSERT INTO station_meta (key,value) VALUES (?,?)", [
+        "hardware_config",
+        JSON.stringify({ ...CONFIG, printerDpi }),
+      ]);
+      expect((await loadHardwareConfig(exec)).printerDpi).toBeNull();
+    },
+  );
+
   it("defaults to no hardware, ZPL and no print verification when nothing is stored", async () => {
     expect(await loadHardwareConfig(await makeExec())).toEqual(DEFAULT_HARDWARE_CONFIG);
     expect(DEFAULT_HARDWARE_CONFIG).toEqual({
       scanner: null,
       printer: null,
       printerLanguage: "zpl",
+      printerDpi: null,
       verifyPrintedLabel: false,
     });
   });
@@ -58,6 +80,7 @@ describe("hardware config", () => {
       scanner: null,
       printer: { kind: "serial", port: "COM4", baud: 19200 },
       printerLanguage: "zpl",
+      printerDpi: null,
       verifyPrintedLabel: false,
     };
     await saveHardwareConfig(exec, serial);
@@ -107,6 +130,7 @@ describe("hardware config", () => {
       scanner: null,
       printer: { kind: "usb", printer: "Zebra ZD421" },
       printerLanguage: "tspl",
+      printerDpi: null,
       verifyPrintedLabel: false,
     };
     await saveHardwareConfig(exec, usb);

@@ -237,8 +237,25 @@ function decodeTextCodewords(
 }
 
 export function decodeDataMatrixAscii(raw: unknown): string {
-  const output: string[] = [];
+  return decodeAsciiCodewords(readCodewords(raw), false);
+}
+
+/** Bounded test decoder: ASCII/text modes only; other GS1 encodation modes still throw. */
+export function decodeGs1DataMatrixAscii(raw: unknown): string {
+  if (!Array.isArray(raw) || raw.length !== 1 || !isRawDataMatrix(raw[0])) {
+    throw new Error("Expected one raw Data Matrix symbol");
+  }
+  // This decoder deliberately supports the fixed 18x18 acceptance vector only:
+  // 18 data codewords followed by 14 Reed-Solomon words. A full data region has
+  // no pad marker, so reading the ECC words as ASCII would fabricate a tail.
+  if (raw[0].pixx !== 18 || raw[0].pixy !== 18) throw new Error("Unsupported GS1 test symbol size");
   const codewords = readCodewords(raw);
+  if (codewords[0] !== 232) throw new Error("Missing leading GS1 FNC1 codeword");
+  return decodeAsciiCodewords(codewords.slice(1, 18), true);
+}
+
+function decodeAsciiCodewords(codewords: readonly number[], gs1: boolean): string {
+  const output: string[] = [];
   for (let index = 0; index < codewords.length; index += 1) {
     const codeword = codewords[index];
     if (codeword === undefined) {
@@ -257,6 +274,10 @@ export function decodeDataMatrixAscii(raw: unknown): string {
     }
     if (codeword === 239) {
       index = decodeTextCodewords(codewords, index + 1, output) - 1;
+      continue;
+    }
+    if (gs1 && codeword === 232) {
+      output.push("\u001d");
       continue;
     }
     throw new Error(`Unsupported Data Matrix codeword ${codeword}`);

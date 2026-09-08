@@ -4,6 +4,7 @@ import {
   classifyScan,
   validateShiftScan,
   type LabelTemplateSpec,
+  parseDuplicateKm,
   type ScanVerdict,
 } from "@markiro/domain";
 import { Alert, Button, FullScreenDialog, SignalOverlay, type SignalTone } from "@markiro/ui";
@@ -42,6 +43,7 @@ import { applyMigrations, readShiftMirror, type SqlExecutor } from "../lib/mirro
 import { renderLabelBytes } from "../lib/print-label.js";
 import { subscribeStationProductImageCache } from "../lib/product-image-cache.js";
 import { rasterizeText } from "../lib/rasterizer.js";
+import type { FloorWorkBarrier } from "../lib/credential-recovery.js";
 import { createScanQueue, type ScanOutcome, type ScanQueue } from "../lib/scan-queue.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import type { OfflineShiftCloseSummary } from "../lib/shift-close.js";
@@ -55,10 +57,18 @@ import type { StationProductImageDescriptor } from "../lib/mirror.js";
 import { WorkCounters } from "../ui/work/WorkCounters.js";
 import { WorkFooter } from "../ui/work/WorkFooter.js";
 import { buildWorkLabels } from "../ui/work/work-labels.js";
+import {
+  useProductLabelWork,
+  type ProductLabelWorkEnvironment,
+} from "../lib/use-product-label-work.js";
+import { ProductLabelInstrument } from "../ui/work/ProductLabelInstrument.js";
+import { ProductLabelVerification } from "../ui/work/ProductLabelVerification.js";
+import { ProductLabelHistory } from "../ui/exceptions/ProductLabelHistory.js";
 import { ExceptionFlow } from "./ExceptionFlow.js";
 
 export interface WorkScreenProps {
   exec: SqlExecutor;
+  productLabelEnvironment?: ProductLabelWorkEnvironment;
   shiftId: string;
   terminalId: string | null;
   operatorId: string;
@@ -85,6 +95,7 @@ export interface WorkScreenProps {
   onScanRecorded?: () => void;
   /** Registers the ordered scan/job queue with App's credential-recovery barrier. */
   onScanQueueRegister?: (queue: ScanQueue) => () => void;
+  onFloorWorkRegister?: (barrier: FloorWorkBarrier) => () => void;
   /** Return to shift selection. Does NOT close the shift — that is a cabinet action. */
   onExit: () => void;
   /** Persists a local close and queues it for the server. */
@@ -149,6 +160,7 @@ function toneOf(verdict: ScanVerdict): SignalTone {
 
 export function WorkScreen({
   exec,
+  productLabelEnvironment,
   shiftId,
   terminalId,
   operatorId,
@@ -167,6 +179,7 @@ export function WorkScreen({
   sound,
   onScanRecorded,
   onScanQueueRegister,
+  onFloorWorkRegister,
   onExit,
   onCloseShift,
   pendingSync,
@@ -182,6 +195,21 @@ export function WorkScreen({
   onPrintRecoveryChange,
 }: WorkScreenProps) {
   const { t, i18n } = useTranslation();
+  const productLabels = useProductLabelWork({
+    exec,
+    shiftId,
+    terminalId,
+    operatorId,
+    ...(productLabelEnvironment ? { environment: productLabelEnvironment } : {}),
+    ...(onFloorWorkRegister ? { register: onFloorWorkRegister } : {}),
+  });
+  const productLabelsRef = useRef(productLabels);
+  productLabelsRef.current = productLabels;
+  const productLabelsBlocked =
+    productLabels.loading ||
+    productLabels.error ||
+    Boolean(productLabels.work && !productLabels.work.canAccept());
+
   const [accepted, setAccepted] = useState(0);
   const [rejected, setRejected] = useState(0);
   const [signal, setSignal] = useState<{ tone: SignalTone; title: string; detail?: string } | null>(
@@ -530,6 +558,7 @@ export function WorkScreen({
   // the current blocking state in a ref so those stale callbacks are harmless.
   const ordinaryScanBlockedRef = useRef(false);
   ordinaryScanBlockedRef.current = Boolean(
+    productLabelsBlocked ||
     !printRecoveryHydrated ||
     printAdmissionBlocked ||
     verification ||
@@ -543,7 +572,23 @@ export function WorkScreen({
     noSerials,
   );
 
+  async function pauseProductLabels() {
+    ordinaryScanBlockedRef.current = true;
+    queue.discardBufferedScans();
+    const closing = queue.close();
+    await productLabelsRef.current.work?.close();
+    await closing;
+    onExit();
+  }
   function requestExit() {
+    if (
+      productLabelsRef.current.work ||
+      productLabelsRef.current.loading ||
+      productLabelsRef.current.error
+    ) {
+      void pauseProductLabels();
+      return;
+    }
     if (ordinaryScanBlockedRef.current) return;
     if (pendingSync > 0) setConfirmExit(true);
     else onExit();
@@ -573,6 +618,14 @@ export function WorkScreen({
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes("already closed")) onExit();
       else if (message.includes("reason")) setCloseReasonPicker(true);
+      else if (message.includes("PRODUCT_LABEL_"))
+        setCloseError(
+          t(
+            message.includes("CLOSE_CHANGED")
+              ? "productLabels.closeChanged"
+              : "productLabels.closeBlocked",
+          ),
+        );
       else setCloseError(message.includes("open box") ? t("work.closeOpenBox") : message);
     } finally {
       closeRequestRef.current = false;
@@ -1121,6 +1174,9 @@ export function WorkScreen({
     () =>
       createScanQueue({
         shouldProcess: () =>
+          !productLabelsRef.current.loading &&
+          !productLabelsRef.current.error &&
+          (!productLabelsRef.current.work || productLabelsRef.current.work.canAccept()) &&
           printRecoveryHydratedRef.current &&
           !printAdmissionBlockedRef.current &&
           printRecoveryRef.current === null &&
@@ -1159,6 +1215,13 @@ export function WorkScreen({
               });
             }
           }
+          if (verdict.status === "ok" && productLabelsRef.current.work) {
+            try {
+              parseDuplicateKm(raw);
+            } catch {
+              verdict = { status: "invalid", raw };
+            }
+          }
           const scannedAt = new Date().toISOString();
           const event = {
             shiftId,
@@ -1175,6 +1238,21 @@ export function WorkScreen({
             // `ok` is only produced for a parsed KM, so this branch always holds.
             const km = scan.kind === "km" ? scan.km : null;
             const codeHash = km ? verdict.key : null;
+            const labelWork = productLabelsRef.current.work;
+            if (labelWork && codeHash) {
+              // No physical input buffered before the print may confirm the new label.
+              queue.discardBufferedScans();
+              const result = await labelWork.accept(raw);
+              if (result.status === "busy") throw new Error("PRODUCT_LABEL_BUSY");
+              keys.current.add(codeHash);
+              if (result.status === "duplicate")
+                return {
+                  raw,
+                  verdict: { status: "duplicate", key: codeHash },
+                  firstSeen: await findFirstSeen(exec, codeHash),
+                };
+              return { raw, verdict, firstSeen: null, productLabel: true };
+            }
             const result = await recordScan(
               exec,
               event,
@@ -1253,7 +1331,8 @@ export function WorkScreen({
                   }).format(new Date(outcome.firstSeen)),
                 });
 
-          publishVerdict(outcome.verdict, title, detail);
+          if (outcome.productLabel) playSignalTone("ok", live.current.sound);
+          else publishVerdict(outcome.verdict, title, detail);
 
           // Nudged last, strictly after the operator-visible signal is
           // rendered: `process()` above already wrote this outcome's outbox
@@ -1419,6 +1498,7 @@ export function WorkScreen({
   // to compete with anything is print verification itself, not a stray
   // rejection from the loop underneath it.
   useEffect(() => {
+    if (showExceptions && productLabelsRef.current.work) return source.start(() => {});
     if (verification || confirmClear || boxActionPending || showExceptions) return;
     // Keep the physical source subscribed while serial recovery owns the
     // screen, but deliberately discard its payloads. A keyboard-wedge source
@@ -1426,7 +1506,22 @@ export function WorkScreen({
     // would let that Enter activate the dialog's focused recovery button and
     // dismiss a blocking state without an intentional operator action.
     if (printRecovery || noSerials) return source.start(() => {});
-    return source.start((raw) => {
+    let sourceActive = true;
+    const stop = source.start((raw) => {
+      if (!sourceActive) return;
+      const labels = productLabelsRef.current;
+      if (labels.loading || labels.error) return;
+      if (labels.work && !labels.work.canAccept()) {
+        const state = labels.work.getSnapshot();
+        if (state.busy || !state.ready || state.error) return;
+        void labels.work.verify(raw).then((result) => {
+          if (result !== "stale") {
+            live.current.onScanRecorded?.();
+            playSignalTone(result === "match" ? "ok" : "error", live.current.sound);
+          }
+        });
+        return;
+      }
       if (!printRecoveryHydratedRef.current) {
         void printRecoveryReady.current?.then((recoveryBlocked) => {
           if (!recoveryBlocked && !printAdmissionBlockedRef.current && !printRecoveryRef.current) {
@@ -1439,6 +1534,10 @@ export function WorkScreen({
       if (planReachedPromptRef.current) return;
       queue.enqueue(raw);
     });
+    return () => {
+      sourceActive = false;
+      stop();
+    };
   }, [
     source,
     queue,
@@ -1452,11 +1551,12 @@ export function WorkScreen({
   ]);
 
   const printBlocked =
-    issuerPrefix !== null &&
-    (!printRecoveryHydrated ||
-      printAdmissionBlocked ||
-      printRecovery !== null ||
-      verification !== null);
+    productLabelsBlocked ||
+    (issuerPrefix !== null &&
+      (!printRecoveryHydrated ||
+        printAdmissionBlocked ||
+        printRecovery !== null ||
+        verification !== null));
   const recoveryCallbackRef = useRef(onPrintRecoveryChange);
   recoveryCallbackRef.current = onPrintRecoveryChange;
   useEffect(() => {
@@ -1554,7 +1654,9 @@ export function WorkScreen({
   return (
     <main className="work-screen" aria-label={productName}>
       <div className="work-screen__content">
-        {showExceptions ? (
+        {showExceptions && productLabels.work ? (
+          <ProductLabelHistory work={productLabels.work} onBack={() => setShowExceptions(false)} />
+        ) : showExceptions ? (
           <ExceptionFlow
             boxes={closedBoxes}
             canUndo={lastScanned?.boxId === box?.boxId}
@@ -1583,8 +1685,15 @@ export function WorkScreen({
                 image={productImage}
                 gtin={expectedGtin14}
                 refreshKey={imageRefreshKey}
-                showVerdict={issuerPrefix === null}
+                showVerdict={issuerPrefix === null && !productLabels.work}
               />
+              {productLabels.work ? (
+                <ProductLabelInstrument
+                  job={productLabels.state.job}
+                  busy={productLabels.state.busy}
+                  verification={productLabels.verification}
+                />
+              ) : null}
               {issuerPrefix !== null ? (
                 <BoxFillInstrument
                   box={box}
@@ -1637,8 +1746,27 @@ export function WorkScreen({
         onExceptions={() => setShowExceptions(true)}
         onPause={requestExit}
         onClose={() => void requestClose()}
-        closeDisabled={closeRequestPending}
+        closeDisabled={closeRequestPending || productLabelsBlocked}
       />
+
+      {productLabels.work && productLabelsBlocked && !showExceptions ? (
+        <ProductLabelVerification
+          state={productLabels.state}
+          work={productLabels.work}
+          onPause={() => void pauseProductLabels()}
+          {...(onOpenPrinterSetup ? { onSetup: onOpenPrinterSetup } : {})}
+        />
+      ) : null}
+      {productLabels.error ? (
+        <FullScreenDialog
+          open
+          title={t("productLabels.storageError")}
+          backLabel={t("productLabels.pause")}
+          onClose={() => void pauseProductLabels()}
+        >
+          <Alert tone="error" title={t("productLabels.storageError")} />
+        </FullScreenDialog>
+      ) : null}
 
       <div className="work-screen__overlays">
         {overlayState === "exit-pending" ? (

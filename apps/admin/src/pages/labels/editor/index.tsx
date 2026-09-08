@@ -35,10 +35,12 @@ import { useNavigate, useParams } from "react-router";
 
 import {
   EGAIS_PRODUCT_GROUP_CODE,
+  assertDuplicateTemplate,
+  buildDuplicateLabelTemplate,
+  type LabelTemplatePurpose,
   generateTspl,
   generateZpl,
   labelTemplateUsesField,
-  sampleLabelData,
   type LabelImportResult,
   type LabelTemplateSpec,
   type RasterizeTextFn,
@@ -54,6 +56,7 @@ import { rasterizeText as realRasterizeText } from "../../../labels/rasterizer.j
 import { toast } from "../../../lib/toast.js";
 import { useChzProductGroups } from "../../catalog/api.js";
 import { useCreateLabelTemplate, useLabelTemplate, useUpdateLabelTemplate } from "../api.js";
+import { labelPreviewData, labelRenderOptions } from "../preview-data.js";
 import { describeDefaultConflict } from "../scope.js";
 import "./editor.css";
 import { buildTsplBlob, buildZplBlob, downloadBlob, safeFileName } from "./download.js";
@@ -130,6 +133,7 @@ export function LabelEditorPage({
         key={id}
         mode="edit"
         id={id}
+        initialPurpose={templateQuery.data.purpose ?? "box"}
         initialName={templateQuery.data.name}
         initialSpec={templateQuery.data.spec}
         initialEnabled={templateQuery.data.enabled}
@@ -144,6 +148,7 @@ export function LabelEditorPage({
     <LabelEditorContent
       key="new"
       mode="create"
+      initialPurpose="box"
       initialName={t("pages.labels.editor.defaultName")}
       initialSpec={DEFAULT_SPEC}
       initialEnabled
@@ -158,6 +163,7 @@ interface LabelEditorContentProps {
   mode: "create" | "edit";
   id?: string;
   initialName: string;
+  initialPurpose: LabelTemplatePurpose;
   initialSpec: LabelTemplateSpec;
   initialEnabled: boolean;
   /** `null` = every category (see `LabelTemplateDto.chzProductGroupCodes`). */
@@ -170,6 +176,7 @@ function LabelEditorContent({
   mode,
   id,
   initialName,
+  initialPurpose,
   initialSpec,
   initialEnabled,
   initialProductGroupCodes,
@@ -178,7 +185,10 @@ function LabelEditorContent({
 }: LabelEditorContentProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const editor = useSpecState(initialSpec);
+  const [purpose, setPurpose] = useState(initialPurpose);
+  const [copying, setCopying] = useState(false);
+  const editingExisting = mode === "edit" && !copying;
+  const editor = useSpecState(initialSpec, purpose);
   const [name, setName] = useState(initialName);
   // Selection metadata lives beside `name`, not in the spec state: like the
   // name it is not part of the print model (see the file doc comment).
@@ -226,6 +236,14 @@ function LabelEditorContent({
   const updateMutation = useUpdateLabelTemplate();
 
   const spec = editor.state.spec;
+  let duplicateInvalid = false;
+  if (purpose === "product_duplicate") {
+    try {
+      assertDuplicateTemplate(spec);
+    } catch {
+      duplicateInvalid = true;
+    }
+  }
   const egaisOutsideScope =
     scopeMode === "selected" &&
     !selectedCodes.includes(EGAIS_PRODUCT_GROUP_CODE) &&
@@ -338,14 +356,14 @@ function LabelEditorContent({
     // `invalidSizeAxes`'s doc comment above) -- the spec was never updated,
     // so saving now would silently persist the last COMMITTED size instead
     // of the one on screen. Refuse until the user fixes or clears it.
-    if (hasInvalidSize) return;
+    if (hasInvalidSize || duplicateInvalid) return;
     if (scopeMode === "selected" && selectedCodes.length === 0) {
       setScopeError(t("pages.labels.editor.scopeEmptyError"));
       return;
     }
     const chzProductGroupCodes = scopeMode === "all" ? null : selectedCodes;
     try {
-      if (mode === "edit" && id) {
+      if (editingExisting && id) {
         await updateMutation.mutateAsync({
           id,
           input: { name, spec, enabled, chzProductGroupCodes },
@@ -354,6 +372,7 @@ function LabelEditorContent({
         setDirty(false);
       } else {
         const created = await createMutation.mutateAsync({
+          purpose,
           name,
           spec,
           enabled,
@@ -382,13 +401,20 @@ function LabelEditorContent({
    * disabled or hidden.
    */
   async function handleDownload(format: "zpl" | "tspl"): Promise<void> {
-    const sample = sampleLabelData();
+    if (duplicateInvalid) return;
+    const sample = labelPreviewData(purpose);
     try {
       if (format === "zpl") {
-        const text = await generateZpl(spec, sample, { rasterizeText });
+        const text = await generateZpl(spec, sample, {
+          rasterizeText,
+          ...labelRenderOptions(purpose),
+        });
         downloadBlob(buildZplBlob(text), `${safeFileName(name)}.zpl`);
       } else {
-        const text = await generateTspl(spec, sample, { rasterizeText });
+        const text = await generateTspl(spec, sample, {
+          rasterizeText,
+          ...labelRenderOptions(purpose),
+        });
         downloadBlob(buildTsplBlob(text), `${safeFileName(name)}.tspl`);
       }
     } catch (error) {
@@ -439,7 +465,7 @@ function LabelEditorContent({
         <Button
           type="button"
           loading={isSaving}
-          disabled={hasInvalidSize}
+          disabled={hasInvalidSize || duplicateInvalid}
           onClick={() => void handleSave()}
         >
           {t("pages.labels.editor.save")}
@@ -451,6 +477,56 @@ function LabelEditorContent({
           className="label-editor__settings"
           aria-label={t("pages.labels.editor.settingsTitle")}
         >
+          <Select
+            label={t("pages.labels.purpose.label")}
+            value={purpose}
+            disabled={editingExisting}
+            options={[
+              { value: "box", label: t("pages.labels.purpose.box") },
+              { value: "product_duplicate", label: t("pages.labels.purpose.duplicate") },
+            ]}
+            onValueChange={(value) => {
+              setPurpose(value === "product_duplicate" ? "product_duplicate" : "box");
+              if (!copying) {
+                handleReplaceSpec(
+                  value === "product_duplicate" ? buildDuplicateLabelTemplate() : DEFAULT_SPEC,
+                );
+                setCustomSize(false);
+                clearSizeDrafts();
+              }
+              markDirty();
+            }}
+          />
+          {editingExisting ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setCopying(true);
+                setName(t("pages.labels.purpose.copyName", { name }));
+                markDirty();
+              }}
+            >
+              {t("pages.labels.purpose.copy")}
+            </Button>
+          ) : null}
+          {copying ? <Alert tone="info">{t("pages.labels.purpose.copyHint")}</Alert> : null}
+          {duplicateInvalid ? (
+            <Alert tone="error">{t("pages.labels.purpose.invalid")}</Alert>
+          ) : null}
+          {purpose === "product_duplicate" ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                handleReplaceSpec(buildDuplicateLabelTemplate());
+                setCustomSize(false);
+                clearSizeDrafts();
+              }}
+            >
+              {t("pages.labels.purpose.reset")}
+            </Button>
+          ) : null}
           <Select
             label={t("pages.labels.editor.sizePresetLabel")}
             options={[
@@ -608,6 +684,7 @@ function LabelEditorContent({
           )}
           <PreviewPane
             spec={spec}
+            purpose={purpose}
             rasterizeText={rasterizeText}
             checkFamilyCoverage={checkFamilyCoverage}
           />

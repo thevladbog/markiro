@@ -5,7 +5,7 @@ import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { shiftMonthKey } from "@markiro/domain";
+import { buildDuplicateLabelTemplate, shiftMonthKey } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -191,8 +191,16 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     await agent.get("/org/profile").expect(403);
 
     const response = await agent.get("/shifts/planning-config").expect(200);
-    expect(response.body).toEqual({ defaultBoxLabelTemplateId, defaultSource: "organization" });
-    expect(Object.keys(response.body)).toEqual(["defaultBoxLabelTemplateId", "defaultSource"]);
+    expect(response.body).toEqual({
+      defaultBoxLabelTemplateId,
+      defaultSource: "organization",
+      validationPrintProtocol: null,
+    });
+    expect(Object.keys(response.body)).toEqual([
+      "defaultBoxLabelTemplateId",
+      "defaultSource",
+      "validationPrintProtocol",
+    ]);
   });
 
   // ---------------------------------------------------------------------
@@ -1641,9 +1649,9 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const apiKey = device.apiKey;
     const server = app!.getHttpServer();
 
-    // Session-only: not part of the station's six routes.
+    // Session-only administrative mutations and shift detail.
     await request(server).get(`/shifts/${id}`).set("x-api-key", apiKey).expect(403);
-    await request(server).get("/shifts/planning-config").set("x-api-key", apiKey).expect(403);
+
     await request(server)
       .patch(`/shifts/${id}`)
       .set("x-api-key", apiKey)
@@ -1657,6 +1665,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     await request(server).delete(`/shifts/${id}`).set("x-api-key", apiKey).expect(403);
 
     // Regression guard: the station's own routes stay reachable by the same key.
+    await request(server).get("/shifts/planning-config").set("x-api-key", apiKey).expect(200);
     await request(server).get("/shifts").set("x-api-key", apiKey).expect(200);
     const stationCreated = await request(server)
       .post("/shifts")
@@ -1857,16 +1866,19 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
 
     const beerConfig = await agent.get(`/shifts/planning-config?productId=${beer}`).expect(200);
     expect(beerConfig.body).toEqual({
+      validationPrintProtocol: null,
       defaultBoxLabelTemplateId: beerDefault,
       defaultSource: "category",
     });
     const milkConfig = await agent.get(`/shifts/planning-config?productId=${milk}`).expect(200);
     expect(milkConfig.body).toEqual({
+      validationPrintProtocol: null,
       defaultBoxLabelTemplateId: orgDefault,
       defaultSource: "organization",
     });
     const orgConfig = await agent.get("/shifts/planning-config").expect(200);
     expect(orgConfig.body).toEqual({
+      validationPrintProtocol: null,
       defaultBoxLabelTemplateId: orgDefault,
       defaultSource: "organization",
     });
@@ -2002,5 +2014,88 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       .get(`/shifts/box-label-templates?productId=${randomUUID()}`)
       .set("x-api-key", device.apiKey)
       .expect(404);
+  });
+
+  it("offers tenant/category-scoped duplicate summaries to stations and excludes them from box selection", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const otherAgent = request.agent(app!.getHttpServer());
+    const otherTenantId = await signUpAndActivate(otherAgent);
+    const productId = await seedProduct(tenantId, {
+      status: "active",
+      chzProductGroupCode: 15,
+      boxCapacity: 6,
+    });
+    const foreignProductId = await seedProduct(otherTenantId);
+    const universal = randomUUID();
+    const beer = randomUUID();
+    const disabled = randomUUID();
+    const milk = randomUUID();
+    const foreign = randomUUID();
+    const spec = buildDuplicateLabelTemplate();
+    await db.insert(schema.labelTemplates).values([
+      { id: universal, tenantId, name: "A universal", purpose: "product_duplicate", spec },
+      {
+        id: beer,
+        tenantId,
+        name: "B beer",
+        purpose: "product_duplicate",
+        spec,
+        chzProductGroupCodes: [15],
+      },
+      {
+        id: disabled,
+        tenantId,
+        name: "Disabled",
+        purpose: "product_duplicate",
+        spec,
+        enabled: false,
+      },
+      {
+        id: milk,
+        tenantId,
+        name: "Milk",
+        purpose: "product_duplicate",
+        spec,
+        chzProductGroupCodes: [8],
+      },
+      { id: foreign, tenantId: otherTenantId, name: "Foreign", purpose: "product_duplicate", spec },
+    ]);
+    const box = await seedScopedLabelTemplate(tenantId, "Box", {});
+    const device = await createTestStationDevice(app!, agent, "Duplicate picker station");
+    const endpoint = `/shifts/product-label-templates?productId=${productId}`;
+    await request(app!.getHttpServer()).get(endpoint).expect(401);
+    const station = await request(app!.getHttpServer())
+      .get(endpoint)
+      .set("x-api-key", device.apiKey)
+      .expect(200);
+    expect(station.body).toEqual({
+      items: [
+        { id: universal, name: "A universal", widthMm: 58, heightMm: 40, dpi: 203 },
+        { id: beer, name: "B beer", widthMm: 58, heightMm: 40, dpi: 203 },
+      ],
+    });
+    const cabinet = await agent.get(endpoint).expect(200);
+    expect(cabinet.body).toEqual(station.body);
+    await request(app!.getHttpServer())
+      .get("/shifts/product-label-templates")
+      .set("x-api-key", device.apiKey)
+      .expect(400);
+    await request(app!.getHttpServer())
+      .get(`/shifts/product-label-templates?productId=${foreignProductId}`)
+      .set("x-api-key", device.apiKey)
+      .expect(404);
+    for (const query of ["", `?productId=${productId}`]) {
+      const legacy = await request(app!.getHttpServer())
+        .get(`/shifts/box-label-templates${query}`)
+        .set("x-api-key", device.apiKey)
+        .expect(200);
+      expect(legacy.body.items.map((item: { id: string }) => item.id)).toEqual([box]);
+    }
+    const invalidBox = await agent
+      .post("/shifts")
+      .send({ productId, mode: "aggregation", boxLabelTemplateId: universal })
+      .expect(400);
+    expect(invalidBox.body.code).toBe("BOX_LABEL_TEMPLATE_NOT_ELIGIBLE");
   });
 });

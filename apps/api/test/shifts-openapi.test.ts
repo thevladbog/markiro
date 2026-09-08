@@ -85,6 +85,7 @@ const shiftProperties = [
   "counterpartyName",
   "ssccIssuerCounterpartyId",
   "boxLabelTemplateId",
+  "validationPrint",
   "plannedQty",
   "plannedDate",
   "productionDate",
@@ -105,6 +106,67 @@ const requiredShiftProperties = shiftProperties.filter(
 );
 
 describe("shifts OpenAPI contract", () => {
+  it("documents the product-specific duplicate template picker without exposing specs", async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [ShiftsController],
+      providers: [{ provide: ShiftsService, useValue: {} }],
+    })
+      .overrideGuard(TenantGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(AuthorizationGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(SubscriptionAccessGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app = moduleRef.createNestApplication();
+    try {
+      const document = SwaggerModule.createDocument(app, new DocumentBuilder().build());
+      const planning = responseSchema(document, "/shifts/planning-config", "get", "200");
+      expectRequired(planning, [
+        "defaultBoxLabelTemplateId",
+        "defaultSource",
+        "validationPrintProtocol",
+      ]);
+      expect(property(planning, "validationPrintProtocol")).toMatchObject({
+        enum: ["validation-dm-duplicate-v1"],
+        nullable: true,
+      });
+      for (const [route, method] of [
+        ["/shifts", "post"],
+        ["/shifts/{id}/open", "post"],
+        ["/shifts/{id}/enter", "post"],
+        ["/shifts/{id}/bundle", "get"],
+        ["/shifts/{id}/reference-bundle", "get"],
+      ] as const) {
+        const op = operation(document, route, method);
+        expect(op.parameters).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              name: "x-station-capabilities",
+              in: "header",
+              required: false,
+            }),
+          ]),
+        );
+        expect(op.responses).toHaveProperty("409");
+      }
+      const path = "/shifts/product-label-templates";
+      const schema = responseSchema(document, path, "get", "200");
+      expectProperties(schema, ["items"]);
+      const item = property(schema, "items").items;
+      if (!item) throw new Error("Missing template item schema");
+      expectProperties(item, ["id", "name", "widthMm", "heightMm", "dpi"]);
+      expectRequired(item, ["id", "name", "widthMm", "heightMm", "dpi"]);
+      expect(operation(document, path, "get").parameters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "productId", in: "query", required: true }),
+        ]),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it("documents productionDate on create and update request bodies", async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [ShiftsController],
@@ -134,6 +196,7 @@ describe("shifts OpenAPI contract", () => {
         "counterpartyId",
         "ssccIssuerCounterpartyId",
         "boxLabelTemplateId",
+        "validationPrint",
         "plannedQty",
         "plannedDate",
         "productionDate",
@@ -151,6 +214,7 @@ describe("shifts OpenAPI contract", () => {
         "counterpartyId",
         "ssccIssuerCounterpartyId",
         "boxLabelTemplateId",
+        "validationPrint",
         "plannedQty",
         "plannedDate",
         "productionDate",

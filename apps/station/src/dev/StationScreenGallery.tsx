@@ -1,3 +1,10 @@
+import type { ProductLabelJobView } from "../lib/product-labels/types.js";
+import type { ProductLabelWork, ProductLabelWorkState } from "../lib/use-product-label-work.js";
+import { ProductLabelInstrument } from "../ui/work/ProductLabelInstrument.js";
+import {
+  ProductLabelVerification,
+  ProductLabelReprintReason,
+} from "../ui/work/ProductLabelVerification.js";
 import {
   useEffect,
   useLayoutEffect,
@@ -33,6 +40,7 @@ import { Enrollment } from "../pages/Enrollment.js";
 import { ExceptionFlow } from "../pages/ExceptionFlow.js";
 import { InventoryTaskConfirmation } from "../pages/InventoryTaskConfirmation.js";
 import { InventoryWorkScreen } from "../pages/InventoryWorkScreen.js";
+import { NewShift } from "../pages/NewShift.js";
 import { TaskSelection } from "../pages/TaskSelection.js";
 import { UpdateCenter } from "../pages/UpdateCenter.js";
 import { WorkstationSetup } from "../pages/WorkstationSetup.js";
@@ -158,6 +166,7 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
   // they never can in production.
   const rendersActiveShiftWorkScreen =
     fixture.kind === "work" ||
+    fixture.kind === "product-label" ||
     (fixture.kind === "box" && fixture.variant === "full") ||
     syncVariant === "offline";
   // Unconditional operatorControl/windowControl/update is a SEPARATE fact
@@ -256,6 +265,8 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
       return <NewShiftFixture view={fixture.variant} locale={locale} />;
     case "shift":
       return <ShiftFixture variant={fixture.variant} locale={locale} />;
+    case "product-label":
+      return <ProductLabelFixture variant={fixture.variant} locale={locale} />;
     case "work":
       return <WorkFixture mode={fixture.variant} locale={locale} />;
     case "work-overlay":
@@ -1115,7 +1126,118 @@ function LoginFixture({ variant, locale }: { variant: string; locale: GalleryLoc
   );
 }
 
+/** Drives the real creation form to a review state. This client cannot create/open shifts. */
+function DuplicateNewShiftFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
+  const root = useRef<HTMLDivElement>(null);
+  const client = useMemo<StationClient>(
+    () => ({
+      get<T>(path: string): Promise<T> {
+        if (path.startsWith("/products?"))
+          return Promise.resolve({
+            items: [
+              {
+                id: "11111111-1111-4111-8111-111111111111",
+                gtin14: "04600000000015",
+                name: locale === "ru" ? "Кега · тестовый продукт" : "Keg · sample product",
+                boxCapacity: null,
+              },
+            ],
+          } as T);
+        if (path.startsWith("/shifts/planning-config"))
+          return Promise.resolve({ validationPrintProtocol: "validation-dm-duplicate-v1" } as T);
+        if (path.startsWith("/shifts/product-label-templates"))
+          return Promise.resolve({
+            items: [
+              {
+                id: "22222222-2222-4222-8222-222222222222",
+                name: locale === "ru" ? "Внешняя этикетка" : "Outer label",
+                widthMm: 58,
+                heightMm: 40,
+                dpi: 203,
+              },
+            ],
+          } as T);
+        return Promise.reject(new Error("Unknown gallery request"));
+      },
+      post<T>(path: string): Promise<T> {
+        if (path === "/products/gtin-check")
+          return Promise.resolve({ gtin14: "04600000000015", owner: "own" } as T);
+        return Promise.reject(new Error("Shift writes are disabled in the gallery"));
+      },
+      download: () => Promise.reject(new Error("Gallery download unavailable")),
+      whoami: () => Promise.resolve({ ok: true }),
+    }),
+    [locale],
+  );
+  const source = useMemo<ScanSource>(
+    () => ({
+      start(listener) {
+        let active = true;
+        queueMicrotask(() => {
+          if (active) listener("04600000000015");
+        });
+        return () => {
+          active = false;
+        };
+      },
+    }),
+    [],
+  );
+  useEffect(() => {
+    const container = root.current;
+    if (!container) return;
+    let step = 0;
+    const advance = () => {
+      if (step === 0) {
+        const button = container.querySelector<HTMLButtonElement>(
+          '[data-testid="new-shift-print-settings"]',
+        );
+        if (!button || button.disabled) return;
+        step = 1;
+        button.click();
+        return;
+      }
+      if (step === 1) {
+        const input = container.querySelector<HTMLInputElement>('input[name="duplicate-print"]');
+        if (!input || input.disabled) return;
+        step = 2;
+        if (!input.checked) input.click();
+        return;
+      }
+      if (step === 2) {
+        const input = container.querySelector<HTMLInputElement>(
+          'input[name="duplicate-verification"]',
+        );
+        if (!input || input.disabled) return;
+        step = 3;
+        if (variant === "print-none" && input.checked) input.click();
+        if (variant !== "print-template") return;
+        container
+          .querySelector<HTMLButtonElement>('[data-testid="new-shift-print-continue"]')
+          ?.click();
+      }
+    };
+    const observer = new MutationObserver(advance);
+    observer.observe(container, { childList: true, subtree: true, attributes: true });
+    advance();
+    return () => observer.disconnect();
+  }, [variant]);
+  return (
+    <div ref={root} style={{ height: "100%", minHeight: 0 }}>
+      <NewShift
+        client={client}
+        source={source}
+        hardwareConfig={{ ...GALLERY_SETUP_HARDWARE_CONFIG, printerDpi: 203 }}
+        onStarted={() => undefined}
+        onBack={() => undefined}
+      />
+    </div>
+  );
+}
+
 function NewShiftFixture({ view, locale }: { view: string; locale: GalleryLocale }) {
+  if (view.startsWith("print-"))
+    return <DuplicateNewShiftFixture key={view} variant={view} locale={locale} />;
   const ru = locale === "ru";
   const notFound = view === "not-found";
   const found = view === "found";
@@ -1351,7 +1473,91 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
   );
 }
 
-function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) {
+function ProductLabelFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
+  const completed = variant === "none" || variant === "verified";
+  const job: ProductLabelJobView | null =
+    variant === "waiting"
+      ? null
+      : {
+          jobId: "11111111-1111-4111-8111-111111111111",
+          shiftId: "22222222-2222-4222-8222-222222222222",
+          codeSuffix: "IAL-42",
+          attemptId: "33333333-3333-4333-8333-333333333333",
+          attemptNo: 1,
+          language: "zpl",
+          dpi: 203,
+          status: completed
+            ? "completed"
+            : variant === "prepared"
+              ? "prepared"
+              : variant === "sending"
+                ? "sending"
+                : variant === "unknown" || variant === "failed"
+                  ? "attention"
+                  : "awaiting_verification",
+          attemptState:
+            variant === "unknown"
+              ? "delivery_unknown"
+              : variant === "failed"
+                ? "failed_before_send"
+                : variant === "prepared"
+                  ? "prepared"
+                  : variant === "sending"
+                    ? "sending"
+                    : "sent",
+          verification: variant === "none" ? "none" : "required",
+          verificationOutcome:
+            variant === "verified" ? "verified" : variant === "none" ? "not_required" : "pending",
+          ownershipConflict: false,
+          acceptedAt: "2026-09-08T10:00:00.000Z",
+          updatedAt: "2026-09-08T10:00:01.000Z",
+        };
+  const state: ProductLabelWorkState = {
+    ready: true,
+    busy: variant === "sending",
+    job,
+    error: null,
+    closed: false,
+    result: variant === "mismatch" ? "mismatch" : variant === "invalid" ? "invalid" : null,
+  };
+  // Visual-only fixture: production components receive safe views, never credentials or a transport.
+  const work: ProductLabelWork = {
+    getSnapshot: () => state,
+    subscribe: () => () => {},
+    setVerificationPaused: () => {},
+    checkPrinter: () => {},
+    canAccept: () => !job || completed,
+    list: () => Promise.resolve(job ? [job] : []),
+    open: async () => {},
+    close: async () => {},
+    idle: async () => {},
+    accept: () => Promise.resolve({ status: "busy" }),
+    verify: () => Promise.resolve("stale"),
+    resumePrepared: async () => {},
+    reprint: async () => {},
+    retry: async () => {},
+  };
+  return (
+    <>
+      <WorkFixture mode="validation" locale={locale} productLabel={{ job, busy: state.busy }} />
+      {variant === "reason" ? (
+        <ProductLabelReprintReason busy={false} onConfirm={() => {}} onBack={() => {}} />
+      ) : job && !completed ? (
+        <ProductLabelVerification state={state} work={work} onPause={() => {}} onSetup={() => {}} />
+      ) : null}
+    </>
+  );
+}
+
+function WorkFixture({
+  mode,
+  locale,
+  productLabel,
+}: {
+  mode: string;
+  locale: GalleryLocale;
+  productLabel?: { job: ProductLabelJobView | null; busy: boolean };
+}) {
   const ru = locale === "ru";
   const t = i18n.getFixedT(locale);
   // "box-full" is a filled box moments before it closes -- still an ordinary
@@ -1398,8 +1604,14 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
               gtin="04607000000042"
               operation={waiting ? null : (operations[0] ?? null)}
               labels={workLabels.status}
-              showVerdict={!aggregation}
+              showVerdict={!aggregation && !productLabel}
             />
+            {productLabel ? (
+              <ProductLabelInstrument
+                {...productLabel}
+                verification={productLabel.job?.verification ?? "required"}
+              />
+            ) : null}
             {aggregation ? (
               <BoxFillInstrument
                 box={{ boxId: "gallery-box-1", itemCount: boxItemCount }}
@@ -1973,7 +2185,11 @@ function SetupFixture({ tab, locale }: { tab: string; locale: GalleryLocale }) {
   }, [tab, locale]);
 
   return (
-    <div ref={rootRef} className="gallery-workstation-setup">
+    <div
+      ref={rootRef}
+      className="gallery-workstation-setup"
+      style={{ height: "100%", minHeight: 0 }}
+    >
       <WorkstationSetup
         hw={hw}
         exec={exec}

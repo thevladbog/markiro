@@ -3246,6 +3246,253 @@ export const STATION_MIGRATIONS: string[] = [
         WHERE json_extract(item.value, '$.kind') = 'reprint'
        ON CONFLICT(inventory_id, snapshot_id, correction_id) DO NOTHING;
      END;`,
+  // Product duplicate labels: each command and all dependent facts commit in one statement.
+  `CREATE TABLE IF NOT EXISTS product_label_accept_commands (
+     credential_ownership TEXT NOT NULL,
+     job_id TEXT NOT NULL,
+     shift_id TEXT NOT NULL,
+     terminal_id TEXT NOT NULL,
+     operator_id TEXT NOT NULL,
+     raw TEXT NOT NULL,
+     code_hash TEXT NOT NULL,
+     gtin14 TEXT NOT NULL,
+     serial TEXT NOT NULL,
+     accepted_at TEXT NOT NULL,
+     acceptance_json TEXT NOT NULL,
+     command_digest TEXT NOT NULL,
+     projection_json TEXT NOT NULL,
+     PRIMARY KEY (credential_ownership, job_id),
+     CONSTRAINT product_label_acceptance_json_check CHECK (json_valid(acceptance_json) AND json_type(acceptance_json) = 'object'),
+     CONSTRAINT product_label_acceptance_projection_check CHECK (json_valid(projection_json) AND json_type(projection_json) = 'object')
+   );`,
+  `CREATE TABLE IF NOT EXISTS product_label_jobs (
+     credential_ownership TEXT NOT NULL,
+     job_id TEXT NOT NULL,
+     shift_id TEXT NOT NULL,
+     projection_json TEXT NOT NULL,
+     status TEXT NOT NULL,
+     ownership_conflict INTEGER NOT NULL DEFAULT 0,
+     updated_at TEXT NOT NULL,
+     PRIMARY KEY (credential_ownership, job_id),
+     FOREIGN KEY (credential_ownership, job_id) REFERENCES product_label_accept_commands(credential_ownership, job_id) ON DELETE CASCADE,
+     CONSTRAINT product_label_jobs_status_check CHECK (status IN ('prepared', 'sending', 'awaiting_verification', 'completed', 'attention')),
+     CONSTRAINT product_label_jobs_projection_check CHECK (json_valid(projection_json) AND json_type(projection_json) = 'object'),
+     CONSTRAINT product_label_jobs_conflict_check CHECK (ownership_conflict IN (0, 1))
+   );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS product_label_jobs_one_unresolved_owner_uq ON product_label_jobs (credential_ownership) WHERE status <> 'completed';`,
+  `CREATE INDEX IF NOT EXISTS product_label_jobs_owner_shift_idx ON product_label_jobs (credential_ownership, shift_id, updated_at);`,
+  `CREATE TABLE IF NOT EXISTS product_label_attempts (
+     credential_ownership TEXT NOT NULL,
+     attempt_id TEXT NOT NULL,
+     job_id TEXT NOT NULL,
+     attempt_no INTEGER NOT NULL,
+     prepared_json TEXT NOT NULL,
+     state TEXT NOT NULL,
+     verified_at TEXT,
+     verified_by TEXT,
+     PRIMARY KEY (credential_ownership, attempt_id),
+     FOREIGN KEY (credential_ownership, job_id) REFERENCES product_label_jobs(credential_ownership, job_id) ON DELETE CASCADE,
+     CONSTRAINT product_label_attempts_number_check CHECK (attempt_no BETWEEN 1 AND 9007199254740991),
+     CONSTRAINT product_label_attempts_state_check CHECK (state IN ('prepared', 'sending', 'sent', 'failed_before_send', 'delivery_unknown')),
+     CONSTRAINT product_label_attempts_prepared_check CHECK (json_valid(prepared_json) AND json_type(prepared_json) = 'object'),
+     CONSTRAINT product_label_attempts_verified_check CHECK ((verified_at IS NULL) = (verified_by IS NULL))
+   );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS product_label_attempts_job_number_uq ON product_label_attempts (credential_ownership, job_id, attempt_no);`,
+  `CREATE TABLE IF NOT EXISTS product_label_events (
+     credential_ownership TEXT NOT NULL,
+     event_id TEXT NOT NULL,
+     job_id TEXT NOT NULL,
+     sequence INTEGER NOT NULL,
+     event_json TEXT NOT NULL,
+     PRIMARY KEY (credential_ownership, event_id),
+     FOREIGN KEY (credential_ownership, job_id) REFERENCES product_label_jobs(credential_ownership, job_id) ON DELETE CASCADE,
+     CONSTRAINT product_label_events_sequence_check CHECK (sequence BETWEEN 1 AND 9007199254740991),
+     CONSTRAINT product_label_events_json_check CHECK (json_valid(event_json) AND json_type(event_json) = 'object')
+   );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS product_label_events_job_sequence_uq ON product_label_events (credential_ownership, job_id, sequence);`,
+  `CREATE TABLE IF NOT EXISTS product_label_outbox (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     credential_ownership TEXT NOT NULL,
+     event_id TEXT NOT NULL,
+     queued_at TEXT NOT NULL,
+     FOREIGN KEY (credential_ownership, event_id) REFERENCES product_label_events(credential_ownership, event_id) ON DELETE CASCADE
+   );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS product_label_outbox_event_uq ON product_label_outbox (credential_ownership, event_id);`,
+  `CREATE INDEX IF NOT EXISTS product_label_outbox_owner_id_idx ON product_label_outbox (credential_ownership, id);`,
+  // AFTER INSERT matters: ON CONFLICT DO NOTHING retries must not run the busy guard.
+  `CREATE TRIGGER IF NOT EXISTS product_label_accept_command_apply
+   AFTER INSERT ON product_label_accept_commands
+   BEGIN
+     SELECT CASE WHEN EXISTS (
+       SELECT 1 FROM product_label_jobs
+       WHERE credential_ownership = NEW.credential_ownership AND status <> 'completed'
+     ) THEN RAISE(ABORT, 'PRODUCT_LABEL_BUSY') END;
+
+     INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+     VALUES (NEW.code_hash, NEW.shift_id, NEW.gtin14, NEW.serial, NEW.accepted_at, NULL);
+
+     INSERT INTO scan_events_mirror (shift_id, terminal_id, raw, verdict, scanned_at, operator_id)
+     VALUES (NEW.shift_id, NEW.terminal_id, NEW.raw, 'ok', NEW.accepted_at, NEW.operator_id);
+
+     INSERT INTO outbox (shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial, box_id, operator_id)
+     VALUES (NEW.shift_id, NEW.terminal_id, NEW.raw, 'ok', NEW.accepted_at, NEW.code_hash, NEW.gtin14, NEW.serial, NULL, NEW.operator_id);
+
+     INSERT INTO product_label_jobs (credential_ownership, job_id, shift_id, projection_json, status, updated_at)
+     VALUES (NEW.credential_ownership, NEW.job_id, NEW.shift_id, NEW.projection_json, 'prepared', NEW.accepted_at);
+
+     INSERT INTO product_label_attempts (credential_ownership, attempt_id, job_id, attempt_no, prepared_json, state)
+     VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.attemptId'), NEW.job_id, 1,
+             json_extract(NEW.acceptance_json, '$.preparedEvent'), 'prepared');
+
+     INSERT INTO product_label_events (credential_ownership, event_id, job_id, sequence, event_json)
+     VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.eventId'), NEW.job_id, 1,
+             json_extract(NEW.acceptance_json, '$.preparedEvent'));
+
+     INSERT INTO product_label_outbox (credential_ownership, event_id, queued_at)
+     VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.eventId'), NEW.accepted_at);
+   END;`,
+  `ALTER TABLE shift_mirror ADD COLUMN validation_print_context TEXT
+   CONSTRAINT shift_mirror_validation_print_context_json_check
+   CHECK (validation_print_context IS NULL OR json_valid(validation_print_context));`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_mirror_guard_insert
+   BEFORE INSERT ON shift_mirror
+   WHEN EXISTS (
+     SELECT 1 FROM shift_mirror current
+     WHERE current.id = NEW.id AND current.status <> 'planned'
+       AND json_extract(current.validation_print_context, '$.policy.mode') = 'duplicate_dm'
+       AND (NEW.mode <> 'validation' OR NEW.status = 'planned'
+         OR json_extract(NEW.validation_print_context, '$.policy') IS NOT json_extract(current.validation_print_context, '$.policy'))
+   ) OR EXISTS (
+     SELECT 1 FROM product_label_accept_commands accepted
+     WHERE accepted.shift_id = NEW.id
+       AND (NEW.mode <> 'validation' OR NEW.status = 'planned'
+         OR json_extract(NEW.validation_print_context, '$.policy') IS NOT json_extract(accepted.acceptance_json, '$.policy'))
+   )
+   BEGIN SELECT RAISE(ABORT, 'PRODUCT_LABEL_POLICY_FROZEN'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_mirror_guard_update
+   BEFORE UPDATE ON shift_mirror
+   WHEN (
+     OLD.status <> 'planned'
+     AND json_extract(OLD.validation_print_context, '$.policy.mode') = 'duplicate_dm'
+     AND (NEW.mode <> 'validation' OR NEW.status = 'planned'
+       OR json_extract(NEW.validation_print_context, '$.policy') IS NOT json_extract(OLD.validation_print_context, '$.policy'))
+   ) OR EXISTS (
+     SELECT 1 FROM product_label_accept_commands accepted
+     WHERE accepted.shift_id = NEW.id
+       AND (NEW.mode <> 'validation' OR NEW.status = 'planned'
+         OR json_extract(NEW.validation_print_context, '$.policy') IS NOT json_extract(accepted.acceptance_json, '$.policy'))
+   )
+   BEGIN SELECT RAISE(ABORT, 'PRODUCT_LABEL_POLICY_FROZEN'); END;`,
+  `CREATE TABLE IF NOT EXISTS product_label_event_commands (
+     credential_ownership TEXT NOT NULL, event_id TEXT NOT NULL, job_id TEXT NOT NULL,
+     command_token TEXT NOT NULL, event_digest TEXT NOT NULL,
+     expected_sequence INTEGER NOT NULL, expected_attempt_id TEXT NOT NULL,
+     event_json TEXT NOT NULL, projection_json TEXT NOT NULL,
+     PRIMARY KEY (credential_ownership, event_id),
+     FOREIGN KEY (credential_ownership, job_id) REFERENCES product_label_jobs(credential_ownership, job_id) ON DELETE CASCADE,
+     CONSTRAINT product_label_event_commands_sequence_check CHECK (expected_sequence BETWEEN 1 AND 9007199254740990),
+     CONSTRAINT product_label_event_commands_json_check CHECK (json_valid(event_json) AND json_type(event_json) = 'object' AND json_valid(projection_json) AND json_type(projection_json) = 'object')
+   );`,
+  `CREATE INDEX IF NOT EXISTS product_label_event_commands_owner_job_idx ON product_label_event_commands (credential_ownership, job_id);`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_event_command_apply
+   AFTER INSERT ON product_label_event_commands
+   BEGIN
+     SELECT CASE WHEN NOT EXISTS (
+       SELECT 1 FROM product_label_jobs job
+       WHERE job.credential_ownership = NEW.credential_ownership AND job.job_id = NEW.job_id
+         AND json_extract(job.projection_json, '$.latestSequence') = NEW.expected_sequence
+         AND json_extract(job.projection_json, '$.attemptId') = NEW.expected_attempt_id
+     ) THEN RAISE(ABORT, 'PRODUCT_LABEL_STALE') END;
+     SELECT CASE WHEN json_extract(NEW.event_json, '$.sequence') IS NOT NEW.expected_sequence + 1
+       OR json_extract(NEW.event_json, '$.jobId') IS NOT NEW.job_id
+       OR json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id
+       OR json_extract(NEW.projection_json, '$.latestSequence') IS NOT NEW.expected_sequence + 1
+       THEN RAISE(ABORT, 'PRODUCT_LABEL_EVENT_INVALID') END;
+     SELECT CASE WHEN json_extract(NEW.event_json, '$.kind') IN ('prepared','sending') AND (
+       EXISTS (SELECT 1 FROM product_label_jobs job WHERE job.credential_ownership = NEW.credential_ownership AND job.job_id = NEW.job_id AND job.ownership_conflict = 1)
+       OR EXISTS (SELECT 1 FROM conflicts_mirror conflict WHERE conflict.code_hash = json_extract(NEW.event_json, '$.codeHash'))
+       OR NOT EXISTS (SELECT 1 FROM codes_mirror code WHERE code.code_hash = json_extract(NEW.event_json, '$.codeHash')
+         AND code.shift_id = json_extract(NEW.event_json, '$.shiftId') AND code.scanned_at = json_extract(NEW.event_json, '$.acceptedAt'))
+     ) THEN RAISE(ABORT, 'PRODUCT_LABEL_OWNERSHIP_CONFLICT') END;
+     SELECT CASE WHEN json_extract(NEW.event_json, '$.kind') = 'prepared' AND EXISTS (
+       SELECT 1 FROM product_label_jobs job WHERE job.credential_ownership = NEW.credential_ownership
+         AND job.job_id <> NEW.job_id AND job.status <> 'completed'
+     ) THEN RAISE(ABORT, 'PRODUCT_LABEL_BUSY') END;
+
+     INSERT INTO product_label_events(credential_ownership,event_id,job_id,sequence,event_json)
+     VALUES(NEW.credential_ownership,NEW.event_id,NEW.job_id,json_extract(NEW.event_json,'$.sequence'),NEW.event_json);
+     INSERT INTO product_label_attempts(credential_ownership,attempt_id,job_id,attempt_no,prepared_json,state)
+     SELECT NEW.credential_ownership,json_extract(NEW.event_json,'$.attemptId'),NEW.job_id,
+       json_extract(NEW.event_json,'$.attemptNo'),NEW.event_json,'prepared'
+     WHERE json_extract(NEW.event_json,'$.kind') = 'prepared';
+     UPDATE product_label_attempts SET state=json_extract(NEW.projection_json,'$.attemptState'),
+       verified_at=CASE WHEN json_extract(NEW.event_json,'$.kind')='verified' THEN json_extract(NEW.event_json,'$.occurredAt') ELSE verified_at END,
+       verified_by=CASE WHEN json_extract(NEW.event_json,'$.kind')='verified' THEN json_extract(NEW.event_json,'$.operatorId') ELSE verified_by END
+     WHERE credential_ownership=NEW.credential_ownership AND job_id=NEW.job_id AND attempt_id=json_extract(NEW.event_json,'$.attemptId');
+     UPDATE product_label_jobs SET projection_json=NEW.projection_json,
+       status=json_extract(NEW.projection_json,'$.status'),updated_at=json_extract(NEW.event_json,'$.occurredAt')
+     WHERE credential_ownership=NEW.credential_ownership AND job_id=NEW.job_id;
+     INSERT INTO product_label_outbox(credential_ownership,event_id,queued_at)
+     VALUES(NEW.credential_ownership,NEW.event_id,json_extract(NEW.event_json,'$.occurredAt'));
+   END;`,
+  `CREATE TABLE IF NOT EXISTS product_label_receipts (
+     credential_ownership TEXT NOT NULL, event_id TEXT NOT NULL, event_json TEXT NOT NULL,
+     outcome TEXT NOT NULL, rejection_code TEXT, received_at TEXT NOT NULL,
+     PRIMARY KEY (credential_ownership,event_id),
+     FOREIGN KEY (credential_ownership,event_id) REFERENCES product_label_events(credential_ownership,event_id) ON DELETE CASCADE,
+     CONSTRAINT product_label_receipts_outcome_check CHECK (
+       (outcome='accepted' AND rejection_code IS NULL) OR
+       (outcome='quarantined' AND rejection_code IS NOT NULL AND rejection_code IN ('parent_missing','policy_mismatch','ownership_conflict','invalid_transition','sequence_gap','subscription_read_only','storage_invalid')))
+   );`,
+  `CREATE INDEX IF NOT EXISTS product_label_receipts_owner_time_idx ON product_label_receipts(credential_ownership,received_at);`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_receipt_guard BEFORE INSERT ON product_label_receipts
+   BEGIN
+     SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM product_label_events event WHERE event.credential_ownership=NEW.credential_ownership AND event.event_id=NEW.event_id AND event.event_json=NEW.event_json)
+       OR EXISTS (SELECT 1 FROM product_label_receipts receipt WHERE receipt.credential_ownership=NEW.credential_ownership AND receipt.event_id=NEW.event_id AND (receipt.event_json IS NOT NEW.event_json OR receipt.outcome IS NOT NEW.outcome OR receipt.rejection_code IS NOT NEW.rejection_code))
+       THEN RAISE(ABORT,'PRODUCT_LABEL_RECEIPT_MISMATCH') END;
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_receipt_apply AFTER INSERT ON product_label_receipts
+   BEGIN
+     UPDATE product_label_jobs SET ownership_conflict=1
+       WHERE NEW.rejection_code='ownership_conflict' AND credential_ownership=NEW.credential_ownership
+         AND job_id IN (SELECT job_id FROM product_label_events WHERE credential_ownership=NEW.credential_ownership AND event_id=NEW.event_id);
+     DELETE FROM product_label_outbox WHERE credential_ownership=NEW.credential_ownership AND event_id=NEW.event_id;
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_accept_active_guard BEFORE INSERT ON product_label_accept_commands
+   WHEN NOT EXISTS (SELECT 1 FROM product_label_accept_commands WHERE credential_ownership=NEW.credential_ownership AND job_id=NEW.job_id)
+   BEGIN
+     SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM shift_mirror WHERE id=NEW.shift_id AND status='active'
+       AND json_extract(validation_print_context,'$.policy.policyRevision')=json_extract(NEW.acceptance_json,'$.policy.policyRevision')
+       AND json_extract(validation_print_context,'$.policy.snapshot.digest')=json_extract(NEW.acceptance_json,'$.policy.snapshot.digest'))
+       OR EXISTS (SELECT 1 FROM shift_close_outbox WHERE shift_id=NEW.shift_id)
+       THEN RAISE(ABORT,'PRODUCT_LABEL_SHIFT_CLOSED') END;
+   END;`,
+  `ALTER TABLE product_label_event_commands ADD COLUMN recovery INTEGER NOT NULL DEFAULT 0 CHECK (recovery IN (0,1));`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_event_active_guard BEFORE INSERT ON product_label_event_commands
+   WHEN json_extract(NEW.event_json,'$.kind') IN ('prepared','sending')
+   BEGIN
+     SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM shift_mirror WHERE id=json_extract(NEW.event_json,'$.shiftId') AND status='active')
+       OR EXISTS (SELECT 1 FROM shift_close_outbox WHERE shift_id=json_extract(NEW.event_json,'$.shiftId'))
+       THEN CASE WHEN NEW.recovery<>1 OR NOT EXISTS (
+         SELECT 1 FROM product_label_jobs WHERE credential_ownership=NEW.credential_ownership AND job_id=NEW.job_id AND status<>'completed'
+       ) THEN RAISE(ABORT,'PRODUCT_LABEL_SHIFT_CLOSED') END END;
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_shift_close_guard BEFORE INSERT ON shift_close_outbox
+   BEGIN
+     SELECT CASE WHEN EXISTS (SELECT 1 FROM product_label_jobs WHERE shift_id=NEW.shift_id AND status<>'completed')
+       THEN RAISE(ABORT,'PRODUCT_LABEL_UNRESOLVED') END;
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_shift_close_apply AFTER INSERT ON shift_close_outbox
+   WHEN EXISTS (SELECT 1 FROM shift_mirror WHERE id=NEW.shift_id AND json_extract(validation_print_context,'$.policy.mode')='duplicate_dm')
+   BEGIN UPDATE shift_mirror SET status='closed' WHERE id=NEW.shift_id; END;`,
+
+  `CREATE TRIGGER IF NOT EXISTS product_label_close_snapshot_guard BEFORE INSERT ON shift_close_outbox
+   WHEN EXISTS (SELECT 1 FROM shift_mirror WHERE id=NEW.shift_id AND json_extract(validation_print_context,'$.policy.mode')='duplicate_dm')
+   BEGIN
+     SELECT CASE WHEN NEW.actual_qty<>(SELECT COUNT(*) FROM codes_mirror WHERE shift_id=NEW.shift_id)
+       OR NEW.planned_qty_snapshot IS NOT (SELECT planned_qty FROM shift_mirror WHERE id=NEW.shift_id)
+       THEN RAISE(ABORT,'PRODUCT_LABEL_CLOSE_CHANGED') END;
+   END;`,
 ];
 
 export interface StationMigrationEntry {

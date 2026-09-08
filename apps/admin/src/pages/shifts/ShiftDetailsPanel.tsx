@@ -1,3 +1,4 @@
+import { ProductLabelHistory } from "./ProductLabelHistory.js";
 import {
   Alert,
   Badge,
@@ -285,6 +286,33 @@ export function ShiftDetailsPanel({ shift, onClose }: { shift: ShiftDto; onClose
           <h3>{t("pages.shifts.details.outputTitle")}</h3>
           <ShiftOutput shift={shift} />
         </section>
+        {shift.validationPrint?.mode === "duplicate_dm" ? (
+          <section className="mk-shift-details__section">
+            <h3>{t("pages.shifts.duplicate.title")}</h3>
+            <dl className="mk-shift-details__properties">
+              <div>
+                <dt>{t("pages.shifts.duplicate.template")}</dt>
+                <dd>{shift.validationPrint.snapshot.name}</dd>
+              </div>
+              <div>
+                <dt>{t("pages.shifts.duplicate.verification")}</dt>
+                <dd>
+                  {t(
+                    shift.validationPrint.verification === "required"
+                      ? "pages.shifts.duplicate.requiredHint"
+                      : "pages.shifts.duplicate.noneHint",
+                  )}
+                </dd>
+              </div>
+            </dl>
+            {shift.status !== "planned" ? (
+              <p className="mk-shift-details__empty">{t("pages.shifts.duplicate.frozen")}</p>
+            ) : null}
+          </section>
+        ) : null}
+        {shift.validationPrint?.mode === "duplicate_dm" && shift.status !== "planned" ? (
+          <ProductLabelHistory key={shift.id} shiftId={shift.id} />
+        ) : null}
         <section className="mk-shift-details__section">
           <h3>{t("pages.shifts.details.parametersTitle")}</h3>
           <dl className="mk-shift-details__properties">

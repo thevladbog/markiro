@@ -18,8 +18,9 @@
  */
 import { useCallback, useReducer } from "react";
 
-import { type LabelTemplateSpec } from "@markiro/domain";
+import { type LabelTemplatePurpose, type LabelTemplateSpec } from "@markiro/domain";
 
+import { labelPreviewData, labelRenderOptions } from "../preview-data.js";
 import { fitSpecElements } from "../geometry.js";
 
 interface SpecState {
@@ -29,7 +30,7 @@ interface SpecState {
 
 type SpecAction =
   | { type: "replaceSpec"; spec: LabelTemplateSpec }
-  | { type: "resizeLabel"; widthMm: number; heightMm: number };
+  | { type: "resizeLabel"; widthMm: number; heightMm: number; purpose: LabelTemplatePurpose };
 
 function specReducer(state: SpecState, action: SpecAction): SpecState {
   switch (action.type) {
@@ -41,14 +42,21 @@ function specReducer(state: SpecState, action: SpecAction): SpecState {
         widthMm: action.widthMm,
         heightMm: action.heightMm,
       };
-      const fitted = fitSpecElements(resized);
+      const fitted = fitSpecElements(
+        resized,
+        labelPreviewData(action.purpose),
+        labelRenderOptions(action.purpose),
+      );
       if (!fitted.ok) return { ...state, geometryError: "ELEMENT_TOO_LARGE" };
       return { spec: fitted.spec, geometryError: null };
     }
   }
 }
 
-export function useSpecState(initialSpec: LabelTemplateSpec) {
+export function useSpecState(
+  initialSpec: LabelTemplateSpec,
+  purpose: LabelTemplatePurpose = "box",
+) {
   const [state, dispatch] = useReducer(specReducer, initialSpec, (spec) => ({
     spec,
     geometryError: null,
@@ -58,8 +66,9 @@ export function useSpecState(initialSpec: LabelTemplateSpec) {
     [],
   );
   const resizeLabel = useCallback(
-    (widthMm: number, heightMm: number) => dispatch({ type: "resizeLabel", widthMm, heightMm }),
-    [],
+    (widthMm: number, heightMm: number) =>
+      dispatch({ type: "resizeLabel", widthMm, heightMm, purpose }),
+    [purpose],
   );
   return { state, replaceSpec, resizeLabel };
 }

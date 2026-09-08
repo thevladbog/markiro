@@ -73,6 +73,38 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
   code. Re-pair rotates its credential on the same durable device record; the
   paired line is the default floor filter, not an authorization boundary.
 
+### Product Data Matrix duplicate labels
+
+A validation shift can print one duplicate of the full product Data Matrix on its
+outer packaging. This does not create another product unit, SSCC or aggregation.
+The administrator or station operator chooses `validationPrint` before activation:
+`none`, or `duplicate_dm` with `verification=required|none`. Opening freezes the
+policy revision and a validated `product_duplicate` template snapshot. Box-purpose
+templates and organization/category box defaults remain separate.
+
+The station prepares a GS1 raster with the canonical full code and saved label
+fields/date. Its local accept command atomically creates the accepted scan, job,
+first attempt and outboxes through SQLite triggers. At most one unresolved job
+exists per credential owner; pooled connections never depend on a multi-call
+BEGIN/COMMIT. A durable `sending` claim precedes transport. Restart maps an unfinished
+send to `delivery_unknown` without resending. Explicit reprints keep the original
+bytes and require a reason. Required verification durably compares the full code,
+including separators and crypto tail, before accepting the next unit.
+
+`POST /station/scans` carries ordered `productLabelEvents` and explicit per-event
+receipts. The full combined request is pinned before HTTP and retried unchanged;
+late verification remains queued after earlier acknowledgements. Server records
+are keyed by tenant/device/job and event, with quarantined physical facts retained.
+Cabinet history separates attempts, sends, verification and accepted product counts.
+Local print copies retire only after the shift closes, every channel is acknowledged,
+and no conflict, quarantine or pinned request remains. Product identity is retained.
+
+`VALIDATION_DM_DUPLICATE_ENABLED` defaults to false and only gates new policy
+creation/enablement. Existing compatible bundle/recovery/sync remain available when
+it is disabled. Hardware/Windows acceptance and staged rollout are documented in
+[the acceptance runbook](acceptance/validation-dm-duplicate.md); browser mock transport
+is not evidence that any specific printer/scanner combination is supported.
+
 ## 3. Offline & sync
 
 - Shift downloads to the station in full: product, label template,

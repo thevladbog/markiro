@@ -2,6 +2,7 @@ import { z } from "zod";
 import { DomainError } from "../errors.js";
 import { formatSsccHri } from "../gs1/sscc.js";
 import { formatLabelDate } from "./date.js";
+import { canonicalizeKm } from "../gs1/km.js";
 
 /** Data sources a text/field element on a label can be bound to. */
 export const LABEL_FIELDS = [
@@ -62,6 +63,8 @@ const fieldElementSchema = z.object({
   kind: z.literal("field"),
   ...elementBaseShape,
   field: labelFieldSchema,
+  /** Human-readable identity only; the barcode continues to use the original field bytes. */
+  textFormat: z.literal("km_without_crypto").optional(),
   ...wrappableTextShape,
 });
 export type LabelFieldElement = z.infer<typeof fieldElementSchema>;
@@ -155,6 +158,17 @@ export const labelTemplateSpecSchema = z
   .superRefine((spec, ctx) => {
     const seenIds = new Set<string>();
     for (const element of spec.elements) {
+      if (
+        element.kind === "field" &&
+        element.textFormat === "km_without_crypto" &&
+        element.field !== "km.code"
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "km_without_crypto requires the km.code field",
+          path: ["elements"],
+        });
+      }
       if (seenIds.has(element.id)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -261,8 +275,18 @@ export const QTY_UNIT_SUFFIX = "шт.";
 export function labelFieldDisplayValue(
   field: LabelField,
   data: Record<LabelField, string>,
+  textFormat?: LabelFieldElement["textFormat"],
 ): string {
   const value = data[field] ?? "";
+  if (field === "km.code" && textFormat === "km_without_crypto") {
+    try {
+      const km = canonicalizeKm(value);
+      return `01${km.gtin14}21${km.serial}`;
+    } catch (error) {
+      if (error instanceof DomainError) return "";
+      throw error;
+    }
+  }
   if (field === "sscc" && /^\d{18}$/.test(value)) return formatSsccHri(value);
   if (field === "qty") {
     const digits = value.trim();

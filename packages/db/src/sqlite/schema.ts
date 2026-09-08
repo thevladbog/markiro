@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  foreignKey,
   index,
   integer,
   primaryKey,
@@ -58,41 +59,52 @@ export const operatorsMirrorB = sqliteTable("operators_mirror_b", {
 });
 
 /** Local mirror of the downloaded shift, incl. the label template spec json. */
-export const shiftMirror = sqliteTable("shift_mirror", {
-  id: text("id").primaryKey(),
-  status: text("status").notNull(),
-  mode: text("mode").notNull(),
-  productId: text("product_id").notNull(),
-  productName: text("product_name"),
-  lineId: text("line_id"),
-  lineName: text("line_name"),
-  counterpartyId: text("counterparty_id"),
-  counterpartyName: text("counterparty_name"),
-  counterpartyGln: text("counterparty_gln"),
-  labelTemplateId: text("label_template_id"),
-  labelTemplateName: text("label_template_name"),
-  labelTemplateSpec: text("label_template_spec"),
-  plannedQty: integer("planned_qty"),
-  plannedDate: text("planned_date"),
-  productionDate: text("production_date"),
-  boxCapacity: integer("box_capacity"),
-  palletCapacity: integer("pallet_capacity"),
-  palletsEnabled: integer("pallets_enabled", { mode: "boolean" }).notNull().default(false),
-  openedAt: text("opened_at"),
-  stationClosePolicy: text("station_close_policy"),
-  stationCloseOwnerDeviceId: text("station_close_owner_device_id"),
-  // This device's box-SSCC issuer prefix (Task 13 review, plan 06c) -- see
-  // migrations.ts's ALTER for why this trails the rest of the table.
-  issuerPrefix: text("issuer_prefix"),
-  // The box label's OWN template spec (CodeRabbit PR33 review, Finding 3) --
-  // entirely separate from labelTemplateSpec above, which is the ITEM
-  // template. See migrations.ts's trailing ALTER for why this trails the
-  // rest of the table too.
-  boxLabelTemplateSpec: text("box_label_template_spec"),
-  // Human-readable shift number (`AUG26-003`, `/S` = station-created) --
-  // composed server-side; see migrations.ts's trailing ALTER.
-  number: text("number"),
-});
+export const shiftMirror = sqliteTable(
+  "shift_mirror",
+  {
+    id: text("id").primaryKey(),
+    status: text("status").notNull(),
+    mode: text("mode").notNull(),
+    productId: text("product_id").notNull(),
+    productName: text("product_name"),
+    lineId: text("line_id"),
+    lineName: text("line_name"),
+    counterpartyId: text("counterparty_id"),
+    counterpartyName: text("counterparty_name"),
+    counterpartyGln: text("counterparty_gln"),
+    labelTemplateId: text("label_template_id"),
+    labelTemplateName: text("label_template_name"),
+    labelTemplateSpec: text("label_template_spec"),
+    plannedQty: integer("planned_qty"),
+    plannedDate: text("planned_date"),
+    productionDate: text("production_date"),
+    boxCapacity: integer("box_capacity"),
+    palletCapacity: integer("pallet_capacity"),
+    palletsEnabled: integer("pallets_enabled", { mode: "boolean" }).notNull().default(false),
+    openedAt: text("opened_at"),
+    stationClosePolicy: text("station_close_policy"),
+    stationCloseOwnerDeviceId: text("station_close_owner_device_id"),
+    // This device's box-SSCC issuer prefix (Task 13 review, plan 06c) -- see
+    // migrations.ts's ALTER for why this trails the rest of the table.
+    issuerPrefix: text("issuer_prefix"),
+    // The box label's OWN template spec (CodeRabbit PR33 review, Finding 3) --
+    // entirely separate from labelTemplateSpec above, which is the ITEM
+    // template. See migrations.ts's trailing ALTER for why this trails the
+    // rest of the table too.
+    boxLabelTemplateSpec: text("box_label_template_spec"),
+    // Human-readable shift number (`AUG26-003`, `/S` = station-created) --
+    // composed server-side; see migrations.ts's trailing ALTER.
+    number: text("number"),
+    /** Atomically published validation policy and its complete product label context. */
+    validationPrintContext: text("validation_print_context"),
+  },
+  (table) => [
+    check(
+      "shift_mirror_validation_print_context_json_check",
+      sql`${table.validationPrintContext} IS NULL OR json_valid(${table.validationPrintContext})`,
+    ),
+  ],
+);
 
 /** Local mirror of the shift's product (for ad-hoc GTIN resolution offline). */
 export const productMirror = sqliteTable("product_mirror", {
@@ -845,3 +857,216 @@ export interface OperatorMirrorRecord {
   badgeHash: string | null;
   active: boolean;
 }
+
+/** Immutable one-statement acceptance input; children retain the same credential generation. */
+export const productLabelAcceptCommands = sqliteTable(
+  "product_label_accept_commands",
+  {
+    credentialOwnership: text("credential_ownership").notNull(),
+    jobId: text("job_id").notNull(),
+    shiftId: text("shift_id").notNull(),
+    terminalId: text("terminal_id").notNull(),
+    operatorId: text("operator_id").notNull(),
+    raw: text("raw").notNull(),
+    codeHash: text("code_hash").notNull(),
+    gtin14: text("gtin14").notNull(),
+    serial: text("serial").notNull(),
+    acceptedAt: text("accepted_at").notNull(),
+    acceptanceJson: text("acceptance_json").notNull(),
+    commandDigest: text("command_digest").notNull(),
+    projectionJson: text("projection_json").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.credentialOwnership, t.jobId] }),
+    check(
+      "product_label_acceptance_json_check",
+      sql`json_valid(${t.acceptanceJson}) AND json_type(${t.acceptanceJson}) = 'object'`,
+    ),
+    check(
+      "product_label_acceptance_projection_check",
+      sql`json_valid(${t.projectionJson}) AND json_type(${t.projectionJson}) = 'object'`,
+    ),
+  ],
+);
+
+export const productLabelJobs = sqliteTable(
+  "product_label_jobs",
+  {
+    credentialOwnership: text("credential_ownership").notNull(),
+    jobId: text("job_id").notNull(),
+    shiftId: text("shift_id").notNull(),
+    projectionJson: text("projection_json").notNull(),
+    status: text("status").notNull(),
+    ownershipConflict: integer("ownership_conflict", { mode: "boolean" }).notNull().default(false),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.credentialOwnership, t.jobId] }),
+    foreignKey({
+      columns: [t.credentialOwnership, t.jobId],
+      foreignColumns: [
+        productLabelAcceptCommands.credentialOwnership,
+        productLabelAcceptCommands.jobId,
+      ],
+    }).onDelete("cascade"),
+    uniqueIndex("product_label_jobs_one_unresolved_owner_uq")
+      .on(t.credentialOwnership)
+      .where(sql`${t.status} <> 'completed'`),
+    index("product_label_jobs_owner_shift_idx").on(t.credentialOwnership, t.shiftId, t.updatedAt),
+    check(
+      "product_label_jobs_status_check",
+      sql`${t.status} IN ('prepared', 'sending', 'awaiting_verification', 'completed', 'attention')`,
+    ),
+    check(
+      "product_label_jobs_projection_check",
+      sql`json_valid(${t.projectionJson}) AND json_type(${t.projectionJson}) = 'object'`,
+    ),
+    check("product_label_jobs_conflict_check", sql`${t.ownershipConflict} IN (0, 1)`),
+  ],
+);
+
+export const productLabelAttempts = sqliteTable(
+  "product_label_attempts",
+  {
+    credentialOwnership: text("credential_ownership").notNull(),
+    attemptId: text("attempt_id").notNull(),
+    jobId: text("job_id").notNull(),
+    attemptNo: integer("attempt_no").notNull(),
+    preparedJson: text("prepared_json").notNull(),
+    state: text("state").notNull(),
+    verifiedAt: text("verified_at"),
+    verifiedBy: text("verified_by"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.credentialOwnership, t.attemptId] }),
+    foreignKey({
+      columns: [t.credentialOwnership, t.jobId],
+      foreignColumns: [productLabelJobs.credentialOwnership, productLabelJobs.jobId],
+    }).onDelete("cascade"),
+    uniqueIndex("product_label_attempts_job_number_uq").on(
+      t.credentialOwnership,
+      t.jobId,
+      t.attemptNo,
+    ),
+    check(
+      "product_label_attempts_number_check",
+      sql`${t.attemptNo} BETWEEN 1 AND 9007199254740991`,
+    ),
+    check(
+      "product_label_attempts_state_check",
+      sql`${t.state} IN ('prepared', 'sending', 'sent', 'failed_before_send', 'delivery_unknown')`,
+    ),
+    check(
+      "product_label_attempts_prepared_check",
+      sql`json_valid(${t.preparedJson}) AND json_type(${t.preparedJson}) = 'object'`,
+    ),
+    check(
+      "product_label_attempts_verified_check",
+      sql`(${t.verifiedAt} IS NULL) = (${t.verifiedBy} IS NULL)`,
+    ),
+  ],
+);
+
+export const productLabelEvents = sqliteTable(
+  "product_label_events",
+  {
+    credentialOwnership: text("credential_ownership").notNull(),
+    eventId: text("event_id").notNull(),
+    jobId: text("job_id").notNull(),
+    sequence: integer("sequence").notNull(),
+    eventJson: text("event_json").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.credentialOwnership, t.eventId] }),
+    foreignKey({
+      columns: [t.credentialOwnership, t.jobId],
+      foreignColumns: [productLabelJobs.credentialOwnership, productLabelJobs.jobId],
+    }).onDelete("cascade"),
+    uniqueIndex("product_label_events_job_sequence_uq").on(
+      t.credentialOwnership,
+      t.jobId,
+      t.sequence,
+    ),
+    check("product_label_events_sequence_check", sql`${t.sequence} BETWEEN 1 AND 9007199254740991`),
+    check(
+      "product_label_events_json_check",
+      sql`json_valid(${t.eventJson}) AND json_type(${t.eventJson}) = 'object'`,
+    ),
+  ],
+);
+
+export const productLabelOutbox = sqliteTable(
+  "product_label_outbox",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    credentialOwnership: text("credential_ownership").notNull(),
+    eventId: text("event_id").notNull(),
+    queuedAt: text("queued_at").notNull(),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.credentialOwnership, t.eventId],
+      foreignColumns: [productLabelEvents.credentialOwnership, productLabelEvents.eventId],
+    }).onDelete("cascade"),
+    uniqueIndex("product_label_outbox_event_uq").on(t.credentialOwnership, t.eventId),
+    index("product_label_outbox_owner_id_idx").on(t.credentialOwnership, t.id),
+  ],
+);
+
+/** One statement claims and commits an event, projection, attempt and outbox record. */
+export const productLabelEventCommands = sqliteTable(
+  "product_label_event_commands",
+  {
+    credentialOwnership: text("credential_ownership").notNull(),
+    eventId: text("event_id").notNull(),
+    jobId: text("job_id").notNull(),
+    commandToken: text("command_token").notNull(),
+    eventDigest: text("event_digest").notNull(),
+    expectedSequence: integer("expected_sequence").notNull(),
+    expectedAttemptId: text("expected_attempt_id").notNull(),
+    eventJson: text("event_json").notNull(),
+    projectionJson: text("projection_json").notNull(),
+    recovery: integer("recovery", { mode: "boolean" }).notNull().default(false),
+  },
+  (t) => [
+    primaryKey({ columns: [t.credentialOwnership, t.eventId] }),
+    foreignKey({
+      columns: [t.credentialOwnership, t.jobId],
+      foreignColumns: [productLabelJobs.credentialOwnership, productLabelJobs.jobId],
+    }).onDelete("cascade"),
+    index("product_label_event_commands_owner_job_idx").on(t.credentialOwnership, t.jobId),
+    check(
+      "product_label_event_commands_sequence_check",
+      sql`${t.expectedSequence} BETWEEN 1 AND 9007199254740990`,
+    ),
+    check(
+      "product_label_event_commands_json_check",
+      sql`json_valid(${t.eventJson}) AND json_type(${t.eventJson}) = 'object' AND json_valid(${t.projectionJson}) AND json_type(${t.projectionJson}) = 'object'`,
+    ),
+  ],
+);
+
+/** Immutable local delivery verdict; insertion atomically removes only this event from outbox. */
+export const productLabelReceipts = sqliteTable(
+  "product_label_receipts",
+  {
+    credentialOwnership: text("credential_ownership").notNull(),
+    eventId: text("event_id").notNull(),
+    eventJson: text("event_json").notNull(),
+    outcome: text("outcome").notNull(),
+    rejectionCode: text("rejection_code"),
+    receivedAt: text("received_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.credentialOwnership, t.eventId] }),
+    foreignKey({
+      columns: [t.credentialOwnership, t.eventId],
+      foreignColumns: [productLabelEvents.credentialOwnership, productLabelEvents.eventId],
+    }).onDelete("cascade"),
+    index("product_label_receipts_owner_time_idx").on(t.credentialOwnership, t.receivedAt),
+    check(
+      "product_label_receipts_outcome_check",
+      sql`(${t.outcome} = 'accepted' AND ${t.rejectionCode} IS NULL) OR (${t.outcome} = 'quarantined' AND ${t.rejectionCode} IS NOT NULL AND ${t.rejectionCode} IN ('parent_missing','policy_mismatch','ownership_conflict','invalid_transition','sequence_gap','subscription_read_only','storage_invalid'))`,
+    ),
+  ],
+);

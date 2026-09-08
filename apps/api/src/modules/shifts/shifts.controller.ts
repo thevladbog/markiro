@@ -1,4 +1,10 @@
 import {
+  productLabelHistoryQuerySchema,
+  productLabelEventsQuerySchema,
+  type ProductLabelHistoryQuery,
+  type ProductLabelEventsQuery,
+} from "./product-label-history";
+import {
   Body,
   Controller,
   Delete,
@@ -14,13 +20,21 @@ import {
 import {
   ApiBody,
   ApiCreatedResponse,
+  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger";
-import { CABINET_CAPABILITY } from "@markiro/domain";
+import {
+  CABINET_CAPABILITY,
+  productLabelTemplateListSchema,
+  productLabelHistorySchema,
+  productLabelEventHistorySchema,
+  PRODUCT_LABEL_PROTOCOL,
+  type ProductLabelTemplateList,
+} from "@markiro/domain";
 import {
   ApiCabinetAuth,
   ApiCabinetOrStationAuth,
@@ -29,6 +43,7 @@ import {
   ApiZodBody,
   ApiZodQuery,
   ApiZodValidationError,
+  zodApiSchema,
 } from "../../lib/openapi";
 import { AllowStationOrPermissions, RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
@@ -68,6 +83,8 @@ import {
   type UpdateShiftDto,
   boxLabelTemplateProductQuerySchema,
   type BoxLabelTemplateProductQueryDto,
+  productLabelTemplateProductQuerySchema,
+  type ProductLabelTemplateProductQueryDto,
 } from "./dto";
 import { ShiftsService, type EffectiveListShiftsQuery } from "./shifts.service";
 
@@ -101,14 +118,34 @@ export class ShiftsController {
     return this.shiftsService.listShifts(req.tenantId!, effectiveQuery);
   }
 
+  @Get("product-label-templates")
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "List product duplicate label template options",
+    description:
+      "Enabled templates for the tenant and the product's category. Returns summaries without template specs.",
+  })
+  @ApiCabinetOrStationAuth()
+  @ApiZodQuery(productLabelTemplateProductQuerySchema)
+  @ApiOkResponse({ schema: zodApiSchema(productLabelTemplateListSchema) })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 429)
+  async listProductLabelTemplates(
+    @Req() req: RequestWithTenant,
+    @Query(new ZodValidationPipe(productLabelTemplateProductQuerySchema))
+    query: ProductLabelTemplateProductQueryDto,
+  ): Promise<ProductLabelTemplateList> {
+    return this.shiftsService.listProductLabelTemplates(req.tenantId!, query.productId);
+  }
+
   @Get("planning-config")
-  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   @ApiOperation({
     summary: "Read the shift planning configuration",
     description:
       "With `productId`, the box-template default is resolved for that product's category (category default, then organisation default).",
   })
-  @ApiCabinetAuth()
+  @ApiCabinetOrStationAuth()
   @ApiZodQuery(boxLabelTemplateProductQuerySchema)
   @ApiOkResponse({ schema: shiftPlanningConfigOpenApiSchema })
   @ApiZodValidationError()
@@ -145,6 +182,43 @@ export class ShiftsController {
     return this.shiftsService.listBoxLabelTemplates(req.tenantId!, query.productId);
   }
 
+  @Get(":id/product-labels")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "Read duplicate label history and attempt totals" })
+  @ApiCabinetAuth()
+  @ApiParam({ name: "id", format: "uuid" })
+  @ApiZodQuery(productLabelHistoryQuerySchema)
+  @ApiOkResponse({ schema: zodApiSchema(productLabelHistorySchema) })
+  @ApiHttpErrors(400, 401, 403, 404)
+  getProductLabels(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Query(new ZodValidationPipe(productLabelHistoryQuerySchema)) query: ProductLabelHistoryQuery,
+  ) {
+    return this.shiftsService.getProductLabelHistory(req.tenantId!, id, query);
+  }
+
+  @Get(":id/product-labels/:jobId/events")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Read accepted label events in device sequence order",
+    description: "Specify deviceId when the same local job UUID occurs on multiple stations.",
+  })
+  @ApiCabinetAuth()
+  @ApiParam({ name: "id", format: "uuid" })
+  @ApiParam({ name: "jobId", format: "uuid" })
+  @ApiZodQuery(productLabelEventsQuerySchema)
+  @ApiOkResponse({ schema: zodApiSchema(productLabelEventHistorySchema) })
+  @ApiHttpErrors(400, 401, 403, 404)
+  getProductLabelEvents(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Param("jobId") jobId: string,
+    @Query(new ZodValidationPipe(productLabelEventsQuerySchema)) query: ProductLabelEventsQuery,
+  ) {
+    return this.shiftsService.getProductLabelEvents(req.tenantId!, id, jobId, query);
+  }
+
   @Get(":id/summary")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   @ApiOperation({ summary: "Read factual shift output and participants" })
@@ -159,8 +233,7 @@ export class ShiftsController {
     return this.shiftsService.getShiftSummary(req.tenantId!, id);
   }
 
-  // Cabinet-only: not one of the station's six routes (list, create, open,
-  // bundle, reference bundle, box-label-templates) here. A device reading an
+  // Cabinet-only: a device reading an
   // arbitrary shift by id has no legitimate use once it can already
   // list/open/bundle its own.
   @Get(":id")
@@ -175,6 +248,11 @@ export class ShiftsController {
   }
 
   @Post()
+  @ApiHeader({
+    name: "x-station-capabilities",
+    required: false,
+    description: `Comma-separated station protocols. ${PRODUCT_LABEL_PROTOCOL} is required for duplicate printing; otherwise STATION_UPDATE_REQUIRED (409).`,
+  })
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
   @ApiOperation({
@@ -199,6 +277,7 @@ export class ShiftsController {
           lineId: req.deviceLineId ?? null,
         },
         "station",
+        req.get("x-station-capabilities"),
       );
     }
     return this.shiftsService.createShift(req.tenantId!, body, "admin");
@@ -264,6 +343,11 @@ export class ShiftsController {
   }
 
   @Post(":id/open")
+  @ApiHeader({
+    name: "x-station-capabilities",
+    required: false,
+    description: `Comma-separated station protocols. ${PRODUCT_LABEL_PROTOCOL} is required for duplicate printing; otherwise STATION_UPDATE_REQUIRED (409).`,
+  })
   @HttpCode(200)
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
@@ -273,10 +357,20 @@ export class ShiftsController {
   @ApiOkResponse({ schema: shiftOpenApiSchema })
   @ApiHttpErrors(401, 403, 404, 409, 429)
   async openShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftDto> {
-    return this.shiftsService.openShift(req.tenantId!, id, req.deviceId);
+    return this.shiftsService.openShift(
+      req.tenantId!,
+      id,
+      req.deviceId,
+      req.get("x-station-capabilities"),
+    );
   }
 
   @Post(":id/enter")
+  @ApiHeader({
+    name: "x-station-capabilities",
+    required: false,
+    description: `Comma-separated station protocols. ${PRODUCT_LABEL_PROTOCOL} is required for duplicate printing; otherwise STATION_UPDATE_REQUIRED (409).`,
+  })
   @HttpCode(200)
   @UseGuards(StationOnlyGuard)
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
@@ -291,10 +385,20 @@ export class ShiftsController {
   @ApiHttpErrors(401, 403, 404, 409, 429)
   async enterShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftDto> {
     if (!req.deviceId) throw new Error("Station device identity is missing");
-    return this.shiftsService.enterShift(req.tenantId!, id, req.deviceId);
+    return this.shiftsService.enterShift(
+      req.tenantId!,
+      id,
+      req.deviceId,
+      req.get("x-station-capabilities"),
+    );
   }
 
   @Get(":id/bundle")
+  @ApiHeader({
+    name: "x-station-capabilities",
+    required: false,
+    description: `Comma-separated station protocols. ${PRODUCT_LABEL_PROTOCOL} is required for duplicate printing; otherwise STATION_UPDATE_REQUIRED (409).`,
+  })
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   @AllowSubscriptionRecovery("shift")
   @ApiOperation({
@@ -305,12 +409,22 @@ export class ShiftsController {
   @ApiCabinetOrStationAuth()
   @ApiParam({ name: "id", format: "uuid" })
   @ApiOkResponse({ schema: shiftBundleOpenApiSchema })
-  @ApiHttpErrors(400, 401, 403, 404, 429)
+  @ApiHttpErrors(400, 401, 403, 404, 409, 429)
   async getBundle(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftBundleDto> {
-    return this.shiftsService.getBundle(req.tenantId!, id, req.deviceId ?? null);
+    return this.shiftsService.getBundle(
+      req.tenantId!,
+      id,
+      req.deviceId ?? null,
+      req.get("x-station-capabilities"),
+    );
   }
 
   @Get(":id/reference-bundle")
+  @ApiHeader({
+    name: "x-station-capabilities",
+    required: false,
+    description: `Comma-separated station protocols. ${PRODUCT_LABEL_PROTOCOL} is required for duplicate printing; otherwise STATION_UPDATE_REQUIRED (409).`,
+  })
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   @AllowSubscriptionRecovery("shift")
   @ApiOperation({
@@ -320,11 +434,16 @@ export class ShiftsController {
   @ApiCabinetOrStationAuth()
   @ApiParam({ name: "id", format: "uuid" })
   @ApiOkResponse({ schema: shiftReferenceBundleOpenApiSchema })
-  @ApiHttpErrors(401, 403, 404, 429)
+  @ApiHttpErrors(401, 403, 404, 409, 429)
   async getReferenceBundle(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
   ): Promise<ShiftReferenceBundleDto> {
-    return this.shiftsService.getReferenceBundle(req.tenantId!, id);
+    return this.shiftsService.getReferenceBundle(
+      req.tenantId!,
+      id,
+      req.authKind === "station",
+      req.get("x-station-capabilities"),
+    );
   }
 }

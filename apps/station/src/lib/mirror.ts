@@ -1,3 +1,8 @@
+import type { ValidationPrintPolicy } from "@markiro/domain";
+import {
+  parseMirroredProductLabelContext,
+  productLabelContextForBundle,
+} from "./product-labels/context.js";
 import {
   STATION_MIGRATION_ENTRIES,
   SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATION_IDS,
@@ -17,6 +22,8 @@ export interface StationBundle {
     status: string;
     mode: string;
     productId: string;
+    /** Absent only from pre-protocol servers. */
+    validationPrint?: ValidationPrintPolicy;
     productName: string | null;
     lineId: string | null;
     lineName: string | null;
@@ -102,6 +109,7 @@ export interface StationProductImageDescriptor {
 }
 
 export interface ShiftMirrorRow {
+  validationPrint: ValidationPrintPolicy | null;
   id: string;
   status: string;
   mode: string;
@@ -227,7 +235,9 @@ const b = (v: boolean) => (v ? 1 : 0);
  * every `exec.run` call, so a `BEGIN`/`COMMIT`/`ROLLBACK` sent as separate
  * calls does not actually group these statements — see `journal.ts`'s
  * `recordScan` doc comment for the full story. These are therefore
- * individual statements: the shift upsert, then the product upsert. A failure
+ * individual statements: the shift upsert, then the product upsert. Duplicate
+ * printing carries its policy and complete field context in the first statement;
+ * it never depends on a partially updated product mirror for print fields. A failure
  * during either upsert leaves that half applied until the next successful
  * sync repairs it. `bundle.operators` is deliberately ignored: the live
  * `/station/operators` sync and initial pairing are the authoritative roster
@@ -258,6 +268,7 @@ async function upsertBundleBody(
   preserveIssuerPrefix: boolean,
 ): Promise<void> {
   const s = bundle.shift;
+  const printContext = productLabelContextForBundle(bundle);
   // A pre-upgrade server omits `number` entirely; that absence must not
   // erase a number an upgraded server already mirrored (server rollback
   // mid-fleet). An explicit `null` from the server still applies.
@@ -278,10 +289,11 @@ async function upsertBundleBody(
        counterparty_id, counterparty_name, counterparty_gln,
        label_template_id, label_template_name, label_template_spec,
        planned_qty, planned_date, production_date, box_capacity, pallet_capacity, pallets_enabled,
-       opened_at, issuer_prefix, box_label_template_spec, number
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       opened_at, issuer_prefix, box_label_template_spec, number, validation_print_context
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
        status=excluded.status, mode=excluded.mode, product_id=excluded.product_id,
+       validation_print_context=excluded.validation_print_context,
        product_name=excluded.product_name,
        line_id=excluded.line_id, line_name=excluded.line_name,
        counterparty_id=excluded.counterparty_id, counterparty_name=excluded.counterparty_name,
@@ -324,6 +336,7 @@ async function upsertBundleBody(
       // Insert value only; whether the UPDATE branch touches `number` is
       // decided by `numberUpdate` above.
       s.number ?? null,
+      printContext === null ? null : JSON.stringify(printContext),
     ],
   );
 
@@ -583,9 +596,10 @@ export async function readShiftMirror(
     box_capacity: number | null;
     issuer_prefix: string | null;
     box_label_template_spec: string | null;
+    validation_print_context: string | null;
   }>(
     `SELECT id, status, mode, counterparty_gln, label_template_spec, box_capacity, issuer_prefix,
-            box_label_template_spec
+            box_label_template_spec, validation_print_context
      FROM shift_mirror WHERE id = ?`,
     [id],
   );
@@ -593,6 +607,7 @@ export async function readShiftMirror(
   if (!r) return null;
   return {
     id: r.id,
+    validationPrint: parseMirroredProductLabelContext(r.validation_print_context)?.policy ?? null,
     status: r.status,
     mode: r.mode,
     counterpartyGln: r.counterparty_gln,
