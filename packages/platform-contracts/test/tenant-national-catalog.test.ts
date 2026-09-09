@@ -499,3 +499,17 @@ it("separates product and photo reasons without exposing actor or raw provider d
   };
   expect(importResultSchema.safeParse(result).success).toBe(true);
 });
+
+it("records an explicitly reviewed kept alternative without changing old keep decisions", () => {
+  const old = {
+    previewId: ID_1,
+    acceptedEntryIds: [],
+    linkAction: "attach",
+    photo: { kind: "keep" },
+  };
+  expect(importDecisionSchema.parse(old)).toEqual(old);
+  expect(
+    importDecisionSchema.parse({ ...old, photo: { kind: "keep", reviewedCandidateId: ID_2 } })
+      .photo,
+  ).toEqual({ kind: "keep", reviewedCandidateId: ID_2 });
+});

@@ -1,3 +1,5 @@
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
 import type { Db } from "@markiro/db";
 import { describe, expect, it, vi } from "vitest";
 import { MediaAssetsReconciler } from "../src/modules/media/media-assets.reconciler";
@@ -30,75 +32,77 @@ function asset(overrides: Partial<FakeAsset> & Pick<FakeAsset, "id">): FakeAsset
   };
 }
 
-function fakeDb(
-  initial: FakeAsset[],
-  staleBefore = new Date("2026-08-13T11:45:00.000Z"),
-): { db: Db; rows: FakeAsset[]; deletedIds: string[] } {
+function fakeDb(initial: FakeAsset[]): { db: Db; rows: FakeAsset[]; deletedIds: string[] } {
   const rows = initial.map((row) => ({ ...row }));
   const deletedIds: string[] = [];
-  let candidates: FakeAsset[] = [];
-  let claimIndex = 0;
-  let claimed: FakeAsset | undefined;
-
+  const dialect = new PgDialect();
+  const evaluate = (condition: SQL | undefined) => {
+    if (!condition) return rows;
+    const query = dialect.sqlToQuery(condition);
+    const params = query.params;
+    const id = rows.find((r) => params.includes(r.id))?.id;
+    return rows.filter((r) => {
+      if (id && id !== r.id) return false;
+      if (query.sql.includes('"status" in') && r.status === "active") return false;
+      if (
+        query.sql.includes('"status" =') &&
+        params.includes("deleting") &&
+        r.status !== "deleting"
+      )
+        return false;
+      const cutoff = params.find((v) => typeof v === "string" && /^\d{4}-/.test(v));
+      if (query.sql.includes('"updated_at" <') && cutoff && r.updatedAt >= new Date(String(cutoff)))
+        return false;
+      if (
+        query.sql.includes("not exists") &&
+        (r.referencedBy || (r.referenceAfterClaim && locked.has(r.id)))
+      )
+        return false;
+      return true;
+    });
+  };
+  const locked = new Set<string>();
   const db = {
-    select: (fields: Record<string, unknown>) => {
+    transaction: async (work: (tx: unknown) => Promise<unknown>) => work(db),
+    select: () => {
+      let condition: SQL | undefined;
+      const execute = () => evaluate(condition).map((r) => ({ ...r }));
       const query = {
         from: () => query,
-        leftJoin: () => query,
-        where: () => query,
-        limit: async (limit: number) => {
-          if ("objectKey" in fields) {
-            candidates = rows
-              .filter(
-                (row) =>
-                  (row.status === "staging" || row.status === "deleting") &&
-                  row.updatedAt < staleBefore &&
-                  row.referencedBy === undefined,
-              )
-              .slice(0, limit);
-            claimIndex = 0;
-            return candidates.map(
-              ({ referenceAfterClaim: _race, claimLost: _lost, ...row }) => row,
-            );
-          }
-          if (!claimed?.referenceAfterClaim) return [];
-          return [
-            {
-              avatarAssetId: claimed.referenceAfterClaim === "avatar" ? claimed.id : null,
-              productAssetId: claimed.referenceAfterClaim === "product" ? claimed.id : null,
-            },
-          ];
+        where: (value: SQL) => {
+          condition = value;
+          return query;
         },
+        limit: async (count: number) => execute().slice(0, count),
+        for: async () => {
+          const found = execute().filter((r) => !r.claimLost);
+          for (const r of found) locked.add(r.id);
+          return found;
+        },
+        then: (resolve: (value: FakeAsset[]) => unknown, reject: (reason: unknown) => unknown) =>
+          Promise.resolve(execute()).then(resolve, reject),
       };
       return query;
     },
     update: () => ({
       set: (values: Partial<FakeAsset>) => ({
-        where: () => ({
-          returning: async () => {
-            const candidate = candidates[claimIndex++];
-            claimed = candidate;
-            if (!candidate || candidate.claimLost) return [];
-            Object.assign(candidate, values);
-            return [{ id: candidate.id }];
-          },
-        }),
+        where: async (condition: SQL) => {
+          for (const row of evaluate(condition)) Object.assign(row, values);
+          return { rowCount: 1 };
+        },
       }),
     }),
     delete: () => ({
-      where: async () => {
-        if (!claimed || claimed.status !== "deleting" || claimed.referenceAfterClaim) {
-          return { rowCount: 0 };
+      where: async (condition: SQL) => {
+        const selected = evaluate(condition);
+        for (const row of selected) {
+          deletedIds.push(row.id);
+          rows.splice(rows.indexOf(row), 1);
         }
-        const index = rows.findIndex((row) => row.id === claimed?.id);
-        if (index < 0) return { rowCount: 0 };
-        const [removed] = rows.splice(index, 1);
-        if (removed) deletedIds.push(removed.id);
-        return { rowCount: 1 };
+        return { rowCount: selected.length };
       },
     }),
   } as unknown as Db;
-
   return { db, rows, deletedIds };
 }
 
@@ -126,27 +130,25 @@ describe("MediaAssetsService", () => {
   });
 
   it("does not let an immediate-cleanup metadata deletion failure escape after object deletion", async () => {
-    const metadataPresent = true;
-    const query = {
-      from: () => query,
-      where: () => query,
-      limit: async () => [{ objectKey: "tenants/tenant-1/products/asset-1.webp" }],
-    };
-    const db = {
-      select: () => query,
-      delete: () => ({
-        where: async () => {
-          throw new Error("database delete unavailable");
-        },
+    const state = fakeDb([
+      asset({
+        id: "asset-1",
+        ownerTenantId: "tenant-1",
+        objectKey: "tenants/tenant-1/products/asset-1.webp",
+        status: "deleting",
       }),
-    } as unknown as Db;
+    ]);
+    const db = state.db;
+    vi.spyOn(db, "delete").mockImplementation(() => {
+      throw new Error("database delete unavailable");
+    });
     const storage = fakeStorage();
 
     await expect(
       new MediaAssetsService(db, storage).cleanupDeletingTenantAsset("tenant-1", "asset-1"),
     ).resolves.toBeUndefined();
     expect(storage.delete).toHaveBeenCalledWith("tenants/tenant-1/products/asset-1.webp");
-    expect(metadataPresent).toBe(true);
+    expect(state.rows).toHaveLength(1);
   });
 
   it("reconciles unreferenced stale user and tenant assets without touching aggregate references", async () => {

@@ -1,3 +1,4 @@
+import { photoReviewSchema } from "./national-catalog-image-state";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { productAttributeValueSchema } from "@markiro/domain";
@@ -54,6 +55,7 @@ export function parseImportDiff(value: unknown): StoredImportDiff {
 export const storedDecisionSchema = importDecisionSchema.safeExtend({
   version: z.literal(1),
   acceptedBy: z.string().min(1),
+  reviewedPhotoCandidateId: z.uuid().optional(),
   sourceHash: z.string().length(64),
   acceptedEntries: z.array(entrySchema),
 });
@@ -134,7 +136,12 @@ export function canonicalImportDecisions(value: ImportApply) {
       linkAction: d.linkAction,
       photo:
         d.photo.kind === "keep"
-          ? { kind: "keep" as const }
+          ? {
+              kind: "keep" as const,
+              ...(d.photo.reviewedCandidateId
+                ? { reviewedCandidateId: d.photo.reviewedCandidateId }
+                : {}),
+            }
           : { kind: "candidate" as const, candidateId: d.photo.candidateId },
     }))
     .sort((a, b) => a.previewId.localeCompare(b.previewId));
@@ -191,6 +198,7 @@ export const appliedEvidenceSchema = z
   .object({
     version: z.literal(1),
     appliedBy: z.string().min(1),
+    photoReview: photoReviewSchema.optional(),
     linkId: z.uuid(),
     cardId: z.string().min(1),
     environment: z.enum(["production", "sandbox"]),

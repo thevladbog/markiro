@@ -1,3 +1,4 @@
+import { reviewedPhotoForConfirmation } from "./national-catalog-image-state";
 import { randomUUID } from "node:crypto";
 import { BadRequestException, ConflictException } from "@nestjs/common";
 import { and, eq, isNull } from "drizzle-orm";
@@ -367,16 +368,35 @@ export async function applyImportItem(
         ]),
       }).entries
     : [];
+  const photoReview = await reviewedPhotoForConfirmation(tx, {
+    tenantId: actor.tenantId,
+    sessionId: preview.sessionId,
+    previewId: preview.id,
+    snapshotId,
+    sourceHash: preview.sourceHash,
+    gtin14: source.boundGtin14,
+    sourcePhotos: source.normalized.images,
+    requestedId: decision.reviewedPhotoCandidateId,
+    choice: decision.photo.kind,
+    previous:
+      link &&
+      link.cardId === source.cardId &&
+      link.environment === source.environment &&
+      link.boundGtin14 === source.boundGtin14
+        ? link.reviewedPhoto
+        : null,
+  });
   const meaningfulHash = meaningfulCatalogHash({
     providerName: source.normalized.name,
     mappedEntries: baselineEntries,
-    imageChecksum: null,
+    imageChecksum: photoReview?.checksum ?? null,
   });
   if (link && decision.linkAction === "replace")
     await closeNationalCatalogLinkInTransaction(tx, actor, productId, link.revision, "replaced");
   const linkValues = {
     latestSnapshotId: snapshotId,
     reviewedSnapshotId: snapshotId,
+    reviewedPhoto: photoReview,
     lastAttemptAt: now,
     lastSuccessAt: now,
     lastOutcome: "ok" as const,
@@ -443,6 +463,7 @@ export async function applyImportItem(
       appliedEvidence: appliedEvidenceSchema.parse({
         version: 1,
         appliedBy: actor.userId,
+        ...(photoReview ? { photoReview } : {}),
         linkId: confirmedLinkId,
         cardId: source.cardId,
         environment: source.environment,

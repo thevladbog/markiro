@@ -1,3 +1,4 @@
+import { overlayStoredImages } from "./national-catalog-image-state";
 import { randomUUID } from "node:crypto";
 import {
   ConflictException,
@@ -68,6 +69,10 @@ export class NationalCatalogImportPreviewService {
     private readonly sessions: NationalCatalogImportService,
     private readonly client: Pick<NationalCatalogClient, "getFeedProductsByIds">,
     private readonly coordinator: NationalCatalogRequestCoordinator,
+    private readonly imagePreparation: { enabled: boolean; verifiedHosts: readonly string[] } = {
+      enabled: false,
+      verifiedHosts: [],
+    },
   ) {}
   async prepare(
     actor: ImportActor,
@@ -306,7 +311,11 @@ export class NationalCatalogImportPreviewService {
           const card = cards[0];
           if (!card) throw new Error("Missing matched card");
           try {
-            const preview = await buildImportPreview(tx, currentSession, item, card, request);
+            const preview = await buildImportPreview(tx, currentSession, item, card, request, {
+              actorId: current.actorId,
+              enabled:
+                this.imagePreparation.enabled && this.imagePreparation.verifiedHosts.length > 0,
+            });
             completed.push({ itemId: item.id, previewId: preview.id });
           } catch (error) {
             if (!(
@@ -464,11 +473,13 @@ export class NationalCatalogImportPreviewService {
         return [preview.id, importPreviewSchema.parse(diff.view)] as const;
       }),
     );
-    const views = ids.map((id) => {
-      const view = mapped.get(id);
-      if (!view) throw new ConflictException("preview_unavailable");
-      return view;
-    });
+    const views = await Promise.all(
+      ids.map(async (id) => {
+        const view = mapped.get(id);
+        if (!view) throw new ConflictException("preview_unavailable");
+        return overlayStoredImages(tx, row.tenantId, row.sessionId, view);
+      }),
+    );
     const state: ImportPreparation["state"] =
       cp.state === "blocked"
         ? "blocked"

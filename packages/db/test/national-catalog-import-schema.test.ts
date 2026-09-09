@@ -126,3 +126,12 @@ it("retains optional immutable application evidence separately from the canonica
   expect(evidence?.dataType).toBe("json");
   expect(evidence?.notNull).toBe(false);
 });
+
+it("persists actual photo preparation initiator and repair checkpoint without inventing historical actors", () => {
+  const config = getTableConfig(table("nationalCatalogImportImages"));
+  for (const name of ["preparation_actor_id", "preparation_checkpoint"]) {
+    const column = config.columns.find((c) => c.name === name);
+    expect(column).toBeDefined();
+    expect(column?.notNull).toBe(false);
+  }
+});

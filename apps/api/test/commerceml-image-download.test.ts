@@ -95,6 +95,46 @@ describe("downloadBoundedImage", () => {
     ...overrides,
   });
 
+  it("destroys the actual request and response on caller abort without exposing signed URLs", async () => {
+    const controller = new AbortController();
+    const response = new PassThrough();
+    const req = Object.assign(new EventEmitter(), { end: vi.fn(), destroy: vi.fn() });
+    const request = vi.fn(
+      (_url: URL, _options: unknown, callback: (res: IncomingMessage) => void) => {
+        const res = response as unknown as IncomingMessage;
+        res.statusCode = 200;
+        res.headers = {};
+        queueMicrotask(() => callback(res));
+        return req;
+      },
+    ) as unknown as typeof httpsRequest;
+    const pending = downloadBoundedImage("https://images.example/a?secret=never-log", policy(), {
+      request,
+      signal: controller.signal,
+    });
+    await Promise.resolve();
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({
+      reason: "timeout",
+      message: "timeout: request aborted",
+    });
+    expect(req.destroy).toHaveBeenCalledOnce();
+    expect(response.destroyed).toBe(true);
+  });
+
+  it("does not open a request when the caller has already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const request = vi.fn() as unknown as typeof httpsRequest;
+    await expect(
+      downloadBoundedImage("https://images.example/a", policy(), {
+        request,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ reason: "timeout" });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("checks the allowlist again after a redirect", async () => {
     await expect(
       downloadBoundedImage(

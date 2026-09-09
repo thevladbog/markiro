@@ -13,6 +13,8 @@ export interface ImageDownloadPolicy {
 export interface ImageDownloadDeps {
   /** Подменяется в тестах; в бою — node:https.request. */
   request?: typeof httpsRequest;
+  /** Cancels the native request before the coordinator releases capacity. */
+  signal?: AbortSignal;
 }
 
 export type ImageDownloadReason =
@@ -169,12 +171,16 @@ function fetchHop(
   request: typeof httpsRequest,
   timeoutMs: number,
   maxBytes: number,
+  signal?: AbortSignal,
 ): Promise<{ redirectTo: string } | { body: Buffer }> {
   return new Promise((resolve, reject) => {
     let settled = false;
     let currentRes: IncomingMessage | undefined;
     let req: ReturnType<typeof httpsRequest> | undefined;
-    const clearDeadline = () => clearTimeout(deadlineTimer);
+    const clearDeadline = () => {
+      clearTimeout(deadlineTimer);
+      signal?.removeEventListener("abort", abort);
+    };
     const settleResolve = (value: { redirectTo: string } | { body: Buffer }) => {
       if (settled) return;
       settled = true;
@@ -194,6 +200,16 @@ function fetchHop(
       settleReject(new ImageDownloadError("timeout", `deadline ${timeoutMs}ms expired`));
     }, timeoutMs);
 
+    const abort = () => {
+      req?.destroy();
+      currentRes?.destroy();
+      settleReject(new ImageDownloadError("timeout", "request aborted"));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
     try {
       req = request(url, { method: "GET", lookup: guardedLookup, timeout: timeoutMs }, (res) => {
         currentRes = res;
@@ -291,7 +307,7 @@ export async function downloadBoundedImage(
     if (remainingMs <= 0) {
       throw new ImageDownloadError("timeout", `budget ${policy.timeoutMs}ms exhausted`);
     }
-    const outcome = await fetchHop(url, request, remainingMs, policy.maxBytes);
+    const outcome = await fetchHop(url, request, remainingMs, policy.maxBytes, deps.signal);
     if ("body" in outcome) return outcome.body;
     current = outcome.redirectTo;
     base = url;

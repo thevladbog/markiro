@@ -247,7 +247,9 @@ export const importPreviewSchema = z
   .strict();
 export type ImportPreview = z.infer<typeof importPreviewSchema>;
 
-const keepPhotoDecisionSchema = z.object({ kind: z.literal("keep") }).strict();
+const keepPhotoDecisionSchema = z
+  .object({ kind: z.literal("keep"), reviewedCandidateId: z.uuid().optional() })
+  .strict();
 const candidatePhotoDecisionSchema = z
   .object({ kind: z.literal("candidate"), candidateId: platformUuidSchema })
   .strict();

@@ -518,4 +518,23 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
       ),
     ).rejects.toMatchObject({ code: "23514" });
   });
+  it("adds nullable photo preparation and review evidence without inventing old actors or selectors", async () => {
+    const row = await pool.query(
+      "SELECT source_id, preparation_actor_id, preparation_checkpoint FROM national_catalog_import_images WHERE id=$1",
+      [image],
+    );
+    expect(row.rows).toEqual([
+      { source_id: null, preparation_actor_id: null, preparation_checkpoint: null },
+    ]);
+    const columns = await pool.query(
+      "SELECT column_name,is_nullable FROM information_schema.columns WHERE table_name='national_catalog_product_links' AND column_name='reviewed_photo'",
+    );
+    expect(columns.rows).toEqual([{ column_name: "reviewed_photo", is_nullable: "YES" }]);
+    await expect(
+      pool.query(
+        "UPDATE national_catalog_import_images SET preparation_actor_id='missing-actor' WHERE id=$1",
+        [image],
+      ),
+    ).rejects.toMatchObject({ code: "23503" });
+  });
 });

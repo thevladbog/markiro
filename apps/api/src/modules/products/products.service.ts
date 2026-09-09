@@ -1,6 +1,8 @@
 import { closeNationalCatalogLinkInTransaction } from "../national-catalog/national-catalog-link-writer";
 import { ProductWriter } from "./product-writer";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import type { ExpectedPreparedPhoto } from "../national-catalog/national-catalog-image-state";
 import {
   BadRequestException,
   ConflictException,
@@ -369,6 +371,124 @@ export class ProductsService {
 
     if (initialImage !== null && initialImage.checksum === image.checksum) return "unchanged";
     await this.activateProcessedImage(tenantId, null, productId, image, initialImage);
+    return "applied";
+  }
+
+  /** Caller owns receipt transaction. Activate reviewed staging bytes with product-image CAS.
+   * Lock order: session/receipt -> product -> link/candidate -> staged asset. */
+  async applyPreparedImage(
+    tx: ProductAuditTx,
+    tenantId: string,
+    actorUserId: string,
+    productId: string,
+    image: ProcessedProductImage,
+    expected: ExpectedPreparedPhoto,
+    stagedAssetId: string,
+  ): Promise<"applied" | "unchanged"> {
+    await this.lockProduct(tx, tenantId, productId);
+    const [asset] = await tx
+      .select()
+      .from(schema.mediaAssets)
+      .where(
+        and(
+          eq(schema.mediaAssets.ownerTenantId, tenantId),
+          eq(schema.mediaAssets.id, stagedAssetId),
+        ),
+      )
+      .for("update");
+    if (
+      !asset ||
+      asset.status !== "staging" ||
+      asset.checksum !== image.checksum ||
+      asset.contentType !== image.contentType ||
+      asset.byteSize !== image.byteSize ||
+      asset.width !== image.width ||
+      asset.height !== image.height ||
+      image.buffer.byteLength !== image.byteSize ||
+      createHash("sha256").update(image.buffer).digest("hex") !== image.checksum
+    )
+      throw new ConflictException("prepared_image_changed");
+    const [current] = await tx
+      .select({
+        assetId: schema.productImages.assetId,
+        updatedAt: schema.productImages.updatedAt,
+        checksum: schema.mediaAssets.checksum,
+        contentType: schema.mediaAssets.contentType,
+        byteSize: schema.mediaAssets.byteSize,
+        width: schema.mediaAssets.width,
+        height: schema.mediaAssets.height,
+      })
+      .from(schema.productImages)
+      .innerJoin(
+        schema.mediaAssets,
+        and(
+          eq(schema.mediaAssets.id, schema.productImages.assetId),
+          eq(schema.mediaAssets.ownerTenantId, tenantId),
+          eq(schema.mediaAssets.status, "active"),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.productImages.tenantId, tenantId),
+          eq(schema.productImages.productId, productId),
+        ),
+      );
+    const actual = current
+      ? {
+          assetId: current.assetId,
+          updatedAt: current.updatedAt.toISOString(),
+          checksum: current.checksum,
+          width: current.width,
+          height: current.height,
+        }
+      : null;
+    // Identity/version comparison precedes the checksum shortcut: replacement is a conflict even if visually equal.
+    if (!isDeepStrictEqual(actual, expected)) throw new ConflictException("product_image_changed");
+    if (current?.checksum === image.checksum) return "unchanged";
+    const [activated] = await tx
+      .update(schema.mediaAssets)
+      .set({ status: "active", updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.mediaAssets.id, stagedAssetId),
+          eq(schema.mediaAssets.ownerTenantId, tenantId),
+          eq(schema.mediaAssets.status, "staging"),
+        ),
+      )
+      .returning({ id: schema.mediaAssets.id });
+    if (!activated) throw new ConflictException("prepared_image_changed");
+    await tx
+      .insert(schema.productImages)
+      .values({ tenantId, productId, assetId: stagedAssetId })
+      .onConflictDoUpdate({
+        target: [schema.productImages.tenantId, schema.productImages.productId],
+        set: { assetId: stagedAssetId, updatedAt: new Date() },
+      });
+    if (current)
+      await tx
+        .update(schema.mediaAssets)
+        .set({ status: "deleting", updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.mediaAssets.id, current.assetId),
+            eq(schema.mediaAssets.ownerTenantId, tenantId),
+          ),
+        );
+    await this.writeSuccessAudit(
+      tx,
+      tenantId,
+      actorUserId,
+      productId,
+      current ? "product.image.replaced" : "product.image.uploaded",
+      current ? descriptorFromAsset(current) : null,
+      {
+        checksum: image.checksum,
+        contentType: image.contentType,
+        byteSize: image.byteSize,
+        width: image.width,
+        height: image.height,
+      },
+    );
     return "applied";
   }
 

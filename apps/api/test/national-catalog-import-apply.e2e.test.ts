@@ -153,6 +153,37 @@ describe("atomic National Catalog product application (real PostgreSQL services)
     service = new NationalCatalogImportApplyService(repository, sessions);
   }
   async function apply(body: ImportApply) {
+    // Task9 requires reviewed ready metadata BEFORE acceptance; these remain metadata-only fixtures.
+    for (const d of body.decisions) {
+      if (d.photo.kind !== "candidate") continue;
+      const [candidate] = await db
+        .select()
+        .from(schema.nationalCatalogImportImages)
+        .where(eq(schema.nationalCatalogImportImages.candidateId, d.photo.candidateId));
+      if (!candidate || candidate.state !== "pending") continue;
+      const assetId = randomUUID();
+      await db.insert(schema.mediaAssets).values({
+        id: assetId,
+        ownerTenantId: actor.tenantId,
+        objectKey: `test/${assetId}`,
+        contentType: "image/webp",
+        byteSize: 10,
+        checksum: "a".repeat(64),
+        width: 1,
+        height: 1,
+      });
+      await db
+        .update(schema.nationalCatalogImportImages)
+        .set({
+          state: "ready",
+          stagedAssetId: assetId,
+          checksum: "a".repeat(64),
+          byteSize: 10,
+          width: 1,
+          height: 1,
+        })
+        .where(eq(schema.nationalCatalogImportImages.id, candidate.id));
+    }
     await init();
     const started = await service.start(actor, sessionId, body);
     await service.resume(actor.tenantId, started.operationId);

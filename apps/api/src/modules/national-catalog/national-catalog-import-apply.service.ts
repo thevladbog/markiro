@@ -1,3 +1,4 @@
+import { assertReadyImage, naturalReadyPhotoId } from "./national-catalog-image-state";
 import { randomUUID } from "node:crypto";
 import {
   BadRequestException,
@@ -100,7 +101,19 @@ export class NationalCatalogImportApplyService {
         if (preview.productId) products.add(preview.productId);
         gtins.add(source.boundGtin14);
         let imageId: string | null = null;
-        if (decision.photo.kind === "candidate") {
+        const reviewedCandidateId =
+          decision.photo.kind === "candidate"
+            ? decision.photo.candidateId
+            : (decision.photo.reviewedCandidateId ??
+              (await naturalReadyPhotoId(
+                tx,
+                actor.tenantId,
+                sessionId,
+                preview.id,
+                source.boundGtin14,
+                source.normalized.images,
+              )));
+        if (reviewedCandidateId) {
           const [image] = await tx
             .select()
             .from(schema.nationalCatalogImportImages)
@@ -109,7 +122,7 @@ export class NationalCatalogImportApplyService {
                 eq(schema.nationalCatalogImportImages.tenantId, actor.tenantId),
                 eq(schema.nationalCatalogImportImages.sessionId, sessionId),
                 eq(schema.nationalCatalogImportImages.previewId, preview.id),
-                eq(schema.nationalCatalogImportImages.candidateId, decision.photo.candidateId),
+                eq(schema.nationalCatalogImportImages.candidateId, reviewedCandidateId),
               ),
             )
             .for("update");
@@ -121,7 +134,8 @@ export class NationalCatalogImportApplyService {
             image.expiresAt.getTime() <= Date.now()
           )
             throw new BadRequestException("image_candidate_invalid");
-          imageId = image.id;
+          await assertReadyImage(tx, image);
+          if (decision.photo.kind === "candidate") imageId = image.id;
         }
         writes.push({
           tenantId: actor.tenantId,
@@ -132,6 +146,7 @@ export class NationalCatalogImportApplyService {
             ...decision,
             version: 1,
             acceptedBy: actor.userId,
+            ...(reviewedCandidateId ? { reviewedPhotoCandidateId: reviewedCandidateId } : {}),
             sourceHash: preview.sourceHash,
             acceptedEntries,
           },
@@ -270,7 +285,10 @@ export class NationalCatalogImportApplyService {
           (item.productResult === "failed" && item.nextAttemptAt !== null),
       );
       const imagePending = items.some(
-        (item) => item.productResult === "applied" && item.imageResult === "pending",
+        (item) =>
+          item.productResult === "applied" &&
+          (item.imageResult === "pending" ||
+            (item.imageResult === "failed" && item.nextImageAttemptAt !== null)),
       );
       await tx
         .update(operations)

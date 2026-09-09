@@ -80,6 +80,7 @@ it("retains a sole foreign-GTIN photo as an explicit alternative, never as a fal
   expect(buildPhotoCandidates(source, GTIN, false)).toEqual([
     {
       url: "https://images.example.test/foreign",
+      sourceId: "foreign",
       dto: expect.objectContaining({
         state: "pending",
         reason: "barcode_mismatch",

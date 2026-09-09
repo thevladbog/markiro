@@ -1,3 +1,5 @@
+import { newImageCheckpoint } from "./national-catalog-image-state";
+import { chooseDefaultPhoto } from "./national-catalog-photo-selection";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { ConflictException, UnprocessableEntityException } from "@nestjs/common";
@@ -140,6 +142,7 @@ export async function buildImportPreview(
   item: ImportItemRow,
   source: NationalCatalogProduct,
   body: ImportPrepare,
+  imagePreparation?: { actorId: string; enabled: boolean },
 ): Promise<ImportPreview> {
   const tenantId = session.tenantId;
   if (!item.gtin14 || !item.cardId || String(source.id) !== item.cardId)
@@ -494,11 +497,16 @@ export async function buildImportPreview(
   });
   if (photos.length)
     await tx.insert(schema.nationalCatalogImportImages).values(
-      photos.map(({ dto, url }) => ({
+      photos.map(({ dto, url, sourceId }) => ({
         tenantId,
         sessionId: session.id,
         previewId: id,
         candidateId: dto.candidateId,
+        sourceId,
+        preparationActorId:
+          imagePreparation?.enabled && dto.selectedByDefault ? imagePreparation.actorId : null,
+        preparationCheckpoint:
+          imagePreparation?.enabled && dto.selectedByDefault ? newImageCheckpoint() : null,
         sourceHash,
         sourceUrl: url,
         state: dto.state === "failed" ? ("failed" as const) : ("pending" as const),
@@ -513,7 +521,7 @@ export function buildPhotoCandidates(
   source: NationalCatalogProduct,
   gtin14: string,
   hasImage: boolean,
-): Array<{ dto: ImportPhoto; url: string | null }> {
+): Array<{ dto: ImportPhoto; url: string | null; sourceId: string }> {
   const candidates = source.images.map((image) => {
     const matches =
       image.barcode !== null &&
@@ -521,26 +529,26 @@ export function buildPhotoCandidates(
       normalizeToGtin14(image.barcode) === gtin14;
     const invalid = image.barcode !== null && !isValidGtin(image.barcode);
     const foreign = image.barcode !== null && !invalid && !matches;
-    return { image, matches, invalid, foreign };
+    return { candidateId: randomUUID(), image, matches, invalid, foreign };
   });
-  const matching = candidates.filter((row) => row.matches && !row.invalid);
-  const automatic = candidates.filter((row) => !row.invalid && !row.foreign);
-  const eligible = matching.length
-    ? matching
-    : automatic.filter((row) => row.image.primary).length
-      ? automatic.filter((row) => row.image.primary)
-      : automatic;
-  const primary = eligible.filter((row) => row.image.primary);
-  const selected =
-    eligible.length === 1 ? eligible[0] : primary.length === 1 ? primary[0] : undefined;
+  const selected = chooseDefaultPhoto(
+    gtin14,
+    candidates
+      .filter((row) => !row.invalid)
+      .map((row) => ({
+        candidateId: row.candidateId,
+        barcode: row.image.barcode === null ? null : normalizeToGtin14(row.image.barcode),
+        primary: row.image.primary,
+      })),
+  );
   return [
     ...candidates.map((row) => ({
       dto: {
-        candidateId: randomUUID(),
+        candidateId: row.candidateId,
         previewPath: null,
         state: row.invalid ? ("failed" as const) : ("pending" as const),
         primary: row.image.primary,
-        selectedByDefault: !hasImage && row === selected,
+        selectedByDefault: !hasImage && row.candidateId === selected,
         reason: row.invalid
           ? ("invalid_barcode" as const)
           : row.foreign
@@ -548,6 +556,7 @@ export function buildPhotoCandidates(
             : null,
       },
       url: row.invalid ? null : row.image.url,
+      sourceId: row.image.sourceId,
     })),
     ...source.imageIssues.map((issue) => ({
       dto: {
@@ -559,6 +568,7 @@ export function buildPhotoCandidates(
         reason: issue.reason,
       },
       url: null,
+      sourceId: issue.sourceId,
     })),
   ];
 }
