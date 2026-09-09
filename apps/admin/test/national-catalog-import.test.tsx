@@ -197,6 +197,7 @@ import {
 function mockServer() {
   const state = {
     session: { ...sessionFixture, selected: 1, selectedItemIds: [id(2)] },
+    items: { ...itemsFixture, nextCursor: null },
     preparation: structuredClone(previewFixture),
     result: structuredClone(resultFixture),
     readOnly: false,
@@ -250,7 +251,7 @@ function mockServer() {
         selected: b.itemIds.length,
       };
       body = state.session;
-    } else if (path.includes("/items")) body = { ...itemsFixture, nextCursor: null };
+    } else if (path.includes("/items")) body = state.items;
     else if (path.endsWith("/previews")) {
       const b = importPrepareSchema.parse(JSON.parse(String(init?.body)));
       prepares.push(b);
@@ -1705,5 +1706,170 @@ it.each(["ru", "en"] as const)(
     } finally {
       await i18n.changeLanguage("ru");
     }
+  },
+);
+
+it("updates a visible import even when the browser window does not have focus", async () => {
+  vi.spyOn(document, "hasFocus").mockReturnValue(false);
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  const server = mockServer();
+  server.state.session = {
+    ...sessionFixture,
+    state: "loading",
+    automaticWorkPending: true,
+    loaded: 0,
+  };
+  server.state.items = { items: [], nextCursor: null };
+  renderImport(selectionRoute);
+  await screen.findByText(/Загружено строк: 0/);
+  server.state.session = {
+    ...server.state.session,
+    state: "ready",
+    complete: true,
+    automaticWorkPending: false,
+    loaded: 1,
+    revision: 1,
+  };
+  server.state.items = { ...itemsFixture, nextCursor: null };
+  await screen.findByRole("checkbox", { name: /4006381333931/ }, { timeout: 4500 });
+});
+
+it("refreshes the item feed after discovery completes even if an earlier empty response arrives last", async () => {
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  const server = mockServer();
+  server.state.session = {
+    ...sessionFixture,
+    state: "loading",
+    automaticWorkPending: true,
+    loaded: 0,
+  };
+  const original = server.fetchMock.getMockImplementation()!;
+  let releaseEmpty: (() => void) | undefined;
+  let releaseSession: (() => void) | undefined;
+  let releaseFreshItems: (() => void) | undefined;
+  const freshItems = new Promise<void>((resolve) => {
+    releaseFreshItems = resolve;
+  });
+  const itemRequestStarted = new Promise<void>((resolve) => {
+    releaseSession = resolve;
+  });
+  const staleItems = new Promise<void>((resolve) => {
+    releaseEmpty = resolve;
+  });
+  let completionEnabled = false;
+  let staleRequestStarted = false;
+  server.fetchMock.mockImplementation(async (url, init) => {
+    if (String(url).endsWith(`/import-sessions/${id(1)}`)) {
+      if (completionEnabled) {
+        await itemRequestStarted;
+        server.state.session = {
+          ...server.state.session,
+          state: "ready",
+          complete: true,
+          automaticWorkPending: false,
+          loaded: 1,
+          revision: 1,
+        };
+      }
+    }
+    if (String(url).includes("/items")) {
+      if (!completionEnabled || !staleRequestStarted) {
+        if (completionEnabled) {
+          staleRequestStarted = true;
+          releaseSession?.();
+          await staleItems;
+        }
+        return new Response(JSON.stringify({ items: [], nextCursor: null }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+    if (String(url).includes("/items")) await freshItems;
+    return original(url, init);
+  });
+  renderImport(selectionRoute);
+  await screen.findByText(/Загружено строк: 0/);
+  completionEnabled = true;
+  await screen.findByText(/Загружено строк: 1/, {}, { timeout: 4500 });
+  await act(async () => {
+    releaseEmpty?.();
+  });
+  try {
+    expect(
+      screen.getByRole("status", { name: "Загружаем товары из Национального каталога" }),
+    ).toBeDefined();
+    expect(screen.queryByText("Товары не найдены")).toBeNull();
+  } finally {
+    await act(async () => {
+      releaseFreshItems?.();
+    });
+  }
+  await screen.findByRole("checkbox", { name: /4006381333931/ }, { timeout: 3000 });
+}, 9000);
+
+it.each(["queued", "loading", "partial"] as const)(
+  "shows %s preparation progress without premature confirmation instructions or apply actions",
+  (state) => {
+    render(
+      <ImportReview
+        sessionId={id(1)}
+        data={{
+          ...previewFixture,
+          preparation: {
+            ...previewFixture.preparation,
+            state,
+            completed: 0,
+            automaticWorkPending: true,
+          },
+          items: [],
+        }}
+        canWrite
+        busy={false}
+        onPrepare={vi.fn()}
+        onApply={vi.fn()}
+        onPhoto={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+      { wrapper: MemoryRouter },
+    );
+    expect(screen.getByRole("status").textContent).toContain("Готовим сравнение");
+    expect(screen.queryByLabelText("Итог перед добавлением")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Применить выбранное" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Обновить сравнение" })).toBeNull();
+  },
+);
+
+it.each(["failed", "blocked"] as const)(
+  "does not describe stopped %s comparison preparation as ongoing",
+  (state) => {
+    render(
+      <ImportReview
+        sessionId={id(1)}
+        data={{
+          ...previewFixture,
+          preparation: {
+            ...previewFixture.preparation,
+            state,
+            completed: 0,
+            automaticWorkPending: false,
+          },
+          items: [],
+        }}
+        canWrite
+        busy={false}
+        onPrepare={vi.fn()}
+        onApply={vi.fn()}
+        onPhoto={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+      { wrapper: MemoryRouter },
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain("Не удалось загрузить данные");
+    expect(
+      screen.getByRole("button", { name: "Обновить сравнение" }).hasAttribute("disabled"),
+    ).toBe(false);
+    expect(screen.queryByRole("button", { name: "Применить выбранное" })).toBeNull();
   },
 );

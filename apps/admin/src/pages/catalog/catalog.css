@@ -65,21 +65,115 @@
 
 .mk-nc-import {
   display: grid;
-  gap: var(--space-4, 16px);
+  gap: var(--sp-6);
+  align-content: start;
+  min-width: 0;
+}
+.mk-nc-import > p,
+.mk-nc-selection p,
+.mk-nc-review p,
+.mk-nc-section-heading h2 {
+  margin: 0;
+}
+.mk-nc-section-heading h2 {
+  font: var(--text-h2);
+}
+.mk-nc-selection,
+.mk-nc-review {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.mk-nc-section-heading,
+.mk-nc-product-cell,
+.mk-nc-product-details,
+.mk-nc-match-cell {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.mk-nc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+}
+.mk-nc-meta,
+.mk-nc-hint,
+.mk-nc-product-details {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+.mk-nc-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+}
+.mk-nc-selection-toolbar,
+.mk-nc-selection-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.mk-nc-progress {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+}
+.mk-nc-progress > div {
+  display: grid;
+  gap: var(--sp-2);
+}
+.mk-nc-progress > .mk-spinner {
+  flex-shrink: 0;
+}
+.mk-nc-selection-table td {
+  vertical-align: top;
+}
+.mk-nc-product-details {
+  padding-inline-start: 26px;
+  gap: var(--sp-1);
 }
 .mk-nc-actions,
 .mk-nc-photos {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3, 12px);
-  margin-block: 16px;
+  gap: var(--sp-3);
+  margin-block: var(--sp-4);
+}
+.mk-nc-steps,
+.mk-nc-selection-footer .mk-nc-actions,
+.mk-nc-review > .mk-nc-actions {
+  margin: 0;
 }
 .mk-nc-review-item {
   min-width: 0;
-  padding: 16px;
-  margin-block: 16px;
+  padding: var(--sp-4);
+  margin-block: var(--sp-4);
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+.mk-nc-review > .mk-nc-review-item {
+  display: grid;
+  gap: var(--sp-3);
+  margin: 0;
+}
+.mk-nc-review > .mk-nc-review-item > button {
+  justify-self: start;
+}
+@media (max-width: 600px) {
+  .mk-nc-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mk-nc-selection-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 .mk-nc-fields {
   display: grid;
