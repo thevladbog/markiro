@@ -53,6 +53,13 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   {
     contract: customerContract(CABINET_GUARDS, { mode: "read_only_allowed", reason: "read" }),
     routes: [
+      "GET /national-catalog/capabilities (NationalCatalogImportController.capabilitiesRead)",
+      "GET /national-catalog/import-sessions/:sessionId (NationalCatalogImportController.read)",
+      "GET /national-catalog/import-sessions/:sessionId/preparations/:preparationId (NationalCatalogImportController.preparation)",
+      "GET /national-catalog/import-sessions/:sessionId/applies/:operationId (NationalCatalogImportController.result)",
+      "GET /national-catalog/import-sessions/:sessionId/items (NationalCatalogImportController.items)",
+      "GET /national-catalog/import-sessions/:sessionId/images/:candidateId (NationalCatalogImportController.image)",
+      "GET /products/:id/national-catalog/link (NationalCatalogLinkController.read)",
       "GET /chz-product-groups (ProductGroupsController.list)",
       "GET /code-search (CodeSearchController.classify)",
       "GET /code-search/codes (CodeSearchController.listCodes)",
@@ -203,6 +210,17 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   {
     contract: customerContract(CABINET_GUARDS, { mode: "write" }),
     routes: [
+      "POST /national-catalog/import-sessions (NationalCatalogImportController.start)",
+      "POST /national-catalog/import-sessions/:sessionId/retries (NationalCatalogImportController.retrySession)",
+      "PUT /national-catalog/import-sessions/:sessionId/selection (NationalCatalogImportController.select)",
+      "POST /national-catalog/import-sessions/:sessionId/previews (NationalCatalogImportController.prepare)",
+      "POST /national-catalog/import-sessions/:sessionId/preparations/:preparationId/retries (NationalCatalogImportController.retryPreparation)",
+      "POST /national-catalog/import-sessions/:sessionId/previews/:previewId/images/:candidateId (NationalCatalogImportController.prepareImage)",
+      "POST /national-catalog/import-sessions/:sessionId/applies (NationalCatalogImportController.apply)",
+      "POST /national-catalog/import-sessions/:sessionId/applies/:operationId/retries (NationalCatalogImportController.retryApply)",
+      "POST /national-catalog/import-sessions/:sessionId/cancel (NationalCatalogImportController.cancel)",
+      "POST /products/:id/national-catalog/link/refresh (NationalCatalogLinkController.refresh)",
+      "DELETE /products/:id/national-catalog/link (NationalCatalogLinkController.remove)",
       "DELETE /counterparties/:id (CounterpartiesController.deleteCounterparty)",
       "DELETE /disaggregation-reasons/:id (DisaggregationReasonsController.archiveReason)",
       "DELETE /disaggregation/:id/lines/:lineId (DisaggregationController.removeLine)",

@@ -53,11 +53,11 @@ export class NationalCatalogImageService {
     previewId: string,
     candidateId: string,
   ): Promise<ImportPhoto> {
-    this.enabled();
     return this.repository.transaction(async (tx) => {
       const session = await this.repository.lock(tx, actor.tenantId, sessionId);
       await this.sessions.assertSessionAccess(tx, actor, session);
       let row = await this.lock(tx, actor.tenantId, sessionId, previewId, candidateId);
+      this.enabled();
       await this.assertTemporary(tx, session, row);
       const cp = row.preparationCheckpoint
         ? imageCheckpointSchema.parse(row.preparationCheckpoint)

@@ -855,6 +855,13 @@
       "when": 1788921199746,
       "tag": "0121_sudden_oracle",
       "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1788925596383,
+      "tag": "0122_watery_molten_man",
+      "breakpoints": true
     }
   ]
 }

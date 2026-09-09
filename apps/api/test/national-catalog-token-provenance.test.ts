@@ -4,6 +4,8 @@ import { createDb, schema, type Db } from "@markiro/db";
 import { and, eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { loadEnv } from "../src/env";
+import { NationalCatalogCapabilitiesService } from "../src/modules/national-catalog/national-catalog-capabilities.service";
 import { ChzTokenService } from "../src/modules/chz-exports/chz-token.service";
 import { ChzCryptoService } from "../src/modules/signer-agents/chz-crypto.service";
 import { CHZ_TRUE_API_BASE_URLS } from "../src/modules/signer-agents/chz-constants";
@@ -65,6 +67,86 @@ describe.skipIf(!process.env.DATABASE_URL)("National Catalog token provenance", 
     });
     return id;
   }
+  it("derives safe ready/missing/blocked capability reasons without signer work", async () => {
+    const env = loadEnv({
+      ...process.env,
+      NATIONAL_CATALOG_BASE_URL: "https://api.nk.sandbox.crptech.ru",
+      NATIONAL_CATALOG_OWN_IMPORT_ENABLED: "true",
+      NATIONAL_CATALOG_GTIN_IMPORT_ENABLED: "true",
+      NATIONAL_CATALOG_IMAGE_IMPORT_ENABLED: "true",
+      NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS: "",
+    });
+    const service = new NationalCatalogCapabilitiesService(db, tokens, env);
+    expect(await service.read(tenantId)).toMatchObject({
+      connection: { state: "blocked", reason: "token_unavailable" },
+      unavailableReason: { ownCatalog: "connection_unavailable", images: "connection_unavailable" },
+    });
+    await insertToken(CHZ_TRUE_API_BASE_URLS.sandbox);
+    expect(await service.read(tenantId)).toMatchObject({
+      ownCatalog: true,
+      gtinLookup: true,
+      photos: false,
+      connection: { state: "ready", reason: null },
+      unavailableReason: { images: "image_policy_unavailable" },
+    });
+    env.NATIONAL_CATALOG_OWN_IMPORT_ENABLED = false;
+    expect(await service.read(tenantId)).toMatchObject({
+      ownCatalog: false,
+      gtinLookup: true,
+      unavailableReason: { ownCatalog: "disabled" },
+    });
+    env.NATIONAL_CATALOG_BASE_URL = "https://arbitrary.example.test";
+    expect(await service.read(tenantId)).toMatchObject({
+      connection: { state: "blocked", reason: "provider_unconfigured" },
+    });
+    await db
+      .update(schema.integrationChannels)
+      .set({ settings: { environment: "invalid" } })
+      .where(eq(schema.integrationChannels.tenantId, tenantId));
+    expect(await service.read(tenantId)).toMatchObject({
+      connection: { state: "blocked", reason: "integration_unavailable" },
+    });
+    await db
+      .delete(schema.integrationChannels)
+      .where(eq(schema.integrationChannels.tenantId, tenantId));
+    expect(await service.read(tenantId)).toMatchObject({
+      connection: { state: "missing", reason: "integration_missing" },
+    });
+    expect(
+      await db
+        .select()
+        .from(schema.chzSignerTasks)
+        .where(eq(schema.chzSignerTasks.tenantId, tenantId)),
+    ).toEqual([]);
+  });
+  it("inspects all stored credential states without scheduling signer refresh", async () => {
+    expect(await tokens.inspectCatalogToken(tenantId, "sandbox")).toBe("missing");
+    await insertToken(CHZ_TRUE_API_BASE_URLS.sandbox);
+    expect(await tokens.inspectCatalogToken(tenantId, "sandbox")).toBe("ok");
+    expect(await tokens.inspectCatalogToken(tenantId, "production")).toBe("environment_mismatch");
+    await db
+      .update(schema.chzApiTokens)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.chzApiTokens.tenantId, tenantId));
+    expect(await tokens.inspectCatalogToken(tenantId, "sandbox")).toBe("expired");
+    await db
+      .update(schema.chzApiTokens)
+      .set({ sourceTrueApiBaseUrl: null })
+      .where(eq(schema.chzApiTokens.tenantId, tenantId));
+    expect(await tokens.inspectCatalogToken(tenantId, "sandbox")).toBe("provenance_unknown");
+    expect(
+      await new ChzTokenService(db, new ChzCryptoService(undefined)).inspectCatalogToken(
+        tenantId,
+        "sandbox",
+      ),
+    ).toBe("unconfigured");
+    expect(
+      await db
+        .select()
+        .from(schema.chzSignerTasks)
+        .where(eq(schema.chzSignerTasks.tenantId, tenantId)),
+    ).toEqual([]);
+  });
   it("blocks unknown legacy provenance and queues exactly one refresh without deleting token", async () => {
     await insertToken(null);
     await expect(tokens.getCatalogToken(tenantId, "sandbox")).resolves.toEqual({

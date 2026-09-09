@@ -346,8 +346,13 @@ describe("tenant National Catalog import output contracts", () => {
       }).success,
     ).toBe(false);
     expect(
-      catalogCapabilitiesSchema.safeParse({ ownCatalog: true, gtinLookup: true, photos: false })
-        .success,
+      catalogCapabilitiesSchema.safeParse({
+        ownCatalog: true,
+        gtinLookup: true,
+        photos: false,
+        connection: { state: "ready", reason: null },
+        unavailableReason: { ownCatalog: null, gtinLookup: null, images: "disabled" },
+      }).success,
     ).toBe(true);
     expect(
       importItemsQuerySchema.safeParse({
@@ -534,4 +539,27 @@ it("allows only safe compact refresh reasons", () => {
   expect(
     chzSummarySchema.safeParse({ ...base, lastErrorCode: "https://private.example/token" }).success,
   ).toBe(false);
+});
+
+it("requires safe coherent capability connection and refusal reasons", () => {
+  const valid = {
+    ownCatalog: false,
+    gtinLookup: false,
+    photos: false,
+    connection: { state: "missing", reason: "integration_missing" },
+    unavailableReason: {
+      ownCatalog: "disabled",
+      gtinLookup: "connection_unavailable",
+      images: "connection_unavailable",
+    },
+  };
+  expect(catalogCapabilitiesSchema.safeParse(valid).success).toBe(true);
+  for (const connection of [
+    { state: "ready", reason: "token_unavailable" },
+    { state: "missing", reason: null },
+    { state: "blocked", reason: "integration_disabled" },
+    { state: "ready", reason: null, url: "https://secret.invalid" },
+  ])
+    expect(catalogCapabilitiesSchema.safeParse({ ...valid, connection }).success).toBe(false);
+  expect(catalogCapabilitiesSchema.safeParse({ ...valid, ownCatalog: true }).success).toBe(false);
 });

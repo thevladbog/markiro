@@ -215,7 +215,7 @@ export const importPhotoReasonSchema = z.enum([
   "image_unavailable",
 ]);
 
-const importPhotoSchema = z
+export const importPhotoSchema = z
   .object({
     candidateId: platformUuidSchema,
     previewPath: z.string().nullable(),
@@ -337,9 +337,54 @@ export const chzSummarySchema = z
   .strict();
 export type ChzSummary = z.infer<typeof chzSummarySchema>;
 
+export const catalogConnectionSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("ready"), reason: z.null() }).strict(),
+  z.object({ state: z.literal("missing"), reason: z.literal("integration_missing") }).strict(),
+  z
+    .object({
+      state: z.literal("blocked"),
+      reason: z.enum(["integration_unavailable", "provider_unconfigured", "token_unavailable"]),
+    })
+    .strict(),
+]);
+const catalogUnavailableReasonSchema = z
+  .enum(["disabled", "connection_unavailable", "image_policy_unavailable"])
+  .nullable();
 export const catalogCapabilitiesSchema = z
-  .object({ ownCatalog: z.boolean(), gtinLookup: z.boolean(), photos: z.boolean() })
-  .strict();
+  .object({
+    ownCatalog: z.boolean(),
+    gtinLookup: z.boolean(),
+    photos: z.boolean(),
+    connection: catalogConnectionSchema,
+    unavailableReason: z
+      .object({
+        ownCatalog: catalogUnavailableReasonSchema,
+        gtinLookup: catalogUnavailableReasonSchema,
+        images: catalogUnavailableReasonSchema,
+      })
+      .strict(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      value.unavailableReason.ownCatalog === "image_policy_unavailable" ||
+      value.unavailableReason.gtinLookup === "image_policy_unavailable"
+    )
+      ctx.addIssue({ code: "custom", message: "Image policy only governs images" });
+    for (const [enabled, reason] of [
+      [value.ownCatalog, value.unavailableReason.ownCatalog],
+      [value.gtinLookup, value.unavailableReason.gtinLookup],
+      [value.photos, value.unavailableReason.images],
+    ]) {
+      if (
+        enabled !== (reason === null) ||
+        (enabled && value.connection.state !== "ready") ||
+        (reason === "connection_unavailable" && value.connection.state === "ready") ||
+        (reason === "image_policy_unavailable" && value.connection.state !== "ready")
+      )
+        ctx.addIssue({ code: "custom", message: "Capability and availability reason disagree" });
+    }
+  });
 export type CatalogCapabilities = z.infer<typeof catalogCapabilitiesSchema>;
 
 export const importItemsQuerySchema = z
@@ -409,3 +454,17 @@ export const chzLinkDetailSchema = z
   })
   .strict();
 export type ChzLinkDetail = z.infer<typeof chzLinkDetailSchema>;
+
+export const importSessionRetrySchema = z.object({}).strict();
+export const importApplyRetrySchema = z
+  .object({
+    previewIds: z
+      .array(platformUuidSchema)
+      .min(1)
+      .max(MAX_APPLY_ITEMS)
+      .refine((values) => new Set(values).size === values.length, "Duplicate preview IDs"),
+  })
+  .strict();
+export const chzLinkChangeSchema = z
+  .object({ action: z.literal("remove"), expectedRevision: nonNegativeIntegerSchema })
+  .strict();

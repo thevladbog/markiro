@@ -10,6 +10,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -537,5 +538,27 @@ export const nationalCatalogImportPreparations = pgTable(
       foreignColumns: [nationalCatalogImportSessions.tenantId, nationalCatalogImportSessions.id],
     }),
     index("nc_import_preparations_repair_idx").on(t.expiresAt, t.updatedAt),
+  ],
+);
+
+/** Scheduling fairness only; source checkpoints/receipts remain work authority. */
+export const nationalCatalogImportDispatchAttempts = pgTable(
+  "national_catalog_import_dispatch_attempts",
+  {
+    kind: text("kind").notNull(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    workId: uuid("work_id").notNull(),
+    stepId: text("step_id").notNull(),
+    attemptedAt: at("attempted_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.kind, t.tenantId, t.workId, t.stepId] }),
+    index("nc_import_dispatch_tenant_attempt_idx").on(t.tenantId, t.attemptedAt),
+    check(
+      "nc_import_dispatch_kind_ck",
+      sql`${t.kind} in ('enumerate','prepare','candidate','apply','accepted_image','refresh')`,
+    ),
   ],
 );

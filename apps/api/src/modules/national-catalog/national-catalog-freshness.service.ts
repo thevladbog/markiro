@@ -67,13 +67,11 @@ export class NationalCatalogFreshnessService {
   constructor(
     @Inject(NATIONAL_CATALOG_FRESHNESS_REPOSITORY)
     private readonly repository: NationalCatalogFreshnessRepository,
-    private readonly refreshes?: Pick<NationalCatalogLinkRefreshService, "schedule">,
+    private readonly refreshes: Pick<NationalCatalogLinkRefreshService, "schedule">,
     private readonly batchSize = DEFAULT_FRESHNESS_BATCH_SIZE,
   ) {}
 
   async run(): Promise<{ selected: number; completed: number; failed: number }> {
-    // Task11 replaces this temporary inactive construction with required scheduler DI.
-    if (!this.refreshes) return { selected: 0, completed: 0, failed: 0 };
     const targets = await this.repository.listDueProducts(this.batchSize);
     let completed = 0;
     let failed = 0;

@@ -49,6 +49,14 @@ export function verifyCatalogEnvironment(
   }
 }
 
+/** A configured provider endpoint must be one of the explicitly supported catalog roots. */
+export function isCatalogBaseUrlConfigured(value: string | undefined): boolean {
+  return (
+    value !== undefined &&
+    Object.values(CATALOG_BASE_URLS).some((expected) => registeredUrl(value, expected))
+  );
+}
+
 function registeredUrl(value: string, expected: string): boolean {
   // URL removes an explicit :443 and normalizes dot paths. Inspect the supplied
   // authority/path too, so normalization cannot turn a forbidden URL into an allowed one.

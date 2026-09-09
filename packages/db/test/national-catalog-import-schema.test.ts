@@ -149,3 +149,21 @@ it("retains observation review and resumable refresh independently of temporary 
     expect(column?.notNull).toBe(false);
   }
 });
+
+it("records dispatch fairness independently from work receipts with a tenant cascading key", () => {
+  const config = getTableConfig(table("nationalCatalogImportDispatchAttempts"));
+  expect(config.primaryKeys[0]?.columns.map((column) => column.name)).toEqual([
+    "kind",
+    "tenant_id",
+    "work_id",
+    "step_id",
+  ]);
+  expect(config.foreignKeys[0]?.onDelete).toBe("cascade");
+  expect(config.columns.map((column) => column.name)).toEqual([
+    "kind",
+    "tenant_id",
+    "work_id",
+    "step_id",
+    "attempted_at",
+  ]);
+});

@@ -562,4 +562,39 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
         refresh_error_code: null,
       });
   });
+  it("adds independent bounded dispatch fairness keys without manufacturing work receipts", async () => {
+    const workId = randomUUID();
+    await pool.query(
+      "INSERT INTO national_catalog_import_dispatch_attempts(kind,tenant_id,work_id,step_id,attempted_at) VALUES('enumerate',$1,$2,$3,now())",
+      [tenant, workId, randomUUID()],
+    );
+    await expect(
+      pool.query(
+        "INSERT INTO national_catalog_import_dispatch_attempts(kind,tenant_id,work_id,step_id,attempted_at) VALUES('arbitrary',$1,$2,'step',now())",
+        [tenant, randomUUID()],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      pool.query(
+        "INSERT INTO national_catalog_import_dispatch_attempts(kind,tenant_id,work_id,step_id,attempted_at) VALUES('apply','missing-tenant',$1,'product',now())",
+        [randomUUID()],
+      ),
+    ).rejects.toMatchObject({ code: "23503" });
+    const before = await pool.query(
+      "SELECT count(*)::int AS n FROM national_catalog_import_operations WHERE tenant_id=$1",
+      [tenant],
+    );
+    await pool.query(
+      "UPDATE national_catalog_import_dispatch_attempts SET attempted_at=now() WHERE tenant_id=$1",
+      [tenant],
+    );
+    expect(
+      (
+        await pool.query(
+          "SELECT count(*)::int AS n FROM national_catalog_import_operations WHERE tenant_id=$1",
+          [tenant],
+        )
+      ).rows,
+    ).toEqual(before.rows);
+  });
 });

@@ -4,7 +4,10 @@ import { DB } from "../../auth/auth.module";
 import type { Env } from "../../env";
 import { ChzTokenService } from "../chz-exports/chz-token.service";
 import { ChzCryptoService } from "../signer-agents/chz-crypto.service";
-import { NationalCatalogRequestCoordinator } from "./national-catalog-request-coordinator";
+import {
+  NationalCatalogRequestCoordinator,
+  isCatalogBaseUrlConfigured,
+} from "./national-catalog-request-coordinator";
 import { NationalCatalogClient } from "./national-catalog.client";
 import { NationalCatalogController } from "./national-catalog.controller";
 import {
@@ -25,14 +28,212 @@ import {
   NationalCatalogSchemaService,
 } from "./national-catalog-schema.service";
 
+import { AuthorizationService } from "../../authorization/authorization.service";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
+import { ProductsModule } from "../products/products.module";
+import { ProductsService } from "../products/products.service";
+import { ObjectStorageService } from "../storage/object-storage.service";
+import { NationalCatalogImportRepository } from "./national-catalog-import.repository";
+import { NationalCatalogImportService } from "./national-catalog-import.service";
+import { NationalCatalogImportPreviewService } from "./national-catalog-import-preview.service";
+import { NationalCatalogImportApplyService } from "./national-catalog-import-apply.service";
+import { NationalCatalogImageService } from "./national-catalog-image.service";
+import { NationalCatalogLinkRefreshService } from "./national-catalog-link-refresh.service";
+import { NationalCatalogLinkService } from "./national-catalog-link.service";
+import { NationalCatalogImportController } from "./national-catalog-import.controller";
+import { NationalCatalogLinkController } from "./national-catalog-link.controller";
+import { NationalCatalogCapabilitiesService } from "./national-catalog-capabilities.service";
+
+import { NationalCatalogJobRepository } from "./national-catalog-job-repository";
+import { NationalCatalogJobsService } from "./national-catalog-jobs.service";
+
 @Global()
 @Module({})
 export class NationalCatalogModule {
   static forRoot(env: Env): DynamicModule {
+    const photos = {
+      enabled: env.NATIONAL_CATALOG_IMAGE_IMPORT_ENABLED,
+      verifiedHosts: env.NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS,
+    };
     return {
       module: NationalCatalogModule,
-      controllers: [NationalCatalogController],
+      imports: [ProductsModule],
+      controllers: [
+        NationalCatalogController,
+        NationalCatalogImportController,
+        NationalCatalogLinkController,
+      ],
       providers: [
+        {
+          provide: NationalCatalogJobRepository,
+          inject: [DB],
+          useFactory: (db: ConstructorParameters<typeof NationalCatalogJobRepository>[0]) =>
+            new NationalCatalogJobRepository(db),
+        },
+        {
+          provide: NationalCatalogJobsService,
+          inject: [
+            NationalCatalogJobRepository,
+            NationalCatalogImportService,
+            NationalCatalogImportPreviewService,
+            NationalCatalogImportApplyService,
+            NationalCatalogImageService,
+            NationalCatalogLinkRefreshService,
+          ],
+          useFactory: (
+            repository: NationalCatalogJobRepository,
+            sessions: NationalCatalogImportService,
+            previews: NationalCatalogImportPreviewService,
+            applies: NationalCatalogImportApplyService,
+            images: NationalCatalogImageService,
+            refreshes: NationalCatalogLinkRefreshService,
+          ) =>
+            new NationalCatalogJobsService(
+              repository,
+              sessions,
+              previews,
+              applies,
+              images,
+              refreshes,
+            ),
+        },
+        {
+          provide: NationalCatalogImportRepository,
+          inject: [DB],
+          useFactory: (db: ConstructorParameters<typeof NationalCatalogImportRepository>[0]) =>
+            new NationalCatalogImportRepository(db),
+        },
+        {
+          provide: NationalCatalogImportService,
+          inject: [
+            NationalCatalogImportRepository,
+            NationalCatalogClient,
+            NationalCatalogRequestCoordinator,
+            AuthorizationService,
+            EntitlementsService,
+          ],
+          useFactory: (
+            repository: NationalCatalogImportRepository,
+            client: NationalCatalogClient,
+            coordinator: NationalCatalogRequestCoordinator,
+            authorization: AuthorizationService,
+            entitlements: EntitlementsService,
+          ) =>
+            new NationalCatalogImportService(
+              repository,
+              client,
+              coordinator,
+              authorization,
+              entitlements,
+              {
+                ownCatalog: env.NATIONAL_CATALOG_OWN_IMPORT_ENABLED,
+                gtinLookup: env.NATIONAL_CATALOG_GTIN_IMPORT_ENABLED,
+              },
+            ),
+        },
+        {
+          provide: NationalCatalogImportPreviewService,
+          inject: [
+            NationalCatalogImportRepository,
+            NationalCatalogImportService,
+            NationalCatalogClient,
+            NationalCatalogRequestCoordinator,
+          ],
+          useFactory: (
+            repository: NationalCatalogImportRepository,
+            sessions: NationalCatalogImportService,
+            client: NationalCatalogClient,
+            coordinator: NationalCatalogRequestCoordinator,
+          ) =>
+            new NationalCatalogImportPreviewService(
+              repository,
+              sessions,
+              client,
+              coordinator,
+              photos,
+            ),
+        },
+        {
+          provide: NationalCatalogImportApplyService,
+          inject: [NationalCatalogImportRepository, NationalCatalogImportService],
+          useFactory: (
+            repository: NationalCatalogImportRepository,
+            sessions: NationalCatalogImportService,
+          ) => new NationalCatalogImportApplyService(repository, sessions),
+        },
+        {
+          provide: NationalCatalogImageService,
+          inject: [
+            NationalCatalogImportRepository,
+            NationalCatalogImportService,
+            NationalCatalogRequestCoordinator,
+            ObjectStorageService,
+            ProductsService,
+          ],
+          useFactory: (
+            repository: NationalCatalogImportRepository,
+            sessions: NationalCatalogImportService,
+            coordinator: NationalCatalogRequestCoordinator,
+            storage: ObjectStorageService,
+            products: ProductsService,
+          ) =>
+            new NationalCatalogImageService(
+              repository,
+              sessions,
+              coordinator,
+              storage,
+              products,
+              photos,
+            ),
+        },
+        {
+          provide: NationalCatalogLinkRefreshService,
+          inject: [
+            DB,
+            AuthorizationService,
+            EntitlementsService,
+            NationalCatalogClient,
+            NationalCatalogRequestCoordinator,
+          ],
+          useFactory: (
+            db: ConstructorParameters<typeof NationalCatalogLinkRefreshService>[0],
+            authorization: AuthorizationService,
+            entitlements: EntitlementsService,
+            client: NationalCatalogClient,
+            coordinator: NationalCatalogRequestCoordinator,
+          ) =>
+            new NationalCatalogLinkRefreshService(
+              db,
+              authorization,
+              entitlements,
+              client,
+              coordinator,
+              { enabled: isCatalogBaseUrlConfigured(env.NATIONAL_CATALOG_BASE_URL), photos },
+            ),
+        },
+        {
+          provide: NationalCatalogLinkService,
+          inject: [
+            DB,
+            AuthorizationService,
+            EntitlementsService,
+            NationalCatalogLinkRefreshService,
+          ],
+          useFactory: (
+            db: ConstructorParameters<typeof NationalCatalogLinkService>[0],
+            authorization: AuthorizationService,
+            entitlements: EntitlementsService,
+            refreshes: NationalCatalogLinkRefreshService,
+          ) => new NationalCatalogLinkService(db, authorization, entitlements, refreshes),
+        },
+        {
+          provide: NationalCatalogCapabilitiesService,
+          inject: [DB, ChzTokenService],
+          useFactory: (
+            db: ConstructorParameters<typeof NationalCatalogCapabilitiesService>[0],
+            tokens: ChzTokenService,
+          ) => new NationalCatalogCapabilitiesService(db, tokens, env),
+        },
         {
           provide: NationalCatalogClient,
           useFactory: () =>
@@ -104,13 +305,26 @@ export class NationalCatalogModule {
         },
         {
           provide: NationalCatalogFreshnessService,
-          inject: [nationalCatalogFreshnessRepositoryProvider.provide],
+          inject: [
+            nationalCatalogFreshnessRepositoryProvider.provide,
+            NationalCatalogLinkRefreshService,
+          ],
           useFactory: (
             repository: ConstructorParameters<typeof NationalCatalogFreshnessService>[0],
-          ) => new NationalCatalogFreshnessService(repository),
+            refreshes: NationalCatalogLinkRefreshService,
+          ) => new NationalCatalogFreshnessService(repository, refreshes),
         },
       ],
       exports: [
+        NationalCatalogJobsService,
+        NationalCatalogJobRepository,
+        NationalCatalogImportService,
+        NationalCatalogImportPreviewService,
+        NationalCatalogImportApplyService,
+        NationalCatalogImageService,
+        NationalCatalogLinkRefreshService,
+        NationalCatalogLinkService,
+        NationalCatalogCapabilitiesService,
         NationalCatalogRequestCoordinator,
         NationalCatalogClient,
         NationalCatalogProductsService,

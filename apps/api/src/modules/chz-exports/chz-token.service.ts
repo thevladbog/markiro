@@ -95,6 +95,23 @@ export class ChzTokenService {
     tenantId: string,
     expected: keyof typeof CHZ_TRUE_API_BASE_URLS,
   ): Promise<CatalogTokenResult> {
+    const result = await this.readCatalogToken(tenantId, expected);
+    if (result.status !== "ok" && this.crypto.isConfigured()) await this.requestRefresh(tenantId);
+    return result;
+  }
+
+  /** Safe stored inspection: no refresh intent and no token bytes leave this method. */
+  async inspectCatalogToken(
+    tenantId: string,
+    expected: keyof typeof CHZ_TRUE_API_BASE_URLS,
+  ): Promise<CatalogTokenResult["status"]> {
+    return (await this.readCatalogToken(tenantId, expected)).status;
+  }
+
+  private async readCatalogToken(
+    tenantId: string,
+    expected: keyof typeof CHZ_TRUE_API_BASE_URLS,
+  ): Promise<CatalogTokenResult> {
     if (!this.crypto.isConfigured()) return { status: "unconfigured" };
     // One statement observes token provenance and channel settings together.
     const [row] = await this.db
@@ -136,7 +153,6 @@ export class ChzTokenService {
         }
       }
     }
-    await this.requestRefresh(tenantId);
     return result;
   }
 
