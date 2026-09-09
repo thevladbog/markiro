@@ -759,7 +759,7 @@ describe("NewShift", () => {
     const defaultOption = screen.getByRole("button", { name: /Box 58x40/ });
     expect(defaultOption.getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByText("Default")).toBeDefined();
-    expect(screen.getByText("58×40 mm · 203 dpi")).toBeDefined();
+    expect(screen.getByText("58×40 mm")).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() =>
@@ -1004,7 +1004,7 @@ describe("NewShift", () => {
     await waitFor(() => expect(screen.getByTestId("new-shift-template")).toBeDefined());
     expect(screen.getByRole("heading", { name: "Шаблон этикетки короба" })).toBeDefined();
     expect(screen.getByText("По умолчанию")).toBeDefined();
-    expect(screen.getByText("58×40 мм · 203 dpi")).toBeDefined();
+    expect(screen.getByText("58×40 мм")).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Начать" }));
     await waitFor(() =>

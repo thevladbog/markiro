@@ -34,6 +34,7 @@ interface BoxLabelTemplateOption {
   name: string;
   widthMm: number;
   heightMm: number;
+  /** Authoring resolution; informational only (spec 2026-09-10). */
   dpi: number;
   language: string;
 }
@@ -352,11 +353,6 @@ export function NewShift({
           setError(t("shifts.printHardwareRequired"));
           return;
         }
-        if (hardwareConfig.printerDpi !== selected.dpi) {
-          setPrinterError(true);
-          setError(t("shifts.printDpiMismatch"));
-          return;
-        }
         validationPrint = validationPrintInputSchema.parse({
           mode: "duplicate_dm",
           templateId: selected.id,
@@ -414,11 +410,6 @@ export function NewShift({
           opened.status !== "active"
         ) {
           setError(t("shifts.printPolicyNotConfirmed"));
-          return;
-        }
-        if (authoritative.data.snapshot.spec.dpi !== hardwareConfig.printerDpi) {
-          setPrinterError(true);
-          setError(t("shifts.printDpiMismatch"));
           return;
         }
       }
@@ -679,7 +670,6 @@ export function NewShift({
                         {t("shifts.templateMeta", {
                           width: option.widthMm,
                           height: option.heightMm,
-                          dpi: option.dpi,
                         })}
                       </span>
                       {!productLabels && option.id === defaultTemplateId ? (

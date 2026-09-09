@@ -6,6 +6,7 @@ import {
   type LabelTemplateSpec,
   parseDuplicateKm,
   type ScanVerdict,
+  type PrinterDpi,
 } from "@markiro/domain";
 import { Alert, Button, FullScreenDialog, SignalOverlay, type SignalTone } from "@markiro/ui";
 import { boxLabelFields } from "../lib/box-label.js";
@@ -132,6 +133,8 @@ export interface WorkScreenProps {
   printing?: {
     target: PrintTarget;
     language: PrinterLanguage;
+    /** The attached printer's resolution; null for settings saved before the field existed. */
+    dpi?: PrinterDpi | null;
     print: (target: PrintTarget, bytes: Uint8Array) => Promise<void>;
   } | null;
   /** Opens the existing workstation setup without resolving the durable print job. */
@@ -945,8 +948,8 @@ export function WorkScreen({
             print: (target, bytes) => serializePrint(() => currentPrinting.print(target, bytes)),
           }
         : null,
-      render: (template, fields, language) =>
-        renderLabelBytes(template, fields, language, rasterizeText),
+      render: (template, fields, language, dpi) =>
+        renderLabelBytes(template, fields, language, rasterizeText, { dpi }),
     });
   }
 

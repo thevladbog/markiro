@@ -207,7 +207,12 @@ export const labelTemplateSummaryOpenApiSchema: SchemaObject = {
     name: { type: "string", minLength: 1, maxLength: 200 },
     widthMm: { type: "number", minimum: 10, maximum: 300 },
     heightMm: { type: "number", minimum: 10, maximum: 300 },
-    dpi: { type: "integer", enum: [203, 300] },
+    dpi: {
+      type: "integer",
+      enum: [203, 300],
+      description:
+        "Authoring resolution used by the admin preview and code import. The station prints every template at its own printer's resolution; a station without a configured printer resolution prints box labels at this authoring resolution and refuses duplicate printing until one is set.",
+    },
     language: { type: "string", enum: ["zpl", "tspl"] },
     purpose: { type: "string", enum: ["box", "product_duplicate"] },
     enabled: { type: "boolean" },

@@ -131,9 +131,16 @@ export type LabelElement = z.infer<typeof labelElementSchema>;
 
 const dpiSchema = z.union([z.literal(203), z.literal(300)]);
 
+/** A printer resolution the emitters support. */
+export type PrinterDpi = z.infer<typeof dpiSchema>;
+
 /**
- * A printer-agnostic label layout: physical size, print resolution, target
- * command language, and the positioned elements. Elements MAY fall outside
+ * A printer-agnostic label layout: physical size, AUTHORING resolution,
+ * target command language, and the positioned elements. `dpi` is what the
+ * admin preview and the code importer work in; it is NOT a requirement on
+ * the printer — the station prints every template at its own printer's
+ * resolution through `withPrinterDpi` (spec 2026-09-10), and `language` is
+ * likewise overridden by the station's configured printer language. Elements MAY fall outside
  * `[0, widthMm] x [0, heightMm]` — the schema does not enforce label bounds;
  * that is an editor-time concern, not a model invariant.
  *
@@ -199,6 +206,25 @@ export function parseLabelTemplate(json: unknown): LabelTemplateSpec {
     throw new DomainError("LABEL_INVALID", message, { cause });
   }
   return result.data;
+}
+
+/**
+ * The spec to PRINT on a given printer: the same millimetre geometry with
+ * the printer's own resolution in `dpi`, so the emitters convert mm into the
+ * dots that printer actually has. `spec.dpi` is the AUTHORING resolution and
+ * only reaches the printer when the station does not know its printer's
+ * resolution (`printerDpi === null` — settings saved before the field
+ * existed), which keeps such stations printing exactly as before.
+ *
+ * Returns the same reference when nothing changes, so callers may key
+ * caches on identity.
+ */
+export function withPrinterDpi(
+  spec: LabelTemplateSpec,
+  printerDpi: PrinterDpi | null,
+): LabelTemplateSpec {
+  if (printerDpi === null || printerDpi === spec.dpi) return spec;
+  return { ...spec, dpi: printerDpi };
 }
 
 /** Converts millimetres to printer dots at the given resolution: round(mm * dpi / 25.4). */

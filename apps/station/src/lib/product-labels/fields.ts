@@ -59,10 +59,14 @@ export async function prepareProductLabelAcceptance(
       "Duplicate printing requires a template snapshot",
     );
   assertDuplicateTemplate(policy.snapshot.spec);
-  if (input.printerDpi !== policy.snapshot.spec.dpi)
+  // A template is resolution-neutral (spec 2026-09-10); what must be known is
+  // the PRINTER's resolution, because the bytes below are rendered for it and
+  // a reprint replays them only on the same language and dpi.
+  const printerDpi = input.printerDpi;
+  if (printerDpi === null)
     throw new DomainError(
-      "PRODUCT_LABEL_PRINTER_DPI_MISMATCH",
-      "Configure the printer resolution to match the duplicate template",
+      "PRODUCT_LABEL_PRINTER_DPI_REQUIRED",
+      "Configure the printer resolution before printing duplicates",
     );
   const language = z.enum(["zpl", "tspl"]).parse(input.language);
   const km = parseDuplicateKm(input.raw);
@@ -76,7 +80,7 @@ export async function prepareProductLabelAcceptance(
     fields,
     language,
     input.rasterizeText,
-    { kmDataMatrix: "raster" },
+    { kmDataMatrix: "raster", dpi: printerDpi },
   );
   const codeHash = kmHash(km);
   return parseProductLabelAcceptance({
@@ -112,7 +116,7 @@ export async function prepareProductLabelAcceptance(
       attemptNo: 1,
       reason: null,
       language,
-      dpi: policy.snapshot.spec.dpi,
+      dpi: printerDpi,
       bytesDigest: productLabelBytesDigest(bytes),
     },
   });

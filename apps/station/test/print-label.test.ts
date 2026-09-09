@@ -54,4 +54,18 @@ describe("renderLabelBytes", () => {
     const bytes = await renderLabelBytes(SPEC, sampleLabelData(), "tspl", fakeRasterize);
     expect(Array.from(bytes)).toContain(0xff);
   });
+
+  it("prints at the attached printer's resolution, not the template's authoring dpi", async () => {
+    const bytes = await renderLabelBytes(SPEC, sampleLabelData(), "zpl", fakeRasterize, {
+      dpi: 300,
+    });
+    expect(new TextDecoder().decode(bytes)).toContain("^PW685");
+  });
+
+  it("falls back to the authoring dpi when the printer resolution is unknown", async () => {
+    const bytes = await renderLabelBytes(SPEC, sampleLabelData(), "zpl", fakeRasterize, {
+      dpi: null,
+    });
+    expect(new TextDecoder().decode(bytes)).toContain("^PW464");
+  });
 });

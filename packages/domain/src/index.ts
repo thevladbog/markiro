@@ -14,6 +14,8 @@ export {
   assertDuplicateTemplate,
   buildDuplicateLabelTemplate,
   buildDuplicateLabelTemplates,
+  buildLegacyDuplicateLabelTemplates,
+  DUPLICATE_LABEL_TEMPLATE_NAME,
 } from "./labels/duplicate.js";
 export {
   buildSscc,
@@ -40,6 +42,7 @@ export {
   ptToDots,
   QTY_UNIT_SUFFIX,
   sampleLabelData,
+  withPrinterDpi,
 } from "./labels/model.js";
 export {
   isBoxLabelTemplateEligible,
@@ -65,9 +68,12 @@ export {
   buildDateFreeBoxLabelTemplates,
   buildDatedBoxLabelTemplates,
   buildDefaultLabelTemplates,
+  buildLegacyDateFreeBoxLabelTemplates,
+  buildLegacyDatedBoxLabelTemplates,
+  buildLegacyPrintNameBoxLabelTemplates,
   buildPrintNameBoxLabelTemplates,
 } from "./labels/defaults.js";
-export type { DefaultLabelTemplate } from "./labels/defaults.js";
+export type { DefaultLabelTemplate, LegacyStockLabelTemplate } from "./labels/defaults.js";
 export type {
   LabelBarcodeElement,
   LabelBoxElement,
@@ -77,6 +83,7 @@ export type {
   LabelLineElement,
   LabelTemplateSpec,
   LabelTextElement,
+  PrinterDpi,
 } from "./labels/model.js";
 export {
   MAX_LABEL_CODE_BYTES,

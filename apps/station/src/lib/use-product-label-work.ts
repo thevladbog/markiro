@@ -380,7 +380,9 @@ export function useProductLabelWork(input: {
           getPrinting,
           canPrint: () => {
             const deps = getPrinting();
-            return deps.target !== null && deps.dpi === context.policy.snapshot.spec.dpi;
+            // Any template prints on any printer; only the printer's own
+            // resolution must be known (spec 2026-09-10).
+            return deps.target !== null && deps.dpi !== null;
           },
           prepare: (raw) => {
             const deps = getPrinting();

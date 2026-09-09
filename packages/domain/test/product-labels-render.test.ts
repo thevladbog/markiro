@@ -325,3 +325,23 @@ describe("duplicate TSPL path", () => {
     );
   });
 });
+
+describe("duplicate template resolution floor", () => {
+  const base = domain.buildDuplicateLabelTemplate(300);
+  const withCodeSize = (sizeMm: number): domain.LabelTemplateSpec => ({
+    ...base,
+    elements: base.elements.map((element) =>
+      element.kind === "barcode" && element.data === "km.code" ? { ...element, sizeMm } : element,
+    ),
+  });
+
+  it("judges the minimum code size at 203 dpi even for a template authored at 300", () => {
+    // 1.4 mm is 17 dots at 300 dpi but only 11 at 203 dpi; the coarsest
+    // supported printer decides, because any template may print on any printer.
+    expect(() => domain.assertDuplicateTemplate(withCodeSize(1.4))).toThrowError(
+      expect.objectContaining({ code: "DUPLICATE_LABEL_TEMPLATE_INVALID" }),
+    );
+    // 1.6 mm is 13 dots at 203 dpi — accepted.
+    expect(() => domain.assertDuplicateTemplate(withCodeSize(1.6))).not.toThrow();
+  });
+});

@@ -1905,7 +1905,6 @@
       "addAction": "+ Template",
       "newTemplateCard": "+ New template",
       "sizeBadge": "{{width}}×{{height}} mm",
-      "dpiBadge": "{{dpi}} dpi",
       "filterLabel": "Show",
       "filterAll": "All",
       "filterEnabled": "Enabled",
@@ -1936,7 +1935,8 @@
         "customSizeOption": "Custom size",
         "widthLabel": "Label width, mm",
         "heightLabel": "Label height, mm",
-        "dpiLabel": "DPI",
+        "previewDpiLabel": "Preview resolution",
+        "previewDpiHint": "The station prints at its own printer's resolution. This value only affects the preview and code import.",
         "bothLanguagesNote": "One template prints on both Zebra and TSC: the station picks the language from its own printer.",
         "settingsTitle": "Label settings",
         "enabledLabel": "Enabled",
@@ -1990,7 +1990,7 @@
         },
         "zoomCaption": "zoom {{scale}} px/mm",
         "preview": {
-          "caption": "preview = print",
+          "caption": "preview = print at the preview resolution",
           "cyrillicWarning": "The selected font has no Cyrillic glyphs — text will print as a raster image. Sharpness may be reduced.",
           "coverageCheckFailed": "Could not verify the font — printed text may look different from this preview."
         },

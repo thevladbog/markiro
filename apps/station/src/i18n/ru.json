@@ -160,7 +160,7 @@
     "templateSearch": "Поиск шаблона",
     "templateSearchEmpty": "Ничего не найдено. Измените запрос.",
     "templateDefault": "По умолчанию",
-    "templateMeta": "{{width}}×{{height}} мм · {{dpi}} dpi",
+    "templateMeta": "{{width}}×{{height}} мм",
     "templatesEmpty": "В админке нет шаблонов этикеток. Создайте шаблон и повторите.",
     "templatesLoadFailed": "Не удалось загрузить шаблоны этикеток. Попробуйте ещё раз.",
     "templatePagination": "Страницы шаблонов",
@@ -189,7 +189,6 @@
     "retryPrintSettings": "Повторить загрузку",
     "printHardwareRequired": "Настройте принтер и его разрешение перед запуском печати дубликатов.",
     "printerSettings": "Настройки принтера",
-    "printDpiMismatch": "Разрешение принтера не совпадает с шаблоном. Выберите другой шаблон или проверьте настройки принтера.",
     "productTemplateUnavailable": "Выбранный шаблон больше недоступен. Выберите другой.",
     "printPolicyNotConfirmed": "Сервер не подтвердил параметры печати. Откройте смену из списка после проверки настроек."
   },
@@ -590,7 +589,8 @@
     "printerCheckMismatch": "Отсканирован другой код: {{received}}",
     "scannerCheckWaiting": "Скан ещё не получен",
     "printerResolution": "Разрешение принтера",
-    "printerResolutionUnknown": "Не указано"
+    "printerResolutionUnknown": "Не указано",
+    "printerDpiHint": "Все этикетки печатаются в этом разрешении. Пока оно не указано, коробочные этикетки печатаются в разрешении шаблона, а печать дубликатов недоступна."
   },
   "conflicts": {
     "title": "Коды, занятые другим терминалом",
