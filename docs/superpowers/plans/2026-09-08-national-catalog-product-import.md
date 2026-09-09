@@ -14,7 +14,11 @@
 
 Tasks 1–13 are implemented and independently reviewed. Task14 implementation and
 local verification are complete, with one unchanged Station aggregate test failure
-retained for review; final API/admin/browser gates passed separately. The current
+retained for review; Task14 API/admin/browser gates passed separately at its pre-fix head. The one
+whole-branch review identified 6 Important and 8 Minor corrections. Their single
+fix wave has final package and scoped layout/auth proof, while the full API
+fixture failure and Station aggregate remain recorded as failed runs. One scoped
+controller-owned re-review remains. The current
 integration/browser/CI evidence and operating documentation are recorded in the
 [delivery report](../../evidence/national-catalog-import/delivery-verification.md).
 That report is the current verification record; the task checklists below preserve

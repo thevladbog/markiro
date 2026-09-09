@@ -1,0 +1,72 @@
+[
+  [
+    ":test/inventory-documents.e2e.test.ts",
+    {
+      "duration": 3750.7401660000005,
+      "failed": false
+    }
+  ],
+  [
+    ":test/inventory-lifecycle.e2e.test.ts",
+    {
+      "duration": 4512.248208,
+      "failed": false
+    }
+  ],
+  [
+    ":test/inventory-snapshot.e2e.test.ts",
+    {
+      "duration": 3296.658375,
+      "failed": false
+    }
+  ],
+  [
+    ":test/provision-tenant-owner.e2e.test.ts",
+    {
+      "duration": 18165.74925,
+      "failed": false
+    }
+  ],
+  [
+    ":test/local-infrastructure.e2e.test.ts",
+    {
+      "duration": 969.1746250000003,
+      "failed": false
+    }
+  ],
+  [
+    ":test/inventory-snapshot-digest.test.ts",
+    {
+      "duration": 1.9841670000000704,
+      "failed": false
+    }
+  ],
+  [
+    ":test/inventory-documents-openapi.test.ts",
+    {
+      "duration": 2.833708999999999,
+      "failed": false
+    }
+  ],
+  [
+    ":test/national-catalog-image.test.ts",
+    {
+      "duration": 5969.09375,
+      "failed": false
+    }
+  ],
+  [
+    ":test/national-catalog-import-auth.e2e.test.ts",
+    {
+      "duration": 2702.596084,
+      "failed": true
+    }
+  ],
+  [
+    ":test/national-catalog-import-http.e2e.test.ts",
+    {
+      "duration": 1193.533292,
+      "failed": false
+    }
+  ]
+]

@@ -397,6 +397,19 @@ suppresses the changes indicator without discarding baseline evidence; unknown i
 not archive. Additive public identity/dependency projections read legacy stored rows
 without rewriting receipt/source bytes or hashes.
 
+Confirmation advances review independently of observation and attempt chronology.
+A later observation/status or newer failed attempt survives applying an older
+comparison; displayed check time uses the stored fetch/preparation anchor. Pending
+refresh work uses the current link revision and existing identity/step/run fencing,
+preserving same-step actor, retry budget and provider delay. Photo checks reselect
+from the verified latest snapshot when the reviewed selector changes, without
+reusing another photo's checksum.
+
+Public cancellation serializes with accepted work and stops remaining core/photo
+continuations even after temporary TTL. Bounded per-record cleanup removes expired
+unconfirmed session/item/preparation payloads and impossible photo retention while
+preserving identity stubs, exact audit, accepted decisions and applied evidence.
+
 Photos have independent durable outcomes and explicit READY-candidate choices.
 Accepted cached bytes remain referenced for eligible post-TTL recovery; preview and
 active image use the same normalized WebP. GC serializes its reference recheck with

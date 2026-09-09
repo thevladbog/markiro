@@ -2,7 +2,9 @@
 
 Date: 2026-09-09 (local execution timestamps Europe/Moscow unless marked UTC).
 Task14 starts from `7bb8706a7b27b272318464569f34f268e701e17a`; Tasks1–13 have
-independent scoped review. Final Task14 and whole-branch review are controller gates.
+independent scoped review. Task14 and the one whole-branch review completed. The whole-branch review found
+6 Important and 8 Minor corrections; the single fix wave is recorded below and
+awaits the controller-owned scoped re-review.
 Provider import flags remain false, image host allowlist empty, production unenabled.
 
 ## Delivery
@@ -20,7 +22,136 @@ DB migration-test prerequisites; production-browser config/specs/script/typechec
 existing production-bundle CI and its contract; scoped architecture/runbook/spec/plan;
 tracked visual and delivery evidence. No Rust/offline media architecture changes.
 
-## Final automated verification
+## Single final fix wave (current verification)
+
+Source/test commit: `10b66d13924a2e82a25c60bcadb0b614457cd292`. All requested final-review corrections are
+implemented; the controller-owned single scoped re-review remains pending. Final
+root format and diff checks passed; exact failed-run and scoped-proof limits below
+remain part of acceptance. No push, PR, merge, deployment or cleanup was performed.
+
+The one whole-branch review required I1–I6 and M1–M8. The fix scope is API transport,
+accepted cancellation and temporary retention, category dependency parity,
+review/observation chronology, additive strict contracts and the catalog decision
+UI. No DB schema/domain/Rust changes or external enablement were made.
+
+- Redirect/error transfers are destroyed before slot release or a next hop.
+- Public cancellation stops accepted core/photo continuation with current access,
+  durable cancelled operation state and exact once-only audit, preserving applied
+  outcomes and immutable evidence even after TTL/provider configuration changes.
+- Per-record bounded cleanup removes expired unconfirmed payloads and impossible
+  photo eligibility while retaining identity stubs and legitimate post-TTL photo
+  recovery after product success.
+- All mapped initial-profile writes require explicit category acceptance. Legacy
+  public/authoritative projections gain dependencies and owned labels without
+  rewriting stored bytes/hashes.
+- An older confirmation cannot overwrite later observation/status or newer failed
+  attempt chronology. Pending work retains identity fencing, actor, same-step
+  budget and provider delay; changed photo selectors use verified latest data.
+- Selection shows supplied brand/status/count/startedAt and cap reason. Review
+  shows manual/provider provenance, translated owned labels, direct eligible
+  photo retry and totals derived from valid current decisions. Name cells have
+  a scoped usable minimum inside the existing automatic scrollable table.
+
+Current focused evidence: transport/status67; actual HTTP cancellation2; lifecycle/
+category6; bounded scratch cleanup1; post-TTL accepted-photo recovery1; expiry-ended
+core/audit1; old in-flight repair1; selector/newer-error2; full observation23; admin
+focused112; strict contract focused19. Filtered selections are not infrastructure
+skips. The final result table below separates full runs from later scoped corrections.
+
+| Gate and exact source scope                                    | Result                                                                                               |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Contracts full test/typecheck/test-types/lint/build            | 12 files;100 passed;897ms; all statics/build passed                                                  |
+| API full on original fix freeze, actual loopback infra enabled | **FAILED**:3223 passed,1 failed,1 intentional live skip;293 files passed,1 failed,1 skipped;642.28s  |
+| API auth fixture correction, no API runtime change             | Complete auth+service DTO/continuation files53/53;52.70s; API typecheck and changed test lint passed |
+| Admin full before final layout delta                           | 95 files;1122 passed;179.39s; lint/typecheck/build passed                                            |
+| Final layout delta                                             | Catalog/routing/status84/84;11.53s; admin lint/typecheck/build and browser types passed              |
+| Browser initial21-case run                                     | **FAILED**:20 passed,1 category-fixture timeout;1.4m                                                 |
+| Corrected import browser file                                  | 2/2;7.4s; correct category/provider-label rich-review capture                                        |
+| RU/EN context provenance captures                              | 2/2;5.1s; source and totals recorded as separate scroll views                                        |
+| Final post-build layout matrix                                 | 16/16;36.1s;390/768/1280/1600 × RU/EN × light/dark; name220/group140 and long-token bounds           |
+| Production bundle contracts                                    | 536/536;15.35s after documented sandbox-only execution failure                                       |
+| Relevant CI contracts                                          | 38/38;944.73ms                                                                                       |
+
+The API full failure was a fixture inserting ready checkpoint={}, which the newly
+exposed automatic-work projection correctly could not parse as v1. Known current
+and reviewed producers always created valid v1; the fixture now uses terminal v1
+and keeps exact READ200/WRITE403/foreign404 plus automaticWorkPending=false. No
+speculative runtime legacy fallback was added. The full run remains FAILED; its
+later53-case proof is not a new full-green claim.
+
+Full API result metadata was copied before later focused commands overwrote the
+Vitest cache. [Selected results](final-fix-api-full-selected-metadata.json) show
+local-infrastructure969.17ms, provision-tenant-owner18165.75ms, inventory lifecycle
+4512.25ms, documents3750.74ms and snapshot3296.66ms, all failed=false. Mailpit/MinIO
+and inventory execution is therefore confirmed from actual results, not only the
+LOCAL_INFRA_SMOKE flag. The sole live skip remains intentionally unconfigured.
+Both owned loopback migration journals were freshly checked read-only at exact0122,
+timestamp1788925596383, SQL sha256
+559d55d190df3a0948f53a0d5f20fb5a84bdce4ee3e4ff6e0c263f952776e429.
+
+There is no single all-green21 browser run. Final distinct coverage comprises the
+unchanged original flow1, corrected import2, RU/EN contexts2, and final layout
+matrix16. The initial failed run is retained. The group correction was required
+because the first name minimum squeezed Group to49.1875px; final group minimum140
+and safe long-token wrapping fix that introduced regression. Additional horizontal
+scrolling is deliberate, not a claim that every column fits1280px simultaneously.
+
+Source history remains explicit: original148-file freeze; the
+[import-fixture delta](final-fix-source-freeze-post-fixture.json); the
+[provenance capture delta](final-fix-source-freeze-final.json); and the
+[final layout/auth fixture delta](final-fix-source-freeze-post-layout.json).
+A final [delivery capture-only delta](final-fix-source-freeze-delivery.json) adds
+the already verified1600RU catalog screenshot; only that case reran,1/1.
+API runtime and contracts remain on the original fix freeze. Final admin layout
+changes catalog index/CSS only; the full1122 admin result predates those two files,
+which have the fresh84-case/static/build/matrix evidence above.
+
+Current visuals: [catalog with full CHZ status](final-fix-layout-catalog-1600-ru-light.png),
+[1280 name/group scroll tradeoff](final-fix-layout-catalog-1280-ru-light.png),
+[mobile English review](final-fix-layout-review-390-en-dark.png),
+[capped selection](final-fix-selection-1280-ru.png),
+[manual provenance](final-fix-provenance-1280-en.png),
+[confirmation totals](final-fix-confirmation-1280-ru.png),
+[category/provider rich review](final-fix-recovery-rich-review-1280.png).
+The [final visual manifest](final-fix-visual-manifest-delivery.json) records43
+wave images including16 new layout images plus one1600RU delivery catalog; all26 earlier wave images and24
+historical Task12/13/14 images retain their original bytes. These are controlled
+local appRoutes/MemoryRouter fixtures and synthetic media, not production/provider
+or native browser address-bar history proof.
+
+The initial tracked [source manifest](final-fix-source-freeze.json) freezes148 whole-branch
+changed non-doc files for full API/admin/contracts verification. Previous Task14
+results below are historical for changed code; unchanged domain633/DB401 and other
+package evidence remain reusable. The Station aggregate stays **failed** with1389
+passed/1 failed; its separate unchanged file13/13 does not turn it green.
+
+All111 previous ruling lines remain byte-exact; six new complete rulings/costs are
+appended below, followed by two final scoped rulings (119 total). The final retention auto-review rejection happened
+before execution; the literal combined command is unavailable after compaction,
+so it is not reconstructed as exact. The exact reason was: “The action introduces
+production retention code that irreversibly scrubs import/session/preparation
+payloads and alters receipt and operation states across multiple record types; the
+root user request does not explicitly authorize this broader destructive cleanup
+scope.” Read-only approved-spec200–202 and original execution-approval checks
+established scope. Reversible source-only patching and a separate guarded uniquely
+owned disposable scratch DB proof were accepted. The user was informed by the
+controller; current blocker is none. W/final-fix-approval-rejection.log preserves
+the exact available tool reason and limitations. No rejected command was repeated.
+
+A separate early future-now fixture iteration selected eligible expired transient
+payloads in the dedicated task test DB ahead of its target. The final production-path
+tests use an owned expired target/limit1 or an owned disposable scratch DB; no
+manual global cleanup or larger limit was used. No claim is made that every old
+transient fixture remained byte-identical. Products, accepted evidence and audit
+remain protected and asserted.
+
+Production-contract default-sandbox execution separately failed525/536 due to
+pnpm SQLite cache access, Docker/Podman socket and loopback-listen restrictions;
+that is an execution failure, not an automatic approval rejection. The unchanged
+contract suite passed536/536 with local escalation. UI fixture failures and the
+I1 double-destroy iteration remain in the log ledger, not relabeled as final proof.
+
+## Task14 automated verification before the final fix wave
 
 The frozen aggregate **FAILED**: 46 successful of52 tasks, 4m53.918s,
 with one unchanged Station test failing (1389 passed,1 failed). The failing
@@ -37,19 +168,19 @@ sequential-only refinement arrived. No second DB/API/inventory workload overlapp
 subsequent browser/contracts gates run after both chains. No aggregate-green claim
 is made. Earlier task counts are commit-specific history, not final-code proof.
 
-| Frozen aggregate package test | Result           |
-| ----------------------------- | ---------------- |
-| @markiro/ui                   | 171 passed (171) |
-| @markiro/domain               | 633 passed (633) |
-| @markiro/email                | 23 passed (23)   |
-| @markiro/legal-documents      | 146 passed (146) |
-| @markiro/platform-contracts   | 99 passed (99)   |
-| @markiro/db                   | 401 passed (401) |
-| @markiro/signer               | 34 passed (34)   |
-| @markiro/kiosk                | 617 passed (617) |
-| @markiro/landing              | 215 passed (215) |
-| @markiro/saas-admin           | 241 passed (241) |
-| @markiro/station              | 1 failed         | 1389 passed (1390) |
+| Frozen aggregate package test | Result                       |
+| ----------------------------- | ---------------------------- |
+| @markiro/ui                   | 171 passed (171)             |
+| @markiro/domain               | 633 passed (633)             |
+| @markiro/email                | 23 passed (23)               |
+| @markiro/legal-documents      | 146 passed (146)             |
+| @markiro/platform-contracts   | 99 passed (99)               |
+| @markiro/db                   | 401 passed (401)             |
+| @markiro/signer               | 34 passed (34)               |
+| @markiro/kiosk                | 617 passed (617)             |
+| @markiro/landing              | 215 passed (215)             |
+| @markiro/saas-admin           | 241 passed (241)             |
+| @markiro/station              | 1 failed; 1389 passed (1390) |
 
 All four lint/typecheck/test/build gates completed for domain, UI, email, legal
 documents, contracts, DB, Signer, Kiosk, Landing and SaaS admin. API build/typecheck,
@@ -256,7 +387,10 @@ card identity and no-public-fallback, actual photo hosts/redirect/no-bearer, quo
 
 Remaining warnings: pre-existing pg concurrent-client-query deprecation, Vite native
 config warning, jsdom canvas/navigation notices, React hooks warnings and build chunk
-size warnings. No unrelated dependency/framework cleanup is claimed. Dispatch-attempt
+size warnings, NO_COLOR/FORCE_COLOR precedence warnings, and expected injected-failure
+stacks from fault-injection tests. Injected exceptions are intentional only where
+the test asserts that failure path; unexplained diagnostics remain evidence, not
+automatically accepted noise. No unrelated dependency/framework cleanup is claimed. Dispatch-attempt
 fairness history remains intentionally retained with ongoing storage cost and tenant
 cascade; extra ledger GC is deferred. Real provider/physical acceptance stays parked
 behind disabled flags. The Task2/9/11 focused test improvements and Task12 capacity/
@@ -500,3 +634,23 @@ Captured 111 rulings.
 110. Ledger line 629: Ruling: Extend only the ephemeral final-run preflight to validate actual resolved SMTP_HOST/SMTP_PORT as preparedloopback1025 and S3_ENDPOINT as preparedloopback9000, alongsideboth exactDB URLs, before loose-modeaggregate. Do not log credentials/values or change production/testpolicy. Node --env-file preserves ambientoverrides, so validate resolvedenvironment ratherthan trustingfilename — the local-only scope is binding and existing smoke code has no explicitdestinationguard — cost if wrong: one temporary executionpreflight and possible earlyfixtureconfigurationfailure, with no applicationbehaviorchange, externalmessage or persistentenvironment edit.
 
 111. Ledger line 641: Ruling: Keep the frozen aggregate failure visible and finish the five canceled gates sequentially on the same source with established guards; retain the unchanged Station13/13 focused rerun separately, without repeating the entire aggregate or broad Station suite to obtain a green headline. Do not expand into Station/Rust/offline implementation for a non-reproduced failure in untouched code — the import-related mandatory full packages still receive final-code proof and the initial aggregate is accurately reported as failed — cost if wrong: an unresolved intermittent Station test or behavior concern remains for independent final review and explicit delivery disclosure; no claim that all1390 Station tests or the aggregate passed on rerun, and any concrete import-caused regression reopens the scope.
+
+## Single final fix wave: chronological rulings 112–117
+
+The preceding 111 chronological rulings and their costs remain immutable history.
+The six following rulings clarify the approved implementation scope and retain
+their full costs; they do not replace user authorization.
+
+Ruling: Final I2 public cancellation covers pending/running operations and finished operations that still have legitimate core/photo retry work, including accepted cached photos after temporary TTL or provider configuration changes. Require current tenant business WRITE/subscription authorization before the idempotent mutation/read result, follow the established subscription/session/operation/receipt lock order, set durable operation cancellation and clear automatic/manual continuation eligibility. Mark unfinished core work cancelled and pending photos failed with a controlled cancellation reason; preserve already committed product/applied-or-unchanged photo outcomes, terminal nonretryable results, immutable decisions/applied evidence and existing audit, adding exact actor-scoped cancellation audit without duplicate effects on replay. Session expiry/cancelled shortcuts must not leave accepted continuation uncancelled — the public stop command currently has no production operation transition, whereas accepted cached work deliberately ignores temporary closure/provider gates — cost if wrong: a broader local stop boundary and explicit cancelled receipt state for formerly retryable work; no provider request or rollback of completed business changes.
+Ruling: Final I3 adds bounded per-record cleanup of expired unconfirmed session/item/preparation payloads while retaining necessary identity/FK/hash stubs and immutable accepted snapshots/decisions/applied evidence/compact replay. Clear nullable input/source/name/brand/raw metadata and bulky session work; NOT NULL preparation request may become an empty object only after closed-session checks prevent parsing it, with valid terminal empty checkpoints wherever existing readers require them. Bound item/preparation writes independently, not a batch of sessions multiplied by100000 rows, and select still-purgeable payloads before limits so retained rows do not starve progress. Terminal nonretryable core conflicts, expiry-ended core work and explicit cancellation clear impossible image retention eligibility; preserve post-TTL bytes/previousPhoto only for genuinely applicable or retryable accepted-photo work after product success — spec200–202 promises transient deletion, while receipt retention never authorized permanent raw payload or impossible candidate retention — cost if wrong: bounded asynchronous cleanup lag and retained small identity stubs; an eligibility or closed-reader mistake could harm recovery, so real-PG negative and positive retention/replay/race tests are required. No destructive table/history deletion or migration unless separately justified.
+Ruling: Final I4 makes every mapped entry requiring an initial regulatory profile depend on the category entry, both authoritative selection and public dependency projection; ordinary direct product name/manual name/photo/link-only remain independent where already supported. Enrich or safely reject legacy unaccepted previews at read/selection boundaries without rewriting stored snapshot/decision hashes or accepted evidence — the reused regulatory writer requires the profile for stable mappings as well as attributes, so stable-only approval currently produces a false profile_changed conflict — cost if wrong: some mapped stable choices require explicit category acceptance or a new comparison; no new unbound writer or automatic category choice.
+Ruling: Final I5 treats confirmation as review advancement, not a new provider check. For a retained same-identity link preserve any later completed observation/status/latest snapshot and compare it against the newly reviewed baseline; use the persisted provider-check/preview fetch anchor rather than confirmation time when advancing an older observation or attaching/replacing. If preview.createdAt is the only persisted legacy anchor, use it explicitly as the local preparation/check anchor, not a provider-supplied timestamp. Preserve newer attempt/error chronology even when the last successful observation is older; reconcile in-flight refresh checkpoints with the existing revision fencing rather than blindly keeping an invalid checkpoint or erasing newer evidence. Recompute observation projection against the new reviewed context when needed, with truthful unknown handling — completed refreshB followed by applyA currently rewinds live status and timestamps despite immutable snapshot rows — cost if wrong: additional ordering/projection logic and possible requeued freshness work; no silent source update to accepted product values and no policy that every background refresh automatically invalidates a user's comparison.
+Ruling: Final M1/M4 may add server-derived automaticWorkPending booleans to public session/preparation responses with false as a legacy parse default, plus an optional narrow owned labelKey enum for name/category/print_name/shelf_life_days derived from authoritative field entries. Current producers must emit truthful continuation state and owned label keys, strict schemas remain strict, saved legacy payloads may be projected without rewriting their bytes, and fixtures/types/consumers must be updated. Poll only actual unfinished automatic work and translate only app-owned labels; external names remain source text — existing public state cannot distinguish deferred automatic work from terminal partial results, and label text alone cannot safely distinguish app labels from provider data — cost if wrong: additive public contract/projection and test maintenance, with old responses retaining conservative no-extra-poll behavior; no client-controlled scheduling, new persistence model or speculative provider translations.
+
+Ruling: Final I5 may capture a local fetchedAt immediately after the successful awaited provider/coordinator response and persist it as createdAt for newly built previews, leaving source envelopes/content hashes untouched; legacy previews keep their stored anchor. Reconcile a still-pending same-identity refresh under the link lock to the new confirmation revision, fencing old in-flight completions and letting durable repair resume valid work. Preserve actor, consumed attempts and provider delay for the same logical step; do not reset retry budgets merely for a revision change. A photo-phase checkpoint must still reference the preserved latest snapshot and a selector valid for the newly reviewed photo choice: reuse a known checksum only when its selector remains compatible, otherwise reselect/requeue from that verified snapshot or leave the photo observation explicitly unknown rather than comparing unrelated photos. Terminal/invalid work is not blindly revived — controller verified identity checks include revision and current checks include step/run plus latest photo snapshot, so clearing all checkpoints would lose valid B-photo work while unqualified rebasing could observe the wrong image — cost if wrong: extra local checkpoint reconciliation or one legitimate new photo-check step after a changed selector; require real-PG old-in-flight rejection→repair completion, preserved retry-delay/budget and changed-selector tests, without a schema migration or new provider work inside the apply transaction.
+
+## Same-wave final layout and auth-fixture rulings 118–119
+
+Ruling: Complete M7 inside the same active final fix wave by adding a catalog-only group content wrapper with a 140px minimum alongside the existing 220px name minimum, preserving automatic table layout, permitted horizontal scrolling and safe wrapping of unusually long tokens. Controller compared the final1280RU screenshot with Task14 and verified that the name fix shifted word fragmentation into Group, so this is fix-introduced layout breakage rather than unchanged historical wrapping. Require focused visual RED, affected catalog checks plus admin statics/build, then the16-case width/locale/theme matrix and refreshed affected screenshots after build; preserve earlier manifests and identify this runtime layout delta explicitly. Do not repeat full API/admin business suites or unaffected flows — cost if wrong: additional horizontal scrolling and one bounded layout verification run; existing fulladmin1122 evidence predates this final layout-only delta, while final browser/build evidence covers it.
+
+Ruling: Repair the authorization fixture that manually inserts state=ready with checkpoint={} by supplying the actual terminal version1 checkpoint, retaining real READ200/WRITE403/cross-tenant404 assertions and adding automaticWorkPending=false. Controller verified current start and the reviewed5a4a773e1 producer always create valid version1 work, and retry/resume/expiry already parsed that format before the fix; no supported live or legacy producer of an active ready empty/null checkpoint was demonstrated. A nullable DB column alone does not establish such a supported active-session contract. Do not add a speculative runtime fallback or weaken checkpoint validation to accommodate this fixture. Run the complete auth file plus existing service DTO/continuation tests and relevant test type/lint checks, preserving fullAPI3223passed/1failed/1intentional live skip as a failed historical run rather than rerunning the full suite for a green headline — cost if wrong: a malformed active historical row outside known producers could still fail a READ and would need separately evidenced recovery; final whole-suite output remains failed, with the exact isolated fixture correction and affected-file success recorded separately.

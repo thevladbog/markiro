@@ -81,6 +81,32 @@ are checked at the route and before background writes. Station/device tokens are
 not cabinet actors. An old authenticated session does not preserve revoked WRITE.
 READ access to existing receipts remains useful when import permission is absent.
 
+Public session cancellation also stops accepted pending/running operations and finished
+operations with remaining legitimate retries, even after temporary TTL or provider
+configuration changes. It requires current WRITE/subscription access, uses the
+subscription/session/operation/receipt lock order, and preserves committed outcomes,
+immutable decisions/applied evidence and exact audit. Replaying cancellation does
+not duplicate its audit. Pending photos become failed with a cancellation reason;
+previous applied/unchanged photos and terminal nonretryable results remain intact.
+
+Scheduled repair independently bounds expired session, item, preparation and
+impossible receipt cleanup to 50 candidates per kind per pass (hard cap 500).
+It removes transient input/provider/manual payloads, retaining small identity/FK/hash
+stubs. Closed preparation requests become an empty object only behind closed-session
+reader checks; checkpoints remain valid terminal records. Terminal core conflicts,
+expiry-ended core work and cancellation clear impossible image eligibility. A
+successfully applied product's eligible cached-photo retry retains its required
+bytes and evidence after TTL. Cleanup does not delete accepted history or change
+confirmed product values, and bounded batches may leave a short cleanup backlog.
+
+Session/preparation responses expose server-derived `automaticWorkPending` for
+focused-page polling through provider delays; legacy responses default false.
+Terminal 401/403/404/410 polling stops. App-owned `labelKey` values are translated;
+provider labels remain source text. Every mapped field requiring an initial
+regulatory profile depends on the explicitly accepted category, including stable
+print-name and shelf-life fields. Legacy saved previews are projected in memory
+without rewriting stored source/diff/hash or accepted decisions.
+
 Session and unconfirmed preparation lifetime is 24 hours. Accepted operations keep
 immutable request/decision identity, per-item product/image results and applied
 evidence. Same request replay returns the existing operation; different bytes for
@@ -102,6 +128,16 @@ existing 9,001,024-byte import JSON transport limit plus its small local envelop
 It is not a storage quota guarantee or a bytes/characters equivalence. Actual
 browser quota may be smaller; quota failures retain the same mandatory pre-POST
 recovery path. Unrelated HTTP routes retain their existing 100 KiB body limit.
+
+Confirming an older comparison advances its reviewed baseline without overwriting a
+later provider observation or a newer failed attempt. Newly prepared previews use
+a local fetch-completion timestamp; legacy rows retain their stored preparation
+anchor. Confirmation is never displayed as a new provider request. Pending refresh
+work is rebased to the new link revision with identity/step/run fencing; the same
+logical step retains its actor, consumed attempts and provider delay. A changed
+photo choice can start a new photo step only from the verified latest snapshot.
+A checksum from another selector is not reused; an unavailable projection remains
+unknown. Old in-flight completion cannot overwrite the new review.
 
 ## Jobs, limits and recovery
 
