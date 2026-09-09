@@ -27,6 +27,7 @@ export function ImportSelection({
   onPrepare,
   canWrite,
   busy,
+  refreshing = false,
 }: {
   session: ImportSession;
   data: ImportItemsResponse;
@@ -36,10 +37,12 @@ export function ImportSelection({
   onPrepare: () => void;
   canWrite: boolean;
   busy: boolean;
+  refreshing?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const tr = (key: string) => t(`pages.catalog.import.${key}`);
-  const loading = session.automaticWorkPending || ["queued", "loading"].includes(session.state);
+  const loading =
+    refreshing || session.automaticWorkPending || ["queued", "loading"].includes(session.state);
   const emptyKey = !session.complete
     ? "listUnavailable"
     : query.search || query.statuses.length

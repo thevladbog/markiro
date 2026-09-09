@@ -1747,6 +1747,10 @@ it("refreshes the item feed after discovery completes even if an earlier empty r
   const original = server.fetchMock.getMockImplementation()!;
   let releaseEmpty: (() => void) | undefined;
   let releaseSession: (() => void) | undefined;
+  let releaseFreshItems: (() => void) | undefined;
+  const freshItems = new Promise<void>((resolve) => {
+    releaseFreshItems = resolve;
+  });
   const itemRequestStarted = new Promise<void>((resolve) => {
     releaseSession = resolve;
   });
@@ -1781,6 +1785,7 @@ it("refreshes the item feed after discovery completes even if an earlier empty r
         });
       }
     }
+    if (String(url).includes("/items")) await freshItems;
     return original(url, init);
   });
   renderImport(selectionRoute);
@@ -1790,6 +1795,16 @@ it("refreshes the item feed after discovery completes even if an earlier empty r
   await act(async () => {
     releaseEmpty?.();
   });
+  try {
+    expect(
+      screen.getByRole("status", { name: "Загружаем товары из Национального каталога" }),
+    ).toBeDefined();
+    expect(screen.queryByText("Товары не найдены")).toBeNull();
+  } finally {
+    await act(async () => {
+      releaseFreshItems?.();
+    });
+  }
   await screen.findByRole("checkbox", { name: /4006381333931/ }, { timeout: 3000 });
 }, 9000);
 

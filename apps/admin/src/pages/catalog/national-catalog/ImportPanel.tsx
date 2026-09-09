@@ -749,6 +749,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
             onQuery={setQuery}
             canWrite={mutable}
             busy={busy}
+            refreshing={items.isFetching}
             onPrepare={() => prepare()}
             onSelection={(ids) =>
               void run(async () => {
