@@ -40,6 +40,11 @@ analogous fixes before editing.
   Rust crate. Runs on a tenant's UKEP machine and keeps a fresh Chestny ZNAK
   True API token in the cloud by signing the auth challenge with a GOST
   certificate. Windows-only; its Cargo workspace is `signer-core` + `src-tauri`.
+- `apps/handheld`: native Android (Kotlin, Compose) app for industrial handheld
+  terminals (ТСД). Pairs and authenticates as a station device of kind
+  `handheld`, keeps an offline operator roster, and receives scans from the
+  vendor scanner service or a keyboard wedge. Gradle project outside the pnpm
+  workspace; CI job `handheld-android`.
 - `apps/saas-admin`: platform operator panel for tenants, catalog, billing,
   acts, payments, offers, legal documents, platform team, and audit. It has its
   own auth boundary and client; it is not a tenant-admin route set.
