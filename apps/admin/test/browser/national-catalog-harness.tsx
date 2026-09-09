@@ -1,6 +1,6 @@
 import "@markiro/ui/styles.css";
 import "../../src/global.css";
-import "../../src/i18n/index.js";
+import i18n from "../../src/i18n/index.js";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
@@ -55,7 +55,9 @@ const authClient: AuthClientLike = {
 
 const container = document.getElementById("root");
 if (!container) throw new Error("#root element not found");
-const initialEntry = new URLSearchParams(window.location.search).get("route") ?? "/";
+const params = new URLSearchParams(window.location.search);
+void i18n.changeLanguage(params.get("lang") === "en" ? "en" : "ru");
+const initialEntry = params.get("route") ?? "/";
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 });

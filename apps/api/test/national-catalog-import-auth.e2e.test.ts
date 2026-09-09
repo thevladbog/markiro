@@ -5,7 +5,7 @@ import { ROUTE_SUBSCRIPTION_ACCESS_POLICY } from "../src/subscriptions/subscript
 import { NationalCatalogImportController } from "../src/modules/national-catalog/national-catalog-import.controller";
 import { NationalCatalogLinkController } from "../src/modules/national-catalog/national-catalog-link.controller";
 import { Test } from "@nestjs/testing";
-import type { INestApplication } from "@nestjs/common";
+import { Logger, type INestApplication } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
 import { eq } from "drizzle-orm";
 import express from "express";
@@ -483,10 +483,34 @@ describe.skipIf(!ready)("National Catalog actual cabinet HTTP authorization", ()
       .post(`/national-catalog/import-sessions/${response.body.id}/applies`)
       .send(body)
       .expect(404);
-    await f.agent
-      .post("/national-catalog/import-sessions")
-      .send({ mode: "gtins", text: "0".repeat(9_001_024) })
-      .expect(413);
+    const expectedErrors: unknown[] = [];
+    const originalError = Logger.prototype.error;
+    const errorLog = vi.spyOn(Logger.prototype, "error").mockImplementation(function (
+      this: Logger,
+      ...args: Parameters<Logger["error"]>
+    ) {
+      const error: unknown = args[0];
+      if (error instanceof Error && error.message === "request entity too large") {
+        expectedErrors.push(error);
+        return;
+      }
+      originalError.apply(this, args);
+    });
+    try {
+      await f.agent
+        .post("/national-catalog/import-sessions")
+        .send({ mode: "gtins", text: "0".repeat(9_001_024) })
+        .expect(413);
+      expect(expectedErrors).toEqual([
+        expect.objectContaining({
+          message: "request entity too large",
+          type: "entity.too.large",
+          status: 413,
+        }),
+      ]);
+    } finally {
+      errorLog.mockRestore();
+    }
   });
   it("schedules current links with both enumeration flags off and refuses absent provider configuration", async () => {
     const f = await fixture();

@@ -1359,3 +1359,46 @@ it("starts a new lookup for an unlinked product GTIN", async () => {
   expect(starts).toEqual([{ mode: "gtins", text: "04006381333931" }]);
   expect(router.state.location.search).not.toContain("exactCardId");
 });
+
+it.each(["ru", "en"] as const)(
+  "identifies separate failed receipt positions in %s after previews expire without inventing product names",
+  async (language) => {
+    const { default: i18n } = await import("../src/i18n/index.js");
+    await i18n.changeLanguage(language);
+    try {
+      const { ImportResult } =
+        await import("../src/pages/catalog/national-catalog/ImportResult.js");
+      render(
+        <MemoryRouter>
+          <ImportResult
+            result={{
+              operationId: id(90),
+              state: "finished",
+              items: [id(91), id(92)].map((previewId) => ({
+                previewId,
+                productId: null,
+                product: "failed",
+                image: "none",
+                productReason: null,
+                imageReason: null,
+                reason: null,
+              })),
+            }}
+            canWrite={false}
+            busy={false}
+            retryBlocked={false}
+            onRetry={() => {}}
+            onCancel={() => {}}
+          />
+        </MemoryRouter>,
+      );
+      expect(screen.getByText(language === "ru" ? "Позиция 1" : "Position 1")).toBeTruthy();
+      expect(screen.getByText(language === "ru" ? "Позиция 2" : "Position 2")).toBeTruthy();
+      expect(screen.getByText(id(91))).toBeTruthy();
+      expect(screen.getByText(id(92))).toBeTruthy();
+      expect(screen.queryByRole("link")).toBeNull();
+    } finally {
+      await i18n.changeLanguage("ru");
+    }
+  },
+);

@@ -374,6 +374,50 @@ write before the saved database plan can proceed. The
 production controller uses serial-console host-key evidence and OS Login for
 the private app host; it does not trust a static SSH key.
 
+## National Catalog product import and confirmed links
+
+The cabinet import workflow is implemented with explicit own-feed and GTIN entries,
+selection and immutable review preparations. Provider import flags default off;
+production access, CDN hosts and live recovery acceptance remain unverified.
+[The import runbook](runbooks/national-catalog-import.md) defines operational and
+rollout boundaries; [delivery evidence](evidence/national-catalog-import/delivery-verification.md)
+records current local verification separately from external acceptance.
+
+A confirmed link binds tenant, provider environment, card, canonical GTIN and revision.
+GTIN equality only offers a link. One card may expose several GTINs. New import
+requires owned/granted feed access, never public-card fallback. Canonical GTIN edits
+require explicit revision-pinned atomic detach. Local unlink retains values, active
+photo, immutable snapshots and history; `externalRef` remains the 1C association.
+
+Accepted product fields, initial category, link, snapshot and exact audit evidence
+commit together per position. Observed projections record provider freshness while
+reviewed projections preserve accepted choices. Background checks never overwrite
+accepted fields/category/photo. Explicit archive disables v1 comparison/import and
+suppresses the changes indicator without discarding baseline evidence; unknown is
+not archive. Additive public identity/dependency projections read legacy stored rows
+without rewriting receipt/source bytes or hashes.
+
+Photos have independent durable outcomes and explicit READY-candidate choices.
+Accepted cached bytes remain referenced for eligible post-TTL recovery; preview and
+active image use the same normalized WebP. GC serializes its reference recheck with
+attachment and performs object deletion outside the lock. Image errors do not undo
+a committed product. Existing Kiosk/Station private image descriptors and caches
+remain the delivery path; host tests are not physical offline/Windows proof.
+
+Tenant-fenced external coordination, durable checkpoints and repair queues support
+partial discovery, cancellation and retries. Current WRITE and subscription state
+are checked again before queued mutations. Immutable operation receipts remain
+readable after temporary expiry. The cabinet preserves unknown pending apply intent
+across TTL/access failure and scopes it to actual auth identity outside the query
+boundary. Local storage must round-trip before a new POST.
+
+Enumeration flags do not disable confirmed-link observation refresh; that separately
+requires explicit provider configuration, environment, credential and eligibility.
+Accepted cached photo completion and local unlink remain provider-independent.
+Rollback disables provider work without deleting additive schema or evidence. The
+0122 dispatch-attempt fairness history is retained, grows by logical work step and
+cascades on tenant deletion; no additional history GC is introduced.
+
 ## Open items (tracked for later phases)
 
 - Direct Chestny ZNAK integration (SUZ code ordering, report submission,

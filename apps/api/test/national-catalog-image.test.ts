@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { PgBoss, type JobWithMetadata } from "pg-boss";
 import { createHash } from "node:crypto";
 import { ProductsService } from "../src/modules/products/products.service";
 import { MediaAssetsService } from "../src/modules/media/media-assets.service";
@@ -663,6 +664,114 @@ describe("private National Catalog images (real PostgreSQL and normalized bytes)
     expect(swap).toHaveBeenCalledTimes(2);
     expect(rt.download).toHaveBeenCalledTimes(1);
   });
+  it("redelivers a committed image receipt across two real local PgBoss worker instances", async () => {
+    const rt = runtime();
+    const { p, id } = await prepared(rt);
+    const { apply, result } = await accept(p, id);
+    const queueSchema = `nc_test_${randomUUID().replaceAll("-", "")}`;
+    const queueUrl = process.env.DATABASE_URL;
+    if (!queueUrl) throw new Error("Queue test requires PostgreSQL");
+    const options = {
+      connectionString: queueUrl,
+      schema: queueSchema,
+      supervise: false,
+      schedule: false,
+    };
+    const first = new PgBoss(options);
+    const second = new PgBoss(options);
+    const errors: Error[] = [];
+    first.on("error", (error) => errors.push(error));
+    second.on("error", (error) => errors.push(error));
+    const deliveries: { id: string; retryCount: number }[] = [];
+    const queue = "accepted-image";
+    try {
+      await first.start();
+      await first.createQueue(queue, { retryLimit: 2, retryDelay: 2 });
+      const jobId = await first.send(queue, { operationId: result.operationId, previewId: p.id });
+      expect(jobId).toBeTypeOf("string");
+      if (!jobId) throw new Error("Queue did not retain the accepted job");
+      await first.work(
+        queue,
+        { includeMetadata: true, pollingIntervalSeconds: 0.5 },
+        async (jobs: JobWithMetadata<{ operationId: string; previewId: string }>[]) => {
+          for (const job of jobs) {
+            deliveries.push({ id: job.id, retryCount: job.retryCount });
+            await rt.service.apply(actor.tenantId, job.data.operationId, job.data.previewId);
+            throw new Error("synthetic lost acknowledgement after committed receipt");
+          }
+        },
+      );
+      await expect
+        .poll(async () => (await first.getJobById(queue, jobId))?.state, {
+          timeout: 8000,
+          interval: 20,
+        })
+        .toBe("retry");
+      await first.stop({ graceful: true, timeout: 2000 });
+      const receipt = await apply.read(actor.tenantId, sessionId, result.operationId);
+      expect(receipt.items[0]).toMatchObject({ product: "applied", image: "applied" });
+      const before = await db
+        .select()
+        .from(schema.nationalCatalogImportOperationItems)
+        .where(eq(schema.nationalCatalogImportOperationItems.operationId, result.operationId));
+      const auditBefore = await db
+        .select()
+        .from(schema.tenantAuditEvents)
+        .where(eq(schema.tenantAuditEvents.organizationId, actor.tenantId));
+      expect(auditBefore.length).toBeGreaterThan(0);
+      await second.start();
+      await second.work(
+        queue,
+        { includeMetadata: true, pollingIntervalSeconds: 0.5 },
+        async (jobs: JobWithMetadata<{ operationId: string; previewId: string }>[]) => {
+          for (const job of jobs) {
+            deliveries.push({ id: job.id, retryCount: job.retryCount });
+            await rt.service.apply(actor.tenantId, job.data.operationId, job.data.previewId);
+          }
+        },
+      );
+      await expect
+        .poll(async () => (await second.getJobById(queue, jobId))?.state, {
+          timeout: 8000,
+          interval: 20,
+        })
+        .toBe("completed");
+      expect(deliveries).toEqual([
+        { id: jobId, retryCount: 0 },
+        { id: jobId, retryCount: 1 },
+      ]);
+      expect(await apply.read(actor.tenantId, sessionId, result.operationId)).toEqual(receipt);
+      expect(
+        await db
+          .select()
+          .from(schema.nationalCatalogImportOperationItems)
+          .where(eq(schema.nationalCatalogImportOperationItems.operationId, result.operationId)),
+      ).toEqual(before);
+      expect(
+        await db
+          .select()
+          .from(schema.tenantAuditEvents)
+          .where(eq(schema.tenantAuditEvents.organizationId, actor.tenantId)),
+      ).toEqual(auditBefore);
+      expect(
+        await db
+          .select()
+          .from(schema.productImages)
+          .where(eq(schema.productImages.productId, existingId)),
+      ).toHaveLength(1);
+      expect(rt.download).toHaveBeenCalledTimes(1);
+      expect(errors).toEqual([]);
+    } finally {
+      const stopped = await Promise.allSettled([
+        first.stop({ graceful: false }),
+        second.stop({ graceful: false }),
+      ]);
+      // Generated identifier owned only by this test; no shared job schema is removed.
+      await connection.pool.query(`DROP SCHEMA IF EXISTS "${queueSchema}" CASCADE`);
+      expect(stopped.every((value) => value.status === "fulfilled")).toBe(true);
+    }
+  }, 25000);
+
   it("an asset attacher winning the row lock prevents GC's later storage call", async () => {
     const rt = runtime();
     photos();
@@ -684,9 +793,31 @@ describe("private National Catalog images (real PostgreSQL and normalized bytes)
     });
     const client = await connection.pool.connect();
     await client.query("BEGIN");
+    let collecting: Promise<number> | undefined;
     try {
       await client.query("SELECT id FROM media_assets WHERE id=$1 FOR UPDATE", [assetId]);
-      const collecting = rt.media.reconcile(new Date(), 10000);
+      const blocker = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+      const blockerPid = blocker.rows[0]?.pid;
+      expect(blockerPid).toBeTypeOf("number");
+      collecting = rt.media.reconcile(new Date(), 10000);
+      // This client holds exactly the target asset row. Wait until the actual
+      // collector claim is blocked by it, rather than merely starting a promise.
+      await expect
+        .poll(
+          async () => {
+            const waiting = await connection.pool.query<{ count: number }>(
+              `SELECT count(*)::int AS count FROM pg_stat_activity
+           WHERE datname=current_database() AND wait_event_type='Lock'
+             AND query LIKE '%media_assets%' AND query LIKE '%for update%'
+             AND $1 = ANY(pg_blocking_pids(pid))`,
+              [blockerPid],
+            );
+            return waiting.rows[0]?.count;
+          },
+          { timeout: 5000, interval: 10 },
+        )
+        .toBe(1);
+      expect(rt.storage.delete).not.toHaveBeenCalledWith(key);
       await client.query(
         "UPDATE national_catalog_import_images SET staged_asset_id=$1,state='ready',checksum=$2,byte_size=10,width=1,height=1 WHERE candidate_id=$3",
         [assetId, "a".repeat(64), id],
@@ -700,6 +831,7 @@ describe("private National Catalog images (real PostgreSQL and normalized bytes)
     } finally {
       await client.query("ROLLBACK");
       client.release();
+      await collecting;
     }
   });
   it("a committed GC claim prevents activation before object deletion, without holding a DB lock over storage", async () => {

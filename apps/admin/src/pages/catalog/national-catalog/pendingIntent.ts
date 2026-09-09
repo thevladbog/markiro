@@ -10,7 +10,10 @@ export type PendingIntent = z.infer<typeof intentSchema>;
 export const identityKey = (tenant: string, user: string) =>
   `${encodeURIComponent(tenant)}:${encodeURIComponent(user)}:`;
 const key = (identity: string, sessionId: string) => `${prefix}${identity}${sessionId}`;
-const MAX_BYTES = 200_000;
+// UTF-16 code units, not network bytes. Covers the existing 9,001,024-byte
+// import body bound plus the small intent envelope; browser quota may be lower.
+// Persistence still must round-trip exactly before any POST can proceed.
+const MAX_SERIALIZED_CHARACTERS = 9_002_048;
 export type IntentState =
   | { status: "missing" }
   | { status: "valid"; intent: PendingIntent }
@@ -24,7 +27,7 @@ export function loadIntent(identity: string, sessionId: string): IntentState {
     return { status: "unavailable" };
   }
   if (raw === null) return { status: "missing" };
-  if (raw.length > MAX_BYTES) return { status: "corrupt" };
+  if (raw.length > MAX_SERIALIZED_CHARACTERS) return { status: "corrupt" };
   let intent: PendingIntent;
   try {
     intent = intentSchema.parse(JSON.parse(raw));
@@ -56,7 +59,7 @@ export function saveIntent(identity: string, intent: PendingIntent) {
   if (existing.status === "valid" && JSON.stringify(existing.intent) !== JSON.stringify(parsed))
     throw new Error("unresolved_intent");
   const raw = JSON.stringify(parsed);
-  if (raw.length > MAX_BYTES) throw new Error("storage_unavailable");
+  if (raw.length > MAX_SERIALIZED_CHARACTERS) throw new Error("storage_unavailable");
   sessionStorage.setItem(key(identity, intent.sessionId), raw);
   if (sessionStorage.getItem(key(identity, intent.sessionId)) !== raw)
     throw new Error("storage_unavailable");

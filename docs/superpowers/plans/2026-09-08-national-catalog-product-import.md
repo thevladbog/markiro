@@ -10,6 +10,18 @@
 
 **Spec:** [Согласованная спецификация](../specs/2026-09-08-national-catalog-product-import-design.md).
 
+## Implementation status (2026-09-09)
+
+Tasks 1–13 are implemented and independently reviewed. Task14 implementation and
+local verification are complete, with one unchanged Station aggregate test failure
+retained for review; final API/admin/browser gates passed separately. The current
+integration/browser/CI evidence and operating documentation are recorded in the
+[delivery report](../../evidence/national-catalog-import/delivery-verification.md).
+That report is the current verification record; the task checklists below preserve
+the original execution instructions and are not evidence of production enablement.
+Final Task14/whole-branch review and live provider/CDN/worker acceptance are separate.
+Flags remain disabled. No deployment, push or PR is part of this delivery.
+
 ## Global Constraints
 
 - Два входа в один процесс: «Мои товары» и «По GTIN».

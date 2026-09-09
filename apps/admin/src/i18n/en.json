@@ -1715,7 +1715,8 @@
         "abandonWarning": "The previous operation may have been accepted. This only removes the local request and does not cancel it. Check the catalog before adding again.",
         "confirmAbandon": "Confirm: forget request",
         "comparisonRejected": "The comparison is stale. Refresh it before applying changes.",
-        "rejectedItem": "This item requires a new comparison."
+        "rejectedItem": "This item requires a new comparison.",
+        "resultPosition": "Position {{position}}"
       },
       "chz": {
         "unavailable": "Information unavailable",

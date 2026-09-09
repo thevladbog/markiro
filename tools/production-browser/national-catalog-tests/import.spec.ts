@@ -8,6 +8,7 @@ import {
   importSelectionSchema,
 } from "../../../packages/platform-contracts/dist/index.js";
 import {
+  photoFixtureBase64,
   capabilitiesFixture,
   id,
   itemsFixture,
@@ -37,10 +38,7 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
       await route.fulfill({
         status: 200,
         contentType: "image/webp",
-        body: Buffer.from(
-          "UklGRtABAABXRUJQVlA4IMQBAACwDgCdASp4AHgAPm00mEckIyKhKhWZGIANiWcA1OTATP+ynyjg57xAWK6mrhcvK4uEOEJOeKcf68ccMaTvrvXuFK8HkwkvF9qI/5W9qQ4ziV0yXsdpwU1bSgSqpLThYrtGfCUP38EDWeNBmTKxkvTNs3vUY9k5uqRyhulTZIAA/vo8Ly0lehcyDUOF0mwMucDqrz8TB1AUgnCSKYyf6i0GiEISFpEah96xvzuKxlWPHGXpVerx9h049ZZZUPNCdLytMBUXTtqsdj3X2LIBRkGcpqUkQy8BR4bu61Q74IBFl2Q5EXUhYbNGgbBgkEzFdc/LtBHm+BUm7Io8DqEleiFF9NXysIZN3jIIrTXSlzWFjlq+s6fH/N/pvNfIPpzCGS/Vj1Mv0cYT+9r/c6bIj3/5SCP7A/cK/TnU34NI4hdSeP2/BIZUH6C+4mX08y/yPUxTadyZ/XrAVm1T4991HgkUgl1U6XqYApaTXt0I36QmwJL+RJATyfb6HuWUYvrnZu8sxmNLJAMk7H5haduYgcEiP3XoD0mwifGsmMRplQEM0d1W9m/o/xhYy1r6K++Nl3ErUqob73rOCKf7gdQ+afmAAAAAAA==",
-          "base64",
-        ),
+        body: Buffer.from(photoFixtureBase64, "base64"),
       });
       return;
     }
@@ -121,7 +119,11 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
   await expect(page.getByLabel("Название вручную")).toBeVisible();
   const evidence = resolve("../../docs/evidence/national-catalog-import");
   await mkdir(evidence, { recursive: true });
-  await page.screenshot({ path: resolve(evidence, "task-12-review-1280.png"), fullPage: true });
+  if (process.env.NC_UPDATE_SCREENSHOTS === "1")
+    await page.screenshot({
+      path: resolve(evidence, "task-14-recovery-review-1280.png"),
+      fullPage: true,
+    });
   await page.getByRole("button", { name: "Добавить выбранные изменения" }).click();
   await expect(page.getByText("Эта позиция требует нового сравнения.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Добавить выбранные изменения" })).toBeDisabled();
@@ -184,10 +186,11 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
     "naturalWidth",
     120,
   );
-  await page.screenshot({
-    path: resolve(evidence, "task-12-review-rich-1280.png"),
-    fullPage: true,
-  });
+  if (process.env.NC_UPDATE_SCREENSHOTS === "1")
+    await page.screenshot({
+      path: resolve(evidence, "task-14-recovery-rich-review-1280.png"),
+      fullPage: true,
+    });
   const pendingKey = `markiro.nc.pending.v1:browser_org:browser_manager:${id(1)}`;
   await page.evaluate((key) => sessionStorage.setItem(key, "{"), pendingKey);
   await page.reload();
@@ -298,7 +301,11 @@ test("catalog discloses CHZ statuses and opens the saved link panel", async ({ p
   expect(overflow).toEqual([]);
   const evidence = resolve("../../docs/evidence/national-catalog-import");
   await mkdir(evidence, { recursive: true });
-  await page.screenshot({ path: resolve(evidence, "task-13-catalog-1280.png"), fullPage: true });
+  if (process.env.NC_UPDATE_SCREENSHOTS === "1")
+    await page.screenshot({
+      path: resolve(evidence, "task-14-status-catalog-1280.png"),
+      fullPage: true,
+    });
   await row.getByRole("link", { name: "Связь с ЧЗ" }).click();
   const panel = page.getByRole("dialog", { name: "Связь с Честным знаком" });
   await expect(panel.getByText("card-1", { exact: true })).toBeVisible();
@@ -313,11 +320,12 @@ test("catalog discloses CHZ statuses and opens the saved link panel", async ({ p
     panel.getByText("Не удалось проверить фотографию. Статус карточки сохранён."),
   ).toBeVisible();
   await expect(panel.getByRole("button", { name: "Удалить связь", exact: true })).toBeVisible();
-  await page.screenshot({
-    path: resolve(evidence, "task-13-link-1280.png"),
-    animations: "disabled",
-    fullPage: true,
-  });
+  if (process.env.NC_UPDATE_SCREENSHOTS === "1")
+    await page.screenshot({
+      path: resolve(evidence, "task-14-status-link-1280.png"),
+      animations: "disabled",
+      fullPage: true,
+    });
   await panel.getByRole("button", { name: "Закрыть" }).focus();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);

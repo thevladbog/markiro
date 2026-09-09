@@ -1,6 +1,4 @@
 import { defineConfig } from "@playwright/test";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 export default defineConfig({
   testDir: "./national-catalog-tests",
   workers: 1,
@@ -9,13 +7,14 @@ export default defineConfig({
   timeout: 30000,
   expect: { timeout: 5000 },
   reporter: "list",
-  outputDir: join(tmpdir(), "markiro-national-catalog-browser"),
+  outputDir: "./test-results/national-catalog",
   use: {
     browserName: "chromium",
     baseURL: "http://127.0.0.1:43183",
     locale: "ru-RU",
     viewport: { width: 1280, height: 900 },
     trace: "retain-on-failure",
+    screenshot: "only-on-failure",
   },
   webServer: {
     command:

@@ -25,8 +25,15 @@ export function ImportResult({
       <h2>{tr("result")}</h2>
       <p role="status">{tr(`operationStates.${result.state}`)}</p>
       {retryBlocked && <Alert>{tr("operationRunning")}</Alert>}
-      {result.items.map((item) => (
+      {result.items.map((item, index) => (
         <article className="mk-nc-review-item" key={item.previewId}>
+          {!item.productId && (
+            <p>
+              {t("pages.catalog.import.resultPosition", { position: index + 1 })}
+              <br />
+              <code>{item.previewId}</code>
+            </p>
+          )}
           <h3>
             {tr("product")}: {tr(`productOutcomes.${item.product}`)}
           </h3>

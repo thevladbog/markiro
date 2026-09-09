@@ -48,6 +48,68 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
     photo: { kind: "candidate", candidateId: candidate },
   };
 
+  // Each dependent scenario declares its own prerequisites; selected -t runs
+  // must exercise the intended constraints, rather than zero-row UPDATEs.
+  async function prerequisiteLinks() {
+    for (const [id, gtin, snap] of [
+      [product, "04601234567893", snapshot],
+      [packagingProduct, "14601234567890", null],
+    ]) {
+      await pool.query(
+        `INSERT INTO national_catalog_product_links (tenant_id, product_id, environment, card_id, bound_gtin14, confirmed_by, latest_snapshot_id, reviewed_snapshot_id)
+         SELECT $1,$2,'production','original-card',$3,$4,$5,$5
+         WHERE NOT EXISTS (SELECT 1 FROM national_catalog_product_links WHERE tenant_id=$1 AND product_id=$2 AND closed_at IS NULL)`,
+        [tenant, id, gtin, actor, snap],
+      );
+    }
+  }
+  async function prerequisiteSession() {
+    await pool.query(
+      `INSERT INTO national_catalog_import_sessions (id,tenant_id,actor_id,environment,mode,through_at,expires_at)
+       VALUES ($1,$3,$4,'production','gtins',now(),now()+interval '24 hours'),($2,$3,$4,'production','own_catalog',now(),now()+interval '24 hours') ON CONFLICT (id) DO NOTHING`,
+      [session, otherSession, tenant, actor],
+    );
+    await pool.query(
+      `INSERT INTO national_catalog_import_items (id,tenant_id,session_id,gtin14,card_id,match)
+       VALUES ($1,$2,$3,'04601234567893','shared-card','existing') ON CONFLICT (id) DO NOTHING`,
+      [item, tenant, session],
+    );
+  }
+  async function prerequisitePreview() {
+    await prerequisiteSession();
+    await pool.query(
+      `INSERT INTO national_catalog_import_previews (id,tenant_id,session_id,item_id,expires_at,source_hash,source,diff)
+       VALUES ($1,$2,$3,$4,now()+interval '24 hours',$5,'{"good_id":"shared-card"}','[]'),($6,$2,$3,$4,now()+interval '24 hours',$5,'{"good_id":"shared-card"}','[]') ON CONFLICT (id) DO NOTHING`,
+      [preview, tenant, session, item, sourceHash, otherPreview],
+    );
+    await pool.query(
+      `INSERT INTO national_catalog_import_operations (id,tenant_id,session_id,actor_id,request_id,decision_hash)
+       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
+      [operation, tenant, session, actor, randomUUID(), sourceHash],
+    );
+  }
+  async function prerequisiteImage() {
+    await prerequisitePreview();
+    await pool.query(
+      `INSERT INTO media_assets (id,owner_tenant_id,object_key,content_type,byte_size,checksum,width,height)
+       VALUES ($1,$2,'nc-import/staged.webp','image/webp',100,$3,100,100) ON CONFLICT (id) DO NOTHING`,
+      [asset, tenant, sourceHash],
+    );
+    await pool.query(
+      `INSERT INTO national_catalog_import_images (id,tenant_id,session_id,preview_id,candidate_id,source_hash,staged_asset_id,checksum,byte_size,width,height,state,expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$6,100,100,100,'ready',now()+interval '24 hours') ON CONFLICT (id) DO NOTHING`,
+      [image, tenant, session, preview, candidate, sourceHash, asset],
+    );
+  }
+  async function prerequisiteReceipt() {
+    await prerequisiteImage();
+    await pool.query(
+      `INSERT INTO national_catalog_import_operation_items (tenant_id,session_id,operation_id,preview_id,decision,product_id,product_result,image_result,accepted_image_id,image_retry_eligible)
+       VALUES ($1,$2,$3,$4,$5,$6,'applied','failed',$7,true) ON CONFLICT DO NOTHING`,
+      [tenant, session, operation, preview, decision, product, image],
+    );
+  }
+
   beforeAll(async () => {
     await maintenancePool.query(`CREATE DATABASE "${databaseName}"`);
     created = true;
@@ -190,6 +252,7 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
   });
 
   it("rejects cross-tenant product links and snapshots from another product", async () => {
+    await prerequisiteLinks();
     await expect(
       pool.query(
         `INSERT INTO national_catalog_product_links (tenant_id, product_id, environment, card_id, bound_gtin14, confirmed_by) VALUES ($1, $2, 'production', 'foreign', '04601234567893', $3)`,
@@ -238,6 +301,7 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
   });
 
   it("rejects previews and operation receipts crossing same-tenant sessions", async () => {
+    await prerequisiteSession();
     await expect(
       pool.query(
         `INSERT INTO national_catalog_import_previews (tenant_id, session_id, item_id, expires_at, source_hash) VALUES ($1, $2, $3, now() + interval '24 hours', $4)`,
@@ -261,6 +325,7 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
   });
 
   it("rejects a receipt whose operation and preview belong to different sessions", async () => {
+    await prerequisitePreview();
     const otherOperation = randomUUID();
     await pool.query(
       `INSERT INTO national_catalog_import_operations (id, tenant_id, session_id, actor_id, request_id, decision_hash) VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -275,6 +340,7 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
   });
 
   it("stores raw and normalized link observations independently of reviewed values", async () => {
+    await prerequisiteLinks();
     const observedHash = "b".repeat(64);
     await pool.query(
       `UPDATE national_catalog_product_links SET raw_status = 'provider-new-status', raw_detailed_statuses = ARRAY['provider-detail'], status_keys = ARRAY['unknown']::national_catalog_status_key[], last_attempt_at = '2026-09-08T00:00:00Z', last_success_at = '2026-09-07T00:00:00Z', last_outcome = 'error', observed_meaningful_hash = $3, reviewed_meaningful_hash = $4 WHERE tenant_id = $1 AND product_id = $2 AND closed_at IS NULL`,
@@ -302,6 +368,7 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
   });
 
   it("keeps request identity unique across sessions of a tenant", async () => {
+    await prerequisiteSession();
     const requestId = randomUUID();
     await pool.query(
       `INSERT INTO national_catalog_import_operations (tenant_id, session_id, actor_id, request_id, decision_hash) VALUES ($1, $2, $3, $4, $5)`,
@@ -316,6 +383,7 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
   });
 
   it("rejects image sources or assets from a different preview or tenant", async () => {
+    await prerequisitePreview();
     await pool.query(
       `INSERT INTO media_assets (id, owner_tenant_id, object_key, content_type, byte_size, checksum, width, height) VALUES ($1, $2, 'nc-import/staged.webp', 'image/webp', 100, $3, 100, 100)`,
       [asset, tenant, sourceHash],
@@ -356,6 +424,8 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
   });
 
   it("retains accepted failed-photo receipts and staged bytes beyond temporary expiry", async () => {
+    await prerequisiteImage();
+    await prerequisiteLinks();
     await pool.query(
       `INSERT INTO national_catalog_import_operation_items (tenant_id, session_id, operation_id, preview_id, decision, product_id, product_result, image_result, accepted_image_id, image_retry_eligible) VALUES ($1, $2, $3, $4, $5, $6, 'applied', 'failed', $7, true)`,
       [tenant, session, operation, preview, decision, product, image],
@@ -420,6 +490,7 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
   });
 
   it("preserves bigint fencing precision and rejects invalid counters and image metadata", async () => {
+    await prerequisiteImage();
     await pool.query(
       `INSERT INTO national_catalog_request_leases (tenant_id, owner, fence, lease_until, next_allowed_at) VALUES ($1, $2, 9007199254740993, now(), now())`,
       [tenant, randomUUID()],
@@ -476,6 +547,7 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
     ).toEqual([{ count: 1 }]);
   });
   it("adds nullable evidence without backfill and freezes actual applied evidence independently of image outcomes", async () => {
+    await prerequisiteReceipt();
     const before = await pool.query(
       `SELECT applied_evidence FROM national_catalog_import_operation_items WHERE operation_id=$1`,
       [operation],
@@ -519,6 +591,7 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
     ).rejects.toMatchObject({ code: "23514" });
   });
   it("adds nullable photo preparation and review evidence without inventing old actors or selectors", async () => {
+    await prerequisiteImage();
     const row = await pool.query(
       "SELECT source_id, preparation_actor_id, preparation_checkpoint FROM national_catalog_import_images WHERE id=$1",
       [image],
@@ -538,6 +611,7 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
     ).rejects.toMatchObject({ code: "23503" });
   });
   it("adds unknown projection/refresh state without inventing reviewed data for legacy links", async () => {
+    await prerequisiteLinks();
     const columns = await pool.query(
       "SELECT column_name,is_nullable FROM information_schema.columns WHERE table_name='national_catalog_product_links' AND column_name=ANY($1::text[]) ORDER BY column_name",
       [["reviewed_projection", "observed_projection", "refresh_checkpoint", "refresh_error_code"]],

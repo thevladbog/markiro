@@ -63,7 +63,6 @@ it("rejects corrupt, unknown-version, oversized or provider-payload pending stor
   for (const raw of [
     "{",
     JSON.stringify({ version: 2 }),
-    "x".repeat(200001),
     JSON.stringify({
       version: 1,
       kind: "apply",
@@ -207,3 +206,32 @@ it.each(["loop", "limit"])(
     }
   },
 );
+
+// A legitimate field-heavy apply is below the existing HTTP body limit.
+it("persists and reloads a100-position60-field intent without changing its exact request", () => {
+  const body = importApplySchema.parse({
+    requestId: id(500),
+    decisions: Array.from({ length: 100 }, (_, index) => ({
+      previewId: id(1000 + index),
+      acceptedEntryIds: Array.from({ length: 60 }, (_, field) => id(2000 + field)),
+      linkAction: "attach",
+      photo: { kind: "keep" },
+    })),
+  });
+  const intent = { version: 1 as const, kind: "apply" as const, sessionId: id(1), expiresAt, body };
+  expect(JSON.stringify(intent).length).toBeGreaterThan(200_000);
+  expect(new TextEncoder().encode(JSON.stringify(body)).byteLength).toBeLessThan(900_000);
+  saveIntent(identity, intent);
+  expect(loadIntent(identity, id(1))).toEqual({ status: "valid", intent });
+});
+
+it("bounds the serialized intent envelope and refuses oversized retained bytes without deleting them", () => {
+  const body = { requestId: id(5), decisions: [initialChoice(previewFixture.items[0]!).decision] };
+  const intent = { version: 1 as const, kind: "apply" as const, sessionId: id(1), expiresAt, body };
+  expect(JSON.stringify(intent).length - JSON.stringify(body).length).toBeLessThan(1024);
+  const oversized = JSON.stringify(intent) + " ".repeat(9_002_049);
+  const get = vi.spyOn(Storage.prototype, "getItem").mockReturnValue(oversized);
+  expect(loadIntent(identity, id(1))).toEqual({ status: "corrupt" });
+  expect(() => saveIntent(identity, intent)).toThrow("storage_unavailable");
+  expect(get.mock.results[0]?.value).toBe(oversized);
+});

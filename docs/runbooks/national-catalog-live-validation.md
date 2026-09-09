@@ -1,5 +1,7 @@
 # National Catalog live read validation
 
+For product import enablement, also complete the [import acceptance checklist](national-catalog-import.md#live-acceptance-before-limited-enablement). This diagnostic preserves its existing read scope; its public-card checks never establish owned/granted import access.
+
 Run this gate only against a tenant that the deployment owner has authorized for
 National Catalog read validation. It makes only these GET requests:
 
