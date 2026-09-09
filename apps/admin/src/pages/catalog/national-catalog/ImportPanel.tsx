@@ -33,10 +33,9 @@ import {
 import { ImportSelection, initialItemsQuery } from "./ImportSelection.js";
 import { ImportReview, type ReviewDrafts } from "./ImportReview.js";
 import { ImportResult } from "./ImportResult.js";
-const polling = () =>
-  typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus()
-    ? 2000
-    : false;
+// React Query pauses intervals for hidden tabs and resumes on visibility changes.
+// A hasFocus() snapshot can permanently disable an interval after switching apps.
+const POLL_INTERVAL_MS = 2000;
 const pollingDenied = (error: unknown) =>
   error instanceof ApiRequestError && [401, 403, 404, 410].includes(error.status);
 const terminalError = (error: unknown) => error instanceof ApiRequestError && error.status === 410;
@@ -187,7 +186,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
       !pollingDenied(q.state.error) &&
       (q.state.data?.automaticWorkPending ||
         ["queued", "loading"].includes(q.state.data?.state ?? ""))
-        ? polling()
+        ? POLL_INTERVAL_MS
         : false,
   });
   const live =
@@ -198,7 +197,9 @@ function ScopedImportPanel({ identity }: { identity: string }) {
     session.data?.mode === "gtins" ? capabilities.data?.gtinLookup : capabilities.data?.ownCatalog;
   const mutable = canWrite && live && !!modeAvailable && !pending && !storageBlocked;
   const items = useQuery({
-    queryKey: [...prefix, sessionId, "items", query],
+    // Refresh the feed for every discovered revision, including the final one:
+    // an older empty response must not survive after the session stops polling.
+    queryKey: [...prefix, sessionId, "items", query, session.data?.revision],
     queryFn: ({ signal }) => api.getImportItems(sessionId, query, signal),
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[2] === sessionId ? previous : undefined,
@@ -211,7 +212,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
       !pollingDenied(q.state.error) &&
       (session.data?.automaticWorkPending ||
         ["queued", "loading"].includes(session.data?.state ?? ""))
-        ? polling()
+        ? POLL_INTERVAL_MS
         : false,
   });
   const exactItems = useQuery({
@@ -270,7 +271,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
         q.state.data?.preparation.state === "queued" ||
         q.state.data?.preparation.state === "loading" ||
         q.state.data?.items.some((p) => p.photos.some((photo) => photo.state === "pending")))
-        ? polling()
+        ? POLL_INTERVAL_MS
         : false,
   });
   const result = useQuery({
@@ -282,7 +283,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
     refetchOnReconnect: (q) => !terminalError(q.state.error),
     refetchInterval: (q) =>
       !pollingDenied(q.state.error) && ["pending", "running"].includes(q.state.data?.state ?? "")
-        ? polling()
+        ? POLL_INTERVAL_MS
         : false,
   });
   const invalidatedResult = useRef<string | null>(null);
@@ -501,10 +502,11 @@ function ScopedImportPanel({ identity }: { identity: string }) {
       onClose={() => closeCatalogPanel(location, navigate)}
     >
       <div className="mk-nc-import">
-        <nav aria-label={tr("steps")} className="mk-nc-actions">
+        <nav aria-label={tr("steps")} className="mk-nc-actions mk-nc-steps">
           <Button
             variant="secondary"
             disabled={!sessionId || busy}
+            aria-current={!showReview && !showResult && sessionId ? "step" : undefined}
             onClick={() =>
               route({
                 sessionId,
@@ -519,6 +521,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
           <Button
             variant="secondary"
             disabled={!preparationId || busy}
+            aria-current={showReview ? "step" : undefined}
             onClick={() =>
               route({
                 sessionId,

@@ -3,7 +3,7 @@ import type {
   ImportPrepareResponse,
   ImportPreview,
 } from "@markiro/platform-contracts";
-import { Alert, Button, Checkbox, Input, Select, RadioCard } from "@markiro/ui";
+import { Alert, Button, Checkbox, Input, Select, RadioCard, Spinner } from "@markiro/ui";
 import { useId, useState } from "react";
 import { productImageUrl, type ProductDto } from "../api.js";
 import { useTranslation } from "react-i18next";
@@ -86,7 +86,10 @@ export function ImportReview({
     setChoices((previous) => ({ ...previous, [p.id]: fn(currentChoice(p, previous[p.id])) }));
   }
   const applicable = data.items.filter((p) => p.canApply);
-  const ready = ["ready", "partial"].includes(data.preparation.state);
+  const preparing =
+    ["queued", "loading"].includes(data.preparation.state) ||
+    (data.preparation.automaticWorkPending && data.preparation.completed < data.preparation.total);
+  const ready = !preparing && ["ready", "partial"].includes(data.preparation.state);
   const invalidName = Object.values(effectiveDrafts.manualNames).some(
     (name) => name.trim().length > 200,
   );
@@ -136,11 +139,27 @@ export function ImportReview({
     photos: validChoices.filter((p) => choiceFor(p).decision.photo.kind === "candidate").length,
   };
   return (
-    <section aria-label={tr("review")}>
-      <h2>{tr("review")}</h2>
-      <p>{tr("reviewHint")}</p>
+    <section aria-label={tr("review")} className="mk-nc-review">
+      <header className="mk-nc-section-heading">
+        <h2>{tr("review")}</h2>
+        <p className="mk-nc-hint">{tr("reviewHint")}</p>
+      </header>
       {comparisonRejected && <Alert tone="error">{tr("comparisonRejected")}</Alert>}
-      {!ready && <p role="status">{tr("preparing")}</p>}
+      {preparing && (
+        <div className="mk-nc-progress" role="status">
+          <Spinner aria-hidden="true" />
+          <div>
+            <p>{tr("preparing")}</p>
+            <p className="mk-nc-hint">
+              {t("pages.catalog.import.preparationProgress", {
+                completed: data.preparation.completed,
+                total: data.preparation.total,
+              })}
+            </p>
+          </div>
+        </div>
+      )}
+      {!ready && !preparing && <Alert tone="error">{tr("loadFailed")}</Alert>}
       {data.preparation.failures.map((f) => (
         <Alert key={f.itemId} tone="error">
           {f.itemId}:{" "}
@@ -435,14 +454,14 @@ export function ImportReview({
           </fieldset>
         );
       })}
-      {canWrite && (
+      {canWrite && ready && (
         <p aria-label={tr("confirmationSummary")} aria-live="polite">
           {canConfirm
             ? t("pages.catalog.import.confirmationTotals", totals)
             : tr("confirmationIncomplete")}
         </p>
       )}
-      {canWrite && (
+      {canWrite && !preparing && (
         <div className="mk-nc-actions">
           <Button
             variant="secondary"
@@ -451,13 +470,15 @@ export function ImportReview({
           >
             {tr("refreshComparison")}
           </Button>
-          <Button
-            variant="primary"
-            disabled={!canConfirm}
-            onClick={() => onApply(applicable.map((p) => choiceFor(p).decision))}
-          >
-            {tr("apply")}
-          </Button>
+          {ready && (
+            <Button
+              variant="primary"
+              disabled={!canConfirm}
+              onClick={() => onApply(applicable.map((p) => choiceFor(p).decision))}
+            >
+              {tr("apply")}
+            </Button>
+          )}
         </div>
       )}
       {dirty && <p>{tr("draftNeedsComparison")}</p>}
