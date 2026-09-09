@@ -403,7 +403,12 @@ export const shiftBoxLabelTemplatesOpenApiSchema: SchemaObject = {
           name: { type: "string" },
           widthMm: { type: "number", minimum: 0 },
           heightMm: { type: "number", minimum: 0 },
-          dpi: { type: "integer", enum: [203, 300] },
+          dpi: {
+            type: "integer",
+            enum: [203, 300],
+            description:
+              "Authoring resolution. Informational only: the station prints at its own printer's resolution.",
+          },
           language: { type: "string", enum: ["zpl", "tspl"] },
         },
       },

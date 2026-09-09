@@ -8,6 +8,7 @@ import {
   buildDefaultLabelTemplates,
   buildDuplicateLabelTemplate,
   DEFAULT_BOX_LABEL_TEMPLATE_NAME,
+  DUPLICATE_LABEL_TEMPLATE_NAME,
 } from "@markiro/domain";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -377,7 +378,7 @@ describe.skipIf(!ready)("platform tenant management", () => {
     expect(policy).toEqual({ limitsEnabled: true });
   });
 
-  it("seeds both duplicate resolutions and preserves all box presets and the box default", async () => {
+  it("seeds the resolution-free stock set: one duplicate preset, all box presets and the box default", async () => {
     await ensureTenant();
     const templates = await setup.db
       .select()
@@ -387,20 +388,10 @@ describe.skipIf(!ready)("platform tenant management", () => {
     expect(
       boxes.map(({ name, spec }) => ({ name, spec })).sort((a, b) => a.name.localeCompare(b.name)),
     ).toEqual(buildDefaultLabelTemplates().sort((a, b) => a.name.localeCompare(b.name)));
-    expect(
-      templates
-        .filter((template) => template.purpose === "product_duplicate")
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    ).toEqual([
+    expect(templates.filter((template) => template.purpose === "product_duplicate")).toEqual([
       expect.objectContaining({
-        name: "Дубликат Data Matrix 58×40 (203 dpi)",
+        name: DUPLICATE_LABEL_TEMPLATE_NAME,
         spec: buildDuplicateLabelTemplate(),
-        enabled: true,
-        chzProductGroupCodes: null,
-      }),
-      expect.objectContaining({
-        name: "Дубликат Data Matrix 58×40 (300 dpi)",
-        spec: { ...buildDuplicateLabelTemplate(), dpi: 300 },
         enabled: true,
         chzProductGroupCodes: null,
       }),
