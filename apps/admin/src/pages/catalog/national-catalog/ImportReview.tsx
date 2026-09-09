@@ -19,6 +19,8 @@ export function ImportReview({
   canWrite,
   busy,
   canPreparePhotos = false,
+  comparisonRejected = false,
+  rejectedPreviewIds = [],
   onPrepare,
   onApply,
   onPhoto,
@@ -29,6 +31,8 @@ export function ImportReview({
   canWrite: boolean;
   busy: boolean;
   canPreparePhotos?: boolean;
+  comparisonRejected?: boolean;
+  rejectedPreviewIds?: string[];
   onPrepare: (drafts: ReviewDrafts) => void;
   onApply: (decisions: ImportDecision[]) => void;
   onPhoto: (previewId: string, candidateId: string) => void;
@@ -86,6 +90,7 @@ export function ImportReview({
     <section aria-label={tr("review")}>
       <h2>{tr("review")}</h2>
       <p>{tr("reviewHint")}</p>
+      {comparisonRejected && <Alert tone="error">{tr("comparisonRejected")}</Alert>}
       {!ready && <p role="status">{tr("preparing")}</p>}
       {data.preparation.failures.map((f) => (
         <Alert key={f.itemId} tone="error">
@@ -105,6 +110,9 @@ export function ImportReview({
             <legend>
               {preview.identity.gtin14} · {preview.identity.name ?? tr("unnamed")}
             </legend>
+            {comparisonRejected && rejectedPreviewIds.includes(preview.id) && (
+              <Alert tone="error">{tr("rejectedItem")}</Alert>
+            )}
             <p>
               {tr(
                 preview.linkAction === "replace"
@@ -156,8 +164,11 @@ export function ImportReview({
                 ]}
                 onValueChange={(optionId) => {
                   const next = {
-                    ...drafts,
-                    categoryChoices: { ...drafts.categoryChoices, [preview.itemId]: optionId },
+                    ...effectiveDrafts,
+                    categoryChoices: {
+                      ...effectiveDrafts.categoryChoices,
+                      [preview.itemId]: optionId,
+                    },
                   };
                   setDrafts(next);
                   setDirty(true);
@@ -331,6 +342,7 @@ export function ImportReview({
             variant="primary"
             disabled={
               busy ||
+              comparisonRejected ||
               dirty ||
               !ready ||
               !applicable.length ||

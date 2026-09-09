@@ -11,6 +11,7 @@ import { schema } from "@markiro/db";
 import {
   importApplySchema,
   type ImportApply,
+  type ImportApplyConflict,
   type ImportResult,
 } from "@markiro/platform-contracts";
 import { lockTenantSubscriptionTimeline } from "../../subscriptions/subscription-locks";
@@ -72,11 +73,21 @@ export class NationalCatalogImportApplyService {
       for (const decision of canonical.decisions) {
         const preview = await this.preview(tx, actor.tenantId, sessionId, decision.previewId);
         if (preview.expiresAt.getTime() <= Date.now() || preview.payloadPurgedAt)
-          throw new ConflictException("preview_expired");
+          throw new ConflictException({
+            statusCode: 409,
+            error: "Conflict",
+            message: "preview_expired",
+            previewIds: [preview.id],
+          } satisfies ImportApplyConflict);
         const diff = parseImportDiff(preview.diff);
         const source = sourceEnvelopeSchema.parse(preview.source);
         if (source.environment !== session.environment)
-          throw new ConflictException("environment_mismatch");
+          throw new ConflictException({
+            statusCode: 409,
+            error: "Conflict",
+            message: "environment_mismatch",
+            previewIds: [preview.id],
+          } satisfies ImportApplyConflict);
         if (!diff.view.canApply)
           throw new BadRequestException(diff.view.reason ?? "preview_not_applicable");
         if (decision.linkAction !== diff.view.linkAction)

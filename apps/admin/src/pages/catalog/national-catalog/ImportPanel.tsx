@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CABINET_CAPABILITY } from "@markiro/domain";
+import { importApplyConflictSchema } from "@markiro/platform-contracts";
 import type {
   ImportApply,
   ImportDecision,
@@ -17,6 +18,8 @@ import { useAuthClient } from "../../../auth/client.js";
 import { closeCatalogPanel } from "../ProductPanelRoute.js";
 import * as api from "./api.js";
 import {
+  abandonIntent,
+  type IntentState,
   clearIdentityIntents,
   readIntentOwner,
   writeIntentOwner,
@@ -94,6 +97,18 @@ function ScopedImportPanel({ identity }: { identity: string }) {
   const preparationId = params.get("preparationId") ?? "";
   const operationId = params.get("operationId") ?? "";
   const step = params.get("step");
+  const comparisonRejected =
+    !!preparationId && params.get("rejectedPreparationId") === preparationId;
+  const rejectedIdsText = params.get("rejectedPreviewIds") ?? "";
+  const rejectedDetails = importApplyConflictSchema.safeParse({
+    statusCode: 409,
+    error: "Conflict",
+    message: params.get("rejectedReason"),
+    previewIds: rejectedIdsText.length <= 3700 ? rejectedIdsText.split(",") : [],
+  });
+  const rejectedPreviewIds =
+    comparisonRejected && rejectedDetails.success ? rejectedDetails.data.previewIds : [];
+
   const showResult = !!operationId && step !== "selection" && step !== "review";
   const showReview = !!preparationId && !showResult && step !== "selection";
   const [query, setQuery] = useState(initialItemsQuery);
@@ -101,9 +116,15 @@ function ScopedImportPanel({ identity }: { identity: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryBlocked, setRetryBlocked] = useState(false);
-  const [pending, setPending] = useState(() =>
-    sessionId ? loadIntent(identity, sessionId) : null,
+  const [recovery, setRecovery] = useState<IntentState>(() =>
+    sessionId ? loadIntent(identity, sessionId) : { status: "missing" },
   );
+  const pending = recovery.status === "valid" ? recovery.intent : null;
+  const storageBlocked = recovery.status === "corrupt" || recovery.status === "unavailable";
+  const [abandonConfirm, setAbandonConfirm] = useState(false);
+  function setPending(intent: PendingIntent | null) {
+    setRecovery(intent ? { status: "valid", intent } : { status: "missing" });
+  }
   const [receiptToClear, setReceiptToClear] = useState<{
     sessionId: string;
     kind: "prepare" | "apply";
@@ -124,7 +145,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
     };
   }, [identity, client]);
   useEffect(() => {
-    setPending(sessionId ? loadIntent(identity, sessionId) : null);
+    setRecovery(sessionId ? loadIntent(identity, sessionId) : { status: "missing" });
   }, [identity, sessionId]);
   useEffect(() => {
     if (
@@ -160,7 +181,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
     !terminalError(session.error);
   const modeAvailable =
     session.data?.mode === "gtins" ? capabilities.data?.gtinLookup : capabilities.data?.ownCatalog;
-  const mutable = canWrite && live && !!modeAvailable && !pending;
+  const mutable = canWrite && live && !!modeAvailable && !pending && !storageBlocked;
   const items = useQuery({
     queryKey: [...prefix, sessionId, "items", query],
     queryFn: ({ signal }) => api.getImportItems(sessionId, query, signal),
@@ -206,12 +227,18 @@ function ScopedImportPanel({ identity }: { identity: string }) {
     if (result.data?.state === "finished" || result.data?.state === "cancelled")
       setRetryBlocked(false);
   }, [result.dataUpdatedAt, result.data?.state]);
-  function route(ids: {
-    sessionId: string;
-    preparationId?: string;
-    operationId?: string;
-    step?: string;
-  }) {
+  function route(
+    ids: {
+      sessionId: string;
+      preparationId?: string;
+      operationId?: string;
+      step?: string;
+      rejectedPreparationId?: string;
+      rejectedPreviewIds?: string;
+      rejectedReason?: string;
+    },
+    clearRejection = false,
+  ) {
     const originalState: unknown = location.state;
     const state =
       originalState &&
@@ -220,7 +247,15 @@ function ScopedImportPanel({ identity }: { identity: string }) {
       originalState.catalogBackground === true
         ? { catalogBackground: true }
         : null;
-    setParams(ids, { replace: true, state });
+    const retainedRejection =
+      !clearRejection && params.has("rejectedPreparationId")
+        ? {
+            rejectedPreparationId: params.get("rejectedPreparationId") ?? "",
+            rejectedPreviewIds: params.get("rejectedPreviewIds") ?? "",
+            rejectedReason: params.get("rejectedReason") ?? "",
+          }
+        : {};
+    setParams({ ...retainedRejection, ...ids }, { replace: true, state });
   }
   async function run(action: () => Promise<void>) {
     if (lock.current) return;
@@ -257,7 +292,10 @@ function ScopedImportPanel({ identity }: { identity: string }) {
   }
   function acceptedPreparation(data: ImportPrepareResponse, sid = sessionId) {
     client.setQueryData([...prefix, sid, data.preparation.id, "preparation"], data);
-    route({ sessionId: sid, preparationId: data.preparation.id });
+    route(
+      { sessionId: sid, preparationId: data.preparation.id },
+      data.preparation.id !== params.get("rejectedPreparationId"),
+    );
     setReceiptToClear({ sessionId: sid, kind: "prepare", id: data.preparation.id });
   }
   function acceptedResult(data: Result, sid = sessionId) {
@@ -273,6 +311,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
     try {
       saveIntent(identity, intent);
     } catch {
+      setRecovery(loadIntent(identity, intent.sessionId));
       setError(tr("storageUnavailable"));
       return;
     }
@@ -286,6 +325,27 @@ function ScopedImportPanel({ identity }: { identity: string }) {
         if (active.current) acceptedResult(data, intent.sessionId);
       }
     } catch (e) {
+      if (
+        active.current &&
+        intent.kind === "apply" &&
+        e instanceof ApiRequestError &&
+        e.status === 409 &&
+        (e.code ?? e.message) !== "operation_running"
+      ) {
+        const details = importApplyConflictSchema.safeParse(e.details);
+        const attempted = new Set(intent.body.decisions.map((decision) => decision.previewId));
+        const ids = details.success
+          ? details.data.previewIds.filter((id) => attempted.has(id))
+          : [];
+        route({
+          sessionId,
+          preparationId,
+          ...(operationId ? { operationId } : {}),
+          rejectedPreparationId: preparationId,
+          rejectedPreviewIds: ids.join(","),
+          rejectedReason: details.success ? details.data.message : "",
+        });
+      }
       if (
         e instanceof ApiRequestError &&
         (e.status === 400 ||
@@ -301,7 +361,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
     }
   }
   function prepare(drafts: ReviewDrafts = { manualNames: {}, categoryChoices: {} }) {
-    if (!session.data || pending) return;
+    if (!session.data || pending || storageBlocked) return;
     const body: ImportPrepare = {
       requestId: crypto.randomUUID(),
       itemIds: [...session.data.selectedItemIds].sort(),
@@ -325,7 +385,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
     );
   }
   function apply(decisions: ImportDecision[]) {
-    if (!session.data || pending) return;
+    if (!session.data || pending || storageBlocked || comparisonRejected) return;
     const body: ImportApply = {
       requestId: crypto.randomUUID(),
       decisions: decisions
@@ -401,6 +461,49 @@ function ScopedImportPanel({ identity }: { identity: string }) {
         {error && <Alert tone="error">{error}</Alert>}
         {readError && (
           <Alert tone="error">{tr(terminalError(readError) ? "expired" : "loadFailed")}</Alert>
+        )}
+        {storageBlocked && (
+          <Alert tone="error">
+            <p>{tr("storageRecoveryBlocked")}</p>
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() => {
+                setRecovery(loadIntent(identity, sessionId));
+                setAbandonConfirm(false);
+              }}
+            >
+              {tr("retryStorageRead")}
+            </Button>
+            {canWrite && (
+              <>
+                <Button variant="secondary" disabled={busy} onClick={() => setAbandonConfirm(true)}>
+                  {tr("abandonRequest")}
+                </Button>
+                {abandonConfirm && (
+                  <>
+                    <p>{tr("abandonWarning")}</p>
+                    <Button
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={() => {
+                        try {
+                          abandonIntent(identity, sessionId);
+                          setRecovery({ status: "missing" });
+                          setAbandonConfirm(false);
+                          setError(null);
+                        } catch {
+                          setError(tr("storageUnavailable"));
+                        }
+                      }}
+                    >
+                      {tr("confirmAbandon")}
+                    </Button>
+                  </>
+                )}
+              </>
+            )}
+          </Alert>
         )}
         {pending && (
           <Alert>
@@ -537,6 +640,8 @@ function ScopedImportPanel({ identity }: { identity: string }) {
             canPreparePhotos={capabilities.data?.photos === true}
             canWrite={mutable}
             busy={busy}
+            comparisonRejected={comparisonRejected}
+            rejectedPreviewIds={rejectedPreviewIds}
             onPrepare={prepare}
             onApply={apply}
             onPhoto={(pid, cid) =>

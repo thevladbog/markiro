@@ -11,29 +11,49 @@ export const identityKey = (tenant: string, user: string) =>
   `${encodeURIComponent(tenant)}:${encodeURIComponent(user)}:`;
 const key = (identity: string, sessionId: string) => `${prefix}${identity}${sessionId}`;
 const MAX_BYTES = 200_000;
-export function loadIntent(identity: string, sessionId: string): PendingIntent | null {
+export type IntentState =
+  | { status: "missing" }
+  | { status: "valid"; intent: PendingIntent }
+  | { status: "corrupt" }
+  | { status: "unavailable" };
+export function loadIntent(identity: string, sessionId: string): IntentState {
+  let raw: string | null;
   try {
-    const raw = sessionStorage.getItem(key(identity, sessionId));
-    if (!raw) return null;
-    if (raw.length > MAX_BYTES) throw new Error("invalid_intent");
-    const intent = intentSchema.parse(JSON.parse(raw));
-    if (
-      intent.sessionId !== sessionId ||
-      (intent.kind === "prepare" && Date.parse(intent.expiresAt) <= Date.now())
-    ) {
-      clearIntent(identity, sessionId);
-      return null;
-    }
-    return intent;
+    raw = sessionStorage.getItem(key(identity, sessionId));
   } catch {
-    clearIntent(identity, sessionId);
-    return null;
+    return { status: "unavailable" };
   }
+  if (raw === null) return { status: "missing" };
+  if (raw.length > MAX_BYTES) return { status: "corrupt" };
+  let intent: PendingIntent;
+  try {
+    intent = intentSchema.parse(JSON.parse(raw));
+  } catch {
+    return { status: "corrupt" };
+  }
+  if (intent.sessionId !== sessionId) return { status: "corrupt" };
+  if (intent.kind === "prepare" && Date.parse(intent.expiresAt) <= Date.now()) {
+    try {
+      abandonIntent(identity, sessionId);
+      return { status: "missing" };
+    } catch {
+      return { status: "unavailable" };
+    }
+  }
+  return { status: "valid", intent };
+}
+/** Deliberate local abandonment must prove removal before admitting another intent. */
+export function abandonIntent(identity: string, sessionId: string) {
+  sessionStorage.removeItem(key(identity, sessionId));
+  if (sessionStorage.getItem(key(identity, sessionId)) !== null)
+    throw new Error("storage_unavailable");
 }
 export function saveIntent(identity: string, intent: PendingIntent) {
   const parsed = intentSchema.parse(intent);
   const existing = loadIntent(identity, intent.sessionId);
-  if (existing && JSON.stringify(existing) !== JSON.stringify(parsed))
+  if (existing.status === "corrupt" || existing.status === "unavailable")
+    throw new Error("storage_unavailable");
+  if (existing.status === "valid" && JSON.stringify(existing.intent) !== JSON.stringify(parsed))
     throw new Error("unresolved_intent");
   const raw = JSON.stringify(parsed);
   if (raw.length > MAX_BYTES) throw new Error("storage_unavailable");

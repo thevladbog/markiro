@@ -1,3 +1,4 @@
+import { sourceEnvelopeSchema } from "../src/modules/national-catalog/national-catalog-import-apply-state";
 import { randomUUID, createHash } from "node:crypto";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
@@ -9,6 +10,7 @@ import sharp from "sharp";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AppModule } from "../src/app.module";
+import { PgBossService } from "../src/jobs/jobs.module";
 import { mountAuth, setupAuth } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { ChzTokenService } from "../src/modules/chz-exports/chz-token.service";
@@ -38,6 +40,7 @@ const GTIN = "04601234567893";
 describe.skipIf(!ready)("National Catalog successful actual AppModule HTTP mappings", () => {
   let app: INestApplication;
   let db: Db;
+  let restoreWorkerStartup: (() => void) | undefined;
   const objects = new Map<string, Buffer>();
   const storage = {
     put: vi.fn(async (key: string, body: Buffer) => {
@@ -157,11 +160,19 @@ describe.skipIf(!ready)("National Catalog successful actual AppModule HTTP mappi
     mountAuth(server, setup.auth);
     server.use(nationalCatalogBodyParser);
     server.use(express.json());
+    // This HTTP mapping fixture drives workers explicitly. A live repair worker
+    // could concurrently consume another fixture's persisted image jobs.
+    const startup = vi.spyOn(app.get(PgBossService), "onModuleInit").mockResolvedValue(undefined);
+    restoreWorkerStartup = () => startup.mockRestore();
     await app.init();
     await listenOnLoopback(app);
   });
   afterAll(async () => {
-    await app?.close();
+    try {
+      await app?.close();
+    } finally {
+      restoreWorkerStartup?.();
+    }
   });
   it("maps selection, preparation, explicit photo, cached GET, apply/retry receipts and link removal", async () => {
     const agent = request.agent(app.getHttpServer());
@@ -241,6 +252,109 @@ describe.skipIf(!ready)("National Catalog successful actual AppModule HTTP mappi
     );
     const preview = views.items[0];
     if (!preview) throw Error(JSON.stringify(views));
+    // Admission conflicts identify only the tenant/session-resolved rejected preview.
+    const previewTable = schema.nationalCatalogImportPreviews;
+    const [originalPreview] = await db
+      .select()
+      .from(previewTable)
+      .where(eq(previewTable.id, preview.id));
+    if (!originalPreview) throw Error("stored preview missing");
+    const rejectedBody = {
+      requestId: randomUUID(),
+      decisions: [
+        {
+          previewId: preview.id,
+          acceptedEntryIds: [],
+          linkAction: preview.linkAction,
+          photo: { kind: "keep" },
+        },
+      ],
+    };
+    for (const reason of ["preview_expired", "environment_mismatch"] as const) {
+      await db
+        .update(previewTable)
+        .set(
+          reason === "preview_expired"
+            ? { expiresAt: new Date(Date.now() - 1000) }
+            : {
+                expiresAt: originalPreview.expiresAt,
+                source: {
+                  ...sourceEnvelopeSchema.parse(originalPreview.source),
+                  environment: "sandbox",
+                },
+              },
+        )
+        .where(eq(previewTable.id, preview.id));
+      const before = await db.select().from(previewTable).where(eq(previewTable.id, preview.id));
+      const response = await agent
+        .post(base + "/applies")
+        .send(rejectedBody)
+        .expect(409);
+      expect(response.body).toEqual({
+        statusCode: 409,
+        error: "Conflict",
+        message: reason,
+        previewIds: [preview.id],
+      });
+      expect(await db.select().from(previewTable).where(eq(previewTable.id, preview.id))).toEqual(
+        before,
+      );
+      expect(
+        await db
+          .select()
+          .from(schema.nationalCatalogImportOperations)
+          .where(eq(schema.nationalCatalogImportOperations.tenantId, tenantId)),
+      ).toEqual([]);
+      expect(
+        await db
+          .select()
+          .from(schema.nationalCatalogImportOperationItems)
+          .where(eq(schema.nationalCatalogImportOperationItems.tenantId, tenantId)),
+      ).toEqual([]);
+    }
+    const beforeDenial = await db
+      .select()
+      .from(previewTable)
+      .where(eq(previewTable.id, preview.id));
+    const otherSession = contracts.importSessionSchema.parse(
+      (
+        await agent
+          .post("/national-catalog/import-sessions")
+          .send({ mode: "gtins", text: GTIN })
+          .expect(200)
+      ).body,
+    );
+    const wrongSession = await agent
+      .post(`/national-catalog/import-sessions/${otherSession.id}/applies`)
+      .send(rejectedBody)
+      .expect(404);
+    expect(wrongSession.body).not.toHaveProperty("previewIds");
+    const foreignAgent = request.agent(app.getHttpServer());
+    await signUpAndActivate(foreignAgent);
+    const denied = await foreignAgent
+      .post(base + "/applies")
+      .send(rejectedBody)
+      .expect(404);
+    expect(denied.body).not.toHaveProperty("previewIds");
+    expect(await db.select().from(previewTable).where(eq(previewTable.id, preview.id))).toEqual(
+      beforeDenial,
+    );
+    expect(
+      await db
+        .select()
+        .from(schema.nationalCatalogImportOperations)
+        .where(eq(schema.nationalCatalogImportOperations.tenantId, tenantId)),
+    ).toEqual([]);
+    expect(
+      await db
+        .select()
+        .from(schema.nationalCatalogImportOperationItems)
+        .where(eq(schema.nationalCatalogImportOperationItems.tenantId, tenantId)),
+    ).toEqual([]);
+    await db
+      .update(previewTable)
+      .set({ expiresAt: originalPreview.expiresAt, source: originalPreview.source })
+      .where(eq(previewTable.id, preview.id));
     const alternative = preview.photos.find((p) => !p.selectedByDefault);
     if (!alternative) throw Error("alternative missing");
     const photo = contracts.importPhotoSchema.parse(

@@ -1,3 +1,5 @@
+import { HttpException } from "@nestjs/common";
+import { sourceEnvelopeSchema } from "../src/modules/national-catalog/national-catalog-import-apply-state";
 import { randomUUID } from "node:crypto";
 import { createDb, schema, type Db } from "@markiro/db";
 import { and, eq } from "drizzle-orm";
@@ -272,6 +274,56 @@ describe("atomic National Catalog product application (real PostgreSQL services)
     if (!option) throw new Error("category option expected");
     return { id, preview: await preview(undefined, option.optionId) };
   }
+  it.each(["preview_expired", "environment_mismatch"] as const)(
+    "returns the specific rejected preview for %s without admitting or mutating evidence",
+    async (reason) => {
+      const p = await preview();
+      const table = schema.nationalCatalogImportPreviews;
+      const [stored] = await db.select().from(table).where(eq(table.id, p.id));
+      if (!stored) throw Error("missing preview");
+      await db
+        .update(table)
+        .set(
+          reason === "preview_expired"
+            ? { expiresAt: new Date(Date.now() - 1000) }
+            : {
+                source: { ...sourceEnvelopeSchema.parse(stored.source), environment: "production" },
+              },
+        )
+        .where(eq(table.id, p.id));
+      const before = await db.select().from(table).where(eq(table.id, p.id));
+      const productBefore = await product();
+      await init();
+      try {
+        await service.start(actor, sessionId, decision(p));
+        throw Error("expected conflict");
+      } catch (error) {
+        expect(error).toBeInstanceOf(HttpException);
+        if (!(error instanceof HttpException)) throw error;
+        expect(error.getStatus()).toBe(409);
+        expect(error.getResponse()).toEqual({
+          statusCode: 409,
+          error: "Conflict",
+          message: reason,
+          previewIds: [p.id],
+        });
+      }
+      expect(await db.select().from(table).where(eq(table.id, p.id))).toEqual(before);
+      expect(await product()).toEqual(productBefore);
+      expect(
+        await db
+          .select()
+          .from(schema.nationalCatalogImportOperations)
+          .where(eq(schema.nationalCatalogImportOperations.tenantId, actor.tenantId)),
+      ).toEqual([]);
+      expect(
+        await db
+          .select()
+          .from(schema.nationalCatalogImportOperationItems)
+          .where(eq(schema.nationalCatalogImportOperationItems.tenantId, actor.tenantId)),
+      ).toEqual([]);
+    },
+  );
   it("confirms link-only, preserves exact name/operational fields, and writes exact actor/link audit", async () => {
     const before = await product();
     const p = await preview();

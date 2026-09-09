@@ -6,6 +6,7 @@ import {
   IMPORT_GTIN_MAX_TOKENS,
   IMPORT_GTIN_TEXT_MAX_CHARS,
   importApplySchema,
+  importApplyConflictSchema,
   importDecisionSchema,
   importItemSchema,
   importItemsQuerySchema,
@@ -581,4 +582,27 @@ it("requires explicit scoped field dependency IDs rather than accepting absent o
       fields: [{ ...fields[0], requiresEntryIds: [ID_3] }],
     }).success,
   ).toBe(false);
+});
+
+it("strictly identifies bounded unique rejected preview IDs in additive apply conflicts", () => {
+  const body = {
+    statusCode: 409,
+    error: "Conflict",
+    message: "preview_expired",
+    previewIds: [ID_1],
+  };
+  expect(importApplyConflictSchema.parse(body)).toEqual(body);
+  expect(
+    importApplyConflictSchema.parse({ ...body, message: "environment_mismatch" }),
+  ).toMatchObject({ previewIds: [ID_1] });
+  for (const invalid of [
+    { ...body, previewIds: [] },
+    { ...body, previewIds: [ID_1, ID_1] },
+    { ...body, previewIds: ids(101) },
+    { ...body, previewIds: ["bad"] },
+    { ...body, message: "operation_running" },
+    { ...body, statusCode: 400 },
+    { ...body, extra: true },
+  ])
+    expect(importApplyConflictSchema.safeParse(invalid).success).toBe(false);
 });

@@ -320,6 +320,17 @@ const importResultItemSchema = z
   })
   .strict();
 
+export const importApplyConflictSchema = z
+  .object({
+    statusCode: z.literal(409),
+    error: z.literal("Conflict"),
+    message: z.enum(["preview_expired", "environment_mismatch"]),
+    previewIds: z.array(platformUuidSchema).min(1).max(100),
+  })
+  .strict()
+  .superRefine((value, context) => addDuplicateIssue(value.previewIds, context, ["previewIds"]));
+export type ImportApplyConflict = z.infer<typeof importApplyConflictSchema>;
+
 export const importResultSchema = z
   .object({
     operationId: platformUuidSchema,

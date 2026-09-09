@@ -156,6 +156,7 @@ function mockServer() {
     failPrepare: 0,
     apply403: false,
     apply409: false,
+    applyConflict: null as unknown,
     retry409: false,
     disabled: false,
   };
@@ -220,7 +221,7 @@ function mockServer() {
         body = { message: "access_changed" };
       } else if (state.apply409) {
         status = 409;
-        body = { message: "preview_expired" };
+        body = state.applyConflict ?? { message: "preview_expired" };
       } else body = state.result;
     } else if (path.includes("/applies/") && path.endsWith("/retries") && state.retry409) {
       state.result.state = "running";
@@ -270,7 +271,7 @@ it("replays lost prepare response after unmount with identical body/requestId", 
   await screen.findByLabelText("Название вручную");
   expect(server.prepares).toHaveLength(2);
   expect(server.prepares[1]).toEqual(server.prepares[0]);
-  expect(loadIntent(identityKey("tenant", "user"), id(1))).toBeNull();
+  expect(loadIntent(identityKey("tenant", "user"), id(1))).toEqual({ status: "missing" });
 });
 it("recovers accepted apply after lost response, expired session and temporary403 with the same body", async () => {
   const server = mockServer();
@@ -283,7 +284,7 @@ it("recovers accepted apply after lost response, expired session and temporary40
   );
   await screen.findByRole("button", { name: "Восстановить результат запроса" });
   const intent = loadIntent(identityKey("tenant", "user"), id(1));
-  expect(intent?.kind).toBe("apply");
+  expect(intent).toMatchObject({ status: "valid", intent: { kind: "apply" } });
   view.unmount();
   server.state.expired = true;
   vi.spyOn(Date, "now").mockReturnValue(originalNow + 120000);
@@ -308,7 +309,7 @@ it("recovers accepted apply after lost response, expired session and temporary40
     true,
   );
   expect(view.router.state.location.search).toContain(`operationId=${id(20)}`);
-  expect(loadIntent(identityKey("tenant", "user"), id(1))).toBeNull();
+  expect(loadIntent(identityKey("tenant", "user"), id(1))).toEqual({ status: "missing" });
 });
 it("preserves pending apply through navigating away and reopening", async () => {
   const server = mockServer();
@@ -721,7 +722,7 @@ it("clears owned intents after a settled tenant switch even with the panel close
   );
   await screen.findByRole("button", { name: "Восстановить результат запроса" });
   await view.user.click(screen.getByRole("button", { name: "Закрыть" }));
-  expect(loadIntent(identityKey("tenant", "user"), id(1))).not.toBeNull();
+  expect(loadIntent(identityKey("tenant", "user"), id(1)).status).toBe("valid");
   sessionStorage.setItem("unrelated", "keep");
   testSession = {
     ...defaultSession,
@@ -729,7 +730,9 @@ it("clears owned intents after a settled tenant switch even with the panel close
   };
   view.refresh();
   await screen.findByRole("button", { name: "Добавить из Национального каталога" });
-  await waitFor(() => expect(loadIntent(identityKey("tenant", "user"), id(1))).toBeNull());
+  await waitFor(() =>
+    expect(loadIntent(identityKey("tenant", "user"), id(1))).toEqual({ status: "missing" }),
+  );
   expect(sessionStorage.getItem("unrelated")).toBe("keep");
   expect(view.router.state.location.pathname).toBe("/catalog");
 });
@@ -827,4 +830,223 @@ it("returns from selection to the saved running receipt without losing its opera
   await user.click(screen.getByRole("button", { name: "Результат" }));
   await screen.findByText("Добавление продолжается");
   expect(server.applies).toHaveLength(0);
+});
+
+it("preserves all late-polled manual and category inputs when changing category, including deliberate blank overrides", async () => {
+  const data = structuredClone(previewFixture);
+  const first = data.items[0]!;
+  first.fields[0]!.source = "manual";
+  first.fields[0]!.after = "Сохранённое имя";
+  first.categoryOptions = [
+    { optionId: id(40), label: "Первая", selected: true },
+    { optionId: id(41), label: "Новая", selected: false },
+  ];
+  const second = structuredClone(first);
+  second.id = id(50);
+  second.itemId = id(51);
+  second.fields[0]!.after = "Второе имя";
+  second.categoryOptions = [{ optionId: id(52), label: "Вторая", selected: true }];
+  data.items.push(second);
+  const prepare = vi.fn();
+  const props = {
+    sessionId: id(1),
+    canWrite: true,
+    busy: false,
+    onPrepare: prepare,
+    onApply: vi.fn(),
+    onPhoto: vi.fn(),
+    onRetry: vi.fn(),
+  };
+  const view = render(
+    <ImportReview
+      {...props}
+      data={{ ...data, items: [], preparation: { ...data.preparation, state: "loading" } }}
+    />,
+  );
+  view.rerender(<ImportReview {...props} data={data} />);
+  const user = userEvent.setup();
+  await user.selectOptions(screen.getAllByLabelText("Начальная категория")[0]!, id(41));
+  expect(prepare).toHaveBeenLastCalledWith({
+    manualNames: { [first.itemId]: "Сохранённое имя", [second.itemId]: "Второе имя" },
+    categoryChoices: { [first.itemId]: id(41), [second.itemId]: id(52) },
+  });
+  await user.clear(screen.getAllByLabelText("Название вручную")[0]!);
+  view.rerender(<ImportReview {...props} data={structuredClone(data)} />);
+  await user.selectOptions(screen.getAllByLabelText("Начальная категория")[0]!, id(40));
+  expect(prepare).toHaveBeenLastCalledWith({
+    manualNames: { [first.itemId]: "", [second.itemId]: "Второе имя" },
+    categoryChoices: { [first.itemId]: id(40), [second.itemId]: id(52) },
+  });
+});
+
+it.each(["{", JSON.stringify({ version: 9 }), "x".repeat(200001)])(
+  "blocks corrupt pending evidence without deleting it or sending a new request",
+  async (raw) => {
+    const server = mockServer();
+    const storageKey = `markiro.nc.pending.v1:${identityKey("tenant", "user")}${id(1)}`;
+    sessionStorage.setItem(storageKey, raw);
+    const { user } = renderImport(reviewRoute);
+    await screen.findByText(
+      "Не удалось прочитать сохранённый запрос. Его прежний результат может оставаться неизвестным.",
+    );
+    expect(sessionStorage.getItem(storageKey)).toBe(raw);
+    expect(screen.queryByRole("button", { name: "Добавить выбранные изменения" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Прочитать запрос ещё раз" }));
+    expect(server.applies).toHaveLength(0);
+    expect(server.prepares).toHaveLength(0);
+    expect(sessionStorage.getItem(storageKey)).toBe(raw);
+  },
+);
+it("preserves unreadable pending evidence, retries reading it, and never submits a replacement", async () => {
+  const server = mockServer();
+  server.state.failApply = 1;
+  let view = renderImport(reviewRoute);
+  await view.user.click(
+    await screen.findByRole("button", { name: "Добавить выбранные изменения" }),
+  );
+  await screen.findByRole("button", { name: "Восстановить результат запроса" });
+  const original = server.applies[0];
+  view.unmount();
+  const getItem = Storage.prototype.getItem;
+  const getter = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (
+    this: Storage,
+    key: string,
+  ) {
+    if (key.startsWith("markiro.nc.pending.v1:")) throw new Error("blocked");
+    return getItem.call(this, key);
+  });
+  view = renderImport(reviewRoute);
+  await screen.findByText(
+    "Не удалось прочитать сохранённый запрос. Его прежний результат может оставаться неизвестным.",
+  );
+  expect(screen.queryByRole("button", { name: "Добавить выбранные изменения" })).toBeNull();
+  expect(server.applies).toHaveLength(1);
+  getter.mockRestore();
+  await view.user.click(screen.getByRole("button", { name: "Прочитать запрос ещё раз" }));
+  await view.user.click(
+    await screen.findByRole("button", { name: "Восстановить результат запроса" }),
+  );
+  await screen.findByText("Товар добавлен. Фото не загрузилось.");
+  expect(server.applies).toEqual([original, original]);
+});
+it("requires deliberate abandonment and verified scoped removal before unblocking corrupt storage", async () => {
+  const server = mockServer();
+  const storageKey = `markiro.nc.pending.v1:${identityKey("tenant", "user")}${id(1)}`;
+  sessionStorage.setItem(storageKey, "{");
+  sessionStorage.setItem("unrelated", "keep");
+  const { user } = renderImport(reviewRoute);
+  await screen.findByRole("button", { name: "Забыть этот запрос" });
+  await user.click(screen.getByRole("button", { name: "Забыть этот запрос" }));
+  await screen.findByText(
+    "Предыдущая операция могла быть принята. Это удалит только локальный запрос и не отменит её. Перед новым добавлением проверьте каталог.",
+  );
+  const remover = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {});
+  await user.click(screen.getByRole("button", { name: "Подтверждаю: забыть запрос" }));
+  expect(sessionStorage.getItem(storageKey)).toBe("{");
+  expect(screen.queryByRole("button", { name: "Добавить выбранные изменения" })).toBeNull();
+  expect(server.applies).toHaveLength(0);
+  remover.mockRestore();
+  await user.click(screen.getByRole("button", { name: "Подтверждаю: забыть запрос" }));
+  await screen.findByRole("button", { name: "Добавить выбранные изменения" });
+  expect(sessionStorage.getItem(storageKey)).toBeNull();
+  expect(sessionStorage.getItem("unrelated")).toBe("keep");
+  expect(server.applies).toHaveLength(0);
+});
+
+it.each([
+  { statusCode: 409, error: "Conflict", message: "preview_expired", previewIds: [id(99)] },
+  { statusCode: 409, error: "Conflict", message: "preview_expired", previewIds: [id(12)] },
+  { statusCode: 409, error: "Conflict", message: "environment_mismatch", previewIds: [id(12)] },
+  { message: "preview_expired" },
+  { statusCode: 409, error: "Conflict", message: "preview_expired", previewIds: ["invalid"] },
+])(
+  "blocks stale decisions and identifies only strictly reported rows until a new comparison",
+  async (conflict) => {
+    const server = mockServer();
+    const second = structuredClone(server.state.preparation.items[0]!);
+    second.id = id(50);
+    second.itemId = id(51);
+    second.identity = { ...second.identity, name: "Второй товар" };
+    second.fields[0]!.id = id(52);
+    server.state.preparation.items.push(second);
+    server.state.session.selectedItemIds.push(second.itemId);
+    server.state.session.selected = 2;
+    server.state.apply409 = true;
+    server.state.applyConflict = conflict;
+    const view = renderImport(reviewRoute);
+    await view.user.click(
+      await screen.findByRole("button", { name: "Добавить выбранные изменения" }),
+    );
+    await screen.findByText("Сравнение устарело. Обновите его перед добавлением изменений.");
+    const known = "previewIds" in conflict && conflict.previewIds[0] === id(12);
+    const firstGroup = screen.getByRole("group", { name: "04006381333931 · Молоко" });
+    const secondGroup = screen.getByRole("group", { name: "04006381333931 · Второй товар" });
+    expect(firstGroup.textContent?.includes("Эта позиция требует нового сравнения.")).toBe(known);
+    expect(secondGroup.textContent?.includes("Эта позиция требует нового сравнения.")).toBe(false);
+    expect(
+      screen.getByRole("button", { name: "Добавить выбранные изменения" }).hasAttribute("disabled"),
+    ).toBe(true);
+    await view.user.click(screen.getByRole("button", { name: "Добавить выбранные изменения" }));
+    expect(server.applies).toHaveLength(1);
+    await view.user.click(screen.getByRole("button", { name: "Выбор товаров" }));
+    await view.user.click(screen.getByRole("button", { name: "Сравнение" }));
+    expect(
+      screen.getByRole("button", { name: "Добавить выбранные изменения" }).hasAttribute("disabled"),
+    ).toBe(true);
+    const savedRoute = view.router.state.location.pathname + view.router.state.location.search;
+    view.unmount();
+    const reopened = renderImport(savedRoute);
+    await screen.findByText("Сравнение устарело. Обновите его перед добавлением изменений.");
+    expect(
+      screen.getByRole("button", { name: "Добавить выбранные изменения" }).hasAttribute("disabled"),
+    ).toBe(true);
+    server.state.apply409 = false;
+    server.state.preparation.preparation.id = id(60);
+    server.state.preparation.items = server.state.preparation.items.map((p, index) => ({
+      ...p,
+      id: id(61 + index),
+    }));
+    await reopened.user.click(screen.getByRole("button", { name: "Обновить сравнение" }));
+    await waitFor(() =>
+      expect(reopened.router.state.location.search).toContain(`preparationId=${id(60)}`),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Сравнение устарело. Обновите его перед добавлением изменений."),
+      ).toBeNull(),
+    );
+    await reopened.user.click(screen.getByRole("button", { name: "Добавить выбранные изменения" }));
+    expect(server.applies).toHaveLength(2);
+    expect(server.applies[1]?.requestId).not.toBe(server.applies[0]?.requestId);
+    expect(server.applies[1]?.decisions.map((d) => d.previewId)).toEqual([id(61), id(62)]);
+  },
+);
+
+it("identifies a strictly rejected attempted preview after pending apply is reopened on the selection step", async () => {
+  const server = mockServer();
+  server.state.failApply = 1;
+  const view = renderImport(reviewRoute);
+  await view.user.click(
+    await screen.findByRole("button", { name: "Добавить выбранные изменения" }),
+  );
+  await screen.findByRole("button", { name: "Восстановить результат запроса" });
+  await view.user.click(screen.getByRole("button", { name: "Выбор товаров" }));
+  const route = view.router.state.location.pathname + view.router.state.location.search;
+  view.unmount();
+  server.state.apply409 = true;
+  server.state.applyConflict = {
+    statusCode: 409,
+    error: "Conflict",
+    message: "preview_expired",
+    previewIds: [id(12)],
+  };
+  const reopened = renderImport(route);
+  await reopened.user.click(
+    await screen.findByRole("button", { name: "Восстановить результат запроса" }),
+  );
+  await screen.findByText("Эта позиция требует нового сравнения.");
+  expect(server.applies[1]).toEqual(server.applies[0]);
+  expect(
+    screen.getByRole("button", { name: "Добавить выбранные изменения" }).hasAttribute("disabled"),
+  ).toBe(true);
 });

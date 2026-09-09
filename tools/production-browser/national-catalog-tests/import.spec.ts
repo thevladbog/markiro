@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   importApplySchema,
+  importApplyConflictSchema,
   importPrepareSchema,
   importSelectionSchema,
 } from "../../../packages/platform-contracts/dist/index.js";
@@ -26,6 +27,8 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
   let session = { ...sessionFixture };
   let preparation = structuredClone(previewFixture);
   const writes: unknown[] = [];
+  let rejectNextApply = true;
+  let prepareCount = 0;
   page.on("pageerror", (e) => errors.push(e.message));
   await page.route(`${origin}/api/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -61,6 +64,13 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
     else if (path.endsWith("/previews")) {
       const input = importPrepareSchema.parse(route.request().postDataJSON());
       writes.push(input);
+      prepareCount++;
+      if (prepareCount > 1)
+        preparation = {
+          ...preparation,
+          preparation: { ...preparation.preparation, id: id(60) },
+          items: preparation.items.map((item) => ({ ...item, id: id(61) })),
+        };
       preparation = {
         ...preparation,
         preparation: { ...preparation.preparation, requestId: input.requestId },
@@ -69,6 +79,22 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
     } else if (path.includes("/preparations/")) body = preparation;
     else if (path.endsWith("/applies")) {
       writes.push(importApplySchema.parse(route.request().postDataJSON()));
+      if (rejectNextApply) {
+        rejectNextApply = false;
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify(
+            importApplyConflictSchema.parse({
+              statusCode: 409,
+              error: "Conflict",
+              message: "preview_expired",
+              previewIds: [id(12)],
+            }),
+          ),
+        });
+        return;
+      }
       body = resultFixture;
     } else if (path.includes("/applies/")) body = resultFixture;
     else if (path.includes("/import-sessions")) body = session;
@@ -97,12 +123,18 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
   await mkdir(evidence, { recursive: true });
   await page.screenshot({ path: resolve(evidence, "task-12-review-1280.png"), fullPage: true });
   await page.getByRole("button", { name: "Добавить выбранные изменения" }).click();
-  await expect(page.getByText("Товар добавлен. Фото не загрузилось.")).toBeVisible();
+  await expect(page.getByText("Эта позиция требует нового сравнения.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Добавить выбранные изменения" })).toBeDisabled();
   expect(writes).toHaveLength(2);
+  await page.getByRole("button", { name: "Обновить сравнение" }).click();
+  await expect(page.getByRole("button", { name: "Добавить выбранные изменения" })).toBeEnabled();
+  await page.getByRole("button", { name: "Добавить выбранные изменения" }).click();
+  await expect(page.getByText("Товар добавлен. Фото не загрузилось.")).toBeVisible();
+  expect(writes).toHaveLength(4);
   await page.goto(open(`/catalog/import?sessionId=${id(1)}&operationId=${id(20)}`));
   await page.reload();
   await expect(page.getByText("Товар добавлен. Фото не загрузилось.")).toBeVisible();
-  expect(writes).toHaveLength(2);
+  expect(writes).toHaveLength(4);
   // Rich synthetic comparison: existing product, explicit initial category,
   // dependent attribute and cached normalized WebP. No provider media is used.
   const p = preparation.items[0];
@@ -140,7 +172,9 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
     },
   ];
   await page.setViewportSize({ width: 1280, height: 1300 });
-  await page.goto(open(`/catalog/import?sessionId=${id(1)}&preparationId=${id(10)}`));
+  await page.goto(
+    open(`/catalog/import?sessionId=${id(1)}&preparationId=${preparation.preparation.id}`),
+  );
   await expect(page.getByText("04006381333931 · Молоко")).toBeVisible();
   await page.getByRole("checkbox", { name: "Категория", exact: true }).click();
   await page.getByRole("checkbox", { name: "Жирность", exact: true }).click();
@@ -154,6 +188,27 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
     path: resolve(evidence, "task-12-review-rich-1280.png"),
     fullPage: true,
   });
+  const pendingKey = `markiro.nc.pending.v1:browser_org:browser_manager:${id(1)}`;
+  await page.evaluate((key) => sessionStorage.setItem(key, "{"), pendingKey);
+  await page.reload();
+  await expect(
+    page.getByText(
+      "Не удалось прочитать сохранённый запрос. Его прежний результат может оставаться неизвестным.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Добавить выбранные изменения" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Прочитать запрос ещё раз" }).click();
+  expect(await page.evaluate((key) => sessionStorage.getItem(key), pendingKey)).toBe("{");
+  await page.getByRole("button", { name: "Забыть этот запрос" }).click();
+  await expect(
+    page.getByText(
+      "Предыдущая операция могла быть принята. Это удалит только локальный запрос и не отменит её. Перед новым добавлением проверьте каталог.",
+    ),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Подтверждаю: забыть запрос" }).click();
+  await expect(page.getByRole("button", { name: "Добавить выбранные изменения" })).toBeVisible();
+  expect(await page.evaluate((key) => sessionStorage.getItem(key), pendingKey)).toBeNull();
+  expect(writes).toHaveLength(4);
   await page.getByRole("button", { name: "Закрыть" }).focus();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);

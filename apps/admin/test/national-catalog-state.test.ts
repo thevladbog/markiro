@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { importApplySchema, importPrepareSchema } from "@markiro/platform-contracts";
 import {
+  abandonIntent,
   clearIdentityIntents,
   identityKey,
   loadIntent,
@@ -33,8 +34,8 @@ it("expires prepare intents but preserves unresolved applies beyond sessionTTL f
   });
   saveIntent(identity, { version: 1, kind: "apply", sessionId: id(6), expiresAt, body: apply });
   time.mockReturnValue(Date.parse("2026-09-10T00:00:00Z"));
-  expect(loadIntent(identity, id(1))).toBeNull();
-  expect(loadIntent(identity, id(6))?.body).toEqual(apply);
+  expect(loadIntent(identity, id(1))).toEqual({ status: "missing" });
+  expect(loadIntent(identity, id(6))).toMatchObject({ status: "valid", intent: { body: apply } });
 });
 it("scopes pending bodies by both user and tenant and each session, rejects overwrite of unresolved intent", () => {
   const intent = {
@@ -46,15 +47,15 @@ it("scopes pending bodies by both user and tenant and each session, rejects over
   };
   saveIntent(identity, intent);
   saveIntent(identity, { ...intent, sessionId: id(6) });
-  expect(loadIntent(identityKey("other", "user"), id(1))).toBeNull();
-  expect(loadIntent(identityKey("tenant", "other"), id(1))).toBeNull();
+  expect(loadIntent(identityKey("other", "user"), id(1))).toEqual({ status: "missing" });
+  expect(loadIntent(identityKey("tenant", "other"), id(1))).toEqual({ status: "missing" });
   expect(() =>
     saveIntent(identity, { ...intent, body: { ...intent.body, requestId: id(7) } }),
   ).toThrow("unresolved_intent");
   sessionStorage.setItem("unrelated", "keep");
   clearIdentityIntents(identity);
-  expect(loadIntent(identity, id(1))).toBeNull();
-  expect(loadIntent(identity, id(6))).toBeNull();
+  expect(loadIntent(identity, id(1))).toEqual({ status: "missing" });
+  expect(loadIntent(identity, id(6))).toEqual({ status: "missing" });
   expect(sessionStorage.getItem("unrelated")).toBe("keep");
 });
 it("rejects corrupt, unknown-version, oversized or provider-payload pending storage", () => {
@@ -76,8 +77,8 @@ it("rejects corrupt, unknown-version, oversized or provider-payload pending stor
     }),
   ]) {
     sessionStorage.setItem(storageKey, raw);
-    expect(loadIntent(identity, id(1))).toBeNull();
-    expect(sessionStorage.getItem(storageKey)).toBeNull();
+    expect(loadIntent(identity, id(1))).toEqual({ status: "corrupt" });
+    expect(sessionStorage.getItem(storageKey)).toBe(raw);
   }
 });
 it("never defaults a foreign-GTIN candidate and clears old decisions for a new preview identity", () => {
@@ -108,4 +109,44 @@ it("removes dependent fields when category is unchecked and never reselects them
   expect(choice.decision.acceptedEntryIds).toEqual([id(13)]);
   choice = toggleField(preview, choice, id(40), true);
   expect(choice.decision.acceptedEntryIds).toEqual([id(13), id(40)]);
+});
+
+it("blocks unreadable storage and verifies deletion before abandoning or expiring prepare", () => {
+  const getItem = Storage.prototype.getItem;
+  const getter = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+    throw Error("blocked");
+  });
+  expect(loadIntent(identity, id(1))).toEqual({ status: "unavailable" });
+  expect(() => abandonIntent(identity, id(1))).toThrow("blocked");
+  getter.mockRestore();
+  const intent = {
+    version: 1 as const,
+    kind: "prepare" as const,
+    sessionId: id(1),
+    expiresAt,
+    body: { requestId: id(4), itemIds: [id(2)], manualNames: [], categoryChoices: [] },
+  };
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-08T00:00:00Z"));
+  saveIntent(identity, intent);
+  vi.mocked(Date.now).mockReturnValue(Date.parse("2026-09-10T00:00:00Z"));
+  const remover = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {});
+  expect(loadIntent(identity, id(1))).toEqual({ status: "unavailable" });
+  expect(() => abandonIntent(identity, id(1))).toThrow("storage_unavailable");
+  expect(getItem.call(sessionStorage, `markiro.nc.pending.v1:${identity}${id(1)}`)).not.toBeNull();
+  remover.mockRestore();
+  expect(loadIntent(identity, id(1))).toEqual({ status: "missing" });
+});
+it("cannot overwrite invalid pending bytes through the mandatory pre-POST persistence gate", () => {
+  const storageKey = `markiro.nc.pending.v1:${identity}${id(1)}`;
+  sessionStorage.setItem(storageKey, "{");
+  expect(() =>
+    saveIntent(identity, {
+      version: 1,
+      kind: "apply",
+      sessionId: id(1),
+      expiresAt,
+      body: { requestId: id(5), decisions: [initialChoice(previewFixture.items[0]!).decision] },
+    }),
+  ).toThrow("storage_unavailable");
+  expect(sessionStorage.getItem(storageKey)).toBe("{");
 });

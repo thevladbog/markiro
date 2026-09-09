@@ -1708,7 +1708,14 @@
           "access_changed": "Your access has changed. Contact an administrator."
         },
         "accessDenied": "Check your sign-in, editing permissions and subscription. Retry the saved request when access is restored.",
-        "photosUnavailable": "New photos cannot be prepared right now. Keep the current photo or add the product without one."
+        "photosUnavailable": "New photos cannot be prepared right now. Keep the current photo or add the product without one.",
+        "storageRecoveryBlocked": "The saved request could not be read. Its previous outcome may still be unknown.",
+        "retryStorageRead": "Read saved request again",
+        "abandonRequest": "Forget this request",
+        "abandonWarning": "The previous operation may have been accepted. This only removes the local request and does not cancel it. Check the catalog before adding again.",
+        "confirmAbandon": "Confirm: forget request",
+        "comparisonRejected": "The comparison is stale. Refresh it before applying changes.",
+        "rejectedItem": "This item requires a new comparison."
       }
     },
     "counterparties": {
