@@ -1764,7 +1764,24 @@
         "exactRetry": "Return to link",
         "detachLabel": "Remove the CHZ link when saving the new GTIN",
         "detachRequired": "Confirm CHZ link removal for the new GTIN.",
-        "gtinConflict": "The link changed. Close the form and check the link before changing GTIN again."
+        "gtinConflict": "The link changed. Close the form and check the link before changing GTIN again.",
+        "errors": {
+          "access_changed": "Card access changed. Check permissions in CHZ.",
+          "integration_unconfigured": "The CHZ connection is not configured.",
+          "environment_mismatch": "The CHZ environment differs from the saved link environment.",
+          "refresh_disabled": "CHZ information refresh is disabled.",
+          "local_gtin_changed": "The product GTIN changed. Check the saved link.",
+          "card_lost_gtin": "The CHZ card no longer contains the linked GTIN.",
+          "card_unavailable": "The linked card is unavailable in CHZ.",
+          "photo_unavailable": "The photo check is incomplete; the successful card check remains valid.",
+          "request_failed": "The check request failed. Retry the refresh.",
+          "request_timeout": "The CHZ response timed out. Retry the refresh.",
+          "retry_exhausted": "Check retries are exhausted. Start the refresh again.",
+          "quota_wait": "The check is waiting for available CHZ request quota.",
+          "lease_busy": "Another check is running. Wait for it to finish.",
+          "token_unavailable": "CHZ credentials are unavailable. Check the connection.",
+          "provider_unavailable": "The CHZ service is temporarily unavailable. Retry the refresh later."
+        }
       }
     },
     "counterparties": {

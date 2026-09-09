@@ -381,7 +381,10 @@ it("releases a busy-only Back block after an unchanged edit request fails", asyn
 });
 
 import { linkFixture, productFixture } from "./national-catalog-fixtures.js";
-function renderLinkedEdit(conflict = false) {
+function renderLinkedEdit(
+  conflict = false,
+  options: { unlinked?: boolean; patchError?: { code?: string; message?: string } } = {},
+) {
   const writes: unknown[] = [];
   let revision = 4;
   const client = new QueryClient({
@@ -391,15 +394,31 @@ function renderLinkedEdit(conflict = false) {
     if (init?.method === "PATCH") {
       writes.push(JSON.parse(String(init.body)));
       return jsonResponse(
-        conflict ? 409 : 200,
-        conflict ? { message: "CHZ_LINK_REVISION_CONFLICT" } : productFixture,
+        conflict || options.patchError ? 409 : 200,
+        options.patchError ?? (conflict ? { message: "link_changed" } : productFixture),
       );
     }
+    if (String(url).endsWith("/image") && init?.method === "POST")
+      return jsonResponse(409, { message: "Product image staging state changed" });
     if (String(url).endsWith("/gtin-check"))
       return jsonResponse(200, { gtin14: "04600000000015", owner: "unknown" });
     return jsonResponse(200, {
       items: String(url).includes("/products")
-        ? [{ ...productFixture, chz: { ...linkFixture.summary, revision } }]
+        ? [
+            {
+              ...productFixture,
+              chz: options.unlinked
+                ? {
+                    ...linkFixture.summary,
+                    linkId: null,
+                    revision: null,
+                    statusKeys: [],
+                    lastSuccessAt: null,
+                    lastOutcome: "never",
+                  }
+                : { ...linkFixture.summary, revision },
+            },
+          ]
         : [],
     });
   });
@@ -501,4 +520,81 @@ it("pins the edit revision despite a background link refresh", async () => {
   await user.click(screen.getByRole("button", { name: "Сохранить" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toMatchObject({ chzLinkChange: { action: "detach", expectedRevision: 4 } });
+});
+
+it("preserves duplicate-GTIN409 on an unlinked product instead of inventing a CHZ conflict", async () => {
+  const { user, writes } = renderLinkedEdit(false, {
+    unlinked: true,
+    patchError: { message: "A product with this GTIN already exists for this tenant" },
+  });
+  const gtin = await screen.findByLabelText("ГТИН");
+  await user.clear(gtin);
+  await user.type(gtin, "04600000000015");
+  await user.click(screen.getByRole("button", { name: "Сохранить" }));
+  expect(
+    await screen.findByText("A product with this GTIN already exists for this tenant"),
+  ).toBeDefined();
+  expect(
+    screen.queryByText(
+      "Связь изменилась. Закройте форму и проверьте связь перед повторным изменением GTIN.",
+    ),
+  ).toBeNull();
+  expect(writes).toHaveLength(1);
+  expect(writes[0]).not.toHaveProperty("chzLinkChange");
+});
+it("keeps image409 separate after a successful atomic product PATCH", async () => {
+  const { user, writes, fetch } = renderLinkedEdit();
+  vi.stubGlobal(
+    "createImageBitmap",
+    vi.fn(async () => ({ width: 10, height: 5, close: vi.fn() })),
+  );
+  const context = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    clearRect: vi.fn(),
+    drawImage: vi.fn(),
+  } as unknown as CanvasRenderingContext2D);
+  try {
+    const gtin = await screen.findByLabelText("ГТИН");
+    await user.clear(gtin);
+    await user.type(gtin, "04600000000015");
+    await user.click(
+      screen.getByRole("checkbox", { name: "Удалить связь с ЧЗ при сохранении нового GTIN" }),
+    );
+    await user.upload(
+      screen.getByTestId("file-drop-input"),
+      new File(["fixture"], "photo.png", { type: "image/png" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Product image staging state changed")).toBeDefined();
+    expect(
+      screen.queryByText(
+        "Связь изменилась. Закройте форму и проверьте связь перед повторным изменением GTIN.",
+      ),
+    ).toBeNull();
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({
+      gtin: "04600000000015",
+      chzLinkChange: { action: "detach", expectedRevision: 4 },
+    });
+    expect(
+      fetch.mock.calls.filter(([url, init]) => url.endsWith("/image") && init?.method === "POST"),
+    ).toHaveLength(1);
+    expect(gtin.hasAttribute("aria-invalid")).toBe(false);
+  } finally {
+    context.mockRestore();
+  }
+});
+it("associates the actual CHZ_LINK_REQUIRES_DETACH code with GTIN when saved summary is stale", async () => {
+  const { user, writes } = renderLinkedEdit(false, {
+    unlinked: true,
+    patchError: { code: "CHZ_LINK_REQUIRES_DETACH" },
+  });
+  const gtin = await screen.findByLabelText("ГТИН");
+  await user.clear(gtin);
+  await user.type(gtin, "04600000000015");
+  await user.click(screen.getByRole("button", { name: "Сохранить" }));
+  const message = await screen.findByText(
+    "Связь изменилась. Закройте форму и проверьте связь перед повторным изменением GTIN.",
+  );
+  expect(gtin.getAttribute("aria-describedby")?.split(" ")).toContain(message.id);
+  expect(writes).toHaveLength(1);
 });

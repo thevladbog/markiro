@@ -1,11 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
+import { chzRefreshErrorCodeSchema } from "@markiro/platform-contracts";
 import type { ChzSummary } from "@markiro/platform-contracts";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 import { AccessProvider } from "../src/access/context.js";
-import "../src/i18n/index.js";
+import i18n from "../src/i18n/index.js";
+import { ChzStatus } from "../src/pages/catalog/national-catalog/ChzStatus.js";
 import { CatalogPage } from "../src/pages/catalog/index.js";
 import type { ProductDto } from "../src/pages/catalog/api.js";
 
@@ -27,9 +29,10 @@ const legacyProduct: ProductDto = {
   defaultCounterpartyId: null,
   createdAt: "2026-09-09T00:00:00.000Z",
 };
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.unstubAllGlobals();
+  await i18n.changeLanguage("ru");
 });
 function renderCatalog(products: ProductDto[]) {
   const fetch = vi.fn(
@@ -131,3 +134,95 @@ it("matches any CHZ status independently of the Markiro status and preserves oth
   expect(screen.queryByText("Хлеб")).toBeNull();
   expect(within(screen.getByRole("table")).getByText("Молоко")).toBeDefined();
 });
+
+const errorMessages: Record<
+  NonNullable<ChzSummary["lastErrorCode"]>,
+  { ru: string; en: string }
+> = {
+  access_changed: {
+    ru: "Доступ к карточке изменился. Проверьте права в ЧЗ.",
+    en: "Card access changed. Check permissions in CHZ.",
+  },
+  integration_unconfigured: {
+    ru: "Подключение ЧЗ не настроено.",
+    en: "The CHZ connection is not configured.",
+  },
+  environment_mismatch: {
+    ru: "Среда ЧЗ не совпадает со средой сохранённой связи.",
+    en: "The CHZ environment differs from the saved link environment.",
+  },
+  refresh_disabled: {
+    ru: "Обновление сведений ЧЗ отключено.",
+    en: "CHZ information refresh is disabled.",
+  },
+  local_gtin_changed: {
+    ru: "GTIN товара изменился. Проверьте сохранённую связь.",
+    en: "The product GTIN changed. Check the saved link.",
+  },
+  card_lost_gtin: {
+    ru: "Карточка ЧЗ больше не содержит GTIN связи.",
+    en: "The CHZ card no longer contains the linked GTIN.",
+  },
+  card_unavailable: {
+    ru: "Связанная карточка недоступна в ЧЗ.",
+    en: "The linked card is unavailable in CHZ.",
+  },
+  photo_unavailable: {
+    ru: "Проверка фотографии не завершена; успешная проверка карточки остаётся действительной.",
+    en: "The photo check is incomplete; the successful card check remains valid.",
+  },
+  request_failed: {
+    ru: "Запрос проверки не выполнен. Повторите обновление.",
+    en: "The check request failed. Retry the refresh.",
+  },
+  request_timeout: {
+    ru: "Время ожидания ответа ЧЗ истекло. Повторите обновление.",
+    en: "The CHZ response timed out. Retry the refresh.",
+  },
+  retry_exhausted: {
+    ru: "Попытки проверки исчерпаны. Запустите обновление ещё раз.",
+    en: "Check retries are exhausted. Start the refresh again.",
+  },
+  quota_wait: {
+    ru: "Проверка ожидает доступной квоты запросов ЧЗ.",
+    en: "The check is waiting for available CHZ request quota.",
+  },
+  lease_busy: {
+    ru: "Другая проверка уже выполняется. Дождитесь её завершения.",
+    en: "Another check is running. Wait for it to finish.",
+  },
+  token_unavailable: {
+    ru: "Учётные данные ЧЗ недоступны. Проверьте подключение.",
+    en: "CHZ credentials are unavailable. Check the connection.",
+  },
+  provider_unavailable: {
+    ru: "Сервис ЧЗ временно недоступен. Повторите обновление позже.",
+    en: "The CHZ service is temporarily unavailable. Retry the refresh later.",
+  },
+};
+it.each(
+  (["ru", "en"] as const).flatMap((language) =>
+    chzRefreshErrorCodeSchema.options.map((code) => ({ language, code })),
+  ),
+)(
+  "discloses $code safely in $language while retaining good card evidence",
+  async ({ language, code }) => {
+    await i18n.changeLanguage(language);
+    const view = render(
+      <ChzStatus summary={{ ...summary, lastOutcome: "error", lastErrorCode: code }} />,
+    );
+    const disclosure = view.container.querySelector("details");
+    if (!disclosure) throw new Error("Missing status disclosure");
+    await userEvent
+      .setup()
+      .click(within(disclosure).getByText(language === "ru" ? "Подробнее" : "Details"));
+    expect(within(disclosure).getByText(errorMessages[code][language])).toBeDefined();
+    expect(disclosure.querySelector("time")?.getAttribute("datetime")).toBe(
+      "2026-09-09T00:00:00.000Z",
+    );
+    expect(
+      screen.getAllByText(language === "ru" ? "Опубликовано" : "Published").length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText(code)).toBeNull();
+  },
+);

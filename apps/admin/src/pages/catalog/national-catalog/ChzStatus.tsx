@@ -41,6 +41,9 @@ export function ChzStatus({ summary }: { summary: ChzSummary | undefined }) {
             : tr("details")}
         </summary>
         <div className="mk-chz-status__details">
+          {summary.lastErrorCode && (
+            <p className="mk-chz-status__error">{tr(`errors.${summary.lastErrorCode}`)}</p>
+          )}
           {statuses.length > 0 && <div className="mk-chz-status__chips">{statuses.map(chip)}</div>}
           {statuses.includes("unknown") && (
             <>

@@ -251,31 +251,43 @@ function EditProductPanel() {
         onDirtyChange={guard.setDirty}
         onClose={guard.requestClose}
         onSubmit={async (input: CreateProductInput, image, detach) => {
+          setError(null);
+          setGtinError(null);
           try {
-            setError(null);
-            setGtinError(null);
             await mutation.mutateAsync({
               id: product.id,
               input: { ...input, ...(detach ? { chzLinkChange: detach } : {}) },
             });
-            if (image) await imageMutation.mutateAsync({ id: product.id, file: image });
-            toast("ok", t("pages.catalog.toasts.updateSuccess"));
-            guard.finish();
           } catch (cause) {
             if (
               cause instanceof ApiRequestError &&
               cause.status === 409 &&
-              input.gtin !== product.gtin14
+              ["CHZ_LINK_REQUIRES_DETACH", "link_changed"].includes(cause.code ?? cause.message)
             ) {
               setGtinError(t("pages.catalog.chz.gtinConflict"));
+            } else {
+              setError(
+                cause instanceof ApiRequestError
+                  ? cause.message
+                  : t("pages.catalog.toasts.updateError"),
+              );
+            }
+            return;
+          }
+          if (image) {
+            try {
+              await imageMutation.mutateAsync({ id: product.id, file: image });
+            } catch (cause) {
+              setError(
+                cause instanceof ApiRequestError
+                  ? cause.message
+                  : t("pages.catalog.form.imageError"),
+              );
               return;
             }
-            setError(
-              cause instanceof ApiRequestError
-                ? cause.message
-                : t("pages.catalog.toasts.updateError"),
-            );
           }
+          toast("ok", t("pages.catalog.toasts.updateSuccess"));
+          guard.finish();
         }}
       />
       {guard.confirmOpen ? (

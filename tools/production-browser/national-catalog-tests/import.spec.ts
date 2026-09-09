@@ -305,10 +305,19 @@ test("catalog discloses CHZ statuses and opens the saved link panel", async ({ p
   await panel.getByText("Ещё статусов: 2 · Подробнее").click();
   await expect(panel.getByText("STATUS_NEW", { exact: true })).toBeVisible();
   await expect(
+    panel.getByText(
+      "Проверка фотографии не завершена; успешная проверка карточки остаётся действительной.",
+    ),
+  ).toBeVisible();
+  await expect(
     panel.getByText("Не удалось проверить фотографию. Статус карточки сохранён."),
   ).toBeVisible();
   await expect(panel.getByRole("button", { name: "Удалить связь", exact: true })).toBeVisible();
-  await page.screenshot({ path: resolve(evidence, "task-13-link-1280.png"), fullPage: true });
+  await page.screenshot({
+    path: resolve(evidence, "task-13-link-1280.png"),
+    animations: "disabled",
+    fullPage: true,
+  });
   await panel.getByRole("button", { name: "Закрыть" }).focus();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
