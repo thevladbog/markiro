@@ -1,4 +1,4 @@
-import type { LabelTemplateSpec } from "@markiro/domain";
+import type { LabelTemplateSpec, PrinterDpi } from "@markiro/domain";
 import type { BoxPrintErrorCode } from "./boxes.js";
 import type { PrintTarget } from "./hardware.js";
 import type { PrinterLanguage } from "./hardware-config.js";
@@ -12,12 +12,19 @@ export interface BoxPrintInput {
   printing: {
     target: PrintTarget;
     language: PrinterLanguage;
+    /**
+     * The attached printer's resolution. Omitted or null = the workstation
+     * was configured before the setting existed: the label prints at its
+     * authoring dpi, exactly as before (spec 2026-09-10).
+     */
+    dpi?: PrinterDpi | null;
     print: (target: PrintTarget, bytes: Uint8Array) => Promise<void>;
   } | null;
   render: (
     template: LabelTemplateSpec,
     fields: Record<string, string>,
     language: PrinterLanguage,
+    dpi: PrinterDpi | null,
   ) => Promise<Uint8Array>;
 }
 
@@ -27,7 +34,12 @@ export async function attemptBoxPrint(input: BoxPrintInput): Promise<BoxPrintAtt
 
   let bytes: Uint8Array;
   try {
-    bytes = await input.render(input.template, input.fields, input.printing.language);
+    bytes = await input.render(
+      input.template,
+      input.fields,
+      input.printing.language,
+      input.printing.dpi ?? null,
+    );
   } catch {
     console.error("station: box label render failed");
     return { kind: "failed", code: "render_failed" };

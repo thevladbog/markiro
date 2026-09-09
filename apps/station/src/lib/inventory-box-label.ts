@@ -3,6 +3,7 @@ import {
   isValidSscc,
   type LabelField,
   type LabelTemplateSpec,
+  type PrinterDpi,
   type RasterizeTextFn,
 } from "@markiro/domain";
 
@@ -48,6 +49,9 @@ export function renderInventoryBoxLabel(
   input: InventoryBoxLabelInput,
   language: PrinterLanguage,
   rasterizeText: RasterizeTextFn,
+  dpi: PrinterDpi | null = null,
 ): Promise<Uint8Array> {
-  return renderLabelBytes(template, inventoryBoxLabelFields(input), language, rasterizeText);
+  return renderLabelBytes(template, inventoryBoxLabelFields(input), language, rasterizeText, {
+    dpi,
+  });
 }
