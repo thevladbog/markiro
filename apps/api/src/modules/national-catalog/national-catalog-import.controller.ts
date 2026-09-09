@@ -35,6 +35,7 @@ import {
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
+import { PgBossService } from "../../jobs/jobs.module";
 import type { ImportActor } from "./national-catalog-import.types";
 import { NationalCatalogImportService } from "./national-catalog-import.service";
 import { NationalCatalogImportPreviewService } from "./national-catalog-import-preview.service";
@@ -69,6 +70,7 @@ export class NationalCatalogImportController {
     private readonly applies: NationalCatalogImportApplyService,
     private readonly images: NationalCatalogImageService,
     private readonly capabilities: NationalCatalogCapabilitiesService,
+    private readonly jobs: PgBossService,
   ) {}
   @Get("capabilities")
   @ApiOperation({ summary: "Read National Catalog import capabilities" })
@@ -87,11 +89,13 @@ export class NationalCatalogImportController {
   @RequireSubscriptionWrite()
   @ApiZodBody(contracts.importStartSchema)
   @ApiZodResponse({ status: 200, schema: contracts.importSessionSchema })
-  start(
+  async start(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(contracts.importStartSchema)) body: contracts.ImportStart,
   ) {
-    return this.sessions.start(actor(req), body);
+    const result = await this.sessions.start(actor(req), body);
+    await this.jobs.wakeNationalCatalog();
+    return result;
   }
   @Get("import-sessions/:sessionId")
   @ApiOperation({ summary: "Read a saved import session" })
@@ -110,13 +114,15 @@ export class NationalCatalogImportController {
   @RequireSubscriptionWrite()
   @ApiZodBody(contracts.importSessionRetrySchema)
   @ApiZodResponse({ status: 200, schema: contracts.importSessionSchema })
-  retrySession(
+  async retrySession(
     @Req() req: RequestWithTenant,
     @Param("sessionId", new ParseUUIDPipe()) sessionId: string,
     @Body(new ZodValidationPipe(contracts.importSessionRetrySchema))
     _body: z.infer<typeof contracts.importSessionRetrySchema>,
   ) {
-    return this.sessions.retry(actor(req), sessionId);
+    const result = await this.sessions.retry(actor(req), sessionId);
+    await this.jobs.wakeNationalCatalog();
+    return result;
   }
   @Put("import-sessions/:sessionId/selection")
   @ApiOperation({ summary: "Update the import selection" })
@@ -141,12 +147,14 @@ export class NationalCatalogImportController {
   @RequireSubscriptionWrite()
   @ApiZodBody(contracts.importPrepareSchema)
   @ApiZodResponse({ status: 200, schema: contracts.importPrepareResponseSchema })
-  prepare(
+  async prepare(
     @Req() req: RequestWithTenant,
     @Param("sessionId", new ParseUUIDPipe()) sessionId: string,
     @Body(new ZodValidationPipe(contracts.importPrepareSchema)) body: contracts.ImportPrepare,
   ) {
-    return this.previews.prepare(actor(req), sessionId, body);
+    const result = await this.previews.prepare(actor(req), sessionId, body);
+    await this.jobs.wakeNationalCatalog();
+    return result;
   }
   @Get("import-sessions/:sessionId/preparations/:preparationId")
   @ApiOperation({ summary: "Read saved import preparation" })
@@ -169,14 +177,16 @@ export class NationalCatalogImportController {
   @RequireSubscriptionWrite()
   @ApiZodBody(contracts.importPreparationRetrySchema)
   @ApiZodResponse({ status: 200, schema: contracts.importPrepareResponseSchema })
-  retryPreparation(
+  async retryPreparation(
     @Req() req: RequestWithTenant,
     @Param("sessionId", new ParseUUIDPipe()) sessionId: string,
     @Param("preparationId", new ParseUUIDPipe()) preparationId: string,
     @Body(new ZodValidationPipe(contracts.importPreparationRetrySchema))
     _body: z.infer<typeof contracts.importPreparationRetrySchema>,
   ) {
-    return this.previews.retryPreparation(actor(req), sessionId, preparationId);
+    const result = await this.previews.retryPreparation(actor(req), sessionId, preparationId);
+    await this.jobs.wakeNationalCatalog();
+    return result;
   }
   @Post("import-sessions/:sessionId/previews/:previewId/images/:candidateId")
   @ApiOperation({ summary: "Prepare an alternative import photo" })
@@ -186,7 +196,7 @@ export class NationalCatalogImportController {
   @RequireSubscriptionWrite()
   @ApiZodBody(contracts.importSessionRetrySchema)
   @ApiZodResponse({ status: 200, schema: contracts.importPhotoSchema })
-  prepareImage(
+  async prepareImage(
     @Req() req: RequestWithTenant,
     @Param("sessionId", new ParseUUIDPipe()) sessionId: string,
     @Param("previewId", new ParseUUIDPipe()) previewId: string,
@@ -194,7 +204,9 @@ export class NationalCatalogImportController {
     @Body(new ZodValidationPipe(contracts.importSessionRetrySchema))
     _body: z.infer<typeof contracts.importSessionRetrySchema>,
   ) {
-    return this.images.prepare(actor(req), sessionId, previewId, candidateId);
+    const result = await this.images.prepare(actor(req), sessionId, previewId, candidateId);
+    await this.jobs.wakeNationalCatalog();
+    return result;
   }
   @Post("import-sessions/:sessionId/applies")
   @ApiOperation({ summary: "Accept import decisions" })
@@ -204,12 +216,14 @@ export class NationalCatalogImportController {
   @RequireSubscriptionWrite()
   @ApiZodBody(contracts.importApplySchema)
   @ApiZodResponse({ status: 200, schema: contracts.importResultSchema })
-  apply(
+  async apply(
     @Req() req: RequestWithTenant,
     @Param("sessionId", new ParseUUIDPipe()) sessionId: string,
     @Body(new ZodValidationPipe(contracts.importApplySchema)) body: contracts.ImportApply,
   ) {
-    return this.applies.start(actor(req), sessionId, body);
+    const result = await this.applies.start(actor(req), sessionId, body);
+    await this.jobs.wakeNationalCatalog();
+    return result;
   }
   @Get("import-sessions/:sessionId/applies/:operationId")
   @ApiOperation({ summary: "Read saved import results" })
@@ -232,14 +246,16 @@ export class NationalCatalogImportController {
   @RequireSubscriptionWrite()
   @ApiZodBody(contracts.importApplyRetrySchema)
   @ApiZodResponse({ status: 200, schema: contracts.importResultSchema })
-  retryApply(
+  async retryApply(
     @Req() req: RequestWithTenant,
     @Param("sessionId", new ParseUUIDPipe()) sessionId: string,
     @Param("operationId", new ParseUUIDPipe()) operationId: string,
     @Body(new ZodValidationPipe(contracts.importApplyRetrySchema))
     body: z.infer<typeof contracts.importApplyRetrySchema>,
   ) {
-    return this.applies.retry(actor(req), sessionId, operationId, body.previewIds);
+    const result = await this.applies.retry(actor(req), sessionId, operationId, body.previewIds);
+    await this.jobs.wakeNationalCatalog();
+    return result;
   }
   @Post("import-sessions/:sessionId/cancel")
   @ApiOperation({ summary: "Cancel an import session" })

@@ -39,6 +39,13 @@ the narrow legacy reader projects old rows without rewriting their bytes or hash
 Photo application has an independent durable result. READY candidates serve the
 same normalized cached WebP bytes used by application; selection pins a candidate,
 not an arbitrary provider URL. Replacing an existing photo requires explicit choice.
+When photo preparation is enabled, each new review automatically prepares only
+the uniquely eligible main candidate, including when a local photo already exists.
+Other candidates wait for the user's preparation button. `automaticWorkPending`
+distinguishes queued/running preparation from an idle `pending` candidate; the
+cabinet polls only active work and displays cached READY previews automatically.
+Viewing a preview never selects it for replacement. Legacy saved reviews are read
+without starting new work; idle photos can be prepared explicitly.
 A product can succeed while its photo fails; eligible retry resumes the photo from
 accepted cached bytes without recreating the product. Merely ready, unviewed or
 unaccepted bytes do not become a reviewed photo baseline. An accepted photo receipt
@@ -163,7 +170,11 @@ waiting on a provider. The 30-minute refresh schedule enqueues checks; it does n
 promise that every product is checked within 30 minutes.
 
 Dispatch repair scans durable enumeration, preparation, apply, image and refresh
-work. Stable work IDs and receipt checks make repeated delivery safe. The additive
+work. Mutations wake its coalesced queue after their intent commits, and successful
+worker steps wake it again to dispatch follow-up work. The minute schedule remains
+the recovery path if a wake fails; a failed wake does not reject an accepted request.
+Stored GET endpoints never start work. Stable work IDs and receipt checks make
+repeated delivery safe. The additive
 0122 dispatch-attempt table records fairness, not completion or HTTP attempts.
 Completed dispatch history is retained and cascades on tenant deletion; storage
 grows per logical work step and requires later retention planning. No extra history

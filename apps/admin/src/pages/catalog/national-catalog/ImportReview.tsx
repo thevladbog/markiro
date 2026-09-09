@@ -80,7 +80,6 @@ export function ImportReview({
     },
   };
   const [dirty, setDirty] = useState(false);
-  const [viewing, setViewing] = useState<Record<string, string>>({});
   const choiceFor = (p: ImportPreview) => currentChoice(p, choices[p.id]);
   function update(p: ImportPreview, fn: (choice: ReviewChoice) => ReviewChoice) {
     setChoices((previous) => ({ ...previous, [p.id]: fn(currentChoice(p, previous[p.id])) }));
@@ -393,7 +392,7 @@ export function ImportReview({
                             }))
                           }
                         >
-                          {viewing[preview.id] === photo.candidateId && available && (
+                          {available && (
                             <img
                               src={photoUrl(sessionId, photo.candidateId)}
                               alt={tr("photoPreview")}
@@ -401,12 +400,12 @@ export function ImportReview({
                               height={120}
                               onLoad={() =>
                                 update(preview, (c) =>
-                                  c.viewedCandidateIds.includes(photo.candidateId)
+                                  c.loadedCandidateIds.includes(photo.candidateId)
                                     ? c
                                     : {
                                         ...c,
-                                        viewedCandidateIds: [
-                                          ...c.viewedCandidateIds,
+                                        loadedCandidateIds: [
+                                          ...c.loadedCandidateIds,
                                           photo.candidateId,
                                         ],
                                       },
@@ -418,21 +417,14 @@ export function ImportReview({
                             available
                               ? "choosePhoto"
                               : photo.state === "pending"
-                                ? "photoPending"
+                                ? photo.automaticWorkPending === false
+                                  ? "photoNotPrepared"
+                                  : "photoPending"
                                 : "photoFailed",
                           )}
                         </RadioCard>
-                        {available ? (
-                          <Button
-                            variant="secondary"
-                            onClick={() =>
-                              setViewing({ ...viewing, [preview.id]: photo.candidateId })
-                            }
-                          >
-                            {tr("viewPhoto")}
-                          </Button>
-                        ) : (
-                          (photo.state === "pending" ||
+                        {!available &&
+                          ((photo.state === "pending" && photo.automaticWorkPending !== true) ||
                             (photo.state === "failed" && photo.reason === "download_failed")) && (
                             <Button
                               variant="secondary"
@@ -443,8 +435,7 @@ export function ImportReview({
                                 photo.state === "failed" ? "retryPhotoPreparation" : "preparePhoto",
                               )}
                             </Button>
-                          )
-                        )}
+                          )}
                       </div>
                     );
                   })}

@@ -296,6 +296,87 @@ function mockServer() {
 const selectionRoute = `/catalog/import?sessionId=${id(1)}`;
 const reviewRoute = `${selectionRoute}&preparationId=${id(10)}`;
 const resultRoute = `${selectionRoute}&operationId=${id(20)}`;
+it("does not poll idle photo alternatives when preparation is complete", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  try {
+    const server = mockServer();
+    server.state.preparation.items[0]!.photos = [
+      {
+        candidateId: id(30),
+        state: "pending",
+        previewPath: null,
+        primary: false,
+        selectedByDefault: false,
+        automaticWorkPending: false,
+        reason: null,
+      },
+    ];
+    renderImport(reviewRoute);
+    await screen.findByText("Фото не загружено");
+    const requests = server.calls.filter((path) => path.includes("/preparations/")).length;
+    expect(requests).toBeGreaterThan(0);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4500);
+    });
+    expect(server.calls.filter((path) => path.includes("/preparations/")).length).toBe(requests);
+    expect(screen.queryByText("Фото готовится")).toBeNull();
+  } finally {
+    cleanup();
+    vi.useRealTimers();
+  }
+});
+it.each(["item", "page"])(
+  "keeps the loaded list visible without a discovery banner when toggling the %s checkbox",
+  async (target) => {
+    const server = mockServer();
+    server.state.session = {
+      ...sessionFixture,
+      state: "ready",
+      complete: true,
+      automaticWorkPending: false,
+      loaded: 1,
+    };
+    const original = server.fetchMock.getMockImplementation()!;
+    let pendingItems: Promise<void> | null = null;
+    const refreshing = vi.fn();
+    server.fetchMock.mockImplementation(async (url, init) => {
+      if (String(url).includes("/items") && pendingItems) {
+        refreshing();
+        await pendingItems;
+      }
+      return original(url, init);
+    });
+    const { user } = renderImport(selectionRoute);
+    const item = await screen.findByRole("checkbox", { name: /4006381333931/ });
+    const checkbox =
+      target === "item"
+        ? item
+        : screen.getByRole("checkbox", { name: "Выбрать все на странице (1)" });
+    for (const selected of [true, false]) {
+      let releaseItems: (() => void) | undefined;
+      refreshing.mockClear();
+      pendingItems = new Promise<void>((resolve) => {
+        releaseItems = resolve;
+      });
+      try {
+        await user.click(checkbox);
+        await screen.findByText(`Выбрано: ${selected ? 1 : 0} из 100`);
+        expect(refreshing).toHaveBeenCalled();
+        expect(item.getAttribute("aria-checked")).toBe(String(selected));
+        expect(screen.getByRole("checkbox", { name: /4006381333931/ })).toBe(item);
+        expect(
+          screen.queryByRole("status", { name: "Загружаем товары из Национального каталога" }),
+        ).toBeNull();
+        expect(screen.queryByText("Ожидаем первые товары…")).toBeNull();
+      } finally {
+        await act(async () => {
+          releaseItems?.();
+          pendingItems = null;
+        });
+      }
+    }
+  },
+);
 it("starts GTIN lookup with exact text and keeps the selected session route", async () => {
   const server = mockServer();
   const { user, router } = renderImport("/catalog/import");
@@ -513,7 +594,7 @@ it("preserves manual name, field toggles, explicit keep and replacement confirma
     categoryChoices: {},
   });
 });
-it("records keep.reviewedCandidateId only after explicitly viewing a READY candidate and choosing keep", async () => {
+it("records keep.reviewedCandidateId only after a READY image loads and is explicitly selected", async () => {
   const data = structuredClone(previewFixture);
   data.items[0]!.productId = id(21);
   data.items[0]!.photos = [
@@ -541,16 +622,18 @@ it("records keep.reviewedCandidateId only after explicitly viewing a READY candi
     { wrapper: MemoryRouter },
   );
   const user = userEvent.setup();
-  expect(screen.queryByRole("img")).toBeNull();
-  await user.click(screen.getByRole("button", { name: "Просмотреть фото" }));
   const image = screen.getByRole("img", { name: "Подготовленное фото товара" });
   expect(image.getAttribute("src")).toBe(
     `/api/national-catalog/import-sessions/${id(1)}/images/${id(30)}`,
   );
-  fireEvent.load(image);
   await user.click(screen.getByRole("radio", { name: "Сохранить текущее фото" }));
   await user.click(screen.getByRole("button", { name: "Применить выбранное" }));
-  expect(apply.mock.calls[0]?.[0][0].photo).toEqual({ kind: "keep", reviewedCandidateId: id(30) });
+  expect(apply.mock.calls[0]?.[0][0].photo).toEqual({ kind: "keep" });
+  fireEvent.load(image);
+  await user.click(screen.getByRole("radio", { name: "Выбрать это фото" }));
+  await user.click(screen.getByRole("radio", { name: "Сохранить текущее фото" }));
+  await user.click(screen.getByRole("button", { name: "Применить выбранное" }));
+  expect(apply.mock.calls[1]?.[0][0].photo).toEqual({ kind: "keep", reviewedCandidateId: id(30) });
 });
 
 it("requires category acceptance for dependent fields, while independent fields remain selected", async () => {
@@ -727,7 +810,7 @@ it("preserves choices across a real focused preparation poll", async () => {
   await user.click(screen.getByRole("checkbox", { name: /Подтверждаю замену/ }));
   await user.click(screen.getByRole("radio", { name: "Сохранить текущее фото" }));
   p.photos[0]!.state = "ready";
-  await screen.findByRole("button", { name: "Просмотреть фото" }, { timeout: 4000 });
+  await screen.findByRole("img", { name: "Подготовленное фото товара" }, { timeout: 4000 });
   expect(server.calls.filter((path) => path.includes("/preparations/")).length).toBeGreaterThan(1);
   expect((screen.getByLabelText("Название вручную") as HTMLInputElement).value).toBe(
     "Моё название",

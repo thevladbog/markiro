@@ -45,6 +45,19 @@ it.each(["queued", "loading", "partial"] as const)(
   },
 );
 
+it.each([
+  { state: "queued", automaticWorkPending: false },
+  { state: "loading", automaticWorkPending: false },
+  { state: "partial", automaticWorkPending: true },
+] as const)("keeps populated $state discovery free of the loading banner", (session) => {
+  selection({ ...session, loaded: 1 }, true);
+  expect(screen.getByRole("checkbox", { name: /4006381333931/ })).toBeDefined();
+  expect(
+    screen.queryByRole("status", { name: "Загружаем товары из Национального каталога" }),
+  ).toBeNull();
+  expect(screen.queryByText("Ожидаем первые товары…")).toBeNull();
+});
+
 it("shows an empty result only when discovery completed", () => {
   selection({ state: "ready", complete: true, automaticWorkPending: false });
   expect(screen.getByText("Товары не найдены")).toBeDefined();

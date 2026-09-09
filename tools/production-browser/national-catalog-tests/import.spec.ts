@@ -184,7 +184,6 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
   await page.getByRole("radio", { name: "Категория — Предлагаемое значение", exact: true }).click();
   await page.getByRole("radio", { name: "Жирность — Предлагаемое значение", exact: true }).click();
   await page.getByRole("checkbox", { name: /Подтверждаю замену/ }).click();
-  await page.getByRole("button", { name: "Просмотреть фото" }).click();
   await expect(page.getByRole("img", { name: "Подготовленное фото товара" })).toHaveJSProperty(
     "naturalWidth",
     120,

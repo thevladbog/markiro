@@ -14,6 +14,7 @@ import { asc, eq, inArray, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
 import type { Env } from "../env";
+import { describeErrorForLog } from "../lib/error-log";
 import { ExchangeSessionService } from "../modules/exchange/exchange-session.service";
 import { JournalService } from "../modules/integrations/journal.service";
 import {
@@ -712,7 +713,13 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         await boss.createQueue(name, { policy: "stately", retryLimit: 0 });
         this.workerIds.push(
           await boss.work(name, async (jobs) => {
-            for (const job of jobs) await this.nationalCatalogJobs?.execute(job.data);
+            if (!this.nationalCatalogJobs) return;
+            for (const job of jobs) {
+              await this.nationalCatalogJobs.execute(job.data);
+              // A completed step can commit another page, preview, or photo intent.
+              // Failed steps retain their durable retry horizon for scheduled repair.
+              await this.wakeNationalCatalog();
+            }
           }),
         );
       }
@@ -812,6 +819,20 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     const jobId = await this.boss.send(BUILD_SHIFT_EXPORT_QUEUE, { exportId });
     if (!jobId) throw new Error("shift export enqueue failed");
     return jobId;
+  }
+
+  /** Call after the intent commits. The minute repair schedule remains the recovery path. */
+  async wakeNationalCatalog(): Promise<void> {
+    if (!this.boss || !this.started) return;
+    try {
+      // The stately queue coalesces pending wakes with the keyless cron job.
+      // A null result means a repair is already pending, which is sufficient.
+      await this.boss.send(CATALOG_REPAIR_QUEUE, {});
+    } catch (error) {
+      this.logger.warn(
+        `National Catalog queue wake failed; scheduled repair will recover work: ${describeErrorForLog(error)}`,
+      );
+    }
   }
 
   async enqueueInventoryDocumentRun(runId: string): Promise<string> {

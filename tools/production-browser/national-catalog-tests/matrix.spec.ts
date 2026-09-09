@@ -234,7 +234,6 @@ for (const width of [390, 768, 1280, 1600])
         await page.goto(open(`/catalog/import?sessionId=${id(1)}&preparationId=${id(10)}`));
         await expect(page.locator(".mk-nc-review-item")).toHaveCount(3);
         for (const fieldset of await page.locator(".mk-nc-review-item").all()) {
-          await fieldset.getByRole("button", { name: t.import.viewPhoto, exact: true }).click();
           await expect(
             fieldset.getByRole("img", { name: t.import.photoPreview, exact: true }),
           ).toHaveJSProperty("naturalWidth", 120);

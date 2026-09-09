@@ -147,7 +147,6 @@ for (const width of [390, 1280]) {
     await expect(fat).toBeDisabled();
     await category.click();
     await fat.click();
-    await item.getByRole("button", { name: "Просмотреть фото" }).click();
     await expect(item.getByRole("img", { name: "Подготовленное фото товара" })).toHaveJSProperty(
       "naturalWidth",
       120,

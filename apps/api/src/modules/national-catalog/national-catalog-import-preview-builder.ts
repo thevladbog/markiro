@@ -437,7 +437,7 @@ export async function buildImportPreview(
     });
   }
   const id = randomUUID();
-  const photos = buildPhotoCandidates(source, item.gtin14, !!photo);
+  const photos = buildPhotoCandidates(source, item.gtin14, !!photo, imagePreparation?.enabled);
   const linkAction = !link
     ? "attach"
     : link.environment === session.environment &&
@@ -518,9 +518,8 @@ export async function buildImportPreview(
         candidateId: dto.candidateId,
         sourceId,
         preparationActorId:
-          imagePreparation?.enabled && dto.selectedByDefault ? imagePreparation.actorId : null,
-        preparationCheckpoint:
-          imagePreparation?.enabled && dto.selectedByDefault ? newImageCheckpoint() : null,
+          imagePreparation?.enabled && dto.automaticWorkPending ? imagePreparation.actorId : null,
+        preparationCheckpoint: dto.automaticWorkPending ? newImageCheckpoint() : null,
         sourceHash,
         sourceUrl: url,
         state: dto.state === "failed" ? ("failed" as const) : ("pending" as const),
@@ -535,6 +534,7 @@ export function buildPhotoCandidates(
   source: NationalCatalogProduct,
   gtin14: string,
   hasImage: boolean,
+  prepareMainPhoto = false,
 ): Array<{ dto: ImportPhoto; url: string | null; sourceId: string }> {
   const candidates = source.images.map((image) => {
     const matches =
@@ -561,6 +561,7 @@ export function buildPhotoCandidates(
         candidateId: row.candidateId,
         previewPath: null,
         state: row.invalid ? ("failed" as const) : ("pending" as const),
+        automaticWorkPending: prepareMainPhoto && row.candidateId === selected,
         primary: row.image.primary,
         selectedByDefault: !hasImage && row.candidateId === selected,
         reason: row.invalid
@@ -577,6 +578,7 @@ export function buildPhotoCandidates(
         candidateId: randomUUID(),
         previewPath: null,
         state: "failed" as const,
+        automaticWorkPending: false,
         primary: false,
         selectedByDefault: false,
         reason: issue.reason,

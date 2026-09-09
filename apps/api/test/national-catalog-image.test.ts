@@ -217,6 +217,81 @@ describe("private National Catalog images (real PostgreSQL and normalized bytes)
       { sourceId: "good_img", url: "https://images.example/default", barcode: GTIN, primary: true },
     ];
   }
+  it("prepares the main source photo with an existing local photo and leaves alternatives idle until requested", async () => {
+    const rt = runtime();
+    const currentAssetId = randomUUID();
+    await db.insert(schema.mediaAssets).values({
+      id: currentAssetId,
+      ownerTenantId: actor.tenantId,
+      objectKey: `test/${currentAssetId}`,
+      contentType: "image/webp",
+      byteSize: 10,
+      checksum: "f".repeat(64),
+      width: 10,
+      height: 10,
+      status: "active",
+    });
+    await db.insert(schema.productImages).values({
+      tenantId: actor.tenantId,
+      productId: existingId,
+      assetId: currentAssetId,
+    });
+    source.images = [
+      { sourceId: "main", url: "https://images.example/main", barcode: GTIN, primary: true },
+      {
+        sourceId: "alternative",
+        url: "https://images.example/other",
+        barcode: GTIN,
+        primary: false,
+      },
+    ];
+    const p = await preview();
+    const main = p.photos[0];
+    const alternative = p.photos[1];
+    if (!main || !alternative) throw new Error("Missing photo candidates");
+    expect(main).toMatchObject({
+      state: "pending",
+      selectedByDefault: false,
+      automaticWorkPending: true,
+    });
+    expect(alternative).toMatchObject({
+      state: "pending",
+      selectedByDefault: false,
+      automaticWorkPending: false,
+    });
+    const rows = await db
+      .select()
+      .from(schema.nationalCatalogImportImages)
+      .where(eq(schema.nationalCatalogImportImages.previewId, p.id));
+    expect(
+      rows.find((row) => row.candidateId === main.candidateId)?.preparationCheckpoint,
+    ).toMatchObject({ enqueuePending: true });
+    expect(
+      rows.find((row) => row.candidateId === alternative.candidateId)?.preparationCheckpoint,
+    ).toBeNull();
+    await rt.service.resume(actor.tenantId, sessionId, p.id, main.candidateId);
+    expect(await rt.service.prepare(actor, sessionId, p.id, main.candidateId)).toMatchObject({
+      state: "ready",
+      automaticWorkPending: false,
+    });
+    expect(await rt.service.prepare(actor, sessionId, p.id, alternative.candidateId)).toMatchObject(
+      { state: "pending", automaticWorkPending: true },
+    );
+    await rt.service.resume(actor.tenantId, sessionId, p.id, alternative.candidateId);
+    expect(await rt.service.prepare(actor, sessionId, p.id, alternative.candidateId)).toMatchObject(
+      { state: "ready", automaticWorkPending: false },
+    );
+    const [current] = await db
+      .select()
+      .from(schema.productImages)
+      .where(
+        and(
+          eq(schema.productImages.tenantId, actor.tenantId),
+          eq(schema.productImages.productId, existingId),
+        ),
+      );
+    expect(current?.assetId).toBe(currentAssetId);
+  });
   async function prepared(rt: ReturnType<typeof runtime>) {
     photos();
     const p = await preview();
