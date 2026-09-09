@@ -1277,20 +1277,16 @@ function NewShiftFixture({ view, locale }: { view: string; locale: GalleryLocale
                 aria-pressed="true"
               >
                 <span className="new-shift__template-name">
-                  {ru ? "Коробка 58×40 (203 dpi)" : "Box 58×40 (203 dpi)"}
+                  {ru ? "Коробка 58×40" : "Box 58×40"}
                 </span>
-                <span className="new-shift__template-meta">
-                  {ru ? "58×40 мм · 203 dpi" : "58×40 mm · 203 dpi"}
-                </span>
+                <span className="new-shift__template-meta">{ru ? "58×40 мм" : "58×40 mm"}</span>
                 <span className="new-shift__template-badge">{ru ? "По умолчанию" : "Default"}</span>
               </button>
               <button type="button" className="new-shift__template" aria-pressed="false">
                 <span className="new-shift__template-name">
-                  {ru ? "Паллета 100×80 (300 dpi)" : "Pallet 100×80 (300 dpi)"}
+                  {ru ? "Паллета 100×80" : "Pallet 100×80"}
                 </span>
-                <span className="new-shift__template-meta">
-                  {ru ? "100×80 мм · 300 dpi" : "100×80 mm · 300 dpi"}
-                </span>
+                <span className="new-shift__template-meta">{ru ? "100×80 мм" : "100×80 mm"}</span>
               </button>
             </div>
           </>

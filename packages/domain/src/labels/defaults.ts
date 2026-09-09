@@ -9,7 +9,7 @@ export interface DefaultLabelTemplate {
 }
 
 /** The stock template new tenants get as their default box label. */
-export const DEFAULT_BOX_LABEL_TEMPLATE_NAME = "Коробка 58×40 (203 dpi)";
+export const DEFAULT_BOX_LABEL_TEMPLATE_NAME = "Коробка 58×40";
 
 const BASE_WIDTH_MM = 58;
 const BASE_HEIGHT_MM = 40;
@@ -582,41 +582,59 @@ function buildBoxLabelSpec(
   return { widthMm, heightMm, dpi, language: "zpl", elements };
 }
 
-/** The five stock sizes both families are cut in. */
-const BOX_LABEL_SIZES: ReadonlyArray<{ w: number; h: number; dpi: 203 | 300 }> = [
-  { w: 58, h: 40, dpi: 203 },
-  { w: 58, h: 40, dpi: 300 },
-  { w: 75, h: 120, dpi: 203 },
-  { w: 100, h: 100, dpi: 203 },
-  { w: 100, h: 150, dpi: 203 },
+/**
+ * Every stock template is AUTHORED at 203 dpi. That is not a printer
+ * requirement: the station prints any template at its own printer's
+ * resolution (`withPrinterDpi`, spec 2026-09-10). The SSCC module width the
+ * 203 dpi build picks (2 dots = 0.2502 mm on the 58×40) rounds to 3 dots
+ * (0.254 mm) on a 300 dpi printer — the same modules the former 300 dpi twin
+ * carried explicitly.
+ */
+const STOCK_AUTHORING_DPI = 203;
+
+/** The four stock sizes both families are cut in. */
+const BOX_LABEL_SIZES: ReadonlyArray<{ w: number; h: number }> = [
+  { w: 58, h: 40 },
+  { w: 75, h: 120 },
+  { w: 100, h: 100 },
+  { w: 100, h: 150 },
 ];
 
+/** Part of the seed identity of the print-name family (see `buildPrintNameBoxLabelTemplates`). */
+const PRINT_NAME_SUFFIX = " [Назв. для печати]";
+
+function stockName(w: number, h: number, dates: DateFields, suffix = ""): string {
+  return dates === "with-dates"
+    ? `Коробка ${w}×${h}${suffix}`
+    : `Коробка ${w}×${h} без дат${suffix}`;
+}
+
 /**
- * The five DATED stock box labels — the original family, and the one
+ * The four DATED stock box labels — the original family, and the one
  * `DEFAULT_BOX_LABEL_TEMPLATE_NAME` points into. Pure and deterministic.
  */
 export function buildDatedBoxLabelTemplates(): DefaultLabelTemplate[] {
-  return BOX_LABEL_SIZES.map(({ w, h, dpi }) => ({
-    name: `Коробка ${w}×${h} (${dpi} dpi)`,
-    spec: buildBoxLabelSpec(w, h, dpi, "with-dates"),
+  return BOX_LABEL_SIZES.map(({ w, h }) => ({
+    name: stockName(w, h, "with-dates"),
+    spec: buildBoxLabelSpec(w, h, STOCK_AUTHORING_DPI, "with-dates"),
   }));
 }
 
 /**
- * The five DATE-FREE stock box labels: same five sizes, same design, minus
+ * The four DATE-FREE stock box labels: same four sizes, same design, minus
  * «Дата производства» and «Годен до». For goods whose packaging already
  * carries the dates (or has none to carry) — and, because the space the two
  * columns used to take goes to the SSCC symbol, with materially taller bars.
  *
  * THE NAMES ARE THE SEED IDENTITY. They are the `(tenant_id, name)`
- * idempotency key of the backfill migration and of tenant provisioning;
- * renaming one here re-seeds it as a second row rather than updating the
- * first.
+ * idempotency key of tenant provisioning and of migration 0123's rename
+ * table; renaming one here re-seeds it as a second row rather than updating
+ * the first.
  */
 export function buildDateFreeBoxLabelTemplates(): DefaultLabelTemplate[] {
-  return BOX_LABEL_SIZES.map(({ w, h, dpi }) => ({
-    name: `Коробка ${w}×${h} без дат (${dpi} dpi)`,
-    spec: buildBoxLabelSpec(w, h, dpi, "without-dates"),
+  return BOX_LABEL_SIZES.map(({ w, h }) => ({
+    name: stockName(w, h, "without-dates"),
+    spec: buildBoxLabelSpec(w, h, STOCK_AUTHORING_DPI, "without-dates"),
   }));
 }
 
@@ -629,26 +647,83 @@ export function buildDateFreeBoxLabelTemplates(): DefaultLabelTemplate[] {
  */
 export function buildPrintNameBoxLabelTemplates(): DefaultLabelTemplate[] {
   return [
-    ...BOX_LABEL_SIZES.map(({ w, h, dpi }) => ({
-      name: `Коробка ${w}×${h} (${dpi} dpi) [Назв. для печати]`,
-      spec: buildBoxLabelSpec(w, h, dpi, "with-dates", "product.printName"),
+    ...BOX_LABEL_SIZES.map(({ w, h }) => ({
+      name: stockName(w, h, "with-dates", PRINT_NAME_SUFFIX),
+      spec: buildBoxLabelSpec(w, h, STOCK_AUTHORING_DPI, "with-dates", "product.printName"),
     })),
-    ...BOX_LABEL_SIZES.map(({ w, h, dpi }) => ({
-      name: `Коробка ${w}×${h} без дат (${dpi} dpi) [Назв. для печати]`,
-      spec: buildBoxLabelSpec(w, h, dpi, "without-dates", "product.printName"),
+    ...BOX_LABEL_SIZES.map(({ w, h }) => ({
+      name: stockName(w, h, "without-dates", PRINT_NAME_SUFFIX),
+      spec: buildBoxLabelSpec(w, h, STOCK_AUTHORING_DPI, "without-dates", "product.printName"),
     })),
   ];
 }
 
 /**
- * Every stock box label a tenant is seeded with: the dated five, the
- * date-free five, then their ten print-name duplicates. Provisioning inserts
- * exactly this list.
+ * Every stock box label a tenant is seeded with: the dated four, the
+ * date-free four, then their eight print-name duplicates. Provisioning
+ * inserts exactly this list.
  */
 export function buildDefaultLabelTemplates(): DefaultLabelTemplate[] {
   return [
     ...buildDatedBoxLabelTemplates(),
     ...buildDateFreeBoxLabelTemplates(),
     ...buildPrintNameBoxLabelTemplates(),
+  ];
+}
+
+/**
+ * One row of the seed set AS IT WAS before templates became
+ * resolution-neutral (spec 2026-09-10): the dpi-suffixed name and, for the
+ * 203 dpi rows, the resolution-free name migration 0123 renames it to.
+ * `renamedTo` is null for the 58×40 @300 twins — the migration disables
+ * those instead of renaming them.
+ */
+export interface LegacyStockLabelTemplate extends DefaultLabelTemplate {
+  renamedTo: string | null;
+}
+
+/**
+ * The pre-2026-09-10 seed sizes: the same four plus a 58×40 twin authored at
+ * 300 dpi, in the order migrations 0053/0056/0059 inline them. Read only by
+ * the legacy builders below.
+ */
+const LEGACY_BOX_LABEL_SIZES: ReadonlyArray<{ w: number; h: number; dpi: 203 | 300 }> = [
+  { w: 58, h: 40, dpi: 203 },
+  { w: 58, h: 40, dpi: 300 },
+  { w: 75, h: 120, dpi: 203 },
+  { w: 100, h: 100, dpi: 203 },
+  { w: 100, h: 150, dpi: 203 },
+];
+
+function legacyRows(
+  dates: DateFields,
+  nameField?: "product.printName",
+): LegacyStockLabelTemplate[] {
+  const suffix = nameField === undefined ? "" : PRINT_NAME_SUFFIX;
+  return LEGACY_BOX_LABEL_SIZES.map(({ w, h, dpi }) => ({
+    name: stockName(w, h, dates, ` (${dpi} dpi)${suffix}`),
+    spec: buildBoxLabelSpec(w, h, dpi, dates, nameField ?? "product.name"),
+    renamedTo: dpi === 300 ? null : stockName(w, h, dates, suffix),
+  }));
+}
+
+/**
+ * The legacy seed rows, family by family. Provisioning does NOT use these:
+ * they exist for the migration drift guards (0053, 0056, 0059) and for
+ * migration 0123, which renames the 203 rows and disables the untouched
+ * 300 twins. Pure and deterministic like everything above.
+ */
+export function buildLegacyDatedBoxLabelTemplates(): LegacyStockLabelTemplate[] {
+  return legacyRows("with-dates");
+}
+
+export function buildLegacyDateFreeBoxLabelTemplates(): LegacyStockLabelTemplate[] {
+  return legacyRows("without-dates");
+}
+
+export function buildLegacyPrintNameBoxLabelTemplates(): LegacyStockLabelTemplate[] {
+  return [
+    ...legacyRows("with-dates", "product.printName"),
+    ...legacyRows("without-dates", "product.printName"),
   ];
 }

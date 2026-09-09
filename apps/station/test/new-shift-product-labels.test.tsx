@@ -263,14 +263,24 @@ it("refuses to enter an opened shift without the authoritative print snapshot", 
   expect(h.onStarted).not.toHaveBeenCalled();
 });
 
-it("refuses a mismatched printer DPI before creating the shift", async () => {
+it("starts duplicate printing on a 300 dpi printer with a template authored at 203 dpi", async () => {
   const h = await setup({ hardware: { ...hardware, printerDpi: 300 } });
   await selectDuplicateTemplate();
   fireEvent.click(screen.getByRole("button", { name: "Start" }));
-  await screen.findByText(
-    "The printer resolution does not match the template. Choose another template or check printer settings.",
-  );
-  expect(h.requests).toEqual([]);
+  await waitFor(() => expect(h.onStarted).toHaveBeenCalledTimes(1));
+  expect(h.requests).toEqual([
+    {
+      path: "/shifts",
+      body: expect.objectContaining({
+        validationPrint: {
+          mode: "duplicate_dm",
+          verification: "required",
+          templateId: h.fixture.policy.templateId,
+        },
+      }),
+    },
+  ]);
+  expect(screen.queryByText(/printer resolution does not match/)).toBeNull();
 });
 
 it("keeps a template and optional verification when navigating back through settings", async () => {

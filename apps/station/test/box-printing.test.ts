@@ -19,6 +19,7 @@ function configuredInput(): BoxPrintInput {
     printing: {
       target: PRINT_TARGET,
       language: "zpl",
+      dpi: 300,
       print: vi.fn(async () => {}),
     },
     render: vi.fn(async () => new Uint8Array([1, 2, 3])),
@@ -88,5 +89,35 @@ describe("attemptBoxPrint", () => {
       bytes: new Uint8Array([1, 2, 3]),
     });
     expect(input.printing?.print).toHaveBeenCalledWith(PRINT_TARGET, new Uint8Array([1, 2, 3]));
+  });
+
+  it("hands the printer's resolution to the renderer", async () => {
+    const input = configuredInput();
+
+    await attemptBoxPrint(input);
+    expect(input.render).toHaveBeenCalledWith(
+      BOX_TEMPLATE,
+      { sscc: "046012345600007778" },
+      "zpl",
+      300,
+    );
+  });
+
+  it("passes null through for legacy settings without a resolution", async () => {
+    const input = configuredInput();
+    // A transport saved before the resolution setting existed carries no `dpi`.
+    const legacyPrinting = {
+      target: PRINT_TARGET,
+      language: "zpl" as const,
+      print: vi.fn(async () => {}),
+    };
+
+    await attemptBoxPrint({ ...input, printing: legacyPrinting });
+    expect(input.render).toHaveBeenCalledWith(
+      BOX_TEMPLATE,
+      { sscc: "046012345600007778" },
+      "zpl",
+      null,
+    );
   });
 });

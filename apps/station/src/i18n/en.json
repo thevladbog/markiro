@@ -160,7 +160,7 @@
     "templateSearch": "Search templates",
     "templateSearchEmpty": "Nothing found. Change the query.",
     "templateDefault": "Default",
-    "templateMeta": "{{width}}×{{height}} mm · {{dpi}} dpi",
+    "templateMeta": "{{width}}×{{height}} mm",
     "templatesEmpty": "No label templates in the admin panel. Create one and try again.",
     "templatesLoadFailed": "Failed to load label templates. Try again.",
     "templatePagination": "Template pages",
@@ -189,7 +189,6 @@
     "retryPrintSettings": "Retry loading",
     "printHardwareRequired": "Configure the printer and its resolution before starting duplicate printing.",
     "printerSettings": "Printer settings",
-    "printDpiMismatch": "The printer resolution does not match the template. Choose another template or check printer settings.",
     "productTemplateUnavailable": "The selected template is no longer available. Choose another one.",
     "printPolicyNotConfirmed": "The server did not confirm printing settings. Open the shift from the list after checking its settings."
   },
@@ -590,7 +589,8 @@
     "printerCheckMismatch": "A different code was scanned: {{received}}",
     "scannerCheckWaiting": "No scan received yet",
     "printerResolution": "Printer resolution",
-    "printerResolutionUnknown": "Not configured"
+    "printerResolutionUnknown": "Not configured",
+    "printerDpiHint": "Every label prints at this resolution. Until it is set, box labels print at the template's resolution and duplicate printing is unavailable."
   },
   "conflicts": {
     "title": "Codes claimed elsewhere",

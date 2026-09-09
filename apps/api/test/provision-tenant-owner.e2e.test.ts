@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { and, eq, inArray, like, or } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createDb, schema } from "@markiro/db";
-import { buildDuplicateLabelTemplate } from "@markiro/domain";
+import { buildDuplicateLabelTemplate, DUPLICATE_LABEL_TEMPLATE_NAME } from "@markiro/domain";
 import { MailCryptoService } from "../src/modules/mail/mail-crypto.service";
 import { MailDeliveryService } from "../src/modules/mail/mail-delivery.service";
 import { activationIdentifier } from "../src/modules/tenant-owner-activation/token";
@@ -291,26 +291,22 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
         .sort(),
     ).toEqual(
       [
-        "Коробка 58×40 (203 dpi)",
-        "Коробка 58×40 (300 dpi)",
-        "Коробка 75×120 (203 dpi)",
-        "Коробка 100×100 (203 dpi)",
-        "Коробка 100×150 (203 dpi)",
-        "Коробка 58×40 без дат (203 dpi)",
-        "Коробка 58×40 без дат (300 dpi)",
-        "Коробка 75×120 без дат (203 dpi)",
-        "Коробка 100×100 без дат (203 dpi)",
-        "Коробка 100×150 без дат (203 dpi)",
-        "Коробка 58×40 (203 dpi) [Назв. для печати]",
-        "Коробка 58×40 (300 dpi) [Назв. для печати]",
-        "Коробка 75×120 (203 dpi) [Назв. для печати]",
-        "Коробка 100×100 (203 dpi) [Назв. для печати]",
-        "Коробка 100×150 (203 dpi) [Назв. для печати]",
-        "Коробка 58×40 без дат (203 dpi) [Назв. для печати]",
-        "Коробка 58×40 без дат (300 dpi) [Назв. для печати]",
-        "Коробка 75×120 без дат (203 dpi) [Назв. для печати]",
-        "Коробка 100×100 без дат (203 dpi) [Назв. для печати]",
-        "Коробка 100×150 без дат (203 dpi) [Назв. для печати]",
+        "Коробка 58×40",
+        "Коробка 75×120",
+        "Коробка 100×100",
+        "Коробка 100×150",
+        "Коробка 58×40 без дат",
+        "Коробка 75×120 без дат",
+        "Коробка 100×100 без дат",
+        "Коробка 100×150 без дат",
+        "Коробка 58×40 [Назв. для печати]",
+        "Коробка 75×120 [Назв. для печати]",
+        "Коробка 100×100 [Назв. для печати]",
+        "Коробка 100×150 [Назв. для печати]",
+        "Коробка 58×40 без дат [Назв. для печати]",
+        "Коробка 75×120 без дат [Назв. для печати]",
+        "Коробка 100×100 без дат [Назв. для печати]",
+        "Коробка 100×150 без дат [Назв. для печати]",
       ].sort(),
     );
 
@@ -320,7 +316,7 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .where(eq(schema.orgProfiles.tenantId, result.tenantId));
     // The tenant default is the DATED 58×40 @203 — the date-free family added
     // alongside it must not become anybody's default.
-    const expected = templates.find((t) => t.name === "Коробка 58×40 (203 dpi)");
+    const expected = templates.find((t) => t.name === "Коробка 58×40");
     expect(profile?.defaultId).toBe(expected?.id);
 
     // Idempotency: re-provisioning the same tenant must not duplicate templates.
@@ -334,19 +330,11 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .select({ id: schema.labelTemplates.id })
       .from(schema.labelTemplates)
       .where(eq(schema.labelTemplates.tenantId, result.tenantId));
-    expect(after).toHaveLength(22);
-    expect(
-      templates
-        .filter((t) => t.purpose === "product_duplicate")
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    ).toEqual([
+    expect(after).toHaveLength(17);
+    expect(templates.filter((t) => t.purpose === "product_duplicate")).toEqual([
       expect.objectContaining({
-        name: "Дубликат Data Matrix 58×40 (203 dpi)",
+        name: DUPLICATE_LABEL_TEMPLATE_NAME,
         spec: buildDuplicateLabelTemplate(),
-      }),
-      expect.objectContaining({
-        name: "Дубликат Data Matrix 58×40 (300 dpi)",
-        spec: { ...buildDuplicateLabelTemplate(), dpi: 300 },
       }),
     ]);
   });

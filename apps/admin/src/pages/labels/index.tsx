@@ -134,9 +134,10 @@ function TemplateCard({
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>{body}</div>
       )}
-      {/* Size and DPI only: a template has no language of its own -- it
-          prints on Zebra and TSC alike and the station picks the language
-          from its own printer (spec 2026-08-20), so no card badges one. */}
+      {/* Size only: a template has neither a language nor a resolution of
+          its own -- it prints on Zebra and TSC, at 203 and 300 dpi alike,
+          and the station picks both from its own printer (specs 2026-08-20
+          and 2026-09-10), so no card badges either. */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <Badge>
           {t("pages.labels.sizeBadge", {
@@ -144,7 +145,6 @@ function TemplateCard({
             height: item.heightMm.toFixed(1),
           })}
         </Badge>
-        <Badge>{t("pages.labels.dpiBadge", { dpi: item.dpi })}</Badge>
         <Badge>
           {t(
             item.purpose === "product_duplicate"

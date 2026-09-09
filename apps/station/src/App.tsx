@@ -1631,6 +1631,7 @@ export function App() {
                   ? {
                       target: hardwareConfig.printer,
                       language: hardwareConfig.printerLanguage,
+                      dpi: hardwareConfig.printerDpi ?? null,
                       print: (target, bytes) => tauriHardware.print(target, bytes),
                     }
                   : null
@@ -1664,6 +1665,7 @@ export function App() {
                 ? {
                     target: hardwareConfig.printer,
                     language: hardwareConfig.printerLanguage,
+                    dpi: hardwareConfig.printerDpi ?? null,
                     print: (target, bytes) => tauriHardware.print(target, bytes),
                   }
                 : null

@@ -1,5 +1,6 @@
 import { DomainError } from "../errors.js";
 import { labelTemplateUsesField } from "./eligibility.js";
+import type { LegacyStockLabelTemplate } from "./defaults.js";
 import { labelTemplateSpecSchema, mmToDots, type LabelTemplateSpec } from "./model.js";
 
 /** Stock-label typography and rules: readable fields left, full GS1 symbol right. */
@@ -114,13 +115,36 @@ export function buildDuplicateLabelTemplate(dpi: 203 | 300 = 203): LabelTemplate
   };
 }
 
-/** Separate stock presets so operators can select the printer's actual resolution. */
+/** The seed identity of the one stock duplicate preset (spec 2026-09-10). */
+export const DUPLICATE_LABEL_TEMPLATE_NAME = "Дубликат Data Matrix 58×40";
+
+/**
+ * The stock duplicate preset new tenants get — one, authored at 203 dpi; the
+ * station prints it at its own printer's resolution (`withPrinterDpi`).
+ */
 export function buildDuplicateLabelTemplates(): { name: string; spec: LabelTemplateSpec }[] {
+  return [{ name: DUPLICATE_LABEL_TEMPLATE_NAME, spec: buildDuplicateLabelTemplate(203) }];
+}
+
+/**
+ * The pre-2026-09-10 presets, one per resolution, as migrations 0114/0115
+ * seeded them: for migration 0123 (rename the 203 row, disable the untouched
+ * 300 twin) and its drift guard. Provisioning does not use this.
+ */
+export function buildLegacyDuplicateLabelTemplates(): LegacyStockLabelTemplate[] {
   return ([203, 300] as const).map((dpi) => ({
     name: `Дубликат Data Matrix 58×40 (${dpi} dpi)`,
     spec: buildDuplicateLabelTemplate(dpi),
+    renamedTo: dpi === 203 ? DUPLICATE_LABEL_TEMPLATE_NAME : null,
   }));
 }
+
+/**
+ * A template may print on any supported printer (spec 2026-09-10), so the
+ * "at least 12 dots per code" floor is judged at the COARSEST resolution:
+ * a code that is big enough at 203 dpi is big enough at 300.
+ */
+const COARSEST_PRINTER_DPI = 203;
 
 export function assertDuplicateTemplate(spec: LabelTemplateSpec): void {
   const parsed = labelTemplateSpecSchema.safeParse(spec);
@@ -139,7 +163,7 @@ export function assertDuplicateTemplate(spec: LabelTemplateSpec): void {
     code.yMm < 0 ||
     code.xMm + code.sizeMm > parsed.data.widthMm ||
     code.yMm + code.sizeMm > parsed.data.heightMm ||
-    mmToDots(code.sizeMm, parsed.data.dpi) < 12
+    mmToDots(code.sizeMm, COARSEST_PRINTER_DPI) < 12
   )
     invalidTemplate();
   // The raster reserves its quiet zone inside this square. Actual payload fit is checked on render.

@@ -174,6 +174,41 @@ describe("WorkstationSetup", () => {
     expect(verdict.textContent).toContain("the printer works");
   });
 
+  it("prints the test label at the configured printer resolution", async () => {
+    const printed: Uint8Array[] = [];
+    const hw = hardware({
+      print: async (_target, bytes) => {
+        printed.push(bytes);
+      },
+    });
+    render(
+      <WorkstationSetup
+        hw={hw}
+        exec={noopExec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+    await screen.findByText("COM3");
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("radio", { name: "Serial (COM port)" }));
+    fireEvent.change(screen.getByLabelText("Printer port"), { target: { value: "COM9" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Printer resolution" }), {
+      target: { value: "300" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Test print" }));
+    await waitFor(() => expect(printed).toHaveLength(1));
+    // 58×40 mm at 300 dpi; a 203 dpi print would open with ^PW464.
+    expect(new TextDecoder().decode(printed[0])).toContain("^PW685");
+    expect(
+      screen.getByText(
+        "Every label prints at this resolution. Until it is set, box labels print at the template's resolution and duplicate printing is unavailable.",
+      ),
+    ).toBeDefined();
+  });
+
   it("shows a scan received during the test", async () => {
     let emit: (raw: string) => void = () => {};
     const hw = hardware({

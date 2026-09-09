@@ -4,6 +4,7 @@ import {
   type InventoryEvent,
   type LabelField,
   type LabelTemplateSpec,
+  type PrinterDpi,
   type RasterizeTextFn,
   type StationInventoryBundleManifest,
 } from "@markiro/domain";
@@ -41,6 +42,8 @@ export interface InventoryPrintAttemptView {
 export interface InventoryBoxPrintingTransport {
   target: PrintTarget;
   language: PrinterLanguage;
+  /** Omitted or null = legacy settings: labels print at their authoring dpi. */
+  dpi?: PrinterDpi | null;
   print: (target: PrintTarget, bytes: Uint8Array) => Promise<void>;
 }
 
@@ -61,6 +64,7 @@ export interface AttemptInventoryBoxPrintInput {
     template: LabelTemplateSpec,
     fields: Record<LabelField, string>,
     language: PrinterLanguage,
+    dpi: PrinterDpi | null,
   ) => Promise<Uint8Array>;
   rasterizeText?: RasterizeTextFn;
   kind?: "initial" | "reprint";
@@ -407,12 +411,14 @@ async function attemptInternal(
       template: LabelTemplateSpec,
       _fields: Record<LabelField, string>,
       language: PrinterLanguage,
+      dpi: PrinterDpi | null,
     ) =>
       renderInventoryBoxLabel(
         template,
         labelInput(input.manifest, row),
         language,
         input.rasterizeText ?? rasterizeText,
+        dpi,
       ));
   const physical = await attemptBoxPrint({
     template: input.manifest.boxLabelTemplate?.spec ?? null,

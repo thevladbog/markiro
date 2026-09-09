@@ -86,6 +86,15 @@ describe("inventory box label", () => {
     );
   });
 
+  it("prints at the attached printer's resolution when one is configured", async () => {
+    const rasterize = vi.fn(async () => raster);
+    const zpl = await renderInventoryBoxLabel(SPEC, INPUT, "zpl", rasterize, 300);
+    const text = new TextDecoder("latin1").decode(zpl);
+    // 58×40 mm at 300 dpi; the same spec at 203 dpi opens with ^PW464/^LL320.
+    expect(text).toContain("^PW685");
+    expect(text).toContain("^LL472");
+  });
+
   it("rejects a presented or malformed SSCC instead of changing label identity", () => {
     expect(() => inventoryBoxLabelFields({ ...INPUT, sscc: "(00)046006820000621515" })).toThrow(
       "inventory box SSCC is invalid",

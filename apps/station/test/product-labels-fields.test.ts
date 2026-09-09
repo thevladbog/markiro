@@ -156,16 +156,22 @@ describe("duplicate label preparation", () => {
     },
   );
 
-  it.each([null, 300] as const)(
-    "rejects unknown or mismatching printer DPI before rendering: %s",
-    async (printerDpi) => {
-      const value = { ...input(), printerDpi };
-      await expect(prepareProductLabelAcceptance(value)).rejects.toMatchObject({
-        code: "PRODUCT_LABEL_PRINTER_DPI_MISMATCH",
-      });
-      expect(value.rasterizeText).not.toHaveBeenCalled();
-    },
-  );
+  it("requires a configured printer resolution before rendering", async () => {
+    const value = { ...input(), printerDpi: null };
+    await expect(prepareProductLabelAcceptance(value)).rejects.toMatchObject({
+      code: "PRODUCT_LABEL_PRINTER_DPI_REQUIRED",
+    });
+    expect(value.rasterizeText).not.toHaveBeenCalled();
+  });
+
+  it("renders a template authored at 203 dpi at the printer's 300 dpi and records that resolution", async () => {
+    const value = { ...input(203), printerDpi: 300 as const };
+    const result = await prepareProductLabelAcceptance(value);
+    expect(result.policy.snapshot.spec.dpi).toBe(203);
+    expect(result.preparedEvent.dpi).toBe(300);
+    // 58×40 mm at 300 dpi; the same template on a 203 dpi printer opens with ^PW464.
+    expect(Buffer.from(result.bytesBase64, "base64").toString("latin1")).toContain("^PW685");
+  });
 
   it("rejects inconsistent or incomplete product context before rendering", async () => {
     const value = input();
