@@ -14,6 +14,7 @@ import { asc, eq, inArray, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
 import type { Env } from "../env";
+import { describeErrorForLog } from "../lib/error-log";
 import { ExchangeSessionService } from "../modules/exchange/exchange-session.service";
 import { JournalService } from "../modules/integrations/journal.service";
 import {
@@ -827,8 +828,10 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       // The stately queue coalesces pending wakes with the keyless cron job.
       // A null result means a repair is already pending, which is sufficient.
       await this.boss.send(CATALOG_REPAIR_QUEUE, {});
-    } catch {
-      this.logger.warn("National Catalog queue wake failed; scheduled repair will recover work");
+    } catch (error) {
+      this.logger.warn(
+        `National Catalog queue wake failed; scheduled repair will recover work: ${describeErrorForLog(error)}`,
+      );
     }
   }
 

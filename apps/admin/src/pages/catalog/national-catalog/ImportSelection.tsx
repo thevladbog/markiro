@@ -42,9 +42,8 @@ export function ImportSelection({
   const { t, i18n } = useTranslation();
   const tr = (key: string) => t(`pages.catalog.import.${key}`);
   const loading =
-    (refreshing && data.items.length === 0) ||
-    session.automaticWorkPending ||
-    ["queued", "loading"].includes(session.state);
+    data.items.length === 0 &&
+    (refreshing || session.automaticWorkPending || ["queued", "loading"].includes(session.state));
   const emptyKey = !session.complete
     ? "listUnavailable"
     : query.search || query.statuses.length

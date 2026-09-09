@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as MarkiroDb from "@markiro/db";
 import type { JobWithMetadata } from "pg-boss";
 import { Test } from "@nestjs/testing";
+import { Logger } from "@nestjs/common";
 import {
   BUILD_INVENTORY_DOCUMENT_QUEUE,
   BUILD_SHIFT_EXPORT_QUEUE,
@@ -343,6 +344,25 @@ describe("PgBossService immediate National Catalog wake", () => {
     boss.send.mockClear();
     await expect(service.wakeNationalCatalog()).resolves.toBeUndefined();
     expect(boss.send).not.toHaveBeenCalled();
+  });
+
+  it("includes bounded failure details in the warning message without SQL parameters", async () => {
+    const boss = fakeBoss();
+    const { service } = serviceWith(boss);
+    await service.onModuleInit();
+    const warn = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => {});
+    const error = new Error("queue unavailable\nparams: private-payload");
+    error.stack =
+      "Error: queue unavailable\nparams: private-payload\n    at queueSend (queue.ts:1:1)";
+    try {
+      boss.send.mockRejectedValueOnce(error);
+      await expect(service.wakeNationalCatalog()).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledExactlyOnceWith(
+        "National Catalog queue wake failed; scheduled repair will recover work: queue unavailable\n    at queueSend (queue.ts:1:1)",
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("wakes only after a successful durable worker step settles", async () => {
