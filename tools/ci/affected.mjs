@@ -12,6 +12,7 @@ export const HEAVY_JOBS = Object.freeze([
   "station_windows_build",
   "signer_rust",
   "signer_windows_build",
+  "handheld_android",
 ]);
 
 const signerJobs = ["signer_rust", "signer_windows_build"];
@@ -120,6 +121,9 @@ function jobsForPath(path) {
     if (path.startsWith("apps/station/src-tauri/")) return stationJobs;
     return ["verify_static", "verify_app_tests", "production_bundle", ...stationJobs];
   }
+
+  // The Android app is a Gradle project outside the pnpm workspace: only its own job runs.
+  if (path.startsWith("apps/handheld/")) return ["handheld_android"];
 
   const appMatch = /^apps\/([^/]+)\//u.exec(path);
   if (appMatch) return appJobs[appMatch[1]] ?? null;

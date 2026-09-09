@@ -34,6 +34,7 @@ jobs:
       station_windows_build: ${{ steps.affected.outputs.station_windows_build }}
       signer_rust: ${{ steps.affected.outputs.signer_rust }}
       signer_windows_build: ${{ steps.affected.outputs.signer_windows_build }}
+      handheld_android: ${{ steps.affected.outputs.handheld_android }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -540,6 +541,26 @@ jobs:
       - name: Compile the Windows Tauri application
         run: pnpm --filter @markiro/signer tauri build --debug --no-bundle
 
+  handheld-android:
+    needs: classify-changes
+    if: needs.classify-changes.outputs.handheld_android == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/handheld
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+      - name: Unit tests, lint, debug build
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+
   ci-required:
     needs:
       - classify-changes
@@ -552,6 +573,7 @@ jobs:
       - station-windows-build
       - signer-rust
       - signer-windows-build
+      - handheld-android
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

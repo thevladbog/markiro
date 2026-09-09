@@ -41,3 +41,6 @@ docs/superpowers/plans/2026-09-02-mkr-ins-09-shift-close.md
 /tools/production-browser/test-results/
 # Prettier reformats the Kotlin, YAML and TypeScript blocks in this plan and breaks inline code spans; keep manually formatted.
 docs/superpowers/plans/2026-09-10-handheld-foundation.md
+
+# Android app: Gradle project, formatted by Android Studio/ktlint, not Prettier.
+apps/handheld/
