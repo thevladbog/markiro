@@ -29,39 +29,39 @@
 
 **PR 1 — code**
 
-| File | Responsibility after this plan |
-| --- | --- |
-| `packages/domain/src/labels/model.ts` | Adds `PrinterDpi` type and `withPrinterDpi(spec, printerDpi)`; documents `dpi` as the authoring resolution. |
-| `packages/domain/src/labels/duplicate.ts` | `assertDuplicateTemplate` floor evaluated at 203 dpi; one stock duplicate (`DUPLICATE_LABEL_TEMPLATE_NAME`); `buildLegacyDuplicateLabelTemplates()` for migration guards. |
-| `packages/domain/src/labels/defaults.ts` | Four stock sizes, resolution-free names, `DEFAULT_BOX_LABEL_TEMPLATE_NAME = "Коробка 58×40"`; `buildLegacy*BoxLabelTemplates()` returning the pre-change rows with `renamedTo`. |
-| `packages/domain/src/index.ts` | Exports the new names. |
-| `packages/domain/test/labels-printer-dpi.test.ts` (new) | `withPrinterDpi` behaviour. |
-| `packages/domain/test/product-labels-render.test.ts` | Resolution floor of `assertDuplicateTemplate`. |
-| `packages/domain/test/labels-defaults.test.ts` | New names/sizes, legacy drift guards, 58×40 SSCC at both printer resolutions. |
-| `apps/api/src/modules/label-templates/dto.ts`, `apps/api/src/modules/shifts/dto.ts` | OpenAPI descriptions of `dpi`. |
-| `apps/api/src/modules/platform-tenants/tenant-provisioning.service.ts` | Comment only (list comes from domain). |
-| `apps/api/test/platform-tenants.e2e.test.ts`, `apps/api/test/provision-tenant-owner.e2e.test.ts` | 17 seeded templates, new names. |
-| `apps/station/src/lib/print-label.ts` | `renderLabelBytes(..., options.dpi)` — the single substitution point. |
-| `apps/station/src/lib/box-printing.ts` | `printing.dpi` threaded into `render`. |
-| `apps/station/src/lib/inventory-box-label.ts`, `apps/station/src/lib/inventory-box-printing.ts` | Transport carries `dpi`; default renderer passes it. |
-| `apps/station/src/pages/WorkScreen.tsx`, `apps/station/src/App.tsx` | Printing context carries `hardwareConfig.printerDpi`. |
-| `apps/station/src/pages/WorkstationSetup.tsx`, `apps/station/src/ui/setup/PrinterSetupPanel.tsx` | Test print at printer dpi; hint under the resolution select. |
-| `apps/station/src/lib/product-labels/fields.ts`, `validation.ts`, `apps/station/src/lib/use-product-label-work.ts` | Duplicates render at printer dpi; mismatch checks removed. |
-| `apps/station/src/pages/NewShift.tsx`, `apps/station/src/dev/StationScreenGallery.tsx` | No dpi checks; meta line without dpi. |
-| `apps/station/src/i18n/ru.json`, `en.json` | `shifts.templateMeta`, `setup.printerDpiHint`; `shifts.printDpiMismatch` removed. |
-| `apps/station/test/*` | See tasks 5–9. |
-| `apps/admin/src/pages/labels/index.tsx`, `editor/index.tsx`, `apps/admin/src/i18n/*.json` | No dpi badge; "Разрешение предпросмотра" select with hint. |
-| `apps/admin/test/labels-library.test.tsx`, `labels-editor.test.tsx` | Updated expectations. |
-| `docs/hardware-acceptance-checklist.md` | Resolution items rewritten. |
+| File                                                                                                               | Responsibility after this plan                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/domain/src/labels/model.ts`                                                                              | Adds `PrinterDpi` type and `withPrinterDpi(spec, printerDpi)`; documents `dpi` as the authoring resolution.                                                                     |
+| `packages/domain/src/labels/duplicate.ts`                                                                          | `assertDuplicateTemplate` floor evaluated at 203 dpi; one stock duplicate (`DUPLICATE_LABEL_TEMPLATE_NAME`); `buildLegacyDuplicateLabelTemplates()` for migration guards.       |
+| `packages/domain/src/labels/defaults.ts`                                                                           | Four stock sizes, resolution-free names, `DEFAULT_BOX_LABEL_TEMPLATE_NAME = "Коробка 58×40"`; `buildLegacy*BoxLabelTemplates()` returning the pre-change rows with `renamedTo`. |
+| `packages/domain/src/index.ts`                                                                                     | Exports the new names.                                                                                                                                                          |
+| `packages/domain/test/labels-printer-dpi.test.ts` (new)                                                            | `withPrinterDpi` behaviour.                                                                                                                                                     |
+| `packages/domain/test/product-labels-render.test.ts`                                                               | Resolution floor of `assertDuplicateTemplate`.                                                                                                                                  |
+| `packages/domain/test/labels-defaults.test.ts`                                                                     | New names/sizes, legacy drift guards, 58×40 SSCC at both printer resolutions.                                                                                                   |
+| `apps/api/src/modules/label-templates/dto.ts`, `apps/api/src/modules/shifts/dto.ts`                                | OpenAPI descriptions of `dpi`.                                                                                                                                                  |
+| `apps/api/src/modules/platform-tenants/tenant-provisioning.service.ts`                                             | Comment only (list comes from domain).                                                                                                                                          |
+| `apps/api/test/platform-tenants.e2e.test.ts`, `apps/api/test/provision-tenant-owner.e2e.test.ts`                   | 17 seeded templates, new names.                                                                                                                                                 |
+| `apps/station/src/lib/print-label.ts`                                                                              | `renderLabelBytes(..., options.dpi)` — the single substitution point.                                                                                                           |
+| `apps/station/src/lib/box-printing.ts`                                                                             | `printing.dpi` threaded into `render`.                                                                                                                                          |
+| `apps/station/src/lib/inventory-box-label.ts`, `apps/station/src/lib/inventory-box-printing.ts`                    | Transport carries `dpi`; default renderer passes it.                                                                                                                            |
+| `apps/station/src/pages/WorkScreen.tsx`, `apps/station/src/App.tsx`                                                | Printing context carries `hardwareConfig.printerDpi`.                                                                                                                           |
+| `apps/station/src/pages/WorkstationSetup.tsx`, `apps/station/src/ui/setup/PrinterSetupPanel.tsx`                   | Test print at printer dpi; hint under the resolution select.                                                                                                                    |
+| `apps/station/src/lib/product-labels/fields.ts`, `validation.ts`, `apps/station/src/lib/use-product-label-work.ts` | Duplicates render at printer dpi; mismatch checks removed.                                                                                                                      |
+| `apps/station/src/pages/NewShift.tsx`, `apps/station/src/dev/StationScreenGallery.tsx`                             | No dpi checks; meta line without dpi.                                                                                                                                           |
+| `apps/station/src/i18n/ru.json`, `en.json`                                                                         | `shifts.templateMeta`, `setup.printerDpiHint`; `shifts.printDpiMismatch` removed.                                                                                               |
+| `apps/station/test/*`                                                                                              | See tasks 5–9.                                                                                                                                                                  |
+| `apps/admin/src/pages/labels/index.tsx`, `editor/index.tsx`, `apps/admin/src/i18n/*.json`                          | No dpi badge; "Разрешение предпросмотра" select with hint.                                                                                                                      |
+| `apps/admin/test/labels-library.test.tsx`, `labels-editor.test.tsx`                                                | Updated expectations.                                                                                                                                                           |
+| `docs/hardware-acceptance-checklist.md`                                                                            | Resolution items rewritten.                                                                                                                                                     |
 
 **PR 2 — data**
 
-| File | Responsibility |
-| --- | --- |
-| `packages/db/migrations/0123_dpi_neutral_stock_label_templates.sql` | Rename 17 stock names; disable untouched, unreferenced 300-dpi twins. |
-| `packages/db/migrations/meta/_journal.json` | Journal entry for 0123. |
-| `packages/db/test/dpi-neutral-stock-label-templates-migration.test.ts` (new) | Four migration cases + idempotency. |
-| `packages/domain/test/labels-defaults.test.ts` | Drift guard for 0123's literals. |
+| File                                                                         | Responsibility                                                        |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `packages/db/migrations/0123_dpi_neutral_stock_label_templates.sql`          | Rename 17 stock names; disable untouched, unreferenced 300-dpi twins. |
+| `packages/db/migrations/meta/_journal.json`                                  | Journal entry for 0123.                                               |
+| `packages/db/test/dpi-neutral-stock-label-templates-migration.test.ts` (new) | Four migration cases + idempotency.                                   |
+| `packages/domain/test/labels-defaults.test.ts`                               | Drift guard for 0123's literals.                                      |
 
 ---
 
@@ -70,11 +70,13 @@
 ### Task 1: `withPrinterDpi` in the domain model
 
 **Files:**
+
 - Modify: `packages/domain/src/labels/model.ts` (the `dpiSchema` line, the schema doc comment, and after `parseLabelTemplate`)
 - Modify: `packages/domain/src/index.ts` (the `export { ... } from "./labels/model.js"` value block and the `export type { ... } from "./labels/model.js"` block)
 - Create: `packages/domain/test/labels-printer-dpi.test.ts`
 
 **Interfaces:**
+
 - Produces: `export type PrinterDpi = 203 | 300;` and `export function withPrinterDpi(spec: LabelTemplateSpec, printerDpi: PrinterDpi | null): LabelTemplateSpec` — returns the SAME reference when `printerDpi` is `null` or equals `spec.dpi`, otherwise `{ ...spec, dpi: printerDpi }`. Tasks 5–8 consume both.
 
 - [ ] **Step 1: Write the failing test**
@@ -125,8 +127,12 @@ describe("withPrinterDpi", () => {
   });
 
   it("makes the emitters convert millimetres into the printer's own dots", async () => {
-    const at203 = await generateZpl(withPrinterDpi(SPEC, 203), sampleLabelData(), { rasterizeText });
-    const at300 = await generateZpl(withPrinterDpi(SPEC, 300), sampleLabelData(), { rasterizeText });
+    const at203 = await generateZpl(withPrinterDpi(SPEC, 203), sampleLabelData(), {
+      rasterizeText,
+    });
+    const at300 = await generateZpl(withPrinterDpi(SPEC, 300), sampleLabelData(), {
+      rasterizeText,
+    });
     // 58 mm is 464 dots at 203 dpi and 685 at 300 dpi.
     expect(at203).toContain("^PW464");
     expect(at300).toContain("^PW685");
@@ -218,10 +224,12 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 2: `assertDuplicateTemplate` judges the module floor at 203 dpi
 
 **Files:**
+
 - Modify: `packages/domain/src/labels/duplicate.ts` (the `assertDuplicateTemplate` function)
 - Test: `packages/domain/test/product-labels-render.test.ts` (append a `describe`)
 
 **Interfaces:**
+
 - Consumes: `mmToDots` from `./model.js` (already imported).
 - Produces: unchanged signature `assertDuplicateTemplate(spec: LabelTemplateSpec): void`; the "≥ 12 dots" rule now uses 203 dpi regardless of `spec.dpi`.
 
@@ -272,13 +280,13 @@ const COARSEST_PRINTER_DPI = 203;
 and replace the condition line
 
 ```ts
-    mmToDots(code.sizeMm, parsed.data.dpi) < 12
+mmToDots(code.sizeMm, parsed.data.dpi) < 12;
 ```
 
 with
 
 ```ts
-    mmToDots(code.sizeMm, COARSEST_PRINTER_DPI) < 12
+mmToDots(code.sizeMm, COARSEST_PRINTER_DPI) < 12;
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
@@ -300,12 +308,14 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 3: Resolution-free stock set with legacy builders
 
 **Files:**
+
 - Modify: `packages/domain/src/labels/defaults.ts` (line 12 `DEFAULT_BOX_LABEL_TEMPLATE_NAME`; the tail from `/** The five stock sizes ... */` to the end of the file)
 - Modify: `packages/domain/src/labels/duplicate.ts` (`buildDuplicateLabelTemplates`)
 - Modify: `packages/domain/src/index.ts` (duplicate and defaults export blocks)
 - Test: `packages/domain/test/labels-defaults.test.ts`
 
 **Interfaces:**
+
 - Produces (defaults.ts):
   - `export const DEFAULT_BOX_LABEL_TEMPLATE_NAME = "Коробка 58×40";`
   - `buildDatedBoxLabelTemplates()`, `buildDateFreeBoxLabelTemplates()`, `buildPrintNameBoxLabelTemplates()`, `buildDefaultLabelTemplates()` — same signatures, 4 / 4 / 8 / 16 rows, new names, all `dpi: 203`.
@@ -368,191 +378,191 @@ const SIZES: Array<[number, number, number]> = [
 Replace the whole first `it("returns BOTH stock families with the exact seed names", ...)` with:
 
 ```ts
-  it("returns BOTH stock families with the exact, resolution-free seed names", () => {
-    const templates = buildDefaultLabelTemplates();
-    // The names are the `(tenant_id, name)` idempotency key of provisioning
-    // and of migration 0123's rename table, so they are pinned literally here.
-    expect(templates.map((t) => t.name)).toEqual([
-      "Коробка 58×40",
-      "Коробка 75×120",
-      "Коробка 100×100",
-      "Коробка 100×150",
-      "Коробка 58×40 без дат",
-      "Коробка 75×120 без дат",
-      "Коробка 100×100 без дат",
-      "Коробка 100×150 без дат",
-      "Коробка 58×40 [Назв. для печати]",
-      "Коробка 75×120 [Назв. для печати]",
-      "Коробка 100×100 [Назв. для печати]",
-      "Коробка 100×150 [Назв. для печати]",
+it("returns BOTH stock families with the exact, resolution-free seed names", () => {
+  const templates = buildDefaultLabelTemplates();
+  // The names are the `(tenant_id, name)` idempotency key of provisioning
+  // and of migration 0123's rename table, so they are pinned literally here.
+  expect(templates.map((t) => t.name)).toEqual([
+    "Коробка 58×40",
+    "Коробка 75×120",
+    "Коробка 100×100",
+    "Коробка 100×150",
+    "Коробка 58×40 без дат",
+    "Коробка 75×120 без дат",
+    "Коробка 100×100 без дат",
+    "Коробка 100×150 без дат",
+    "Коробка 58×40 [Назв. для печати]",
+    "Коробка 75×120 [Назв. для печати]",
+    "Коробка 100×100 [Назв. для печати]",
+    "Коробка 100×150 [Назв. для печати]",
+    "Коробка 58×40 без дат [Назв. для печати]",
+    "Коробка 75×120 без дат [Назв. для печати]",
+    "Коробка 100×100 без дат [Назв. для печати]",
+    "Коробка 100×150 без дат [Назв. для печати]",
+  ]);
+  // ...and the whole list is exactly the three groups, in that order, so
+  // provisioning (which consumes this one function) seeds all sixteen.
+  expect(templates).toEqual([
+    ...buildDatedBoxLabelTemplates(),
+    ...buildDateFreeBoxLabelTemplates(),
+    ...buildPrintNameBoxLabelTemplates(),
+  ]);
+  // The tenant default is still the DATED 58×40 — adding a family must
+  // not move it.
+  expect(DEFAULT_BOX_LABEL_TEMPLATE_NAME).toBe("Коробка 58×40");
+  expect(buildDatedBoxLabelTemplates()[0]!.name).toBe(DEFAULT_BOX_LABEL_TEMPLATE_NAME);
+  expect(
+    templates.filter((t) => t.name === DEFAULT_BOX_LABEL_TEMPLATE_NAME),
+    "the default name must identify exactly one seeded template",
+  ).toHaveLength(1);
+  // Both families are cut in the same four sizes, all authored at 203 dpi:
+  // the station prints them at its own printer's resolution.
+  for (const family of [buildDatedBoxLabelTemplates(), buildDateFreeBoxLabelTemplates()]) {
+    expect(family.map((t) => [t.spec.widthMm, t.spec.heightMm, t.spec.dpi])).toEqual(SIZES);
+  }
+});
+
+it("keeps the pre-2026-09-10 seed rows reachable for the migration guards", () => {
+  const legacy = [
+    ...buildLegacyDatedBoxLabelTemplates(),
+    ...buildLegacyDateFreeBoxLabelTemplates(),
+    ...buildLegacyPrintNameBoxLabelTemplates(),
+  ];
+  expect(legacy.map((t) => [t.name, t.renamedTo])).toEqual([
+    ["Коробка 58×40 (203 dpi)", "Коробка 58×40"],
+    ["Коробка 58×40 (300 dpi)", null],
+    ["Коробка 75×120 (203 dpi)", "Коробка 75×120"],
+    ["Коробка 100×100 (203 dpi)", "Коробка 100×100"],
+    ["Коробка 100×150 (203 dpi)", "Коробка 100×150"],
+    ["Коробка 58×40 без дат (203 dpi)", "Коробка 58×40 без дат"],
+    ["Коробка 58×40 без дат (300 dpi)", null],
+    ["Коробка 75×120 без дат (203 dpi)", "Коробка 75×120 без дат"],
+    ["Коробка 100×100 без дат (203 dpi)", "Коробка 100×100 без дат"],
+    ["Коробка 100×150 без дат (203 dpi)", "Коробка 100×150 без дат"],
+    ["Коробка 58×40 (203 dpi) [Назв. для печати]", "Коробка 58×40 [Назв. для печати]"],
+    ["Коробка 58×40 (300 dpi) [Назв. для печати]", null],
+    ["Коробка 75×120 (203 dpi) [Назв. для печати]", "Коробка 75×120 [Назв. для печати]"],
+    ["Коробка 100×100 (203 dpi) [Назв. для печати]", "Коробка 100×100 [Назв. для печати]"],
+    ["Коробка 100×150 (203 dpi) [Назв. для печати]", "Коробка 100×150 [Назв. для печати]"],
+    [
+      "Коробка 58×40 без дат (203 dpi) [Назв. для печати]",
       "Коробка 58×40 без дат [Назв. для печати]",
+    ],
+    ["Коробка 58×40 без дат (300 dpi) [Назв. для печати]", null],
+    [
+      "Коробка 75×120 без дат (203 dpi) [Назв. для печати]",
       "Коробка 75×120 без дат [Назв. для печати]",
+    ],
+    [
+      "Коробка 100×100 без дат (203 dpi) [Назв. для печати]",
       "Коробка 100×100 без дат [Назв. для печати]",
+    ],
+    [
+      "Коробка 100×150 без дат (203 dpi) [Назв. для печати]",
       "Коробка 100×150 без дат [Назв. для печати]",
-    ]);
-    // ...and the whole list is exactly the three groups, in that order, so
-    // provisioning (which consumes this one function) seeds all sixteen.
-    expect(templates).toEqual([
-      ...buildDatedBoxLabelTemplates(),
-      ...buildDateFreeBoxLabelTemplates(),
-      ...buildPrintNameBoxLabelTemplates(),
-    ]);
-    // The tenant default is still the DATED 58×40 — adding a family must
-    // not move it.
-    expect(DEFAULT_BOX_LABEL_TEMPLATE_NAME).toBe("Коробка 58×40");
-    expect(buildDatedBoxLabelTemplates()[0]!.name).toBe(DEFAULT_BOX_LABEL_TEMPLATE_NAME);
-    expect(
-      templates.filter((t) => t.name === DEFAULT_BOX_LABEL_TEMPLATE_NAME),
-      "the default name must identify exactly one seeded template",
-    ).toHaveLength(1);
-    // Both families are cut in the same four sizes, all authored at 203 dpi:
-    // the station prints them at its own printer's resolution.
-    for (const family of [buildDatedBoxLabelTemplates(), buildDateFreeBoxLabelTemplates()]) {
-      expect(family.map((t) => [t.spec.widthMm, t.spec.heightMm, t.spec.dpi])).toEqual(SIZES);
-    }
-  });
+    ],
+  ]);
+  // A renamed legacy row is byte-for-byte the current stock spec under its
+  // new name; the 300 twins are the same layout at the other resolution.
+  const current = new Map(buildDefaultLabelTemplates().map((t) => [t.name, t.spec]));
+  for (const row of legacy) {
+    if (row.renamedTo !== null) expect(row.spec, row.name).toEqual(current.get(row.renamedTo));
+    else expect(row.spec.dpi, row.name).toBe(300);
+  }
+});
 
-  it("keeps the pre-2026-09-10 seed rows reachable for the migration guards", () => {
-    const legacy = [
-      ...buildLegacyDatedBoxLabelTemplates(),
-      ...buildLegacyDateFreeBoxLabelTemplates(),
-      ...buildLegacyPrintNameBoxLabelTemplates(),
-    ];
-    expect(legacy.map((t) => [t.name, t.renamedTo])).toEqual([
-      ["Коробка 58×40 (203 dpi)", "Коробка 58×40"],
-      ["Коробка 58×40 (300 dpi)", null],
-      ["Коробка 75×120 (203 dpi)", "Коробка 75×120"],
-      ["Коробка 100×100 (203 dpi)", "Коробка 100×100"],
-      ["Коробка 100×150 (203 dpi)", "Коробка 100×150"],
-      ["Коробка 58×40 без дат (203 dpi)", "Коробка 58×40 без дат"],
-      ["Коробка 58×40 без дат (300 dpi)", null],
-      ["Коробка 75×120 без дат (203 dpi)", "Коробка 75×120 без дат"],
-      ["Коробка 100×100 без дат (203 dpi)", "Коробка 100×100 без дат"],
-      ["Коробка 100×150 без дат (203 dpi)", "Коробка 100×150 без дат"],
-      ["Коробка 58×40 (203 dpi) [Назв. для печати]", "Коробка 58×40 [Назв. для печати]"],
-      ["Коробка 58×40 (300 dpi) [Назв. для печати]", null],
-      ["Коробка 75×120 (203 dpi) [Назв. для печати]", "Коробка 75×120 [Назв. для печати]"],
-      ["Коробка 100×100 (203 dpi) [Назв. для печати]", "Коробка 100×100 [Назв. для печати]"],
-      ["Коробка 100×150 (203 dpi) [Назв. для печати]", "Коробка 100×150 [Назв. для печати]"],
-      [
-        "Коробка 58×40 без дат (203 dpi) [Назв. для печати]",
-        "Коробка 58×40 без дат [Назв. для печати]",
-      ],
-      ["Коробка 58×40 без дат (300 dpi) [Назв. для печати]", null],
-      [
-        "Коробка 75×120 без дат (203 dpi) [Назв. для печати]",
-        "Коробка 75×120 без дат [Назв. для печати]",
-      ],
-      [
-        "Коробка 100×100 без дат (203 dpi) [Назв. для печати]",
-        "Коробка 100×100 без дат [Назв. для печати]",
-      ],
-      [
-        "Коробка 100×150 без дат (203 dpi) [Назв. для печати]",
-        "Коробка 100×150 без дат [Назв. для печати]",
-      ],
-    ]);
-    // A renamed legacy row is byte-for-byte the current stock spec under its
-    // new name; the 300 twins are the same layout at the other resolution.
-    const current = new Map(buildDefaultLabelTemplates().map((t) => [t.name, t.spec]));
-    for (const row of legacy) {
-      if (row.renamedTo !== null) expect(row.spec, row.name).toEqual(current.get(row.renamedTo));
-      else expect(row.spec.dpi, row.name).toBe(300);
+it("prints the 58×40 SSCC GS1-legal on both printer resolutions", async () => {
+  const modules = code128ModuleCount("0".repeat(20), true) + 2 * GS1_128_QUIET_ZONE_MODULES;
+  for (const { name, spec } of buildDefaultLabelTemplates()) {
+    if (spec.widthMm !== 58) continue;
+    const sscc = spec.elements.find((el) => el.kind === "barcode" && el.data === "sscc");
+    if (sscc?.kind !== "barcode" || sscc.moduleWidthMm === undefined)
+      throw new Error(`${name}: SSCC barcode with an explicit module width expected`);
+    for (const [dpi, dots] of [
+      [203, 2],
+      [300, 3],
+    ] as const) {
+      const printed = withPrinterDpi(spec, dpi);
+      expect(mmToDots(sscc.moduleWidthMm, printed.dpi), `${name} @${dpi}: module dots`).toBe(dots);
+      // Symbol plus both quiet zones, at the width the printer will really draw.
+      const moduleMm = (25.4 / dpi) * dots;
+      const left = sscc.xMm - GS1_128_QUIET_ZONE_MODULES * moduleMm;
+      expect(left, `${name} @${dpi}: left quiet zone on the label`).toBeGreaterThanOrEqual(0);
+      expect(left + modules * moduleMm, `${name} @${dpi}: right edge`).toBeLessThanOrEqual(58);
+      await expect(
+        generateZpl(printed, sampleLabelData(), { rasterizeText: boundedRasterizer() }),
+      ).resolves.toContain(dpi === 203 ? "^PW464" : "^PW685");
+      await expect(
+        generateTspl(printed, sampleLabelData(), { rasterizeText: boundedRasterizer() }),
+      ).resolves.toContain("PRINT 1");
     }
-  });
-
-  it("prints the 58×40 SSCC GS1-legal on both printer resolutions", async () => {
-    const modules = code128ModuleCount("0".repeat(20), true) + 2 * GS1_128_QUIET_ZONE_MODULES;
-    for (const { name, spec } of buildDefaultLabelTemplates()) {
-      if (spec.widthMm !== 58) continue;
-      const sscc = spec.elements.find((el) => el.kind === "barcode" && el.data === "sscc");
-      if (sscc?.kind !== "barcode" || sscc.moduleWidthMm === undefined)
-        throw new Error(`${name}: SSCC barcode with an explicit module width expected`);
-      for (const [dpi, dots] of [
-        [203, 2],
-        [300, 3],
-      ] as const) {
-        const printed = withPrinterDpi(spec, dpi);
-        expect(mmToDots(sscc.moduleWidthMm, printed.dpi), `${name} @${dpi}: module dots`).toBe(dots);
-        // Symbol plus both quiet zones, at the width the printer will really draw.
-        const moduleMm = (25.4 / dpi) * dots;
-        const left = sscc.xMm - GS1_128_QUIET_ZONE_MODULES * moduleMm;
-        expect(left, `${name} @${dpi}: left quiet zone on the label`).toBeGreaterThanOrEqual(0);
-        expect(left + modules * moduleMm, `${name} @${dpi}: right edge`).toBeLessThanOrEqual(58);
-        await expect(
-          generateZpl(printed, sampleLabelData(), { rasterizeText: boundedRasterizer() }),
-        ).resolves.toContain(dpi === 203 ? "^PW464" : "^PW685");
-        await expect(
-          generateTspl(printed, sampleLabelData(), { rasterizeText: boundedRasterizer() }),
-        ).resolves.toContain("PRINT 1");
-      }
-    }
-  });
+  }
+});
 ```
 
 In `it("centres the SSCC barcode at the widest GS1-legal module width", ...)` replace the `expected` map with:
 
 ```ts
-    const expected: Record<string, { moduleWidthMm: number; xMm: number }> = {
-      // 203 dpi authoring: 2 dots = 0.2502 mm, already GS1's MINIMUM
-      // X-dimension — a 3-dot module would be 58.6 mm of bars on a 58 mm
-      // label. On a 300 dpi printer the same 0.2502 mm rounds to 3 dots
-      // (0.254 mm), see "prints the 58×40 SSCC GS1-legal on both printer resolutions".
-      "Коробка 58×40": { moduleWidthMm: 0.2502, xMm: 9.5 },
-      "Коробка 75×120": { moduleWidthMm: 0.3754, xMm: 8.2 },
-      "Коробка 100×100": { moduleWidthMm: 0.5005, xMm: 11 },
-      "Коробка 100×150": { moduleWidthMm: 0.5005, xMm: 11 },
-      // The date-free family changes the label's vertical budget only, so at
-      // each size its symbol is the same WIDTH in the same place — only
-      // taller.
-      "Коробка 58×40 без дат": { moduleWidthMm: 0.2502, xMm: 9.5 },
-      "Коробка 75×120 без дат": { moduleWidthMm: 0.3754, xMm: 8.2 },
-      "Коробка 100×100 без дат": { moduleWidthMm: 0.5005, xMm: 11 },
-      "Коробка 100×150 без дат": { moduleWidthMm: 0.5005, xMm: 11 },
-    };
+const expected: Record<string, { moduleWidthMm: number; xMm: number }> = {
+  // 203 dpi authoring: 2 dots = 0.2502 mm, already GS1's MINIMUM
+  // X-dimension — a 3-dot module would be 58.6 mm of bars on a 58 mm
+  // label. On a 300 dpi printer the same 0.2502 mm rounds to 3 dots
+  // (0.254 mm), see "prints the 58×40 SSCC GS1-legal on both printer resolutions".
+  "Коробка 58×40": { moduleWidthMm: 0.2502, xMm: 9.5 },
+  "Коробка 75×120": { moduleWidthMm: 0.3754, xMm: 8.2 },
+  "Коробка 100×100": { moduleWidthMm: 0.5005, xMm: 11 },
+  "Коробка 100×150": { moduleWidthMm: 0.5005, xMm: 11 },
+  // The date-free family changes the label's vertical budget only, so at
+  // each size its symbol is the same WIDTH in the same place — only
+  // taller.
+  "Коробка 58×40 без дат": { moduleWidthMm: 0.2502, xMm: 9.5 },
+  "Коробка 75×120 без дат": { moduleWidthMm: 0.3754, xMm: 8.2 },
+  "Коробка 100×100 без дат": { moduleWidthMm: 0.5005, xMm: 11 },
+  "Коробка 100×150 без дат": { moduleWidthMm: 0.5005, xMm: 11 },
+};
 ```
 
 In `it("spends the freed row on the barcode, not on a fourth name line", ...)` replace the `expectedBars` map with:
 
 ```ts
-    const expectedBars: Record<string, number> = {
-      "Коробка 58×40 без дат": 7.6,
-      "Коробка 75×120 без дат": 10.3,
-      "Коробка 100×100 без дат": 13.5,
-      "Коробка 100×150 без дат": 13.5,
-    };
+const expectedBars: Record<string, number> = {
+  "Коробка 58×40 без дат": 7.6,
+  "Коробка 75×120 без дат": 10.3,
+  "Коробка 100×100 без дат": 13.5,
+  "Коробка 100×150 без дат": 13.5,
+};
 ```
 
 Replace the three drift-guard tests at the end of the file (`matches the jsonb inlined into db migration 0056/0053/0059`) with:
 
 ```ts
-  it("matches the jsonb inlined into db migration 0056 (drift guard)", async () => {
-    expect(await inlinedRows("0056_align_dated_label_quantity.sql")).toEqual(
-      buildLegacyDatedBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
-    );
-  });
+it("matches the jsonb inlined into db migration 0056 (drift guard)", async () => {
+  expect(await inlinedRows("0056_align_dated_label_quantity.sql")).toEqual(
+    buildLegacyDatedBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
+  );
+});
 
-  /**
-   * The DATE-FREE family's own drift guard. Its migration is an
-   * insert-if-absent (these names have never existed, so nothing needs
-   * overwriting), and like 0052's it must stay in step with this module —
-   * whoever changes the layout has to regenerate the SQL.
-   */
-  it("matches the jsonb inlined into db migration 0053 (drift guard)", async () => {
-    expect(await inlinedRows("0053_date_free_label_templates.sql")).toEqual(
-      buildLegacyDateFreeBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
-    );
-  });
+/**
+ * The DATE-FREE family's own drift guard. Its migration is an
+ * insert-if-absent (these names have never existed, so nothing needs
+ * overwriting), and like 0052's it must stay in step with this module —
+ * whoever changes the layout has to regenerate the SQL.
+ */
+it("matches the jsonb inlined into db migration 0053 (drift guard)", async () => {
+  expect(await inlinedRows("0053_date_free_label_templates.sql")).toEqual(
+    buildLegacyDateFreeBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
+  );
+});
 
-  /**
-   * The PRINT-NAME family's drift guard — insert-if-absent like 0053's, and
-   * generated the same way: whoever changes the layout regenerates the SQL.
-   */
-  it("matches the jsonb inlined into db migration 0059 (drift guard)", async () => {
-    expect(await inlinedRows("0059_print_name_label_templates.sql")).toEqual(
-      buildLegacyPrintNameBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
-    );
-  });
+/**
+ * The PRINT-NAME family's drift guard — insert-if-absent like 0053's, and
+ * generated the same way: whoever changes the layout regenerates the SQL.
+ */
+it("matches the jsonb inlined into db migration 0059 (drift guard)", async () => {
+  expect(await inlinedRows("0059_print_name_label_templates.sql")).toEqual(
+    buildLegacyPrintNameBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
+  );
+});
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -599,7 +609,9 @@ const BOX_LABEL_SIZES: ReadonlyArray<{ w: number; h: number }> = [
 const PRINT_NAME_SUFFIX = " [Назв. для печати]";
 
 function stockName(w: number, h: number, dates: DateFields, suffix = ""): string {
-  return dates === "with-dates" ? `Коробка ${w}×${h}${suffix}` : `Коробка ${w}×${h} без дат${suffix}`;
+  return dates === "with-dates"
+    ? `Коробка ${w}×${h}${suffix}`
+    : `Коробка ${w}×${h} без дат${suffix}`;
 }
 
 /**
@@ -827,6 +839,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 4: API — seeded set, OpenAPI descriptions
 
 **Files:**
+
 - Modify: `apps/api/src/modules/label-templates/dto.ts` (the `dpi` property in `labelTemplateSummaryOpenApiSchema`)
 - Modify: `apps/api/src/modules/shifts/dto.ts` (the `dpi` property inside `shiftBoxLabelTemplatesOpenApiSchema.properties.items.items.properties`)
 - Modify: `apps/api/src/modules/platform-tenants/tenant-provisioning.service.ts` (comment lines 114–120 only)
@@ -834,6 +847,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Test: `apps/api/test/provision-tenant-owner.e2e.test.ts` (import line 5; the names list, the default lookup, the `toHaveLength(22)`, the duplicates expectation)
 
 **Interfaces:**
+
 - Consumes: `buildDefaultLabelTemplates`, `buildDuplicateLabelTemplate`, `DEFAULT_BOX_LABEL_TEMPLATE_NAME`, `DUPLICATE_LABEL_TEMPLATE_NAME` from Task 3.
 - Produces: no runtime API change; provisioning seeds 16 + 1 rows because it reads the domain lists.
 
@@ -853,32 +867,32 @@ import {
 and replace the test `it("seeds both duplicate resolutions and preserves all box presets and the box default", ...)` with:
 
 ```ts
-  it("seeds the resolution-free stock set: one duplicate preset, all box presets and the box default", async () => {
-    await ensureTenant();
-    const templates = await setup.db
-      .select()
-      .from(schema.labelTemplates)
-      .where(eq(schema.labelTemplates.tenantId, tenantId));
-    const boxes = templates.filter((template) => template.purpose === "box");
-    expect(
-      boxes.map(({ name, spec }) => ({ name, spec })).sort((a, b) => a.name.localeCompare(b.name)),
-    ).toEqual(buildDefaultLabelTemplates().sort((a, b) => a.name.localeCompare(b.name)));
-    expect(templates.filter((template) => template.purpose === "product_duplicate")).toEqual([
-      expect.objectContaining({
-        name: DUPLICATE_LABEL_TEMPLATE_NAME,
-        spec: buildDuplicateLabelTemplate(),
-        enabled: true,
-        chzProductGroupCodes: null,
-      }),
-    ]);
-    const [profile] = await setup.db
-      .select()
-      .from(schema.orgProfiles)
-      .where(eq(schema.orgProfiles.tenantId, tenantId));
-    expect(profile?.defaultBoxLabelTemplateId).toBe(
-      boxes.find((template) => template.name === DEFAULT_BOX_LABEL_TEMPLATE_NAME)?.id,
-    );
-  });
+it("seeds the resolution-free stock set: one duplicate preset, all box presets and the box default", async () => {
+  await ensureTenant();
+  const templates = await setup.db
+    .select()
+    .from(schema.labelTemplates)
+    .where(eq(schema.labelTemplates.tenantId, tenantId));
+  const boxes = templates.filter((template) => template.purpose === "box");
+  expect(
+    boxes.map(({ name, spec }) => ({ name, spec })).sort((a, b) => a.name.localeCompare(b.name)),
+  ).toEqual(buildDefaultLabelTemplates().sort((a, b) => a.name.localeCompare(b.name)));
+  expect(templates.filter((template) => template.purpose === "product_duplicate")).toEqual([
+    expect.objectContaining({
+      name: DUPLICATE_LABEL_TEMPLATE_NAME,
+      spec: buildDuplicateLabelTemplate(),
+      enabled: true,
+      chzProductGroupCodes: null,
+    }),
+  ]);
+  const [profile] = await setup.db
+    .select()
+    .from(schema.orgProfiles)
+    .where(eq(schema.orgProfiles.tenantId, tenantId));
+  expect(profile?.defaultBoxLabelTemplateId).toBe(
+    boxes.find((template) => template.name === DEFAULT_BOX_LABEL_TEMPLATE_NAME)?.id,
+  );
+});
 ```
 
 In `apps/api/test/provision-tenant-owner.e2e.test.ts` change line 5 to
@@ -913,24 +927,24 @@ replace the 20-name array inside `.toEqual([...].sort())` with
 replace
 
 ```ts
-    const expected = templates.find((t) => t.name === "Коробка 58×40 (203 dpi)");
+const expected = templates.find((t) => t.name === "Коробка 58×40 (203 dpi)");
 ```
 
 with
 
 ```ts
-    const expected = templates.find((t) => t.name === "Коробка 58×40");
+const expected = templates.find((t) => t.name === "Коробка 58×40");
 ```
 
 replace `expect(after).toHaveLength(22);` with `expect(after).toHaveLength(17);`, and replace the duplicates expectation (the `expect(templates.filter((t) => t.purpose === "product_duplicate").sort(...)).toEqual([...two objects...])`) with:
 
 ```ts
-    expect(templates.filter((t) => t.purpose === "product_duplicate")).toEqual([
-      expect.objectContaining({
-        name: DUPLICATE_LABEL_TEMPLATE_NAME,
-        spec: buildDuplicateLabelTemplate(),
-      }),
-    ]);
+expect(templates.filter((t) => t.purpose === "product_duplicate")).toEqual([
+  expect.objectContaining({
+    name: DUPLICATE_LABEL_TEMPLATE_NAME,
+    spec: buildDuplicateLabelTemplate(),
+  }),
+]);
 ```
 
 - [ ] **Step 2: Run the two e2e files**
@@ -971,22 +985,22 @@ In `apps/api/src/modules/shifts/dto.ts` replace the `dpi: { type: "integer", enu
 In `apps/api/src/modules/platform-tenants/tenant-provisioning.service.ts` replace the comment block
 
 ```ts
-      // Stock box-label templates (spec: 2026-08-20 label editor simplification).
-      // Both families — the dated five and the date-free five — come from the
-      // single `buildDefaultLabelTemplates()` list, so a family added there is
-      // seeded here without touching this loop. The tenant's DEFAULT stays the
-      // dated 58×40 @203 (`DEFAULT_BOX_LABEL_TEMPLATE_NAME`) regardless.
+// Stock box-label templates (spec: 2026-08-20 label editor simplification).
+// Both families — the dated five and the date-free five — come from the
+// single `buildDefaultLabelTemplates()` list, so a family added there is
+// seeded here without touching this loop. The tenant's DEFAULT stays the
+// dated 58×40 @203 (`DEFAULT_BOX_LABEL_TEMPLATE_NAME`) regardless.
 ```
 
 with
 
 ```ts
-      // Stock box-label templates (specs 2026-08-20 and 2026-09-10). All
-      // families come from the single `buildDefaultLabelTemplates()` list, so
-      // a family added there is seeded here without touching this loop. The
-      // templates are resolution-neutral — the station prints them at its own
-      // printer's dpi — and the tenant's DEFAULT stays the dated 58×40
-      // (`DEFAULT_BOX_LABEL_TEMPLATE_NAME`) regardless.
+// Stock box-label templates (specs 2026-08-20 and 2026-09-10). All
+// families come from the single `buildDefaultLabelTemplates()` list, so
+// a family added there is seeded here without touching this loop. The
+// templates are resolution-neutral — the station prints them at its own
+// printer's dpi — and the tenant's DEFAULT stays the dated 58×40
+// (`DEFAULT_BOX_LABEL_TEMPLATE_NAME`) regardless.
 ```
 
 - [ ] **Step 4: Run the OpenAPI test**
@@ -1008,10 +1022,12 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 5: Station render substitutes the printer resolution
 
 **Files:**
+
 - Modify: `apps/station/src/lib/print-label.ts`
 - Test: `apps/station/test/print-label.test.ts`
 
 **Interfaces:**
+
 - Consumes: `withPrinterDpi`, `PrinterDpi` from `@markiro/domain` (Task 1).
 - Produces:
 
@@ -1035,19 +1051,19 @@ export async function renderLabelBytes(
 Append inside `describe("renderLabelBytes", ...)` in `apps/station/test/print-label.test.ts`:
 
 ```ts
-  it("prints at the attached printer's resolution, not the template's authoring dpi", async () => {
-    const bytes = await renderLabelBytes(SPEC, sampleLabelData(), "zpl", fakeRasterize, {
-      dpi: 300,
-    });
-    expect(new TextDecoder().decode(bytes)).toContain("^PW685");
+it("prints at the attached printer's resolution, not the template's authoring dpi", async () => {
+  const bytes = await renderLabelBytes(SPEC, sampleLabelData(), "zpl", fakeRasterize, {
+    dpi: 300,
   });
+  expect(new TextDecoder().decode(bytes)).toContain("^PW685");
+});
 
-  it("falls back to the authoring dpi when the printer resolution is unknown", async () => {
-    const bytes = await renderLabelBytes(SPEC, sampleLabelData(), "zpl", fakeRasterize, {
-      dpi: null,
-    });
-    expect(new TextDecoder().decode(bytes)).toContain("^PW464");
+it("falls back to the authoring dpi when the printer resolution is unknown", async () => {
+  const bytes = await renderLabelBytes(SPEC, sampleLabelData(), "zpl", fakeRasterize, {
+    dpi: null,
   });
+  expect(new TextDecoder().decode(bytes)).toContain("^PW464");
+});
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -1140,6 +1156,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 6: Box printing carries the printer resolution
 
 **Files:**
+
 - Modify: `apps/station/src/lib/box-printing.ts`
 - Modify: `apps/station/src/lib/inventory-box-label.ts` (`renderInventoryBoxLabel`)
 - Modify: `apps/station/src/lib/inventory-box-printing.ts` (`InventoryBoxPrintingTransport`, the `render?` member of `AttemptInventoryBoxPrintInput`, the default `render` in `attemptInventoryBoxPrint`)
@@ -1148,6 +1165,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Test: `apps/station/test/box-printing.test.ts`, `apps/station/test/inventory-box-label.test.ts`
 
 **Interfaces:**
+
 - Consumes: `renderLabelBytes(..., { dpi })` from Task 5; `PrinterDpi` from Task 1.
 - Produces:
 
@@ -1171,9 +1189,20 @@ export interface BoxPrintInput {
   ) => Promise<Uint8Array>;
 }
 // inventory-box-label.ts
-export function renderInventoryBoxLabel(template, input, language, rasterizeText, dpi: PrinterDpi | null = null): Promise<Uint8Array>;
+export function renderInventoryBoxLabel(
+  template,
+  input,
+  language,
+  rasterizeText,
+  dpi: PrinterDpi | null = null,
+): Promise<Uint8Array>;
 // inventory-box-printing.ts
-export interface InventoryBoxPrintingTransport { target; language; dpi?: PrinterDpi | null; print }
+export interface InventoryBoxPrintingTransport {
+  target;
+  language;
+  dpi?: PrinterDpi | null;
+  print;
+}
 ```
 
 `dpi` is OPTIONAL on the transport objects so the 29 existing test fixtures that build `{ target, language, print }` keep compiling; production callers (App.tsx) always pass it.
@@ -1201,44 +1230,48 @@ function configuredInput(): BoxPrintInput {
 and append inside `describe("attemptBoxPrint", ...)`:
 
 ```ts
-  it("hands the printer's resolution to the renderer", async () => {
-    const input = configuredInput();
+it("hands the printer's resolution to the renderer", async () => {
+  const input = configuredInput();
 
-    await attemptBoxPrint(input);
-    expect(input.render).toHaveBeenCalledWith(
-      BOX_TEMPLATE,
-      { sscc: "046012345600007778" },
-      "zpl",
-      300,
-    );
-  });
+  await attemptBoxPrint(input);
+  expect(input.render).toHaveBeenCalledWith(
+    BOX_TEMPLATE,
+    { sscc: "046012345600007778" },
+    "zpl",
+    300,
+  );
+});
 
-  it("passes null through for legacy settings without a resolution", async () => {
-    const input = configuredInput();
-    // A transport saved before the resolution setting existed carries no `dpi`.
-    const legacyPrinting = { target: PRINT_TARGET, language: "zpl" as const, print: vi.fn(async () => {}) };
+it("passes null through for legacy settings without a resolution", async () => {
+  const input = configuredInput();
+  // A transport saved before the resolution setting existed carries no `dpi`.
+  const legacyPrinting = {
+    target: PRINT_TARGET,
+    language: "zpl" as const,
+    print: vi.fn(async () => {}),
+  };
 
-    await attemptBoxPrint({ ...input, printing: legacyPrinting });
-    expect(input.render).toHaveBeenCalledWith(
-      BOX_TEMPLATE,
-      { sscc: "046012345600007778" },
-      "zpl",
-      null,
-    );
-  });
+  await attemptBoxPrint({ ...input, printing: legacyPrinting });
+  expect(input.render).toHaveBeenCalledWith(
+    BOX_TEMPLATE,
+    { sscc: "046012345600007778" },
+    "zpl",
+    null,
+  );
+});
 ```
 
 In `apps/station/test/inventory-box-label.test.ts` append inside `describe("inventory box label", ...)`:
 
 ```ts
-  it("prints at the attached printer's resolution when one is configured", async () => {
-    const rasterize = vi.fn(async () => raster);
-    const zpl = await renderInventoryBoxLabel(SPEC, INPUT, "zpl", rasterize, 300);
-    const text = new TextDecoder("latin1").decode(zpl);
-    // 58×40 mm at 300 dpi; the same spec at 203 dpi opens with ^PW464/^LL320.
-    expect(text).toContain("^PW685");
-    expect(text).toContain("^LL472");
-  });
+it("prints at the attached printer's resolution when one is configured", async () => {
+  const rasterize = vi.fn(async () => raster);
+  const zpl = await renderInventoryBoxLabel(SPEC, INPUT, "zpl", rasterize, 300);
+  const text = new TextDecoder("latin1").decode(zpl);
+  // 58×40 mm at 300 dpi; the same spec at 203 dpi opens with ^PW464/^LL320.
+  expect(text).toContain("^PW685");
+  expect(text).toContain("^LL472");
+});
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1326,6 +1359,7 @@ export function renderInventoryBoxLabel(
 ```
 
 In `apps/station/src/lib/inventory-box-printing.ts`:
+
 - add `type PrinterDpi,` to the `@markiro/domain` import (after `type LabelTemplateSpec,`);
 - replace `InventoryBoxPrintingTransport` with
 
@@ -1353,39 +1387,35 @@ export interface InventoryBoxPrintingTransport {
 - replace the default renderer inside `attemptInventoryBoxPrint`
 
 ```ts
-  const render =
-    input.render ??
-    ((
-      template: LabelTemplateSpec,
-      _fields: Record<LabelField, string>,
-      language: PrinterLanguage,
-    ) =>
-      renderInventoryBoxLabel(
-        template,
-        labelInput(input.manifest, row),
-        language,
-        input.rasterizeText ?? rasterizeText,
-      ));
+const render =
+  input.render ??
+  ((template: LabelTemplateSpec, _fields: Record<LabelField, string>, language: PrinterLanguage) =>
+    renderInventoryBoxLabel(
+      template,
+      labelInput(input.manifest, row),
+      language,
+      input.rasterizeText ?? rasterizeText,
+    ));
 ```
 
 with
 
 ```ts
-  const render =
-    input.render ??
-    ((
-      template: LabelTemplateSpec,
-      _fields: Record<LabelField, string>,
-      language: PrinterLanguage,
-      dpi: PrinterDpi | null,
-    ) =>
-      renderInventoryBoxLabel(
-        template,
-        labelInput(input.manifest, row),
-        language,
-        input.rasterizeText ?? rasterizeText,
-        dpi,
-      ));
+const render =
+  input.render ??
+  ((
+    template: LabelTemplateSpec,
+    _fields: Record<LabelField, string>,
+    language: PrinterLanguage,
+    dpi: PrinterDpi | null,
+  ) =>
+    renderInventoryBoxLabel(
+      template,
+      labelInput(input.manifest, row),
+      language,
+      input.rasterizeText ?? rasterizeText,
+      dpi,
+    ));
 ```
 
 In `apps/station/src/pages/WorkScreen.tsx` add `type PrinterDpi` to the existing `@markiro/domain` type imports, replace the `printing?:` prop with
@@ -1453,12 +1483,14 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 7: Workstation setup — test print at printer dpi, hint under the resolution select
 
 **Files:**
+
 - Modify: `apps/station/src/pages/WorkstationSetup.tsx` (the `renderLabelBytes(...)` call in `testPrint`, lines 289–294)
 - Modify: `apps/station/src/ui/setup/PrinterSetupPanel.tsx` (the `<Select ... label={t("setup.printerResolution")} .../>` block, lines 201–214)
 - Modify: `apps/station/src/i18n/ru.json`, `apps/station/src/i18n/en.json` (the `setup` object, after `printerResolutionUnknown`)
 - Test: `apps/station/test/workstation-setup.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `renderLabelBytes(..., { dpi })` (Task 5).
 - Produces: i18n key `setup.printerDpiHint`.
 
@@ -1513,45 +1545,45 @@ Expected: FAIL — bytes contain `^PW464`; the hint text is not found.
 In `apps/station/src/pages/WorkstationSetup.tsx` replace
 
 ```ts
-      const bytes = await renderLabelBytes(
-        spec,
-        sampleLabelData(),
-        result.config.printerLanguage,
-        rasterizeText,
-      );
+const bytes = await renderLabelBytes(
+  spec,
+  sampleLabelData(),
+  result.config.printerLanguage,
+  rasterizeText,
+);
 ```
 
 with
 
 ```ts
-      // The test label prints at the resolution the working labels will use.
-      const bytes = await renderLabelBytes(
-        spec,
-        sampleLabelData(),
-        result.config.printerLanguage,
-        rasterizeText,
-        { dpi: result.config.printerDpi ?? null },
-      );
+// The test label prints at the resolution the working labels will use.
+const bytes = await renderLabelBytes(
+  spec,
+  sampleLabelData(),
+  result.config.printerLanguage,
+  rasterizeText,
+  { dpi: result.config.printerDpi ?? null },
+);
 ```
 
 In `apps/station/src/ui/setup/PrinterSetupPanel.tsx` add `hint={t("setup.printerDpiHint")}` to the resolution select:
 
 ```tsx
-          <Select
-            size="floor"
-            label={t("setup.printerResolution")}
-            hint={t("setup.printerDpiHint")}
-            value={printerDpi?.toString() ?? ""}
-            disabled={disabled || transport === "none"}
-            options={[
-              { value: "", label: t("setup.printerResolutionUnknown") },
-              { value: "203", label: "203 dpi" },
-              { value: "300", label: "300 dpi" },
-            ]}
-            onValueChange={(value) =>
-              onPrinterDpiChange?.(value === "203" ? 203 : value === "300" ? 300 : null)
-            }
-          />
+<Select
+  size="floor"
+  label={t("setup.printerResolution")}
+  hint={t("setup.printerDpiHint")}
+  value={printerDpi?.toString() ?? ""}
+  disabled={disabled || transport === "none"}
+  options={[
+    { value: "", label: t("setup.printerResolutionUnknown") },
+    { value: "203", label: "203 dpi" },
+    { value: "300", label: "300 dpi" },
+  ]}
+  onValueChange={(value) =>
+    onPrinterDpiChange?.(value === "203" ? 203 : value === "300" ? 300 : null)
+  }
+/>
 ```
 
 In `apps/station/src/i18n/ru.json` replace
@@ -1603,12 +1635,14 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 8: Duplicates render at the printer resolution; mismatch checks removed
 
 **Files:**
+
 - Modify: `apps/station/src/lib/product-labels/fields.ts` (`prepareProductLabelAcceptance`)
 - Modify: `apps/station/src/lib/product-labels/validation.ts` (the big `if (...)` in `parseProductLabelAcceptance`)
 - Modify: `apps/station/src/lib/use-product-label-work.ts` (`canPrint`)
 - Test: `apps/station/test/product-labels-fields.test.ts`, `apps/station/test/product-labels-acceptance.test.ts`
 
 **Interfaces:**
+
 - Consumes: `renderLabelBytes(..., { kmDataMatrix, dpi })` (Task 5).
 - Produces: `prepareProductLabelAcceptance` throws `DomainError("PRODUCT_LABEL_PRINTER_DPI_REQUIRED")` when `input.printerDpi === null`; otherwise `preparedEvent.dpi === input.printerDpi` and the bytes are rendered at that resolution. `parseProductLabelAcceptance` no longer compares `preparedEvent.dpi` with `policy.snapshot.spec.dpi`.
 
@@ -1626,39 +1660,39 @@ In `apps/station/test/product-labels-fields.test.ts` replace the test
 with:
 
 ```ts
-  it("requires a configured printer resolution before rendering", async () => {
-    const value = { ...input(), printerDpi: null };
-    await expect(prepareProductLabelAcceptance(value)).rejects.toMatchObject({
-      code: "PRODUCT_LABEL_PRINTER_DPI_REQUIRED",
-    });
-    expect(value.rasterizeText).not.toHaveBeenCalled();
+it("requires a configured printer resolution before rendering", async () => {
+  const value = { ...input(), printerDpi: null };
+  await expect(prepareProductLabelAcceptance(value)).rejects.toMatchObject({
+    code: "PRODUCT_LABEL_PRINTER_DPI_REQUIRED",
   });
+  expect(value.rasterizeText).not.toHaveBeenCalled();
+});
 
-  it("renders a template authored at 203 dpi at the printer's 300 dpi and records that resolution", async () => {
-    const value = { ...input(203), printerDpi: 300 as const };
-    const result = await prepareProductLabelAcceptance(value);
-    expect(result.policy.snapshot.spec.dpi).toBe(203);
-    expect(result.preparedEvent.dpi).toBe(300);
-    // 58×40 mm at 300 dpi; the same template on a 203 dpi printer opens with ^PW464.
-    expect(Buffer.from(result.bytesBase64, "base64").toString("latin1")).toContain("^PW685");
-  });
+it("renders a template authored at 203 dpi at the printer's 300 dpi and records that resolution", async () => {
+  const value = { ...input(203), printerDpi: 300 as const };
+  const result = await prepareProductLabelAcceptance(value);
+  expect(result.policy.snapshot.spec.dpi).toBe(203);
+  expect(result.preparedEvent.dpi).toBe(300);
+  // 58×40 mm at 300 dpi; the same template on a 203 dpi printer opens with ^PW464.
+  expect(Buffer.from(result.bytesBase64, "base64").toString("latin1")).toContain("^PW685");
+});
 ```
 
 In `apps/station/test/product-labels-acceptance.test.ts` replace the test `it("rejects prepared DPI that differs from the frozen template before writing", ...)` with:
 
 ```ts
-  it("accepts a prepared resolution that differs from the template's authoring dpi", async () => {
-    const input = productLabelAcceptanceFixture();
-    // The template snapshot is authored at 203 dpi; the printer is 300.
-    const prepared = { ...input, preparedEvent: { ...input.preparedEvent, dpi: 300 as const } };
-    await expect(acceptFixture(exec, prepared)).resolves.toEqual({
-      status: "accepted",
-      jobId: input.jobId,
-    });
-    const stored = await readProductLabelJob(exec, input.credentialOwnership, input.jobId);
-    expect(stored?.policy.snapshot.spec.dpi).toBe(203);
-    expect(stored?.projection.dpi).toBe(300);
+it("accepts a prepared resolution that differs from the template's authoring dpi", async () => {
+  const input = productLabelAcceptanceFixture();
+  // The template snapshot is authored at 203 dpi; the printer is 300.
+  const prepared = { ...input, preparedEvent: { ...input.preparedEvent, dpi: 300 as const } };
+  await expect(acceptFixture(exec, prepared)).resolves.toEqual({
+    status: "accepted",
+    jobId: input.jobId,
   });
+  const stored = await readProductLabelJob(exec, input.credentialOwnership, input.jobId);
+  expect(stored?.policy.snapshot.spec.dpi).toBe(203);
+  expect(stored?.projection.dpi).toBe(300);
+});
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1671,55 +1705,48 @@ Expected: FAIL — `PRODUCT_LABEL_PRINTER_DPI_MISMATCH` is thrown for both the n
 In `apps/station/src/lib/product-labels/fields.ts` replace
 
 ```ts
-  assertDuplicateTemplate(policy.snapshot.spec);
-  if (input.printerDpi !== policy.snapshot.spec.dpi)
-    throw new DomainError(
-      "PRODUCT_LABEL_PRINTER_DPI_MISMATCH",
-      "Configure the printer resolution to match the duplicate template",
-    );
-  const language = z.enum(["zpl", "tspl"]).parse(input.language);
-  const km = parseDuplicateKm(input.raw);
-  const fields = duplicateLabelFields({
-    ...input.labelContext,
-    canonicalRaw: km.raw,
-    acceptedAt: input.acceptedAt,
-  });
-  const bytes = await renderLabelBytes(
-    policy.snapshot.spec,
-    fields,
-    language,
-    input.rasterizeText,
-    { kmDataMatrix: "raster" },
+assertDuplicateTemplate(policy.snapshot.spec);
+if (input.printerDpi !== policy.snapshot.spec.dpi)
+  throw new DomainError(
+    "PRODUCT_LABEL_PRINTER_DPI_MISMATCH",
+    "Configure the printer resolution to match the duplicate template",
   );
+const language = z.enum(["zpl", "tspl"]).parse(input.language);
+const km = parseDuplicateKm(input.raw);
+const fields = duplicateLabelFields({
+  ...input.labelContext,
+  canonicalRaw: km.raw,
+  acceptedAt: input.acceptedAt,
+});
+const bytes = await renderLabelBytes(policy.snapshot.spec, fields, language, input.rasterizeText, {
+  kmDataMatrix: "raster",
+});
 ```
 
 with
 
 ```ts
-  assertDuplicateTemplate(policy.snapshot.spec);
-  // A template is resolution-neutral (spec 2026-09-10); what must be known is
-  // the PRINTER's resolution, because the bytes below are rendered for it and
-  // a reprint replays them only on the same language and dpi.
-  const printerDpi = input.printerDpi;
-  if (printerDpi === null)
-    throw new DomainError(
-      "PRODUCT_LABEL_PRINTER_DPI_REQUIRED",
-      "Configure the printer resolution before printing duplicates",
-    );
-  const language = z.enum(["zpl", "tspl"]).parse(input.language);
-  const km = parseDuplicateKm(input.raw);
-  const fields = duplicateLabelFields({
-    ...input.labelContext,
-    canonicalRaw: km.raw,
-    acceptedAt: input.acceptedAt,
-  });
-  const bytes = await renderLabelBytes(
-    policy.snapshot.spec,
-    fields,
-    language,
-    input.rasterizeText,
-    { kmDataMatrix: "raster", dpi: printerDpi },
+assertDuplicateTemplate(policy.snapshot.spec);
+// A template is resolution-neutral (spec 2026-09-10); what must be known is
+// the PRINTER's resolution, because the bytes below are rendered for it and
+// a reprint replays them only on the same language and dpi.
+const printerDpi = input.printerDpi;
+if (printerDpi === null)
+  throw new DomainError(
+    "PRODUCT_LABEL_PRINTER_DPI_REQUIRED",
+    "Configure the printer resolution before printing duplicates",
   );
+const language = z.enum(["zpl", "tspl"]).parse(input.language);
+const km = parseDuplicateKm(input.raw);
+const fields = duplicateLabelFields({
+  ...input.labelContext,
+  canonicalRaw: km.raw,
+  acceptedAt: input.acceptedAt,
+});
+const bytes = await renderLabelBytes(policy.snapshot.spec, fields, language, input.rasterizeText, {
+  kmDataMatrix: "raster",
+  dpi: printerDpi,
+});
 ```
 
 and, in the same function's `preparedEvent`, replace
@@ -1785,12 +1812,14 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 9: Shift start without resolution checks
 
 **Files:**
+
 - Modify: `apps/station/src/pages/NewShift.tsx` (the two `printDpiMismatch` blocks at lines 355–359 and 419–423; the `templateMeta` call at lines 679–683)
 - Modify: `apps/station/src/i18n/ru.json`, `apps/station/src/i18n/en.json` (`shifts.templateMeta`; remove `shifts.printDpiMismatch`)
 - Modify: `apps/station/src/dev/StationScreenGallery.tsx` (the two template cards at lines 1275–1292)
 - Test: `apps/station/test/new-shift-product-labels.test.tsx`, `apps/station/test/new-shift.test.tsx` (lines 762 and 1007)
 
 **Interfaces:**
+
 - Consumes: nothing new; `hardwareConfig.printerDpi` stays required for duplicates via `shifts.printHardwareRequired`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1822,25 +1851,25 @@ it("starts duplicate printing on a 300 dpi printer with a template authored at 2
 In `apps/station/test/new-shift.test.tsx` replace
 
 ```ts
-    expect(screen.getByText("58×40 mm · 203 dpi")).toBeDefined();
+expect(screen.getByText("58×40 mm · 203 dpi")).toBeDefined();
 ```
 
 with
 
 ```ts
-    expect(screen.getByText("58×40 mm")).toBeDefined();
+expect(screen.getByText("58×40 mm")).toBeDefined();
 ```
 
 and
 
 ```ts
-    expect(screen.getByText("58×40 мм · 203 dpi")).toBeDefined();
+expect(screen.getByText("58×40 мм · 203 dpi")).toBeDefined();
 ```
 
 with
 
 ```ts
-    expect(screen.getByText("58×40 мм")).toBeDefined();
+expect(screen.getByText("58×40 мм")).toBeDefined();
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1853,40 +1882,44 @@ Expected: FAIL — the mismatch message blocks the start; the meta line still re
 In `apps/station/src/pages/NewShift.tsx` delete this block (inside the duplicate branch of the start handler):
 
 ```ts
-        if (hardwareConfig.printerDpi !== selected.dpi) {
-          setPrinterError(true);
-          setError(t("shifts.printDpiMismatch"));
-          return;
-        }
+if (hardwareConfig.printerDpi !== selected.dpi) {
+  setPrinterError(true);
+  setError(t("shifts.printDpiMismatch"));
+  return;
+}
 ```
 
 and delete this block (after the authoritative policy check):
 
 ```ts
-        if (authoritative.data.snapshot.spec.dpi !== hardwareConfig.printerDpi) {
-          setPrinterError(true);
-          setError(t("shifts.printDpiMismatch"));
-          return;
-        }
+if (authoritative.data.snapshot.spec.dpi !== hardwareConfig.printerDpi) {
+  setPrinterError(true);
+  setError(t("shifts.printDpiMismatch"));
+  return;
+}
 ```
 
 Replace
 
 ```tsx
-                        {t("shifts.templateMeta", {
-                          width: option.widthMm,
-                          height: option.heightMm,
-                          dpi: option.dpi,
-                        })}
+{
+  t("shifts.templateMeta", {
+    width: option.widthMm,
+    height: option.heightMm,
+    dpi: option.dpi,
+  });
+}
 ```
 
 with
 
 ```tsx
-                        {t("shifts.templateMeta", {
-                          width: option.widthMm,
-                          height: option.heightMm,
-                        })}
+{
+  t("shifts.templateMeta", {
+    width: option.widthMm,
+    height: option.heightMm,
+  });
+}
 ```
 
 If, after these deletions, `selected.dpi` / `option.dpi` were the only readers of the `dpi` member on the local `BoxLabelTemplateOption` interface, keep the member (the API still sends it and the strict product-template zod schema requires it) but add the comment `/** Authoring resolution; informational only (spec 2026-09-10). */` above `dpi: number;`.
@@ -1930,35 +1963,59 @@ and delete the line
 In `apps/station/src/dev/StationScreenGallery.tsx` replace the two card texts:
 
 ```tsx
-                  {ru ? "Коробка 58×40 (203 dpi)" : "Box 58×40 (203 dpi)"}
+{
+  ru ? "Коробка 58×40 (203 dpi)" : "Box 58×40 (203 dpi)";
+}
 ```
+
 →
+
 ```tsx
-                  {ru ? "Коробка 58×40" : "Box 58×40"}
+{
+  ru ? "Коробка 58×40" : "Box 58×40";
+}
 ```
 
 ```tsx
-                  {ru ? "58×40 мм · 203 dpi" : "58×40 mm · 203 dpi"}
+{
+  ru ? "58×40 мм · 203 dpi" : "58×40 mm · 203 dpi";
+}
 ```
+
 →
+
 ```tsx
-                  {ru ? "58×40 мм" : "58×40 mm"}
+{
+  ru ? "58×40 мм" : "58×40 mm";
+}
 ```
 
 ```tsx
-                  {ru ? "Паллета 100×80 (300 dpi)" : "Pallet 100×80 (300 dpi)"}
+{
+  ru ? "Паллета 100×80 (300 dpi)" : "Pallet 100×80 (300 dpi)";
+}
 ```
+
 →
+
 ```tsx
-                  {ru ? "Паллета 100×80" : "Pallet 100×80"}
+{
+  ru ? "Паллета 100×80" : "Pallet 100×80";
+}
 ```
 
 ```tsx
-                  {ru ? "100×80 мм · 300 dpi" : "100×80 mm · 300 dpi"}
+{
+  ru ? "100×80 мм · 300 dpi" : "100×80 mm · 300 dpi";
+}
 ```
+
 →
+
 ```tsx
-                  {ru ? "100×80 мм" : "100×80 mm"}
+{
+  ru ? "100×80 мм" : "100×80 mm";
+}
 ```
 
 - [ ] **Step 4: Run the shift-start suites and the i18n parity check**
@@ -1980,12 +2037,14 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 10: Admin — no resolution badge, preview-resolution select
 
 **Files:**
+
 - Modify: `apps/admin/src/pages/labels/index.tsx` (the badges block: comment at lines 137–139 and the `<Badge>{t("pages.labels.dpiBadge", ...)}</Badge>` at line 147)
 - Modify: `apps/admin/src/pages/labels/editor/index.tsx` (the `<Select label={t("pages.labels.editor.dpiLabel")} .../>` at lines 594–601)
 - Modify: `apps/admin/src/i18n/ru.json`, `apps/admin/src/i18n/en.json`
 - Test: `apps/admin/test/labels-library.test.tsx` (the `it("renders cards from the mocked GET response with name and size/DPI badges", ...)` test), `apps/admin/test/labels-editor.test.tsx` (`chooseOption(user, "DPI", "300")` at line 279 and `chooseOption(userEvent.setup(), "DPI", "300")` at line 1116)
 
 **Interfaces:**
+
 - Produces: i18n keys `pages.labels.editor.previewDpiLabel`, `pages.labels.editor.previewDpiHint`; removes `pages.labels.dpiBadge` and `pages.labels.editor.dpiLabel`. `pages.labels.editor.import.dpiLabel` ("DPI импорта") stays.
 
 - [ ] **Step 1: Update the tests**
@@ -1993,35 +2052,35 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 In `apps/admin/test/labels-library.test.tsx` replace the badge test with:
 
 ```tsx
-  it("renders cards from the mocked GET response with name and size badges only", async () => {
-    stubFetch([BOX_SUMMARY, UNIT_SUMMARY]);
+it("renders cards from the mocked GET response with name and size badges only", async () => {
+  stubFetch([BOX_SUMMARY, UNIT_SUMMARY]);
 
-    renderPage();
+  renderPage();
 
-    expect(await screen.findByText("Короб 100×100 v3")).toBeDefined();
-    expect(screen.getByText("Единица 58×40")).toBeDefined();
-    expect(screen.getByText("100.0×100.0 мм")).toBeDefined();
-    expect(screen.getByText("58.0×40.0 мм")).toBeDefined();
-    // A template is printer-neutral -- it prints on Zebra and TSC alike, at
-    // 203 and 300 dpi alike; the station picks both from its own printer
-    // (specs 2026-08-20 and 2026-09-10). `language` and `dpi` are still on
-    // the summary DTO -- they just must not reach the screen.
-    expect(screen.queryByText("203 dpi")).toBeNull();
-    expect(screen.queryByText("ZPL")).toBeNull();
-    expect(screen.queryByText("TSPL")).toBeNull();
-  });
+  expect(await screen.findByText("Короб 100×100 v3")).toBeDefined();
+  expect(screen.getByText("Единица 58×40")).toBeDefined();
+  expect(screen.getByText("100.0×100.0 мм")).toBeDefined();
+  expect(screen.getByText("58.0×40.0 мм")).toBeDefined();
+  // A template is printer-neutral -- it prints on Zebra and TSC alike, at
+  // 203 and 300 dpi alike; the station picks both from its own printer
+  // (specs 2026-08-20 and 2026-09-10). `language` and `dpi` are still on
+  // the summary DTO -- they just must not reach the screen.
+  expect(screen.queryByText("203 dpi")).toBeNull();
+  expect(screen.queryByText("ZPL")).toBeNull();
+  expect(screen.queryByText("TSPL")).toBeNull();
+});
 ```
 
 In `apps/admin/test/labels-editor.test.tsx` replace both `"DPI"` select labels:
 
 ```ts
-    await chooseOption(user, "Разрешение предпросмотра", "300");
+await chooseOption(user, "Разрешение предпросмотра", "300");
 ```
 
 and
 
 ```ts
-    if (dpi === 300) await chooseOption(userEvent.setup(), "Разрешение предпросмотра", "300");
+if (dpi === 300) await chooseOption(userEvent.setup(), "Разрешение предпросмотра", "300");
 ```
 
 Also rename the test title `"a dpi change round-trips into the spec Save POSTs"` to `"a preview-resolution change round-trips into the spec Save POSTs"`.
@@ -2036,51 +2095,51 @@ Expected: FAIL — `203 dpi` badges are rendered; no select labelled «Разр�
 In `apps/admin/src/pages/labels/index.tsx` replace
 
 ```tsx
-      {/* Size and DPI only: a template has no language of its own -- it
+{
+  /* Size and DPI only: a template has no language of its own -- it
           prints on Zebra and TSC alike and the station picks the language
-          from its own printer (spec 2026-08-20), so no card badges one. */}
+          from its own printer (spec 2026-08-20), so no card badges one. */
+}
 ```
 
 with
 
 ```tsx
-      {/* Size only: a template has neither a language nor a resolution of
+{
+  /* Size only: a template has neither a language nor a resolution of
           its own -- it prints on Zebra and TSC, at 203 and 300 dpi alike,
           and the station picks both from its own printer (specs 2026-08-20
-          and 2026-09-10), so no card badges either. */}
+          and 2026-09-10), so no card badges either. */
+}
 ```
 
 and delete the line
 
 ```tsx
-        <Badge>{t("pages.labels.dpiBadge", { dpi: item.dpi })}</Badge>
+<Badge>{t("pages.labels.dpiBadge", { dpi: item.dpi })}</Badge>
 ```
 
 In `apps/admin/src/pages/labels/editor/index.tsx` replace
 
 ```tsx
-          <Select
-            label={t("pages.labels.editor.dpiLabel")}
-            options={DPI_OPTIONS}
-            value={String(spec.dpi)}
-            onValueChange={(value) =>
-              handleReplaceSpec({ ...spec, dpi: value === "300" ? 300 : 203 })
-            }
-          />
+<Select
+  label={t("pages.labels.editor.dpiLabel")}
+  options={DPI_OPTIONS}
+  value={String(spec.dpi)}
+  onValueChange={(value) => handleReplaceSpec({ ...spec, dpi: value === "300" ? 300 : 203 })}
+/>
 ```
 
 with
 
 ```tsx
-          <Select
-            label={t("pages.labels.editor.previewDpiLabel")}
-            hint={t("pages.labels.editor.previewDpiHint")}
-            options={DPI_OPTIONS}
-            value={String(spec.dpi)}
-            onValueChange={(value) =>
-              handleReplaceSpec({ ...spec, dpi: value === "300" ? 300 : 203 })
-            }
-          />
+<Select
+  label={t("pages.labels.editor.previewDpiLabel")}
+  hint={t("pages.labels.editor.previewDpiHint")}
+  options={DPI_OPTIONS}
+  value={String(spec.dpi)}
+  onValueChange={(value) => handleReplaceSpec({ ...spec, dpi: value === "300" ? 300 : 203 })}
+/>
 ```
 
 In `apps/admin/src/i18n/ru.json`: delete the line `"dpiBadge": "{{dpi}} dpi",` under `pages.labels`; under `pages.labels.editor` replace `"dpiLabel": "DPI",` with
@@ -2116,6 +2175,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 11: Hardware acceptance checklist
 
 **Files:**
+
 - Modify: `docs/hardware-acceptance-checklist.md` (the "Label output" section, items between "Long product name on the stock 58×40 template" and "All five stock templates, printed once each")
 
 - [ ] **Step 1: Rewrite the resolution items**
@@ -2246,12 +2306,14 @@ After pushing, confirm CI actually started for the new SHA (`gh api repos/{owner
 ### Task 13: Migration 0123 — rename stock rows, disable untouched 300 twins
 
 **Files:**
+
 - Create: `packages/db/migrations/0123_dpi_neutral_stock_label_templates.sql` (generated — see Step 3)
 - Modify: `packages/db/migrations/meta/_journal.json` (append an entry)
 - Create: `packages/db/test/dpi-neutral-stock-label-templates-migration.test.ts`
 - Modify: `packages/domain/test/labels-defaults.test.ts` (append a drift guard)
 
 **Interfaces:**
+
 - Consumes: `buildLegacyDatedBoxLabelTemplates`, `buildLegacyDateFreeBoxLabelTemplates`, `buildLegacyPrintNameBoxLabelTemplates`, `buildLegacyDuplicateLabelTemplates` (Task 3), `inlinedRows` helper already present in `labels-defaults.test.ts`.
 - Produces: migration 0123 with two statements — rename table (17 triples `(old_name, new_name, purpose)`) and twin-disable table (5 pairs `(name, '<compact json>')`, cast to jsonb in the `WHERE`, exactly the row format of 0053/0056/0059 so the existing `inlinedRows` parser reads it).
 
@@ -2439,36 +2501,36 @@ describe.skipIf(!databaseUrl)("dpi-neutral stock label templates migration", () 
 Append inside the `describe` that holds the other drift guards in `packages/domain/test/labels-defaults.test.ts` (add `buildLegacyDuplicateLabelTemplates` to the import list first):
 
 ```ts
-  /**
-   * Migration 0123 (spec 2026-09-10) renames the 203 stock rows and disables
-   * the untouched 300 twins by exact jsonb match. Both tables are generated
-   * from the legacy builders; whoever changes them regenerates the SQL.
-   */
-  it("matches the rename table and the twin jsonb inlined into db migration 0123 (drift guard)", async () => {
-    const legacy = [
-      ...buildLegacyDatedBoxLabelTemplates(),
-      ...buildLegacyDateFreeBoxLabelTemplates(),
-      ...buildLegacyPrintNameBoxLabelTemplates(),
-      ...buildLegacyDuplicateLabelTemplates(),
-    ];
-    const file = "0123_dpi_neutral_stock_label_templates.sql";
-    expect(await inlinedRows(file)).toEqual(
-      legacy.filter((t) => t.renamedTo === null).map((t) => ({ name: t.name, spec: t.spec })),
-    );
-    const sql = await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), "utf8");
-    const renames = [...sql.matchAll(/\('([^']+)', '([^']+)', '(box|product_duplicate)'\)/g)].map(
-      (m) => [m[1], m[2], m[3]],
-    );
-    expect(renames).toEqual(
-      legacy
-        .filter((t) => t.renamedTo !== null)
-        .map((t) => [
-          t.name,
-          t.renamedTo,
-          t.name.startsWith("Дубликат") ? "product_duplicate" : "box",
-        ]),
-    );
-  });
+/**
+ * Migration 0123 (spec 2026-09-10) renames the 203 stock rows and disables
+ * the untouched 300 twins by exact jsonb match. Both tables are generated
+ * from the legacy builders; whoever changes them regenerates the SQL.
+ */
+it("matches the rename table and the twin jsonb inlined into db migration 0123 (drift guard)", async () => {
+  const legacy = [
+    ...buildLegacyDatedBoxLabelTemplates(),
+    ...buildLegacyDateFreeBoxLabelTemplates(),
+    ...buildLegacyPrintNameBoxLabelTemplates(),
+    ...buildLegacyDuplicateLabelTemplates(),
+  ];
+  const file = "0123_dpi_neutral_stock_label_templates.sql";
+  expect(await inlinedRows(file)).toEqual(
+    legacy.filter((t) => t.renamedTo === null).map((t) => ({ name: t.name, spec: t.spec })),
+  );
+  const sql = await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), "utf8");
+  const renames = [...sql.matchAll(/\('([^']+)', '([^']+)', '(box|product_duplicate)'\)/g)].map(
+    (m) => [m[1], m[2], m[3]],
+  );
+  expect(renames).toEqual(
+    legacy
+      .filter((t) => t.renamedTo !== null)
+      .map((t) => [
+        t.name,
+        t.renamedTo,
+        t.name.startsWith("Дубликат") ? "product_duplicate" : "box",
+      ]),
+  );
+});
 ```
 
 - [ ] **Step 3: Generate the migration and register it**
@@ -2553,13 +2615,13 @@ Expected output: `wrote 0123: 17 renames, 5 twins`.
 Append to the `entries` array in `packages/db/migrations/meta/_journal.json` (after the `0122_watery_molten_man` entry, comma-separated):
 
 ```json
-    {
-      "idx": 123,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0123_dpi_neutral_stock_label_templates",
-      "breakpoints": true
-    }
+{
+  "idx": 123,
+  "version": "7",
+  "when": 1789000000000,
+  "tag": "0123_dpi_neutral_stock_label_templates",
+  "breakpoints": true
+}
 ```
 
 (`when` must exceed the previous entry's `1788925596383`; data-only migrations in this repo carry no `meta/0123_snapshot.json`, like 0114 and 0115.)

@@ -101,11 +101,15 @@ DTO и снимки не меняют форму. Меняются только 
   ```ts
   export type PrinterDpi = 203 | 300;
   /** Спека для печати на конкретном принтере: dpi принтера, при null — dpi авторинга. */
-  export function withPrinterDpi(spec: LabelTemplateSpec, printerDpi: PrinterDpi | null): LabelTemplateSpec;
+  export function withPrinterDpi(
+    spec: LabelTemplateSpec,
+    printerDpi: PrinterDpi | null,
+  ): LabelTemplateSpec;
   ```
 
   Возвращает ту же ссылку, если подстановка не меняет `dpi`. Единственная точка, через
   которую станция получает печатную спеку.
+
 - `assertDuplicateTemplate` (`labels/duplicate.ts`): порог «модуль не меньше 12 точек»
   проверяется на 203 dpi независимо от `spec.dpi`. Шаблон, прошедший проверку, годен для
   любого поддерживаемого разрешения; фактическое размещение полного кода по-прежнему
