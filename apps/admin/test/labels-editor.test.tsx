@@ -586,7 +586,7 @@ describe("Import is the only content path", () => {
 
     // What IS offered instead.
     expect(screen.getByRole("button", { name: "Импорт кода" })).toBeDefined();
-    expect(screen.getByText("предпросмотр = печать")).toBeDefined();
+    expect(screen.getByText("предпросмотр = печать в разрешении предпросмотра")).toBeDefined();
   });
 
   it("imported ZPL replaces the spec and Save POSTs it", async () => {

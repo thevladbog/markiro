@@ -211,7 +211,7 @@ export const labelTemplateSummaryOpenApiSchema: SchemaObject = {
       type: "integer",
       enum: [203, 300],
       description:
-        "Authoring resolution used by the admin preview and code import. The station prints every template at its own printer's resolution.",
+        "Authoring resolution used by the admin preview and code import. The station prints every template at its own printer's resolution; a station without a configured printer resolution prints box labels at this authoring resolution and refuses duplicate printing until one is set.",
     },
     language: { type: "string", enum: ["zpl", "tspl"] },
     purpose: { type: "string", enum: ["box", "product_duplicate"] },

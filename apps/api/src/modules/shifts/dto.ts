@@ -407,7 +407,7 @@ export const shiftBoxLabelTemplatesOpenApiSchema: SchemaObject = {
             type: "integer",
             enum: [203, 300],
             description:
-              "Authoring resolution. Informational only: the station prints at its own printer's resolution.",
+              "Authoring resolution. Informational only: the station prints at its own printer's resolution, falling back to this value for box labels only when no printer resolution is configured.",
           },
           language: { type: "string", enum: ["zpl", "tspl"] },
         },
