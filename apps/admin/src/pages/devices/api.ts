@@ -2,7 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient, UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { apiFetch } from "../../api/client.js";
 
-export type DeviceType = "station" | "kiosk";
+export type DeviceType = "station" | "kiosk" | "handheld";
+/** Stations and handhelds share the station endpoints and the station pairing mutation. */
+export type StationKind = "station" | "handheld";
+export function isStationLike(type: DeviceType): boolean {
+  return type === "station" || type === "handheld";
+}
 export type DeviceStatus = "awaiting_pairing" | "online" | "offline" | "revoked";
 export interface DeviceDto {
   id: string;
@@ -28,6 +33,7 @@ export interface DevicesResponse {
 export interface CreateStationInput {
   name: string;
   lineId: string | null;
+  kind?: StationKind;
 }
 export interface CreateKioskInput {
   name: string;
@@ -38,6 +44,7 @@ export interface CreateKioskInput {
 export interface UpdateStationInput {
   name?: string;
   lineId?: string | null;
+  kind?: StationKind;
 }
 export interface UpdateKioskInput {
   name?: string;
@@ -159,7 +166,7 @@ export function clearDevicePairingCodeMutations(
 ): void {
   for (const mutation of queryClient
     .getMutationCache()
-    .findAll({ mutationKey: pairingMutationKey(type) })) {
+    .findAll({ mutationKey: pairingMutationKey(isStationLike(type) ? "station" : "kiosk") })) {
     if (
       mutation.state.variables === deviceId &&
       (expectedResult === undefined || mutation.state.data === expectedResult)
