@@ -17,6 +17,7 @@
     "@hookform/resolvers": "5.9.1",
     "@markiro/db": "workspace:*",
     "@markiro/domain": "workspace:*",
+    "@markiro/platform-contracts": "workspace:*",
     "@markiro/ui": "workspace:*",
     "@tanstack/react-query": "5.101.4",
     "@zxing/browser": "0.2.1",

@@ -14,6 +14,7 @@ import { asc, eq, inArray, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
 import type { Env } from "../env";
+import { describeErrorForLog } from "../lib/error-log";
 import { ExchangeSessionService } from "../modules/exchange/exchange-session.service";
 import { JournalService } from "../modules/integrations/journal.service";
 import {
@@ -52,6 +53,12 @@ import {
 import { NationalCatalogFreshnessService } from "../modules/national-catalog/national-catalog-freshness.service";
 import { NationalCatalogSchemaService } from "../modules/national-catalog/national-catalog-schema.service";
 import { NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID } from "../modules/national-catalog/national-catalog.tokens";
+
+import {
+  NationalCatalogJobsService,
+  CATALOG_QUEUES,
+  CATALOG_REPAIR_QUEUE,
+} from "../modules/national-catalog/national-catalog-jobs.service";
 
 export const PG_CONNECTION_STRING = "JOBS_PG_CONNECTION_STRING";
 export const BUILD_SHIFT_EXPORT_QUEUE = "build-shift-export";
@@ -403,6 +410,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID)
     private readonly nationalCatalogSchemaSourceTenantId?: string,
+    @Optional() private readonly nationalCatalogJobs?: NationalCatalogJobsService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -701,6 +709,30 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         }),
       );
 
+      for (const name of new Set(Object.values(CATALOG_QUEUES))) {
+        await boss.createQueue(name, { policy: "stately", retryLimit: 0 });
+        this.workerIds.push(
+          await boss.work(name, async (jobs) => {
+            if (!this.nationalCatalogJobs) return;
+            for (const job of jobs) {
+              await this.nationalCatalogJobs.execute(job.data);
+              // A completed step can commit another page, preview, or photo intent.
+              // Failed steps retain their durable retry horizon for scheduled repair.
+              await this.wakeNationalCatalog();
+            }
+          }),
+        );
+      }
+      await boss.createQueue(CATALOG_REPAIR_QUEUE, { policy: "stately", retryLimit: 0 });
+      await boss.schedule(CATALOG_REPAIR_QUEUE, "* * * * *");
+      this.workerIds.push(
+        await boss.work(CATALOG_REPAIR_QUEUE, async () => {
+          await this.nationalCatalogJobs?.repair((name, payload, singletonKey) =>
+            boss.send(name, payload, { singletonKey }),
+          );
+        }),
+      );
+
       await boss.createQueue(NATIONAL_CATALOG_PRODUCT_FRESHNESS_QUEUE, {
         policy: "stately",
         retryLimit: 3,
@@ -714,7 +746,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       );
       this.workerIds.push(
         await boss.work(NATIONAL_CATALOG_PRODUCT_FRESHNESS_QUEUE, async () => {
-          await this.nationalCatalogFreshness?.run();
+          await this.runNationalCatalogFreshness();
         }),
       );
 
@@ -787,6 +819,20 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     const jobId = await this.boss.send(BUILD_SHIFT_EXPORT_QUEUE, { exportId });
     if (!jobId) throw new Error("shift export enqueue failed");
     return jobId;
+  }
+
+  /** Call after the intent commits. The minute repair schedule remains the recovery path. */
+  async wakeNationalCatalog(): Promise<void> {
+    if (!this.boss || !this.started) return;
+    try {
+      // The stately queue coalesces pending wakes with the keyless cron job.
+      // A null result means a repair is already pending, which is sufficient.
+      await this.boss.send(CATALOG_REPAIR_QUEUE, {});
+    } catch (error) {
+      this.logger.warn(
+        `National Catalog queue wake failed; scheduled repair will recover work: ${describeErrorForLog(error)}`,
+      );
+    }
   }
 
   async enqueueInventoryDocumentRun(runId: string): Promise<string> {
@@ -930,6 +976,10 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async runNationalCatalogFreshness(): Promise<void> {
+    await this.nationalCatalogFreshness?.run();
+  }
+
   async checkReady(): Promise<void> {
     if (!this.started || !this.boss) throw new Error("pg-boss is not started");
     try {
@@ -938,7 +988,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       throw new Error("pg-boss database probe failed");
     }
     if (
-      this.workerIds.length !== 17 ||
+      this.workerIds.length !== 23 ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {

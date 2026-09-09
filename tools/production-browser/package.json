@@ -17,7 +17,8 @@
     "test:landing:lighthouse": "node scripts/lighthouse-landing.mjs",
     "test:lighthouse-parser": "node --test test/lighthouse-landing.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:product-labels": "playwright test --config product-labels.playwright.config.ts"
+    "test:product-labels": "playwright test --config product-labels.playwright.config.ts",
+    "test:national-catalog": "playwright test --config national-catalog.playwright.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.62.0",

@@ -530,8 +530,22 @@ function assertAuthorityContract(adapted, { alb }) {
       "/docs",
       "/docs/*",
     ],
-    ["/shifts", "/shifts/box-label-templates", "/products", "/products/gtin-check"],
-    ["/shifts", "/shifts/box-label-templates", "/products", "/products/gtin-check"],
+    [
+      "/shifts",
+      "/shifts/planning-config",
+      "/shifts/product-label-templates",
+      "/shifts/box-label-templates",
+      "/products",
+      "/products/gtin-check",
+    ],
+    [
+      "/shifts",
+      "/shifts/planning-config",
+      "/shifts/product-label-templates",
+      "/shifts/box-label-templates",
+      "/products",
+      "/products/gtin-check",
+    ],
     ["^/shifts/[^/]+/(open|bundle|reference-bundle)$"],
     ["^/shifts/[^/]+/(open|bundle|reference-bundle)$"],
   ];
@@ -1396,7 +1410,12 @@ test("direct Caddy adapter keeps bare admin routes static and routes exact Stati
   );
   const routeTable = applicationOrderedRouteTable(admin);
 
-  for (const path of ["/shifts", "/products"]) {
+  for (const path of [
+    "/shifts",
+    "/shifts/planning-config",
+    "/shifts/product-label-templates",
+    "/products",
+  ]) {
     const request = { method: "GET", path };
     const selected = selectedAdaptedRoute(routeTable, request);
     assert.ok(
@@ -1411,6 +1430,16 @@ test("direct Caddy adapter keeps bare admin routes static and routes exact Stati
 
   for (const request of [
     { method: "GET", path: "/shifts", headers: { "x-api-key": "station-test-key" } },
+    {
+      method: "GET",
+      path: "/shifts/planning-config",
+      headers: { "x-api-key": "station-test-key" },
+    },
+    {
+      method: "GET",
+      path: "/shifts/product-label-templates",
+      headers: { "x-api-key": "station-test-key" },
+    },
     { method: "POST", path: "/shifts", headers: { "x-api-key": "station-test-key" } },
     { method: "GET", path: "/products", headers: { "x-api-key": "station-test-key" } },
     {
@@ -1439,6 +1468,8 @@ test("direct Caddy adapter keeps bare admin routes static and routes exact Stati
       headers: { "x-api-key": "station-test-key" },
     },
     { method: "OPTIONS", path: "/shifts" },
+    { method: "OPTIONS", path: "/shifts/planning-config" },
+    { method: "OPTIONS", path: "/shifts/product-label-templates" },
     { method: "OPTIONS", path: "/shifts/box-label-templates" },
     { method: "OPTIONS", path: "/products" },
     { method: "OPTIONS", path: "/products/gtin-check" },

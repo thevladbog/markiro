@@ -36,3 +36,6 @@ docs/superpowers/plans/2026-08-30-mkr-ins-06-inventory-prep.md
 docs/superpowers/plans/2026-08-30-mkr-ins-07-inventory-close.md
 docs/superpowers/plans/2026-08-30-mkr-ins-08-shift-planning.md
 docs/superpowers/plans/2026-09-02-mkr-ins-09-shift-close.md
+
+# Disposable local/CI National Catalog browser traces and failure screenshots.
+/tools/production-browser/test-results/

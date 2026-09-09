@@ -62,3 +62,240 @@
     max-width: none;
   }
 }
+
+.mk-nc-import {
+  display: grid;
+  gap: var(--sp-6);
+  align-content: start;
+  min-width: 0;
+}
+.mk-nc-import > p,
+.mk-nc-selection p,
+.mk-nc-review p,
+.mk-nc-section-heading h2 {
+  margin: 0;
+}
+.mk-nc-section-heading h2 {
+  font: var(--text-h2);
+}
+.mk-nc-selection,
+.mk-nc-review {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.mk-nc-section-heading,
+.mk-nc-product-cell,
+.mk-nc-product-details,
+.mk-nc-match-cell {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.mk-nc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+}
+.mk-nc-meta,
+.mk-nc-hint,
+.mk-nc-product-details {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+.mk-nc-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+}
+.mk-nc-selection-toolbar,
+.mk-nc-selection-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.mk-nc-progress {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+}
+.mk-nc-progress > div {
+  display: grid;
+  gap: var(--sp-2);
+}
+.mk-nc-progress > .mk-spinner {
+  flex-shrink: 0;
+}
+.mk-nc-selection-table td {
+  vertical-align: top;
+}
+.mk-nc-product-details {
+  padding-inline-start: 26px;
+  gap: var(--sp-1);
+}
+.mk-nc-actions,
+.mk-nc-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-block: var(--sp-4);
+}
+.mk-nc-steps,
+.mk-nc-selection-footer .mk-nc-actions,
+.mk-nc-review > .mk-nc-actions {
+  margin: 0;
+}
+.mk-nc-review-item {
+  min-width: 0;
+  padding: var(--sp-4);
+  margin-block: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.mk-nc-review > .mk-nc-review-item {
+  display: grid;
+  gap: var(--sp-3);
+  margin: 0;
+}
+.mk-nc-review > .mk-nc-review-item > button {
+  justify-self: start;
+}
+@media (max-width: 600px) {
+  .mk-nc-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mk-nc-selection-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+.mk-nc-fields {
+  display: grid;
+  gap: var(--sp-3);
+  margin-block: var(--sp-4);
+}
+.mk-nc-comparison-head,
+.mk-nc-comparison-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.mk-nc-comparison-head {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+  padding-inline: var(--sp-3);
+}
+fieldset.mk-nc-comparison-row,
+.mk-nc-photo-comparison {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.mk-nc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.mk-nc-photo-candidates,
+.mk-nc-photo-candidate {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--sp-2);
+}
+.mk-nc-fields p,
+.mk-nc-review-item p {
+  overflow-wrap: anywhere;
+}
+.mk-nc-photo-comparison legend {
+  padding: 0;
+  margin-bottom: var(--sp-3);
+  font: var(--text-h3);
+}
+.mk-nc-photo-comparison img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+.mk-nc-photo-candidate button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.mk-chz-cell,
+.mk-chz-status,
+.mk-chz-status__details {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mk-chz-cell {
+  min-width: 160px;
+}
+.mk-chz-status {
+  font: var(--text-body-sm);
+}
+.mk-chz-status summary {
+  cursor: pointer;
+  color: var(--fg-2);
+}
+.mk-chz-status summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.mk-chz-status__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.mk-chz-status__details p {
+  margin: 0;
+}
+.mk-chz-status__error {
+  color: var(--err-fg);
+}
+.mk-chz-link {
+  display: grid;
+  gap: var(--sp-4);
+}
+.mk-chz-link dl {
+  margin: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+.mk-chz-link dd {
+  margin: 0 0 var(--sp-3);
+  overflow-wrap: anywhere;
+}
+.mk-chz-link dt {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.mk-catalog-product-name,
+.mk-catalog-product-group {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.mk-catalog-product-name {
+  min-width: 220px;
+}
+.mk-catalog-product-group {
+  min-width: 140px;
+}

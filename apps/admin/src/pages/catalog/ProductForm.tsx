@@ -1,11 +1,12 @@
 import { zodResolver } from "@hookform/resolvers/zod";
+import type { ChzSummary } from "@markiro/platform-contracts";
 import type { TFunction } from "i18next";
 import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
-import { CABINET_CAPABILITY, isValidGtin } from "@markiro/domain";
+import { CABINET_CAPABILITY, isValidGtin, normalizeToGtin14 } from "@markiro/domain";
 import { Alert, Button, Checkbox, FileDropZone, Input, Select, SidePanel } from "@markiro/ui";
 import type { OverlayDismissReason, SelectOption } from "@markiro/ui";
 
@@ -111,8 +112,14 @@ export interface ProductFormProps {
   counterparties: CounterpartyDto[];
   submitting?: boolean;
   submissionError?: string | null;
+  gtinSubmissionError?: string | null;
+  chzSummary?: ChzSummary;
   onDirtyChange?: (dirty: boolean) => void;
-  onSubmit: (input: CreateProductInput, image?: File | null) => void | Promise<void>;
+  onSubmit: (
+    input: CreateProductInput,
+    image?: File | null,
+    detach?: { action: "detach"; expectedRevision: number },
+  ) => void | Promise<void>;
   onClose: (reason: OverlayDismissReason) => void;
 }
 
@@ -188,11 +195,20 @@ export function ProductForm({
   counterparties,
   submitting = false,
   submissionError,
+  gtinSubmissionError,
+  chzSummary,
   onDirtyChange = () => {},
   onSubmit,
   onClose,
 }: ProductFormProps) {
   const { t } = useTranslation();
+  // The operator confirms this exact edit-lifetime identity, never a background revision.
+  const [chzBaseline] = useState(() => ({
+    gtin: initialValues?.gtin ?? "",
+    linkId: chzSummary?.linkId,
+    revision: chzSummary?.revision,
+  }));
+  const [detachConfirmed, setDetachConfirmed] = useState(false);
   const canUnlinkIntegrations = useCan(CABINET_CAPABILITY.INTEGRATIONS_WRITE);
   const {
     data: productGroups = [],
@@ -219,6 +235,8 @@ export function ProductForm({
     reset,
     watch,
     setValue,
+    setError,
+    clearErrors,
     getValues,
     formState: { errors, isDirty },
   } = useForm<ProductFormValues>({
@@ -227,6 +245,14 @@ export function ProductForm({
   });
 
   const gtinValue = watch("gtin");
+  const canonicalChanged =
+    mode === "edit" &&
+    isValidGtin(gtinValue.trim()) &&
+    normalizeToGtin14(gtinValue.trim()) !== chzBaseline.gtin;
+  const needsDetach = canonicalChanged && !!chzBaseline.linkId;
+  useEffect(() => {
+    setDetachConfirmed(false);
+  }, [gtinValue]);
   const defaultCounterpartyId = watch("defaultCounterpartyId");
   const chzProductGroupCode = watch("chzProductGroupCode");
   const archivedValue = watch("archived");
@@ -319,7 +345,17 @@ export function ProductForm({
   }, [gtinValue]);
 
   const submit = handleSubmit(async (values) => {
-    await onSubmit(toCreateInput(values, mode), selectedImage);
+    if (needsDetach && (!detachConfirmed || chzBaseline.revision == null)) {
+      setError("gtin", { message: "pages.catalog.chz.detachRequired" });
+      return;
+    }
+    await onSubmit(
+      toCreateInput(values, mode),
+      selectedImage,
+      needsDetach && chzBaseline.revision != null
+        ? { action: "detach", expectedRevision: chzBaseline.revision }
+        : undefined,
+    );
   });
 
   const counterpartyOptions: SelectOption[] = [
@@ -437,9 +473,20 @@ export function ProductForm({
           <Input
             label={t("pages.catalog.form.gtinLabel")}
             mono
-            {...errorProp(translateFieldError(t, errors.gtin?.message))}
+            {...errorProp(gtinSubmissionError ?? translateFieldError(t, errors.gtin?.message))}
             {...register("gtin")}
           />
+
+          {needsDetach && (
+            <Checkbox
+              label={t("pages.catalog.chz.detachLabel")}
+              checked={detachConfirmed}
+              onCheckedChange={(checked) => {
+                setDetachConfirmed(checked);
+                clearErrors("gtin");
+              }}
+            />
+          )}
 
           {ownerHint?.owner === "counterparty" && (
             <Alert

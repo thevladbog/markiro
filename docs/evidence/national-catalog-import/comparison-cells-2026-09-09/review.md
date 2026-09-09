@@ -1,0 +1,28 @@
+# Bounded comparison-cell review
+
+**Scoped verdict: Approved. No actionable Critical, Important or Minor findings.**
+
+Reviewed the supplied uncommitted UI/source/test delta from BASE `9da4f95a06aa38892af4e00ae04831f0105d382e`, including all four new files. This is only the explicitly approved comparison-cell follow-up, not another backend or whole-branch review.
+
+## Behavior and accessibility
+
+- `apps/admin/src/pages/catalog/national-catalog/ImportReview.tsx:235` renders each field as current/proposed value cells in a named fieldset. Their shared, per-preview/per-field radio name enforces exclusive choice. The current side maps to rejecting the entry and the proposed side to accepting it through the existing dependency-aware `toggleField`; existing products retain current values by default.
+- `packages/ui/src/components/RadioCard.tsx:32` uses a real label/native radio rather than custom keyboard emulation. The accessible name identifies the parameter and side; caption/value/reason IDs supply the description. Whole-value text clicks work, disabled radios refuse changes, and the checked-cell click callback deliberately preserves explicit repeat selection without double emission (`:41`). Scoped CSS adds visible focus and a non-color selected check (`packages/ui/src/components.css:877`). Existing RadioGroup and admin native-input rules were not modified.
+- Required owned-name acceptance, compatible keyless wire behavior, replacement consent, dirty-comparison checks and final Apply validation remain in `apps/admin/src/pages/catalog/national-catalog/ImportReview.tsx:93`. Read-only/busy/unavailable decisions disable their cells. Removing a category cascades through the existing dependency helper; an unavailable proposed value has a localized reason rather than an implicit category choice.
+- The photo pair keeps candidate selection separate from View/Retry (`apps/admin/src/pages/catalog/national-catalog/ImportReview.tsx:320`). Loading a viewed image records only viewing evidence; selecting the current photo explicitly invokes the existing keep decision. The unchanged `keepPhoto` helper adds `reviewedCandidateId` only from a loaded viewed candidate (`apps/admin/src/pages/catalog/national-catalog/reviewState.ts:45`). Existing products default to keep; selecting a candidate is explicit. The existing link-only button still changes local choices; final Apply performs submission.
+- `apps/admin/src/pages/catalog/national-catalog/ImportPanel.tsx:92` uses the established catalog outlet context for known current thumbnails; `productImageUrl` supplies the existing private product/checksum endpoint (`apps/admin/src/pages/catalog/api.ts:180`). Missing product metadata produces the keep choice without an invented thumbnail. Manual proposed values retain their own source caption; provider labels are not reinterpreted.
+
+## Evidence inspected
+
+- Focused admin/import/state: **83/83**; shared RadioCard: **2/2**; full UI: **173/173**. New tests exercise value-text selection, exact accepted IDs, dependency clearing, required name/read-only rules, and independent photo viewing/keep receipt semantics (`apps/admin/test/national-catalog-comparison.test.tsx:30`, `packages/ui/test/radio-card.test.tsx:38`). Existing old-wire and current-key regressions were preserved in the adapted import suite.
+- Read UI build/typecheck/lint and admin typecheck/lint/browser typecheck outputs. Recorded admin lint has zero errors and five warnings in unchanged boxes/conflicts pages. Existing warning output is not described as pristine.
+- Read both new browser capture logs (**2/2**, final 3.8s) and completed full browser log (**23/23**, 58.4s). The new actual-browser cases test ArrowRight/ArrowLeft with focus, value-text clicks, category gating, both image loads, no premature mutation, exact final payload, and two columns/no horizontal overflow at 390/1280 (`tools/production-browser/national-catalog-tests/comparison.spec.ts:127`). Existing matrix coverage retains RU/EN and both themes across 390/768/1280/1600.
+- Personally inspected the final 390px dark and 1280px light PNGs. Both show readable paired values/photos, selected checks, visible keyboard focus and final Apply. Expanded-height capture is presentation evidence; interaction/bounds checks ran at the normal 1000px viewport height.
+- Independently recomputed all **15** hashes in `comparison-cells-source-freeze.json`; every source/test file matches the supplied review state.
+- Final evidence update: read the completed full-admin log: **96 files, 1128/1128 passed**, 175.86s (`comparison-cells-admin-full.log`). Read the completed scoped Prettier check for all 15 source files: **All matched files use Prettier code style!** (`comparison-cells-format-source.log`). The controller's final root-format/diff/dated verification record remains a separate delivery step; no result is inferred for it.
+
+## Scope and limits
+
+Named dependency checks were limited to existing choice/default/keep helpers, unchanged admission validation, catalog outlet context and product thumbnail URL construction. No tests, browser/network/DB execution, source/index/HEAD edits or subagents were performed; only this report was written. Existing API/Station concerns remain outside this UI follow-up and are not resolved or reclassified here. Live provider, production and hardware acceptance is not claimed. Changes remain uncommitted and no publication is authorized by this review.
+
+**Final assessment:** The reviewed UI/source/test change meets the approved cell-selection behavior and accessibility scope without a fix-introduced regression found. Complete the separately pending delivery gates before reporting overall completion.

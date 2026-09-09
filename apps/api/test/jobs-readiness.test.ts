@@ -40,7 +40,7 @@ vi.mock("@markiro/db", async (importOriginal) => {
   };
 });
 
-const WORKER_IDS = Array.from({ length: 17 }, (_, index) => `worker-${index + 1}`);
+const WORKER_IDS = Array.from({ length: 23 }, (_, index) => `worker-${index + 1}`);
 
 function wip(id: string, state: WorkerState = "active"): WipData {
   return {
@@ -184,14 +184,14 @@ describe("PgBossService readiness", () => {
     pgBossMock.instances.length = 0;
   });
 
-  it("accepts the exact seventeen successfully registered active workers including National Catalog jobs", async () => {
+  it("accepts the exact twenty-three successfully registered active workers including National Catalog jobs", async () => {
     const boss = fakeBoss();
     const { service, subscriptionStatus, signerScheduler } = serviceWith(boss);
 
     await service.onModuleInit();
 
     await expect(service.checkReady()).resolves.toBeUndefined();
-    expect(boss.work).toHaveBeenCalledTimes(17);
+    expect(boss.work).toHaveBeenCalledTimes(23);
     expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(BUILD_SHIFT_EXPORT_QUEUE);
     expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(BUILD_INVENTORY_DOCUMENT_QUEUE);
     expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(

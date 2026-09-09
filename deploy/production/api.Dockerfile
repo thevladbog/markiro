@@ -16,8 +16,8 @@ COPY packages/domain ./packages/domain
 COPY packages/email ./packages/email
 COPY packages/platform-contracts ./packages/platform-contracts
 COPY packages/legal-documents ./packages/legal-documents
-RUN pnpm --filter @markiro/platform-contracts build
 RUN pnpm --filter @markiro/domain build
+RUN pnpm --filter @markiro/platform-contracts build
 RUN pnpm --filter @markiro/db build
 RUN pnpm --filter @markiro/email build
 RUN pnpm --filter @markiro/legal-documents build

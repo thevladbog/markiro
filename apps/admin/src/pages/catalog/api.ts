@@ -9,6 +9,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
+import type { ChzSummary } from "@markiro/platform-contracts";
+
 import { API_BASE, apiFetch } from "../../api/client.js";
 
 export type ProductStatus = "draft" | "active";
@@ -59,6 +61,7 @@ export interface ProductDto {
   defaultCounterpartyId: string | null;
   createdAt: string;
   image?: ProductImageDescriptor | null;
+  chz?: ChzSummary;
 }
 
 /**
@@ -81,7 +84,9 @@ export interface CreateProductInput {
   archived?: boolean;
 }
 
-export type UpdateProductInput = Partial<CreateProductInput>;
+export type UpdateProductInput = Partial<CreateProductInput> & {
+  chzLinkChange?: { action: "detach"; expectedRevision: number };
+};
 
 export interface ListProductsParams {
   search?: string;
@@ -117,6 +122,7 @@ async function fetchChzProductGroups(): Promise<ChzProductGroupDto[]> {
 
 /** Shared TanStack Query cache key prefix for the products list (all filter variants). */
 export const PRODUCTS_QUERY_KEY = ["products"] as const;
+export const PRODUCT_CHZ_LINK_QUERY_KEY = ["product-chz-link"] as const;
 
 function productsQueryKey(params: ListProductsParams) {
   return [...PRODUCTS_QUERY_KEY, params] as const;
@@ -218,8 +224,9 @@ export function useUpdateProduct(): UseMutationResult<
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, input }) => patchProduct(id, input),
-    onSuccess: () => {
+    onSuccess: (_, { id }) => {
       void queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: [...PRODUCT_CHZ_LINK_QUERY_KEY, id] });
     },
   });
 }

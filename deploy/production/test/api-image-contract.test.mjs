@@ -52,9 +52,9 @@ test("API image keeps the production runtime closure minimal and hardened", asyn
   const legalBuild = source.indexOf("RUN pnpm --filter @markiro/legal-documents build");
   const apiBuild = source.indexOf("RUN pnpm --filter @markiro/api build");
   assert.ok(
-    platformContractsBuild >= 0 &&
-      domainBuild > platformContractsBuild &&
-      dbBuild > domainBuild &&
+    domainBuild >= 0 &&
+      platformContractsBuild > domainBuild &&
+      dbBuild > platformContractsBuild &&
       emailBuild > dbBuild &&
       legalBuild > emailBuild &&
       apiBuild > legalBuild,

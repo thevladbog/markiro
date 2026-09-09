@@ -821,6 +821,7 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
       .where(eq(schema.productRegulatoryProposals.id, proposalId));
     expect(appliedProposal).toMatchObject({
       status: "applied",
+      source: "national_catalog",
       sourceRef,
       appliedSelection: [entryId],
       appliedSelectionHash: selectionHash,
@@ -836,7 +837,12 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
         ),
       )
       .limit(1);
-    expect(applyAudit?.after).toMatchObject({ dispositions: { convertible: 1 } });
+    expect(applyAudit?.after).toMatchObject({
+      source: "national_catalog",
+      sourceRef,
+      selectedEntryIds: [entryId],
+      dispositions: { convertible: 1 },
+    });
 
     const invalidProposalId = randomUUID();
     const validMappingId = randomUUID();
@@ -902,6 +908,76 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
       .from(schema.productRegulatoryProposals)
       .where(eq(schema.productRegulatoryProposals.id, invalidProposalId));
     expect(invalidProposal?.status).toBe("preview");
+  });
+
+  it("exposes a transaction writer that rolls back the whole caller mutation on stale profile", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const tenant = await signUpAndActivate(owner);
+    const seeded = await seedProfile(tenant.tenantId, tenant.actorUserId);
+    const proposalId = randomUUID();
+    await db.insert(schema.productRegulatoryProposals).values({
+      id: proposalId,
+      tenantId: tenant.tenantId,
+      productId: seeded.productId,
+      kind: "category_change",
+      source: "manual",
+      baseRevision: 0,
+      diff: {
+        version: 1,
+        kind: "category_change",
+        target: {
+          schemaVersionId: seeded.schemaVersionId,
+          categoryId: "softdrinks",
+          categoryName: "Напитки",
+          tnVedCode: null,
+          okpd2Code: null,
+        },
+        entries: [],
+      },
+      createdBy: tenant.actorUserId,
+      expiresAt: new Date(Date.now() + 60000),
+    });
+    const { ProductRegulatoryWriter } =
+      await import("../src/modules/product-regulatory/product-regulatory-writer");
+    const writer = new ProductRegulatoryWriter();
+    await expect(
+      db.transaction(async (tx) => {
+        await tx
+          .update(schema.products)
+          .set({ name: "Must roll back" })
+          .where(eq(schema.products.id, seeded.productId));
+        expect(
+          await writer.applyInTransaction(
+            tx,
+            tenant.tenantId,
+            tenant.actorUserId,
+            seeded.productId,
+            proposalId,
+            { acceptedEntryIds: [] },
+          ),
+        ).toBe("stale");
+        throw new Error("rollback_position");
+      }),
+    ).rejects.toThrow("rollback_position");
+    const [product] = await db
+      .select()
+      .from(schema.products)
+      .where(eq(schema.products.id, seeded.productId));
+    const [proposal] = await db
+      .select()
+      .from(schema.productRegulatoryProposals)
+      .where(eq(schema.productRegulatoryProposals.id, proposalId));
+    expect(product?.name).toBe("Напиток");
+    expect(proposal).toMatchObject({ status: "preview", staleAt: null, terminalReason: null });
+    await owner
+      .post(`/products/${seeded.productId}/regulatory-proposals/${proposalId}/apply`)
+      .send({ acceptedEntryIds: [] })
+      .expect(409);
+    const [stale] = await db
+      .select()
+      .from(schema.productRegulatoryProposals)
+      .where(eq(schema.productRegulatoryProposals.id, proposalId));
+    expect(stale).toMatchObject({ status: "stale", terminalReason: "revision_mismatch" });
   });
 
   it("marks a proposal stale when its captured current value changes and refuses legacy guesswork", async () => {

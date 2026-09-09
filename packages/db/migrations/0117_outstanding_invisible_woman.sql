@@ -1,0 +1,1 @@
+ALTER TABLE "chz_api_tokens" ADD COLUMN "source_true_api_base_url" text;

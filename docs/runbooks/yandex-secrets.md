@@ -66,6 +66,24 @@ Read-only импорт использует уже зашифрованный Tr
 материализация env и перезапуск API запрещены. Порядок refresh, проверки матрицы,
 activation и tenant smoke описан в `docs/runbooks/national-catalog-live-validation.md`.
 
+Перед deploy версии с импортом товаров добавьте в новую версию Lockbox ещё четыре
+записи, сохранив существующие:
+
+- `NATIONAL_CATALOG_OWN_IMPORT_ENABLED=false`;
+- `NATIONAL_CATALOG_GTIN_IMPORT_ENABLED=false`;
+- `NATIONAL_CATALOG_IMAGE_IMPORT_ENABLED=false`;
+- `NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS` — логически пустой список. Если Lockbox
+  не сохраняет запись с пустой строкой, используйте один ASCII-пробел: штатный
+  загрузчик конфигурации API нормализует его в пустой список хостов. Проверьте
+  наличие самого ключа через metadata/list; отсутствие ключа не эквивалентно
+  пустому списку для runtime inventory.
+
+Эти имена входят в обязательный runtime inventory даже при выключенном импорте.
+Включение и заполнение списка разрешённых хостов выполняются после проверок из
+`docs/runbooks/national-catalog-import.md`.
+Порядок отдельной выкладки настроек описан в
+[`deploy/yandex/national-catalog-rollout.md`](../../deploy/yandex/national-catalog-rollout.md).
+
 ## Evidence провайдера и локализации
 
 Lockbox хранит только runtime values и не является реестром юридических оснований. В отдельной защищённой compliance-карточке перед включением формы зафиксируйте наименование провайдера, реквизиты договора с провайдером, используемые сервисы Postbox/SmartCaptcha/object storage и подтверждение, что первичный сбор и хранение выполняются в Российской Федерации. Секреты и персональные данные заявителей в эту карточку не копируются.

@@ -1497,4 +1497,70 @@ describe.skipIf(!ready)("products e2e", () => {
     await agent.patch(`/products/${id}`).send({ name: "Cabinet Widget 2" }).expect(200);
     await agent.delete(`/products/${id}`).expect(204);
   });
+  it("passes the authenticated actor through explicit GTIN detach and rejects stale/unknown nested input", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const actorUserId = await actorForTenant(tenantId);
+    const created = await agent
+      .post("/products")
+      .send({ gtin: EAN13_CANONICAL, name: "Linked" })
+      .expect(201);
+    const productId = String(created.body.id);
+    await db.insert(schema.nationalCatalogProductLinks).values({
+      tenantId,
+      productId,
+      cardId: "720679",
+      environment: "sandbox",
+      boundGtin14: GTIN14_CANONICAL,
+      confirmedBy: actorUserId,
+    });
+    await agent.patch(`/products/${productId}`).send({ gtin: EAN13_WIDGET_A }).expect(409);
+    await agent
+      .patch(`/products/${productId}`)
+      .send({
+        gtin: EAN13_WIDGET_A,
+        chzLinkChange: { action: "detach", expectedRevision: 1, actorUserId: "fabricated" },
+      })
+      .expect(400);
+    await agent
+      .patch(`/products/${productId}`)
+      .send({ gtin: EAN13_WIDGET_A, chzLinkChange: { action: "detach", expectedRevision: 99 } })
+      .expect(409);
+    await agent
+      .patch(`/products/${productId}`)
+      .send({ gtin: EAN13_WIDGET_A, chzLinkChange: { action: "detach", expectedRevision: 1 } })
+      .expect(200);
+    const [link] = await db
+      .select()
+      .from(schema.nationalCatalogProductLinks)
+      .where(
+        and(
+          eq(schema.nationalCatalogProductLinks.tenantId, tenantId),
+          eq(schema.nationalCatalogProductLinks.productId, productId),
+        ),
+      );
+    expect(link).toMatchObject({
+      closedBy: actorUserId,
+      closedReason: "gtin_changed",
+      boundGtin14: GTIN14_CANONICAL,
+      revision: 2,
+    });
+    const [audit] = await db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.targetId, productId),
+          eq(schema.tenantAuditEvents.action, "national_catalog.link.removed"),
+        ),
+      );
+    expect(audit).toMatchObject({
+      actorUserId,
+      outcome: "success",
+      targetType: "product",
+      targetId: productId,
+      after: { reason: "gtin_changed", revision: 2 },
+    });
+  });
 });

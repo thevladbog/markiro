@@ -222,6 +222,38 @@ const EnvSchema = z
     CHZ_TRUE_API_TOKEN_FORMAT: chzTrueApiTokenFormatSchema,
     // National Catalog stays disabled until a deployment explicitly selects a
     // validated endpoint and a tenant authorized to read its schema.
+    NATIONAL_CATALOG_OWN_IMPORT_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
+    NATIONAL_CATALOG_GTIN_IMPORT_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
+    NATIONAL_CATALOG_IMAGE_IMPORT_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
+    NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS: z
+      .string()
+      .default("")
+      .transform((v) =>
+        v
+          .split(",")
+          .map((host) => host.trim().toLowerCase())
+          .filter(Boolean),
+      )
+      .pipe(
+        z
+          .array(
+            z
+              .string()
+              .regex(
+                /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9](?:[a-z0-9-]{0,57}[a-z0-9])?)$/,
+              ),
+          )
+          .max(100),
+      ),
     NATIONAL_CATALOG_BASE_URL: optionalHttpsUrlSchema,
     NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID: z.string().trim().min(1).optional(),
     NATIONAL_CATALOG_LIVE_GTIN: optionalNationalCatalogLiveGtinSchema,
@@ -328,6 +360,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     "DADATA_SECRET",
     "CHZ_TOKEN_ENCRYPTION_KEY",
     "CHZ_TRUE_API_TOKEN_FORMAT",
+    "NATIONAL_CATALOG_OWN_IMPORT_ENABLED",
+    "NATIONAL_CATALOG_GTIN_IMPORT_ENABLED",
+    "NATIONAL_CATALOG_IMAGE_IMPORT_ENABLED",
+    "NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS",
     "NATIONAL_CATALOG_BASE_URL",
     "NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID",
     "NATIONAL_CATALOG_LIVE_GTIN",

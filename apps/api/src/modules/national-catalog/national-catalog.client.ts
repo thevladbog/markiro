@@ -15,14 +15,23 @@ import {
   type NationalCatalogDependentAttributeRule,
   type NationalCatalogEtagsRequest,
   type NationalCatalogEtagsResponse,
+  type NationalCatalogListPage,
+  type NationalCatalogListRequest,
+  type NationalCatalogListResult,
   type NationalCatalogProduct,
   type NationalCatalogProductAttribute,
   type NationalCatalogProductCategory,
   type NationalCatalogProductIdentifier,
+  type NationalCatalogProductImage,
+  type NationalCatalogProductImageIssue,
   type NationalCatalogProductsResponse,
   type NationalCatalogRequestOptions,
   type NationalCatalogResult,
 } from "./national-catalog.types";
+import {
+  normalizedDetailedStatuses,
+  parseNationalCatalogListPage,
+} from "./national-catalog-list-parser";
 
 export type { NationalCatalogClientDependencies } from "./national-catalog.types";
 
@@ -31,11 +40,13 @@ const ATTRIBUTES_PATH = "/v3/attributes";
 const ETAGS_PATH = "/v3/etagslist";
 const FEED_PRODUCT_PATH = "/v3/feed-product";
 const PRODUCT_PATH = "/v3/product";
+const PRODUCT_LIST_PATH = "/v4/product-list";
 export const NATIONAL_CATALOG_PRODUCT_BATCH_LIMIT = 25;
 export const NATIONAL_CATALOG_RESPONSE_BYTE_LIMITS = {
   categories: 4 * 1024 * 1024,
   attributes: 16 * 1024 * 1024,
   products: 16 * 1024 * 1024,
+  list: 16 * 1024 * 1024,
   etags: 1024 * 1024,
 } as const;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
@@ -103,6 +114,38 @@ export class NationalCatalogClient {
     );
   }
 
+  async getFeedProductsByIds(
+    auth: NationalCatalogAuth,
+    cardIds: string[],
+    options: NationalCatalogRequestOptions = {},
+  ): Promise<NationalCatalogResult<NationalCatalogProductsResponse>> {
+    return this.request(
+      auth,
+      productIdsPath(cardIds),
+      options,
+      NATIONAL_CATALOG_RESPONSE_BYTE_LIMITS.products,
+      parseProducts,
+    );
+  }
+
+  async listOwnProducts(
+    auth: NationalCatalogAuth,
+    request: NationalCatalogListRequest,
+    options: NationalCatalogRequestOptions = {},
+  ): Promise<NationalCatalogListResult> {
+    return this.request<NationalCatalogListPage, { status: "selection_too_large" }>(
+      auth,
+      productListPath(request),
+      options,
+      NATIONAL_CATALOG_RESPONSE_BYTE_LIMITS.list,
+      (payload) => parseNationalCatalogListPage(payload, request),
+      (response) => {
+        if (response.status === 413) return { status: "selection_too_large" };
+        return null;
+      },
+    );
+  }
+
   async getPublishedProducts(
     auth: NationalCatalogAuth,
     gtins: string[],
@@ -123,21 +166,52 @@ export class NationalCatalogClient {
     options: NationalCatalogRequestOptions,
     responseByteLimit: number,
     parse: (payload: unknown) => T | null,
-  ): Promise<NationalCatalogResult<T>> {
+  ): Promise<NationalCatalogResult<T>>;
+  private async request<T, TSpecial>(
+    auth: NationalCatalogAuth,
+    path: string,
+    options: NationalCatalogRequestOptions,
+    responseByteLimit: number,
+    parse: (payload: unknown) => T | null,
+    specialStatus: (response: Response) => TSpecial | null,
+  ): Promise<NationalCatalogResult<T> | TSpecial>;
+  private async request<T, TSpecial>(
+    auth: NationalCatalogAuth,
+    path: string,
+    options: NationalCatalogRequestOptions,
+    responseByteLimit: number,
+    parse: (payload: unknown) => T | null,
+    specialStatus?: (response: Response) => TSpecial | null,
+  ): Promise<NationalCatalogResult<T> | TSpecial> {
     const controller = new AbortController();
     const cancelAbort = this.dependencies.scheduleAbort(controller, this.requestTimeoutMs);
+    const abort = () => controller.abort();
+    options.signal?.addEventListener("abort", abort, { once: true });
+    let response: Response | undefined;
     try {
+      if (options.signal?.aborted) return { status: "unavailable" };
       const headers = new Headers({
         Accept: "application/json",
         Authorization: `Bearer ${auth.token}`,
       });
       if (options.ifNoneMatch) headers.set("If-None-Match", options.ifNoneMatch);
 
-      const response = await this.dependencies.fetch(urlFor(auth.baseUrl, path), {
+      response = await this.dependencies.fetch(urlFor(auth.baseUrl, path), {
         method: "GET",
         headers,
         signal: controller.signal,
       });
+      options.onResponse?.({
+        method: path.split("?")[0] ?? path,
+        status: response.status,
+        usage: {
+          total: usageValue(response.headers.get("API-Usage-Limit"), true),
+          method: usageValue(response.headers.get("API-Method-Usage-Limit"), true),
+        },
+        retryAfterSeconds: coordinatedRetryAfterSeconds(response),
+      });
+      const specialResult = specialStatus?.(response);
+      if (specialResult !== undefined && specialResult !== null) return specialResult;
       if (response.status === 304) return { status: "not_modified" };
       if (response.status === 401) return { status: "unauthorized" };
       if (response.status === 403) {
@@ -180,6 +254,10 @@ export class NationalCatalogClient {
     } catch {
       return { status: "unavailable" };
     } finally {
+      // Early status branches must close the unread body before the coordinator
+      // releases its lease/slot. Await real transport cleanup, not a race timer.
+      await response?.body?.cancel().catch(() => undefined);
+      options.signal?.removeEventListener("abort", abort);
       cancelAbort();
     }
   }
@@ -256,6 +334,67 @@ function productPath(
   return `${path}?${new URLSearchParams(selector).toString()}`;
 }
 
+function productIdsPath(cardIds: string[]): string {
+  validateProductBatchSize(cardIds);
+  if (
+    cardIds.some(
+      (cardId) =>
+        !/^[1-9]\d*$/.test(cardId) || !Number.isSafeInteger(Number(cardId)) || Number(cardId) < 1,
+    )
+  ) {
+    throw new TypeError("National Catalog card IDs must be positive safe integers");
+  }
+  return `${FEED_PRODUCT_PATH}?${new URLSearchParams({ good_ids: cardIds.join(";") }).toString()}`;
+}
+
+function productListPath(request: NationalCatalogListRequest): string {
+  validateProviderDate(request.updatedFrom, "updatedFrom");
+  validateProviderDate(request.updatedTo, "updatedTo");
+  if (request.updatedFrom > request.updatedTo) {
+    throw new RangeError("National Catalog updatedFrom must not be after updatedTo");
+  }
+  if (!Number.isSafeInteger(request.offset) || request.offset < 0) {
+    throw new TypeError("National Catalog offset must be a non-negative integer");
+  }
+  if (!Number.isSafeInteger(request.limit) || request.limit < 1 || request.limit > 1_000) {
+    throw new RangeError("National Catalog list limit must be between one and 1000");
+  }
+  if (request.offset + request.limit > 10_000) {
+    throw new RangeError("National Catalog list offset plus limit must not exceed 10000");
+  }
+  return `${PRODUCT_LIST_PATH}?${new URLSearchParams({
+    from_date: request.updatedFrom,
+    to_date: request.updatedTo,
+    offset: String(request.offset),
+    limit: String(request.limit),
+  }).toString()}`;
+}
+
+function validateProductBatchSize(values: readonly unknown[]): void {
+  if (values.length < 1 || values.length > NATIONAL_CATALOG_PRODUCT_BATCH_LIMIT) {
+    throw new RangeError(
+      `National Catalog product reads require one to ${NATIONAL_CATALOG_PRODUCT_BATCH_LIMIT} identifiers`,
+    );
+  }
+}
+
+function validateProviderDate(value: string, name: string): void {
+  const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(value);
+  if (!match) throw new TypeError(`National Catalog ${name} must use YYYY-MM-DD HH:mm:ss`);
+  const parsed = new Date(`${value.replace(" ", "T")}Z`);
+  if (
+    !Number.isFinite(parsed.getTime()) ||
+    parsed.getUTCFullYear() !== Number(match[1]) ||
+    parsed.getUTCMonth() + 1 !== Number(match[2]) ||
+    parsed.getUTCDate() !== Number(match[3]) ||
+    parsed.getUTCHours() !== Number(match[4]) ||
+    parsed.getUTCMinutes() !== Number(match[5]) ||
+    parsed.getUTCSeconds() !== Number(match[6])
+  ) {
+    throw new TypeError(`National Catalog ${name} must be a valid date and time`);
+  }
+}
+
 function urlFor(baseUrl: string, path: string): string {
   const base = new URL(baseUrl);
   if (base.protocol !== "https:" || base.username || base.password) {
@@ -328,14 +467,33 @@ async function readResponseBytes(
   return bytes;
 }
 
-function usageValue(value: string | null): { used: number; limit: number } | null {
+function usageValue(
+  value: string | null,
+  allowOverLimit = false,
+): { used: number; limit: number } | null {
   const match = /^(\d+)\/(\d+)$/.exec(value ?? "");
   if (!match) return null;
   const used = Number(match[1]);
   const limit = Number(match[2]);
-  return Number.isSafeInteger(used) && Number.isSafeInteger(limit) && limit > 0 && used <= limit
+  return Number.isSafeInteger(used) &&
+    Number.isSafeInteger(limit) &&
+    limit > 0 &&
+    (allowOverLimit || used <= limit)
     ? { used, limit }
     : null;
+}
+
+/** Preserve legacy delta-only result parsing; coordination also honors HTTP dates. */
+function coordinatedRetryAfterSeconds(response: Response): number | null {
+  const delta = retryAfterSeconds(response);
+  if (delta !== null) return delta;
+  const retryAt = Date.parse(response.headers.get("retry-after") ?? "");
+  if (!Number.isFinite(retryAt)) return null;
+  const serverNow = Date.parse(response.headers.get("date") ?? "");
+  return Math.max(
+    0,
+    Math.ceil((retryAt - (Number.isFinite(serverNow) ? serverNow : Date.now())) / 1000),
+  );
 }
 
 function retryAfterSeconds(response: Response): number | null {
@@ -520,20 +678,138 @@ function parseProduct(value: unknown): NationalCatalogProduct | null {
   const id = positiveInteger(record.good_id);
   const name = optionalNullableString(record.good_name);
   const status = optionalNullableString(record.good_status);
+  const detailedStatuses = optionalDetailedStatuses(record.good_detailed_status);
   const identifiers = parseIdentifiers(record.identified_by);
   const categories = parseProductCategories(record.categories);
   const attributes = parseProductAttributes(record.good_attrs);
+  const { images, imageIssues } = parseProductImages(record.good_img, record.good_images);
   if (
     id === null ||
     name === undefined ||
     status === undefined ||
+    detailedStatuses === null ||
     identifiers === null ||
     categories === null ||
     attributes === null
   ) {
     return null;
   }
-  return { id, name, status, identifiers, categories, attributes, raw: record };
+  return {
+    id,
+    name,
+    status,
+    detailedStatuses,
+    identifiers,
+    categories,
+    attributes,
+    images,
+    imageIssues,
+    raw: record,
+  };
+}
+
+function optionalDetailedStatuses(value: unknown): string[] | null {
+  return value === undefined || value === null ? [] : normalizedDetailedStatuses(value);
+}
+
+function parseProductImages(
+  defaultValue: unknown,
+  galleryValue: unknown,
+): { images: NationalCatalogProductImage[]; imageIssues: NationalCatalogProductImageIssue[] } {
+  const images: NationalCatalogProductImage[] = [];
+  const imageIssues: NationalCatalogProductImageIssue[] = [];
+  const defaultUrl = parseDefaultImage(defaultValue, imageIssues);
+  const mentionedGalleryUrls = new Set<string>();
+
+  if (galleryValue !== undefined && galleryValue !== null) {
+    if (!Array.isArray(galleryValue)) {
+      imageIssues.push({ sourceId: "good_images", reason: "invalid_collection" });
+    } else {
+      for (const [index, value] of galleryValue.entries()) {
+        const sourceId = `good_images:${index}`;
+        const record = asRecord(value);
+        if (!record) {
+          imageIssues.push({ sourceId, reason: "invalid_record" });
+          continue;
+        }
+        if (
+          Array.isArray(record.photo_url) ||
+          (typeof record.photo_url === "object" && record.photo_url !== null)
+        ) {
+          imageIssues.push({ sourceId, reason: "unsupported_media" });
+          continue;
+        }
+        const url = imageUrl(record.photo_url);
+        if (url === null) {
+          imageIssues.push({ sourceId, reason: "invalid_url" });
+          continue;
+        }
+        mentionedGalleryUrls.add(url);
+        const barcode = photoBarcode(record.barcode);
+        if (barcode === undefined) {
+          imageIssues.push({ sourceId, reason: "invalid_barcode" });
+          continue;
+        }
+        addGalleryImage(images, { sourceId, url, barcode, primary: false });
+      }
+    }
+  }
+
+  if (defaultUrl !== null) {
+    const galleryDefault = images.find((image) => image.url === defaultUrl);
+    if (galleryDefault) {
+      galleryDefault.primary = true;
+    } else if (!mentionedGalleryUrls.has(defaultUrl)) {
+      images.push({ sourceId: "good_img", url: defaultUrl, barcode: null, primary: true });
+    }
+  }
+
+  return { images, imageIssues };
+}
+
+function addGalleryImage(
+  images: NationalCatalogProductImage[],
+  candidate: NationalCatalogProductImage,
+): void {
+  const sameUrl = images.filter((image) => image.url === candidate.url);
+  if (candidate.barcode === null) {
+    if (sameUrl.length === 0) images.push(candidate);
+    return;
+  }
+  for (let index = images.length - 1; index >= 0; index -= 1) {
+    const image = images[index];
+    if (image?.url === candidate.url && image.barcode === null) images.splice(index, 1);
+  }
+  if (!sameUrl.some((image) => image.barcode === candidate.barcode)) images.push(candidate);
+}
+
+function parseDefaultImage(
+  value: unknown,
+  imageIssues: NationalCatalogProductImageIssue[],
+): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (Array.isArray(value) || (typeof value === "object" && value !== null)) {
+    imageIssues.push({ sourceId: "good_img", reason: "unsupported_media" });
+    return null;
+  }
+  const url = imageUrl(value);
+  if (url === null) imageIssues.push({ sourceId: "good_img", reason: "invalid_url" });
+  return url;
+}
+
+function imageUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function photoBarcode(value: unknown): string | null | undefined {
+  if (value === undefined || value === null || value === "") return null;
+  return typeof value === "string" && /^\d{8,14}$/.test(value) ? value : undefined;
 }
 
 function parseIdentifiers(value: unknown): NationalCatalogProductIdentifier[] | null {

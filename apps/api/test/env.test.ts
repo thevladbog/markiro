@@ -70,3 +70,50 @@ describe("National Catalog environment", () => {
     ).toThrow();
   });
 });
+
+describe("National Catalog import rollout configuration", () => {
+  it("defaults each independent import flag off and host policy empty", () => {
+    const env = loadEnv(requiredEnv);
+    expect(env.NATIONAL_CATALOG_OWN_IMPORT_ENABLED).toBe(false);
+    expect(env.NATIONAL_CATALOG_GTIN_IMPORT_ENABLED).toBe(false);
+    expect(env.NATIONAL_CATALOG_IMAGE_IMPORT_ENABLED).toBe(false);
+    expect(env.NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS).toEqual([]);
+  });
+  it("requires explicit booleans and exact hostname lists", () => {
+    expect(
+      loadEnv({
+        ...requiredEnv,
+        NATIONAL_CATALOG_IMAGE_IMPORT_ENABLED: "true",
+        NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS: " cdn.example.test, IMG.example.test ",
+      }).NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS,
+    ).toEqual(["cdn.example.test", "img.example.test"]);
+    for (const host of [
+      "https://cdn.example.test/path",
+      "*.example.test",
+      "user@cdn.example.test",
+      "127.0.0.1",
+      "example.test:443",
+    ])
+      expect(() =>
+        loadEnv({ ...requiredEnv, NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS: host }),
+      ).toThrow();
+    expect(() => loadEnv({ ...requiredEnv, NATIONAL_CATALOG_OWN_IMPORT_ENABLED: "1" })).toThrow();
+  });
+  it("accepts the exact ASCII hostname of National Catalog photos on the .рф domain", () => {
+    const hostname = new URL("https://национальный-каталог.рф/s3/med/photo.jpg").hostname;
+    expect(
+      loadEnv({
+        ...requiredEnv,
+        NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS: ` ${hostname.toUpperCase()} `,
+      }).NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS,
+    ).toEqual([hostname]);
+  });
+  it.each(["images.xn--", "images.xn--p1ai-", `images.xn--${"a".repeat(60)}`])(
+    "rejects malformed internationalized top-level domains: %s",
+    (hostname) => {
+      expect(() =>
+        loadEnv({ ...requiredEnv, NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS: hostname }),
+      ).toThrow();
+    },
+  );
+});
