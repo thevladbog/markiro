@@ -15,7 +15,12 @@ import {
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import { JournalService } from "../integrations/journal.service";
-import { CHZ_CHANNEL_TYPE } from "./chz-constants";
+import {
+  buildChzTrueApiAuthPayload,
+  CHZ_CHANNEL_TYPE,
+  CHZ_TRUE_API_BASE_URLS,
+} from "./chz-constants";
+import { chzSignerSettingsSchema } from "../integrations/channel-registry";
 import { ChzCryptoService, type EncryptedChzToken } from "./chz-crypto.service";
 
 const CLAIM_POLL_INTERVAL_MS = 2_000;
@@ -107,6 +112,7 @@ export class SignerTasksService {
     }
     const obtainedAt = new Date();
     const expiresAt = new Date(body.expiresAt);
+    let staleEnvironment = false;
     await this.db.transaction(async (tx) => {
       const [task] = await tx
         .update(schema.chzSignerTasks)
@@ -125,7 +131,48 @@ export class SignerTasksService {
         )
         .returning({ id: schema.chzSignerTasks.id, payload: schema.chzSignerTasks.payload });
       if (!task) throw new NotFoundException();
-      const tokenType = chzTrueApiAuthPayloadSchema.parse(task.payload).tokenFormat ?? "jwt";
+      const payload = chzTrueApiAuthPayloadSchema.parse(task.payload);
+      const tokenType = payload.tokenFormat ?? "jwt";
+      // Ensure even a previously absent channel has a row to lock. Channel
+      // updates serialize here; an old in-flight task cannot relabel a bearer.
+      await tx
+        .insert(schema.integrationChannels)
+        .values({ tenantId, type: CHZ_CHANNEL_TYPE })
+        .onConflictDoNothing();
+      const [channel] = await tx
+        .select({ settings: schema.integrationChannels.settings })
+        .from(schema.integrationChannels)
+        .where(
+          and(
+            eq(schema.integrationChannels.tenantId, tenantId),
+            eq(schema.integrationChannels.type, CHZ_CHANNEL_TYPE),
+          ),
+        )
+        .for("update");
+      const settings = chzSignerSettingsSchema.parse(channel?.settings ?? {});
+      if (payload.trueApiBaseUrl !== CHZ_TRUE_API_BASE_URLS[settings.environment]) {
+        staleEnvironment = true;
+        await tx
+          .update(schema.chzSignerTasks)
+          .set({
+            status: "failed",
+            errorCode: "CHZ_ENVIRONMENT_CHANGED",
+            errorMessage: "Signer task environment no longer matches the channel",
+            resultSummary: { reason: "CHZ_ENVIRONMENT_CHANGED" },
+          })
+          .where(
+            and(eq(schema.chzSignerTasks.tenantId, tenantId), eq(schema.chzSignerTasks.id, taskId)),
+          );
+        await tx
+          .insert(schema.chzSignerTasks)
+          .values({
+            tenantId,
+            type: "true_api_auth",
+            payload: buildChzTrueApiAuthPayload(settings),
+          })
+          .onConflictDoNothing();
+        return;
+      }
       await tx
         .insert(schema.chzApiTokens)
         .values({
@@ -134,6 +181,7 @@ export class SignerTasksService {
           tokenNonce: encrypted.tokenNonce,
           tokenTag: encrypted.tokenTag,
           tokenType,
+          sourceTrueApiBaseUrl: payload.trueApiBaseUrl,
           obtainedAt,
           expiresAt,
           agentId,
@@ -146,6 +194,7 @@ export class SignerTasksService {
             tokenNonce: encrypted.tokenNonce,
             tokenTag: encrypted.tokenTag,
             tokenType,
+            sourceTrueApiBaseUrl: payload.trueApiBaseUrl,
             obtainedAt,
             expiresAt,
             agentId,
@@ -176,10 +225,12 @@ export class SignerTasksService {
         channelType: CHZ_CHANNEL_TYPE,
         sessionId: null,
         direction: "in",
-        outcome: "ok",
+        outcome: staleEnvironment ? "warn" : "ok",
         grain: "item",
-        message: "True API token refreshed",
-        details: { expiresAt: body.expiresAt, certThumbprint: body.certThumbprint },
+        message: staleEnvironment ? "Stale True API token discarded" : "True API token refreshed",
+        details: staleEnvironment
+          ? { taskId, agentId, reason: "CHZ_ENVIRONMENT_CHANGED" }
+          : { expiresAt: body.expiresAt, certThumbprint: body.certThumbprint },
       })
       .catch((e) => this.logger.warn(`signer task complete journal append failed: ${e}`));
   }

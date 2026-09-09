@@ -1,3 +1,8 @@
+import {
+  chzStatusKeySchema,
+  chzRefreshErrorCodeSchema,
+  type ChzSummary,
+} from "@markiro/platform-contracts";
 import { z } from "zod";
 
 import type { SchemaObject } from "@nestjs/swagger";
@@ -33,6 +38,10 @@ export type CreateProductDto = z.infer<typeof createProductSchema>;
 
 /** PATCH /products/:id schema -- partial update, preserves untouched fields. */
 export const updateProductSchema = z.object({
+  chzLinkChange: z
+    .object({ action: z.literal("detach"), expectedRevision: z.number().int().nonnegative() })
+    .strict()
+    .optional(),
   gtin: z.string().min(1).optional(),
   name: z.string().min(1).max(200).optional(),
   printName: z.string().trim().min(1).max(200).nullable().optional(),
@@ -60,6 +69,7 @@ export type UpdateProductDto = z.infer<typeof updateProductSchema>;
  * history-aware readers; `"true"` powers the catalog's "not in use" filter.
  */
 export const listProductsQuerySchema = z.object({
+  chzStatus: z.union([z.literal("unlinked"), chzStatusKeySchema]).optional(),
   search: z.string().min(1).optional(),
   status: z.enum(PRODUCT_STATUSES).optional(),
   archived: z.enum(["true", "false", "all"]).optional(),
@@ -82,6 +92,8 @@ export interface ProductImageDescriptor {
 }
 
 export interface ProductDto {
+  /** Omission by an older server means unavailable; the current server always emits this. */
+  chz?: ChzSummary;
   id: string;
   gtin14: string;
   name: string;
@@ -155,8 +167,45 @@ export const productOpenApiSchema: SchemaObject = {
     "shelfLifeDays",
     "externalRef",
     "createdAt",
+    "chz",
   ],
   properties: {
+    chz: {
+      type: "object",
+      required: [
+        "linkId",
+        "revision",
+        "statusKeys",
+        "rawStatus",
+        "rawDetailedStatuses",
+        "lastSuccessAt",
+        "lastAttemptAt",
+        "refreshing",
+        "lastOutcome",
+        "hasChanges",
+        "lastErrorCode",
+      ],
+      properties: {
+        linkId: { type: "string", format: "uuid", nullable: true },
+        revision: { type: "integer", nullable: true },
+        statusKeys: {
+          type: "array",
+          items: { type: "string", enum: [...chzStatusKeySchema.options] },
+        },
+        rawStatus: { type: "string", nullable: true },
+        rawDetailedStatuses: { type: "array", items: { type: "string" } },
+        lastSuccessAt: { type: "string", format: "date-time", nullable: true },
+        lastAttemptAt: { type: "string", format: "date-time", nullable: true },
+        refreshing: { type: "boolean" },
+        lastOutcome: { type: "string", enum: ["ok", "error", "never"] },
+        hasChanges: { type: "boolean" },
+        lastErrorCode: {
+          type: "string",
+          nullable: true,
+          enum: [...chzRefreshErrorCodeSchema.options],
+        },
+      },
+    },
     id: uuidSchema,
     gtin14: { type: "string", pattern: "^[0-9]{14}$" },
     name: { type: "string" },

@@ -19,6 +19,9 @@ import {
 } from "@markiro/ui";
 import type { SelectOption, TableColumn } from "@markiro/ui";
 
+import { chzStatusKeySchema } from "@markiro/platform-contracts";
+import { ChzStatus } from "./national-catalog/ChzStatus.js";
+
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import { useCan } from "../../access/context.js";
@@ -239,11 +242,13 @@ function AuthorizedProductRowActions({ product }: { product: ProductDto }) {
 /** Admin product catalog CRUD screen -- Plan 03 Task 12 (list/create/edit/delete + GTIN owner hint). */
 export function CatalogPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const canReadIntegrations = useCan(CABINET_CAPABILITY.INTEGRATIONS_READ);
 
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [chzFilter, setChzFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
@@ -275,13 +280,20 @@ export function CatalogPage() {
     isError: counterpartiesError,
     refetch: refetchCounterparties,
   } = useCounterparties();
-  const items = data ?? [];
+  const items = (data ?? []).filter((product) => {
+    if (chzFilter === "all") return true;
+    if (chzFilter === "unavailable") return product.chz === undefined;
+    if (chzFilter === "unlinked") return product.chz?.linkId === null;
+    if (chzFilter === "unverified")
+      return !!product.chz?.linkId && product.chz.lastSuccessAt === null;
+    return product.chz?.statusKeys.some((key) => key === chzFilter) ?? false;
+  });
   const counterparties = useMemo(() => counterpartiesData ?? [], [counterpartiesData]);
 
   // Snap back to the first page whenever the visible set changes shape.
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, statusFilter, pageSize]);
+  }, [debouncedSearch, statusFilter, chzFilter, pageSize]);
 
   const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
   // Clamp instead of an effect: deletions on the last page must not flash an empty table.
@@ -309,13 +321,21 @@ export function CatalogPage() {
         width: "84px",
         render: (row) => <ProductThumbnail product={row} />,
       },
-      { key: "name", title: t("pages.catalog.table.name"), wrap: true, width: "26%" },
+      {
+        key: "name",
+        title: t("pages.catalog.table.name"),
+        wrap: true,
+        width: "26%",
+        render: (row) => <span className="mk-catalog-product-name">{row.name}</span>,
+      },
       {
         key: "productGroup",
         title: t("pages.catalog.table.productGroup"),
         wrap: true,
         width: "34%",
-        render: (row) => row.productGroup ?? "—",
+        render: (row) => (
+          <span className="mk-catalog-product-group">{row.productGroup ?? "—"}</span>
+        ),
       },
       {
         key: "boxCapacity",
@@ -338,6 +358,19 @@ export function CatalogPage() {
           ),
       },
       {
+        key: "chz",
+        wrap: true,
+        title: t("pages.catalog.chz.column"),
+        render: (row) => (
+          <div className="mk-chz-cell">
+            <ChzStatus summary={row.chz} />
+            <Link to={`${row.id}/chz`} state={{ catalogBackground: true }}>
+              {t("pages.catalog.chz.open")}
+            </Link>
+          </div>
+        ),
+      },
+      {
         key: "actions",
         title: t("pages.catalog.table.actions"),
         align: "right",
@@ -355,7 +388,21 @@ export function CatalogPage() {
     <AdminPage className="mk-catalog-page" data-testid="catalog-page">
       <PageHeader
         title={t("pages.catalog.title")}
-        actions={canWrite ? <AuthorizedCreateProductAction /> : null}
+        actions={
+          canWrite ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  void navigate("/catalog/import", { state: { catalogBackground: true } })
+                }
+              >
+                {t("pages.catalog.import.entry")}
+              </Button>
+              <AuthorizedCreateProductAction />
+            </div>
+          ) : null
+        }
       />
 
       {canReadIntegrations ? <AuthorizedCandidatesPlaque /> : null}
@@ -380,6 +427,24 @@ export function CatalogPage() {
             options={statusFilterOptions}
             value={statusFilter}
             onValueChange={setStatusFilter}
+          />
+        </div>
+        <div className="mk-catalog-filters__status">
+          <Select
+            label={t("pages.catalog.chz.filter")}
+            value={chzFilter}
+            onValueChange={setChzFilter}
+            options={[
+              { value: "all", label: t("pages.catalog.statusFilter.all") },
+              ...["unavailable", "unlinked", "unverified"].map((value) => ({
+                value,
+                label: t(`pages.catalog.chz.${value}`),
+              })),
+              ...chzStatusKeySchema.options.map((value) => ({
+                value,
+                label: t(`pages.catalog.import.statuses.${value}`),
+              })),
+            ]}
           />
         </div>
         <div className="mk-catalog-filters__page-size">
@@ -422,7 +487,7 @@ export function CatalogPage() {
       <Outlet
         context={
           {
-            products: items,
+            products: data ?? [],
             productsPending: isPending,
             productsError: isError,
             counterparties,

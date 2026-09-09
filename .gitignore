@@ -46,3 +46,6 @@ docs/design-briefs/screenshot-*.png
 
 # Private first-customer evidence packages; tooling remains tracked under tools/.
 /evidence/
+
+# Disposable local/CI National Catalog browser traces and failure screenshots.
+/tools/production-browser/test-results/

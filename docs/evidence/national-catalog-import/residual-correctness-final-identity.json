@@ -1,0 +1,12 @@
+{
+  "checkedAt": "2026-09-09T10:14:49.285502+00:00",
+  "sourceFiles": 148,
+  "runtimeTestDelta": 4,
+  "currentWaveImages": 43,
+  "inheritedImages": 24,
+  "immutableProtectedPaths": 75,
+  "exactChronologicalRulings": 124,
+  "fullApiResultEntries": 295,
+  "base": "703440ebd09cf35fc9090e2c0107131383c98c0a",
+  "sourceAndEvidenceUnchangedAfterBrowser": true
+}

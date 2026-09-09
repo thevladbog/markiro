@@ -1,0 +1,608 @@
+{
+  "createdAt": "2026-09-09T09:18:36.260395+00:00",
+  "base": "f78928a0e4f0ab4030c428b45c767515a1ac628a",
+  "preFixHead": "5a4a773e1b42a6fb955b41e309a7fefbf1ae1e35",
+  "scope": "all whole-branch changed non-documentation source, tests and configuration; excludes generated and evidence docs",
+  "files": [
+    {
+      "path": ".env.example",
+      "sha256": "1b3cfcc37ce1f0f6ba9acdc84c632ac9d76b06899ba631fba09574ad9be8e891"
+    },
+    {
+      "path": ".env.production.example",
+      "sha256": "2f249619b4ccdd89d2a09465c7f40ee5be2f271217fca0e3bac4a149342eb550"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "870b8e62a5feee81e599763b9d90a3b5bf900a3410c958d319b4c47fee949e2a"
+    },
+    {
+      "path": ".gitignore",
+      "sha256": "435afe72d087ef129f444c785ea15b1aa914c62f6f6bc1be1b04bc930cb3a1b4"
+    },
+    {
+      "path": ".prettierignore",
+      "sha256": "ecc9fcc4c65b0f2f22603e4236637c2cb7d42065cd198f93297b75cc159c2bfc"
+    },
+    {
+      "path": "apps/admin/package.json",
+      "sha256": "e839f597f3512c08efb868f16bedf547032a7eaf2efa9fe0bf51ad94090fda10"
+    },
+    {
+      "path": "apps/admin/src/app.tsx",
+      "sha256": "11b854eb58e5963ba40425b7465dda01249cda1972a526bbb9cb8bef425cf4bc"
+    },
+    {
+      "path": "apps/admin/src/i18n/en.json",
+      "sha256": "48e590452cadcf93a22629b2451e7656e322af9677f45248990f1ba87783a585"
+    },
+    {
+      "path": "apps/admin/src/i18n/ru.json",
+      "sha256": "dde84ba30794971f6214b4af6a031ac60ced16dadfa568705d50ee68e8d9e0be"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/ProductForm.tsx",
+      "sha256": "4e42b7660bf254fb79646b2b320eb7c7b38dd59410ab9ecd2a07159e4dd1e061"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/ProductPanelRoute.tsx",
+      "sha256": "de35dc9d08153898d91271a071b42daccd8be0f793d5ffdaad384f38c2045379"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/api.ts",
+      "sha256": "3d89914c6de5d73178b505945915e5595e7ed6feb011e29a494951098347dee1"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/catalog.css",
+      "sha256": "d01285794dce87611f41f11dded078d6736437058478741644b8520b4e0a9c43"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/index.tsx",
+      "sha256": "4be4c474442d6acf3bcdb9ad33f3a7a69c53a6f8f1856e6d4cef9f456b7ea44e"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/national-catalog/ChzStatus.tsx",
+      "sha256": "1ef97a0a4eb419bd53ab8fc8325b36dd418aa33ddfa0f430b4517776937729c7"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/national-catalog/ImportPanel.tsx",
+      "sha256": "da12b384351f435eb036b9182d248916229cadd7a382e66f1e77331445695293"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/national-catalog/ImportResult.tsx",
+      "sha256": "f2a70fb04c93a16212fa868663505f841ab8fc71f171c4fbaef42fbaae0fe952"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/national-catalog/ImportReview.tsx",
+      "sha256": "85ee2c41e0b9353b0ca9c43ed86388a2f82308cce4e4f3c5120ffa76feed6c72"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/national-catalog/ImportSelection.tsx",
+      "sha256": "f625a8f85b5c8028de9532f3d506775d39e732a656f4df41c2fa728c94f89868"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/national-catalog/LinkPanel.tsx",
+      "sha256": "b8da717f32e3a20e283ef9bbbcd784b6f2892739f1717578ce9b1d0b7af7cf3a"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/national-catalog/api.ts",
+      "sha256": "8021bf6169a5a00fb3d4cb0911f95afce580366b2831c7c660b45499c9fd943e"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/national-catalog/pendingIntent.ts",
+      "sha256": "5cd4e0dc6ffa2a39cd2d69bcdaf793a52d8a7187acbbeed212daf892ee5610bc"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/national-catalog/reviewState.ts",
+      "sha256": "b3717a6680e995946af0f7d325852e3f3c6336f4ddb3f3262dacaa03258cc497"
+    },
+    {
+      "path": "apps/admin/test/browser/national-catalog-harness.html",
+      "sha256": "4cd28cc13bb3ef54a7222debdf8fb989233f4f5a747721f72fd9192e59a1472b"
+    },
+    {
+      "path": "apps/admin/test/browser/national-catalog-harness.tsx",
+      "sha256": "8777125349f1c6276aee850eebf50fe37ff7cb4f9827d8a201b5a7c407a58b17"
+    },
+    {
+      "path": "apps/admin/test/catalog-routing.test.tsx",
+      "sha256": "094ae42b13bb7a2796f6596bb5a549e8561819564a6f4e51720a32340b7a1f41"
+    },
+    {
+      "path": "apps/admin/test/national-catalog-fixtures.ts",
+      "sha256": "bfd490cb3f157a3b76889b2a73dda72cc087dff6605a699f862039520f3feabe"
+    },
+    {
+      "path": "apps/admin/test/national-catalog-import.test.tsx",
+      "sha256": "8d82e98e659bbe07022bf58e59b727097a9fcff841acf9888510c700be60bc8b"
+    },
+    {
+      "path": "apps/admin/test/national-catalog-state.test.ts",
+      "sha256": "f848b531ee9a81fa7bcc1982fdf982ec955ca91e409201af6d9e95926bc293e0"
+    },
+    {
+      "path": "apps/admin/test/national-catalog-status.test.tsx",
+      "sha256": "cacc43e3f793474c6c9b479ae18aea4dc0cc53e2994e25164e361484c7e1f6c4"
+    },
+    {
+      "path": "apps/api/src/authorization/authorization.service.ts",
+      "sha256": "ea65458b0e84429b58e65c62062bfb26520e91667b893ce4da072c0d8855246f"
+    },
+    {
+      "path": "apps/api/src/env.ts",
+      "sha256": "20babd87383fb98f39bb10b451e2ba2c8dcf75b0142b28640f6677dc0591347f"
+    },
+    {
+      "path": "apps/api/src/jobs/jobs.module.ts",
+      "sha256": "0d27304fbc5d00c4454f03d7d4367d3388bd285dbb9f9e6e8564ca1b3db48c03"
+    },
+    {
+      "path": "apps/api/src/main.ts",
+      "sha256": "edae10372b80a6657c023f63c87eadaf074270394758a8be0389a3bbcb376c81"
+    },
+    {
+      "path": "apps/api/src/modules/chz-exports/chz-token.service.ts",
+      "sha256": "6f70ec0a86a56c3fda3468b5a999368b35a1fad7b45ae0c72eb3ed9e94a4e65d"
+    },
+    {
+      "path": "apps/api/src/modules/exchange/commerceml/image-download.ts",
+      "sha256": "72e170108a9d3fd4be684a69c0cc2c1c54f57086920d21b49dc4369b5d6b4e1e"
+    },
+    {
+      "path": "apps/api/src/modules/media/bounded-image-download.ts",
+      "sha256": "171710fc8ef44da5cba7e9f63062c7106c013df7e05098164490028dc3367336"
+    },
+    {
+      "path": "apps/api/src/modules/media/media-asset-references.ts",
+      "sha256": "25ed847378096b5b61c789d41db6174f1313ee5cde4efcfcbe0f55f0cf909773"
+    },
+    {
+      "path": "apps/api/src/modules/media/media-assets.service.ts",
+      "sha256": "ebf6694f82f5d7bf73a17f7e5654877590069665f0a37aa817897410fe171647"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/body-parser.ts",
+      "sha256": "1667c79087412357b9e2c99b1b8e875fce0fbd872c1bb37c0b5bd1d91113bf20"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-capabilities.service.ts",
+      "sha256": "b55e0bef52ca3b8d1387a5beeb4263617e055196e8056d683293571de0ca38db"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-confirmation-observation.ts",
+      "sha256": "27d86ae4201557cd681730b6686f416c4e6cef0f01748eec451ce29cf57f08cb"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-enumeration.ts",
+      "sha256": "91fb9a31eed0217b4c8961e9d4d8770a2bbe1f6b7b465c6175aaa8a8c9c244ff"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-freshness.service.ts",
+      "sha256": "edb4e5bb239180ddf5b4f9f377901c928c9a75bc7dcc3df63c7949beae86f185"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-image-apply.ts",
+      "sha256": "30474b32d310476b650507a3482972e26a8ba97c2fba0d5a4ea53fd842e8a790"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-image-state.ts",
+      "sha256": "7ff93d174294392c26c0ce392c5e1b564ad1d8461465cb26d7ed161f8fa22d5e"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-image.service.ts",
+      "sha256": "dfdd7e8566ddab51fa709345e54746ab1f3d6941efa78258ebb5343838120549"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-import-apply-item.ts",
+      "sha256": "0427e52e0fcd8306bf6e09949b5c7bbd77d2a1e0d00493e6a8c0b383e6408a0d"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-import-apply-state.ts",
+      "sha256": "e54ce7233475688f4bac36e742c758feab06af0a5f433f81492c32b8d7378e02"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-import-apply.service.ts",
+      "sha256": "8d3bd92477882566d1b9050b02d5c96dce07a39cdaf5d0ac35531a0b3d5db74a"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-import-cancellation.ts",
+      "sha256": "f167016a4957211ad57789308a47ec7d66c3715b5b8939d96d8e64ba4117f072"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-import-preview-builder.ts",
+      "sha256": "4513dd7829b2124466404008b4177a412cd990933b81544fa63ee6b1d3f08a30"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-import-preview.service.ts",
+      "sha256": "f84c4ad2009be908f27643c0e6883f1b711d0ecfb4d98c4065cb9c83c91880a9"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-import-retention.ts",
+      "sha256": "6d8a4186d4aadb7e6b93709363931b9a44260435570206ea5ea65e805cf10835"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-import.controller.ts",
+      "sha256": "00cc4f3f207cc869fa97e5f5f0ac3b7ab6fcf3711dcfc3de67655dced4d10597"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-import.repository.ts",
+      "sha256": "11743b2ee655c8ff44c4d32ac18dd9513975cc4c18c743603ed981f69c6aa86e"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-import.service.ts",
+      "sha256": "d370a4f4298b4a52da8ccf01a0ea05af85c09ebe6e865a46f8a8b2ddba4d26f9"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-import.types.ts",
+      "sha256": "f3fe14b6ac165f8d516bd68faa891b7e4a2e80d522f2f0f1512d7be587014800"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-job-repository.ts",
+      "sha256": "577898d516693cc8c777a7407afcaabfec8b9c19fd6bda082caa154d1fbb5487"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-jobs.service.ts",
+      "sha256": "5f244e2a47382806eeb73c92fc1df87034bf0b9cf8bbd5789023a47821fcc38e"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-link-refresh.service.ts",
+      "sha256": "709121b9f7e6b011e817ea8e348c3e3de64f3cd8eb798460a2543a8650661a63"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-link-writer.ts",
+      "sha256": "9161d033f65c4e55b98a9d370f97f807ae28fe10c2f16438c94b1ff11306a203"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-link.controller.ts",
+      "sha256": "007f72bc3b4df67a382587fd9cfa3cf8bf9de472fb80142f76469aeef2de8e71"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-link.service.ts",
+      "sha256": "7d1ecf0ac4c011de30e631e7c486d806e9edaa6974341816ec7c93473b44119e"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-list-parser.ts",
+      "sha256": "3b85b75e2cd5ec428faabf046d133ec5a492100b3ec1221725d4861709fec065"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-observation-projection.ts",
+      "sha256": "5c3b402398a547b5986000ecf3f38a382438e1f98734c98cc8b2eef3f2f1ece3"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-photo-selection.ts",
+      "sha256": "9ccc5d3aad72e8a0975ff64ef6286edab45221611ae0375c33751d785b707771"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-preparation-state.ts",
+      "sha256": "1465d3cdcd551c1e49f8581bdf733d1df7623b0632f59ac1bef30a38360d27ff"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-refresh-state.ts",
+      "sha256": "a145f26cc32dfa6c7948fceb97e4129f7b2c6597989b14f4ba898b67871a5079"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-request-coordinator.ts",
+      "sha256": "5a6e5a44bdbf1e96014ae20e0cd7010127b62c4be4e73c47270c016ed267c106"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog-summary.ts",
+      "sha256": "a4f150e400674f784f207a6b6a567223ee54e1b34ea721a32d35a5aeb2672fd3"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog.client.ts",
+      "sha256": "708761eaf53384228285c83f8ada590166f022588bdf4fe77d921a765c8851d5"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog.module.ts",
+      "sha256": "0d9ea48362c3f9855bfd1f7538c4120be0fc1641669d5cbd30e480aade16c62d"
+    },
+    {
+      "path": "apps/api/src/modules/national-catalog/national-catalog.types.ts",
+      "sha256": "13a65f2b53101ce943c13f7c5f3a5413e2f6e971d9a6a7f836e674e3a38b853e"
+    },
+    {
+      "path": "apps/api/src/modules/product-regulatory/product-regulatory-writer.ts",
+      "sha256": "82319d862c3c3726d575e5c1678deb2fb2458a38b3020cae71f3b8cd8a8e71d7"
+    },
+    {
+      "path": "apps/api/src/modules/product-regulatory/product-regulatory.service.ts",
+      "sha256": "36f38f62696ef34fd7e9dfe7fb055762d3a3af536ecabe964986cf208fc20a4f"
+    },
+    {
+      "path": "apps/api/src/modules/product-regulatory/proposal-schema.ts",
+      "sha256": "4d46f6f8a2ee506f291ef83bc4cd891e4472cb917ef7c749043d21d78577638d"
+    },
+    {
+      "path": "apps/api/src/modules/products/dto.ts",
+      "sha256": "c0c1949e9b3a57c91a86532a81c0b2ca060c2808c037f538f36fe313da0b1d01"
+    },
+    {
+      "path": "apps/api/src/modules/products/product-writer.ts",
+      "sha256": "a5933313e6ac19f6080a136334b7702a789d34f3c2914b91eb8a8cc6836a6091"
+    },
+    {
+      "path": "apps/api/src/modules/products/products.controller.ts",
+      "sha256": "37df8d64725e0361c1294818e24dd6a6384419a80b4c4b36a7283e4131260f4d"
+    },
+    {
+      "path": "apps/api/src/modules/products/products.service.ts",
+      "sha256": "b26694f915717fb22752a44f373195ce2d5f6e3026eb853ba2e4741328585160"
+    },
+    {
+      "path": "apps/api/src/modules/signer-agents/signer-tasks.service.ts",
+      "sha256": "cf1edfa51cb7ab7d6437a63c925dbc2dfdb3160bf7f6ab61d77d0f4aa9eb2bfa"
+    },
+    {
+      "path": "apps/api/test/authorization.service.test.ts",
+      "sha256": "718390fda57a7f562ec29cd1ab865a9ab05deea7b6816fa221f2bee94874f1d0"
+    },
+    {
+      "path": "apps/api/test/commerceml-image-download.test.ts",
+      "sha256": "d79c0e615e0c743beeceec8ebee92b07980d4d513d1ee57270b28be3a16aa81a"
+    },
+    {
+      "path": "apps/api/test/env.test.ts",
+      "sha256": "d9fe10eebf5b110f813fe98152800dd7a76346ecfccbda73308ac3bee6b72172"
+    },
+    {
+      "path": "apps/api/test/jobs-readiness.test.ts",
+      "sha256": "e7482866c327c9869a94edd41d63958771bc84858c56ba854eff32d2098db8a5"
+    },
+    {
+      "path": "apps/api/test/media-assets.reconciler.test.ts",
+      "sha256": "d87bf707c8e18ce833c8e12aa8702baa3b958089651df6bcca686d5765677399"
+    },
+    {
+      "path": "apps/api/test/national-catalog-body-parser.test.ts",
+      "sha256": "2fdc8f55a4e2fffe249841a2a0505624a4fa13ab2e875e153d4b29eaa0fc5271"
+    },
+    {
+      "path": "apps/api/test/national-catalog-enumeration.test.ts",
+      "sha256": "9a05388b3a24623a7d486e95c6bf5fd5d63f72fc7b20a011deeb2967b8102812"
+    },
+    {
+      "path": "apps/api/test/national-catalog-freshness.service.test.ts",
+      "sha256": "1717d39b5f9da79d01d9d514703f9205bd228e60c49a73b76a5552d460f52a7b"
+    },
+    {
+      "path": "apps/api/test/national-catalog-image.test.ts",
+      "sha256": "92fe00e745c01722191bc664e0feadb927757e159c0546a81d80c172436836d5"
+    },
+    {
+      "path": "apps/api/test/national-catalog-import-apply-state.test.ts",
+      "sha256": "501aa8c360cb5ffc93eeff958eea30a90b85aec42bdbf2d6e5074d59fdfba701"
+    },
+    {
+      "path": "apps/api/test/national-catalog-import-apply.e2e.test.ts",
+      "sha256": "f99174e069215a17e7ddd9e16d6e5dbc030bb24d0c05471f1aa9610b21c5dd35"
+    },
+    {
+      "path": "apps/api/test/national-catalog-import-auth.e2e.test.ts",
+      "sha256": "34473ab672f1066e361a8e68f05d1e266e29ccff63c766e3fd04dd316d69ef85"
+    },
+    {
+      "path": "apps/api/test/national-catalog-import-http.e2e.test.ts",
+      "sha256": "d3da5a223234a88114f77afeb27eff07001c593885297b350336656705c33f20"
+    },
+    {
+      "path": "apps/api/test/national-catalog-import-preview.test.ts",
+      "sha256": "748da7c79b1ee093424e762b32d3d8e9eb6bbe06dfc39f2de1d5b0773bce5436"
+    },
+    {
+      "path": "apps/api/test/national-catalog-import.service.test.ts",
+      "sha256": "d95fba301f0b4a5a0762c5aaa70c1371f7749ec7b5fda8bb31bd9609354c0c0b"
+    },
+    {
+      "path": "apps/api/test/national-catalog-jobs.e2e.test.ts",
+      "sha256": "7be0860a7c53e772159932ca6c2d04b35ee72620c683850690abb31ea98c9739"
+    },
+    {
+      "path": "apps/api/test/national-catalog-jobs.test.ts",
+      "sha256": "7eaec24293d44176209930791f787795e2a74e2ef67defdb314695769db19bae"
+    },
+    {
+      "path": "apps/api/test/national-catalog-link-observation.e2e.test.ts",
+      "sha256": "843591697f591ef61c944b7951603e42963eeaa39609612d8037148e10fc9f0c"
+    },
+    {
+      "path": "apps/api/test/national-catalog-photo-selection.test.ts",
+      "sha256": "1ede0013288984881b820cbdfd9606246ff62516e82d9612f6b2951c3b030aa0"
+    },
+    {
+      "path": "apps/api/test/national-catalog-request-coordinator.test.ts",
+      "sha256": "88bd0df5af27e104736261e74c3d7cce600f35044de45193f769ca99f11a60b9"
+    },
+    {
+      "path": "apps/api/test/national-catalog-summary.test.ts",
+      "sha256": "6c43c97a3d94ea4ff92871b47802258de0d35bbac40e6ec140e45f0aa3381e96"
+    },
+    {
+      "path": "apps/api/test/national-catalog-token-provenance.test.ts",
+      "sha256": "682956fbea8da7eb94383dc1c11508e73658bf558d02193da088364ff0edd1a7"
+    },
+    {
+      "path": "apps/api/test/national-catalog.client.test.ts",
+      "sha256": "d828f333e3c09543738f7a2afa70a1f34d370ed0b1d98ef960eb99645b1ca297"
+    },
+    {
+      "path": "apps/api/test/national-catalog.module.test.ts",
+      "sha256": "8c762cf4006111b04afbc2b1efb23d86de430d12270fe89bc2fa83525bd14d4e"
+    },
+    {
+      "path": "apps/api/test/product-registry-invalidation.test.ts",
+      "sha256": "7090c04165524124d49c407d2fed94d06bed40c8c5459a98790b857eec11e77f"
+    },
+    {
+      "path": "apps/api/test/product-regulatory.e2e.test.ts",
+      "sha256": "e5aa28d663b8e3634465b60bf11e94ca3b433795ad417657c266da9bffdf2c0e"
+    },
+    {
+      "path": "apps/api/test/products.e2e.test.ts",
+      "sha256": "1f98e4dec7792680e099921c2a2589fa0a57fe190782da0f68890bfd2af91d15"
+    },
+    {
+      "path": "apps/api/test/signer-agent-tasks.e2e.test.ts",
+      "sha256": "9661c019944c5976590c1f507174ffb7135b83ff1929b5fa8bfbe0915b5b9558"
+    },
+    {
+      "path": "apps/api/test/subscription-route-inventory.test.ts",
+      "sha256": "3609ebe342486cbc50a7db68eb8805941d0b2c70fd061d5870f400ce399733c3"
+    },
+    {
+      "path": "packages/db/drizzle.config.ts",
+      "sha256": "cc41b889322e6c7a385f6ae05b059491b18585c7d5b2bf901e23ef0fdbadd741"
+    },
+    {
+      "path": "packages/db/migrations/0116_national_catalog_product_import.sql",
+      "sha256": "b8c94b0df333e5cf8dc428017b4a6476a2fac7879898756be95ca8dbc0ea4dc9"
+    },
+    {
+      "path": "packages/db/migrations/0117_outstanding_invisible_woman.sql",
+      "sha256": "17268b6346e59cca276a2f77195c0ec763da0e680a174d7c95b17fb9e7f50b5d"
+    },
+    {
+      "path": "packages/db/migrations/0118_tired_lorna_dane.sql",
+      "sha256": "bd2013cdf3c6be1ca561c5dbb679e69e83c43722c6f5e4b64687b2302ae2f0a5"
+    },
+    {
+      "path": "packages/db/migrations/0119_old_abomination.sql",
+      "sha256": "d52320d496f6638439edaddd1bef2a393630e108c673e76d77213b1cf3ed6b80"
+    },
+    {
+      "path": "packages/db/migrations/0120_hesitant_captain_universe.sql",
+      "sha256": "b60cc143dfd67f761760ebf27437b4357e26fa0a22589ba358e21b0a4677e06b"
+    },
+    {
+      "path": "packages/db/migrations/0121_sudden_oracle.sql",
+      "sha256": "f65af00f75b10d46de0e928423ac2ff6f3b870c624649374102ea36babf867b8"
+    },
+    {
+      "path": "packages/db/migrations/0122_watery_molten_man.sql",
+      "sha256": "559d55d190df3a0948f53a0d5f20fb5a84bdce4ee3e4ff6e0c263f952776e429"
+    },
+    {
+      "path": "packages/db/migrations/meta/0116_snapshot.json",
+      "sha256": "c4fb9afd836c5b2c12e98919c76e0772d9f3ae1cc1c32ccd8329d34cb449a921"
+    },
+    {
+      "path": "packages/db/migrations/meta/0117_snapshot.json",
+      "sha256": "46319bad1d6e7865fceaef231160a21bc43c3e1ecf0e7f556cf64fe75f349bf9"
+    },
+    {
+      "path": "packages/db/migrations/meta/0118_snapshot.json",
+      "sha256": "fe7f4048d251ea2c4ae4a7ad9e633509e59fa2d8b0c9ca0a1babd66fc3e1e5b6"
+    },
+    {
+      "path": "packages/db/migrations/meta/0119_snapshot.json",
+      "sha256": "41fd283ad5aa6d613b7fd2ed8d22973c46aa4d519c80b7538f3180f40ad4f411"
+    },
+    {
+      "path": "packages/db/migrations/meta/0120_snapshot.json",
+      "sha256": "dd5df7db0e29e9c35233179350168407af0ad279849fc1740494d0b64a85b05e"
+    },
+    {
+      "path": "packages/db/migrations/meta/0121_snapshot.json",
+      "sha256": "903e4c396dc0220c0800e51c15b82e85a3e8b436b5f5cb650f988c1c4439f32d"
+    },
+    {
+      "path": "packages/db/migrations/meta/0122_snapshot.json",
+      "sha256": "f0f38427aa50687d799f640881bf8e14a67688c6ba66c42633f5466ef3c0e7d3"
+    },
+    {
+      "path": "packages/db/migrations/meta/_journal.json",
+      "sha256": "9eda5098e3dba814b0d31987734cd9c8657c13504f452b461a8d077e2e695ea6"
+    },
+    {
+      "path": "packages/db/src/schema.ts",
+      "sha256": "d01d010a16d05fc1d9a79768c0cfc4ee718b3cfbe4ef95d613a4931378320ac8"
+    },
+    {
+      "path": "packages/db/src/schema/chz.ts",
+      "sha256": "8e19ea131655bd8790fad21584b14049c9136782db748fb7f2bbd7a19046ab9d"
+    },
+    {
+      "path": "packages/db/src/schema/national-catalog-import.ts",
+      "sha256": "8d27d0f2143f1c9842ae5412f2038a58cd6dd016ee0918fe6fa8c78b1fea5424"
+    },
+    {
+      "path": "packages/db/test/chz-token-provenance-migration.test.ts",
+      "sha256": "2459bd4551045253b59a569a694b5956c52c76ee1ee8caf78fef63dcaa1e9f73"
+    },
+    {
+      "path": "packages/db/test/national-catalog-import-migration.test.ts",
+      "sha256": "f2d1745a109c0ba3097a39963a6b92f9a24de6fc0526bd3790279c1d2442c66a"
+    },
+    {
+      "path": "packages/db/test/national-catalog-import-schema.test.ts",
+      "sha256": "c15216475bcdfad56dc0de023ae91329b2747b966a0160db0aa87170ace0b68f"
+    },
+    {
+      "path": "packages/domain/src/catalog/national-catalog.ts",
+      "sha256": "08fcbb1eeb8ecfded1e263b0374d1ca5b4c0fa46d1c7a1e5f00fa14892ad28d3"
+    },
+    {
+      "path": "packages/domain/src/index.ts",
+      "sha256": "c8f119370ded0352398909fe9f09441ccd33793d662dbd628739e7849453d067"
+    },
+    {
+      "path": "packages/domain/test/national-catalog.test.ts",
+      "sha256": "305acc5e913cd76133adc0103bc5c595502e9c6ca9808911d6eead9d393b7b51"
+    },
+    {
+      "path": "packages/platform-contracts/package.json",
+      "sha256": "4337843e6c261cd2b27bbbad043ab99f2d5c235aa0608646e6776a4b9e2e89de"
+    },
+    {
+      "path": "packages/platform-contracts/src/index.ts",
+      "sha256": "f4754556398d4e9d52dbbac3120449475d341b3955e66a55e6174bcd0eb3e19b"
+    },
+    {
+      "path": "packages/platform-contracts/src/tenant-national-catalog.ts",
+      "sha256": "679f0a3bc30018060c7afcbb8b07c91d7d6ca1ce768964068a83e5fa907b5338"
+    },
+    {
+      "path": "packages/platform-contracts/test/tenant-national-catalog.test.ts",
+      "sha256": "ac9a2110ed4c6926dee51ef85fb1dfdd06a14ebc64ef4fc59140bd8dccc2d216"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sha256": "602f8fee7d9356202647f494216bac30acfbfa6bc43afc0f96f4a21c0a15e803"
+    },
+    {
+      "path": "tools/ci/test/workflow.test.mjs",
+      "sha256": "52f5da51e9d6fd563ab76f4a9121be47a5ed75d2ef33d849599dceb834c6ec80"
+    },
+    {
+      "path": "tools/production-browser/national-catalog-tests/flows.spec.ts",
+      "sha256": "fc657caac436dcf1667e47296f88e521a0d9f848aefe452bed122fcc43777bce"
+    },
+    {
+      "path": "tools/production-browser/national-catalog-tests/import.spec.ts",
+      "sha256": "ddfe103d442ba46380d5ee27a06efe2c755ddaf4bed89adb3960f80d807142ef"
+    },
+    {
+      "path": "tools/production-browser/national-catalog-tests/matrix.spec.ts",
+      "sha256": "a03c3e149ec5a8fd8c32686b1dbffc4beb712546c06a82ca94606e0ad4a85bb6"
+    },
+    {
+      "path": "tools/production-browser/national-catalog.playwright.config.ts",
+      "sha256": "20e31b9c7acc94a152f56aeeb6637ba694b17f702d2695f97f5398378b862ca3"
+    },
+    {
+      "path": "tools/production-browser/package.json",
+      "sha256": "0b3225f37cd35ab56f8026017f78e35fdca4c3b0575be3b20672e7557bed5ec6"
+    },
+    {
+      "path": "tools/production-browser/tsconfig.json",
+      "sha256": "d4db96062ff442eed2a75cd9cb983e86cb87e5cda602486e8e3f4963602047d1"
+    }
+  ],
+  "postFixtureDelta": [
+    {
+      "path": "tools/production-browser/national-catalog-tests/import.spec.ts",
+      "previousSha256": "eac620099580cc661822929541da8182ed8597c8b18825d6b894ce5eb9a41037",
+      "sha256": "ddfe103d442ba46380d5ee27a06efe2c755ddaf4bed89adb3960f80d807142ef"
+    }
+  ],
+  "supersedesForBrowserFixtureOnly": "final-fix-source-freeze.json"
+}

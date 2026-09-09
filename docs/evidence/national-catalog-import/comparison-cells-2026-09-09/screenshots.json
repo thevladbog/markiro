@@ -1,0 +1,19 @@
+{
+  "source": "Local Chromium fixture capture; expanded presentation height",
+  "files": [
+    {
+      "path": "comparison-1280-ru-light.png",
+      "width": 1280,
+      "height": 1280,
+      "byteSize": 168731,
+      "sha256": "0c6d7b589985c0aa4ccd615cb5edaec815da0bb7570c449c88022a24411e8f85"
+    },
+    {
+      "path": "comparison-390-ru-dark.png",
+      "width": 390,
+      "height": 1560,
+      "byteSize": 115361,
+      "sha256": "0e4e9989a1b639d7e1fc8d29e275677cb3f8ecc69bd32cd7aa4400ee6f7b746f"
+    }
+  ]
+}

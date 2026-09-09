@@ -172,6 +172,25 @@ test("Signer Windows verification includes the stable release contract", () => {
   assert.ok(job.steps.some((step) => step.run === "pnpm test:signer-release:contract"));
 });
 
+test("National Catalog storage checks run after local MinIO initialization", () => {
+  const job = workflow.jobs["tenant-team-infrastructure"];
+  const storage = job.steps.find((step) =>
+    step.run?.includes("test/national-catalog-image.test.ts"),
+  );
+  assert.ok(storage, "the infrastructure job must execute the real catalog image round trip");
+  assert.equal(job.env.LOCAL_INFRA_SMOKE, "1");
+  assert.equal(job.env.S3_ENDPOINT, "http://127.0.0.1:9000");
+  assert.equal(storage.if, undefined, "storage coverage must not silently skip");
+  assert.ok(
+    job.steps.indexOf(storage) >
+      job.steps.indexOf(stepByName(job, "Initialize the private development bucket")),
+  );
+  assert.ok(
+    job.steps.indexOf(storage) >
+      job.steps.indexOf(stepByName(job, "Build API workspace dependencies")),
+  );
+});
+
 test("ci-required always evaluates the classifier and every heavy job", () => {
   const gate = workflow.jobs["ci-required"];
   assert.ok(gate, "workflow must define ci-required");
@@ -184,4 +203,30 @@ test("ci-required always evaluates the classifier and every heavy job", () => {
   assert.equal(resultStep.id, "result");
   assert.equal(resultStep.env.CI_NEEDS_JSON, "${{ toJSON(needs) }}");
   assert.equal(resultStep.run, "node tools/ci/required-results.mjs --needs-env CI_NEEDS_JSON");
+});
+
+test("National Catalog fixtures use existing Chromium job and preserve portable failure evidence", () => {
+  const job = workflow.jobs["production-bundle"];
+  const browser = stepByName(job, "Verify National Catalog cabinet fixtures");
+  assert.equal(
+    browser.run,
+    "pnpm --dir tools/production-browser --ignore-workspace test:national-catalog",
+  );
+  assert.ok(
+    job.steps.indexOf(browser) >
+      job.steps.indexOf(stepByName(job, "Verify the inventory admin gallery contract")),
+  );
+  const artifact = stepByName(job, "Preserve National Catalog browser failure evidence");
+  assert.equal(artifact.if, "failure()");
+  assert.match(artifact.uses, /^actions\/upload-artifact@[a-f0-9]{40}$/);
+  assert.equal(artifact.with.path, "tools/production-browser/test-results/national-catalog");
+  const config = readFileSync(
+    "tools/production-browser/national-catalog.playwright.config.ts",
+    "utf8",
+  );
+  assert.match(config, /outputDir: "\.\/test-results\/national-catalog"/);
+  assert.match(config, /trace: "retain-on-failure"/);
+  assert.match(config, /screenshot: "only-on-failure"/);
+  assert.match(config, /retries: 0/);
+  assert.match(config, /43183 --strictPort/);
 });

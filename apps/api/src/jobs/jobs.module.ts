@@ -53,6 +53,12 @@ import { NationalCatalogFreshnessService } from "../modules/national-catalog/nat
 import { NationalCatalogSchemaService } from "../modules/national-catalog/national-catalog-schema.service";
 import { NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID } from "../modules/national-catalog/national-catalog.tokens";
 
+import {
+  NationalCatalogJobsService,
+  CATALOG_QUEUES,
+  CATALOG_REPAIR_QUEUE,
+} from "../modules/national-catalog/national-catalog-jobs.service";
+
 export const PG_CONNECTION_STRING = "JOBS_PG_CONNECTION_STRING";
 export const BUILD_SHIFT_EXPORT_QUEUE = "build-shift-export";
 export const BUILD_INVENTORY_DOCUMENT_QUEUE = "build-inventory-document-run";
@@ -403,6 +409,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID)
     private readonly nationalCatalogSchemaSourceTenantId?: string,
+    @Optional() private readonly nationalCatalogJobs?: NationalCatalogJobsService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -701,6 +708,24 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         }),
       );
 
+      for (const name of new Set(Object.values(CATALOG_QUEUES))) {
+        await boss.createQueue(name, { policy: "stately", retryLimit: 0 });
+        this.workerIds.push(
+          await boss.work(name, async (jobs) => {
+            for (const job of jobs) await this.nationalCatalogJobs?.execute(job.data);
+          }),
+        );
+      }
+      await boss.createQueue(CATALOG_REPAIR_QUEUE, { policy: "stately", retryLimit: 0 });
+      await boss.schedule(CATALOG_REPAIR_QUEUE, "* * * * *");
+      this.workerIds.push(
+        await boss.work(CATALOG_REPAIR_QUEUE, async () => {
+          await this.nationalCatalogJobs?.repair((name, payload, singletonKey) =>
+            boss.send(name, payload, { singletonKey }),
+          );
+        }),
+      );
+
       await boss.createQueue(NATIONAL_CATALOG_PRODUCT_FRESHNESS_QUEUE, {
         policy: "stately",
         retryLimit: 3,
@@ -714,7 +739,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       );
       this.workerIds.push(
         await boss.work(NATIONAL_CATALOG_PRODUCT_FRESHNESS_QUEUE, async () => {
-          await this.nationalCatalogFreshness?.run();
+          await this.runNationalCatalogFreshness();
         }),
       );
 
@@ -930,6 +955,10 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async runNationalCatalogFreshness(): Promise<void> {
+    await this.nationalCatalogFreshness?.run();
+  }
+
   async checkReady(): Promise<void> {
     if (!this.started || !this.boss) throw new Error("pg-boss is not started");
     try {
@@ -938,7 +967,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       throw new Error("pg-boss database probe failed");
     }
     if (
-      this.workerIds.length !== 17 ||
+      this.workerIds.length !== 23 ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {

@@ -47,8 +47,12 @@ export class AuthorizationService {
     @Optional() private readonly entitlements?: EntitlementsService,
   ) {}
 
-  async resolvePrincipal(userId: string, tenantId: string): Promise<CabinetPrincipal | null> {
-    const memberships = await this.db
+  async resolvePrincipal(
+    userId: string,
+    tenantId: string,
+    executor: Pick<Db, "select"> = this.db,
+  ): Promise<CabinetPrincipal | null> {
+    const memberships = await executor
       .select({ role: schema.member.role })
       .from(schema.member)
       .where(and(eq(schema.member.userId, userId), eq(schema.member.organizationId, tenantId)))

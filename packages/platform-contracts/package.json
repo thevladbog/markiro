@@ -26,6 +26,9 @@
   "peerDependencies": {
     "zod": "4.4.3"
   },
+  "dependencies": {
+    "@markiro/domain": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "26.2.0",
     "typescript": "6.0.3",

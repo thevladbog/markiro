@@ -61,6 +61,14 @@ describe.skipIf(!ready)("signer agent task queue", () => {
   // expire) the task it creates before the next `insertTask()` call --
   // otherwise the insert races the partial unique index and fails.
   async function insertTask(tokenFormat?: "jwt" | "uuid"): Promise<string> {
+    // Task provenance must match the configured channel at completion.
+    await db
+      .insert(schema.integrationChannels)
+      .values({ tenantId, type: "chestny_znak", settings: { environment: "sandbox" } })
+      .onConflictDoUpdate({
+        target: [schema.integrationChannels.tenantId, schema.integrationChannels.type],
+        set: { settings: { environment: "sandbox" } },
+      });
     const [row] = await db
       .insert(schema.chzSignerTasks)
       .values({
