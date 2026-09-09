@@ -98,6 +98,7 @@ export async function applyAcceptedImage(
           nextImageAttemptAt: null,
         })
         .where(eq(receipts.id, receipt.id));
+      await recordImageFailure(tx, operation.actorId, receipt, "image_attempts_exhausted");
       return null;
     }
     try {
@@ -117,6 +118,7 @@ export async function applyAcceptedImage(
           updatedAt: new Date(),
         })
         .where(eq(receipts.id, receipt.id));
+      await recordImageFailure(tx, operation.actorId, receipt, "image_access_changed");
       return null;
     }
     await tx

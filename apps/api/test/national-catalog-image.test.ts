@@ -828,6 +828,116 @@ describe("private National Catalog images (real PostgreSQL and normalized bytes)
       storage.onModuleDestroy();
     }
   });
+  it.each([
+    { scenario: "pre-read revocation", reason: "image_access_changed", attempts: 0 },
+    { scenario: "exhausted-attempt recovery", reason: "image_attempts_exhausted", attempts: 4 },
+  ])(
+    "audits terminal $scenario once with the current operation actor",
+    async ({ reason, attempts }) => {
+      const rt = runtime();
+      const { p, id } = await prepared(rt);
+      const { apply, result } = await accept(p, id);
+      const currentActorId = randomUUID();
+      await db.insert(schema.user).values({
+        id: currentActorId,
+        name: "Current operation actor",
+        email: `${currentActorId}@example.test`,
+        emailVerified: true,
+      });
+      await db.insert(schema.member).values({
+        id: randomUUID(),
+        userId: currentActorId,
+        organizationId: actor.tenantId,
+        role: "owner",
+        createdAt: new Date(),
+      });
+      await db
+        .update(schema.nationalCatalogImportOperations)
+        .set({ actorId: currentActorId })
+        .where(
+          and(
+            eq(schema.nationalCatalogImportOperations.tenantId, actor.tenantId),
+            eq(schema.nationalCatalogImportOperations.id, result.operationId),
+          ),
+        );
+      const receipts = schema.nationalCatalogImportOperationItems;
+      const receiptScope = and(
+        eq(receipts.tenantId, actor.tenantId),
+        eq(receipts.operationId, result.operationId),
+        eq(receipts.previewId, p.id),
+      );
+      if (attempts === 4) {
+        // Recovery after the fourth worker died with its persisted claim still pending.
+        await db
+          .update(receipts)
+          .set({
+            imageAttempts: attempts,
+            nextImageAttemptAt: new Date(Date.now() - 1_000),
+          })
+          .where(receiptScope);
+      } else {
+        await db
+          .delete(schema.member)
+          .where(
+            and(
+              eq(schema.member.organizationId, actor.tenantId),
+              eq(schema.member.userId, currentActorId),
+            ),
+          );
+      }
+      const [before] = await db.select().from(receipts).where(receiptScope);
+      if (!before?.acceptedImageId) throw new Error("Expected accepted image receipt");
+      for (let replay = 0; replay < 2; replay++) {
+        await rt.service.apply(actor.tenantId, result.operationId, p.id);
+        expect(
+          (await apply.read(actor.tenantId, sessionId, result.operationId)).items[0],
+        ).toMatchObject({ product: "applied", image: "failed", imageReason: reason });
+        const [after] = await db.select().from(receipts).where(receiptScope);
+        expect(after).toMatchObject({
+          imageAttempts: attempts,
+          nextImageAttemptAt: null,
+          decision: before.decision,
+          appliedEvidence: before.appliedEvidence,
+        });
+        const audits = await db
+          .select()
+          .from(schema.tenantAuditEvents)
+          .where(
+            and(
+              eq(schema.tenantAuditEvents.organizationId, actor.tenantId),
+              eq(schema.tenantAuditEvents.action, "national_catalog.image.failed"),
+            ),
+          );
+        expect(audits).toEqual([
+          expect.objectContaining({
+            organizationId: actor.tenantId,
+            actorUserId: currentActorId,
+            action: "national_catalog.image.failed",
+            outcome: "failure",
+            targetType: "product",
+            targetId: existingId,
+            before: null,
+            after: {
+              operationId: result.operationId,
+              previewId: p.id,
+              acceptedImageId: before.acceptedImageId,
+              reason,
+              result: "failed",
+            },
+          }),
+        ]);
+      }
+      expect(rt.storage.get).not.toHaveBeenCalled();
+      expect(rt.download).toHaveBeenCalledTimes(1);
+      expect(
+        await db
+          .select()
+          .from(schema.productImages)
+          .where(eq(schema.productImages.productId, existingId)),
+      ).toHaveLength(0);
+    },
+  );
+
   it("rechecks write access after cached storage returns before activation", async () => {
     const rt = runtime();
     const { p, id } = await prepared(rt);
