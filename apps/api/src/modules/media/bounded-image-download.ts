@@ -1,7 +1,7 @@
 import { lookup as dnsLookup, type LookupAddress } from "node:dns";
 import type { IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { isIP } from "node:net";
+import { isIP, type LookupFunction } from "node:net";
 
 export interface ImageDownloadPolicy {
   maxBytes: number;
@@ -119,11 +119,7 @@ function stripBrackets(hostname: string): string {
 }
 
 /** Resolves at connection time so DNS rebinding cannot bypass the address check. */
-function guardedLookup(
-  hostname: string,
-  options: object,
-  callback: (error: NodeJS.ErrnoException | null, address: string, family: number) => void,
-): void {
+const guardedLookup: LookupFunction = (hostname, options, callback) => {
   dnsLookup(hostname, { all: true }, (error, addresses: LookupAddress[]) => {
     if (error) {
       callback(error, "", 0);
@@ -138,10 +134,15 @@ function guardedLookup(
       );
       return;
     }
+    // Node's automatic family selection requests the all-addresses callback shape.
+    if (options.all) {
+      callback(null, addresses);
+      return;
+    }
     const first = addresses[0]!;
     callback(null, first.address, first.family);
   });
-}
+};
 
 function validatePolicy(policy: ImageDownloadPolicy): void {
   if (!Number.isFinite(policy.maxBytes) || policy.maxBytes <= 0) {
