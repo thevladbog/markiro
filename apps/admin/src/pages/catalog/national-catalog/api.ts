@@ -1,6 +1,10 @@
 import { z } from "zod";
 import {
   catalogCapabilitiesSchema,
+  chzLinkDetailSchema,
+  chzSummarySchema,
+  chzLinkChangeSchema,
+  type ImportItem,
   importSessionSchema,
   importItemsQuerySchema,
   importItemsResponseSchema,
@@ -119,3 +123,41 @@ export const photoUrl = (id: string, candidateId: string) =>
   `${API_BASE}${sessionPath(id)}/images/${z.uuid().parse(candidateId)}`;
 export const cancelImport = (id: string, signal?: AbortSignal) =>
   write(`${sessionPath(id)}/cancel`, importSessionSchema, {}, signal);
+
+export const getChzLink = (productId: string, signal?: AbortSignal) =>
+  read(`/products/${z.uuid().parse(productId)}/national-catalog/link`, chzLinkDetailSchema, signal);
+export const refreshChzLink = (productId: string, signal?: AbortSignal) =>
+  write(
+    `/products/${z.uuid().parse(productId)}/national-catalog/link/refresh`,
+    chzSummarySchema,
+    {},
+    signal,
+  );
+export const removeChzLink = (productId: string, expectedRevision: number, signal?: AbortSignal) =>
+  write(
+    `/products/${z.uuid().parse(productId)}/national-catalog/link`,
+    chzSummarySchema,
+    chzLinkChangeSchema.parse({ action: "remove", expectedRevision }),
+    signal,
+    "DELETE",
+  );
+
+/** Exhaust only the fresh session's saved feed; never select from a partial traversal. */
+export async function getExactCardItems(id: string, signal?: AbortSignal) {
+  const items: ImportItem[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = null;
+  for (let page = 0; page < 100; page += 1) {
+    const data = await getImportItems(
+      id,
+      { cursor, search: "", statuses: [], includeArchived: true, limit: 100 },
+      signal,
+    );
+    items.push(...data.items);
+    if (data.nextCursor === null) return items;
+    if (seen.has(data.nextCursor)) throw new Error("incomplete_feed");
+    seen.add(data.nextCursor);
+    cursor = data.nextCursor;
+  }
+  throw new Error("incomplete_feed");
+}

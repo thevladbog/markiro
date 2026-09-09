@@ -1050,3 +1050,312 @@ it("identifies a strictly rejected attempted preview after pending apply is reop
     screen.getByRole("button", { name: "Добавить выбранные изменения" }).hasAttribute("disabled"),
   ).toBe(true);
 });
+
+import { linkFixture, productFixture } from "./national-catalog-fixtures.js";
+function linkFetch(
+  options: {
+    readOnly?: boolean;
+    blocked?: boolean;
+    removeConflict?: boolean;
+    noEnumeration?: boolean;
+    forbidden?: boolean;
+    unlinked?: boolean;
+    archived?: boolean;
+  } = {},
+) {
+  let detail = structuredClone(linkFixture);
+  if (options.unlinked)
+    detail = {
+      link: null,
+      summary: {
+        ...detail.summary,
+        linkId: null,
+        revision: null,
+        statusKeys: [],
+        lastSuccessAt: null,
+        lastOutcome: "never",
+      },
+    };
+  if (options.archived)
+    detail = { ...detail, summary: { ...detail.summary, statusKeys: ["archived"] } };
+  const writes: { path: string; method: string; body: unknown }[] = [];
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    const path = String(url);
+    const method = init?.method ?? "GET";
+    if (method !== "GET") writes.push({ path, method, body: JSON.parse(String(init?.body)) });
+    let body: unknown = { items: [] };
+    let status = 200;
+    if (path.includes("/access/me"))
+      body = {
+        roles: ["manager"],
+        capabilities: options.readOnly
+          ? ["operations.read"]
+          : ["operations.read", "operations.write"],
+      };
+    else if (path.includes("/profile"))
+      body = { firstName: "Игорь", middleName: null, lastName: "Волков", hasAvatar: false };
+    else if (path.includes("/capabilities"))
+      body = options.blocked
+        ? {
+            ...capabilitiesFixture,
+            ownCatalog: false,
+            gtinLookup: false,
+            photos: false,
+            connection: { state: "blocked", reason: "provider_unconfigured" },
+            unavailableReason: {
+              ownCatalog: "connection_unavailable",
+              gtinLookup: "connection_unavailable",
+              images: "connection_unavailable",
+            },
+          }
+        : {
+            ...capabilitiesFixture,
+            ownCatalog: false,
+            gtinLookup: !options.noEnumeration,
+            unavailableReason: {
+              ...capabilitiesFixture.unavailableReason,
+              ownCatalog: "disabled",
+              gtinLookup: options.noEnumeration ? "disabled" : null,
+            },
+          };
+    else if (path.endsWith("/link/refresh")) {
+      detail = { ...detail, summary: { ...detail.summary, refreshing: true } };
+      body = detail.summary;
+    } else if (path.endsWith("/link") && method === "DELETE") {
+      if (options.removeConflict) {
+        status = 409;
+        body = { message: "link_revision_conflict" };
+      } else {
+        detail = {
+          summary: {
+            ...detail.summary,
+            linkId: null,
+            revision: null,
+            statusKeys: [],
+            lastSuccessAt: null,
+            lastOutcome: "never",
+            hasChanges: false,
+          },
+          link: null,
+        };
+        body = detail.summary;
+      }
+    } else if (path.endsWith("/link")) body = detail;
+    else if (path.includes("/products"))
+      body = { items: [{ ...productFixture, chz: detail.summary }] };
+    if (options.forbidden && method !== "GET") {
+      status = 403;
+      body = { message: "subscription_inactive" };
+    }
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+  return { fetch, writes };
+}
+it("reads saved CHZ identity without WRITE and keeps mutations unavailable", async () => {
+  const { writes } = linkFetch({ readOnly: true, blocked: true });
+  renderImport(`/catalog/${id(99)}/chz`);
+  expect(await screen.findByRole("dialog", { name: "Связь с Честным знаком" })).toBeDefined();
+  expect(await screen.findByText("card-1")).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Удалить связь" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Обновить статус" })).toBeNull();
+  expect(writes).toEqual([]);
+});
+it("refreshes independently of own-catalog enumeration and retains last good status while pending", async () => {
+  const { writes } = linkFetch({ noEnumeration: true });
+  const { user } = renderImport(`/catalog/${id(99)}/chz`);
+  await user.click(await screen.findByRole("button", { name: "Обновить статус" }));
+  expect(await screen.findAllByText("Обновление статуса…")).not.toHaveLength(0);
+  expect(screen.getAllByText("Опубликовано")).not.toHaveLength(0);
+  expect(writes).toEqual([
+    { path: `/api/products/${id(99)}/national-catalog/link/refresh`, method: "POST", body: {} },
+  ]);
+});
+it("allows local unlink while provider is unavailable and invalidates saved catalog queries", async () => {
+  const { writes, fetch } = linkFetch({ blocked: true });
+  const { user } = renderImport(`/catalog/${id(99)}/chz`);
+  await user.click(await screen.findByRole("button", { name: "Удалить связь" }));
+  await user.click(screen.getByRole("button", { name: "Подтвердить удаление связи" }));
+  expect(await screen.findAllByText("Не связан")).not.toHaveLength(0);
+  expect(writes).toEqual([
+    {
+      path: `/api/products/${id(99)}/national-catalog/link`,
+      method: "DELETE",
+      body: { action: "remove", expectedRevision: 4 },
+    },
+  ]);
+  expect(
+    fetch.mock.calls.filter(([url]) => String(url).includes("/products?")).length,
+  ).toBeGreaterThan(1);
+});
+it("keeps the linked identity after stale removal without silently retrying a new revision", async () => {
+  const { writes } = linkFetch({ removeConflict: true });
+  const { user } = renderImport(`/catalog/${id(99)}/chz`);
+  await user.click(await screen.findByRole("button", { name: "Удалить связь" }));
+  await user.click(screen.getByRole("button", { name: "Подтвердить удаление связи" }));
+  expect(
+    await screen.findByText("Связь изменилась. Перечитайте сведения и повторите действие."),
+  ).toBeDefined();
+  expect(await screen.findByText("card-1")).toBeDefined();
+  expect(writes).toHaveLength(1);
+});
+
+it.each(["unique", "missing", "ambiguous", "archived", "inaccessible", "incomplete"] as const)(
+  "resolves %s exact current card from a fresh GTIN session",
+  async (kind) => {
+    const base = linkFetch();
+    const defaultFetch = base.fetch;
+    let session = {
+      ...sessionFixture,
+      mode: "gtins" as const,
+      state: "ready" as const,
+      complete: kind !== "incomplete",
+      loaded: 2,
+    };
+    const writes: { path: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = String(url);
+        if (!path.includes("/import-sessions")) return defaultFetch(url, init);
+        if (init?.method && init.method !== "GET")
+          writes.push({ path, body: JSON.parse(String(init.body)) });
+        let body: unknown = session;
+        if (path.endsWith("/previews"))
+          body = {
+            ...previewFixture,
+            items: previewFixture.items.map((item) => ({
+              ...item,
+              itemId: id(41),
+              productId: id(99),
+            })),
+          };
+        else if (path.endsWith("/selection")) {
+          const input = JSON.parse(String(init?.body));
+          session = {
+            ...session,
+            revision: session.revision + 1,
+            selected: input.itemIds.length,
+            selectedItemIds: input.itemIds,
+          };
+          body = session;
+        } else if (path.includes("/items"))
+          body = {
+            items: [
+              { ...itemsFixture.items[0], id: id(40), cardId: "other-card" },
+              ...(kind === "missing"
+                ? []
+                : [
+                    {
+                      ...itemsFixture.items[0],
+                      id: id(41),
+                      match: kind === "inaccessible" ? "inaccessible" : "linked",
+                      productId: id(99),
+                      statusKeys: kind === "archived" ? ["archived"] : ["published"],
+                      selectable: kind !== "archived" && kind !== "inaccessible",
+                    },
+                  ]),
+              ...(kind === "ambiguous" ? [{ ...itemsFixture.items[0], id: id(42) }] : []),
+            ],
+            nextCursor: null,
+          };
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+    const { user, router } = renderImport(`/catalog/${id(99)}/chz`);
+    await user.click(await screen.findByRole("button", { name: "Сравнить карточку" }));
+    expect(writes[0]).toEqual({
+      path: "/api/national-catalog/import-sessions",
+      body: { mode: "gtins", text: "04006381333931" },
+    });
+    if (kind === "unique") {
+      await user.click(await screen.findByRole("button", { name: "Выбрать текущую карточку" }));
+      expect(await screen.findByText("Текущая карточка выбрана для сравнения.")).toBeDefined();
+      expect(writes[1]).toEqual({
+        path: `/api/national-catalog/import-sessions/${id(1)}/selection`,
+        body: { expectedRevision: 0, itemIds: [id(41)] },
+      });
+      expect(router.state.location.search).toContain("exactCardId=card-1");
+      await user.click(screen.getByRole("button", { name: "Сравнить выбранные товары" }));
+      expect(await screen.findByLabelText("Название вручную")).toBeDefined();
+      expect(router.state.location.search).toContain(`preparationId=${id(10)}`);
+      expect(router.state.location.search).toContain("exactCardId=card-1");
+      expect(writes[2]?.body).toMatchObject({ itemIds: [id(41)] });
+      expect(sessionStorage.getItem(`markiro.nc.pending.v1:tenant:user:${id(1)}`)).toBeNull();
+      await user.click(screen.getByRole("button", { name: "Закрыть" }));
+      expect(router.state.location.pathname).toBe(`/catalog/${id(99)}/chz`);
+    } else {
+      const messages = {
+        inaccessible:
+          "Текущая карточка не найдена в доступной загрузке. Повторите загрузку из панели связи.",
+        missing:
+          "Текущая карточка не найдена в доступной загрузке. Повторите загрузку из панели связи.",
+        ambiguous: "Текущая карточка определена неоднозначно. Сравнение недоступно.",
+        archived: "Карточка ЧЗ в архиве. Сравнение и применение недоступны.",
+        incomplete:
+          "Загрузка не завершена. Нельзя подтвердить текущую карточку. Повторите загрузку.",
+      };
+      expect(await screen.findByText(messages[kind])).toBeDefined();
+      expect(screen.queryByRole("button", { name: "Выбрать текущую карточку" })).toBeNull();
+      expect(writes).toHaveLength(1);
+      await user.click(screen.getByRole("button", { name: "Вернуться к связи" }));
+      await user.click(await screen.findByRole("button", { name: "Закрыть" }));
+      expect(router.state.location.pathname).toBe("/catalog");
+    }
+  },
+);
+
+it("rejects a current subscription denial without treating unlink as successful", async () => {
+  const { writes } = linkFetch({ forbidden: true });
+  const { user } = renderImport(`/catalog/${id(99)}/chz`);
+  await user.click(await screen.findByRole("button", { name: "Удалить связь" }));
+  await user.click(screen.getByRole("button", { name: "Подтвердить удаление связи" }));
+  expect(
+    await screen.findByText(
+      "Доступен просмотр. Для изменения связи нужны права записи и действующая подписка.",
+    ),
+  ).toBeDefined();
+  expect(screen.getByText("card-1")).toBeDefined();
+  expect(writes).toHaveLength(1);
+});
+it("prevents comparison of an explicitly archived saved card", async () => {
+  const { writes } = linkFetch({ archived: true });
+  renderImport(`/catalog/${id(99)}/chz`);
+  const button = await screen.findByRole("button", { name: "Сравнить карточку" });
+  expect(button.hasAttribute("disabled")).toBe(true);
+  expect(
+    await screen.findByText("Карточка ЧЗ в архиве. Сравнение и применение недоступны."),
+  ).toBeDefined();
+  expect(writes).toEqual([]);
+});
+it("starts a new lookup for an unlinked product GTIN", async () => {
+  const { fetch } = linkFetch({ unlinked: true });
+  const starts: unknown[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/import-sessions")) {
+        if (init?.method === "POST") starts.push(JSON.parse(String(init.body)));
+        return new Response(
+          JSON.stringify(
+            String(url).includes("/items")
+              ? { items: [], nextCursor: null }
+              : { ...sessionFixture, mode: "gtins" },
+          ),
+          { status: 200 },
+        );
+      }
+      return fetch(url, init);
+    }),
+  );
+  const { user, router } = renderImport(`/catalog/${id(99)}/chz`);
+  await user.click(await screen.findByRole("button", { name: "Найти по GTIN" }));
+  expect(starts).toEqual([{ mode: "gtins", text: "04006381333931" }]);
+  expect(router.state.location.search).not.toContain("exactCardId");
+});

@@ -101,3 +101,47 @@ export const resultFixture = importResultSchema.parse({
     },
   ],
 });
+
+import { chzLinkDetailSchema } from "@markiro/platform-contracts";
+import type { ProductDto } from "../src/pages/catalog/api.js";
+export const linkFixture = chzLinkDetailSchema.parse({
+  summary: {
+    linkId: id(88),
+    revision: 4,
+    statusKeys: ["published"],
+    rawStatus: "published",
+    rawDetailedStatuses: [],
+    lastSuccessAt: "2026-09-09T00:00:00.000Z",
+    lastAttemptAt: "2026-09-09T00:00:00.000Z",
+    refreshing: false,
+    lastOutcome: "ok",
+    hasChanges: false,
+    lastErrorCode: null,
+  },
+  link: {
+    id: id(88),
+    revision: 4,
+    cardId: "card-1",
+    environment: "production",
+    boundGtin14: "04006381333931",
+    confirmedAt: "2026-09-08T00:00:00.000Z",
+  },
+});
+export const productFixture: ProductDto = {
+  id: id(99),
+  gtin14: "04006381333931",
+  name: "Молоко",
+  productGroup: null,
+  chzProductGroupCode: null,
+  boxCapacity: null,
+  palletCapacity: null,
+  unitPrice: null,
+  printName: null,
+  egaisCode: null,
+  shelfLifeDays: null,
+  externalRef: null,
+  status: "draft",
+  archived: false,
+  defaultCounterpartyId: null,
+  createdAt: "2026-09-09T00:00:00.000Z",
+};

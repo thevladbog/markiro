@@ -379,3 +379,126 @@ it("releases a busy-only Back block after an unchanged edit request fails", asyn
   await router.navigate(-1);
   await waitFor(() => expect(router.state.location.pathname).toBe("/catalog"));
 });
+
+import { linkFixture, productFixture } from "./national-catalog-fixtures.js";
+function renderLinkedEdit(conflict = false) {
+  const writes: unknown[] = [];
+  let revision = 4;
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "PATCH") {
+      writes.push(JSON.parse(String(init.body)));
+      return jsonResponse(
+        conflict ? 409 : 200,
+        conflict ? { message: "CHZ_LINK_REVISION_CONFLICT" } : productFixture,
+      );
+    }
+    if (String(url).endsWith("/gtin-check"))
+      return jsonResponse(200, { gtin14: "04600000000015", owner: "unknown" });
+    return jsonResponse(200, {
+      items: String(url).includes("/products")
+        ? [{ ...productFixture, chz: { ...linkFixture.summary, revision } }]
+        : [],
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+  const router = createMemoryRouter(
+    createRoutesFromElements(
+      <Route path="/catalog" element={<CatalogPage />}>
+        <Route path=":productId/edit" element={<ProductPanelRoute mode="edit" />} />
+      </Route>,
+    ),
+    { initialEntries: ["/catalog", `/catalog/${productFixture.id}/edit`], initialIndex: 1 },
+  );
+  render(
+    <QueryClientProvider client={client}>
+      <AccessProvider value={ACCESS}>
+        <RouterProvider router={router} />
+      </AccessProvider>
+    </QueryClientProvider>,
+  );
+  return {
+    writes,
+    router,
+    user: userEvent.setup(),
+    fetch,
+    refreshRevision: async () => {
+      revision = 9;
+      await client.invalidateQueries({ queryKey: ["products"] });
+    },
+  };
+}
+it("requires explicit detach for changed canonical GTIN and saves it atomically", async () => {
+  const { user, writes } = renderLinkedEdit();
+  const gtin = await screen.findByLabelText("ГТИН");
+  await user.clear(gtin);
+  await user.type(gtin, "04600000000015");
+  await user.click(screen.getByRole("button", { name: "Сохранить" }));
+  expect(writes).toEqual([]);
+  await user.click(
+    screen.getByRole("checkbox", { name: "Удалить связь с ЧЗ при сохранении нового GTIN" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Сохранить" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({
+    gtin: "04600000000015",
+    chzLinkChange: { action: "detach", expectedRevision: 4 },
+  });
+});
+it("does not detach for canonical GTIN no-op", async () => {
+  const { user, writes } = renderLinkedEdit();
+  const gtin = await screen.findByLabelText("ГТИН");
+  await user.clear(gtin);
+  await user.type(gtin, "4006381333931");
+  expect(
+    screen.queryByRole("checkbox", { name: "Удалить связь с ЧЗ при сохранении нового GTIN" }),
+  ).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Сохранить" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).not.toHaveProperty("chzLinkChange");
+});
+it("cancels a confirmed GTIN detach draft without any product mutation", async () => {
+  const { user, writes, router } = renderLinkedEdit();
+  const gtin = await screen.findByLabelText("ГТИН");
+  await user.clear(gtin);
+  await user.type(gtin, "04600000000015");
+  await user.click(
+    screen.getByRole("checkbox", { name: "Удалить связь с ЧЗ при сохранении нового GTIN" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Отмена" }));
+  await user.click(screen.getByRole("button", { name: "Не сохранять" }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/catalog"));
+  expect(writes).toEqual([]);
+});
+it("shows atomic detach conflicts beside GTIN and keeps the original revision for deliberate retry", async () => {
+  const { user, writes } = renderLinkedEdit(true);
+  const gtin = await screen.findByLabelText("ГТИН");
+  await user.clear(gtin);
+  await user.type(gtin, "04600000000015");
+  await user.click(
+    screen.getByRole("checkbox", { name: "Удалить связь с ЧЗ при сохранении нового GTIN" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Сохранить" }));
+  const message = await screen.findByText(
+    "Связь изменилась. Закройте форму и проверьте связь перед повторным изменением GTIN.",
+  );
+  expect(gtin.getAttribute("aria-describedby")?.split(" ")).toContain(message.id);
+  expect(writes).toHaveLength(1);
+  expect((gtin as HTMLInputElement).value).toBe("04600000000015");
+});
+
+it("pins the edit revision despite a background link refresh", async () => {
+  const { user, writes, refreshRevision } = renderLinkedEdit();
+  const gtin = await screen.findByLabelText("ГТИН");
+  await refreshRevision();
+  await user.clear(gtin);
+  await user.type(gtin, "04600000000015");
+  await user.click(
+    screen.getByRole("checkbox", { name: "Удалить связь с ЧЗ при сохранении нового GTIN" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Сохранить" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ chzLinkChange: { action: "detach", expectedRevision: 4 } });
+});

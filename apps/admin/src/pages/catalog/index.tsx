@@ -19,6 +19,9 @@ import {
 } from "@markiro/ui";
 import type { SelectOption, TableColumn } from "@markiro/ui";
 
+import { chzStatusKeySchema } from "@markiro/platform-contracts";
+import { ChzStatus } from "./national-catalog/ChzStatus.js";
+
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import { useCan } from "../../access/context.js";
@@ -245,6 +248,7 @@ export function CatalogPage() {
 
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [chzFilter, setChzFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
@@ -276,13 +280,20 @@ export function CatalogPage() {
     isError: counterpartiesError,
     refetch: refetchCounterparties,
   } = useCounterparties();
-  const items = data ?? [];
+  const items = (data ?? []).filter((product) => {
+    if (chzFilter === "all") return true;
+    if (chzFilter === "unavailable") return product.chz === undefined;
+    if (chzFilter === "unlinked") return product.chz?.linkId === null;
+    if (chzFilter === "unverified")
+      return !!product.chz?.linkId && product.chz.lastSuccessAt === null;
+    return product.chz?.statusKeys.some((key) => key === chzFilter) ?? false;
+  });
   const counterparties = useMemo(() => counterpartiesData ?? [], [counterpartiesData]);
 
   // Snap back to the first page whenever the visible set changes shape.
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, statusFilter, pageSize]);
+  }, [debouncedSearch, statusFilter, chzFilter, pageSize]);
 
   const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
   // Clamp instead of an effect: deletions on the last page must not flash an empty table.
@@ -337,6 +348,19 @@ export function CatalogPage() {
               label={t(`pages.catalog.status.${row.status}`)}
             />
           ),
+      },
+      {
+        key: "chz",
+        wrap: true,
+        title: t("pages.catalog.chz.column"),
+        render: (row) => (
+          <div className="mk-chz-cell">
+            <ChzStatus summary={row.chz} />
+            <Link to={`${row.id}/chz`} state={{ catalogBackground: true }}>
+              {t("pages.catalog.chz.open")}
+            </Link>
+          </div>
+        ),
       },
       {
         key: "actions",
@@ -397,6 +421,24 @@ export function CatalogPage() {
             onValueChange={setStatusFilter}
           />
         </div>
+        <div className="mk-catalog-filters__status">
+          <Select
+            label={t("pages.catalog.chz.filter")}
+            value={chzFilter}
+            onValueChange={setChzFilter}
+            options={[
+              { value: "all", label: t("pages.catalog.statusFilter.all") },
+              ...["unavailable", "unlinked", "unverified"].map((value) => ({
+                value,
+                label: t(`pages.catalog.chz.${value}`),
+              })),
+              ...chzStatusKeySchema.options.map((value) => ({
+                value,
+                label: t(`pages.catalog.import.statuses.${value}`),
+              })),
+            ]}
+          />
+        </div>
         <div className="mk-catalog-filters__page-size">
           <Select
             label={t("pages.catalog.pageSizeLabel")}
@@ -437,7 +479,7 @@ export function CatalogPage() {
       <Outlet
         context={
           {
-            products: items,
+            products: data ?? [],
             productsPending: isPending,
             productsError: isError,
             counterparties,

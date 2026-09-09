@@ -169,6 +169,7 @@ function EditProductPanel() {
   const imageMutation = useUploadProductImage();
   const deleteImageMutation = useDeleteProductImage();
   const [error, setError] = useState<string | null>(null);
+  const [gtinError, setGtinError] = useState<string | null>(null);
   const guard = useRoutePanelGuard(
     close,
     mutation.isPending || imageMutation.isPending || deleteImageMutation.isPending,
@@ -228,6 +229,8 @@ function EditProductPanel() {
         productStatus={product.status}
         productId={product.id}
         externalRef={product.externalRef}
+        {...(product.chz ? { chzSummary: product.chz } : {})}
+        gtinSubmissionError={gtinError}
         counterparties={context.counterparties}
         submitting={mutation.isPending || imageMutation.isPending}
         {...(product.image ? { image: product.image } : {})}
@@ -247,14 +250,26 @@ function EditProductPanel() {
         submissionError={error}
         onDirtyChange={guard.setDirty}
         onClose={guard.requestClose}
-        onSubmit={async (input: CreateProductInput, image) => {
+        onSubmit={async (input: CreateProductInput, image, detach) => {
           try {
             setError(null);
-            await mutation.mutateAsync({ id: product.id, input });
+            setGtinError(null);
+            await mutation.mutateAsync({
+              id: product.id,
+              input: { ...input, ...(detach ? { chzLinkChange: detach } : {}) },
+            });
             if (image) await imageMutation.mutateAsync({ id: product.id, file: image });
             toast("ok", t("pages.catalog.toasts.updateSuccess"));
             guard.finish();
           } catch (cause) {
+            if (
+              cause instanceof ApiRequestError &&
+              cause.status === 409 &&
+              input.gtin !== product.gtin14
+            ) {
+              setGtinError(t("pages.catalog.chz.gtinConflict"));
+              return;
+            }
             setError(
               cause instanceof ApiRequestError
                 ? cause.message

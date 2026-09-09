@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CABINET_CAPABILITY } from "@markiro/domain";
+import { CABINET_CAPABILITY, isValidGtin } from "@markiro/domain";
 import { importApplyConflictSchema } from "@markiro/platform-contracts";
 import type {
   ImportApply,
@@ -15,6 +15,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { useCan } from "../../../access/context.js";
 import { ApiRequestError } from "../../../api/client.js";
 import { useAuthClient } from "../../../auth/client.js";
+import { PRODUCTS_QUERY_KEY, PRODUCT_CHZ_LINK_QUERY_KEY } from "../api.js";
 import { closeCatalogPanel } from "../ProductPanelRoute.js";
 import * as api from "./api.js";
 import {
@@ -97,6 +98,15 @@ function ScopedImportPanel({ identity }: { identity: string }) {
   const preparationId = params.get("preparationId") ?? "";
   const operationId = params.get("operationId") ?? "";
   const step = params.get("step");
+  const exactCardId = params.get("exactCardId");
+  const exactGtin = params.get("exactGtin") ?? "";
+  const originProductId = params.get("originProductId") ?? "";
+  const exactEntry = exactCardId !== null;
+  const validExactEntry =
+    !!exactCardId &&
+    exactCardId.length <= 1000 &&
+    /^\d{14}$/.test(exactGtin) &&
+    isValidGtin(exactGtin);
   const comparisonRejected =
     !!preparationId && params.get("rejectedPreparationId") === preparationId;
   const rejectedIdsText = params.get("rejectedPreviewIds") ?? "";
@@ -187,7 +197,8 @@ function ScopedImportPanel({ identity }: { identity: string }) {
     queryFn: ({ signal }) => api.getImportItems(sessionId, query, signal),
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[2] === sessionId ? previous : undefined,
-    enabled: !!sessionId && !showReview && !showResult && !terminalError(session.error),
+    enabled:
+      !!sessionId && !exactEntry && !showReview && !showResult && !terminalError(session.error),
     retry: false,
     refetchOnWindowFocus: (q) => !terminalError(q.state.error),
     refetchOnReconnect: (q) => !terminalError(q.state.error),
@@ -196,6 +207,49 @@ function ScopedImportPanel({ identity }: { identity: string }) {
         ? polling()
         : false,
   });
+  const exactItems = useQuery({
+    queryKey: [...prefix, sessionId, "exact-items", session.data?.revision],
+    queryFn: ({ signal }) => api.getExactCardItems(sessionId, signal),
+    enabled:
+      !!sessionId &&
+      exactEntry &&
+      validExactEntry &&
+      session.data?.complete === true &&
+      !showReview &&
+      !showResult,
+    retry: false,
+  });
+  const exactMatches =
+    exactItems.data?.filter((item) => item.cardId === exactCardId && item.gtin14 === exactGtin) ??
+    [];
+  const exactItem = exactMatches.length === 1 ? exactMatches[0] : undefined;
+  const exactReason =
+    !validExactEntry || (session.data && session.data.mode !== "gtins")
+      ? "exactMissing"
+      : session.data &&
+          !session.data.complete &&
+          !["queued", "loading"].includes(session.data.state)
+        ? "exactIncomplete"
+        : exactItems.isError
+          ? "exactIncomplete"
+          : !exactItems.data
+            ? null
+            : exactMatches.length > 1
+              ? "exactAmbiguous"
+              : !exactItem
+                ? "exactMissing"
+                : exactItem.statusKeys.includes("archived")
+                  ? "archived"
+                  : !exactItem.selectable ||
+                      exactItem.match === "inaccessible" ||
+                      exactItem.match === "ambiguous"
+                    ? "exactMissing"
+                    : null;
+  const exactSelected =
+    !!exactItem &&
+    !exactReason &&
+    session.data?.selectedItemIds.length === 1 &&
+    session.data.selectedItemIds[0] === exactItem.id;
   const preparation = useQuery({
     queryKey: [...prefix, sessionId, preparationId, "preparation"],
     queryFn: ({ signal }) => api.getPreparation(sessionId, preparationId, signal),
@@ -223,6 +277,24 @@ function ScopedImportPanel({ identity }: { identity: string }) {
         ? polling()
         : false,
   });
+  const invalidatedResult = useRef<string | null>(null);
+  function invalidateResult(data: Result) {
+    const receipt = JSON.stringify(data);
+    if (invalidatedResult.current === receipt) return;
+    invalidatedResult.current = receipt;
+    void client.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
+    void client.invalidateQueries({ queryKey: PRODUCT_CHZ_LINK_QUERY_KEY });
+  }
+  useEffect(() => {
+    if (result.data) {
+      const receipt = JSON.stringify(result.data);
+      if (invalidatedResult.current !== receipt) {
+        invalidatedResult.current = receipt;
+        void client.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
+        void client.invalidateQueries({ queryKey: PRODUCT_CHZ_LINK_QUERY_KEY });
+      }
+    }
+  }, [result.data, client]);
   useEffect(() => {
     if (result.data?.state === "finished" || result.data?.state === "cancelled")
       setRetryBlocked(false);
@@ -255,7 +327,10 @@ function ScopedImportPanel({ identity }: { identity: string }) {
             rejectedReason: params.get("rejectedReason") ?? "",
           }
         : {};
-    setParams({ ...retainedRejection, ...ids }, { replace: true, state });
+    const retainedExact = exactEntry
+      ? { exactCardId: exactCardId ?? "", exactGtin, originProductId }
+      : {};
+    setParams({ ...retainedExact, ...retainedRejection, ...ids }, { replace: true, state });
   }
   async function run(action: () => Promise<void>) {
     if (lock.current) return;
@@ -299,6 +374,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
     setReceiptToClear({ sessionId: sid, kind: "prepare", id: data.preparation.id });
   }
   function acceptedResult(data: Result, sid = sessionId) {
+    invalidateResult(data);
     client.setQueryData([...prefix, sid, data.operationId, "result"], data);
     route({
       sessionId: sid,
@@ -361,7 +437,8 @@ function ScopedImportPanel({ identity }: { identity: string }) {
     }
   }
   function prepare(drafts: ReviewDrafts = { manualNames: {}, categoryChoices: {} }) {
-    if (!session.data || pending || storageBlocked) return;
+    if (!session.data || pending || storageBlocked || (exactEntry && !exactSelected && !showReview))
+      return;
     const body: ImportPrepare = {
       requestId: crypto.randomUUID(),
       itemIds: [...session.data.selectedItemIds].sort(),
@@ -593,7 +670,67 @@ function ScopedImportPanel({ identity }: { identity: string }) {
         {session.data && !showResult && !live && (
           <Alert>{tr(session.data.state === "cancelled" ? "cancelled" : "expired")}</Alert>
         )}
-        {session.data && !showReview && !showResult && items.data && (
+        {session.data && exactEntry && !showReview && !showResult && (
+          <section className="mk-nc-review-item">
+            <p>
+              {exactGtin} · {exactCardId}
+            </p>
+            {exactReason ? (
+              <Alert tone="warn">{t(`pages.catalog.chz.${exactReason}`)}</Alert>
+            ) : !exactItems.data ? (
+              <Spinner label={t("pages.catalog.chz.exactLoading")} />
+            ) : (
+              <>
+                <p>{exactItem?.name}</p>
+                {exactSelected ? (
+                  <>
+                    <p>{t("pages.catalog.chz.exactSelected")}</p>
+                    <Button disabled={!mutable || busy} onClick={() => prepare()}>
+                      {tr("compare")}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    disabled={!mutable || busy}
+                    onClick={() =>
+                      void run(async () => {
+                        if (!exactItem || exactReason) return;
+                        const data = await api.saveImportSelection(
+                          sessionId,
+                          { expectedRevision: session.data.revision, itemIds: [exactItem.id] },
+                          abort.current.signal,
+                        );
+                        if (active.current)
+                          client.setQueryData([...prefix, sessionId, "session"], data);
+                      })
+                    }
+                  >
+                    {t("pages.catalog.chz.exactSelect")}
+                  </Button>
+                )}
+              </>
+            )}
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() => {
+                const originalState: unknown = location.state;
+                const hasBackground =
+                  originalState &&
+                  typeof originalState === "object" &&
+                  "catalogBackground" in originalState &&
+                  originalState.catalogBackground === true;
+                if (hasBackground) closeCatalogPanel(location, navigate);
+                else if (/^[0-9a-f-]{36}$/i.test(originProductId))
+                  void navigate(`/catalog/${originProductId}/chz`, { replace: true });
+                else closeCatalogPanel(location, navigate);
+              }}
+            >
+              {t("pages.catalog.chz.exactRetry")}
+            </Button>
+          </section>
+        )}
+        {session.data && !exactEntry && !showReview && !showResult && items.data && (
           <ImportSelection
             session={session.data}
             data={items.data}

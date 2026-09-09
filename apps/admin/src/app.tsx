@@ -25,6 +25,7 @@ import {
   ImportPanel,
   NationalCatalogIdentityBoundary,
 } from "./pages/catalog/national-catalog/ImportPanel.js";
+import { LinkPanel } from "./pages/catalog/national-catalog/LinkPanel.js";
 import { CatalogPage } from "./pages/catalog/index.js";
 import { ProductPanelRoute } from "./pages/catalog/ProductPanelRoute.js";
 import { ConflictsPage } from "./pages/conflicts/index.js";
@@ -120,6 +121,7 @@ function appRouteElements() {
           }
         >
           <Route path="import" element={<ImportPanel />} />
+          <Route path=":productId/chz" element={<LinkPanel />} />
           <Route
             path="new"
             element={

@@ -215,3 +215,103 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
   expect(errors).toEqual([]);
   expect(unexpected).toEqual([]);
 });
+
+import { linkFixture, productFixture } from "../../../apps/admin/test/national-catalog-fixtures.js";
+import { chzLinkDetailSchema } from "../../../packages/platform-contracts/dist/index.js";
+test("catalog discloses CHZ statuses and opens the saved link panel", async ({ page }) => {
+  const unexpected: string[] = [];
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const detail = chzLinkDetailSchema.parse({
+    ...linkFixture,
+    summary: {
+      ...linkFixture.summary,
+      statusKeys: ["published", "moderation", "unknown"],
+      rawStatus: "STATUS_NEW",
+      rawDetailedStatuses: ["Проверка дополнительных сведений"],
+      lastErrorCode: "photo_unavailable",
+      hasChanges: true,
+    },
+  });
+  await page.route(`${origin}/api/**`, async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    let body: unknown;
+    if (route.request().method() !== "GET") {
+      unexpected.push(`${route.request().method()} ${path}`);
+      await route.abort();
+      return;
+    }
+    if (path === "/api/access/me")
+      body = { roles: ["manager"], capabilities: ["operations.read", "operations.write"] };
+    else if (path === "/api/profile")
+      body = { firstName: "Игорь", middleName: null, lastName: "Волков", hasAvatar: false };
+    else if (path === "/api/products")
+      body = {
+        items: [
+          {
+            ...productFixture,
+            name: "Молоко фермерское пастеризованное, 3,2 %",
+            chz: detail.summary,
+          },
+        ],
+      };
+    else if (["/api/counterparties", "/api/pickup-orders"].includes(path)) body = { items: [] };
+    else if (path === "/api/national-catalog/capabilities") body = capabilitiesFixture;
+    else if (path === `/api/products/${productFixture.id}/national-catalog/link`) body = detail;
+    else {
+      unexpected.push(path);
+      await route.abort();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
+  await page.goto(open("/catalog"));
+  await expect(page.getByRole("columnheader", { name: "Честный знак" })).toBeVisible();
+  const row = page.getByRole("row").filter({ hasText: "Молоко фермерское" });
+  await expect(row.getByText("Опубликовано", { exact: true }).first()).toBeVisible();
+  await expect(row.getByRole("button", { name: "Изменить" })).toBeVisible();
+  const overflow = await row.evaluate((element) =>
+    Array.from(element.querySelectorAll("td")).flatMap((cell) => {
+      const bounds = cell.getBoundingClientRect();
+      const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+      const escaped: string[] = [];
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        if (!node.textContent?.trim() || !node.parentElement?.checkVisibility()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        if (
+          Array.from(range.getClientRects()).some(
+            (rect) =>
+              rect.width > 0 && (rect.left < bounds.left - 1 || rect.right > bounds.right + 1),
+          )
+        )
+          escaped.push(node.textContent.trim());
+      }
+      return escaped;
+    }),
+  );
+  expect(overflow).toEqual([]);
+  const evidence = resolve("../../docs/evidence/national-catalog-import");
+  await mkdir(evidence, { recursive: true });
+  await page.screenshot({ path: resolve(evidence, "task-13-catalog-1280.png"), fullPage: true });
+  await row.getByRole("link", { name: "Связь с ЧЗ" }).click();
+  const panel = page.getByRole("dialog", { name: "Связь с Честным знаком" });
+  await expect(panel.getByText("card-1", { exact: true })).toBeVisible();
+  await panel.getByText("Ещё статусов: 2 · Подробнее").click();
+  await expect(panel.getByText("STATUS_NEW", { exact: true })).toBeVisible();
+  await expect(
+    panel.getByText("Не удалось проверить фотографию. Статус карточки сохранён."),
+  ).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Удалить связь", exact: true })).toBeVisible();
+  await page.screenshot({ path: resolve(evidence, "task-13-link-1280.png"), fullPage: true });
+  await panel.getByRole("button", { name: "Закрыть" }).focus();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(unexpected).toEqual([]);
+  expect(errors).toEqual([]);
+});

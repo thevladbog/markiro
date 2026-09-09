@@ -150,3 +150,60 @@ it("cannot overwrite invalid pending bytes through the mandatory pre-POST persis
   ).toThrow("storage_unavailable");
   expect(sessionStorage.getItem(storageKey)).toBe("{");
 });
+
+import { getExactCardItems } from "../src/pages/catalog/national-catalog/api.js";
+import { itemsFixture } from "./national-catalog-fixtures.js";
+it("reads the exact-card feed across pages including archived rows instead of choosing the first card", async () => {
+  const calls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      calls.push(String(url));
+      return new Response(
+        JSON.stringify({
+          items: [
+            { ...itemsFixture.items[0], cardId: calls.length === 1 ? "other-card" : "card-1" },
+          ],
+          nextCursor: calls.length === 1 ? "next" : null,
+        }),
+        { status: 200 },
+      );
+    }),
+  );
+  try {
+    const items = await getExactCardItems("00000000-0000-4000-8000-000000000001");
+    expect(items.map((item) => item.cardId)).toEqual(["other-card", "card-1"]);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain("includeArchived=true");
+    expect(calls[1]).toContain("cursor=next");
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+it.each(["loop", "limit"])(
+  "rejects incomplete exact-card traversal at the %s bound",
+  async (kind) => {
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        calls++;
+        return new Response(
+          JSON.stringify({
+            items: itemsFixture.items,
+            nextCursor: kind === "loop" ? "same" : String(calls),
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    try {
+      await expect(getExactCardItems("00000000-0000-4000-8000-000000000001")).rejects.toThrow(
+        "incomplete_feed",
+      );
+      expect(calls).toBe(kind === "loop" ? 2 : 100);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  },
+);
