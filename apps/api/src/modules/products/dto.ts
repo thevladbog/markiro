@@ -33,6 +33,10 @@ export type CreateProductDto = z.infer<typeof createProductSchema>;
 
 /** PATCH /products/:id schema -- partial update, preserves untouched fields. */
 export const updateProductSchema = z.object({
+  chzLinkChange: z
+    .object({ action: z.literal("detach"), expectedRevision: z.number().int().nonnegative() })
+    .strict()
+    .optional(),
   gtin: z.string().min(1).optional(),
   name: z.string().min(1).max(200).optional(),
   printName: z.string().trim().min(1).max(200).nullable().optional(),

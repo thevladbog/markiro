@@ -592,6 +592,19 @@ export class NationalCatalogImportService {
     this.active(lockedSession);
     await this.authorize(tx, actor, lockedSession.mode, lockedSession.environment);
   }
+  /** Cached accepted work only: no enumeration, provider request or temporary TTL extension. */
+  async assertAcceptedOperationAccess(
+    tx: DbTx,
+    actor: ImportActor,
+    lockedSession: ImportSessionRow,
+  ): Promise<void> {
+    if (lockedSession.tenantId !== actor.tenantId)
+      throw new ForbiddenException("session_tenant_mismatch");
+    const principal = await this.authorization.resolvePrincipal(actor.userId, actor.tenantId, tx);
+    if (!principal?.capabilities.includes(CABINET_CAPABILITY.OPERATIONS_WRITE))
+      throw new ForbiddenException("permission_denied");
+    await this.entitlements.assertWriteAccess(actor.tenantId, tx);
+  }
   private active(session: ImportSessionRow): void {
     if (
       session.state === "cancelled" ||

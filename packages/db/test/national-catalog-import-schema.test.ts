@@ -119,3 +119,10 @@ it("persists preparation identity and repair state scoped to its session", () =>
     expect.arrayContaining(["request_hash", "request", "checkpoint", "actor_id", "expires_at"]),
   );
 });
+
+it("retains optional immutable application evidence separately from the canonical decision and image outcome", () => {
+  const config = getTableConfig(table("nationalCatalogImportOperationItems"));
+  const evidence = config.columns.find((column) => column.name === "applied_evidence");
+  expect(evidence?.dataType).toBe("json");
+  expect(evidence?.notNull).toBe(false);
+});

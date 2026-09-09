@@ -475,4 +475,47 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
       ).rows,
     ).toEqual([{ count: 1 }]);
   });
+  it("adds nullable evidence without backfill and freezes actual applied evidence independently of image outcomes", async () => {
+    const before = await pool.query(
+      `SELECT applied_evidence FROM national_catalog_import_operation_items WHERE operation_id=$1`,
+      [operation],
+    );
+    expect(before.rows).toEqual([{ applied_evidence: null }]);
+    const evidence = {
+      version: 1,
+      snapshotId: snapshot,
+      sourceRef: `national-catalog-snapshot:${snapshot}`,
+      sourceHash,
+      acceptedEntryIds: [],
+      acceptedEntries: [],
+    };
+    await pool.query(
+      `UPDATE national_catalog_import_operation_items SET applied_evidence=$2 WHERE operation_id=$1`,
+      [operation, evidence],
+    );
+    await pool.query(
+      `UPDATE national_catalog_import_operation_items SET image_error_code='image_conflict' WHERE operation_id=$1`,
+      [operation],
+    );
+    expect(
+      (
+        await pool.query(
+          `SELECT applied_evidence FROM national_catalog_import_operation_items WHERE operation_id=$1`,
+          [operation],
+        )
+      ).rows,
+    ).toEqual([{ applied_evidence: evidence }]);
+    await expect(
+      pool.query(
+        `UPDATE national_catalog_import_operation_items SET applied_evidence=null WHERE operation_id=$1`,
+        [operation],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      pool.query(
+        `UPDATE national_catalog_import_operation_items SET decision='{}' WHERE operation_id=$1`,
+        [operation],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
 });

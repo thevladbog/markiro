@@ -367,6 +367,8 @@ describe("tenant National Catalog import output contracts", () => {
             productId: ID_3,
             product: "applied",
             image: "unchanged",
+            productReason: null,
+            imageReason: null,
             reason: null,
           },
         ],
@@ -382,6 +384,8 @@ describe("tenant National Catalog import output contracts", () => {
             productId: ID_3,
             product: "applied",
             image: "unchanged",
+            productReason: null,
+            imageReason: null,
             reason: null,
             raw: {},
           },
@@ -450,4 +454,48 @@ it("requires durable request identity and safe preparation/photo state", () => {
 it("accepts only an explicit empty retry command", () => {
   expect(importPreparationRetrySchema.safeParse({}).success).toBe(true);
   expect(importPreparationRetrySchema.safeParse({ attempt: 0 }).success).toBe(false);
+});
+
+it("separates product and photo reasons without exposing actor or raw provider data in link detail", async () => {
+  const { chzLinkDetailSchema } = await import("../src/tenant-national-catalog.js");
+  const summary = {
+    linkId: ID_1,
+    revision: 1,
+    statusKeys: ["published"],
+    rawStatus: "published",
+    rawDetailedStatuses: [],
+    lastSuccessAt: UTC_DATE,
+    lastAttemptAt: UTC_DATE,
+    refreshing: false,
+    lastOutcome: "ok",
+    hasChanges: false,
+  };
+  const link = {
+    id: ID_1,
+    revision: 1,
+    cardId: "720679",
+    environment: "sandbox",
+    boundGtin14: "04006381333931",
+    confirmedAt: UTC_DATE,
+  };
+  expect(chzLinkDetailSchema.safeParse({ summary, link }).success).toBe(true);
+  expect(
+    chzLinkDetailSchema.safeParse({ summary, link: { ...link, confirmedBy: ID_2 } }).success,
+  ).toBe(false);
+  const result = {
+    operationId: ID_1,
+    state: "finished",
+    items: [
+      {
+        previewId: ID_2,
+        productId: ID_3,
+        product: "applied",
+        image: "failed",
+        reason: "image_conflict",
+        productReason: null,
+        imageReason: "image_conflict",
+      },
+    ],
+  };
+  expect(importResultSchema.safeParse(result).success).toBe(true);
 });

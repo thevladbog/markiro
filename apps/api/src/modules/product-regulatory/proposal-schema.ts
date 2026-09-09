@@ -20,7 +20,7 @@ const targetBindingSchema = z
   })
   .strict();
 
-const attributeEntrySchema = z
+export const attributeEntrySchema = z
   .object({
     entryId: uuidSchema,
     target: z.literal("attribute"),
@@ -97,7 +97,7 @@ const stableFieldValueSchema = z.union([
   z.null(),
 ]);
 
-const stableFieldEntrySchema = z
+export const stableFieldEntrySchema = z
   .object({
     entryId: uuidSchema,
     target: z.literal("stable_field"),
@@ -250,7 +250,10 @@ export function parsePersistedProposalDiff(
   if (candidate.kind !== proposalContext.kind) {
     throw new TypeError("Proposal kind does not match its persisted row");
   }
-  if (candidate.kind === "national_catalog_import") {
+  if (
+    candidate.kind === "national_catalog_import" ||
+    (candidate.kind === "category_binding" && proposalContext.source === "national_catalog")
+  ) {
     if (proposalContext.source !== "national_catalog") {
       throw new TypeError("National Catalog import requires the national_catalog source");
     }

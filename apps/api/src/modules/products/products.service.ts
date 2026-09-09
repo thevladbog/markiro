@@ -1,17 +1,18 @@
+import { closeNationalCatalogLinkInTransaction } from "../national-catalog/national-catalog-link-writer";
+import { ProductWriter } from "./product-writer";
 import { randomUUID } from "node:crypto";
 import {
   BadRequestException,
   ConflictException,
   Inject,
   Injectable,
-  InternalServerErrorException,
   Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { and, eq, ilike, or, sql } from "drizzle-orm";
+import { and, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { DomainError, gtinMatchesPrefix, normalizeToGtin14 } from "@markiro/domain";
+import { gtinMatchesPrefix } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { lockTenantBoxRegistry } from "../boxes/box-registry-lock";
 import { MediaAssetsService } from "../media/media-assets.service";
@@ -26,7 +27,6 @@ import type {
   ListProductsResponseDto,
   ProductDto,
   ProductImageDescriptor,
-  ProductStatus,
   UpdateProductDto,
 } from "./dto";
 import {
@@ -76,6 +76,7 @@ type ProductAuditTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 @Injectable()
 export class ProductsService {
+  private readonly writer = new ProductWriter();
   private readonly logger = new Logger(ProductsService.name);
 
   constructor(
@@ -126,37 +127,10 @@ export class ProductsService {
 
   /** Create a product. Server computes `status` -- see computeStatus. */
   async createProduct(tenantId: string, data: CreateProductDto): Promise<ProductDto> {
-    const gtin14 = this.normalizeOrThrow(data.gtin);
-    const chzProductGroupCode = data.chzProductGroupCode ?? null;
-    const boxCapacity = data.boxCapacity ?? null;
-    const palletCapacity = data.palletCapacity ?? null;
-    const status = this.computeStatus({ chzProductGroupCode, boxCapacity, palletCapacity });
-
     try {
-      const productId = await this.db.transaction(async (tx) => {
-        const [row] = await tx
-          .insert(schema.products)
-          .values({
-            tenantId,
-            gtin14,
-            name: data.name,
-            chzProductGroupCode,
-            boxCapacity,
-            palletCapacity,
-            status,
-            archived: data.archived ?? false,
-            defaultCounterpartyId: data.defaultCounterpartyId ?? null,
-            unitPrice: data.unitPrice ?? null,
-            printName: data.printName ?? null,
-            egaisCode: data.egaisCode ?? null,
-            shelfLifeDays: data.shelfLifeDays ?? null,
-            externalRef: data.externalRef ?? null,
-          })
-          .returning({ id: schema.products.id });
-        if (!row) throw new InternalServerErrorException("Failed to create product");
-        await this.replaceLegacyEgaisCode(tx, tenantId, row.id, data.egaisCode ?? null);
-        return row.id;
-      });
+      const productId = await this.db.transaction((tx) =>
+        this.writer.createInTransaction(tx, tenantId, data),
+      );
       return this.getProduct(tenantId, productId);
     } catch (error) {
       this.handleWriteError(error);
@@ -168,8 +142,14 @@ export class ProductsService {
    * `null` clears a nullable field). Status is recomputed from the merged
    * (post-patch) field values on every call, per the plan's draft/active rule.
    */
-  async updateProduct(tenantId: string, id: string, data: UpdateProductDto): Promise<ProductDto> {
-    const normalizedGtin = data.gtin !== undefined ? this.normalizeOrThrow(data.gtin) : undefined;
+  async updateProduct(
+    tenantId: string,
+    id: string,
+    data: UpdateProductDto,
+    actorUserId?: string,
+  ): Promise<ProductDto> {
+    const normalizedGtin =
+      data.gtin !== undefined ? this.writer.normalizeOrThrow(data.gtin) : undefined;
 
     try {
       const updatedId = await this.db.transaction(async (tx) => {
@@ -181,6 +161,34 @@ export class ProductsService {
           .for("update");
         if (!current) throw new NotFoundException();
 
+        if (
+          data.chzLinkChange ||
+          (normalizedGtin !== undefined && normalizedGtin !== current.gtin14)
+        ) {
+          const [link] = await tx
+            .select()
+            .from(schema.nationalCatalogProductLinks)
+            .where(
+              and(
+                eq(schema.nationalCatalogProductLinks.tenantId, tenantId),
+                eq(schema.nationalCatalogProductLinks.productId, id),
+                isNull(schema.nationalCatalogProductLinks.closedAt),
+              ),
+            )
+            .for("update");
+          if (link && !data.chzLinkChange)
+            throw new ConflictException({ code: "CHZ_LINK_REQUIRES_DETACH" });
+          if (data.chzLinkChange) {
+            if (!actorUserId) throw new BadRequestException("detach_actor_required");
+            await closeNationalCatalogLinkInTransaction(
+              tx,
+              { tenantId, userId: actorUserId },
+              id,
+              data.chzLinkChange.expectedRevision,
+              "gtin_changed",
+            );
+          }
+        }
         const gtin14 = normalizedGtin ?? current.gtin14;
         const name = data.name !== undefined ? data.name : current.name;
         const chzProductGroupCode =
@@ -194,7 +202,11 @@ export class ProductsService {
           data.defaultCounterpartyId !== undefined
             ? data.defaultCounterpartyId
             : current.defaultCounterpartyId;
-        const status = this.computeStatus({ chzProductGroupCode, boxCapacity, palletCapacity });
+        const status = this.writer.computeStatus({
+          chzProductGroupCode,
+          boxCapacity,
+          palletCapacity,
+        });
         const set: Partial<typeof schema.products.$inferInsert> = {
           gtin14,
           name,
@@ -220,7 +232,7 @@ export class ProductsService {
           throw new NotFoundException("Product not found or does not belong to this tenant");
         }
         if (data.egaisCode !== undefined) {
-          await this.replaceLegacyEgaisCode(tx, tenantId, id, data.egaisCode);
+          await this.writer.replaceLegacyEgaisCode(tx, tenantId, id, data.egaisCode);
         }
         if (
           productGtinActuallyChanged(
@@ -235,34 +247,6 @@ export class ProductsService {
       return this.getProduct(tenantId, updatedId);
     } catch (error) {
       this.handleWriteError(error);
-    }
-  }
-
-  private async replaceLegacyEgaisCode(
-    tx: ProductAuditTx,
-    tenantId: string,
-    productId: string,
-    code: string | null,
-  ): Promise<void> {
-    if (code !== null && !/^\d{19}$/.test(code)) {
-      throw new BadRequestException({ code: "EGAIS_CODE_INVALID" });
-    }
-    await tx
-      .delete(schema.productEgaisCodes)
-      .where(
-        and(
-          eq(schema.productEgaisCodes.tenantId, tenantId),
-          eq(schema.productEgaisCodes.productId, productId),
-        ),
-      );
-    if (code !== null) {
-      await tx.insert(schema.productEgaisCodes).values({
-        tenantId,
-        productId,
-        code,
-        isPrimary: true,
-        source: "manual",
-      });
     }
   }
 
@@ -667,7 +651,7 @@ export class ProductsService {
    * "unknown".
    */
   async checkGtinOwner(tenantId: string, gtin: string): Promise<GtinCheckResponseDto> {
-    const gtin14 = this.normalizeOrThrow(gtin);
+    const gtin14 = this.writer.normalizeOrThrow(gtin);
 
     const ownPrefixes = await this.orgProfileService.getPrefixes(tenantId);
     if (ownPrefixes.some((prefix) => gtinMatchesPrefix(gtin14, prefix))) {
@@ -783,31 +767,6 @@ export class ProductsService {
       before: { image: before },
       after: attemptedImage ? { attemptedImage, reason } : { reason },
     });
-  }
-
-  /** Normalizes/validates a raw GTIN input; DomainError -> 400 GTIN_INVALID. */
-  private normalizeOrThrow(gtin: string): string {
-    try {
-      return normalizeToGtin14(gtin);
-    } catch (error) {
-      if (error instanceof DomainError) {
-        throw new BadRequestException({ code: error.code, message: error.message });
-      }
-      throw error;
-    }
-  }
-
-  /** active iff boxCapacity AND palletCapacity AND the ChZ group code are all set; else draft. */
-  private computeStatus(fields: {
-    chzProductGroupCode: number | null;
-    boxCapacity: number | null;
-    palletCapacity: number | null;
-  }): ProductStatus {
-    return fields.chzProductGroupCode !== null &&
-      fields.boxCapacity !== null &&
-      fields.palletCapacity !== null
-      ? "active"
-      : "draft";
   }
 
   /**

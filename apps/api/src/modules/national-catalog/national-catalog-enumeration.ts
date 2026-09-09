@@ -68,7 +68,7 @@ export function newStep(checkpoint: ImportCheckpoint): ImportCheckpoint {
 export function pageHash(rows: NationalCatalogListRow[]): string {
   return createHash("sha256").update(JSON.stringify(rows)).digest("hex");
 }
-function statuses(status: string | null, details: string[]): ChzStatusKey[] {
+export function statuses(status: string | null, details: string[]): ChzStatusKey[] {
   const allowed = new Set<ChzStatusKey>([
     "draft",
     "moderation",

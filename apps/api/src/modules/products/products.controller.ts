@@ -168,7 +168,7 @@ export class ProductsController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(updateProductSchema)) body: UpdateProductDto,
   ): Promise<ProductDto> {
-    return this.productsService.updateProduct(req.tenantId!, id, body);
+    return this.productsService.updateProduct(req.tenantId!, id, body, req.userId);
   }
 
   @Post(":id/image")

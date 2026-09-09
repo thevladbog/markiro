@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProductsService } from "../src/modules/products/products.service";
 import { PgDialect } from "drizzle-orm/pg-core";
+import { schema } from "@markiro/db";
 import {
   buildProductRegistryStampSql,
   invalidateProductGtinRegistry,
@@ -99,7 +100,12 @@ describe("ProductsService update registry boundary", () => {
   function serviceFor(returnedGtin: string) {
     const forUpdate = vi.fn().mockResolvedValue([baseRow]);
     const whereSelect = vi.fn(() => ({ for: forUpdate }));
-    const from = vi.fn(() => ({ where: whereSelect }));
+    const from = vi.fn((table: unknown) => {
+      if (table === schema.products) return { where: whereSelect };
+      if (table === schema.nationalCatalogProductLinks)
+        return { where: () => ({ for: vi.fn().mockResolvedValue([]) }) };
+      throw new Error("Unexpected table in product registry fixture");
+    });
     const select = vi.fn(() => ({ from }));
     const returning = vi.fn().mockResolvedValue([{ ...baseRow, gtin14: returnedGtin }]);
     const whereUpdate = vi.fn(() => ({ returning }));

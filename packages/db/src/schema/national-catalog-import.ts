@@ -338,6 +338,7 @@ export const nationalCatalogImportOperationItems = pgTable(
     operationId: uuid("operation_id").notNull(),
     previewId: uuid("preview_id").notNull(),
     decision: jsonb("decision").notNull(),
+    appliedEvidence: jsonb("applied_evidence"),
     productId: uuid("product_id"),
     productResult: nationalCatalogImportProductResult("product_result")
       .notNull()

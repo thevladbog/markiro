@@ -286,6 +286,8 @@ const importResultItemSchema = z
     productId: platformUuidSchema.nullable(),
     product: z.enum(["pending", "applied", "conflict", "failed", "cancelled"]),
     image: z.enum(["none", "pending", "applied", "unchanged", "failed"]),
+    productReason: nullableReasonSchema,
+    imageReason: nullableReasonSchema,
     reason: nullableReasonSchema,
   })
   .strict();
@@ -369,3 +371,21 @@ export const importPrepareResponseSchema = z
   })
   .strict();
 export type ImportPrepareResponse = z.infer<typeof importPrepareResponseSchema>;
+
+export const chzLinkDetailSchema = z
+  .object({
+    summary: chzSummarySchema,
+    link: z
+      .object({
+        id: platformUuidSchema,
+        revision: nonNegativeIntegerSchema,
+        cardId: z.string().min(1),
+        environment: catalogEnvironmentSchema,
+        boundGtin14: normalizedGtin14Schema,
+        confirmedAt: utcDateTimeSchema,
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+export type ChzLinkDetail = z.infer<typeof chzLinkDetailSchema>;

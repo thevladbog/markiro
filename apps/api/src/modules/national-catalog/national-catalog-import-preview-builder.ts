@@ -51,7 +51,7 @@ export type ImportPreviewEntry =
       requiresEntryIds: string[];
     };
 export type StoredImportDiff = { version: 1; entries: ImportPreviewEntry[]; view: ImportPreview };
-const optionSchema = z
+export const optionSchema = z
   .object({
     optionId: z.uuid(),
     label: z.string(),
@@ -117,7 +117,7 @@ export function assertPreviewEntrySelection(
     )
       throw new UnprocessableEntityException("category_entry_required");
 }
-const mappingSchema = z
+export const mappingSchema = z
   .object({
     id: z.uuid(),
     sourceAttributeId: z.string().min(1),
