@@ -1221,6 +1221,98 @@ describe("atomic National Catalog product application (real PostgreSQL services)
     await refresh();
     expect((await read()).hasChanges).toBe(false);
   });
+  it("keeps rejected good_name print-name review unchanged on identical refresh", async () => {
+    const c = await existingAttribute();
+    await db.insert(schema.nationalCatalogAttributeMappings).values({
+      schemaVersionId: c.id,
+      sourceAttributeId: "good_name",
+      targetField: "print_name",
+      conversion: { kind: "string_trim" },
+      mappingVersion: 1,
+    });
+    await db
+      .update(schema.products)
+      .set({ printName: "Local rejected title" })
+      .where(eq(schema.products.id, existingId));
+    const p = await preview();
+    expect(p.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "print_name", applicable: true, after: "Из ЧЗ" }),
+      ]),
+    );
+    const result = await apply(decision(p));
+    expect(result.items[0]?.product).toBe("applied");
+    const link = (await links())[0];
+    if (!link?.reviewedSnapshotId) throw new Error("confirmed snapshot required");
+    const reviewedSnapshotId = link.reviewedSnapshotId;
+    const receiptQuery = () =>
+      db
+        .select()
+        .from(schema.nationalCatalogImportOperationItems)
+        .where(eq(schema.nationalCatalogImportOperationItems.operationId, result.operationId));
+    const snapshotQuery = () =>
+      db
+        .select()
+        .from(schema.nationalCatalogCardSnapshots)
+        .where(eq(schema.nationalCatalogCardSnapshots.id, reviewedSnapshotId));
+    const receipts = await receiptQuery();
+    const snapshots = await snapshotQuery();
+    expect(receipts).toHaveLength(1);
+    expect(snapshots).toHaveLength(1);
+    const { NationalCatalogLinkRefreshService } =
+      await import("../src/modules/national-catalog/national-catalog-link-refresh.service");
+    const { NationalCatalogLinkService } =
+      await import("../src/modules/national-catalog/national-catalog-link.service");
+    const authorization = new AuthorizationService(db),
+      entitlements = new EntitlementsService(db, "managed_only");
+    const worker = new NationalCatalogLinkRefreshService(
+      db,
+      authorization,
+      entitlements,
+      {
+        getFeedProductsByIds: async () => ({
+          status: "ok",
+          value: { products: [source] },
+          etag: null,
+          contentHash: "f".repeat(64),
+          usage: { total: null, method: null },
+        }),
+      },
+      {
+        run: async (_context, fn) =>
+          fn({
+            auth: { baseUrl: "https://catalog.invalid", token: "test-only" },
+            signal: new AbortController().signal,
+          }),
+        runExternal: async () => {
+          throw new Error("no photo request");
+        },
+      },
+      { enabled: true, photos: { enabled: false, verifiedHosts: [] } },
+    );
+    const read = () =>
+      new NationalCatalogLinkService(db, authorization, entitlements).read(
+        actor.tenantId,
+        existingId,
+      );
+    const refresh = async () => {
+      await worker.request(actor, existingId);
+      await worker.resume(actor.tenantId, link.id);
+    };
+    await refresh();
+    expect((await read()).hasChanges).toBe(false);
+    const observed = (await links())[0];
+    expect(observed?.observedMeaningfulHash).toBe(link.reviewedMeaningfulHash);
+    expect(observed?.reviewedMeaningfulHash).toBe(link.reviewedMeaningfulHash);
+    expect(observed?.reviewedProjection).toEqual(link.reviewedProjection);
+    expect(observed?.reviewedProjection).toMatchObject({
+      values: { "stable:print_name": "Из ЧЗ" },
+    });
+    expect(observed?.reviewedSnapshotId).toBe(link.reviewedSnapshotId);
+    expect(await receiptQuery()).toEqual(receipts);
+    expect(await snapshotQuery()).toEqual(snapshots);
+    expect((await product())?.printName).toBe("Local rejected title");
+  });
   it("compares first-filled supported values against known absence under the pinned reviewed schema", async () => {
     const c = await existingAttribute();
     const attribute = source.attributes[0];

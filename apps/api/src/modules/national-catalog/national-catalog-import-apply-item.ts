@@ -363,6 +363,7 @@ export async function applyImportItem(
               (isValidGtin(a.gtin) && normalizeToGtin14(a.gtin) === source.boundGtin14),
           )
           .map((a) => ({ id: a.id, value: a.value, unit: null })),
+        sourceName: source.normalized.name,
         stableMappings,
         currentStableFields: new Map<"print_name" | "shelf_life_days", string | number | null>([
           ["print_name", product?.printName ?? null],
