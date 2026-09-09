@@ -6,16 +6,22 @@ import {
   buildDateFreeBoxLabelTemplates,
   buildDatedBoxLabelTemplates,
   buildDefaultLabelTemplates,
+  buildLegacyDateFreeBoxLabelTemplates,
+  buildLegacyDatedBoxLabelTemplates,
+  buildLegacyPrintNameBoxLabelTemplates,
   buildPrintNameBoxLabelTemplates,
+  code128ModuleCount,
   elementBoundsMm,
   estimatedTextWidthMm,
   generateTspl,
   generateZpl,
+  GS1_128_QUIET_ZONE_MODULES,
   labelFieldDisplayValue,
   mmToDots,
   parseLabelTemplate,
   ptToMm,
   sampleLabelData,
+  withPrinterDpi,
   wrapTextToWidth,
   WRAP_ELLIPSIS,
   type LabelField,
@@ -69,60 +75,133 @@ function boundedRasterizer(): RasterizeTextFn {
   });
 }
 
-/** The five sizes, in the order both families are built in. */
+/** The four stock sizes, in the order both families are built in — all authored at 203 dpi. */
 const SIZES: Array<[number, number, number]> = [
   [58, 40, 203],
-  [58, 40, 300],
   [75, 120, 203],
   [100, 100, 203],
   [100, 150, 203],
 ];
 
 describe("buildDefaultLabelTemplates", () => {
-  it("returns BOTH stock families with the exact seed names", () => {
+  it("returns BOTH stock families with the exact, resolution-free seed names", () => {
     const templates = buildDefaultLabelTemplates();
     // The names are the `(tenant_id, name)` idempotency key of provisioning
-    // and of every seed migration, so they are pinned literally here.
+    // and of migration 0123's rename table, so they are pinned literally here.
     expect(templates.map((t) => t.name)).toEqual([
-      "Коробка 58×40 (203 dpi)",
-      "Коробка 58×40 (300 dpi)",
-      "Коробка 75×120 (203 dpi)",
-      "Коробка 100×100 (203 dpi)",
-      "Коробка 100×150 (203 dpi)",
-      "Коробка 58×40 без дат (203 dpi)",
-      "Коробка 58×40 без дат (300 dpi)",
-      "Коробка 75×120 без дат (203 dpi)",
-      "Коробка 100×100 без дат (203 dpi)",
-      "Коробка 100×150 без дат (203 dpi)",
-      "Коробка 58×40 (203 dpi) [Назв. для печати]",
-      "Коробка 58×40 (300 dpi) [Назв. для печати]",
-      "Коробка 75×120 (203 dpi) [Назв. для печати]",
-      "Коробка 100×100 (203 dpi) [Назв. для печати]",
-      "Коробка 100×150 (203 dpi) [Назв. для печати]",
-      "Коробка 58×40 без дат (203 dpi) [Назв. для печати]",
-      "Коробка 58×40 без дат (300 dpi) [Назв. для печати]",
-      "Коробка 75×120 без дат (203 dpi) [Назв. для печати]",
-      "Коробка 100×100 без дат (203 dpi) [Назв. для печати]",
-      "Коробка 100×150 без дат (203 dpi) [Назв. для печати]",
+      "Коробка 58×40",
+      "Коробка 75×120",
+      "Коробка 100×100",
+      "Коробка 100×150",
+      "Коробка 58×40 без дат",
+      "Коробка 75×120 без дат",
+      "Коробка 100×100 без дат",
+      "Коробка 100×150 без дат",
+      "Коробка 58×40 [Назв. для печати]",
+      "Коробка 75×120 [Назв. для печати]",
+      "Коробка 100×100 [Назв. для печати]",
+      "Коробка 100×150 [Назв. для печати]",
+      "Коробка 58×40 без дат [Назв. для печати]",
+      "Коробка 75×120 без дат [Назв. для печати]",
+      "Коробка 100×100 без дат [Назв. для печати]",
+      "Коробка 100×150 без дат [Назв. для печати]",
     ]);
     // ...and the whole list is exactly the three groups, in that order, so
-    // provisioning (which consumes this one function) seeds all twenty.
+    // provisioning (which consumes this one function) seeds all sixteen.
     expect(templates).toEqual([
       ...buildDatedBoxLabelTemplates(),
       ...buildDateFreeBoxLabelTemplates(),
       ...buildPrintNameBoxLabelTemplates(),
     ]);
-    // The tenant default is still the DATED 58×40 @203 — adding a family must
+    // The tenant default is still the DATED 58×40 — adding a family must
     // not move it.
-    expect(DEFAULT_BOX_LABEL_TEMPLATE_NAME).toBe("Коробка 58×40 (203 dpi)");
+    expect(DEFAULT_BOX_LABEL_TEMPLATE_NAME).toBe("Коробка 58×40");
     expect(buildDatedBoxLabelTemplates()[0]!.name).toBe(DEFAULT_BOX_LABEL_TEMPLATE_NAME);
     expect(
       templates.filter((t) => t.name === DEFAULT_BOX_LABEL_TEMPLATE_NAME),
       "the default name must identify exactly one seeded template",
     ).toHaveLength(1);
-    // Both families are cut in the same five sizes.
+    // Both families are cut in the same four sizes, all authored at 203 dpi:
+    // the station prints them at its own printer's resolution.
     for (const family of [buildDatedBoxLabelTemplates(), buildDateFreeBoxLabelTemplates()]) {
       expect(family.map((t) => [t.spec.widthMm, t.spec.heightMm, t.spec.dpi])).toEqual(SIZES);
+    }
+  });
+
+  it("keeps the pre-2026-09-10 seed rows reachable for the migration guards", () => {
+    const legacy = [
+      ...buildLegacyDatedBoxLabelTemplates(),
+      ...buildLegacyDateFreeBoxLabelTemplates(),
+      ...buildLegacyPrintNameBoxLabelTemplates(),
+    ];
+    expect(legacy.map((t) => [t.name, t.renamedTo])).toEqual([
+      ["Коробка 58×40 (203 dpi)", "Коробка 58×40"],
+      ["Коробка 58×40 (300 dpi)", null],
+      ["Коробка 75×120 (203 dpi)", "Коробка 75×120"],
+      ["Коробка 100×100 (203 dpi)", "Коробка 100×100"],
+      ["Коробка 100×150 (203 dpi)", "Коробка 100×150"],
+      ["Коробка 58×40 без дат (203 dpi)", "Коробка 58×40 без дат"],
+      ["Коробка 58×40 без дат (300 dpi)", null],
+      ["Коробка 75×120 без дат (203 dpi)", "Коробка 75×120 без дат"],
+      ["Коробка 100×100 без дат (203 dpi)", "Коробка 100×100 без дат"],
+      ["Коробка 100×150 без дат (203 dpi)", "Коробка 100×150 без дат"],
+      ["Коробка 58×40 (203 dpi) [Назв. для печати]", "Коробка 58×40 [Назв. для печати]"],
+      ["Коробка 58×40 (300 dpi) [Назв. для печати]", null],
+      ["Коробка 75×120 (203 dpi) [Назв. для печати]", "Коробка 75×120 [Назв. для печати]"],
+      ["Коробка 100×100 (203 dpi) [Назв. для печати]", "Коробка 100×100 [Назв. для печати]"],
+      ["Коробка 100×150 (203 dpi) [Назв. для печати]", "Коробка 100×150 [Назв. для печати]"],
+      [
+        "Коробка 58×40 без дат (203 dpi) [Назв. для печати]",
+        "Коробка 58×40 без дат [Назв. для печати]",
+      ],
+      ["Коробка 58×40 без дат (300 dpi) [Назв. для печати]", null],
+      [
+        "Коробка 75×120 без дат (203 dpi) [Назв. для печати]",
+        "Коробка 75×120 без дат [Назв. для печати]",
+      ],
+      [
+        "Коробка 100×100 без дат (203 dpi) [Назв. для печати]",
+        "Коробка 100×100 без дат [Назв. для печати]",
+      ],
+      [
+        "Коробка 100×150 без дат (203 dpi) [Назв. для печати]",
+        "Коробка 100×150 без дат [Назв. для печати]",
+      ],
+    ]);
+    // A renamed legacy row is byte-for-byte the current stock spec under its
+    // new name; the 300 twins are the same layout at the other resolution.
+    const current = new Map(buildDefaultLabelTemplates().map((t) => [t.name, t.spec]));
+    for (const row of legacy) {
+      if (row.renamedTo !== null) expect(row.spec, row.name).toEqual(current.get(row.renamedTo));
+      else expect(row.spec.dpi, row.name).toBe(300);
+    }
+  });
+
+  it("prints the 58×40 SSCC GS1-legal on both printer resolutions", async () => {
+    const modules = code128ModuleCount("0".repeat(20), true) + 2 * GS1_128_QUIET_ZONE_MODULES;
+    for (const { name, spec } of buildDefaultLabelTemplates()) {
+      if (spec.widthMm !== 58) continue;
+      const sscc = spec.elements.find((el) => el.kind === "barcode" && el.data === "sscc");
+      if (sscc?.kind !== "barcode" || sscc.moduleWidthMm === undefined)
+        throw new Error(`${name}: SSCC barcode with an explicit module width expected`);
+      for (const [dpi, dots] of [
+        [203, 2],
+        [300, 3],
+      ] as const) {
+        const printed = withPrinterDpi(spec, dpi);
+        expect(mmToDots(sscc.moduleWidthMm, printed.dpi), `${name} @${dpi}: module dots`).toBe(dots);
+        // Symbol plus both quiet zones, at the width the printer will really draw.
+        const moduleMm = (25.4 / dpi) * dots;
+        const left = sscc.xMm - GS1_128_QUIET_ZONE_MODULES * moduleMm;
+        expect(left, `${name} @${dpi}: left quiet zone on the label`).toBeGreaterThanOrEqual(0);
+        expect(left + modules * moduleMm, `${name} @${dpi}: right edge`).toBeLessThanOrEqual(58);
+        await expect(
+          generateZpl(printed, sampleLabelData(), { rasterizeText: boundedRasterizer() }),
+        ).resolves.toContain(dpi === 203 ? "^PW464" : "^PW685");
+        await expect(
+          generateTspl(printed, sampleLabelData(), { rasterizeText: boundedRasterizer() }),
+        ).resolves.toContain("PRINT 1");
+      }
     }
   });
 
@@ -303,11 +382,10 @@ describe("buildDefaultLabelTemplates", () => {
     const dated = buildDatedBoxLabelTemplates();
     const dateFree = buildDateFreeBoxLabelTemplates();
     const expectedBars: Record<string, number> = {
-      "Коробка 58×40 без дат (203 dpi)": 7.6,
-      "Коробка 58×40 без дат (300 dpi)": 7.6,
-      "Коробка 75×120 без дат (203 dpi)": 10.3,
-      "Коробка 100×100 без дат (203 dpi)": 13.5,
-      "Коробка 100×150 без дат (203 dpi)": 13.5,
+      "Коробка 58×40 без дат": 7.6,
+      "Коробка 75×120 без дат": 10.3,
+      "Коробка 100×100 без дат": 13.5,
+      "Коробка 100×150 без дат": 13.5,
     };
 
     for (const [index, { name, spec }] of dateFree.entries()) {
@@ -473,23 +551,21 @@ describe("buildDefaultLabelTemplates", () => {
    */
   it("centres the SSCC barcode at the widest GS1-legal module width", () => {
     const expected: Record<string, { moduleWidthMm: number; xMm: number }> = {
-      // 203 dpi: 2 dots = 0.2502 mm, already GS1's MINIMUM X-dimension — a
-      // 3-dot module would be 58.6 mm of bars on a 58 mm label.
-      "Коробка 58×40 (203 dpi)": { moduleWidthMm: 0.2502, xMm: 9.5 },
-      // 300 dpi: 3 dots = 0.254 mm. 4 dots (52.8 mm of bars) fits the label
-      // but leaves only 2.6 mm of quiet zone where GS1 wants 3.4 mm.
-      "Коробка 58×40 (300 dpi)": { moduleWidthMm: 0.254, xMm: 9.2 },
-      "Коробка 75×120 (203 dpi)": { moduleWidthMm: 0.3754, xMm: 8.2 },
-      "Коробка 100×100 (203 dpi)": { moduleWidthMm: 0.5005, xMm: 11 },
-      "Коробка 100×150 (203 dpi)": { moduleWidthMm: 0.5005, xMm: 11 },
+      // 203 dpi authoring: 2 dots = 0.2502 mm, already GS1's MINIMUM
+      // X-dimension — a 3-dot module would be 58.6 mm of bars on a 58 mm
+      // label. On a 300 dpi printer the same 0.2502 mm rounds to 3 dots
+      // (0.254 mm), see "prints the 58×40 SSCC GS1-legal on both printer resolutions".
+      "Коробка 58×40": { moduleWidthMm: 0.2502, xMm: 9.5 },
+      "Коробка 75×120": { moduleWidthMm: 0.3754, xMm: 8.2 },
+      "Коробка 100×100": { moduleWidthMm: 0.5005, xMm: 11 },
+      "Коробка 100×150": { moduleWidthMm: 0.5005, xMm: 11 },
       // The date-free family changes the label's vertical budget only, so at
       // each size its symbol is the same WIDTH in the same place — only
       // taller.
-      "Коробка 58×40 без дат (203 dpi)": { moduleWidthMm: 0.2502, xMm: 9.5 },
-      "Коробка 58×40 без дат (300 dpi)": { moduleWidthMm: 0.254, xMm: 9.2 },
-      "Коробка 75×120 без дат (203 dpi)": { moduleWidthMm: 0.3754, xMm: 8.2 },
-      "Коробка 100×100 без дат (203 dpi)": { moduleWidthMm: 0.5005, xMm: 11 },
-      "Коробка 100×150 без дат (203 dpi)": { moduleWidthMm: 0.5005, xMm: 11 },
+      "Коробка 58×40 без дат": { moduleWidthMm: 0.2502, xMm: 9.5 },
+      "Коробка 75×120 без дат": { moduleWidthMm: 0.3754, xMm: 8.2 },
+      "Коробка 100×100 без дат": { moduleWidthMm: 0.5005, xMm: 11 },
+      "Коробка 100×150 без дат": { moduleWidthMm: 0.5005, xMm: 11 },
     };
 
     for (const { name, spec } of buildDefaultLabelTemplates()) {
@@ -846,7 +922,7 @@ describe("buildDefaultLabelTemplates", () => {
 
   it("matches the jsonb inlined into db migration 0056 (drift guard)", async () => {
     expect(await inlinedRows("0056_align_dated_label_quantity.sql")).toEqual(
-      buildDatedBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
+      buildLegacyDatedBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
     );
   });
 
@@ -858,7 +934,7 @@ describe("buildDefaultLabelTemplates", () => {
    */
   it("matches the jsonb inlined into db migration 0053 (drift guard)", async () => {
     expect(await inlinedRows("0053_date_free_label_templates.sql")).toEqual(
-      buildDateFreeBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
+      buildLegacyDateFreeBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
     );
   });
 
@@ -868,7 +944,7 @@ describe("buildDefaultLabelTemplates", () => {
    */
   it("matches the jsonb inlined into db migration 0059 (drift guard)", async () => {
     expect(await inlinedRows("0059_print_name_label_templates.sql")).toEqual(
-      buildPrintNameBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
+      buildLegacyPrintNameBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
     );
   });
 });
