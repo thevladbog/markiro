@@ -590,7 +590,8 @@
     "printerCheckMismatch": "A different code was scanned: {{received}}",
     "scannerCheckWaiting": "No scan received yet",
     "printerResolution": "Printer resolution",
-    "printerResolutionUnknown": "Not configured"
+    "printerResolutionUnknown": "Not configured",
+    "printerDpiHint": "Every label prints at this resolution. Until it is set, box labels print at the template's resolution and duplicate printing is unavailable."
   },
   "conflicts": {
     "title": "Codes claimed elsewhere",

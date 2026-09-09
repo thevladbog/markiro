@@ -590,7 +590,8 @@
     "printerCheckMismatch": "Отсканирован другой код: {{received}}",
     "scannerCheckWaiting": "Скан ещё не получен",
     "printerResolution": "Разрешение принтера",
-    "printerResolutionUnknown": "Не указано"
+    "printerResolutionUnknown": "Не указано",
+    "printerDpiHint": "Все этикетки печатаются в этом разрешении. Пока оно не указано, коробочные этикетки печатаются в разрешении шаблона, а печать дубликатов недоступна."
   },
   "conflicts": {
     "title": "Коды, занятые другим терминалом",

@@ -286,11 +286,13 @@ export function WorkstationSetup({
           { id: "c", kind: "text", text: code, xMm: 4, yMm: 30, fontSizePt: 10 },
         ],
       };
+      // The test label prints at the resolution the working labels will use.
       const bytes = await renderLabelBytes(
         spec,
         sampleLabelData(),
         result.config.printerLanguage,
         rasterizeText,
+        { dpi: result.config.printerDpi ?? null },
       );
       await hw.print(result.config.printer, bytes);
       setPrintedTestCode(code);

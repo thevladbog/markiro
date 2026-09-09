@@ -201,6 +201,7 @@ export function PrinterSetupPanel({
           <Select
             size="floor"
             label={t("setup.printerResolution")}
+            hint={t("setup.printerDpiHint")}
             value={printerDpi?.toString() ?? ""}
             disabled={disabled || transport === "none"}
             options={[
