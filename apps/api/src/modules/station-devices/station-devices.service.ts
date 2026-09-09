@@ -1,4 +1,10 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
@@ -8,6 +14,7 @@ import {
   type CreateStationDeviceDto,
   type ListStationDevicesResponseDto,
   type StationDeviceDto,
+  type StationDeviceKind,
   type UpdateStationDeviceDto,
 } from "./dto";
 
@@ -34,7 +41,7 @@ export class StationDevicesService {
       this.entitlements.withQuotaSlot(tx, tenantId, "stations", async () => {
         const [created] = await tx
           .insert(schema.stationDevices)
-          .values({ tenantId, name: dto.name, lineId: dto.lineId, apiKeyId: null })
+          .values({ tenantId, name: dto.name, lineId: dto.lineId, kind: dto.kind, apiKeyId: null })
           .returning();
         return created;
       }),
@@ -54,9 +61,17 @@ export class StationDevicesService {
     let lineName = current.lineName;
     if (dto.lineId !== undefined) lineName = await this.lineName(tenantId, dto.lineId);
 
-    const set: { name?: string; lineId?: string | null } = {};
+    const set: { name?: string; lineId?: string | null; kind?: StationDeviceKind } = {};
     if (dto.name !== undefined) set.name = dto.name;
     if (dto.lineId !== undefined) set.lineId = dto.lineId;
+    if (dto.kind !== undefined && dto.kind !== current.device.kind) {
+      // The kind decides which app may redeem the pairing code; a paired
+      // device already runs one of them, so the kind is fixed from then on.
+      if (current.device.apiKeyId !== null || current.device.pairedAt !== null) {
+        throw new ConflictException("Device kind is fixed after pairing");
+      }
+      set.kind = dto.kind;
+    }
     if (Object.keys(set).length === 0) return this.toDto(current);
 
     const [row] = await this.db
@@ -149,6 +164,7 @@ export class StationDevicesService {
     return {
       id: device.id,
       name: device.name,
+      kind: device.kind as StationDeviceKind,
       lineId: device.lineId,
       lineName,
       lifecycle: stationDeviceLifecycle(device),

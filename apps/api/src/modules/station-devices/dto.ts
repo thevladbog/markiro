@@ -1,17 +1,23 @@
 import { z } from "zod";
 import type { SchemaObject } from "@nestjs/swagger";
 
+/** `station` is the line terminal; `handheld` is the Android TSD. Same credential and endpoints. */
+export const stationDeviceKinds = ["station", "handheld"] as const;
+export type StationDeviceKind = (typeof stationDeviceKinds)[number];
+
 /** POST /station-devices body. A station exists before it has a credential. */
 export const createStationDeviceSchema = z.object({
   name: z.string().trim().min(1).max(200),
   lineId: z.string().uuid().nullable(),
+  kind: z.enum(stationDeviceKinds).default("station"),
 });
 export type CreateStationDeviceDto = z.infer<typeof createStationDeviceSchema>;
 
-/** PATCH /station-devices/:id body. Omitted fields are preserved. */
+/** PATCH /station-devices/:id body. Omitted fields are preserved; `kind` is fixed once paired. */
 export const updateStationDeviceSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
   lineId: z.string().uuid().nullable().optional(),
+  kind: z.enum(stationDeviceKinds).optional(),
 });
 export type UpdateStationDeviceDto = z.infer<typeof updateStationDeviceSchema>;
 
@@ -47,6 +53,7 @@ export function stationDeviceLifecycle(
 export interface StationDeviceDto {
   id: string;
   name: string;
+  kind: StationDeviceKind;
   lineId: string | null;
   lineName: string | null;
   lifecycle: StationDeviceLifecycle;
@@ -73,6 +80,7 @@ export const stationDeviceOpenApiSchema: SchemaObject = {
   required: [
     "id",
     "name",
+    "kind",
     "lineId",
     "lineName",
     "lifecycle",
@@ -84,6 +92,7 @@ export const stationDeviceOpenApiSchema: SchemaObject = {
   properties: {
     id: { type: "string", format: "uuid" },
     name: { type: "string" },
+    kind: { type: "string", enum: [...stationDeviceKinds] },
     lineId: { type: "string", format: "uuid", nullable: true },
     lineName: { type: "string", nullable: true },
     lifecycle: { type: "string", enum: ["awaiting_pairing", "online", "offline", "revoked"] },

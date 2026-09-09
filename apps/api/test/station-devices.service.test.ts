@@ -222,6 +222,69 @@ describe("StationDevicesService lifecycle", () => {
 
     expect(updateCalls).toEqual([schema.stationDevices]);
   });
+
+  it("stores the requested kind on create and defaults to station", async () => {
+    const insertValues = vi.fn().mockImplementation((values: { kind: string }) => ({
+      returning: () =>
+        Promise.resolve([
+          {
+            id: "device-2",
+            tenantId: "tenant-1",
+            name: "TSD 1",
+            kind: values.kind,
+            lineId: null,
+            apiKeyId: null,
+            enrolledAt: new Date("2026-09-10T09:00:00Z"),
+            pairedAt: null,
+            revokedAt: null,
+            lastSeenAt: null,
+          },
+        ]),
+    }));
+    const db = {
+      insert: () => ({ values: insertValues }),
+      transaction: (callback: (tx: Db) => Promise<unknown>) => callback(db as unknown as Db),
+    } as unknown as Db;
+    const service = new StationDevicesService(db, bypassEntitlements);
+
+    const handheld = await service.create("tenant-1", {
+      name: "TSD 1",
+      lineId: null,
+      kind: "handheld",
+    });
+    expect(handheld.kind).toBe("handheld");
+    expect(insertValues).toHaveBeenLastCalledWith(
+      expect.objectContaining({ tenantId: "tenant-1", kind: "handheld" }),
+    );
+  });
+
+  it("refuses to change the kind of a paired device", async () => {
+    const paired = {
+      device: {
+        id: "device-3",
+        tenantId: "tenant-1",
+        name: "Paired",
+        kind: "station",
+        lineId: null,
+        apiKeyId: "key-1",
+        enrolledAt: new Date("2026-09-10T09:00:00Z"),
+        pairedAt: new Date("2026-09-10T09:05:00Z"),
+        revokedAt: null,
+        lastSeenAt: null,
+      },
+      lineName: null,
+    };
+    const db = {
+      select: () => ({
+        from: () => ({ leftJoin: () => ({ where: () => Promise.resolve([paired]) }) }),
+      }),
+    } as unknown as Db;
+    const service = new StationDevicesService(db, bypassEntitlements);
+
+    await expect(
+      service.update("tenant-1", "device-3", { kind: "handheld" }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
 });
 
 describe("stationDeviceLifecycle", () => {
