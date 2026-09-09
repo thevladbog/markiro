@@ -289,15 +289,17 @@ describe("atomic product label acceptance", () => {
     ).rejects.toMatchObject({ code: "PRODUCT_LABEL_ACCEPTANCE_INVALID" });
   });
 
-  it("rejects prepared DPI that differs from the frozen template before writing", async () => {
+  it("accepts a prepared resolution that differs from the template's authoring dpi", async () => {
     const input = productLabelAcceptanceFixture();
-    await expect(
-      acceptFixture(exec, {
-        ...input,
-        preparedEvent: { ...input.preparedEvent, dpi: 300 },
-      }),
-    ).rejects.toMatchObject({ code: "PRODUCT_LABEL_ACCEPTANCE_INVALID" });
-    expect(await counts()).toEqual(tables.map(() => 0));
+    // The template snapshot is authored at 203 dpi; the printer is 300.
+    const prepared = { ...input, preparedEvent: { ...input.preparedEvent, dpi: 300 as const } };
+    await expect(acceptFixture(exec, prepared)).resolves.toEqual({
+      status: "accepted",
+      jobId: input.jobId,
+    });
+    const stored = await readProductLabelJob(exec, input.credentialOwnership, input.jobId);
+    expect(stored?.policy.snapshot.spec.dpi).toBe(203);
+    expect(stored?.projection.dpi).toBe(300);
   });
 
   it.each(["codeHash", "canonicalRaw", "bytesBase64", "credentialOwnership"] as const)(
