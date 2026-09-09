@@ -1108,55 +1108,63 @@ describe("private National Catalog images (real PostgreSQL and normalized bytes)
     expect(link?.reviewedPhoto).toBeNull();
   });
 
-  it("serves the same normalized bytes from private local MinIO before and after activation", async () => {
-    const { loadEnv } = await import("../src/env");
-    const { ObjectStorageService } = await import("../src/modules/storage/object-storage.service");
-    const env = loadEnv();
-    if (!["localhost", "127.0.0.1"].includes(new URL(env.S3_ENDPOINT).hostname))
-      throw new Error("Local MinIO only");
-    const storage = new ObjectStorageService(env);
-    const rt = runtime();
-    const service = new NationalCatalogImageService(
-      repository,
-      sessions,
-      rt.coordinator,
-      storage,
-      rt.products,
-      { enabled: true, verifiedHosts: ["images.example"] },
-      rt.download,
-    );
-    let assetId: string | null = null;
-    let objectKey: string | null = null;
-    try {
-      const { p, id } = await prepared({ ...rt, service });
-      const shown = await service.readPreview(actor.tenantId, sessionId, id);
-      const { result } = await accept(p, id);
-      await service.apply(actor.tenantId, result.operationId, p.id);
-      const [active] = await db
-        .select()
-        .from(schema.productImages)
-        .innerJoin(schema.mediaAssets, eq(schema.mediaAssets.id, schema.productImages.assetId))
-        .where(eq(schema.productImages.productId, existingId));
-      if (!active) throw new Error("Expected active private asset");
-      assetId = active.media_assets.id;
-      objectKey = active.media_assets.objectKey;
-      expect((await storage.get(objectKey)).body).toEqual(shown.buffer);
-      expect(active.media_assets.checksum).toBe(
-        createHash("sha256").update(shown.buffer).digest("hex"),
+  // The PostgreSQL-only API job has no MinIO. The infrastructure job runs this
+  // same file with LOCAL_INFRA_SMOKE=1 and an initialized private bucket.
+  it.skipIf(process.env.LOCAL_INFRA_SMOKE !== "1")(
+    "serves the same normalized bytes from private local MinIO before and after activation",
+    async () => {
+      const { loadEnv } = await import("../src/env");
+      const { ObjectStorageService } =
+        await import("../src/modules/storage/object-storage.service");
+      const env = loadEnv();
+      if (!["localhost", "127.0.0.1"].includes(new URL(env.S3_ENDPOINT).hostname))
+        throw new Error("Local MinIO only");
+      const storage = new ObjectStorageService(env);
+      const rt = runtime();
+      const service = new NationalCatalogImageService(
+        repository,
+        sessions,
+        rt.coordinator,
+        storage,
+        rt.products,
+        { enabled: true, verifiedHosts: ["images.example"] },
+        rt.download,
       );
-    } finally {
-      if (assetId && objectKey) {
-        await db.delete(schema.productImages).where(eq(schema.productImages.productId, existingId));
-        await db
-          .update(schema.nationalCatalogImportImages)
-          .set({ stagedAssetId: null, state: "released" })
-          .where(eq(schema.nationalCatalogImportImages.stagedAssetId, assetId));
-        await storage.delete(objectKey);
-        await db.delete(schema.mediaAssets).where(eq(schema.mediaAssets.id, assetId));
+      let assetId: string | null = null;
+      let objectKey: string | null = null;
+      try {
+        const { p, id } = await prepared({ ...rt, service });
+        const shown = await service.readPreview(actor.tenantId, sessionId, id);
+        const { result } = await accept(p, id);
+        await service.apply(actor.tenantId, result.operationId, p.id);
+        const [active] = await db
+          .select()
+          .from(schema.productImages)
+          .innerJoin(schema.mediaAssets, eq(schema.mediaAssets.id, schema.productImages.assetId))
+          .where(eq(schema.productImages.productId, existingId));
+        if (!active) throw new Error("Expected active private asset");
+        assetId = active.media_assets.id;
+        objectKey = active.media_assets.objectKey;
+        expect((await storage.get(objectKey)).body).toEqual(shown.buffer);
+        expect(active.media_assets.checksum).toBe(
+          createHash("sha256").update(shown.buffer).digest("hex"),
+        );
+      } finally {
+        if (assetId && objectKey) {
+          await db
+            .delete(schema.productImages)
+            .where(eq(schema.productImages.productId, existingId));
+          await db
+            .update(schema.nationalCatalogImportImages)
+            .set({ stagedAssetId: null, state: "released" })
+            .where(eq(schema.nationalCatalogImportImages.stagedAssetId, assetId));
+          await storage.delete(objectKey);
+          await db.delete(schema.mediaAssets).where(eq(schema.mediaAssets.id, assetId));
+        }
+        storage.onModuleDestroy();
       }
-      storage.onModuleDestroy();
-    }
-  });
+    },
+  );
   it.each([
     { scenario: "pre-read revocation", reason: "image_access_changed", attempts: 0 },
     { scenario: "exhausted-attempt recovery", reason: "image_attempts_exhausted", attempts: 4 },

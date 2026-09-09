@@ -395,8 +395,12 @@ test("uses every and only the production environment example keys", async () => 
     "S3_FORCE_PATH_STYLE",
     "DADATA_TOKEN",
     "DADATA_SECRET",
+    "NATIONAL_CATALOG_OWN_IMPORT_ENABLED",
+    "NATIONAL_CATALOG_GTIN_IMPORT_ENABLED",
+    "NATIONAL_CATALOG_IMAGE_IMPORT_ENABLED",
+    "NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS",
   ]);
-  assert.equal(inventory.length, 44);
+  assert.equal(inventory.length, 48);
   assert.deepEqual(
     runtimeInventoryKeyNames(
       inventory,

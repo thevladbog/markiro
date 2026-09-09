@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createDb, schema, type Db } from "@markiro/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, count, eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthorizationService } from "../src/authorization/authorization.service";
@@ -459,6 +459,8 @@ describe.skipIf(!process.env.DATABASE_URL)("durable National Catalog sessions", 
       service.items(actor.tenantId, s.id, { ...query, search: "x".repeat(501) }),
     ).rejects.toMatchObject({ status: 422 });
   });
+  // Inserting 100,000 indexed PostgreSQL rows exceeds the default 5s on CI;
+  // this checks the durable row-limit contract, not a latency budget.
   it("stops before the100001st row without losing the prior100000", async () => {
     const s = await service.start(actor, { mode: "own_catalog" });
     await db.execute(
@@ -476,7 +478,12 @@ describe.skipIf(!process.env.DATABASE_URL)("durable National Catalog sessions", 
     const saved = await row(s.id);
     await service.resume(actor.tenantId, s.id);
     expect(await row(s.id)).toEqual(saved);
-  });
+    const [retained] = await db
+      .select({ count: count() })
+      .from(items)
+      .where(and(eq(items.tenantId, actor.tenantId), eq(items.sessionId, s.id)));
+    expect(retained?.count).toBe(100000);
+  }, 30_000);
   it("keeps successful GTIN chunks and explicitly retries only a failed chunk", async () => {
     const gtins = Array.from({ length: 26 }, (_, i) => gtin(i + 1));
     const s = await service.start(actor, { mode: "gtins", text: gtins.join(";") });

@@ -172,6 +172,25 @@ test("Signer Windows verification includes the stable release contract", () => {
   assert.ok(job.steps.some((step) => step.run === "pnpm test:signer-release:contract"));
 });
 
+test("National Catalog storage checks run after local MinIO initialization", () => {
+  const job = workflow.jobs["tenant-team-infrastructure"];
+  const storage = job.steps.find((step) =>
+    step.run?.includes("test/national-catalog-image.test.ts"),
+  );
+  assert.ok(storage, "the infrastructure job must execute the real catalog image round trip");
+  assert.equal(job.env.LOCAL_INFRA_SMOKE, "1");
+  assert.equal(job.env.S3_ENDPOINT, "http://127.0.0.1:9000");
+  assert.equal(storage.if, undefined, "storage coverage must not silently skip");
+  assert.ok(
+    job.steps.indexOf(storage) >
+      job.steps.indexOf(stepByName(job, "Initialize the private development bucket")),
+  );
+  assert.ok(
+    job.steps.indexOf(storage) >
+      job.steps.indexOf(stepByName(job, "Build API workspace dependencies")),
+  );
+});
+
 test("ci-required always evaluates the classifier and every heavy job", () => {
   const gate = workflow.jobs["ci-required"];
   assert.ok(gate, "workflow must define ci-required");
