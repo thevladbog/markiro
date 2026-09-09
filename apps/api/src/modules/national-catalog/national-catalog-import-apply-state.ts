@@ -46,11 +46,41 @@ const entrySchema = z.discriminatedUnion("target", [
     })
     .strict(),
 ]);
+// Persisted v1 views predate public dependency metadata. Read their strict shape,
+// then derive dependencies from the private entries; never rewrite stored evidence.
+const storedFieldSchema = z
+  .object({
+    ...importPreviewSchema.shape.fields.element.shape,
+    requiresEntryIds: z.array(z.uuid()).optional(),
+  })
+  .strict();
+const storedViewSchema = z
+  .object({
+    ...importPreviewSchema.shape,
+    fields: z.array(storedFieldSchema),
+    identity: importPreviewSchema.shape.identity.optional(),
+  })
+  .strict();
+const enrichedStoredViewSchema = z
+  .object({ ...importPreviewSchema.shape, identity: importPreviewSchema.shape.identity.optional() })
+  .strict();
 const diffSchema = z
-  .object({ version: z.literal(1), entries: z.array(entrySchema), view: importPreviewSchema })
+  .object({ version: z.literal(1), entries: z.array(entrySchema), view: storedViewSchema })
   .strict();
 export function parseImportDiff(value: unknown): StoredImportDiff {
-  return diffSchema.parse(value);
+  const diff = diffSchema.parse(value);
+  const entries = new Map(diff.entries.map((entry) => [entry.entryId, entry]));
+  const view = enrichedStoredViewSchema.parse({
+    ...diff.view,
+    fields: diff.view.fields.map((field) => {
+      const entry = entries.get(field.id);
+      return {
+        ...field,
+        requiresEntryIds: entry?.target === "mapped" ? entry.requiresEntryIds : [],
+      };
+    }),
+  });
+  return { ...diff, view };
 }
 export const storedDecisionSchema = importDecisionSchema.safeExtend({
   version: z.literal(1),

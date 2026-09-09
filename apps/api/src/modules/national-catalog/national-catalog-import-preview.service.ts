@@ -1,3 +1,4 @@
+import { parseImportDiff, sourceEnvelopeSchema } from "./national-catalog-import-apply-state";
 import { overlayStoredImages } from "./national-catalog-image-state";
 import { randomUUID } from "node:crypto";
 import {
@@ -455,7 +456,7 @@ export class NationalCatalogImportPreviewService {
     const ids = cp.completed.map((item) => item.previewId);
     const stored = ids.length
       ? await tx
-          .select({ id: previews.id, diff: previews.diff })
+          .select({ id: previews.id, diff: previews.diff, source: previews.source })
           .from(previews)
           .where(
             and(
@@ -470,7 +471,16 @@ export class NationalCatalogImportPreviewService {
         const diff = preview.diff;
         if (!diff || typeof diff !== "object" || !("view" in diff))
           throw new ConflictException("preview_unavailable");
-        return [preview.id, importPreviewSchema.parse(diff.view)] as const;
+        const source = sourceEnvelopeSchema.parse(preview.source);
+        const identity = {
+          gtin14: source.boundGtin14,
+          cardId: source.cardId,
+          name: source.normalized.name,
+        };
+        return [
+          preview.id,
+          importPreviewSchema.parse({ ...parseImportDiff(diff).view, identity }),
+        ] as const;
       }),
     );
     const views = await Promise.all(

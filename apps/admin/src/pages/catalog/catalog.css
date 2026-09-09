@@ -62,3 +62,35 @@
     max-width: none;
   }
 }
+
+.mk-nc-import {
+  display: grid;
+  gap: var(--space-4, 16px);
+}
+.mk-nc-actions,
+.mk-nc-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3, 12px);
+  margin-block: 16px;
+}
+.mk-nc-review-item {
+  min-width: 0;
+  padding: 16px;
+  margin-block: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.mk-nc-fields {
+  display: grid;
+  gap: 12px;
+  margin-block: 16px;
+}
+.mk-nc-fields p,
+.mk-nc-review-item p {
+  overflow-wrap: anywhere;
+}
+.mk-nc-photos img {
+  object-fit: contain;
+  display: block;
+}

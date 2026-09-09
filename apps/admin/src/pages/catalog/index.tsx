@@ -239,6 +239,7 @@ function AuthorizedProductRowActions({ product }: { product: ProductDto }) {
 /** Admin product catalog CRUD screen -- Plan 03 Task 12 (list/create/edit/delete + GTIN owner hint). */
 export function CatalogPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const canReadIntegrations = useCan(CABINET_CAPABILITY.INTEGRATIONS_READ);
 
@@ -355,7 +356,21 @@ export function CatalogPage() {
     <AdminPage className="mk-catalog-page" data-testid="catalog-page">
       <PageHeader
         title={t("pages.catalog.title")}
-        actions={canWrite ? <AuthorizedCreateProductAction /> : null}
+        actions={
+          canWrite ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  void navigate("/catalog/import", { state: { catalogBackground: true } })
+                }
+              >
+                {t("pages.catalog.import.entry")}
+              </Button>
+              <AuthorizedCreateProductAction />
+            </div>
+          ) : null
+        }
       />
 
       {canReadIntegrations ? <AuthorizedCandidatesPlaque /> : null}

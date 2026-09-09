@@ -1,3 +1,4 @@
+import { parseImportDiff } from "../src/modules/national-catalog/national-catalog-import-apply-state";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createDb, schema, type Db } from "@markiro/db";
@@ -61,6 +62,7 @@ it("requires explicit field acceptance for an existing product", () => {
       reason: null,
       source: "national_catalog" as const,
       selectedByDefault: false,
+      requiresEntryIds: [],
     },
   ];
   expect(defaultAcceptedEntries("existing", fields)).toEqual([]);
@@ -592,10 +594,8 @@ describe("immutable pre-product comparisons and durable preparation", () => {
     expect(initial.items[0]?.fields.filter((f) => f.applicable)).toHaveLength(1);
     expect(initial.items[0]?.categoryOptions).toHaveLength(1);
     const choice = initial.items[0]!.categoryOptions[0]!;
-    const selected = await run({
-      ...request(),
-      categoryChoices: [{ itemId, optionId: choice.optionId }],
-    });
+    const selectedBody = { ...request(), categoryChoices: [{ itemId, optionId: choice.optionId }] };
+    const selected = await run(selectedBody);
     expect(selected.items[0]?.fields.filter((f) => f.applicable)).toHaveLength(3);
     const [row] = await db.select().from(previews).where(eq(previews.id, selected.items[0]!.id));
     const diff = row?.diff as StoredImportDiff;
@@ -603,10 +603,65 @@ describe("immutable pre-product comparisons and durable preparation", () => {
     const attr = diff.entries.find((entry) => entry.target === "mapped");
     const binding = diff.entries.find((entry) => entry.target === "category");
     if (!attr || !binding) throw new Error("Missing category entries");
+    expect(selected.items[0]?.fields.find((field) => field.id === attr.entryId)).toHaveProperty(
+      "requiresEntryIds",
+      [binding.entryId],
+    );
     expect(() => assertPreviewEntrySelection(diff, [attr.entryId])).toThrow(
       "category_entry_required",
     );
     expect(() => assertPreviewEntrySelection(diff, [attr.entryId, binding.entryId])).not.toThrow();
+    // Persist an actual v1 view with the dependency property absent, while keeping
+    // authoritative private entries and all original source/decision hashes.
+    const { identity, ...legacyView } = diff.view;
+    expect(identity).toEqual({ gtin14: GTIN, cardId: String(c.value.id), name: c.value.name });
+    const legacy = {
+      ...diff,
+      view: {
+        ...legacyView,
+        fields: diff.view.fields.map(({ requiresEntryIds: _dependencies, ...field }) => field),
+      },
+    };
+    await db.update(previews).set({ diff: legacy }).where(eq(previews.id, selected.items[0]!.id));
+    const [beforeLegacyRead] = await db
+      .select()
+      .from(previews)
+      .where(eq(previews.id, selected.items[0]!.id));
+    await db
+      .update(schema.nationalCatalogImportItems)
+      .set({ name: "Changed after comparison" })
+      .where(eq(schema.nationalCatalogImportItems.id, itemId));
+    const restored = await service.readPreparation(
+      actor.tenantId,
+      sessionId,
+      selected.preparation.id,
+    );
+    expect(restored.items[0]?.identity).toEqual({
+      gtin14: GTIN,
+      cardId: String(c.value.id),
+      name: c.value.name,
+    });
+    expect(
+      restored.items[0]?.fields.find((field) => field.id === attr.entryId)?.requiresEntryIds,
+    ).toEqual([binding.entryId]);
+    const replayed = await service.prepare(actor, sessionId, selectedBody);
+    expect(replayed.preparation.id).toBe(selected.preparation.id);
+    expect(
+      replayed.items[0]?.fields.find((field) => field.id === attr.entryId)?.requiresEntryIds,
+    ).toEqual([binding.entryId]);
+    const [afterLegacyRead] = await db
+      .select()
+      .from(previews)
+      .where(eq(previews.id, selected.items[0]!.id));
+    expect(afterLegacyRead).toEqual(beforeLegacyRead);
+    const parsedLegacy = parseImportDiff(legacy);
+    expect(() => assertPreviewEntrySelection(parsedLegacy, [attr.entryId])).toThrow(
+      "category_entry_required",
+    );
+    expect(() =>
+      assertPreviewEntrySelection(parsedLegacy, [binding.entryId, attr.entryId]),
+    ).not.toThrow();
+
     expect(row?.previousValues).toMatchObject({
       expectedAbsentGtin: GTIN,
       initialProduct: {

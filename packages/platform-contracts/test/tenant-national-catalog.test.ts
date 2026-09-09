@@ -62,6 +62,7 @@ const validPreparation = {
 const validPreview = {
   id: ID_1,
   itemId: ID_2,
+  identity: { gtin14: "04006381333931", cardId: "provider-card-1", name: "Товар" },
   productId: null,
   expiresAt: UTC_DATE,
   fields: [
@@ -74,6 +75,7 @@ const validPreview = {
       reason: null,
       source: "national_catalog",
       selectedByDefault: true,
+      requiresEntryIds: [],
     },
   ],
   photos: [
@@ -562,4 +564,21 @@ it("requires safe coherent capability connection and refusal reasons", () => {
   ])
     expect(catalogCapabilitiesSchema.safeParse({ ...valid, connection }).success).toBe(false);
   expect(catalogCapabilitiesSchema.safeParse({ ...valid, ownCatalog: true }).success).toBe(false);
+});
+
+it("requires explicit scoped field dependency IDs rather than accepting absent or dangling prerequisites", () => {
+  const fields = [{ ...validPreview.fields[0], requiresEntryIds: [] }];
+  expect(importPreviewSchema.safeParse({ ...validPreview, fields }).success).toBe(true);
+  expect(
+    importPreviewSchema.safeParse({
+      ...validPreview,
+      fields: validPreview.fields.map(({ requiresEntryIds: _requires, ...field }) => field),
+    }).success,
+  ).toBe(false);
+  expect(
+    importPreviewSchema.safeParse({
+      ...validPreview,
+      fields: [{ ...fields[0], requiresEntryIds: [ID_3] }],
+    }).success,
+  ).toBe(false);
 });

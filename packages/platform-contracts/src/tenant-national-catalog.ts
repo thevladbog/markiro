@@ -199,6 +199,7 @@ const importFieldSchema = z
     reason: nullableReasonSchema,
     source: z.enum(["national_catalog", "manual"]),
     selectedByDefault: z.boolean(),
+    requiresEntryIds: z.array(platformUuidSchema),
   })
   .strict();
 export type ImportField = z.infer<typeof importFieldSchema>;
@@ -231,13 +232,38 @@ const categoryOptionSchema = z
   .object({ optionId: platformUuidSchema, label: z.string(), selected: z.boolean() })
   .strict();
 
+const importFieldsSchema = z.array(importFieldSchema).superRefine((fields, context) => {
+  addDuplicateIssue(
+    fields.map((field) => field.id),
+    context,
+    [],
+  );
+  const ids = new Set(fields.map((field) => field.id));
+  fields.forEach((field, index) => {
+    addDuplicateIssue(field.requiresEntryIds, context, [index, "requiresEntryIds"]);
+    if (field.requiresEntryIds.some((id) => id === field.id || !ids.has(id)))
+      context.addIssue({
+        code: "custom",
+        path: [index, "requiresEntryIds"],
+        message: "Prerequisite must reference another field in this preview",
+      });
+  });
+});
+
 export const importPreviewSchema = z
   .object({
     id: platformUuidSchema,
     itemId: platformUuidSchema,
+    identity: z
+      .object({
+        gtin14: normalizedGtin14Schema,
+        cardId: z.string().min(1),
+        name: z.string().nullable(),
+      })
+      .strict(),
     productId: platformUuidSchema.nullable(),
     expiresAt: utcDateTimeSchema,
-    fields: z.array(importFieldSchema),
+    fields: importFieldsSchema,
     photos: z.array(importPhotoSchema),
     linkAction: z.enum(["attach", "keep", "replace"]),
     categoryOptions: z.array(categoryOptionSchema),

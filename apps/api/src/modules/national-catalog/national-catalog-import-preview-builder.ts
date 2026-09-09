@@ -52,7 +52,11 @@ export type ImportPreviewEntry =
       entry: MappedEntry;
       requiresEntryIds: string[];
     };
-export type StoredImportDiff = { version: 1; entries: ImportPreviewEntry[]; view: ImportPreview };
+export type StoredImportDiff = {
+  version: 1;
+  entries: ImportPreviewEntry[];
+  view: Omit<ImportPreview, "identity"> & { identity?: ImportPreview["identity"] | undefined };
+};
 export const optionSchema = z
   .object({
     optionId: z.uuid(),
@@ -304,6 +308,7 @@ export async function buildImportPreview(
       reason: null,
       source: entry.source,
       selectedByDefault: !product,
+      requiresEntryIds: [],
     });
   }
   let categoryEntryId: string | null = null;
@@ -324,6 +329,7 @@ export async function buildImportPreview(
       reason: null,
       source: "national_catalog",
       selectedByDefault: !product,
+      requiresEntryIds: [],
     });
   }
   const currentRows = product
@@ -408,6 +414,7 @@ export async function buildImportPreview(
         reason: null,
         source: "national_catalog",
         selectedByDefault: !product,
+        requiresEntryIds: entry.target === "attribute" && categoryEntryId ? [categoryEntryId] : [],
       });
     }
   }
@@ -422,6 +429,7 @@ export async function buildImportPreview(
       reason: target ? "attribute_not_importable" : "compatible_schema_required",
       source: "national_catalog",
       selectedByDefault: false,
+      requiresEntryIds: [],
     });
   }
   const id = randomUUID();
@@ -436,6 +444,7 @@ export async function buildImportPreview(
   const view: ImportPreview = {
     id,
     itemId: item.id,
+    identity: { gtin14: item.gtin14, cardId: item.cardId, name: source.name },
     productId: product?.id ?? null,
     expiresAt: session.expiresAt.toISOString(),
     fields,

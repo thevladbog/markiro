@@ -78,6 +78,9 @@ importers:
       '@markiro/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@markiro/platform-contracts':
+        specifier: workspace:*
+        version: link:../../packages/platform-contracts
       '@markiro/ui':
         specifier: workspace:*
         version: link:../../packages/ui

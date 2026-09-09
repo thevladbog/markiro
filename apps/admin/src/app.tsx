@@ -21,6 +21,10 @@ import { ResetPasswordPage } from "./pages/auth/ResetPassword.js";
 import { SelectOrgPage } from "./pages/auth/SelectOrg.js";
 import { BoxesPage } from "./pages/boxes/index.js";
 import { SellBoxPage } from "./pages/boxes/SellBoxPage.js";
+import {
+  ImportPanel,
+  NationalCatalogIdentityBoundary,
+} from "./pages/catalog/national-catalog/ImportPanel.js";
 import { CatalogPage } from "./pages/catalog/index.js";
 import { ProductPanelRoute } from "./pages/catalog/ProductPanelRoute.js";
 import { ConflictsPage } from "./pages/conflicts/index.js";
@@ -115,6 +119,7 @@ function appRouteElements() {
             </RequireCapability>
           }
         >
+          <Route path="import" element={<ImportPanel />} />
           <Route
             path="new"
             element={
@@ -522,8 +527,15 @@ export function App() {
   const router = useMemo(createAppRouter, []);
 
   return (
-    <AuthQueryBoundary>
-      <RouterProvider router={router} />
-    </AuthQueryBoundary>
+    <NationalCatalogIdentityBoundary
+      onIdentityChange={async () => {
+        if (router.state.location.pathname.startsWith("/catalog/import"))
+          await router.navigate("/catalog/import", { replace: true });
+      }}
+    >
+      <AuthQueryBoundary>
+        <RouterProvider router={router} />
+      </AuthQueryBoundary>
+    </NationalCatalogIdentityBoundary>
   );
 }
