@@ -1115,4 +1115,184 @@ describe("atomic National Catalog product application (real PostgreSQL services)
       ]),
     ).rejects.toThrow("import_operation_cancelled");
   });
+  it("retains rejected/unchanged target review after preview GC and compares live compatible attributes", async () => {
+    const c = await existingAttribute();
+    await apply(decision(await preview()));
+    const link = (await links())[0];
+    if (!link) throw new Error("link");
+    expect(link.reviewedProjection).toMatchObject({
+      version: 1,
+      values: { name: "Из ЧЗ", [`attribute:${c.id}:20`]: { type: "string", value: "Синий" } },
+    });
+    await db
+      .update(schema.nationalCatalogImportPreviews)
+      .set({ source: null, diff: null, previousValues: null, payloadPurgedAt: new Date() })
+      .where(eq(schema.nationalCatalogImportPreviews.sessionId, sessionId));
+    const { NationalCatalogLinkRefreshService } =
+      await import("../src/modules/national-catalog/national-catalog-link-refresh.service");
+    const { NationalCatalogLinkService } =
+      await import("../src/modules/national-catalog/national-catalog-link.service");
+    const authorization = new AuthorizationService(db),
+      entitlements = new EntitlementsService(db, "managed_only");
+    const worker = new NationalCatalogLinkRefreshService(
+      db,
+      authorization,
+      entitlements,
+      {
+        getFeedProductsByIds: async () => ({
+          status: "ok",
+          value: { products: [source] },
+          etag: null,
+          contentHash: "f".repeat(64),
+          usage: { total: null, method: null },
+        }),
+      },
+      {
+        run: async (_context, fn) =>
+          fn({
+            auth: { baseUrl: "https://catalog.invalid", token: "test-only" },
+            signal: new AbortController().signal,
+          }),
+        runExternal: async () => {
+          throw new Error("no photo request");
+        },
+      },
+      { enabled: true, photos: { enabled: false, verifiedHosts: [] } },
+    );
+    const read = () =>
+      new NationalCatalogLinkService(db, authorization, entitlements).read(
+        actor.tenantId,
+        existingId,
+      );
+    const refresh = async () => {
+      await worker.request(actor, existingId);
+      await worker.resume(actor.tenantId, link.id);
+    };
+    await refresh();
+    expect((await read()).hasChanges).toBe(false);
+    const unchangedLink = (await links())[0];
+    expect(unchangedLink?.observedMeaningfulHash).toBe(unchangedLink?.reviewedMeaningfulHash);
+    // Name was rejected and still differs. The only changed target now equals local red.
+    source = { ...source, attributes: source.attributes.map((a) => ({ ...a, value: "Красный" })) };
+    await refresh();
+    expect((await read()).hasChanges).toBe(false);
+    source = { ...source, attributes: source.attributes.map((a) => ({ ...a, value: "Зелёный" })) };
+    await refresh();
+    expect((await read()).hasChanges).toBe(true);
+    await db
+      .update(schema.productRegulatoryAttributeValues)
+      .set({ value: { type: "string", value: "Зелёный" } })
+      .where(
+        and(
+          eq(schema.productRegulatoryAttributeValues.tenantId, actor.tenantId),
+          eq(schema.productRegulatoryAttributeValues.productId, existingId),
+        ),
+      );
+    expect((await read()).hasChanges).toBe(false);
+    await db
+      .update(schema.productRegulatoryAttributeValues)
+      .set({ state: "inapplicable" })
+      .where(
+        and(
+          eq(schema.productRegulatoryAttributeValues.tenantId, actor.tenantId),
+          eq(schema.productRegulatoryAttributeValues.productId, existingId),
+        ),
+      );
+    expect((await read()).hasChanges).toBe(false);
+    await db
+      .update(schema.productRegulatoryAttributeValues)
+      .set({ value: { type: "string", value: "Красный" } })
+      .where(
+        and(
+          eq(schema.productRegulatoryAttributeValues.tenantId, actor.tenantId),
+          eq(schema.productRegulatoryAttributeValues.productId, existingId),
+        ),
+      );
+    await db
+      .update(schema.nationalCatalogSchemaVersions)
+      .set({ status: "retired" })
+      .where(eq(schema.nationalCatalogSchemaVersions.id, c.id));
+    expect((await read()).hasChanges).toBe(false);
+    await db
+      .update(schema.nationalCatalogSchemaVersions)
+      .set({ status: "active" })
+      .where(eq(schema.nationalCatalogSchemaVersions.id, c.id));
+    source = { ...source, categories: [] };
+    await refresh();
+    expect((await read()).hasChanges).toBe(false);
+  });
+  it("compares first-filled supported values against known absence under the pinned reviewed schema", async () => {
+    const c = await existingAttribute();
+    const attribute = source.attributes[0];
+    if (!attribute) throw new Error("attribute fixture");
+    source = { ...source, attributes: [] };
+    await apply(decision(await preview()));
+    const link = (await links())[0];
+    if (!link) throw new Error("link");
+    const reviewed = link.reviewedProjection;
+    expect(reviewed).toMatchObject({
+      values: { name: "Из ЧЗ" },
+      context: { schemaVersionId: c.id },
+    });
+    const { NationalCatalogLinkRefreshService } =
+      await import("../src/modules/national-catalog/national-catalog-link-refresh.service");
+    const { NationalCatalogLinkService } =
+      await import("../src/modules/national-catalog/national-catalog-link.service");
+    const authorization = new AuthorizationService(db),
+      entitlements = new EntitlementsService(db, "managed_only");
+    const worker = new NationalCatalogLinkRefreshService(
+      db,
+      authorization,
+      entitlements,
+      {
+        getFeedProductsByIds: async () => ({
+          status: "ok",
+          value: { products: [source] },
+          etag: null,
+          contentHash: "f".repeat(64),
+          usage: { total: null, method: null },
+        }),
+      },
+      {
+        run: async (_context, fn) =>
+          fn({
+            auth: { baseUrl: "https://catalog.invalid", token: "test-only" },
+            signal: new AbortController().signal,
+          }),
+        runExternal: async () => {
+          throw new Error("no photo request");
+        },
+      },
+      { enabled: true, photos: { enabled: false, verifiedHosts: [] } },
+    );
+    const read = () =>
+      new NationalCatalogLinkService(db, authorization, entitlements).read(
+        actor.tenantId,
+        existingId,
+      );
+    const refresh = async () => {
+      await worker.request(actor, existingId);
+      await worker.resume(actor.tenantId, link.id);
+    };
+    source = { ...source, attributes: [{ ...attribute, value: "Зелёный" }] };
+    await refresh();
+    expect((await read()).hasChanges).toBe(true);
+    source = { ...source, attributes: [{ ...attribute, value: "Красный" }] };
+    await refresh();
+    expect((await read()).hasChanges).toBe(false);
+    source = { ...source, attributes: [] };
+    await refresh();
+    expect((await read()).hasChanges).toBe(false);
+    await db.insert(schema.nationalCatalogAttributeMappings).values({
+      schemaVersionId: c.id,
+      sourceAttributeId: "999",
+      targetField: "print_name",
+      conversion: { kind: "string_trim" },
+      mappingVersion: 1,
+    });
+    source = { ...source, attributes: [{ ...attribute, id: 999, value: "Unpinned title" }] };
+    await refresh();
+    expect((await read()).hasChanges).toBe(false);
+    expect((await links())[0]?.reviewedProjection).toEqual(reviewed);
+  });
 });

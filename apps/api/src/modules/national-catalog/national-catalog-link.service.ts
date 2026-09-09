@@ -1,3 +1,6 @@
+import type { NationalCatalogLinkRefreshService } from "./national-catalog-link-refresh.service";
+import { summaryForCatalogLink } from "./national-catalog-summary";
+import { catalogLocalStateSelection } from "./national-catalog-observation-projection";
 import { ForbiddenException, NotFoundException } from "@nestjs/common";
 import { and, eq, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
@@ -14,13 +17,24 @@ export class NationalCatalogLinkService {
     private readonly db: Db,
     private readonly authorization: AuthorizationService,
     private readonly entitlements: EntitlementsService,
+    private readonly refreshes?: Pick<NationalCatalogLinkRefreshService, "request">,
   ) {}
+  async refresh(actor: ImportActor, productId: string): Promise<ChzSummary> {
+    if (!this.refreshes) throw new ForbiddenException("refresh_disabled");
+    await this.refreshes.request(actor, productId);
+    return this.read(actor.tenantId, productId);
+  }
   async read(tenantId: string, productId: string): Promise<ChzSummary> {
     return (await this.readDetail(tenantId, productId)).summary;
   }
   async readDetail(tenantId: string, productId: string): Promise<ChzLinkDetail> {
     const [row] = await this.db
-      .select({ productId: schema.products.id, link: schema.nationalCatalogProductLinks })
+      .select({
+        product: schema.products,
+        link: schema.nationalCatalogProductLinks,
+        imageChecksum: schema.mediaAssets.checksum,
+        localState: catalogLocalStateSelection,
+      })
       .from(schema.products)
       .leftJoin(
         schema.nationalCatalogProductLinks,
@@ -30,26 +44,26 @@ export class NationalCatalogLinkService {
           isNull(schema.nationalCatalogProductLinks.closedAt),
         ),
       )
+      .leftJoin(
+        schema.productImages,
+        and(
+          eq(schema.productImages.tenantId, schema.products.tenantId),
+          eq(schema.productImages.productId, schema.products.id),
+        ),
+      )
+      .leftJoin(
+        schema.mediaAssets,
+        and(
+          eq(schema.mediaAssets.ownerTenantId, schema.products.tenantId),
+          eq(schema.mediaAssets.id, schema.productImages.assetId),
+          eq(schema.mediaAssets.status, "active"),
+        ),
+      )
       .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
     if (!row) throw new NotFoundException("product_not_found");
     const link = row.link;
     return {
-      summary: {
-        linkId: link?.id ?? null,
-        revision: link?.revision ?? null,
-        statusKeys: link?.statusKeys ?? [],
-        rawStatus: link?.rawStatus ?? null,
-        rawDetailedStatuses: link?.rawDetailedStatuses ?? [],
-        lastSuccessAt: link?.lastSuccessAt?.toISOString() ?? null,
-        lastAttemptAt: link?.lastAttemptAt?.toISOString() ?? null,
-        refreshing: false,
-        lastOutcome: link?.lastOutcome ?? "never",
-        hasChanges:
-          !!link &&
-          link.observedMeaningfulHash !== null &&
-          link.reviewedMeaningfulHash !== null &&
-          link.observedMeaningfulHash !== link.reviewedMeaningfulHash,
-      },
+      summary: summaryForCatalogLink(link, row.product, row.imageChecksum, row.localState),
       link: link
         ? {
             id: link.id,

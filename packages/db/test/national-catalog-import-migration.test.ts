@@ -537,4 +537,29 @@ describe.skipIf(!databaseUrl)("National Catalog import migration", () => {
       ),
     ).rejects.toMatchObject({ code: "23503" });
   });
+  it("adds unknown projection/refresh state without inventing reviewed data for legacy links", async () => {
+    const columns = await pool.query(
+      "SELECT column_name,is_nullable FROM information_schema.columns WHERE table_name='national_catalog_product_links' AND column_name=ANY($1::text[]) ORDER BY column_name",
+      [["reviewed_projection", "observed_projection", "refresh_checkpoint", "refresh_error_code"]],
+    );
+    expect(columns.rows).toEqual(
+      [
+        "observed_projection",
+        "refresh_checkpoint",
+        "refresh_error_code",
+        "reviewed_projection",
+      ].map((column_name) => ({ column_name, is_nullable: "YES" })),
+    );
+    const result = await pool.query(
+      "SELECT reviewed_projection,observed_projection,refresh_checkpoint,refresh_error_code FROM national_catalog_product_links",
+    );
+    expect(result.rows.length).toBeGreaterThan(0);
+    for (const row of result.rows)
+      expect(row).toEqual({
+        reviewed_projection: null,
+        observed_projection: null,
+        refresh_checkpoint: null,
+        refresh_error_code: null,
+      });
+  });
 });

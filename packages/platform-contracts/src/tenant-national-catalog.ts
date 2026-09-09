@@ -303,6 +303,23 @@ export const importResultSchema = z
   .strict();
 export type ImportResult = z.infer<typeof importResultSchema>;
 
+export const chzRefreshErrorCodeSchema = z.enum([
+  "access_changed",
+  "integration_unconfigured",
+  "environment_mismatch",
+  "refresh_disabled",
+  "local_gtin_changed",
+  "card_lost_gtin",
+  "card_unavailable",
+  "photo_unavailable",
+  "request_failed",
+  "request_timeout",
+  "retry_exhausted",
+  "quota_wait",
+  "lease_busy",
+  "token_unavailable",
+  "provider_unavailable",
+]);
 export const chzSummarySchema = z
   .object({
     linkId: platformUuidSchema.nullable(),
@@ -315,6 +332,7 @@ export const chzSummarySchema = z
     refreshing: z.boolean(),
     lastOutcome: z.enum(["ok", "error", "never"]),
     hasChanges: z.boolean(),
+    lastErrorCode: chzRefreshErrorCodeSchema.nullable(),
   })
   .strict();
 export type ChzSummary = z.infer<typeof chzSummarySchema>;

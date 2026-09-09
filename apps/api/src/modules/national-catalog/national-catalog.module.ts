@@ -104,14 +104,10 @@ export class NationalCatalogModule {
         },
         {
           provide: NationalCatalogFreshnessService,
-          inject: [
-            nationalCatalogFreshnessRepositoryProvider.provide,
-            NationalCatalogProductsService,
-          ],
+          inject: [nationalCatalogFreshnessRepositoryProvider.provide],
           useFactory: (
             repository: ConstructorParameters<typeof NationalCatalogFreshnessService>[0],
-            products: NationalCatalogProductsService,
-          ) => new NationalCatalogFreshnessService(repository, products),
+          ) => new NationalCatalogFreshnessService(repository),
         },
       ],
       exports: [

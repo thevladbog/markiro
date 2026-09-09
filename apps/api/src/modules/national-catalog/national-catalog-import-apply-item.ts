@@ -1,3 +1,4 @@
+import { buildCatalogProjection } from "./national-catalog-observation-projection";
 import { reviewedPhotoForConfirmation } from "./national-catalog-image-state";
 import { randomUUID } from "node:crypto";
 import { BadRequestException, ConflictException } from "@nestjs/common";
@@ -157,6 +158,7 @@ export async function applyImportItem(
   if (!isDeepStrictEqual(JSON.parse(JSON.stringify(currentAttributes)), previous.attributes))
     throw new ConflictException("attributes_changed");
   let version: typeof schema.nationalCatalogSchemaVersions.$inferSelect | undefined;
+  let mapping: typeof schema.nationalCatalogCategoryGroupMappings.$inferSelect | undefined;
   let stableMappings: ReturnType<typeof mappingSchema.parse>[] = [];
   if (previous.schema) {
     [version] = await tx
@@ -164,7 +166,7 @@ export async function applyImportItem(
       .from(schema.nationalCatalogSchemaVersions)
       .where(eq(schema.nationalCatalogSchemaVersions.id, previous.schema.version.id))
       .for("share");
-    const [mapping] = await tx
+    [mapping] = await tx
       .select()
       .from(schema.nationalCatalogCategoryGroupMappings)
       .where(eq(schema.nationalCatalogCategoryGroupMappings.id, previous.schema.mapping.id))
@@ -386,6 +388,21 @@ export async function applyImportItem(
         ? link.reviewedPhoto
         : null,
   });
+  const projection = buildCatalogProjection({
+    providerName: source.normalized.name,
+    mappedEntries: baselineEntries,
+    imageChecksum: photoReview?.checksum ?? null,
+    context:
+      version && mapping
+        ? {
+            schemaVersionId: version.id,
+            categoryId: version.categoryId,
+            groupCode: mapping.chzProductGroupCode,
+            definition: version.definition,
+            stableMappings,
+          }
+        : null,
+  });
   const meaningfulHash = meaningfulCatalogHash({
     providerName: source.normalized.name,
     mappedEntries: baselineEntries,
@@ -397,6 +414,10 @@ export async function applyImportItem(
     latestSnapshotId: snapshotId,
     reviewedSnapshotId: snapshotId,
     reviewedPhoto: photoReview,
+    reviewedProjection: projection,
+    observedProjection: projection,
+    refreshCheckpoint: null,
+    refreshErrorCode: null,
     lastAttemptAt: now,
     lastSuccessAt: now,
     lastOutcome: "ok" as const,

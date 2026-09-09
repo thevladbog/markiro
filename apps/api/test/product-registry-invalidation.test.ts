@@ -130,6 +130,8 @@ describe("ProductsService update registry boundary", () => {
       {
         ...baseRow,
         gtin14: returnedGtin,
+        catalogLink: null,
+        catalogLocalState: null,
         imageChecksum: null,
         imageByteSize: null,
         imageWidth: null,
@@ -137,10 +139,10 @@ describe("ProductsService update registry boundary", () => {
       },
     ]);
     const whereProduct = vi.fn(() => ({ limit }));
-    const joinGroup = vi.fn(() => ({ where: whereProduct }));
-    const joinAsset = vi.fn(() => ({ leftJoin: joinGroup }));
-    const joinImage = vi.fn(() => ({ leftJoin: joinAsset }));
-    const fromProduct = vi.fn(() => ({ leftJoin: joinImage }));
+    const leftJoin = vi.fn();
+    const joinedProduct = { leftJoin, where: whereProduct };
+    leftJoin.mockReturnValue(joinedProduct);
+    const fromProduct = vi.fn(() => joinedProduct);
     const selectProduct = vi.fn(() => ({ from: fromProduct }));
     return {
       service: new ProductsService(

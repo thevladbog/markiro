@@ -324,6 +324,7 @@ describe("tenant National Catalog import output contracts", () => {
         refreshing: false,
         lastOutcome: "ok",
         hasChanges: false,
+        lastErrorCode: null,
       }).success,
     ).toBe(true);
   });
@@ -469,6 +470,7 @@ it("separates product and photo reasons without exposing actor or raw provider d
     refreshing: false,
     lastOutcome: "ok",
     hasChanges: false,
+    lastErrorCode: null,
   };
   const link = {
     id: ID_1,
@@ -512,4 +514,24 @@ it("records an explicitly reviewed kept alternative without changing old keep de
     importDecisionSchema.parse({ ...old, photo: { kind: "keep", reviewedCandidateId: ID_2 } })
       .photo,
   ).toEqual({ kind: "keep", reviewedCandidateId: ID_2 });
+});
+
+it("allows only safe compact refresh reasons", () => {
+  const base = {
+    linkId: ID_1,
+    revision: 1,
+    statusKeys: [],
+    rawStatus: null,
+    rawDetailedStatuses: [],
+    lastSuccessAt: null,
+    lastAttemptAt: null,
+    refreshing: false,
+    lastOutcome: "error",
+    hasChanges: false,
+    lastErrorCode: "card_lost_gtin",
+  };
+  expect(chzSummarySchema.safeParse(base).success).toBe(true);
+  expect(
+    chzSummarySchema.safeParse({ ...base, lastErrorCode: "https://private.example/token" }).success,
+  ).toBe(false);
 });

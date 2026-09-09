@@ -1,3 +1,5 @@
+import { summaryForCatalogLink } from "../national-catalog/national-catalog-summary";
+import { catalogLocalStateSelection } from "../national-catalog/national-catalog-observation-projection";
 import { closeNationalCatalogLinkInTransaction } from "../national-catalog/national-catalog-link-writer";
 import { ProductWriter } from "./product-writer";
 import { createHash, randomUUID } from "node:crypto";
@@ -40,6 +42,8 @@ type ProductRow = typeof schema.products.$inferSelect;
 type CurrentProductRow = Omit<ProductRow, "defaultLabelTemplateId">;
 type ProductWithImageRow = CurrentProductRow & {
   productGroupName: string | null;
+  catalogLink: typeof schema.nationalCatalogProductLinks.$inferSelect | null;
+  catalogLocalState: unknown;
   imageChecksum: string | null;
   imageByteSize: number | null;
   imageWidth: number | null;
@@ -68,6 +72,8 @@ const CURRENT_PRODUCT_SELECTION = {
 const PRODUCT_WITH_IMAGE_SELECTION = {
   ...CURRENT_PRODUCT_SELECTION,
   productGroupName: schema.chzProductGroups.name,
+  catalogLink: schema.nationalCatalogProductLinks,
+  catalogLocalState: catalogLocalStateSelection,
   imageChecksum: schema.mediaAssets.checksum,
   imageByteSize: schema.mediaAssets.byteSize,
   imageWidth: schema.mediaAssets.width,
@@ -105,6 +111,17 @@ export class ProductsService {
     if (query.status) {
       conditions.push(eq(schema.products.status, query.status));
     }
+
+    if (query.chzStatus === "unlinked")
+      conditions.push(isNull(schema.nationalCatalogProductLinks.id));
+    else if (query.chzStatus === "unknown")
+      conditions.push(
+        sql`${schema.nationalCatalogProductLinks.id} is not null and (cardinality(${schema.nationalCatalogProductLinks.statusKeys}) = 0 or 'unknown' = any(${schema.nationalCatalogProductLinks.statusKeys}))`,
+      );
+    else if (query.chzStatus)
+      conditions.push(
+        sql`${query.chzStatus} = any(${schema.nationalCatalogProductLinks.statusKeys})`,
+      );
 
     if (query.search) {
       const nameCondition = ilike(schema.products.name, `%${query.search}%`);
@@ -803,6 +820,14 @@ export class ProductsService {
       .select(PRODUCT_WITH_IMAGE_SELECTION)
       .from(schema.products)
       .leftJoin(
+        schema.nationalCatalogProductLinks,
+        and(
+          eq(schema.nationalCatalogProductLinks.tenantId, schema.products.tenantId),
+          eq(schema.nationalCatalogProductLinks.productId, schema.products.id),
+          isNull(schema.nationalCatalogProductLinks.closedAt),
+        ),
+      )
+      .leftJoin(
         schema.productImages,
         and(
           eq(schema.productImages.tenantId, schema.products.tenantId),
@@ -951,6 +976,7 @@ export class ProductsService {
       externalRef: row.externalRef,
       createdAt: row.createdAt,
       image: this.imageDescriptor(row),
+      chz: summaryForCatalogLink(row.catalogLink, row, row.imageChecksum, row.catalogLocalState),
     };
   }
 }

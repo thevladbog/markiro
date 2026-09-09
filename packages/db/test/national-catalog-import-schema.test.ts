@@ -135,3 +135,17 @@ it("persists actual photo preparation initiator and repair checkpoint without in
     expect(column?.notNull).toBe(false);
   }
 });
+
+it("retains observation review and resumable refresh independently of temporary previews", () => {
+  const columns = getTableConfig(table("nationalCatalogProductLinks")).columns;
+  for (const name of [
+    "reviewed_projection",
+    "observed_projection",
+    "refresh_checkpoint",
+    "refresh_error_code",
+  ]) {
+    const column = columns.find((entry) => entry.name === name);
+    expect(column, name).toBeDefined();
+    expect(column?.notNull).toBe(false);
+  }
+});

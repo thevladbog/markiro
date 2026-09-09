@@ -373,6 +373,7 @@ export {
   catalogEnvironmentSchema,
   chzStatusKeySchema,
   chzSummarySchema,
+  chzRefreshErrorCodeSchema,
   chzLinkDetailSchema,
   IMPORT_GTIN_MAX_TOKENS,
   IMPORT_GTIN_TEXT_MAX_CHARS,
