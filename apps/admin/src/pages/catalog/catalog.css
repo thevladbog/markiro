@@ -83,16 +83,64 @@
 }
 .mk-nc-fields {
   display: grid;
-  gap: 12px;
-  margin-block: 16px;
+  gap: var(--sp-3);
+  margin-block: var(--sp-4);
+}
+.mk-nc-comparison-head,
+.mk-nc-comparison-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.mk-nc-comparison-head {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+  padding-inline: var(--sp-3);
+}
+fieldset.mk-nc-comparison-row,
+.mk-nc-photo-comparison {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.mk-nc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.mk-nc-photo-candidates,
+.mk-nc-photo-candidate {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--sp-2);
 }
 .mk-nc-fields p,
 .mk-nc-review-item p {
   overflow-wrap: anywhere;
 }
-.mk-nc-photos img {
-  object-fit: contain;
+.mk-nc-photo-comparison legend {
+  padding: 0;
+  margin-bottom: var(--sp-3);
+  font: var(--text-h3);
+}
+.mk-nc-photo-comparison img {
   display: block;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+.mk-nc-photo-candidate button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .mk-chz-cell,

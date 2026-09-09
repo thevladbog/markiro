@@ -1,0 +1,65 @@
+{
+  "base": "9da4f95a06aa38892af4e00ae04831f0105d382e",
+  "files": [
+    {
+      "path": "apps/admin/src/i18n/en.json",
+      "sha256": "642dbf6336c94c7b71b7bd41130638c97c1bbec9a6fa4e273a947fc3c2ae1f54"
+    },
+    {
+      "path": "apps/admin/src/i18n/ru.json",
+      "sha256": "3a7223448de45ff018c43ee509e22ec2392f7543ef3c13d0ef2c80f1dbdd297c"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/catalog.css",
+      "sha256": "cb9da6620e64be86707df0d62345ff1d46deddb971343beb08e5a13dc5965dec"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/national-catalog/ImportPanel.tsx",
+      "sha256": "35d4470a868a35460230687f174f14358441de7966dc13977c5d71fa9490815a"
+    },
+    {
+      "path": "apps/admin/src/pages/catalog/national-catalog/ImportReview.tsx",
+      "sha256": "8f635c801c3a670da9ad14eff6025fe7b68b6c38887c62d24945bb49061dc6c9"
+    },
+    {
+      "path": "apps/admin/test/national-catalog-comparison.test.tsx",
+      "sha256": "289ad5d6deab96234efe31cf0afc91f6f667a9f960ecf39732fc0e007e369996"
+    },
+    {
+      "path": "apps/admin/test/national-catalog-import.test.tsx",
+      "sha256": "ed36b18444ca58110533ca1752f65a4dcc49324807d0d6cfc808d147c5492a2e"
+    },
+    {
+      "path": "packages/ui/src/components.css",
+      "sha256": "7afb8abffc0045d83da0975050b0bc5caccf804e07efee0ef76d0c97c70621e9"
+    },
+    {
+      "path": "packages/ui/src/components/RadioCard.tsx",
+      "sha256": "e866dd9d6dab0a00eb1bf35d8a6533ee66ebcc94a77a28cd7e11b2abe6fffcb4"
+    },
+    {
+      "path": "packages/ui/src/components/index.ts",
+      "sha256": "98f7fd6839b00ccf4472e0b9686942af94dccf15747222fe5850a360358bb82a"
+    },
+    {
+      "path": "packages/ui/test/radio-card.test.tsx",
+      "sha256": "ff23ec021131974893d8705a9c87ebb17503b560727e7028f05a3a3a4da33ebf"
+    },
+    {
+      "path": "tools/production-browser/national-catalog-tests/comparison.spec.ts",
+      "sha256": "bbcb83e49c4469ab13893533d6234340e38e1e52d6816ad418c8feea11352d43"
+    },
+    {
+      "path": "tools/production-browser/national-catalog-tests/flows.spec.ts",
+      "sha256": "48ee7075ed7a656bb8f47015d37c9a92946c692b48dc1475af06cefffbe212f4"
+    },
+    {
+      "path": "tools/production-browser/national-catalog-tests/import.spec.ts",
+      "sha256": "a65e29ec4b3dba3fa2909593a6a3f817509be562dd89f71f58cb72feedbc702a"
+    },
+    {
+      "path": "tools/production-browser/national-catalog-tests/matrix.spec.ts",
+      "sha256": "54268c6a6b525d29c38915f369ca69cbd8cd87bc6a2326b34903d2cb51b86664"
+    }
+  ]
+}

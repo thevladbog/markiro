@@ -177,7 +177,7 @@ it.each([false, true])(
       />,
       { wrapper: MemoryRouter },
     );
-    const apply = screen.getByRole("button", { name: "Добавить выбранные изменения" });
+    const apply = screen.getByRole("button", { name: "Применить выбранное" });
     expect(apply.hasAttribute("disabled")).toBe(false);
     await userEvent.setup().click(apply);
     expect(onApply).toHaveBeenCalledTimes(1);
@@ -328,9 +328,7 @@ it("recovers accepted apply after lost response, expired session and temporary40
   server.state.session.expiresAt = new Date(originalNow + 60000).toISOString();
   server.state.failApply = 1;
   let view = renderImport(reviewRoute);
-  await view.user.click(
-    await screen.findByRole("button", { name: "Добавить выбранные изменения" }),
-  );
+  await view.user.click(await screen.findByRole("button", { name: "Применить выбранное" }));
   await screen.findByRole("button", { name: "Восстановить результат запроса" });
   const intent = loadIntent(identityKey("tenant", "user"), id(1));
   expect(intent).toMatchObject({ status: "valid", intent: { kind: "apply" } });
@@ -364,9 +362,7 @@ it("preserves pending apply through navigating away and reopening", async () => 
   const server = mockServer();
   server.state.failApply = 1;
   const view = renderImport(reviewRoute);
-  await view.user.click(
-    await screen.findByRole("button", { name: "Добавить выбранные изменения" }),
-  );
+  await view.user.click(await screen.findByRole("button", { name: "Применить выбранное" }));
   await screen.findByRole("button", { name: "Восстановить результат запроса" });
   await view.user.click(screen.getByRole("button", { name: "Закрыть" }));
   await act(() => view.router.navigate(reviewRoute));
@@ -383,7 +379,7 @@ it("never sends a canonical request when browser persistence is unavailable", as
   const setter = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
     throw new Error("QuotaExceededError");
   });
-  await view.user.click(screen.getByRole("button", { name: "Добавить выбранные изменения" }));
+  await view.user.click(screen.getByRole("button", { name: "Применить выбранное" }));
   await screen.findByText(/Не удалось сохранить запрос/);
   expect(server.applies).toHaveLength(0);
   setter.mockRestore();
@@ -482,19 +478,21 @@ it("preserves manual name, field toggles, explicit keep and replacement confirma
   };
   const view = render(<ImportReview {...props} />, { wrapper: MemoryRouter });
   const user = userEvent.setup();
-  await user.click(screen.getByRole("checkbox", { name: "Название товара" }));
+  await user.click(screen.getByRole("radio", { name: "Название товара — Предлагаемое значение" }));
   await user.click(screen.getByRole("checkbox", { name: /Подтверждаю замену/ }));
-  await user.click(screen.getByRole("button", { name: "Сохранить текущее фото" }));
+  await user.click(screen.getByRole("radio", { name: "Сохранить текущее фото" }));
   const ready = structuredClone(data);
   ready.items[0]!.photos[0]!.state = "ready";
   view.rerender(<ImportReview {...props} data={ready} />);
   expect(
-    screen.getByRole("checkbox", { name: "Название товара" }).getAttribute("aria-checked"),
+    screen
+      .getByRole("radio", { name: "Название товара — Предлагаемое значение" })
+      .getAttribute("aria-checked"),
   ).toBe("true");
   expect(
     screen.getByRole("checkbox", { name: /Подтверждаю замену/ }).getAttribute("aria-checked"),
   ).toBe("true");
-  await user.click(screen.getByRole("button", { name: "Добавить выбранные изменения" }));
+  await user.click(screen.getByRole("button", { name: "Применить выбранное" }));
   expect(apply).toHaveBeenCalledWith([
     {
       previewId: id(12),
@@ -549,8 +547,8 @@ it("records keep.reviewedCandidateId only after explicitly viewing a READY candi
     `/api/national-catalog/import-sessions/${id(1)}/images/${id(30)}`,
   );
   fireEvent.load(image);
-  await user.click(screen.getByRole("button", { name: "Сохранить текущее фото" }));
-  await user.click(screen.getByRole("button", { name: "Добавить выбранные изменения" }));
+  await user.click(screen.getByRole("radio", { name: "Сохранить текущее фото" }));
+  await user.click(screen.getByRole("button", { name: "Применить выбранное" }));
   expect(apply.mock.calls[0]?.[0][0].photo).toEqual({ kind: "keep", reviewedCandidateId: id(30) });
 });
 
@@ -581,19 +579,29 @@ it("requires category acceptance for dependent fields, while independent fields 
     { wrapper: MemoryRouter },
   );
   const user = userEvent.setup();
-  await user.click(screen.getByRole("checkbox", { name: "Категория" }));
-  expect(screen.getByRole("checkbox", { name: "Объём" }).getAttribute("aria-checked")).toBe(
-    "false",
-  );
-  expect(screen.getByRole("checkbox", { name: "Объём" }).hasAttribute("disabled")).toBe(true);
+  await user.click(screen.getByRole("radio", { name: "Категория — Сейчас в Markiro" }));
   expect(
-    screen.getByRole("checkbox", { name: "Название товара" }).getAttribute("aria-checked"),
+    screen
+      .getByRole("radio", { name: "Объём — Предлагаемое значение" })
+      .getAttribute("aria-checked"),
+  ).toBe("false");
+  expect(
+    screen.getByRole("radio", { name: "Объём — Предлагаемое значение" }).hasAttribute("disabled"),
+  ).toBe(true);
+  expect(
+    screen
+      .getByRole("radio", { name: "Название товара — Предлагаемое значение" })
+      .getAttribute("aria-checked"),
   ).toBe("true");
-  await user.click(screen.getByRole("checkbox", { name: "Категория" }));
-  expect(screen.getByRole("checkbox", { name: "Объём" }).hasAttribute("disabled")).toBe(false);
-  expect(screen.getByRole("checkbox", { name: "Объём" }).getAttribute("aria-checked")).toBe(
-    "false",
-  );
+  await user.click(screen.getByRole("radio", { name: "Категория — Предлагаемое значение" }));
+  expect(
+    screen.getByRole("radio", { name: "Объём — Предлагаемое значение" }).hasAttribute("disabled"),
+  ).toBe(false);
+  expect(
+    screen
+      .getByRole("radio", { name: "Объём — Предлагаемое значение" })
+      .getAttribute("aria-checked"),
+  ).toBe("false");
 });
 it("prepares a fresh request for manual names and initial category; restores selected category and manual override after reload", async () => {
   const server = mockServer();
@@ -634,9 +642,9 @@ it("allows blank draft name repair, caps manual override at200 and blocks apply 
   const user = userEvent.setup();
   await user.type(screen.getByLabelText("Название вручную"), "x".repeat(201));
   expect((screen.getByLabelText("Название вручную") as HTMLInputElement).value).toHaveLength(200);
-  expect(
-    screen.getByRole("button", { name: "Добавить выбранные изменения" }).hasAttribute("disabled"),
-  ).toBe(true);
+  expect(screen.getByRole("button", { name: "Применить выбранное" }).hasAttribute("disabled")).toBe(
+    true,
+  );
   await user.click(screen.getByRole("button", { name: "Обновить сравнение" }));
   expect(prepare.mock.calls[0]?.[0].manualNames[id(2)]).toHaveLength(200);
 });
@@ -659,13 +667,13 @@ it("blocks apply until explicit replacement and supports link-only preserving ex
     { wrapper: MemoryRouter },
   );
   const user = userEvent.setup();
-  expect(
-    screen.getByRole("button", { name: "Добавить выбранные изменения" }).hasAttribute("disabled"),
-  ).toBe(true);
-  await user.click(screen.getByRole("checkbox", { name: "Название товара" }));
+  expect(screen.getByRole("button", { name: "Применить выбранное" }).hasAttribute("disabled")).toBe(
+    true,
+  );
+  await user.click(screen.getByRole("radio", { name: "Название товара — Предлагаемое значение" }));
   await user.click(screen.getByRole("button", { name: "Добавить связь без изменения полей" }));
   await user.click(screen.getByRole("checkbox", { name: /Подтверждаю замену/ }));
-  await user.click(screen.getByRole("button", { name: "Добавить выбранные изменения" }));
+  await user.click(screen.getByRole("button", { name: "Применить выбранное" }));
   expect(apply).toHaveBeenCalledWith([
     { previewId: id(12), acceptedEntryIds: [], linkAction: "replace", photo: { kind: "keep" } },
   ]);
@@ -674,9 +682,7 @@ it("does not silently reapply a409 stale comparison and refreshes with a new pre
   const server = mockServer();
   server.state.apply409 = true;
   const view = renderImport(reviewRoute);
-  await view.user.click(
-    await screen.findByRole("button", { name: "Добавить выбранные изменения" }),
-  );
+  await view.user.click(await screen.findByRole("button", { name: "Применить выбранное" }));
   await screen.findByText(
     "Данные изменились. Проверьте позиции и обновите сравнение перед применением.",
   );
@@ -713,10 +719,12 @@ it("preserves choices across a real focused preparation poll", async () => {
   ];
   const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
   const { user } = renderImport(reviewRoute);
-  await user.click(await screen.findByRole("checkbox", { name: "Название товара" }));
+  await user.click(
+    await screen.findByRole("radio", { name: "Название товара — Предлагаемое значение" }),
+  );
   await user.type(screen.getByLabelText("Название вручную"), "Моё название");
   await user.click(screen.getByRole("checkbox", { name: /Подтверждаю замену/ }));
-  await user.click(screen.getByRole("button", { name: "Сохранить текущее фото" }));
+  await user.click(screen.getByRole("radio", { name: "Сохранить текущее фото" }));
   p.photos[0]!.state = "ready";
   await screen.findByRole("button", { name: "Просмотреть фото" }, { timeout: 4000 });
   expect(server.calls.filter((path) => path.includes("/preparations/")).length).toBeGreaterThan(1);
@@ -724,13 +732,15 @@ it("preserves choices across a real focused preparation poll", async () => {
     "Моё название",
   );
   expect(
-    screen.getByRole("checkbox", { name: "Название товара" }).getAttribute("aria-checked"),
+    screen
+      .getByRole("radio", { name: "Название товара — Предлагаемое значение" })
+      .getAttribute("aria-checked"),
   ).toBe("true");
   expect(
     screen.getByRole("checkbox", { name: /Подтверждаю замену/ }).getAttribute("aria-checked"),
   ).toBe("true");
   expect(
-    screen.getByRole("button", { name: "Сохранить текущее фото" }).getAttribute("aria-pressed"),
+    screen.getByRole("radio", { name: "Сохранить текущее фото" }).getAttribute("aria-checked"),
   ).toBe("true");
   focus.mockRestore();
 });
@@ -761,11 +771,9 @@ it("allows explicit foreign-GTIN READY alternative with a warning and never sele
   );
   const user = userEvent.setup();
   expect(screen.getByText(/GTIN фотографии отличается/)).toBeDefined();
-  expect(screen.getByRole("button", { name: "Без фото" }).getAttribute("aria-pressed")).toBe(
-    "true",
-  );
-  await user.click(screen.getByRole("button", { name: "Выбрать это фото" }));
-  await user.click(screen.getByRole("button", { name: "Добавить выбранные изменения" }));
+  expect(screen.getByRole("radio", { name: "Без фото" }).getAttribute("aria-checked")).toBe("true");
+  await user.click(screen.getByRole("radio", { name: "Выбрать это фото" }));
+  await user.click(screen.getByRole("button", { name: "Применить выбранное" }));
   expect(apply.mock.calls[0]?.[0][0].photo).toEqual({ kind: "candidate", candidateId: id(30) });
 });
 
@@ -773,9 +781,7 @@ it("clears owned intents after a settled tenant switch even with the panel close
   const server = mockServer();
   server.state.failApply = 1;
   const view = renderImport(reviewRoute);
-  await view.user.click(
-    await screen.findByRole("button", { name: "Добавить выбранные изменения" }),
-  );
+  await view.user.click(await screen.findByRole("button", { name: "Применить выбранное" }));
   await screen.findByRole("button", { name: "Восстановить результат запроса" });
   await view.user.click(screen.getByRole("button", { name: "Закрыть" }));
   expect(loadIntent(identityKey("tenant", "user"), id(1)).status).toBe("valid");
@@ -796,9 +802,7 @@ it("preserves a same-owner pending intent through transient session refresh and 
   const server = mockServer();
   server.state.failApply = 1;
   const view = renderImport(reviewRoute);
-  await view.user.click(
-    await screen.findByRole("button", { name: "Добавить выбранные изменения" }),
-  );
+  await view.user.click(await screen.findByRole("button", { name: "Применить выбранное" }));
   await screen.findByRole("button", { name: "Восстановить результат запроса" });
   const intent = loadIntent(identityKey("tenant", "user"), id(1));
   testSession = { ...defaultSession, isPending: true };
@@ -946,7 +950,7 @@ it.each(["{", JSON.stringify({ version: 9 }), "x".repeat(200001)])(
       "Не удалось прочитать сохранённый запрос. Его прежний результат может оставаться неизвестным.",
     );
     expect(sessionStorage.getItem(storageKey)).toBe(raw);
-    expect(screen.queryByRole("button", { name: "Добавить выбранные изменения" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Применить выбранное" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Прочитать запрос ещё раз" }));
     expect(server.applies).toHaveLength(0);
     expect(server.prepares).toHaveLength(0);
@@ -957,9 +961,7 @@ it("preserves unreadable pending evidence, retries reading it, and never submits
   const server = mockServer();
   server.state.failApply = 1;
   let view = renderImport(reviewRoute);
-  await view.user.click(
-    await screen.findByRole("button", { name: "Добавить выбранные изменения" }),
-  );
+  await view.user.click(await screen.findByRole("button", { name: "Применить выбранное" }));
   await screen.findByRole("button", { name: "Восстановить результат запроса" });
   const original = server.applies[0];
   view.unmount();
@@ -975,7 +977,7 @@ it("preserves unreadable pending evidence, retries reading it, and never submits
   await screen.findByText(
     "Не удалось прочитать сохранённый запрос. Его прежний результат может оставаться неизвестным.",
   );
-  expect(screen.queryByRole("button", { name: "Добавить выбранные изменения" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Применить выбранное" })).toBeNull();
   expect(server.applies).toHaveLength(1);
   getter.mockRestore();
   await view.user.click(screen.getByRole("button", { name: "Прочитать запрос ещё раз" }));
@@ -999,11 +1001,11 @@ it("requires deliberate abandonment and verified scoped removal before unblockin
   const remover = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {});
   await user.click(screen.getByRole("button", { name: "Подтверждаю: забыть запрос" }));
   expect(sessionStorage.getItem(storageKey)).toBe("{");
-  expect(screen.queryByRole("button", { name: "Добавить выбранные изменения" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Применить выбранное" })).toBeNull();
   expect(server.applies).toHaveLength(0);
   remover.mockRestore();
   await user.click(screen.getByRole("button", { name: "Подтверждаю: забыть запрос" }));
-  await screen.findByRole("button", { name: "Добавить выбранные изменения" });
+  await screen.findByRole("button", { name: "Применить выбранное" });
   expect(sessionStorage.getItem(storageKey)).toBeNull();
   expect(sessionStorage.getItem("unrelated")).toBe("keep");
   expect(server.applies).toHaveLength(0);
@@ -1030,9 +1032,7 @@ it.each([
     server.state.apply409 = true;
     server.state.applyConflict = conflict;
     const view = renderImport(reviewRoute);
-    await view.user.click(
-      await screen.findByRole("button", { name: "Добавить выбранные изменения" }),
-    );
+    await view.user.click(await screen.findByRole("button", { name: "Применить выбранное" }));
     await screen.findByText("Сравнение устарело. Обновите его перед добавлением изменений.");
     const known = "previewIds" in conflict && conflict.previewIds[0] === id(12);
     const firstGroup = screen.getByRole("group", { name: "04006381333931 · Молоко" });
@@ -1040,21 +1040,21 @@ it.each([
     expect(firstGroup.textContent?.includes("Эта позиция требует нового сравнения.")).toBe(known);
     expect(secondGroup.textContent?.includes("Эта позиция требует нового сравнения.")).toBe(false);
     expect(
-      screen.getByRole("button", { name: "Добавить выбранные изменения" }).hasAttribute("disabled"),
+      screen.getByRole("button", { name: "Применить выбранное" }).hasAttribute("disabled"),
     ).toBe(true);
-    await view.user.click(screen.getByRole("button", { name: "Добавить выбранные изменения" }));
+    await view.user.click(screen.getByRole("button", { name: "Применить выбранное" }));
     expect(server.applies).toHaveLength(1);
     await view.user.click(screen.getByRole("button", { name: "Выбор товаров" }));
     await view.user.click(screen.getByRole("button", { name: "Сравнение" }));
     expect(
-      screen.getByRole("button", { name: "Добавить выбранные изменения" }).hasAttribute("disabled"),
+      screen.getByRole("button", { name: "Применить выбранное" }).hasAttribute("disabled"),
     ).toBe(true);
     const savedRoute = view.router.state.location.pathname + view.router.state.location.search;
     view.unmount();
     const reopened = renderImport(savedRoute);
     await screen.findByText("Сравнение устарело. Обновите его перед добавлением изменений.");
     expect(
-      screen.getByRole("button", { name: "Добавить выбранные изменения" }).hasAttribute("disabled"),
+      screen.getByRole("button", { name: "Применить выбранное" }).hasAttribute("disabled"),
     ).toBe(true);
     server.state.apply409 = false;
     server.state.preparation.preparation.id = id(60);
@@ -1071,7 +1071,7 @@ it.each([
         screen.queryByText("Сравнение устарело. Обновите его перед добавлением изменений."),
       ).toBeNull(),
     );
-    await reopened.user.click(screen.getByRole("button", { name: "Добавить выбранные изменения" }));
+    await reopened.user.click(await screen.findByRole("button", { name: "Применить выбранное" }));
     expect(server.applies).toHaveLength(2);
     expect(server.applies[1]?.requestId).not.toBe(server.applies[0]?.requestId);
     expect(server.applies[1]?.decisions.map((d) => d.previewId)).toEqual([id(61), id(62)]);
@@ -1082,9 +1082,7 @@ it("identifies a strictly rejected attempted preview after pending apply is reop
   const server = mockServer();
   server.state.failApply = 1;
   const view = renderImport(reviewRoute);
-  await view.user.click(
-    await screen.findByRole("button", { name: "Добавить выбранные изменения" }),
-  );
+  await view.user.click(await screen.findByRole("button", { name: "Применить выбранное" }));
   await screen.findByRole("button", { name: "Восстановить результат запроса" });
   await view.user.click(screen.getByRole("button", { name: "Выбор товаров" }));
   const route = view.router.state.location.pathname + view.router.state.location.search;
@@ -1102,9 +1100,9 @@ it("identifies a strictly rejected attempted preview after pending apply is reop
   );
   await screen.findByText("Эта позиция требует нового сравнения.");
   expect(server.applies[1]).toEqual(server.applies[0]);
-  expect(
-    screen.getByRole("button", { name: "Добавить выбранные изменения" }).hasAttribute("disabled"),
-  ).toBe(true);
+  expect(screen.getByRole("button", { name: "Применить выбранное" }).hasAttribute("disabled")).toBe(
+    true,
+  );
 });
 
 import { linkFixture, productFixture } from "./national-catalog-fixtures.js";
@@ -1550,7 +1548,7 @@ it("retries only the failed photo preparation while retaining explicit field dec
   };
   const view = render(<ImportReview {...props} />, { wrapper: MemoryRouter });
   const user = userEvent.setup();
-  await user.click(screen.getByRole("checkbox", { name: "Название товара" }));
+  await user.click(screen.getByRole("radio", { name: "Название товара — Предлагаемое значение" }));
   await user.click(screen.getByRole("button", { name: "Повторить подготовку фото" }));
   expect(onPhoto).toHaveBeenCalledWith(id(12), id(30));
   const ready = structuredClone(data);
@@ -1558,7 +1556,9 @@ it("retries only the failed photo preparation while retaining explicit field dec
   ready.items[0]!.photos[0]!.reason = null;
   view.rerender(<ImportReview {...props} data={ready} />);
   expect(
-    screen.getByRole("checkbox", { name: "Название товара" }).getAttribute("aria-checked"),
+    screen
+      .getByRole("radio", { name: "Название товара — Предлагаемое значение" })
+      .getAttribute("aria-checked"),
   ).toBe("true");
 });
 
@@ -1680,7 +1680,11 @@ it.each(["ru", "en"] as const)(
       );
       expect(screen.queryByText("Untranslated backend owned label")).toBeNull();
       const user = userEvent.setup();
-      await user.click(screen.getAllByRole("checkbox", { name: tr("fields.name") })[1]!);
+      await user.click(
+        screen.getAllByRole("radio", {
+          name: `${tr("fields.name")} — ${tr("proposedColumn")}`,
+        })[1]!,
+      );
       await user.click(screen.getByRole("checkbox", { name: tr("confirmReplace") }));
       expect(screen.getByLabelText(tr("confirmationSummary")).textContent).toBe(
         i18n.t("pages.catalog.import.confirmationTotals", {
@@ -1691,7 +1695,9 @@ it.each(["ru", "en"] as const)(
           photos: 0,
         }),
       );
-      await user.click(screen.getAllByRole("checkbox", { name: tr("fields.name") })[0]!);
+      await user.click(
+        screen.getAllByRole("radio", { name: `${tr("fields.name")} — ${tr("currentColumn")}` })[0]!,
+      );
       expect(screen.getByRole("button", { name: tr("apply") }).hasAttribute("disabled")).toBe(true);
       expect(screen.getByLabelText(tr("confirmationSummary")).textContent).toBe(
         tr("confirmationIncomplete"),

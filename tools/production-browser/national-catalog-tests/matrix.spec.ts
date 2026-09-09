@@ -232,21 +232,23 @@ for (const width of [390, 768, 1280, 1600])
         await page.keyboard.press("Escape");
         await expect(panel).toHaveCount(0);
         await page.goto(open(`/catalog/import?sessionId=${id(1)}&preparationId=${id(10)}`));
-        await expect(page.locator("fieldset")).toHaveCount(3);
-        for (const fieldset of await page.locator("fieldset").all()) {
+        await expect(page.locator(".mk-nc-review-item")).toHaveCount(3);
+        for (const fieldset of await page.locator(".mk-nc-review-item").all()) {
           await fieldset.getByRole("button", { name: t.import.viewPhoto, exact: true }).click();
-          await expect(fieldset.getByRole("img")).toHaveJSProperty("naturalWidth", 120);
-          const choose = fieldset.getByRole("button", { name: t.import.choosePhoto, exact: true });
+          await expect(
+            fieldset.getByRole("img", { name: t.import.photoPreview, exact: true }),
+          ).toHaveJSProperty("naturalWidth", 120);
+          const choose = fieldset.getByRole("radio", { name: t.import.choosePhoto, exact: true });
           await choose.focus();
           await expect(choose).toBeInViewport();
-          await page.keyboard.press("Enter");
-          await expect(choose).toHaveAttribute("aria-pressed", "true");
+          await page.keyboard.press("Space");
+          await expect(choose).toBeChecked();
         }
         expect(
           await page.getByRole("dialog").evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
         ).toBe(true);
         if (process.env.NC_UPDATE_SCREENSHOTS === "1" && [390, 1280].includes(width)) {
-          await page.locator("fieldset").first().scrollIntoViewIfNeeded();
+          await page.locator(".mk-nc-review-item").first().scrollIntoViewIfNeeded();
           await page.screenshot({
             path: resolve(evidence, `final-fix-layout-review-${width}-${lang}-${theme}.png`),
             animations: "disabled",

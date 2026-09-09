@@ -288,8 +288,8 @@ test("own partial feed, cross-page choices, link-only and draft, independent pho
   await page.getByRole("button", { name: t.previousPage, exact: true }).click();
   await expect(page.getByRole("checkbox", { name: /04006381333931/ })).toBeChecked();
   await page.getByRole("button", { name: t.compare, exact: true }).click();
-  await expect(page.locator("fieldset")).toHaveCount(2);
-  const newProduct = page.locator("fieldset").nth(1);
+  await expect(page.locator(".mk-nc-review-item")).toHaveCount(2);
+  const newProduct = page.locator(".mk-nc-review-item").nth(1);
   await newProduct
     .getByLabel(t.manualName, { exact: true })
     .fill("Йогурт фермерский натуральный 3,5 %, 500 г");
@@ -302,16 +302,16 @@ test("own partial feed, cross-page choices, link-only and draft, independent pho
     categoryChoices: [{ itemId: id(3), optionId: id(500) }],
   });
   await page
-    .locator("fieldset")
+    .locator(".mk-nc-review-item")
     .first()
     .getByRole("button", { name: t.linkOnly, exact: true })
     .click();
   await newProduct.getByRole("button", { name: t.viewPhoto, exact: true }).nth(1).click();
   await expect(newProduct.getByRole("img")).toHaveJSProperty("naturalWidth", 120);
-  const choose = newProduct.getByRole("button", { name: t.choosePhoto, exact: true }).nth(1);
+  const choose = newProduct.getByRole("radio", { name: t.choosePhoto, exact: true }).nth(1);
   await choose.focus();
-  await page.keyboard.press("Enter");
-  await expect(choose).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Space");
+  await expect(choose).toBeChecked();
   await page.getByRole("button", { name: t.apply, exact: true }).click();
   await expect(page.getByText(t.imageFailed)).toBeVisible();
   expect(applyWrites).toHaveLength(1);
@@ -348,7 +348,7 @@ test("own partial feed, cross-page choices, link-only and draft, independent pho
   await page.goto(
     open(`/catalog/import?sessionId=${id(1)}&preparationId=${preparation.preparation.id}`),
   );
-  await expect(page.locator("fieldset")).toHaveCount(2);
+  await expect(page.locator(".mk-nc-review-item")).toHaveCount(2);
   await expect(page.getByLabel(t.manualName, { exact: true }).first()).toBeDisabled();
   await expect(page.getByRole("button", { name: t.apply })).toHaveCount(0);
   await page.goto(open(`/catalog/${productFixture.id}/chz`));
@@ -368,7 +368,7 @@ test("own partial feed, cross-page choices, link-only and draft, independent pho
   expect(starts.at(-1)).toEqual({ mode: "gtins", text: "04006381333931" });
   expect(selectionWrites.at(-1)?.itemIds).toEqual([id(41)]);
   await page.getByRole("button", { name: t.compare, exact: true }).click();
-  await expect(page.locator("fieldset")).toHaveCount(1);
+  await expect(page.locator(".mk-nc-review-item")).toHaveCount(1);
   expect(prepareWrites.at(-1)?.itemIds).toEqual([id(41)]);
   await page.getByRole("button", { name: ru.common.close, exact: true }).click();
   await expect(panel.getByText("card-1", { exact: true })).toBeVisible();
@@ -477,19 +477,20 @@ for (const lang of ["ru", "en"] as const)
       open(`/catalog/import?sessionId=${id(1)}&preparationId=${preparation.preparation.id}`) +
         `&lang=${lang}`,
     );
-    await expect(page.locator("fieldset")).toHaveCount(3);
-    await expect(page.getByText(`${text.manualSource}: Название исправлено вручную`)).toBeVisible();
+    await expect(page.locator(".mk-nc-review-item")).toHaveCount(3);
+    await expect(page.getByText("Название исправлено вручную", { exact: true })).toBeVisible();
     if (process.env.NC_UPDATE_SCREENSHOTS === "1") {
-      await page
-        .getByText(`${text.manualSource}: Название исправлено вручную`)
-        .scrollIntoViewIfNeeded();
+      await page.getByText("Название исправлено вручную", { exact: true }).scrollIntoViewIfNeeded();
       await page.screenshot({
         path: resolve(evidence, `final-fix-provenance-1280-${lang}.png`),
         fullPage: true,
         animations: "disabled",
       });
     }
-    await page.getByRole("checkbox", { name: text.fields.name, exact: true }).nth(1).click();
+    await page
+      .getByRole("radio", { name: `${text.fields.name} — ${text.proposedColumn}`, exact: true })
+      .nth(1)
+      .click();
     await page.getByRole("checkbox", { name: text.confirmReplace }).click();
     await expect(page.getByRole("button", { name: text.apply, exact: true })).toBeEnabled();
     const totals = text.confirmationTotals

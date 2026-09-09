@@ -124,13 +124,13 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
       path: resolve(evidence, "final-fix-recovery-review-1280.png"),
       fullPage: true,
     });
-  await page.getByRole("button", { name: "Добавить выбранные изменения" }).click();
+  await page.getByRole("button", { name: "Применить выбранное" }).click();
   await expect(page.getByText("Эта позиция требует нового сравнения.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Добавить выбранные изменения" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Применить выбранное" })).toBeDisabled();
   expect(writes).toHaveLength(2);
   await page.getByRole("button", { name: "Обновить сравнение" }).click();
-  await expect(page.getByRole("button", { name: "Добавить выбранные изменения" })).toBeEnabled();
-  await page.getByRole("button", { name: "Добавить выбранные изменения" }).click();
+  await expect(page.getByRole("button", { name: "Применить выбранное" })).toBeEnabled();
+  await page.getByRole("button", { name: "Применить выбранное" }).click();
   await expect(page.getByText("Товар добавлен. Фото не загрузилось.")).toBeVisible();
   expect(writes).toHaveLength(4);
   await page.goto(open(`/catalog/import?sessionId=${id(1)}&operationId=${id(20)}`));
@@ -181,8 +181,8 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
     open(`/catalog/import?sessionId=${id(1)}&preparationId=${preparation.preparation.id}`),
   );
   await expect(page.getByText("04006381333931 · Молоко")).toBeVisible();
-  await page.getByRole("checkbox", { name: "Категория", exact: true }).click();
-  await page.getByRole("checkbox", { name: "Жирность", exact: true }).click();
+  await page.getByRole("radio", { name: "Категория — Предлагаемое значение", exact: true }).click();
+  await page.getByRole("radio", { name: "Жирность — Предлагаемое значение", exact: true }).click();
   await page.getByRole("checkbox", { name: /Подтверждаю замену/ }).click();
   await page.getByRole("button", { name: "Просмотреть фото" }).click();
   await expect(page.getByRole("img", { name: "Подготовленное фото товара" })).toHaveJSProperty(
@@ -202,7 +202,7 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
       "Не удалось прочитать сохранённый запрос. Его прежний результат может оставаться неизвестным.",
     ),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Добавить выбранные изменения" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Применить выбранное" })).toHaveCount(0);
   await page.getByRole("button", { name: "Прочитать запрос ещё раз" }).click();
   expect(await page.evaluate((key) => sessionStorage.getItem(key), pendingKey)).toBe("{");
   await page.getByRole("button", { name: "Забыть этот запрос" }).click();
@@ -212,7 +212,7 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
     ),
   ).toBeVisible();
   await page.getByRole("button", { name: "Подтверждаю: забыть запрос" }).click();
-  await expect(page.getByRole("button", { name: "Добавить выбранные изменения" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Применить выбранное" })).toBeVisible();
   expect(await page.evaluate((key) => sessionStorage.getItem(key), pendingKey)).toBeNull();
   expect(writes).toHaveLength(4);
   await page.getByRole("button", { name: "Закрыть" }).focus();

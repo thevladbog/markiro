@@ -11,12 +11,12 @@ import type {
 import { Alert, Button, Textarea, SidePanel, Spinner } from "@markiro/ui";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useSearchParams, useOutletContext } from "react-router";
 import { useCan } from "../../../access/context.js";
 import { ApiRequestError } from "../../../api/client.js";
 import { useAuthClient } from "../../../auth/client.js";
 import { PRODUCTS_QUERY_KEY, PRODUCT_CHZ_LINK_QUERY_KEY } from "../api.js";
-import { closeCatalogPanel } from "../ProductPanelRoute.js";
+import { closeCatalogPanel, type CatalogPanelContext } from "../ProductPanelRoute.js";
 import * as api from "./api.js";
 import {
   abandonIntent,
@@ -89,6 +89,7 @@ export function ImportPanel() {
   ) : null;
 }
 function ScopedImportPanel({ identity }: { identity: string }) {
+  const catalog = useOutletContext<CatalogPanelContext>();
   const { t } = useTranslation();
   const tr = (key: string) => t(`pages.catalog.import.${key}`);
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
@@ -781,6 +782,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
             key={preparation.data.preparation.id}
             sessionId={sessionId}
             data={preparation.data}
+            products={catalog.products}
             canPreparePhotos={capabilities.data?.photos === true}
             canWrite={mutable}
             busy={busy}

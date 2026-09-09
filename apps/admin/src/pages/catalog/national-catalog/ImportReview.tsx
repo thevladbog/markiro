@@ -3,8 +3,9 @@ import type {
   ImportPrepareResponse,
   ImportPreview,
 } from "@markiro/platform-contracts";
-import { Alert, Button, Checkbox, Input, Select } from "@markiro/ui";
-import { useState } from "react";
+import { Alert, Button, Checkbox, Input, Select, RadioCard } from "@markiro/ui";
+import { useId, useState } from "react";
+import { productImageUrl, type ProductDto } from "../api.js";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { photoUrl } from "./api.js";
@@ -19,6 +20,7 @@ export function ImportReview({
   canWrite,
   busy,
   canPreparePhotos = false,
+  products = [],
   comparisonRejected = false,
   rejectedPreviewIds = [],
   onPrepare,
@@ -31,6 +33,7 @@ export function ImportReview({
   canWrite: boolean;
   busy: boolean;
   canPreparePhotos?: boolean;
+  products?: readonly ProductDto[];
   comparisonRejected?: boolean;
   rejectedPreviewIds?: string[];
   onPrepare: (drafts: ReviewDrafts) => void;
@@ -39,6 +42,7 @@ export function ImportReview({
   onRetry: () => void;
 }) {
   const { t } = useTranslation();
+  const choiceGroup = useId();
   const tr = (key: string) => t(`pages.catalog.import.${key}`);
   const [choices, setChoices] = useState<Record<string, ReviewChoice>>({});
   const [drafts, setDrafts] = useState<ReviewDrafts>(() => ({
@@ -150,6 +154,8 @@ export function ImportReview({
       )}
       {data.items.map((preview) => {
         const choice = choiceFor(preview);
+        const product = products.find((item) => item.id === preview.productId);
+        const currentPhoto = product ? productImageUrl(product) : null;
         return (
           <fieldset className="mk-nc-review-item" key={preview.id}>
             <legend>
@@ -222,42 +228,71 @@ export function ImportReview({
               />
             )}
             <div className="mk-nc-fields">
-              {preview.fields.map((field) => (
-                <div key={field.id}>
-                  <Checkbox
-                    label={field.labelKey ? tr(`fields.${field.labelKey}`) : field.label}
-                    checked={choice.decision.acceptedEntryIds.includes(field.id)}
-                    disabled={
-                      !canWrite ||
-                      busy ||
-                      !field.applicable ||
-                      field.requiresEntryIds.some(
-                        (id) => !choice.decision.acceptedEntryIds.includes(id),
-                      )
-                    }
-                    onCheckedChange={(checked) =>
-                      update(preview, (c) => toggleField(preview, c, field.id, checked))
-                    }
-                  />
-                  <p>
-                    <span>
-                      {tr("before")}: {field.before ?? "—"}
-                    </span>
-                    <br />
-                    <span>
-                      {tr(field.source === "manual" ? "manualSource" : "after")}:{" "}
-                      {field.after ?? "—"}
-                    </span>
-                  </p>
-                  {field.reason && (
-                    <p>
-                      {t(`pages.catalog.import.reasons.${field.reason}`, {
+              <div className="mk-nc-comparison-head" aria-hidden="true">
+                <span>{tr("currentColumn")}</span>
+                <span>{tr("proposedColumn")}</span>
+              </div>
+              {preview.fields.map((field) => {
+                const title = field.labelKey ? tr(`fields.${field.labelKey}`) : field.label;
+                const accepted = choice.decision.acceptedEntryIds.includes(field.id);
+                const missing = field.requiresEntryIds.filter(
+                  (id) => !choice.decision.acceptedEntryIds.includes(id),
+                );
+                const reason = missing.length
+                  ? t("pages.catalog.import.requiresFields", {
+                      fields: missing
+                        .map((id) => {
+                          const required = preview.fields.find((entry) => entry.id === id);
+                          return required?.labelKey
+                            ? tr(`fields.${required.labelKey}`)
+                            : (required?.label ?? id);
+                        })
+                        .join(", "),
+                    })
+                  : field.reason
+                    ? t(`pages.catalog.import.reasons.${field.reason}`, {
                         defaultValue: tr("fieldUnavailable"),
-                      })}
-                    </p>
-                  )}
-                </div>
-              ))}
+                      })
+                    : undefined;
+                return (
+                  <fieldset className="mk-nc-comparison-row" key={field.id}>
+                    <legend className="mk-nc-sr-only">{title}</legend>
+                    <RadioCard
+                      name={`${choiceGroup}-${preview.id}-${field.id}`}
+                      label={`${title} — ${tr("currentColumn")}`}
+                      title={title}
+                      caption={tr("currentColumn")}
+                      checked={!accepted}
+                      disabled={!canWrite || busy || !preview.canApply || !field.applicable}
+                      onSelect={() =>
+                        update(preview, (c) => toggleField(preview, c, field.id, false))
+                      }
+                    >
+                      {field.before ?? tr(preview.productId ? "emptyValue" : "doNotAdd")}
+                    </RadioCard>
+                    <RadioCard
+                      name={`${choiceGroup}-${preview.id}-${field.id}`}
+                      label={`${title} — ${tr("proposedColumn")}`}
+                      title={title}
+                      caption={tr(field.source === "manual" ? "manualSource" : "providerSource")}
+                      checked={accepted}
+                      disabled={
+                        !canWrite ||
+                        busy ||
+                        !preview.canApply ||
+                        !field.applicable ||
+                        missing.length > 0
+                      }
+                      description={reason}
+                      onSelect={() =>
+                        update(preview, (c) => toggleField(preview, c, field.id, true))
+                      }
+                    >
+                      {field.after ?? tr("emptyValue")}
+                    </RadioCard>
+                  </fieldset>
+                );
+              })}
             </div>
             {preview.productId && canWrite && (
               <Button
@@ -282,97 +317,121 @@ export function ImportReview({
                 }
               />
             )}
-            <h3>{tr("photo")}</h3>
-            {!canPreparePhotos && preview.photos.some((photo) => photo.state === "pending") && (
-              <p>{tr("photosUnavailable")}</p>
-            )}
-            <Button
-              variant="secondary"
-              disabled={!canWrite || busy}
-              aria-pressed={choice.decision.photo.kind === "keep"}
-              onClick={() => update(preview, keepPhoto)}
-            >
-              {preview.productId ? tr("keepPhoto") : tr("noPhoto")}
-            </Button>
-            <div className="mk-nc-photos">
-              {preview.photos.map((photo) => (
-                <div key={photo.candidateId}>
-                  {photo.state === "ready" &&
-                  (photo.reason === null || photo.reason === "barcode_mismatch") ? (
-                    <>
-                      <Button
-                        variant="secondary"
-                        onClick={() => setViewing({ ...viewing, [preview.id]: photo.candidateId })}
-                      >
-                        {tr("viewPhoto")}
-                      </Button>
-                      {viewing[preview.id] === photo.candidateId && (
-                        <img
-                          src={photoUrl(sessionId, photo.candidateId)}
-                          alt={tr("photoPreview")}
-                          width={120}
-                          height={120}
-                          onLoad={() =>
-                            update(preview, (c) =>
-                              c.viewedCandidateIds.includes(photo.candidateId)
-                                ? c
-                                : {
-                                    ...c,
-                                    viewedCandidateIds: [
-                                      ...c.viewedCandidateIds,
-                                      photo.candidateId,
-                                    ],
-                                  },
-                            )
+            <fieldset className="mk-nc-photo-comparison">
+              <legend>{tr("photo")}</legend>
+              <div className="mk-nc-comparison-row">
+                <RadioCard
+                  name={`${choiceGroup}-${preview.id}-photo`}
+                  label={tr(preview.productId ? "keepPhoto" : "noPhoto")}
+                  title={tr("photo")}
+                  caption={tr("currentColumn")}
+                  checked={choice.decision.photo.kind === "keep"}
+                  disabled={!canWrite || busy || !preview.canApply}
+                  onSelect={() => update(preview, keepPhoto)}
+                >
+                  {currentPhoto && (
+                    <img src={currentPhoto} alt={tr("currentPhoto")} width={120} height={120} />
+                  )}
+                  {tr(preview.productId ? "keepPhoto" : "noPhoto")}
+                </RadioCard>
+                <div className="mk-nc-photo-candidates">
+                  {preview.photos.length === 0 && <p>{tr("noSourcePhoto")}</p>}
+                  {!canPreparePhotos &&
+                    preview.photos.some((photo) => photo.state === "pending") && (
+                      <p>{tr("photosUnavailable")}</p>
+                    )}
+                  {preview.photos.map((photo) => {
+                    const available =
+                      photo.state === "ready" &&
+                      (photo.reason === null || photo.reason === "barcode_mismatch");
+                    return (
+                      <div className="mk-nc-photo-candidate" key={photo.candidateId}>
+                        <RadioCard
+                          name={`${choiceGroup}-${preview.id}-photo`}
+                          label={tr("choosePhoto")}
+                          title={tr("photo")}
+                          caption={tr("providerSource")}
+                          checked={
+                            choice.decision.photo.kind === "candidate" &&
+                            choice.decision.photo.candidateId === photo.candidateId
                           }
-                        />
-                      )}
-                      <Button
-                        variant="secondary"
-                        disabled={!canWrite || busy}
-                        aria-pressed={
-                          choice.decision.photo.kind === "candidate" &&
-                          choice.decision.photo.candidateId === photo.candidateId
-                        }
-                        onClick={() =>
-                          update(preview, (c) => ({
-                            ...c,
-                            photoExplicit: true,
-                            decision: {
-                              ...c.decision,
-                              photo: { kind: "candidate", candidateId: photo.candidateId },
-                            },
-                          }))
-                        }
-                      >
-                        {tr("choosePhoto")}
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <p>{tr(photo.state === "pending" ? "photoPending" : "photoFailed")}</p>
-                      {(photo.state === "pending" ||
-                        (photo.state === "failed" && photo.reason === "download_failed")) && (
-                        <Button
-                          variant="secondary"
-                          disabled={!canWrite || busy || !canPreparePhotos}
-                          onClick={() => onPhoto(preview.id, photo.candidateId)}
+                          disabled={!canWrite || busy || !preview.canApply || !available}
+                          description={
+                            photo.reason
+                              ? t(`pages.catalog.import.reasons.${photo.reason}`, {
+                                  defaultValue: tr("photoFailed"),
+                                })
+                              : undefined
+                          }
+                          onSelect={() =>
+                            update(preview, (c) => ({
+                              ...c,
+                              photoExplicit: true,
+                              decision: {
+                                ...c.decision,
+                                photo: { kind: "candidate", candidateId: photo.candidateId },
+                              },
+                            }))
+                          }
                         >
-                          {tr(photo.state === "failed" ? "retryPhotoPreparation" : "preparePhoto")}
-                        </Button>
-                      )}
-                    </>
-                  )}
-                  {photo.reason && (
-                    <p>
-                      {t(`pages.catalog.import.reasons.${photo.reason}`, {
-                        defaultValue: tr("photoFailed"),
-                      })}
-                    </p>
-                  )}
+                          {viewing[preview.id] === photo.candidateId && available && (
+                            <img
+                              src={photoUrl(sessionId, photo.candidateId)}
+                              alt={tr("photoPreview")}
+                              width={120}
+                              height={120}
+                              onLoad={() =>
+                                update(preview, (c) =>
+                                  c.viewedCandidateIds.includes(photo.candidateId)
+                                    ? c
+                                    : {
+                                        ...c,
+                                        viewedCandidateIds: [
+                                          ...c.viewedCandidateIds,
+                                          photo.candidateId,
+                                        ],
+                                      },
+                                )
+                              }
+                            />
+                          )}
+                          {tr(
+                            available
+                              ? "choosePhoto"
+                              : photo.state === "pending"
+                                ? "photoPending"
+                                : "photoFailed",
+                          )}
+                        </RadioCard>
+                        {available ? (
+                          <Button
+                            variant="secondary"
+                            onClick={() =>
+                              setViewing({ ...viewing, [preview.id]: photo.candidateId })
+                            }
+                          >
+                            {tr("viewPhoto")}
+                          </Button>
+                        ) : (
+                          (photo.state === "pending" ||
+                            (photo.state === "failed" && photo.reason === "download_failed")) && (
+                            <Button
+                              variant="secondary"
+                              disabled={!canWrite || busy || !canPreparePhotos}
+                              onClick={() => onPhoto(preview.id, photo.candidateId)}
+                            >
+                              {tr(
+                                photo.state === "failed" ? "retryPhotoPreparation" : "preparePhoto",
+                              )}
+                            </Button>
+                          )
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
+              </div>
+            </fieldset>
           </fieldset>
         );
       })}

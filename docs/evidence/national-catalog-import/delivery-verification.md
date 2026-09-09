@@ -1,6 +1,12 @@
 # National Catalog import delivery and verification
 
 Date: 2026-09-09 (local execution timestamps Europe/Moscow unless marked UTC).
+
+Subsequent UI follow-up: the approved two-column field/photo selection is
+implemented locally. Its current checks, review and new screenshots are in the
+[dated comparison-cell report](comparison-cells-2026-09-09/verification.md).
+The source freezes and visual evidence below describe the preceding delivery.
+
 Task14 starts from `7bb8706a7b27b272318464569f34f268e701e17a`; Tasks1–13 have
 independent scoped review. Task14 and the one whole-branch review completed. The whole-branch review found
 6 Important and 8 Minor corrections; the single fix wave is recorded below.
