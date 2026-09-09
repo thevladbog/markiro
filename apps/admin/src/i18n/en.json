@@ -1641,6 +1641,7 @@
         "choosePhoto": "Choose this photo",
         "viewPhoto": "View photo",
         "photoPending": "Preparing photo",
+        "photoNotPrepared": "Photo not loaded",
         "photoFailed": "The photo could not be loaded. You can add the product without it.",
         "preparePhoto": "Prepare alternative photo",
         "refreshComparison": "Refresh comparison",
@@ -1712,6 +1713,8 @@
           "failed": "Failed"
         },
         "reasons": {
+          "attribute_not_importable": "Import from Chestny ZNAK is not configured for this field. You can view the value in the source card and enter it in Markiro manually.",
+          "compatible_schema_required": "Importing attributes requires a category with a configured Chestny ZNAK mapping.",
           "barcode_mismatch": "The photo GTIN differs from this product. Select only after checking it.",
           "invalid_barcode": "This photo has an invalid GTIN and cannot be selected.",
           "manual_name_required": "Enter a product name and refresh the comparison.",

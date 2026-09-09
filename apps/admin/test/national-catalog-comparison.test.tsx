@@ -8,6 +8,35 @@ import { id, previewFixture } from "./national-catalog-fixtures.js";
 
 afterEach(cleanup);
 
+it.each([
+  [
+    "attribute_not_importable",
+    "Для этого поля не настроен перенос из Честного знака. Значение можно посмотреть в карточке и заполнить в Markiro вручную.",
+  ],
+  [
+    "compatible_schema_required",
+    "Перенос характеристик недоступен: нужна категория с настроенным сопоставлением Честного знака.",
+  ],
+])("explains the actual import restriction for %s", (reason, message) => {
+  const { props, preview } = review(false);
+  preview.fields.push({
+    id: id(42),
+    label: "Код продукции в ЕГАИС",
+    before: null,
+    after: "0300005753630000036",
+    applicable: false,
+    reason,
+    source: "national_catalog",
+    selectedByDefault: false,
+    requiresEntryIds: [],
+  });
+  render(<ImportReview {...props} />, { wrapper: MemoryRouter });
+  const field = screen.getByRole("group", { name: "Код продукции в ЕГАИС" });
+  expect(within(field).getByText(message)).toBeDefined();
+  expect(within(field).getByText("0300005753630000036")).toBeDefined();
+  expect(screen.queryByText("Поле пока недоступно. Проверьте категорию и значение.")).toBeNull();
+});
+
 function review(existing = true) {
   const data = structuredClone(previewFixture);
   const preview = data.items[0]!;
@@ -116,7 +145,6 @@ it("keeps photo viewing separate from selection and retains the viewed-photo rec
   const user = userEvent.setup();
   const keep = screen.getByRole("radio", { name: "Сохранить текущее фото" });
   expect((keep as HTMLInputElement).checked).toBe(true);
-  await user.click(screen.getByRole("button", { name: "Просмотреть фото" }));
   fireEvent.load(screen.getByRole("img", { name: "Подготовленное фото товара" }));
   expect((keep as HTMLInputElement).checked).toBe(true);
   await user.click(screen.getByRole("radio", { name: "Выбрать это фото" }));

@@ -3,7 +3,7 @@ export interface ReviewChoice {
   decision: ImportDecision;
   photoExplicit: boolean;
   replaceConfirmed: boolean;
-  viewedCandidateIds: string[];
+  loadedCandidateIds: string[];
 }
 export function initialChoice(preview: ImportPreview): ReviewChoice {
   const photo = !preview.productId
@@ -20,7 +20,7 @@ export function initialChoice(preview: ImportPreview): ReviewChoice {
     },
     photoExplicit: false,
     replaceConfirmed: false,
-    viewedCandidateIds: [],
+    loadedCandidateIds: [],
   };
 }
 export function currentChoice(
@@ -43,7 +43,15 @@ export function currentChoice(
     : stored;
 }
 export function keepPhoto(choice: ReviewChoice): ReviewChoice {
-  const reviewedCandidateId = choice.viewedCandidateIds.at(-1);
+  const photo = choice.decision.photo;
+  // Automatic image loads must not choose the source baseline. Retain only the
+  // candidate explicitly selected by the user and successfully displayed.
+  const reviewedCandidateId =
+    photo.kind === "candidate"
+      ? choice.photoExplicit && choice.loadedCandidateIds.includes(photo.candidateId)
+        ? photo.candidateId
+        : undefined
+      : photo.reviewedCandidateId;
   return {
     ...choice,
     photoExplicit: true,

@@ -306,8 +306,7 @@ test("own partial feed, cross-page choices, link-only and draft, independent pho
     .first()
     .getByRole("button", { name: t.linkOnly, exact: true })
     .click();
-  await newProduct.getByRole("button", { name: t.viewPhoto, exact: true }).nth(1).click();
-  await expect(newProduct.getByRole("img")).toHaveJSProperty("naturalWidth", 120);
+  await expect(newProduct.getByRole("img").nth(1)).toHaveJSProperty("naturalWidth", 120);
   const choose = newProduct.getByRole("radio", { name: t.choosePhoto, exact: true }).nth(1);
   await choose.focus();
   await page.keyboard.press("Space");

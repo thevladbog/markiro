@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Test } from "@nestjs/testing";
+import { PgBossService } from "../src/jobs/jobs.module";
 
 import { AuthorizationService } from "../src/authorization/authorization.service";
 import { EntitlementsService } from "../src/subscriptions/entitlements.service";
@@ -54,16 +55,26 @@ describe("NationalCatalogModule wiring", () => {
     });
   });
 
-  it("compiles the import graph with explicit global authorization, entitlement and storage dependencies", async () => {
+  it("compiles the import graph with explicit global authorization, entitlement, storage and queue dependencies", async () => {
     const ref = await Test.createTestingModule({
       imports: [
         {
           global: true,
           module: class TestDbModule {},
-          providers: [DB, AuthorizationService, EntitlementsService, ObjectStorageService].map(
-            (provide) => ({ provide, useValue: {} }),
-          ),
-          exports: [DB, AuthorizationService, EntitlementsService, ObjectStorageService],
+          providers: [
+            DB,
+            AuthorizationService,
+            EntitlementsService,
+            ObjectStorageService,
+            PgBossService,
+          ].map((provide) => ({ provide, useValue: {} })),
+          exports: [
+            DB,
+            AuthorizationService,
+            EntitlementsService,
+            ObjectStorageService,
+            PgBossService,
+          ],
         },
         NationalCatalogModule.forRoot({
           NATIONAL_CATALOG_REQUEST_TIMEOUT_MS: 15_000,

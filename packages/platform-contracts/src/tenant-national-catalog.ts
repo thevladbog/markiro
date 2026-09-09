@@ -223,6 +223,7 @@ export const importPhotoSchema = z
     candidateId: platformUuidSchema,
     previewPath: z.string().nullable(),
     state: z.enum(["pending", "ready", "failed"]),
+    automaticWorkPending: z.boolean().optional(),
     primary: z.boolean(),
     selectedByDefault: z.boolean(),
     reason: importPhotoReasonSchema.nullable(),

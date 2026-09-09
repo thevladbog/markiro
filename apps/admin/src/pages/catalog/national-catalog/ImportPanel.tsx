@@ -270,7 +270,11 @@ function ScopedImportPanel({ identity }: { identity: string }) {
       (q.state.data?.preparation.automaticWorkPending ||
         q.state.data?.preparation.state === "queued" ||
         q.state.data?.preparation.state === "loading" ||
-        q.state.data?.items.some((p) => p.photos.some((photo) => photo.state === "pending")))
+        q.state.data?.items.some((p) =>
+          p.photos.some(
+            (photo) => photo.state === "pending" && photo.automaticWorkPending !== false,
+          ),
+        ))
         ? POLL_INTERVAL_MS
         : false,
   });

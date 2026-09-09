@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as MarkiroDb from "@markiro/db";
 import type { JobWithMetadata } from "pg-boss";
+import { Test } from "@nestjs/testing";
 import {
   BUILD_INVENTORY_DOCUMENT_QUEUE,
   BUILD_SHIFT_EXPORT_QUEUE,
@@ -17,6 +18,15 @@ import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-st
 import type { ChzExportRunnerService } from "../src/modules/chz-exports/chz-export-runner.service";
 import type { ChzCodeStatusIngestService } from "../src/modules/chz-code-statuses/chz-code-status-ingest.service";
 import type { ChzCodeStatusRefreshService } from "../src/modules/chz-code-statuses/chz-code-status-refresh.service";
+import {
+  CATALOG_QUEUES,
+  CATALOG_REPAIR_QUEUE,
+  NationalCatalogJobsService,
+} from "../src/modules/national-catalog/national-catalog-jobs.service";
+import type { CatalogJob } from "../src/modules/national-catalog/national-catalog-job-repository";
+import { NationalCatalogImportController } from "../src/modules/national-catalog/national-catalog-import.controller";
+import { NationalCatalogImportService } from "../src/modules/national-catalog/national-catalog-import.service";
+import type { RequestWithTenant } from "../src/tenancy/tenant.guard";
 
 interface ShiftExportJobData {
   exportId: string;
@@ -92,6 +102,7 @@ function fakeBoss() {
   let workerIndex = 0;
   let shiftExportHandler: ShiftExportHandler | undefined;
   let inventoryDocumentHandler: InventoryDocumentHandler | undefined;
+  const catalogHandlers = new Map<string, ShiftExportHandler>();
   const boss = {
     on: vi.fn(),
     start: vi.fn(async () => boss),
@@ -102,7 +113,7 @@ function fakeBoss() {
     work: vi.fn(
       async (
         name: string,
-        optionsOrHandler: object | ShiftExportHandler,
+        optionsOrHandler: { includeMetadata?: boolean } | ShiftExportHandler,
         handler?: ShiftExportHandler,
       ) => {
         workerIndex += 1;
@@ -110,6 +121,7 @@ function fakeBoss() {
         if (name === BUILD_INVENTORY_DOCUMENT_QUEUE && handler) {
           inventoryDocumentHandler = handler as unknown as InventoryDocumentHandler;
         }
+        if (typeof optionsOrHandler === "function") catalogHandlers.set(name, optionsOrHandler);
         return `worker-${workerIndex}`;
       },
     ),
@@ -121,6 +133,11 @@ function fakeBoss() {
     getWipData: vi.fn(() => []),
     getShiftExportHandler: () => shiftExportHandler,
     getInventoryDocumentHandler: () => inventoryDocumentHandler,
+    getCatalogHandler: (name: string) => {
+      const handler = catalogHandlers.get(name);
+      if (!handler) throw new Error(`Missing handler: ${name}`);
+      return handler;
+    },
   };
   return boss;
 }
@@ -162,6 +179,16 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
   const chzCodeStatusRefresh = {
     run: vi.fn(async () => ({ batches: 0, updated: 0, caughtUp: true })),
   } as unknown as ChzCodeStatusRefreshService;
+  const catalogResume = vi.fn<() => Promise<void>>(async () => undefined);
+  const catalogClaim = vi.fn<() => Promise<CatalogJob[]>>(async () => []);
+  const catalogJobs = new NationalCatalogJobsService(
+    { claim: catalogClaim },
+    { resume: catalogResume, releaseExpired: async () => 0 },
+    { resumePreparation: async () => undefined },
+    { resume: async () => undefined },
+    { resume: async () => undefined, apply: async () => undefined, releaseExpired: async () => 0 },
+    { resume: async () => undefined },
+  );
   return {
     runner,
     service: new PgBossService(
@@ -182,8 +209,15 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
       chzExportRunner,
       chzCodeStatusIngest,
       chzCodeStatusRefresh,
+      undefined,
+      undefined,
+      undefined,
+      catalogJobs,
     ),
     inventoryRunner,
+    catalogJobs,
+    catalogResume,
+    catalogClaim,
   };
 }
 
@@ -271,5 +305,136 @@ describe("PgBossService shift export queue", () => {
     });
     await expect(service.enqueueInventoryDocumentRun("run-2")).resolves.toBe("shift-export-job-id");
     expect(boss.send).toHaveBeenCalledWith(BUILD_INVENTORY_DOCUMENT_QUEUE, { runId: "run-2" });
+  });
+});
+
+describe("PgBossService immediate National Catalog wake", () => {
+  beforeEach(() => {
+    pgBossMock.instances.length = 0;
+  });
+
+  it("enqueues a coalesced repair wake and preserves the minute recovery schedule", async () => {
+    const boss = fakeBoss();
+    const { service } = serviceWith(boss);
+    await service.onModuleInit();
+    boss.send.mockClear();
+
+    await service.wakeNationalCatalog();
+
+    expect(boss.send).toHaveBeenCalledExactlyOnceWith(CATALOG_REPAIR_QUEUE, {});
+    expect(boss.createQueue).toHaveBeenCalledWith(CATALOG_REPAIR_QUEUE, {
+      policy: "stately",
+      retryLimit: 0,
+    });
+    expect(boss.schedule).toHaveBeenCalledWith(CATALOG_REPAIR_QUEUE, "* * * * *");
+  });
+
+  it("keeps wake best-effort when unavailable, deduplicated, or rejected by the queue", async () => {
+    const boss = fakeBoss();
+    const { service } = serviceWith(boss);
+    await expect(service.wakeNationalCatalog()).resolves.toBeUndefined();
+    expect(boss.send).not.toHaveBeenCalled();
+    await service.onModuleInit();
+    boss.send.mockResolvedValueOnce(null);
+    await expect(service.wakeNationalCatalog()).resolves.toBeUndefined();
+    boss.send.mockRejectedValueOnce(new Error("queue unavailable"));
+    await expect(service.wakeNationalCatalog()).resolves.toBeUndefined();
+    await service.onModuleDestroy();
+    boss.send.mockClear();
+    await expect(service.wakeNationalCatalog()).resolves.toBeUndefined();
+    expect(boss.send).not.toHaveBeenCalled();
+  });
+
+  it("wakes only after a successful durable worker step settles", async () => {
+    const boss = fakeBoss();
+    const { service, catalogJobs } = serviceWith(boss);
+    let commit = () => {};
+    const committed = new Promise<void>((resolve) => {
+      commit = resolve;
+    });
+    const execute = vi.spyOn(catalogJobs, "execute").mockImplementation(() => committed);
+    await service.onModuleInit();
+    boss.send.mockClear();
+    const job = exportJob("catalog-job", "unused", 0, 0);
+    const working = boss.getCatalogHandler(CATALOG_QUEUES.enumerate)([job]);
+    expect(execute).toHaveBeenCalledWith(job.data);
+    expect(boss.send).not.toHaveBeenCalled();
+
+    commit();
+    await working;
+    expect(boss.send).toHaveBeenCalledExactlyOnceWith(CATALOG_REPAIR_QUEUE, {});
+
+    boss.send.mockClear();
+    execute.mockRejectedValueOnce(new Error("database failure"));
+    await expect(boss.getCatalogHandler(CATALOG_QUEUES.prepare)([job])).rejects.toThrow(
+      "database failure",
+    );
+    expect(boss.send).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges a finished step even if its follow-up wake fails and never loops empty repair", async () => {
+    const boss = fakeBoss();
+    const { service, catalogJobs, catalogClaim } = serviceWith(boss);
+    vi.spyOn(catalogJobs, "execute").mockResolvedValue(undefined);
+    await service.onModuleInit();
+    boss.send.mockRejectedValueOnce(new Error("queue unavailable"));
+    await expect(
+      boss.getCatalogHandler(CATALOG_QUEUES.candidate)([exportJob("catalog-job", "unused", 0, 0)]),
+    ).resolves.toBeUndefined();
+    expect(boss.send).toHaveBeenCalledWith(CATALOG_REPAIR_QUEUE, {});
+
+    boss.send.mockClear();
+    await boss.getCatalogHandler(CATALOG_REPAIR_QUEUE)([]);
+    expect(catalogClaim).toHaveBeenCalledExactlyOnceWith(100);
+    expect(boss.send).not.toHaveBeenCalled();
+  });
+
+  it("returns the committed HTTP result after a failed wake and later dispatches its durable intent", async () => {
+    const boss = fakeBoss();
+    const { service, catalogClaim } = serviceWith(boss);
+    await service.onModuleInit();
+    const saved = { id: "00000000-0000-4000-8000-000000000001" };
+    let commit: (value: typeof saved) => void = () => {};
+    const committed = new Promise<typeof saved>((resolve) => {
+      commit = resolve;
+    });
+    const module = await Test.createTestingModule({
+      controllers: [NationalCatalogImportController],
+      providers: [
+        { provide: PgBossService, useValue: service },
+        { provide: NationalCatalogImportService, useValue: { start: () => committed } },
+      ],
+    })
+      .useMocker(() => ({}))
+      .compile();
+    try {
+      boss.send.mockClear();
+      boss.send.mockRejectedValueOnce(new Error("queue unavailable"));
+      const response = module
+        .get(NationalCatalogImportController)
+        .start({ tenantId: "tenant", userId: "user" } as RequestWithTenant, {
+          mode: "own_catalog",
+        });
+      expect(boss.send).not.toHaveBeenCalled();
+      commit(saved);
+      await expect(response).resolves.toBe(saved);
+      expect(boss.send).toHaveBeenCalledExactlyOnceWith(CATALOG_REPAIR_QUEUE, {});
+
+      const durable: CatalogJob = {
+        kind: "enumerate",
+        tenantId: "tenant",
+        sessionId: saved.id,
+        workId: saved.id,
+        stepId: "00000000-0000-4000-8000-000000000002",
+      };
+      catalogClaim.mockResolvedValueOnce([durable]);
+      boss.send.mockClear();
+      await boss.getCatalogHandler(CATALOG_REPAIR_QUEUE)([]);
+      expect(boss.send).toHaveBeenCalledExactlyOnceWith(CATALOG_QUEUES.enumerate, durable, {
+        singletonKey: `enumerate:tenant:${saved.id}:${durable.stepId}`,
+      });
+    } finally {
+      await module.close();
+    }
   });
 });

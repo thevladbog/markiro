@@ -11,6 +11,7 @@ import {
   importItemSchema,
   importItemsQuerySchema,
   importItemsResponseSchema,
+  importPhotoSchema,
   importPrepareResponseSchema,
   importPreparationRetrySchema,
   importPrepareSchema,
@@ -94,6 +95,20 @@ const validPreview = {
   canApply: true,
   reason: null,
 } as const;
+
+it("distinguishes queued photo preparation from idle candidates while accepting legacy photos", () => {
+  const photo = { ...validPreview.photos[0], state: "pending", previewPath: null };
+  expect(importPhotoSchema.safeParse(photo).success).toBe(true);
+  for (const automaticWorkPending of [true, false]) {
+    expect(importPhotoSchema.parse({ ...photo, automaticWorkPending })).toMatchObject({
+      state: "pending",
+      automaticWorkPending,
+    });
+  }
+  expect(importPhotoSchema.safeParse({ ...photo, automaticWorkPending: "false" }).success).toBe(
+    false,
+  );
+});
 
 describe("tenant National Catalog import input contracts", () => {
   it("accepts both start modes and rejects empty GTIN input and unknown fields", () => {

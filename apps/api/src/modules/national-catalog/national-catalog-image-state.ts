@@ -48,6 +48,10 @@ export function imageView(original: ImportPhoto, row: ImageRow): ImportPhoto {
   return {
     ...original,
     state: row.state === "released" ? "failed" : row.state,
+    automaticWorkPending:
+      row.state === "pending" &&
+      row.preparationCheckpoint !== null &&
+      imageCheckpointSchema.parse(row.preparationCheckpoint).enqueuePending,
     previewPath:
       row.state === "ready"
         ? `/national-catalog/import-sessions/${row.sessionId}/images/${row.candidateId}`

@@ -24,6 +24,11 @@ for (const width of [390, 720, 1280]) {
       });
       let discovered = false;
       let prepared = false;
+      let selectionRefreshStarted = false;
+      let releaseSelectionRefresh: (() => void) | undefined;
+      const selectionRefresh = new Promise<void>((resolve) => {
+        releaseSelectionRefresh = resolve;
+      });
       let session = { ...sessionFixture, state: "loading", automaticWorkPending: true, loaded: 0 };
       const item = {
         ...itemsFixture.items[0]!,
@@ -52,9 +57,13 @@ for (const width of [390, 720, 1280]) {
             revision: session.revision + 1,
           };
           body = session;
-        } else if (path.endsWith("/items"))
+        } else if (path.endsWith("/items")) {
+          if (session.selected > 0) {
+            selectionRefreshStarted = true;
+            await selectionRefresh;
+          }
           body = { items: discovered ? [item] : [], nextCursor: null };
-        else if (path.endsWith("/previews") || path.includes("/preparations/"))
+        } else if (path.endsWith("/previews") || path.includes("/preparations/"))
           body = prepared
             ? {
                 ...previewFixture,
@@ -143,7 +152,21 @@ for (const width of [390, 720, 1280]) {
       expect(layout.navGap).toBeLessThanOrEqual(32);
       expect(layout.overflow).toBeLessThanOrEqual(1);
       await screenshot("selection");
-      await checkbox.click();
+      await checkbox.scrollIntoViewIfNeeded();
+      const checkboxBefore = await checkbox.boundingBox();
+      try {
+        await checkbox.click();
+        await expect.poll(() => selectionRefreshStarted).toBe(true);
+        await expect(checkbox).toBeChecked();
+        await expect(
+          dialog.getByRole("status", { name: "Загружаем товары из Национального каталога" }),
+        ).toHaveCount(0);
+        const checkboxAfter = await checkbox.boundingBox();
+        expect(checkboxAfter?.y).toBe(checkboxBefore?.y);
+        await screenshot("selected");
+      } finally {
+        releaseSelectionRefresh?.();
+      }
       await dialog.getByRole("button", { name: "Сравнить выбранные товары" }).click();
       await expect(
         dialog.getByRole("status").filter({ hasText: "Готовим сравнение" }),

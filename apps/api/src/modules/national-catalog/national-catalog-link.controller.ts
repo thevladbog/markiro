@@ -25,6 +25,7 @@ import {
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
+import { PgBossService } from "../../jobs/jobs.module";
 import type { ImportActor } from "./national-catalog-import.types";
 import { NationalCatalogLinkService } from "./national-catalog-link.service";
 function actor(req: RequestWithTenant): ImportActor {
@@ -38,7 +39,10 @@ function actor(req: RequestWithTenant): ImportActor {
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
 export class NationalCatalogLinkController {
-  constructor(private readonly links: NationalCatalogLinkService) {}
+  constructor(
+    private readonly links: NationalCatalogLinkService,
+    private readonly jobs: PgBossService,
+  ) {}
   @Get("link")
   @ApiOperation({ summary: "Read the confirmed National Catalog link" })
   @HttpCode(200)
@@ -56,13 +60,15 @@ export class NationalCatalogLinkController {
   @RequireSubscriptionWrite()
   @ApiZodBody(contracts.importSessionRetrySchema)
   @ApiZodResponse({ status: 200, schema: contracts.chzSummarySchema })
-  refresh(
+  async refresh(
     @Req() req: RequestWithTenant,
     @Param("id", new ParseUUIDPipe()) id: string,
     @Body(new ZodValidationPipe(contracts.importSessionRetrySchema))
     _body: z.infer<typeof contracts.importSessionRetrySchema>,
   ) {
-    return this.links.refresh(actor(req), id);
+    const result = await this.links.refresh(actor(req), id);
+    await this.jobs.wakeNationalCatalog();
+    return result;
   }
   @Delete("link")
   @ApiOperation({ summary: "Remove a confirmed National Catalog link" })
