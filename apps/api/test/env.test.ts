@@ -99,4 +99,21 @@ describe("National Catalog import rollout configuration", () => {
       ).toThrow();
     expect(() => loadEnv({ ...requiredEnv, NATIONAL_CATALOG_OWN_IMPORT_ENABLED: "1" })).toThrow();
   });
+  it("accepts the exact ASCII hostname of National Catalog photos on the .рф domain", () => {
+    const hostname = new URL("https://национальный-каталог.рф/s3/med/photo.jpg").hostname;
+    expect(
+      loadEnv({
+        ...requiredEnv,
+        NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS: ` ${hostname.toUpperCase()} `,
+      }).NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS,
+    ).toEqual([hostname]);
+  });
+  it.each(["images.xn--", "images.xn--p1ai-", `images.xn--${"a".repeat(60)}`])(
+    "rejects malformed internationalized top-level domains: %s",
+    (hostname) => {
+      expect(() =>
+        loadEnv({ ...requiredEnv, NATIONAL_CATALOG_IMAGE_ALLOWED_HOSTS: hostname }),
+      ).toThrow();
+    },
+  );
 });
