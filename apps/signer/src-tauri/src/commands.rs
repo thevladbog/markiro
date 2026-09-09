@@ -155,3 +155,13 @@ pub fn unsupported_platform_backends() -> (Arc<dyn Signer>, Arc<dyn SecretStore>
     }
     (Arc::new(Unsupported), Arc::new(Unsupported))
 }
+
+#[tauri::command]
+pub fn signer_autostart_enabled() -> Result<bool, String> {
+    crate::autostart::enabled()
+}
+
+#[tauri::command]
+pub fn signer_set_autostart_enabled(enabled: bool) -> Result<(), String> {
+    crate::autostart::set_enabled(enabled)
+}

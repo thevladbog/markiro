@@ -26,6 +26,16 @@ const STATUS_TO_CHIP: Record<CodeStatus, StatusChipStatus> = {
   written_off: "warn",
 };
 
+// CHZ states are independent of local aggregation. Unknown states stay neutral.
+const CHZ_STATUS_TO_CHIP = new Map<string, StatusChipStatus>([
+  ["INTRODUCED", "ok"],
+  ["EMITTED", "info"],
+  ["APPLIED", "info"],
+  ["RETIRED", "warn"],
+  ["WRITTEN_OFF", "warn"],
+  ["WITHDRAWN", "warn"],
+]);
+
 function DetailField({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -164,6 +174,22 @@ export function CodeCardPage() {
               />
             }
           />
+          {card.chzStatus && (
+            <DetailField
+              label={t("pages.codeSearch.chzStatusLabel")}
+              value={
+                <StatusChip
+                  status={CHZ_STATUS_TO_CHIP.get(card.chzStatus) ?? "neutral"}
+                  glyph={null}
+                  label={
+                    i18n.exists(`pages.inventory.chz.${card.chzStatus}`)
+                      ? t(`pages.inventory.chz.${card.chzStatus}`)
+                      : card.chzStatus
+                  }
+                />
+              }
+            />
+          )}
           <DetailField
             label={t("pages.codeSearch.codeCard.productionDateLabel")}
             value={card.productionDate ? formatDate(card.productionDate, i18n.language) : "—"}

@@ -16,6 +16,8 @@ let statusListener: ((status: AgentStatus) => void) | null = null;
 
 vi.mock("../src/lib/bridge.js", () => ({
   bridge: {
+    autostartEnabled: vi.fn().mockResolvedValue(true),
+    setAutostartEnabled: vi.fn(),
     status: vi.fn(),
     onStatus: vi.fn((listener: (status: AgentStatus) => void) => {
       statusListener = listener;

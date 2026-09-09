@@ -62,6 +62,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /products/:id/national-catalog/link (NationalCatalogLinkController.read)",
       "GET /chz-product-groups (ProductGroupsController.list)",
       "GET /code-search (CodeSearchController.classify)",
+      "GET /code-search/chz-statuses (CodeSearchController.chzStatuses)",
       "GET /code-search/codes (CodeSearchController.listCodes)",
       "GET /code-search/codes/:codeHash (CodeSearchController.getCodeCard)",
       "GET /code-search/boxes/:boxId (CodeSearchController.getBoxCard)",

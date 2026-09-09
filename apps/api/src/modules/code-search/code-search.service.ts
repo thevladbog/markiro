@@ -245,6 +245,14 @@ export class CodeSearchService {
       query.productionTo ? sql`${this.productionDateSql} <= ${query.productionTo}` : undefined,
       query.productId ? eq(schema.products.id, query.productId) : undefined,
       query.status ? sql`(${statusSql}) = ${query.status}` : undefined,
+      query.chzStatus
+        ? sql`exists (
+            select 1 from ${schema.chzCodeStatuses}
+            where ${schema.chzCodeStatuses.tenantId} = ${schema.codeRegistry.tenantId}
+              and ${schema.chzCodeStatuses.codeHash} = ${schema.codeRegistry.codeHash}
+              and ${schema.chzCodeStatuses.status} = ${query.chzStatus}
+          )`
+        : undefined,
     );
 
     const shiftsJoinCondition = and(
@@ -334,6 +342,28 @@ export class CodeSearchService {
       pageCount: Math.max(1, Math.ceil(total / PAGE_SIZE)),
       total,
     };
+  }
+
+  /** Status choices come from registered codes in this tenant, across all pages. */
+  async listChzStatuses(tenantId: string): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ status: schema.chzCodeStatuses.status })
+      .from(schema.chzCodeStatuses)
+      .innerJoin(
+        schema.codeRegistry,
+        and(
+          eq(schema.codeRegistry.tenantId, schema.chzCodeStatuses.tenantId),
+          eq(schema.codeRegistry.codeHash, schema.chzCodeStatuses.codeHash),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.chzCodeStatuses.tenantId, tenantId),
+          isNotNull(schema.chzCodeStatuses.status),
+        ),
+      )
+      .orderBy(schema.chzCodeStatuses.status);
+    return rows.flatMap(({ status }) => (status ? [status] : []));
   }
 
   /**
@@ -445,6 +475,16 @@ export class CodeSearchService {
       .orderBy(desc(schema.boxItems.addedAt))
       .limit(1);
 
+    const [chzRow] = await this.db
+      .select({ status: schema.chzCodeStatuses.status })
+      .from(schema.chzCodeStatuses)
+      .where(
+        and(
+          eq(schema.chzCodeStatuses.tenantId, tenantId),
+          eq(schema.chzCodeStatuses.codeHash, codeHash),
+        ),
+      );
+
     const history = await this.buildCodeHistory(tenantId, codeHash);
 
     return {
@@ -454,6 +494,7 @@ export class CodeSearchService {
       productId: row.productId,
       productName: row.productName,
       status: row.status as CodeStatus,
+      chzStatus: chzRow?.status ?? null,
       productionDate: row.productionDate,
       currentBox: currentBoxRow
         ? {

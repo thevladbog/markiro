@@ -62,6 +62,7 @@ export const listCodesQuerySchema = z.object({
   productId: z.string().uuid().optional(),
   shiftId: z.string().uuid().optional(),
   status: z.enum(["free", "aggregated", "written_off"]).optional(),
+  chzStatus: z.string().min(1).max(256).optional(),
 });
 export type ListCodesQueryDto = z.infer<typeof listCodesQuerySchema>;
 
@@ -139,6 +140,8 @@ export interface CodeCardDto {
   productId: string | null;
   productName: string | null;
   status: CodeStatus;
+  /** Last saved CHZ status; null until a status has been received. */
+  chzStatus: string | null;
   /** The owner shift's effective production day (`coalesce(production_date, planned_date)`), `YYYY-MM-DD`. */
   productionDate: string | null;
   currentBox: { id: string; sscc: string | null } | null;
@@ -392,6 +395,7 @@ export const codeCardOpenApiSchema: SchemaObject = {
     "productId",
     "productName",
     "status",
+    "chzStatus",
     "productionDate",
     "currentBox",
     "history",
@@ -403,6 +407,11 @@ export const codeCardOpenApiSchema: SchemaObject = {
     productId: { ...uuidSchema, nullable: true },
     productName: { type: "string", nullable: true },
     status: codeStatusSchema,
+    chzStatus: {
+      type: "string",
+      nullable: true,
+      description: "Last saved CHZ status, independent of the local code status.",
+    },
     productionDate: productionDateSchema,
     currentBox: {
       type: "object",

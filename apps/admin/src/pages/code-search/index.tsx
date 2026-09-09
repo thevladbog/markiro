@@ -24,6 +24,7 @@ import {
   ApiRequestError,
   classifySearch,
   useCodes,
+  useChzStatuses,
   type ClassifyBoxMatchDto,
   type CodeListItemDto,
 } from "./api.js";
@@ -71,6 +72,8 @@ export function CodeSearchPage() {
   const [productId, setProductId] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
+  const [chzStatus, setChzStatus] = useState("");
+  const { data: chzStatuses = [], isError: chzStatusesError } = useChzStatuses();
 
   // "all": code search is a reporting surface — codes produced under a
   // now-archived product must stay findable by that product.
@@ -84,6 +87,7 @@ export function CodeSearchPage() {
     ...(productionTo ? { productionTo } : {}),
     ...(productId !== "all" ? { productId } : {}),
     ...(statusFilter !== "all" ? { status: statusFilter } : {}),
+    ...(chzStatus ? { chzStatus } : {}),
   });
 
   const items = data?.items ?? [];
@@ -328,6 +332,26 @@ export function CodeSearchPage() {
               setStatusFilter(value);
               setPage(1);
             }}
+          />
+        </div>
+        <div style={{ width: 220 }}>
+          <Select
+            label={t("pages.codeSearch.chzStatusLabel")}
+            options={[
+              { value: "", label: t("pages.codeSearch.filters.chzStatusAll") },
+              ...chzStatuses.map((status) => ({
+                value: status,
+                label: i18n.exists(`pages.inventory.chz.${status}`)
+                  ? t(`pages.inventory.chz.${status}`)
+                  : status,
+              })),
+            ]}
+            value={chzStatus}
+            onValueChange={(value) => {
+              setChzStatus(value);
+              setPage(1);
+            }}
+            {...(chzStatusesError ? { error: t("pages.codeSearch.filters.chzStatusError") } : {})}
           />
         </div>
       </div>

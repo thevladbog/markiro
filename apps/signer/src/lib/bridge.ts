@@ -38,6 +38,9 @@ export type PairOutcome =
   { ok: true; tenantName: string } | { ok: false; error: "rejected" | "unavailable" };
 
 export const bridge = {
+  autostartEnabled: () => invoke<boolean>("signer_autostart_enabled"),
+  setAutostartEnabled: (enabled: boolean) =>
+    invoke<void>("signer_set_autostart_enabled", { enabled }),
   status: () => invoke<AgentStatus>("signer_status"),
   async pair(code: string): Promise<PairOutcome> {
     try {

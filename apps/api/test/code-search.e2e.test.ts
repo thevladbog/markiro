@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import express from "express";
+import { schema } from "@markiro/db";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
@@ -29,6 +30,7 @@ describe.skipIf(!ready)("code-search e2e", () => {
   let agent: ReturnType<typeof request.agent>;
   let stationKey: string;
   let productId: string;
+  let tenantId: string;
 
   // Same fixture value boxes.e2e.test.ts / disaggregation-lines.e2e.test.ts use.
   const SSCC1 = "123456789012345675";
@@ -52,7 +54,7 @@ describe.skipIf(!ready)("code-search e2e", () => {
     await app.init();
     await listenOnLoopback(app);
     agent = request.agent(app!.getHttpServer());
-    await signUpAndActivate(agent);
+    tenantId = await signUpAndActivate(agent);
 
     const station = await createTestStationDevice(app!, agent, "Line 1");
     stationKey = station.apiKey;
@@ -178,6 +180,49 @@ describe.skipIf(!ready)("code-search e2e", () => {
     expect(
       (filtered.body as { items: { codeHash: string }[] }).items.map((i) => i.codeHash),
     ).not.toContain(codeHashFor("aa"));
+  });
+
+  it("reads saved CHZ status, filters and counts before paging, and isolates tenants", async () => {
+    const other = request.agent(app!.getHttpServer());
+    const otherTenant = await signUpAndActivate(other);
+    await setup.db.insert(schema.chzCodeStatuses).values([
+      { tenantId, codeHash: codeHashFor("aa"), status: "INTRODUCED" },
+      { tenantId: otherTenant, codeHash: codeHashFor("aa"), status: "RETIRED" },
+      { tenantId: otherTenant, codeHash: codeHashFor("bb"), status: "FOREIGN_ONLY" },
+      { tenantId, codeHash: "f".repeat(64), status: "NOT_REGISTERED" },
+    ]);
+    const card = await agent.get(`/code-search/codes/${codeHashFor("aa")}`).expect(200);
+    expect(card.body).toMatchObject({ chzStatus: "INTRODUCED", status: "aggregated" });
+    const missing = await agent.get(`/code-search/codes/${codeHashFor("bb")}`).expect(200);
+    expect(missing.body.chzStatus).toBeNull();
+    await other.get(`/code-search/codes/${codeHashFor("aa")}`).expect(404);
+    const options = await agent.get("/code-search/chz-statuses").expect(200);
+    expect(options.body).toEqual(["INTRODUCED"]);
+    await other.get("/code-search/chz-statuses").expect(200, []);
+    const filtered = await agent
+      .get("/code-search/codes?chzStatus=INTRODUCED&status=aggregated")
+      .expect(200);
+    expect(filtered.body).toMatchObject({
+      total: 1,
+      pageCount: 1,
+      items: [{ codeHash: codeHashFor("aa") }],
+    });
+    expect(filtered.body.items).toHaveLength(1);
+    const next = await agent.get("/code-search/codes?chzStatus=INTRODUCED&page=2").expect(200);
+    expect(next.body).toMatchObject({ items: [], total: 1, pageCount: 1, page: 2 });
+    for (const query of [
+      "chzStatus=RETIRED",
+      "chzStatus=INTRODUCED&status=free",
+      `chzStatus=INTRODUCED&productId=${randomUUID()}`,
+    ]) {
+      const empty = await agent.get(`/code-search/codes?${query}`).expect(200);
+      expect(empty.body).toMatchObject({ items: [], total: 0 });
+    }
+    await agent.get("/code-search/codes?chzStatus=").expect(400);
+    await request(app!.getHttpServer())
+      .get("/code-search/chz-statuses")
+      .set("x-api-key", stationKey)
+      .expect(403);
   });
 
   it("keeps historical codes attached to their shift product after the GTIN is reused", async () => {
@@ -420,6 +465,7 @@ describe.skipIf(!ready)("code-search e2e", () => {
       history: { type: string; disaggregationDocNo?: string }[];
     };
     expect(card.status).toBe("free");
+    expect(res.body.chzStatus).toBe("INTRODUCED");
     const dis = card.history.find((h) => h.type === "box_disassembled");
     expect(dis?.disaggregationDocNo).toMatch(/^DSG-/);
   });

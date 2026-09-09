@@ -6,6 +6,8 @@ import type { AgentStatus } from "../src/lib/bridge.js";
 
 vi.mock("../src/lib/bridge.js", () => ({
   bridge: {
+    autostartEnabled: vi.fn().mockResolvedValue(true),
+    setAutostartEnabled: vi.fn(),
     listCertificates: vi.fn().mockResolvedValue([]),
     selectCertificate: vi.fn(),
     unpair: vi.fn(),
