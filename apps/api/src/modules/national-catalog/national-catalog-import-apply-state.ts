@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { productAttributeValueSchema } from "@markiro/domain";
+import { schema } from "@markiro/db";
 import {
   importApplySchema,
   importDecisionSchema,
@@ -85,10 +87,25 @@ export const previousValuesSchema = z
   .object({
     product: z.record(z.string(), z.unknown()).nullable(),
     profile: z.record(z.string(), z.unknown()).nullable(),
+    // Task7 persists local DB rows here; provider attributes belong only to sourceEnvelopeSchema.
     attributes: z.array(
       z
-        .object({ id: z.number().int(), value: z.string(), gtin: z.string().nullable() })
-        .passthrough(),
+        .object({
+          id: z.uuid(),
+          tenantId: z.string().min(1),
+          productId: z.uuid(),
+          schemaVersionId: z.uuid(),
+          attributeId: z.string().min(1),
+          value: productAttributeValueSchema,
+          state: z.enum(schema.productAttributeState.enumValues),
+          source: z.enum(schema.productAttributeSource.enumValues),
+          sourceRef: z.string().nullable(),
+          observedAt: z.iso.datetime().nullable(),
+          appliedBy: z.string().nullable(),
+          appliedAt: z.iso.datetime(),
+          supersededAt: z.iso.datetime().nullable(),
+        })
+        .strict(),
     ),
     link: z.object({ id: z.uuid(), revision: z.number() }).passthrough().nullable(),
     schema: z

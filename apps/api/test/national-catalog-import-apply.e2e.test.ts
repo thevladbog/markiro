@@ -533,6 +533,162 @@ describe("atomic National Catalog product application (real PostgreSQL services)
       sourceRef: `national-catalog-snapshot:${link?.reviewedSnapshotId}`,
     });
   });
+  async function existingAttribute() {
+    const c = await category();
+    await db
+      .update(schema.products)
+      .set({ chzProductGroupCode: 23 })
+      .where(eq(schema.products.id, existingId));
+    await db.insert(schema.productRegulatoryProfiles).values({
+      tenantId: actor.tenantId,
+      productId: existingId,
+      schemaVersionId: c.id,
+      categoryId: String(source.categories[0]!.id),
+      categoryName: "Категория",
+      source: "manual",
+      confirmedBy: actor.userId,
+      confirmedAt: new Date(),
+    });
+    await db.insert(schema.productRegulatoryAttributeValues).values({
+      tenantId: actor.tenantId,
+      productId: existingId,
+      schemaVersionId: c.id,
+      attributeId: "20",
+      value: { type: "string", value: "Красный" },
+      source: "manual",
+      appliedBy: actor.userId,
+    });
+    return c;
+  }
+  async function attributes() {
+    return db
+      .select()
+      .from(schema.productRegulatoryAttributeValues)
+      .where(
+        and(
+          eq(schema.productRegulatoryAttributeValues.tenantId, actor.tenantId),
+          eq(schema.productRegulatoryAttributeValues.productId, existingId),
+        ),
+      );
+  }
+  it("confirms link-only with existing local attributes without changing their provenance", async () => {
+    await existingAttribute();
+    const before = await attributes();
+    const result = await apply(decision(await preview()));
+    expect(result.items[0]).toMatchObject({ product: "applied", productReason: null });
+    expect(await attributes()).toEqual(before);
+    expect((await links())[0]).toMatchObject({ confirmedBy: actor.userId, cardId: "720679" });
+  });
+  it("replaces an existing local attribute with exact typed before/after and snapshot provenance", async () => {
+    const c = await existingAttribute();
+    const before = (await attributes())[0]!;
+    const p = await preview();
+    const result = await apply(decision(p, true));
+    expect(result.items[0]).toMatchObject({ product: "applied", productReason: null });
+    const rows = await attributes();
+    expect(rows).toHaveLength(2);
+    expect(rows.find((row) => row.id === before.id)).toMatchObject({
+      value: before.value,
+      source: "manual",
+      appliedBy: actor.userId,
+      supersededAt: expect.any(Date),
+    });
+    const active = rows.find((row) => row.supersededAt === null);
+    const [link] = await links();
+    expect(active).toMatchObject({
+      tenantId: actor.tenantId,
+      productId: existingId,
+      schemaVersionId: c.id,
+      attributeId: "20",
+      value: { type: "string", value: "Синий" },
+      source: "national_catalog",
+      sourceRef: `national-catalog-snapshot:${link?.reviewedSnapshotId}`,
+      appliedBy: actor.userId,
+    });
+    const [receipt] = await db
+      .select()
+      .from(schema.nationalCatalogImportOperationItems)
+      .where(eq(schema.nationalCatalogImportOperationItems.operationId, result.operationId));
+    expect(receipt?.appliedEvidence).toMatchObject({
+      appliedBy: actor.userId,
+      snapshotId: link?.reviewedSnapshotId,
+      acceptedEntries: expect.arrayContaining([
+        expect.objectContaining({
+          target: "mapped",
+          entry: expect.objectContaining({
+            currentValue: before.value,
+            proposedValue: { type: "string", value: "Синий" },
+          }),
+        }),
+      ]),
+    });
+  });
+  it("rejects changed local attributes after preview without mutating product or provenance", async () => {
+    await existingAttribute();
+    const p = await preview();
+    const [original] = await attributes();
+    if (!original) throw new Error("attribute fixture missing");
+    await db
+      .update(schema.productRegulatoryAttributeValues)
+      .set({ value: { type: "string", value: "Зелёный" } })
+      .where(eq(schema.productRegulatoryAttributeValues.id, original.id));
+    const before = await product();
+    const rows = await attributes();
+    const result = await apply(decision(p, true));
+    expect(result.items[0]).toMatchObject({
+      product: "conflict",
+      productReason: "attributes_changed",
+    });
+    expect(await attributes()).toEqual(rows);
+    expect(await product()).toEqual(before);
+    expect(await links()).toEqual([]);
+  });
+  it("fails malformed stored local attribute values without applying even link-only", async () => {
+    await existingAttribute();
+    const p = await preview();
+    const [stored] = await db
+      .select()
+      .from(schema.nationalCatalogImportPreviews)
+      .where(eq(schema.nationalCatalogImportPreviews.id, p.id));
+    const { previousValuesSchema } =
+      await import("../src/modules/national-catalog/national-catalog-import-apply-state");
+    const previous = previousValuesSchema.parse(stored?.previousValues);
+    await db
+      .update(schema.nationalCatalogImportPreviews)
+      .set({
+        previousValues: {
+          ...previous,
+          attributes: previous.attributes.map((row) => ({
+            ...row,
+            value: { type: "string", value: 123 },
+          })),
+        },
+      })
+      .where(eq(schema.nationalCatalogImportPreviews.id, p.id));
+    const before = await attributes();
+    const result = await apply(decision(p));
+    expect(result.items[0]).toMatchObject({
+      product: "failed",
+      productReason: "infrastructure_failure",
+    });
+    expect(await attributes()).toEqual(before);
+    expect(await links()).toEqual([]);
+  });
+  it("applies a fresh comparison after initial category and attributes import", async () => {
+    const c = await category();
+    expect((await apply(decision(c.preview, true))).items[0]?.product).toBe("applied");
+    const before = await attributes();
+    const linkBefore = (await links())[0]!;
+    const fresh = await preview();
+    expect(fresh.linkAction).toBe("keep");
+    const result = await apply(decision(fresh));
+    expect(result.items[0]).toMatchObject({ product: "applied", productReason: null });
+    expect(await attributes()).toEqual(before);
+    expect((await links())[0]).toMatchObject({
+      id: linkBefore.id,
+      revision: linkBefore.revision + 1,
+    });
+  });
   it("rolls back product, initial category, snapshot, link and audit when the attribute proposal sees stale profile", async () => {
     const c = await category();
     const before = await product();
