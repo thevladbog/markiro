@@ -150,6 +150,23 @@ for (const width of [390, 768, 1280, 1600])
         for (const img of await table.getByRole("img").all())
           await expect(img).toHaveJSProperty("naturalWidth", 120);
         expect(await table.evaluate((el) => getComputedStyle(el).tableLayout)).toBe("auto");
+        for (const name of await table.locator(".mk-catalog-product-name").all())
+          expect((await name.boundingBox())?.width).toBeGreaterThanOrEqual(220);
+        await expect(table.locator(".mk-catalog-product-name")).toHaveCount(3);
+        for (const cell of await table.locator("tbody tr td:nth-child(4)").all())
+          expect(
+            await cell.evaluate((el) => {
+              const style = getComputedStyle(el);
+              return (
+                el.getBoundingClientRect().width -
+                parseFloat(style.paddingLeft) -
+                parseFloat(style.paddingRight)
+              );
+            }),
+          ).toBeGreaterThanOrEqual(140);
+        await expect(table.locator(".mk-catalog-product-group")).toHaveCount(3);
+        for (const group of await table.locator(".mk-catalog-product-group").all())
+          expect((await group.boundingBox())?.width).toBeGreaterThanOrEqual(140);
         // Measure actual text and controls against their OWN cell, independently of permitted container scrolling.
         const escapes = await table.locator("td").evaluateAll((cells) =>
           cells.flatMap((cell) => {
@@ -197,10 +214,13 @@ for (const width of [390, 768, 1280, 1600])
         await expect(link).toBeFocused();
         await expect(link).toBeInViewport();
         const evidence = resolve("../../docs/evidence/national-catalog-import");
-        if (process.env.NC_UPDATE_SCREENSHOTS === "1" && [390, 1280].includes(width)) {
+        if (
+          process.env.NC_UPDATE_SCREENSHOTS === "1" &&
+          ([390, 1280].includes(width) || (width === 1600 && lang === "ru" && theme === "light"))
+        ) {
           await mkdir(evidence, { recursive: true });
           await page.screenshot({
-            path: resolve(evidence, `task-14-catalog-${width}-${lang}-${theme}.png`),
+            path: resolve(evidence, `final-fix-layout-catalog-${width}-${lang}-${theme}.png`),
             animations: "disabled",
             fullPage: true,
           });
@@ -228,10 +248,35 @@ for (const width of [390, 768, 1280, 1600])
         if (process.env.NC_UPDATE_SCREENSHOTS === "1" && [390, 1280].includes(width)) {
           await page.locator("fieldset").first().scrollIntoViewIfNeeded();
           await page.screenshot({
-            path: resolve(evidence, `task-14-review-${width}-${lang}-${theme}.png`),
+            path: resolve(evidence, `final-fix-layout-review-${width}-${lang}-${theme}.png`),
             animations: "disabled",
             fullPage: true,
           });
+        }
+        if (width === 1280 && lang === "ru" && theme === "light") {
+          products[2]!.name = "LongExternalProductName".repeat(12);
+          products[2]!.productGroup = "LongExternalGroupName".repeat(12);
+          await page.goto(open("/catalog"));
+          await expect(table.getByRole("row")).toHaveCount(4);
+          for (const selector of [".mk-catalog-product-name", ".mk-catalog-product-group"]) {
+            const layout = await table
+              .locator(selector)
+              .nth(2)
+              .evaluate((el) => {
+                const bounds = el.getBoundingClientRect();
+                const range = document.createRange();
+                range.selectNodeContents(el);
+                const lines = Array.from(range.getClientRects());
+                return {
+                  lines: lines.length,
+                  escaped: lines.some(
+                    (r) => r.left < bounds.left - 1 || r.right > bounds.right + 1,
+                  ),
+                };
+              });
+            expect(layout.lines).toBeGreaterThan(1);
+            expect(layout.escaped).toBe(false);
+          }
         }
         expect(errors).toEqual([]);
         expect(unexpected).toEqual([]);

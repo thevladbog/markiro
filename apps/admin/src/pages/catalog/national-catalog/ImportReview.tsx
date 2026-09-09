@@ -86,6 +86,50 @@ export function ImportReview({
   const invalidName = Object.values(effectiveDrafts.manualNames).some(
     (name) => name.trim().length > 200,
   );
+  const validChoices = applicable.filter((p) => {
+    const choice = choiceFor(p);
+    return (
+      !(p.linkAction === "replace" && !choice.replaceConfirmed) &&
+      choice.decision.acceptedEntryIds.every((id) =>
+        p.fields.some(
+          (f) =>
+            f.id === id &&
+            f.applicable &&
+            f.requiresEntryIds.every((required) =>
+              choice.decision.acceptedEntryIds.includes(required),
+            ),
+        ),
+      ) &&
+      (p.productId !== null ||
+        choice.decision.acceptedEntryIds.some((id) =>
+          p.fields.some((f) => f.id === id && f.labelKey === "name"),
+        )) &&
+      (choice.decision.photo.kind === "keep" ||
+        p.photos.some(
+          (photo) =>
+            choice.decision.photo.kind === "candidate" &&
+            photo.candidateId === choice.decision.photo.candidateId &&
+            photo.state === "ready" &&
+            (photo.reason === null || photo.reason === "barcode_mismatch"),
+        ))
+    );
+  });
+  const canConfirm =
+    !busy &&
+    !comparisonRejected &&
+    !dirty &&
+    ready &&
+    applicable.length > 0 &&
+    validChoices.length === applicable.length;
+  const totals = {
+    created: validChoices.filter((p) => !p.productId).length,
+    attached: validChoices.filter((p) => p.linkAction === "attach").length,
+    replaced: validChoices.filter((p) => p.linkAction === "replace").length,
+    changed: validChoices.filter(
+      (p) => p.productId && choiceFor(p).decision.acceptedEntryIds.length > 0,
+    ).length,
+    photos: validChoices.filter((p) => choiceFor(p).decision.photo.kind === "candidate").length,
+  };
   return (
     <section aria-label={tr("review")}>
       <h2>{tr("review")}</h2>
@@ -180,7 +224,7 @@ export function ImportReview({
               {preview.fields.map((field) => (
                 <div key={field.id}>
                   <Checkbox
-                    label={field.label}
+                    label={field.labelKey ? tr(`fields.${field.labelKey}`) : field.label}
                     checked={choice.decision.acceptedEntryIds.includes(field.id)}
                     disabled={
                       !canWrite ||
@@ -200,7 +244,8 @@ export function ImportReview({
                     </span>
                     <br />
                     <span>
-                      {tr("after")}: {field.after ?? "—"}
+                      {tr(field.source === "manual" ? "manualSource" : "after")}:{" "}
+                      {field.after ?? "—"}
                     </span>
                   </p>
                   {field.reason && (
@@ -305,13 +350,14 @@ export function ImportReview({
                   ) : (
                     <>
                       <p>{tr(photo.state === "pending" ? "photoPending" : "photoFailed")}</p>
-                      {photo.state === "pending" && (
+                      {(photo.state === "pending" ||
+                        (photo.state === "failed" && photo.reason === "download_failed")) && (
                         <Button
                           variant="secondary"
                           disabled={!canWrite || busy || !canPreparePhotos}
                           onClick={() => onPhoto(preview.id, photo.candidateId)}
                         >
-                          {tr("preparePhoto")}
+                          {tr(photo.state === "failed" ? "retryPhotoPreparation" : "preparePhoto")}
                         </Button>
                       )}
                     </>
@@ -330,6 +376,13 @@ export function ImportReview({
         );
       })}
       {canWrite && (
+        <p aria-label={tr("confirmationSummary")} aria-live="polite">
+          {canConfirm
+            ? t("pages.catalog.import.confirmationTotals", totals)
+            : tr("confirmationIncomplete")}
+        </p>
+      )}
+      {canWrite && (
         <div className="mk-nc-actions">
           <Button
             variant="secondary"
@@ -340,27 +393,7 @@ export function ImportReview({
           </Button>
           <Button
             variant="primary"
-            disabled={
-              busy ||
-              comparisonRejected ||
-              dirty ||
-              !ready ||
-              !applicable.length ||
-              applicable.some((p) => {
-                const choice = choiceFor(p);
-                const photo = choice.decision.photo;
-                return (
-                  (p.linkAction === "replace" && !choice.replaceConfirmed) ||
-                  (photo.kind === "candidate" &&
-                    !p.photos.some(
-                      (candidate) =>
-                        candidate.candidateId === photo.candidateId &&
-                        candidate.state === "ready" &&
-                        (candidate.reason === null || candidate.reason === "barcode_mismatch"),
-                    ))
-                );
-              })
-            }
+            disabled={!canConfirm}
             onClick={() => onApply(applicable.map((p) => choiceFor(p).decision))}
           >
             {tr("apply")}

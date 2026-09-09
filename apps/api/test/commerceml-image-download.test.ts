@@ -95,6 +95,48 @@ describe("downloadBoundedImage", () => {
     ...overrides,
   });
 
+  it.each([302, 503])(
+    "closes an unfinished %i body before settling or following a redirect",
+    async (status) => {
+      const controller = new AbortController();
+      const responses: PassThrough[] = [];
+      const requests: Array<ReturnType<typeof vi.fn>> = [];
+      const request = ((_url: URL, _options: unknown, callback: (res: IncomingMessage) => void) => {
+        if (responses.length) {
+          expect(responses[0]?.destroyed).toBe(true);
+          expect(requests[0]).toHaveBeenCalledOnce();
+        }
+        const response = new PassThrough();
+        responses.push(response);
+        const destroy = vi.fn();
+        requests.push(destroy);
+        const first = responses.length === 1;
+        const res = response as unknown as IncomingMessage;
+        res.statusCode = first ? status : 200;
+        res.headers = first ? { location: "/next" } : {};
+        return Object.assign(new EventEmitter(), {
+          destroy,
+          end() {
+            queueMicrotask(() => {
+              callback(res);
+              if (!first) response.end(Buffer.from("ok"));
+            });
+          },
+        });
+      }) as unknown as typeof httpsRequest;
+      const result = downloadBoundedImage("https://images.example/start", policy(), {
+        request,
+        signal: controller.signal,
+      });
+      if (status === 302) await expect(result).resolves.toEqual(Buffer.from("ok"));
+      else await expect(result).rejects.toMatchObject({ reason: "bad_status" });
+      expect(responses[0]?.destroyed).toBe(true);
+      expect(requests[0]).toHaveBeenCalledOnce();
+      controller.abort();
+      expect(responses[0]?.destroyed).toBe(true);
+    },
+  );
+
   it("destroys the actual request and response on caller abort without exposing signed URLs", async () => {
     const controller = new AbortController();
     const response = new PassThrough();

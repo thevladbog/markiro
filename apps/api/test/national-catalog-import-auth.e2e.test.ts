@@ -89,7 +89,18 @@ describe.skipIf(!ready)("National Catalog actual cabinet HTTP authorization", ()
       throughAt: new Date(),
       expiresAt: new Date(Date.now() + 86400000),
       state: "ready",
-      checkpoint: {},
+      checkpoint: {
+        version: 1,
+        stepId: randomUUID(),
+        runId: null,
+        phase: "done",
+        work: [],
+        failures: [],
+        attempts: 0,
+        state: "done",
+        nextRetryAt: null,
+        enqueuePending: false,
+      },
     });
     await setOnlyOrganizationMemberRole(db, tenantId, "manager");
     await createManagedSubscription(db, {
@@ -106,6 +117,7 @@ describe.skipIf(!ready)("National Catalog actual cabinet HTTP authorization", ()
     );
     expect(writeResponse.status).toBe(403);
     expect(readResponse.status).toBe(200);
+    expect(readResponse.body.automaticWorkPending).toBe(false);
     expect(foreignSessionResponse.status).toBe(404);
   });
   type Route = {

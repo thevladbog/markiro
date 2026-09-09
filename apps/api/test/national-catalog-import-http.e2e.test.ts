@@ -502,4 +502,157 @@ describe.skipIf(!ready)("National Catalog successful actual AppModule HTTP mappi
       ).items[0]?.image,
     ).toBe("applied");
   });
+  it.each([false, true])(
+    "public cancel persists accepted cancellation and defeats worker redelivery (core committed=%s)",
+    async (coreCommitted) => {
+      const agent = request.agent(app.getHttpServer());
+      const tenantId = await signUpAndActivate(agent);
+      await db
+        .insert(schema.integrationChannels)
+        .values({ tenantId, type: "chestny_znak", settings: { environment: "production" } });
+      const productId = randomUUID();
+      await db
+        .insert(schema.products)
+        .values({ id: productId, tenantId, gtin14: GTIN, name: "Keep local" });
+      const session = contracts.importSessionSchema.parse(
+        (
+          await agent
+            .post("/national-catalog/import-sessions")
+            .send({ mode: "gtins", text: GTIN })
+            .expect(200)
+        ).body,
+      );
+      const base = `/national-catalog/import-sessions/${session.id}`;
+      await app.get(NationalCatalogImportService).resume(tenantId, session.id);
+      const list = contracts.importItemsResponseSchema.parse(
+        (await agent.get(base + "/items").expect(200)).body,
+      );
+      const current = contracts.importSessionSchema.parse((await agent.get(base).expect(200)).body);
+      const item = list.items[0]!;
+      await agent
+        .put(base + "/selection")
+        .send({ expectedRevision: current.revision, itemIds: [item.id] })
+        .expect(200);
+      const prep = contracts.importPrepareResponseSchema.parse(
+        (
+          await agent
+            .post(base + "/previews")
+            .send({
+              requestId: randomUUID(),
+              itemIds: [item.id],
+              manualNames: [],
+              categoryChoices: [],
+            })
+            .expect(200)
+        ).body,
+      );
+      await app
+        .get(NationalCatalogImportPreviewService)
+        .resumePreparation(tenantId, session.id, prep.preparation.id);
+      const view = contracts.importPrepareResponseSchema.parse(
+        (await agent.get(base + `/preparations/${prep.preparation.id}`).expect(200)).body,
+      ).items[0]!;
+      const image = view.photos[0]!;
+      const images = app.get(NationalCatalogImageService);
+      await images.resume(tenantId, session.id, view.id, image.candidateId);
+      const result = contracts.importResultSchema.parse(
+        (
+          await agent
+            .post(base + "/applies")
+            .send({
+              requestId: randomUUID(),
+              decisions: [
+                {
+                  previewId: view.id,
+                  acceptedEntryIds: [],
+                  linkAction: "attach",
+                  photo: { kind: "candidate", candidateId: image.candidateId },
+                },
+              ],
+            })
+            .expect(200)
+        ).body,
+      );
+      const applies = app.get(NationalCatalogImportApplyService);
+      if (coreCommitted) await applies.resume(tenantId, result.operationId);
+      const receiptQuery = () =>
+        db
+          .select()
+          .from(schema.nationalCatalogImportOperationItems)
+          .where(eq(schema.nationalCatalogImportOperationItems.operationId, result.operationId));
+      const [before] = await receiptQuery();
+      const auditQuery = () =>
+        db
+          .select()
+          .from(schema.tenantAuditEvents)
+          .where(eq(schema.tenantAuditEvents.organizationId, tenantId));
+      await agent
+        .post(base + "/cancel")
+        .send({})
+        .expect(200);
+      const stopped = contracts.importResultSchema.parse(
+        (await agent.get(base + `/applies/${result.operationId}`).expect(200)).body,
+      );
+      expect(stopped).toMatchObject({
+        state: "cancelled",
+        items: [
+          {
+            product: coreCommitted ? "applied" : "cancelled",
+            image: "failed",
+            imageReason: "import_operation_cancelled",
+          },
+        ],
+      });
+      const audits = await auditQuery();
+      const cancellation = audits.filter(
+        (event) => event.action === "national_catalog.import.cancelled",
+      );
+      expect(cancellation).toHaveLength(1);
+      expect(cancellation[0]).toMatchObject({
+        organizationId: tenantId,
+        actorUserId:
+          before!.decision &&
+          typeof before!.decision === "object" &&
+          "acceptedBy" in before!.decision
+            ? before!.decision.acceptedBy
+            : null,
+        action: "national_catalog.import.cancelled",
+        outcome: "success",
+        targetType: "national_catalog_import_operation",
+        targetId: result.operationId,
+        after: {
+          sessionId: session.id,
+          operationId: result.operationId,
+          state: "cancelled",
+          stoppedPreviewIds: [view.id],
+        },
+      });
+      await agent
+        .post(base + "/cancel")
+        .send({})
+        .expect(200);
+      await applies.resume(tenantId, result.operationId);
+      await images.apply(tenantId, result.operationId, view.id);
+      expect(
+        contracts.importResultSchema.parse(
+          (await agent.get(base + `/applies/${result.operationId}`).expect(200)).body,
+        ),
+      ).toEqual(stopped);
+      expect(await auditQuery()).toEqual(audits);
+      const [after] = await receiptQuery();
+      expect(after!.decision).toEqual(before!.decision);
+      expect(after!.appliedEvidence).toEqual(before!.appliedEvidence);
+      expect(after).toMatchObject({
+        imageRetryEligible: false,
+        nextAttemptAt: null,
+        nextImageAttemptAt: null,
+      });
+      expect(
+        await db
+          .select()
+          .from(schema.productImages)
+          .where(eq(schema.productImages.productId, productId)),
+      ).toHaveLength(0);
+    },
+  );
 });

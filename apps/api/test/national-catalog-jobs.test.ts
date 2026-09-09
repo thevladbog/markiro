@@ -10,7 +10,10 @@ import {
 } from "../src/modules/national-catalog/national-catalog-jobs.service";
 function fixture(jobs: CatalogJob[] = []) {
   const repository = { claim: vi.fn(async () => jobs) };
-  const sessions = { resume: vi.fn<() => Promise<void>>(async () => undefined) };
+  const sessions = {
+    releaseExpired: vi.fn(async () => 0),
+    resume: vi.fn<() => Promise<void>>(async () => undefined),
+  };
   const previews = { resumePreparation: vi.fn(async () => undefined) };
   const applies = { resume: vi.fn<() => Promise<void>>(async () => undefined) };
   const images = {

@@ -11,7 +11,6 @@ import { createProductSchema } from "../products/dto";
 import { mappingSchema } from "./national-catalog-import-preview-builder";
 import { buildNationalCatalogImportEntries } from "./national-catalog-proposal.service";
 import { canonicalJsonHash } from "./national-catalog-products.service";
-import type { NationalCatalogProduct } from "./national-catalog.types";
 import type { CatalogValueProjection } from "./national-catalog-summary";
 
 export const projectionContextSchema = z
@@ -66,7 +65,11 @@ export function buildCatalogProjection(input: {
   return { version: 1, values, context: input.context };
 }
 export function observeCatalogProjection(
-  source: NationalCatalogProduct,
+  source: {
+    name: string | null;
+    categories: Array<{ id: number }>;
+    attributes: Array<{ id: number; value: string; gtin: string | null }>;
+  },
   gtin14: string,
   baseline: CatalogProjection,
   imageChecksum: string | null,

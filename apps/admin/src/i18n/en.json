@@ -1705,7 +1705,9 @@
           "operation_running": "Processing continues. Wait for its result.",
           "image_conflict": "The product photo has changed since comparison. Review the current photo.",
           "download_failed": "Photo download failed. The product can be added separately.",
-          "access_changed": "Your access has changed. Contact an administrator."
+          "access_changed": "Your access has changed. Contact an administrator.",
+          "import_operation_cancelled": "Remaining work was stopped.",
+          "product_not_applied": "Photo was not applied because the product was not added."
         },
         "accessDenied": "Check your sign-in, editing permissions and subscription. Retry the saved request when access is restored.",
         "photosUnavailable": "New photos cannot be prepared right now. Keep the current photo or add the product without one.",
@@ -1716,7 +1718,21 @@
         "confirmAbandon": "Confirm: forget request",
         "comparisonRejected": "The comparison is stale. Refresh it before applying changes.",
         "rejectedItem": "This item requires a new comparison.",
-        "resultPosition": "Position {{position}}"
+        "resultPosition": "Position {{position}}",
+        "sessionRowLimit": "Session limit reached: 100,000 rows. Add the remaining products in another session.",
+        "loadedCount": "Rows loaded: {{count}}",
+        "loadStarted": "Loading started",
+        "manualSource": "Manual entry",
+        "retryPhotoPreparation": "Retry photo preparation",
+        "confirmationSummary": "Summary before adding",
+        "confirmationTotals": "Create products: {{created}} · Add links: {{attached}} · Replace links: {{replaced}} · Change products: {{changed}} · Upload photos: {{photos}}",
+        "confirmationIncomplete": "Complete your choices and update the comparison to see the totals.",
+        "fields": {
+          "name": "Name",
+          "category": "Category",
+          "print_name": "Print name",
+          "shelf_life_days": "Shelf life, days"
+        }
       },
       "chz": {
         "unavailable": "Information unavailable",

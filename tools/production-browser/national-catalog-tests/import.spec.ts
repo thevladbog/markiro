@@ -121,7 +121,7 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
   await mkdir(evidence, { recursive: true });
   if (process.env.NC_UPDATE_SCREENSHOTS === "1")
     await page.screenshot({
-      path: resolve(evidence, "task-14-recovery-review-1280.png"),
+      path: resolve(evidence, "final-fix-recovery-review-1280.png"),
       fullPage: true,
     });
   await page.getByRole("button", { name: "Добавить выбранные изменения" }).click();
@@ -145,17 +145,20 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
   p.linkAction = "replace";
   p.fields[0]!.before = "Молоко фермерское";
   p.categoryOptions = [{ optionId: id(40), label: "Молочная продукция", selected: true }];
+  const providerField = { ...p.fields[0]! };
+  delete providerField.labelKey;
   p.fields.push(
     {
       ...p.fields[0]!,
       id: id(41),
       label: "Категория",
+      labelKey: "category",
       before: null,
       after: "Молочная продукция",
       requiresEntryIds: [],
     },
     {
-      ...p.fields[0]!,
+      ...providerField,
       id: id(42),
       label: "Жирность",
       before: null,
@@ -188,7 +191,7 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
   );
   if (process.env.NC_UPDATE_SCREENSHOTS === "1")
     await page.screenshot({
-      path: resolve(evidence, "task-14-recovery-rich-review-1280.png"),
+      path: resolve(evidence, "final-fix-recovery-rich-review-1280.png"),
       fullPage: true,
     });
   const pendingKey = `markiro.nc.pending.v1:browser_org:browser_manager:${id(1)}`;
@@ -303,7 +306,7 @@ test("catalog discloses CHZ statuses and opens the saved link panel", async ({ p
   await mkdir(evidence, { recursive: true });
   if (process.env.NC_UPDATE_SCREENSHOTS === "1")
     await page.screenshot({
-      path: resolve(evidence, "task-14-status-catalog-1280.png"),
+      path: resolve(evidence, "final-fix-status-catalog-1280.png"),
       fullPage: true,
     });
   await row.getByRole("link", { name: "Связь с ЧЗ" }).click();
@@ -322,7 +325,7 @@ test("catalog discloses CHZ statuses and opens the saved link panel", async ({ p
   await expect(panel.getByRole("button", { name: "Удалить связь", exact: true })).toBeVisible();
   if (process.env.NC_UPDATE_SCREENSHOTS === "1")
     await page.screenshot({
-      path: resolve(evidence, "task-14-status-link-1280.png"),
+      path: resolve(evidence, "final-fix-status-link-1280.png"),
       animations: "disabled",
       fullPage: true,
     });

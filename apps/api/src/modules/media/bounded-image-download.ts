@@ -191,18 +191,16 @@ function fetchHop(
       if (settled) return;
       settled = true;
       clearDeadline();
+      req?.destroy();
+      currentRes?.destroy();
       reject(error);
     };
 
     const deadlineTimer = setTimeout(() => {
-      req?.destroy();
-      currentRes?.destroy();
       settleReject(new ImageDownloadError("timeout", `deadline ${timeoutMs}ms expired`));
     }, timeoutMs);
 
     const abort = () => {
-      req?.destroy();
-      currentRes?.destroy();
       settleReject(new ImageDownloadError("timeout", "request aborted"));
     };
     signal?.addEventListener("abort", abort, { once: true });
@@ -213,16 +211,20 @@ function fetchHop(
     try {
       req = request(url, { method: "GET", lookup: guardedLookup, timeout: timeoutMs }, (res) => {
         currentRes = res;
+        // Keep an error listener through destruction, including non-success responses.
+        res.on("error", () =>
+          settleReject(new ImageDownloadError("network", "response stream failed")),
+        );
         try {
           const status = res.statusCode ?? 0;
           const location = res.headers.location;
           if (status >= 300 && status < 400 && typeof location === "string") {
-            res.resume();
+            req?.destroy();
+            res.destroy();
             settleResolve({ redirectTo: location });
             return;
           }
           if (status < 200 || status >= 300) {
-            res.resume();
             settleReject(new ImageDownloadError("bad_status", `HTTP ${status}`));
             return;
           }
@@ -231,16 +233,12 @@ function fetchHop(
           res.on("data", (chunk: Buffer) => {
             received += chunk.byteLength;
             if (received > maxBytes) {
-              req?.destroy();
               settleReject(new ImageDownloadError("too_large", `> ${maxBytes} bytes`));
               return;
             }
             chunks.push(chunk);
           });
           res.on("end", () => settleResolve({ body: Buffer.concat(chunks) }));
-          res.on("error", () =>
-            settleReject(new ImageDownloadError("network", "response stream failed")),
-          );
         } catch (cause) {
           settleReject(
             cause instanceof ImageDownloadError
@@ -254,7 +252,6 @@ function fetchHop(
       return;
     }
     req.on("timeout", () => {
-      req.destroy();
       settleReject(new ImageDownloadError("timeout", `${timeoutMs}ms`));
     });
     req.on("error", (cause: NodeJS.ErrnoException) => {

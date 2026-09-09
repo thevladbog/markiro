@@ -37,6 +37,8 @@ const polling = () =>
   typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus()
     ? 2000
     : false;
+const pollingDenied = (error: unknown) =>
+  error instanceof ApiRequestError && [401, 403, 404, 410].includes(error.status);
 const terminalError = (error: unknown) => error instanceof ApiRequestError && error.status === 410;
 /** Storage lifecycle follows settled auth; query isolation remains AuthQueryBoundary's job. */
 export function NationalCatalogIdentityBoundary({
@@ -181,7 +183,9 @@ function ScopedImportPanel({ identity }: { identity: string }) {
     refetchOnWindowFocus: (q) => !terminalError(q.state.error),
     refetchOnReconnect: (q) => !terminalError(q.state.error),
     refetchInterval: (q) =>
-      !terminalError(q.state.error) && ["queued", "loading"].includes(q.state.data?.state ?? "")
+      !pollingDenied(q.state.error) &&
+      (q.state.data?.automaticWorkPending ||
+        ["queued", "loading"].includes(q.state.data?.state ?? ""))
         ? polling()
         : false,
   });
@@ -203,7 +207,9 @@ function ScopedImportPanel({ identity }: { identity: string }) {
     refetchOnWindowFocus: (q) => !terminalError(q.state.error),
     refetchOnReconnect: (q) => !terminalError(q.state.error),
     refetchInterval: (q) =>
-      !terminalError(q.state.error) && ["queued", "loading"].includes(session.data?.state ?? "")
+      !pollingDenied(q.state.error) &&
+      (session.data?.automaticWorkPending ||
+        ["queued", "loading"].includes(session.data?.state ?? ""))
         ? polling()
         : false,
   });
@@ -258,8 +264,9 @@ function ScopedImportPanel({ identity }: { identity: string }) {
     refetchOnWindowFocus: (q) => !terminalError(q.state.error),
     refetchOnReconnect: (q) => !terminalError(q.state.error),
     refetchInterval: (q) =>
-      !terminalError(q.state.error) &&
-      (q.state.data?.preparation.state === "queued" ||
+      !pollingDenied(q.state.error) &&
+      (q.state.data?.preparation.automaticWorkPending ||
+        q.state.data?.preparation.state === "queued" ||
         q.state.data?.preparation.state === "loading" ||
         q.state.data?.items.some((p) => p.photos.some((photo) => photo.state === "pending")))
         ? polling()
@@ -273,7 +280,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
     refetchOnWindowFocus: (q) => !terminalError(q.state.error),
     refetchOnReconnect: (q) => !terminalError(q.state.error),
     refetchInterval: (q) =>
-      !terminalError(q.state.error) && ["pending", "running"].includes(q.state.data?.state ?? "")
+      !pollingDenied(q.state.error) && ["pending", "running"].includes(q.state.data?.state ?? "")
         ? polling()
         : false,
   });

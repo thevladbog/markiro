@@ -141,6 +141,7 @@ describe("immutable pre-product comparisons and durable preparation", () => {
   let sessionId: string;
   let itemId: string;
   let service: NationalCatalogImportPreviewService;
+  let sessions: NationalCatalogImportService;
   let features = { ownCatalog: true, gtinLookup: true };
   const detail = vi.fn<NationalCatalogClient["getFeedProductsByIds"]>();
   const beforeToken = vi.fn<() => Promise<void>>();
@@ -196,7 +197,7 @@ describe("immutable pre-product comparisons and durable preparation", () => {
       "https://api.nk.sandbox.crptech.ru",
     );
     features = { ownCatalog: true, gtinLookup: true };
-    const sessions = new NationalCatalogImportService(
+    sessions = new NationalCatalogImportService(
       repository,
       { listOwnProducts: vi.fn(), getFeedProducts: vi.fn() },
       coordinator,
@@ -581,6 +582,353 @@ describe("immutable pre-product comparisons and durable preparation", () => {
     detail.mockResolvedValue(feed([value]));
     return { id, categoryId, value };
   }
+  it("keeps accepted failed-photo bytes recoverable after session payload cleanup and provider removal", async () => {
+    const source = card();
+    source.images = [
+      { sourceId: "good_img", url: "https://images.example/image", barcode: GTIN, primary: true },
+    ];
+    detail.mockResolvedValue(feed([source]));
+    const prepared = await run();
+    const p = prepared.items[0]!;
+    const candidate = p.photos[0]!;
+    const { NationalCatalogImageService } =
+      await import("../src/modules/national-catalog/national-catalog-image.service");
+    const { NationalCatalogImportApplyService } =
+      await import("../src/modules/national-catalog/national-catalog-import-apply.service");
+    const { ProductsService } = await import("../src/modules/products/products.service");
+    const { MediaAssetsService } = await import("../src/modules/media/media-assets.service");
+    const sharp = (await import("sharp")).default;
+    const objects = new Map<string, Buffer>();
+    const storage = {
+      put: vi.fn(async (key: string, body: Buffer) => {
+        objects.set(key, Buffer.from(body));
+      }),
+      get: vi.fn(async (key: string) => {
+        const body = objects.get(key);
+        if (!body) throw Error("missing fixture bytes");
+        return { body, contentType: "image/webp" };
+      }),
+      delete: vi.fn(async (key: string) => {
+        objects.delete(key);
+      }),
+    };
+    const repository = new NationalCatalogImportRepository(db);
+    const media = new MediaAssetsService(db, storage as never);
+    const products = new ProductsService(db, {} as never, media, storage as never);
+    const download = vi.fn(async () =>
+      sharp({ create: { width: 20, height: 10, channels: 3, background: "#123456" } })
+        .png()
+        .toBuffer(),
+    );
+    const images = new NationalCatalogImageService(
+      repository,
+      sessions,
+      { runExternal: async (_context, fn) => fn(new AbortController().signal) },
+      storage,
+      products,
+      { enabled: true, verifiedHosts: ["images.example"] },
+      download,
+    );
+    await images.prepare(actor, sessionId, p.id, candidate.candidateId);
+    await images.resume(actor.tenantId, sessionId, p.id, candidate.candidateId);
+    const applies = new NationalCatalogImportApplyService(repository, sessions);
+    const accepted = await applies.start(actor, sessionId, {
+      requestId: randomUUID(),
+      decisions: [
+        {
+          previewId: p.id,
+          acceptedEntryIds: p.fields.filter((field) => field.applicable).map((field) => field.id),
+          linkAction: p.linkAction,
+          photo: { kind: "candidate", candidateId: candidate.candidateId },
+        },
+      ],
+    });
+    await applies.resume(actor.tenantId, accepted.operationId);
+    storage.get.mockRejectedValueOnce(Error("injected storage outage"));
+    await images.apply(actor.tenantId, accepted.operationId, p.id);
+    const receiptQuery = () =>
+      db
+        .select()
+        .from(schema.nationalCatalogImportOperationItems)
+        .where(eq(schema.nationalCatalogImportOperationItems.operationId, accepted.operationId));
+    const [before] = await receiptQuery();
+    expect(before).toMatchObject({
+      productResult: "applied",
+      imageResult: "failed",
+      imageRetryEligible: true,
+    });
+    const expiredAt = new Date(Date.now() - 1000);
+    await db
+      .update(schema.nationalCatalogImportSessions)
+      .set({ startedAt: new Date(Date.now() - 86_400_001), expiresAt: expiredAt })
+      .where(eq(schema.nationalCatalogImportSessions.id, sessionId));
+    await db.update(previews).set({ expiresAt: expiredAt }).where(eq(previews.id, p.id));
+    await sessions.releaseExpired(new Date(), 1);
+    await images.releaseExpired(new Date(), 1);
+    const [savedPreview] = await db.select().from(previews).where(eq(previews.id, p.id));
+    expect(savedPreview?.payloadPurgedAt).toBeNull();
+    expect(objects.size).toBe(1);
+    await db
+      .delete(schema.integrationChannels)
+      .where(eq(schema.integrationChannels.tenantId, actor.tenantId));
+    const clock = vi.spyOn(Date, "now").mockReturnValue(before!.nextImageAttemptAt!.getTime() + 1);
+    try {
+      await images.apply(actor.tenantId, accepted.operationId, p.id);
+    } finally {
+      clock.mockRestore();
+    }
+    const [after] = await receiptQuery();
+    expect(after).toMatchObject({
+      productResult: "applied",
+      imageResult: "applied",
+      imageRetryEligible: false,
+    });
+    expect(after!.decision).toEqual(before!.decision);
+    expect(after!.appliedEvidence).toEqual(before!.appliedEvidence);
+    expect(download).toHaveBeenCalledOnce();
+  });
+  it("ends expired pending core work without rewriting its accepted decision or duplicating failure audit", async () => {
+    const { NationalCatalogImportApplyService } =
+      await import("../src/modules/national-catalog/national-catalog-import-apply.service");
+    const p = (await run()).items[0]!;
+    const applies = new NationalCatalogImportApplyService(
+      new NationalCatalogImportRepository(db),
+      sessions,
+    );
+    const operation = await applies.start(actor, sessionId, {
+      requestId: randomUUID(),
+      decisions: [
+        {
+          previewId: p.id,
+          acceptedEntryIds: p.fields.filter((field) => field.applicable).map((field) => field.id),
+          linkAction: p.linkAction,
+          photo: { kind: "keep" },
+        },
+      ],
+    });
+    const receipts = schema.nationalCatalogImportOperationItems;
+    const readReceipt = async () =>
+      (await db.select().from(receipts).where(eq(receipts.operationId, operation.operationId)))[0]!;
+    const before = await readReceipt();
+    await db
+      .update(schema.nationalCatalogImportSessions)
+      .set({ startedAt: new Date(0), expiresAt: new Date(1) })
+      .where(eq(schema.nationalCatalogImportSessions.id, sessionId));
+    await sessions.releaseExpired(new Date(), 1);
+    await applies.resume(actor.tenantId, operation.operationId);
+    await sessions.releaseExpired(new Date(), 1);
+    const after = await readReceipt();
+    expect(after).toMatchObject({
+      productResult: "failed",
+      errorCode: "import_session_closed",
+      imageRetryEligible: false,
+      nextAttemptAt: null,
+      nextImageAttemptAt: null,
+    });
+    expect(after.decision).toEqual(before.decision);
+    expect(after.appliedEvidence).toEqual(before.appliedEvidence);
+    const audit = await db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, actor.tenantId),
+          eq(schema.tenantAuditEvents.action, "national_catalog.import.item_failed"),
+        ),
+      );
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      organizationId: actor.tenantId,
+      actorUserId: actor.userId,
+      targetType: "national_catalog_import_preview",
+      targetId: p.id,
+      outcome: "failure",
+      before: null,
+      after: {
+        operationId: operation.operationId,
+        previewId: p.id,
+        result: "failed",
+        reason: "import_session_closed",
+      },
+    });
+  });
+  it("scrubs an abandoned session that never prepared a preview", async () => {
+    const started = await sessions.start(actor, { mode: "gtins", text: "BAD" });
+    await db
+      .update(schema.nationalCatalogImportSessions)
+      .set({ startedAt: new Date(0), expiresAt: new Date(1) })
+      .where(eq(schema.nationalCatalogImportSessions.id, started.id));
+    await sessions.releaseExpired(new Date(), 1);
+    const rows = await db
+      .select()
+      .from(schema.nationalCatalogImportItems)
+      .where(eq(schema.nationalCatalogImportItems.sessionId, started.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      input: null,
+      source: null,
+      name: null,
+      rawStatus: null,
+      rawDetailedStatuses: [],
+    });
+    expect(await db.select().from(previews).where(eq(previews.sessionId, started.id))).toHaveLength(
+      0,
+    );
+    expect((await sessions.read(actor.tenantId, started.id)).state).toBe("expired");
+  });
+  it("scrubs expired abandoned session and preparation payloads in independently bounded batches", async () => {
+    const prepared = await service.prepare(actor, sessionId, {
+      ...request(),
+      manualNames: [{ itemId, name: "Private draft" }],
+    });
+    const [before] = await db
+      .select()
+      .from(preparations)
+      .where(eq(preparations.id, prepared.preparation.id));
+    const extra = randomUUID();
+    await db.insert(schema.nationalCatalogImportItems).values({
+      id: extra,
+      tenantId: actor.tenantId,
+      sessionId,
+      input: "unconfirmed input",
+      name: "Unconfirmed",
+      source: { raw: "private" },
+      match: "invalid",
+    });
+    const expiredAt = new Date(Date.now() - 1000);
+    await db
+      .update(schema.nationalCatalogImportSessions)
+      .set({ startedAt: new Date(Date.now() - 86_400_001), expiresAt: expiredAt })
+      .where(eq(schema.nationalCatalogImportSessions.id, sessionId));
+    await db
+      .update(preparations)
+      .set({ expiresAt: expiredAt })
+      .where(eq(preparations.id, prepared.preparation.id));
+    await sessions.releaseExpired(new Date(), 1);
+    const first = await db
+      .select()
+      .from(schema.nationalCatalogImportItems)
+      .where(eq(schema.nationalCatalogImportItems.sessionId, sessionId));
+    expect(first.filter((row) => row.source !== null)).toHaveLength(1);
+    await sessions.releaseExpired(new Date(), 1);
+    const remaining = await db
+      .select()
+      .from(schema.nationalCatalogImportItems)
+      .where(eq(schema.nationalCatalogImportItems.sessionId, sessionId));
+    expect(remaining).toHaveLength(2);
+    expect(
+      remaining.every((row) => row.source === null && row.input === null && row.name === null),
+    ).toBe(true);
+    const [after] = await db
+      .select()
+      .from(preparations)
+      .where(eq(preparations.id, prepared.preparation.id));
+    expect(after).toMatchObject({
+      id: before?.id,
+      requestId: before?.requestId,
+      requestHash: before?.requestHash,
+      request: {},
+      checkpoint: { work: [], completed: [], failures: [], enqueuePending: false },
+    });
+    await expect(
+      service.readPreparation(actor.tenantId, sessionId, prepared.preparation.id),
+    ).rejects.toThrow("import_preparation_closed");
+    await service.resumePreparation(actor.tenantId, sessionId, prepared.preparation.id);
+    expect(detail).not.toHaveBeenCalled();
+    const session = await sessions.read(actor.tenantId, sessionId);
+    expect(session.state).toBe("expired");
+  });
+  it.each([false, true])(
+    "requires initial category for stable mapped fields through preparation and legacy projection (existing=%s)",
+    async (existing) => {
+      if (existing) {
+        const productId = randomUUID();
+        await db
+          .insert(schema.products)
+          .values({ id: productId, tenantId: actor.tenantId, gtin14: GTIN, name: "Existing" });
+        await db
+          .update(schema.nationalCatalogImportItems)
+          .set({ productId, match: "existing" })
+          .where(eq(schema.nationalCatalogImportItems.id, itemId));
+      }
+      const c = await category();
+      await db.insert(schema.nationalCatalogAttributeMappings).values({
+        schemaVersionId: c.id,
+        sourceAttributeId: "good_name",
+        targetField: "print_name",
+        conversion: { kind: "string_trim" },
+        mappingVersion: 1,
+      });
+      const initial = await run();
+      const option = initial.items[0]!.categoryOptions[0]!;
+      const selected = await run({
+        ...request(),
+        categoryChoices: [{ itemId, optionId: option.optionId }],
+      });
+      const view = selected.items[0]!;
+      const [row] = await db.select().from(previews).where(eq(previews.id, view.id));
+      const diff = parseImportDiff(row!.diff);
+      const binding = diff.entries.find((e) => e.target === "category")!;
+      const stable = diff.entries.find(
+        (e) => e.target === "mapped" && e.entry.target === "stable_field",
+      )!;
+      expect(view.fields.find((f) => f.id === stable.entryId)?.requiresEntryIds).toEqual([
+        binding.entryId,
+      ]);
+      expect(() => assertPreviewEntrySelection(diff, [stable.entryId])).toThrow(
+        "category_entry_required",
+      );
+      const legacy = {
+        ...diff,
+        entries: diff.entries.map((e) =>
+          e.target === "mapped" ? { ...e, requiresEntryIds: [] } : e,
+        ),
+      };
+      await db.update(previews).set({ diff: legacy }).where(eq(previews.id, view.id));
+      const projected = await service.readPreparation(
+        actor.tenantId,
+        sessionId,
+        selected.preparation.id,
+      );
+      expect(
+        projected.items[0]!.fields.find((f) => f.id === stable.entryId)?.requiresEntryIds,
+      ).toEqual([binding.entryId]);
+      const [unchanged] = await db.select().from(previews).where(eq(previews.id, view.id));
+      expect(unchanged!.diff).toEqual(legacy);
+      const { NationalCatalogImportApplyService } =
+        await import("../src/modules/national-catalog/national-catalog-import-apply.service");
+      const applies = new NationalCatalogImportApplyService(
+        new NationalCatalogImportRepository(db),
+        sessions,
+      );
+      const body = {
+        requestId: randomUUID(),
+        decisions: [
+          {
+            previewId: view.id,
+            acceptedEntryIds: [stable.entryId],
+            linkAction: view.linkAction,
+            photo: { kind: "keep" as const },
+          },
+        ],
+      };
+      await expect(applies.start(actor, sessionId, body)).rejects.toThrow(
+        "category_entry_required",
+      );
+      body.decisions[0]!.acceptedEntryIds = projected.items[0]!.fields.filter(
+        (field) => field.applicable,
+      ).map((field) => field.id);
+      const accepted = await applies.start(actor, sessionId, body);
+      await applies.resume(actor.tenantId, accepted.operationId);
+      const receipt = await applies.read(actor.tenantId, sessionId, accepted.operationId);
+      expect(receipt.items[0]?.product).toBe("applied");
+      const [product] = await db
+        .select()
+        .from(schema.products)
+        .where(eq(schema.products.id, receipt.items[0]!.productId!));
+      expect(product?.printName).toBe(c.value.name);
+    },
+  );
   it("requires an explicit persisted category option, creates dependent entries and never duplicates mapped name", async () => {
     const c = await category();
     await db.insert(schema.nationalCatalogAttributeMappings).values({

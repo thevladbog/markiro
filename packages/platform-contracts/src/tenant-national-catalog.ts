@@ -97,6 +97,7 @@ export const importSessionSchema = z
     revision: nonNegativeIntegerSchema,
     mode: z.enum(["own_catalog", "gtins"]),
     state: importSessionStateSchema,
+    automaticWorkPending: z.boolean().default(false),
     loaded: nonNegativeIntegerSchema,
     selected: nonNegativeIntegerSchema.max(MAX_APPLY_ITEMS),
     selectedItemIds: z.array(platformUuidSchema).max(MAX_APPLY_ITEMS),
@@ -193,6 +194,7 @@ const importFieldSchema = z
   .object({
     id: platformUuidSchema,
     label: z.string(),
+    labelKey: z.enum(["name", "category", "print_name", "shelf_life_days"]).optional(),
     before: z.string().nullable(),
     after: z.string().nullable(),
     applicable: z.boolean(),
@@ -445,6 +447,7 @@ export const importPreparationSchema = z
     id: platformUuidSchema,
     requestId: platformUuidSchema,
     state: z.enum(["queued", "loading", "ready", "partial", "blocked", "failed"]),
+    automaticWorkPending: z.boolean().default(false),
     total: z.number().int().min(1).max(MAX_APPLY_ITEMS),
     completed: z.number().int().min(0).max(MAX_APPLY_ITEMS),
     failures: z

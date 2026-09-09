@@ -25,7 +25,7 @@ export type CatalogJobSender = (
 export class NationalCatalogJobsService {
   constructor(
     private readonly repository: Pick<NationalCatalogJobRepository, "claim">,
-    private readonly sessions: Pick<NationalCatalogImportService, "resume">,
+    private readonly sessions: Pick<NationalCatalogImportService, "resume" | "releaseExpired">,
     private readonly previews: Pick<NationalCatalogImportPreviewService, "resumePreparation">,
     private readonly applies: Pick<NationalCatalogImportApplyService, "resume">,
     private readonly images: Pick<
@@ -52,6 +52,7 @@ export class NationalCatalogJobsService {
         failed++;
       }
     }
+    await this.sessions.releaseExpired(new Date(), 50);
     await this.images.releaseExpired(new Date(), 50);
     return { selected: jobs.length, sent, failed };
   }

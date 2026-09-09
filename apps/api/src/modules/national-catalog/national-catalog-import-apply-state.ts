@@ -68,7 +68,21 @@ const diffSchema = z
   .object({ version: z.literal(1), entries: z.array(entrySchema), view: storedViewSchema })
   .strict();
 export function parseImportDiff(value: unknown): StoredImportDiff {
-  const diff = diffSchema.parse(value);
+  const parsed = diffSchema.parse(value);
+  const category = parsed.entries.find((entry) => entry.target === "category");
+  // All mapped writes use the regulatory writer, which needs an initial profile.
+  // Upgrade only the in-memory authoritative projection of old unaccepted views.
+  const diff = {
+    ...parsed,
+    entries: parsed.entries.map((entry) =>
+      entry.target === "mapped" && category
+        ? {
+            ...entry,
+            requiresEntryIds: [...new Set([...entry.requiresEntryIds, category.entryId])],
+          }
+        : entry,
+    ),
+  };
   const entries = new Map(diff.entries.map((entry) => [entry.entryId, entry]));
   const view = enrichedStoredViewSchema.parse({
     ...diff.view,
@@ -76,6 +90,11 @@ export function parseImportDiff(value: unknown): StoredImportDiff {
       const entry = entries.get(field.id);
       return {
         ...field,
+        ...(entry?.target === "name" || entry?.target === "category"
+          ? { labelKey: entry.target }
+          : entry?.target === "mapped" && entry.entry.target === "stable_field"
+            ? { labelKey: entry.entry.targetField }
+            : {}),
         requiresEntryIds: entry?.target === "mapped" ? entry.requiresEntryIds : [],
       };
     }),

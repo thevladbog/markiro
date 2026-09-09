@@ -606,3 +606,51 @@ it("strictly identifies bounded unique rejected preview IDs in additive apply co
   ])
     expect(importApplyConflictSchema.safeParse(invalid).success).toBe(false);
 });
+
+it("accepts explicit automatic continuation and owned field labels while defaulting old responses conservatively", () => {
+  const session = {
+    id: ID_1,
+    revision: 1,
+    mode: "gtins",
+    state: "partial",
+    loaded: 0,
+    selected: 0,
+    selectedItemIds: [],
+    startedAt: UTC_DATE,
+    throughAt: UTC_DATE,
+    expiresAt: UTC_DATE,
+    complete: false,
+    reason: null,
+  };
+  expect(importSessionSchema.parse(session).automaticWorkPending).toBe(false);
+  expect(
+    importSessionSchema.parse({ ...session, automaticWorkPending: true }).automaticWorkPending,
+  ).toBe(true);
+  expect(
+    importPrepareResponseSchema.parse({ preparation: validPreparation, items: [] }).preparation
+      .automaticWorkPending,
+  ).toBe(false);
+  expect(
+    importPrepareResponseSchema.parse({
+      preparation: { ...validPreparation, automaticWorkPending: true },
+      items: [],
+    }).preparation.automaticWorkPending,
+  ).toBe(true);
+  for (const labelKey of ["name", "category", "print_name", "shelf_life_days"]) {
+    expect(
+      importPreviewSchema.parse({
+        ...validPreview,
+        fields: [{ ...validPreview.fields[0], labelKey }],
+      }).fields[0]?.labelKey,
+    ).toBe(labelKey);
+  }
+  expect(
+    importPreviewSchema.safeParse({
+      ...validPreview,
+      fields: [{ ...validPreview.fields[0], labelKey: "provider_guess" }],
+    }).success,
+  ).toBe(false);
+  expect(importSessionSchema.safeParse({ ...session, schedulingOverride: true }).success).toBe(
+    false,
+  );
+});

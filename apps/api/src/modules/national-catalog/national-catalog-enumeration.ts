@@ -81,6 +81,7 @@ export function statuses(status: string | null, details: string[]): ChzStatusKey
   for (const raw of [status, ...details]) {
     const mapped = raw === "notsigned" ? "unsigned" : raw;
     if (mapped && allowed.has(mapped as ChzStatusKey)) result.add(mapped as ChzStatusKey);
+    else if (mapped?.trim()) result.add("unknown");
   }
   return result.size ? [...result] : ["unknown"];
 }

@@ -551,6 +551,203 @@ describe("private National Catalog images (real PostgreSQL and normalized bytes)
       observedMeaningfulHash: "c".repeat(64),
     });
   });
+  it("reselects pending observed photos after a different explicit review and never reuses the old selector checksum", async () => {
+    const rt = runtime();
+    const first = await prepared(rt);
+    await accept(first.p, first.id, true);
+    source.images.push({
+      sourceId: "alternative",
+      url: "https://images.example/alternative",
+      barcode: GTIN,
+      primary: false,
+    });
+    const p = await preview();
+    const alternative = p.photos[1]!;
+    await rt.service.prepare(actor, sessionId, p.id, alternative.candidateId);
+    await rt.service.resume(actor.tenantId, sessionId, p.id, alternative.candidateId);
+    const { NationalCatalogLinkRefreshService } =
+      await import("../src/modules/national-catalog/national-catalog-link-refresh.service");
+    const { readRefreshCheckpoint } =
+      await import("../src/modules/national-catalog/national-catalog-refresh-state");
+    const linkQuery = () =>
+      db
+        .select()
+        .from(schema.nationalCatalogProductLinks)
+        .where(eq(schema.nationalCatalogProductLinks.productId, existingId));
+    const download = vi.fn(async (_url: string) =>
+      sharp({ create: { width: 20, height: 10, channels: 3, background: "#aa0000" } })
+        .png()
+        .toBuffer(),
+    );
+    const worker = new NationalCatalogLinkRefreshService(
+      db,
+      new AuthorizationService(db),
+      new EntitlementsService(db, "managed_only"),
+      {
+        getFeedProductsByIds: async () => ({
+          status: "ok",
+          value: { products: [source] },
+          contentHash: "e".repeat(64),
+          etag: null,
+          usage: { total: null, method: null },
+        }),
+      },
+      {
+        run: async (_context, fn) =>
+          fn({
+            auth: { baseUrl: "https://catalog.invalid", token: "test-only" },
+            signal: new AbortController().signal,
+          }),
+        runExternal: async (_context, fn) => fn(new AbortController().signal),
+      },
+      { enabled: true, photos: { enabled: true, verifiedHosts: ["images.example"] } },
+      download,
+    );
+    await worker.request(actor, existingId);
+    const [initial] = await linkQuery();
+    await worker.resume(actor.tenantId, initial!.id);
+    const [observed] = await linkQuery();
+    const before = readRefreshCheckpoint(observed!.refreshCheckpoint)!;
+    expect(before.phase).toBe("photo");
+    const result = await accept(p, alternative.candidateId, true);
+    expect(
+      (await result.apply.read(actor.tenantId, sessionId, result.result.operationId)).items[0]
+        ?.product,
+    ).toBe("applied");
+    const [reviewed] = await linkQuery();
+    const after = readRefreshCheckpoint(reviewed!.refreshCheckpoint)!;
+    expect(reviewed!.latestSnapshotId).toBe(observed!.latestSnapshotId);
+    expect(reviewed!.observedProjection).not.toHaveProperty("values.photo");
+    expect(after).toMatchObject({
+      phase: "photo",
+      revision: reviewed!.revision,
+      actor: before.actor,
+      attempts: 0,
+      nextRetryAt: before.nextRetryAt,
+      photo: { snapshotId: before.photo!.snapshotId, sourceHash: before.photo!.sourceHash },
+    });
+    expect(after.stepId).not.toBe(before.stepId);
+    expect(after.photo!.selector.urlHash).not.toBe(before.photo!.selector.urlHash);
+    await worker.resume(actor.tenantId, initial!.id);
+    expect(download).toHaveBeenCalledOnce();
+    expect(download.mock.calls[0]?.[0]).toBe("https://images.example/alternative");
+    const [finished] = await linkQuery();
+    expect(finished!.observedProjection).toHaveProperty("values.photo");
+    expect(readRefreshCheckpoint(finished!.refreshCheckpoint)?.enqueuePending).toBe(false);
+  });
+  it.each([false, true])(
+    "public cancellation stops a committed product photo and releases temporary payload (finished after TTL=%s)",
+    async (finishedAfterTtl) => {
+      const rt = runtime();
+      const { p, id } = await prepared(rt);
+      const { apply, result } = await accept(p, id);
+      const query = () =>
+        db
+          .select()
+          .from(schema.nationalCatalogImportOperationItems)
+          .where(eq(schema.nationalCatalogImportOperationItems.operationId, result.operationId));
+      const [before] = await query();
+      if (finishedAfterTtl) {
+        {
+          rt.storage.get.mockRejectedValueOnce(Error("controlled storage failure"));
+          await rt.service.apply(actor.tenantId, result.operationId, p.id);
+          await db
+            .update(schema.nationalCatalogImportOperationItems)
+            .set({ imageAttempts: 4, nextImageAttemptAt: null })
+            .where(eq(schema.nationalCatalogImportOperationItems.operationId, result.operationId));
+          await rt.service.apply(actor.tenantId, result.operationId, p.id);
+        }
+        expect((await apply.read(actor.tenantId, sessionId, result.operationId)).state).toBe(
+          "finished",
+        );
+        await db
+          .update(schema.nationalCatalogImportSessions)
+          .set({
+            startedAt: new Date(Date.now() - 86_400_001),
+            expiresAt: new Date(Date.now() - 1000),
+          })
+          .where(eq(schema.nationalCatalogImportSessions.id, sessionId));
+        await db
+          .delete(schema.integrationChannels)
+          .where(eq(schema.integrationChannels.tenantId, actor.tenantId));
+      }
+      await sessions.cancel(actor, sessionId);
+      expect((await apply.read(actor.tenantId, sessionId, result.operationId)).state).toBe(
+        "cancelled",
+      );
+      await rt.service.apply(actor.tenantId, result.operationId, p.id);
+      const [after] = await query();
+      expect(after).toMatchObject({
+        productResult: "applied",
+        imageResult: "failed",
+        imageRetryEligible: false,
+        nextImageAttemptAt: null,
+      });
+      expect(after?.decision).toEqual(before?.decision);
+      expect(after?.appliedEvidence).toEqual(before?.appliedEvidence);
+      expect(
+        await db
+          .select()
+          .from(schema.productImages)
+          .where(eq(schema.productImages.productId, existingId)),
+      ).toHaveLength(0);
+      await db
+        .update(schema.nationalCatalogImportPreviews)
+        .set({ expiresAt: new Date(0) })
+        .where(eq(schema.nationalCatalogImportPreviews.id, p.id));
+      await rt.service.releaseExpired(new Date(), 1);
+      const [stored] = await db
+        .select()
+        .from(schema.nationalCatalogImportPreviews)
+        .where(eq(schema.nationalCatalogImportPreviews.id, p.id));
+      expect(stored?.payloadPurgedAt).not.toBeNull();
+      expect((await query())[0]?.appliedEvidence).toEqual(before?.appliedEvidence);
+    },
+  );
+  it("terminal core conflict removes impossible photo retention without a fixture eligibility update", async () => {
+    const rt = runtime();
+    const { p, id } = await prepared(rt);
+    const apply = new NationalCatalogImportApplyService(repository, sessions);
+    const result = await apply.start(actor, sessionId, {
+      requestId: randomUUID(),
+      decisions: [
+        {
+          previewId: p.id,
+          acceptedEntryIds: [],
+          linkAction: p.linkAction,
+          photo: { kind: "candidate", candidateId: id },
+        },
+      ],
+    });
+    await db
+      .update(schema.products)
+      .set({ name: "Changed after preview" })
+      .where(eq(schema.products.id, existingId));
+    await apply.resume(actor.tenantId, result.operationId);
+    const [receipt] = await db
+      .select()
+      .from(schema.nationalCatalogImportOperationItems)
+      .where(eq(schema.nationalCatalogImportOperationItems.operationId, result.operationId));
+    expect(receipt).toMatchObject({
+      productResult: "conflict",
+      errorCode: "product_changed",
+      imageRetryEligible: false,
+    });
+    await db
+      .update(schema.nationalCatalogImportPreviews)
+      .set({ expiresAt: new Date(0) })
+      .where(eq(schema.nationalCatalogImportPreviews.id, p.id));
+    await rt.service.releaseExpired(new Date(), 1);
+    const [stored] = await db
+      .select()
+      .from(schema.nationalCatalogImportPreviews)
+      .where(eq(schema.nationalCatalogImportPreviews.id, p.id));
+    expect(stored?.payloadPurgedAt).not.toBeNull();
+    await rt.service.apply(actor.tenantId, result.operationId, p.id);
+    expect(
+      (await apply.read(actor.tenantId, sessionId, result.operationId)).items[0]?.product,
+    ).toBe("conflict");
+  });
   it("protects live and accepted failed assets from storage deletion and deliberately releases expired unaccepted ones", async () => {
     const rt = runtime();
     const { p, id } = await prepared(rt);

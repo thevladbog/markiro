@@ -266,6 +266,7 @@ export class NationalCatalogImportPreviewService {
       });
       return;
     }
+    const fetchedAt = new Date();
     await this.repository.transaction(async (tx) => {
       const currentSession = await this.repository.lock(tx, tenantId, sessionId);
       const current = await this.lock(tx, tenantId, sessionId, preparationId);
@@ -312,11 +313,19 @@ export class NationalCatalogImportPreviewService {
           const card = cards[0];
           if (!card) throw new Error("Missing matched card");
           try {
-            const preview = await buildImportPreview(tx, currentSession, item, card, request, {
-              actorId: current.actorId,
-              enabled:
-                this.imagePreparation.enabled && this.imagePreparation.verifiedHosts.length > 0,
-            });
+            const preview = await buildImportPreview(
+              tx,
+              currentSession,
+              item,
+              card,
+              request,
+              {
+                actorId: current.actorId,
+                enabled:
+                  this.imagePreparation.enabled && this.imagePreparation.verifiedHosts.length > 0,
+              },
+              fetchedAt,
+            );
             completed.push({ itemId: item.id, previewId: preview.id });
           } catch (error) {
             if (!(
@@ -509,6 +518,7 @@ export class NationalCatalogImportPreviewService {
         id: row.id,
         requestId: row.requestId,
         state,
+        automaticWorkPending: cp.enqueuePending,
         total: body.itemIds.length,
         completed: cp.completed.length,
         failures: cp.failures,

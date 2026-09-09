@@ -228,7 +228,7 @@ describe.skipIf(!databaseUrl)("confirmed-link observations with local PostgreSQL
       revision: 1,
       lastOutcome: "ok",
       reviewedProjection: projection("Reviewed"),
-      statusKeys: ["published", "draft"],
+      statusKeys: ["published", "draft", "unknown"],
       rawDetailedStatuses: ["draft", "future-status"],
     });
     const reads = new NationalCatalogLinkService(db, authorization, entitlements);
@@ -526,7 +526,7 @@ describe.skipIf(!databaseUrl)("confirmed-link observations with local PostgreSQL
       expect(summary).toMatchObject({
         lastOutcome: "error",
         lastErrorCode: "photo_unavailable",
-        statusKeys: ["published", "draft"],
+        statusKeys: ["published", "draft", "unknown"],
       });
   });
   it("rotates tenants even when a tenant has many never-attempted confirmed links", async () => {

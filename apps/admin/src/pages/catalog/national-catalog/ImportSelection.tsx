@@ -56,6 +56,11 @@ export function ImportSelection({
     <section aria-label={tr("selection")}>
       <h2>{tr("selection")}</h2>
       {!session.complete && <Alert>{tr("partialList")}</Alert>}
+      {session.reason === "session_row_limit" && <Alert>{tr("sessionRowLimit")}</Alert>}
+      <p>
+        {t("pages.catalog.import.loadedCount", { count: session.loaded })} · {tr("loadStarted")}:{" "}
+        <time dateTime={session.startedAt}>{new Date(session.startedAt).toLocaleString()}</time>
+      </p>
       <p aria-live="polite">
         {t("pages.catalog.import.selectionCount", { count: session.selectedItemIds.length })}
       </p>
@@ -118,6 +123,8 @@ export function ImportSelection({
                   }
                   onCheckedChange={(checked) => select([item.id], checked)}
                 />
+                {item.brand && <p>{item.brand}</p>}
+                <p>{item.statusKeys.map((status) => tr(`statuses.${status}`)).join(" · ")}</p>
                 {item.productId && (
                   <Link to={`/catalog/${item.productId}/edit`}>{tr("openProduct")}</Link>
                 )}

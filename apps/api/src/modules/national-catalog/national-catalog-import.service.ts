@@ -1,3 +1,6 @@
+import { releaseExpiredImportPayloads } from "./national-catalog-import-retention";
+import { cancelAcceptedImportWork } from "./national-catalog-import-cancellation";
+import { lockTenantSubscriptionTimeline } from "../../subscriptions/subscription-locks";
 import { randomUUID } from "node:crypto";
 import { schema } from "@markiro/db";
 import { CABINET_CAPABILITY, parseImportGtins } from "@markiro/domain";
@@ -64,6 +67,9 @@ export class NationalCatalogImportService {
     private readonly entitlements: EntitlementsService,
     private readonly features: ImportFeatures = { ownCatalog: false, gtinLookup: false },
   ) {}
+  releaseExpired(now = new Date(), limit = 50): Promise<number> {
+    return releaseExpiredImportPayloads(this.repository, now, limit);
+  }
   async start(actor: ImportActor, body: ImportStart): Promise<ImportSession> {
     const parsed = importStartSchema.safeParse(body);
     if (!parsed.success) throw new UnprocessableEntityException("invalid_import_start");
@@ -164,20 +170,21 @@ export class NationalCatalogImportService {
   }
   async cancel(actor: ImportActor, sessionId: string): Promise<ImportSession> {
     return this.repository.transaction(async (tx) => {
+      await lockTenantSubscriptionTimeline(tx, actor.tenantId);
       const session = await this.expire(
         tx,
         await this.repository.lock(tx, actor.tenantId, sessionId),
       );
-      if (session.state === "cancelled" || session.state === "expired")
-        return this.summary(tx, session);
-      await this.authorize(tx, actor, session.mode, session.environment);
+      await this.assertAcceptedOperationAccess(tx, actor, session);
+      await cancelAcceptedImportWork(tx, actor, sessionId);
+      if (session.state === "cancelled") return this.summary(tx, session);
       const checkpoint = parseCheckpoint(session.checkpoint);
       return this.summary(
         tx,
         await this.repository.save(tx, session, {
           state: "cancelled",
           cancelledAt: new Date(),
-          checkpoint: { ...checkpoint, enqueuePending: false },
+          checkpoint: { ...checkpoint, enqueuePending: false, nextRetryAt: null },
         }),
       );
     });
@@ -688,6 +695,10 @@ function dto(row: ImportSessionRow): Omit<ImportSession, "selectedItemIds"> {
     revision: row.revision,
     mode: row.mode,
     state: row.state,
+    automaticWorkPending:
+      !["cancelled", "expired"].includes(row.state) &&
+      row.expiresAt.getTime() > Date.now() &&
+      parseCheckpoint(row.checkpoint).enqueuePending,
     loaded: row.loaded,
     selected: row.selected,
     startedAt: row.startedAt.toISOString(),

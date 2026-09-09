@@ -1151,6 +1151,18 @@ describe("atomic National Catalog product application (real PostgreSQL services)
       intercepted.mockRestore();
     }
   });
+  it("public session cancellation durably stops accepted core work and redelivery", async () => {
+    await init();
+    const op = await service.start(actor, sessionId, decision(await preview(), true));
+    await sessions.cancel(actor, sessionId);
+    const cancelled = await service.read(actor.tenantId, sessionId, op.operationId);
+    expect(cancelled.state).toBe("cancelled");
+    expect(cancelled.items[0]?.product).toBe("cancelled");
+    await service.resume(actor.tenantId, op.operationId);
+    expect(await service.read(actor.tenantId, sessionId, op.operationId)).toEqual(cancelled);
+    expect(await links()).toEqual([]);
+    expect((await product())?.name).toBe("Моё имя");
+  });
   it("never resumes an explicitly cancelled accepted operation", async () => {
     await init();
     const op = await service.start(actor, sessionId, decision(await preview(), true));
@@ -1272,6 +1284,197 @@ describe("atomic National Catalog product application (real PostgreSQL services)
     source = { ...source, categories: [] };
     await refresh();
     expect((await read()).hasChanges).toBe(false);
+  });
+  it("fences the old in-flight refresh and preserves its delay and budget for redelivery after confirmation", async () => {
+    await apply(decision(await preview()));
+    const p = await preview();
+    const link = (await links())[0]!;
+    const { NationalCatalogLinkRefreshService } =
+      await import("../src/modules/national-catalog/national-catalog-link-refresh.service");
+    let calls = 0;
+    let admitted: unknown;
+    const worker = new NationalCatalogLinkRefreshService(
+      db,
+      new AuthorizationService(db),
+      new EntitlementsService(db, "managed_only"),
+      {
+        getFeedProductsByIds: async () => {
+          calls++;
+          if (calls === 1) {
+            admitted = (await links())[0]!.refreshCheckpoint;
+            expect((await apply(decision(p))).items[0]?.product).toBe("applied");
+          }
+          return {
+            status: "ok",
+            value: {
+              products: [{ ...source, name: calls === 1 ? "Stale in flight" : "After redelivery" }],
+            },
+            etag: null,
+            contentHash: "f".repeat(64),
+            usage: { total: null, method: null },
+          };
+        },
+      },
+      {
+        run: async (_context, fn) =>
+          fn({
+            auth: { baseUrl: "https://catalog.invalid", token: "test-only" },
+            signal: new AbortController().signal,
+          }),
+        runExternal: async () => {
+          throw new Error("no photo request");
+        },
+      },
+      { enabled: true, photos: { enabled: false, verifiedHosts: [] } },
+    );
+    await worker.request(actor, existingId);
+    await worker.resume(actor.tenantId, link.id);
+    const { readRefreshCheckpoint } =
+      await import("../src/modules/national-catalog/national-catalog-refresh-state");
+    const original = readRefreshCheckpoint(admitted)!;
+    const saved = (await links())[0]!;
+    const rebased = readRefreshCheckpoint(saved.refreshCheckpoint)!;
+    expect(saved.observedProjection).toMatchObject({ values: { name: source.name } });
+    expect(rebased).toMatchObject({
+      revision: saved.revision,
+      actor: original.actor,
+      stepId: original.stepId,
+      attempts: original.attempts,
+      nextRetryAt: original.nextRetryAt,
+      runId: null,
+      enqueuePending: true,
+    });
+    await worker.resume(actor.tenantId, link.id);
+    expect(calls).toBe(1);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse(rebased.nextRetryAt!) + 1);
+    try {
+      await worker.resume(actor.tenantId, link.id);
+    } finally {
+      clock.mockRestore();
+    }
+    expect(calls).toBe(2);
+    const completed = (await links())[0]!;
+    expect(completed.observedProjection).toMatchObject({ values: { name: "After redelivery" } });
+    expect(readRefreshCheckpoint(completed.refreshCheckpoint)).toMatchObject({
+      attempts: 2,
+      enqueuePending: false,
+    });
+  });
+  it("keeps a newer failed refresh attempt while using the preview check time for its successful observation", async () => {
+    await apply(decision(await preview()));
+    const p = await preview();
+    const [prepared] = await db
+      .select()
+      .from(schema.nationalCatalogImportPreviews)
+      .where(eq(schema.nationalCatalogImportPreviews.id, p.id));
+    const { NationalCatalogLinkRefreshService } =
+      await import("../src/modules/national-catalog/national-catalog-link-refresh.service");
+    const worker = new NationalCatalogLinkRefreshService(
+      db,
+      new AuthorizationService(db),
+      new EntitlementsService(db, "managed_only"),
+      {
+        getFeedProductsByIds: async () => {
+          throw Error("controlled provider outage");
+        },
+      },
+      {
+        run: async (_context, fn) =>
+          fn({
+            auth: { baseUrl: "https://catalog.invalid", token: "test-only" },
+            signal: new AbortController().signal,
+          }),
+        runExternal: async () => {
+          throw Error("no photo");
+        },
+      },
+      { enabled: true, photos: { enabled: false, verifiedHosts: [] } },
+    );
+    const link = (await links())[0]!;
+    await worker.request(actor, existingId);
+    await worker.resume(actor.tenantId, link.id);
+    const failed = (await links())[0]!;
+    expect(failed.lastOutcome).toBe("error");
+    await apply(decision(p));
+    const reviewed = (await links())[0]!;
+    expect(reviewed.lastSuccessAt).toEqual(prepared!.createdAt);
+    expect(reviewed.lastAttemptAt).toEqual(failed.lastAttemptAt);
+    expect(reviewed.lastOutcome).toBe("error");
+    expect(reviewed.refreshErrorCode).toBe(failed.refreshErrorCode);
+  });
+  it("preserves a later completed observation when confirming an older retained-link comparison", async () => {
+    await apply(decision(await preview()));
+    const p = await preview();
+    const [prepared] = await db
+      .select()
+      .from(schema.nationalCatalogImportPreviews)
+      .where(eq(schema.nationalCatalogImportPreviews.id, p.id));
+    const { NationalCatalogLinkRefreshService } =
+      await import("../src/modules/national-catalog/national-catalog-link-refresh.service");
+    const { NationalCatalogLinkService } =
+      await import("../src/modules/national-catalog/national-catalog-link.service");
+    const authorization = new AuthorizationService(db);
+    const entitlements = new EntitlementsService(db, "managed_only");
+    const worker = new NationalCatalogLinkRefreshService(
+      db,
+      authorization,
+      entitlements,
+      {
+        getFeedProductsByIds: async () => ({
+          status: "ok",
+          value: {
+            products: [
+              {
+                ...source,
+                name: "Later provider name",
+                status: "draft",
+                detailedStatuses: ["future_provider_status"],
+              },
+            ],
+          },
+          etag: null,
+          contentHash: "f".repeat(64),
+          usage: { total: null, method: null },
+        }),
+      },
+      {
+        run: async (_context, fn) =>
+          fn({
+            auth: { baseUrl: "https://catalog.invalid", token: "test-only" },
+            signal: new AbortController().signal,
+          }),
+        runExternal: async () => {
+          throw new Error("no photo request");
+        },
+      },
+      { enabled: true, photos: { enabled: false, verifiedHosts: [] } },
+    );
+    const link = (await links())[0]!;
+    await worker.request(actor, existingId);
+    await worker.resume(actor.tenantId, link.id);
+    const observed = (await links())[0]!;
+    expect(observed.lastSuccessAt!.getTime()).toBeGreaterThanOrEqual(prepared!.createdAt.getTime());
+    const result = await apply(decision(p));
+    expect(result.items[0]?.product).toBe("applied");
+    const confirmed = (await links())[0]!;
+    expect(confirmed.latestSnapshotId).toBe(observed.latestSnapshotId);
+    expect(confirmed.observedProjection).toEqual(observed.observedProjection);
+    expect(confirmed.rawStatus).toBe("draft");
+    expect(confirmed.statusKeys).toEqual(["draft", "unknown"]);
+    expect(confirmed.lastSuccessAt).toEqual(observed.lastSuccessAt);
+    expect(confirmed.lastAttemptAt).toEqual(observed.lastAttemptAt);
+    expect(confirmed.reviewedProjection).toMatchObject({ values: { name: source.name } });
+    expect(
+      await new NationalCatalogLinkService(db, authorization, entitlements).read(
+        actor.tenantId,
+        existingId,
+      ),
+    ).toMatchObject({
+      hasChanges: true,
+      statusKeys: ["draft", "unknown"],
+      rawStatus: "draft",
+      rawDetailedStatuses: ["future_provider_status"],
+    });
   });
   it("keeps rejected good_name print-name review unchanged on identical refresh", async () => {
     const c = await existingAttribute();

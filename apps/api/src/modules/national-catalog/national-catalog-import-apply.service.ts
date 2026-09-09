@@ -247,6 +247,7 @@ export class NationalCatalogImportApplyService {
           const operation = await this.operation(tx, tenantId, operationId, session.id);
           const item = await this.receipt(tx, tenantId, operationId, candidate.id);
           if (
+            operation.state === "cancelled" ||
             item.productResult === "applied" ||
             item.productResult === "conflict" ||
             item.productResult === "cancelled"
@@ -259,6 +260,15 @@ export class NationalCatalogImportApplyService {
               productResult: classification.result,
               errorCode: classification.reason,
               attempts,
+              ...(!classification.retryable
+                ? {
+                    imageRetryEligible: false,
+                    nextImageAttemptAt: null,
+                    ...(item.imageResult === "pending"
+                      ? { imageResult: "failed" as const, imageErrorCode: "product_not_applied" }
+                      : {}),
+                  }
+                : {}),
               nextAttemptAt:
                 classification.retryable && attempts < 4
                   ? new Date(Date.now() + 60_000 * 2 ** (attempts - 1))

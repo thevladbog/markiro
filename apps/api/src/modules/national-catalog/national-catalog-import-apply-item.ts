@@ -1,3 +1,4 @@
+import { retainedObservationForConfirmation } from "./national-catalog-confirmation-observation";
 import { buildCatalogProjection } from "./national-catalog-observation-projection";
 import { reviewedPhotoForConfirmation } from "./national-catalog-image-state";
 import { randomUUID } from "node:crypto";
@@ -419,8 +420,8 @@ export async function applyImportItem(
     observedProjection: projection,
     refreshCheckpoint: null,
     refreshErrorCode: null,
-    lastAttemptAt: now,
-    lastSuccessAt: now,
+    lastAttemptAt: preview.createdAt,
+    lastSuccessAt: preview.createdAt,
     lastOutcome: "ok" as const,
     rawStatus: source.normalized.status,
     rawDetailedStatuses: source.normalized.detailedStatuses,
@@ -433,7 +434,17 @@ export async function applyImportItem(
   if (link && decision.linkAction === "keep")
     await tx
       .update(schema.nationalCatalogProductLinks)
-      .set({ ...linkValues, revision: link.revision + 1 })
+      .set({
+        ...linkValues,
+        ...(await retainedObservationForConfirmation(
+          tx,
+          link,
+          preview.createdAt,
+          projection,
+          photoReview,
+        )),
+        revision: link.revision + 1,
+      })
       .where(
         and(
           eq(schema.nationalCatalogProductLinks.tenantId, actor.tenantId),

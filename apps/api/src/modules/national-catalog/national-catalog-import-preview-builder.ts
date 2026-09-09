@@ -147,6 +147,7 @@ export async function buildImportPreview(
   source: NationalCatalogProduct,
   body: ImportPrepare,
   imagePreparation?: { actorId: string; enabled: boolean },
+  fetchedAt = new Date(),
 ): Promise<ImportPreview> {
   const tenantId = session.tenantId;
   if (!item.gtin14 || !item.cardId || String(source.id) !== item.cardId)
@@ -302,6 +303,7 @@ export async function buildImportPreview(
     fields.push({
       id: entry.entryId,
       label: "Название",
+      labelKey: "name",
       before: entry.currentValue,
       after: name,
       applicable: true,
@@ -323,6 +325,7 @@ export async function buildImportPreview(
     fields.push({
       id: categoryEntryId,
       label: "Категория",
+      labelKey: "category",
       before: null,
       after: choice.label,
       applicable: true,
@@ -399,7 +402,7 @@ export async function buildImportPreview(
         target: "mapped",
         source: "national_catalog",
         entry,
-        requiresEntryIds: entry.target === "attribute" && categoryEntryId ? [categoryEntryId] : [],
+        requiresEntryIds: categoryEntryId ? [categoryEntryId] : [],
       });
       fields.push({
         id: entry.entryId,
@@ -408,13 +411,14 @@ export async function buildImportPreview(
             ? (definition.attributes.find((a) => a.id === entry.targetAttributeId)?.label ??
               entry.targetAttributeId)
             : entry.targetField,
+        ...(entry.target === "stable_field" ? { labelKey: entry.targetField } : {}),
         before: textValue(entry.currentValue),
         after: textValue(entry.proposedValue),
         applicable: true,
         reason: null,
         source: "national_catalog",
         selectedByDefault: !product,
-        requiresEntryIds: entry.target === "attribute" && categoryEntryId ? [categoryEntryId] : [],
+        requiresEntryIds: categoryEntryId ? [categoryEntryId] : [],
       });
     }
   }
@@ -476,6 +480,7 @@ export async function buildImportPreview(
     itemId: item.id,
     productId: product?.id ?? null,
     expiresAt: session.expiresAt,
+    createdAt: fetchedAt,
     source: snapshot,
     sourceHash,
     expectedProductRevision: product ? productFingerprint(product) : null,

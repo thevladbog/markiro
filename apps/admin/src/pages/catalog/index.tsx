@@ -321,13 +321,21 @@ export function CatalogPage() {
         width: "84px",
         render: (row) => <ProductThumbnail product={row} />,
       },
-      { key: "name", title: t("pages.catalog.table.name"), wrap: true, width: "26%" },
+      {
+        key: "name",
+        title: t("pages.catalog.table.name"),
+        wrap: true,
+        width: "26%",
+        render: (row) => <span className="mk-catalog-product-name">{row.name}</span>,
+      },
       {
         key: "productGroup",
         title: t("pages.catalog.table.productGroup"),
         wrap: true,
         width: "34%",
-        render: (row) => row.productGroup ?? "—",
+        render: (row) => (
+          <span className="mk-catalog-product-group">{row.productGroup ?? "—"}</span>
+        ),
       },
       {
         key: "boxCapacity",

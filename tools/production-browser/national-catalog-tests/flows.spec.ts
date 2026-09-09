@@ -1,3 +1,6 @@
+import { mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
+import en from "../../../apps/admin/src/i18n/en.json" with { type: "json" };
 import { expect, test } from "@playwright/test";
 import {
   importApplySchema,
@@ -193,6 +196,7 @@ test("own partial feed, cross-page choices, link-only and draft, independent pho
                       ...previewFixture.items[0]!.fields[0],
                       id: id(600),
                       label: "Категория",
+                      labelKey: "category",
                       before: null,
                       after: "Молочная продукция",
                     },
@@ -322,6 +326,16 @@ test("own partial feed, cross-page choices, link-only and draft, independent pho
   await page.reload();
   await expect(page.getByText(t.imageFailed)).toBeVisible();
   expect(applyWrites).toHaveLength(1);
+  const failedReceipt = structuredClone(receipt);
+  readOnly = true;
+  await page.goto(open(resultRoute));
+  await expect(page.getByText(t.imageFailed)).toBeVisible();
+  await expect(page.getByRole("button", { name: t.retryImage })).toHaveCount(0);
+  expect(receipt).toEqual(failedReceipt);
+  readOnly = false;
+  await page.goto(open(resultRoute));
+  await expect(page.getByRole("button", { name: t.retryImage, exact: true })).toBeVisible();
+  expect(receipt).toEqual(failedReceipt);
   await page.getByRole("button", { name: t.retryImage, exact: true }).click();
   await expect(page.getByText(t.imageFailed)).toHaveCount(0);
   expect(retryWrites).toEqual([{ previewIds: [receipt.items[1]?.previewId] }]);
@@ -372,3 +386,125 @@ test("own partial feed, cross-page choices, link-only and draft, independent pho
   expect(errors).toEqual([]);
   expect(unexpected).toEqual([]);
 });
+
+for (const lang of ["ru", "en"] as const)
+  test(`capped selection and manual mixed confirmation context ${lang}`, async ({ page }) => {
+    const text = (lang === "ru" ? ru : en).pages.catalog.import;
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const session = importSessionSchema.parse({
+      ...sessionFixture,
+      loaded: 100000,
+      reason: "session_row_limit",
+    });
+    const items = importItemsResponseSchema.parse({
+      ...itemsFixture,
+      nextCursor: null,
+      items: itemsFixture.items.map((item) => ({
+        ...item,
+        brand: "Фермерское хозяйство / Farm brand",
+        statusKeys: ["published", "unknown"],
+      })),
+    });
+    const preparation = importPrepareResponseSchema.parse({
+      ...previewFixture,
+      preparation: { ...previewFixture.preparation, total: 3, completed: 3 },
+      items: [0, 1, 2].map((index) => ({
+        ...previewFixture.items[0],
+        id: id(70 + index),
+        itemId: id(80 + index),
+        identity: {
+          gtin14: ["04006381333931", "04601234567893", "05901234123457"][index],
+          cardId: `card-${index}`,
+          name: index === 0 ? "Название исправлено вручную" : "Existing catalog product",
+        },
+        productId: index ? id(90 + index) : null,
+        linkAction: index === 2 ? "replace" : "attach",
+        fields: [
+          {
+            ...previewFixture.items[0]!.fields[0],
+            id: id(100 + index),
+            source: index === 0 ? "manual" : "national_catalog",
+            before: index ? "Local name" : null,
+            after: index === 0 ? "Название исправлено вручную" : "Provider name",
+          },
+        ],
+        photos: [],
+      })),
+    });
+    await page.route(`${origin}/api/**`, async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      let body: unknown;
+      if (path.endsWith("/access/me"))
+        body = { roles: ["manager"], capabilities: ["operations.read", "operations.write"] };
+      else if (path.endsWith("/profile"))
+        body = { firstName: "Test", middleName: null, lastName: "User", hasAvatar: false };
+      else if (path.endsWith("/capabilities")) body = capabilitiesFixture;
+      else if (path.includes("/preparations/")) body = preparation;
+      else if (path.endsWith("/items")) body = items;
+      else if (path.includes("/import-sessions/")) body = session;
+      else if (
+        ["/api/products", "/api/counterparties", "/api/pickup-orders"].includes(path) ||
+        path.includes("/product-groups")
+      )
+        body = { items: [] };
+      else {
+        errors.push(`${route.request().method()} ${path}`);
+        await route.abort();
+        return;
+      }
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+    });
+    await page.goto(open(`/catalog/import?sessionId=${id(1)}`) + `&lang=${lang}`);
+    await expect(page.getByText(text.sessionRowLimit)).toBeVisible();
+    await expect(
+      page.getByRole("table").getByText("Фермерское хозяйство / Farm brand"),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("table").getByText(`${text.statuses.published} · ${text.statuses.unknown}`),
+    ).toBeVisible();
+    await expect(page.locator(`time[datetime="${session.startedAt}"]`)).toBeVisible();
+    const evidence = resolve("../../docs/evidence/national-catalog-import");
+    if (process.env.NC_UPDATE_SCREENSHOTS === "1") {
+      await mkdir(evidence, { recursive: true });
+      await page.screenshot({
+        path: resolve(evidence, `final-fix-selection-1280-${lang}.png`),
+        fullPage: true,
+        animations: "disabled",
+      });
+    }
+    await page.goto(
+      open(`/catalog/import?sessionId=${id(1)}&preparationId=${preparation.preparation.id}`) +
+        `&lang=${lang}`,
+    );
+    await expect(page.locator("fieldset")).toHaveCount(3);
+    await expect(page.getByText(`${text.manualSource}: Название исправлено вручную`)).toBeVisible();
+    if (process.env.NC_UPDATE_SCREENSHOTS === "1") {
+      await page
+        .getByText(`${text.manualSource}: Название исправлено вручную`)
+        .scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: resolve(evidence, `final-fix-provenance-1280-${lang}.png`),
+        fullPage: true,
+        animations: "disabled",
+      });
+    }
+    await page.getByRole("checkbox", { name: text.fields.name, exact: true }).nth(1).click();
+    await page.getByRole("checkbox", { name: text.confirmReplace }).click();
+    await expect(page.getByRole("button", { name: text.apply, exact: true })).toBeEnabled();
+    const totals = text.confirmationTotals
+      .replace("{{created}}", "1")
+      .replace("{{attached}}", "2")
+      .replace("{{replaced}}", "1")
+      .replace("{{changed}}", "1")
+      .replace("{{photos}}", "0");
+    await expect(page.getByLabel(text.confirmationSummary)).toHaveText(totals);
+    await page.getByLabel(text.confirmationSummary).scrollIntoViewIfNeeded();
+    if (process.env.NC_UPDATE_SCREENSHOTS === "1")
+      await page.screenshot({
+        path: resolve(evidence, `final-fix-confirmation-1280-${lang}.png`),
+        fullPage: true,
+        animations: "disabled",
+      });
+    expect(errors).toEqual([]);
+  });

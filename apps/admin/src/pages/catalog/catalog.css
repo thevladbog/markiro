@@ -145,3 +145,15 @@
   color: var(--fg-2);
   font: var(--text-body-sm);
 }
+
+.mk-catalog-product-name,
+.mk-catalog-product-group {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.mk-catalog-product-name {
+  min-width: 220px;
+}
+.mk-catalog-product-group {
+  min-width: 140px;
+}

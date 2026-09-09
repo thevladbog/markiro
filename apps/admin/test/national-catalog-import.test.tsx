@@ -508,9 +508,16 @@ it("records keep.reviewedCandidateId only after explicitly viewing a READY candi
 it("requires category acceptance for dependent fields, while independent fields remain selected", async () => {
   const data = structuredClone(previewFixture);
   data.items[0]!.fields.push(
-    { ...data.items[0]!.fields[0]!, id: id(40), label: "Категория", requiresEntryIds: [] },
+    {
+      ...data.items[0]!.fields[0]!,
+      id: id(40),
+      label: "Категория",
+      labelKey: "category",
+      requiresEntryIds: [],
+    },
     { ...data.items[0]!.fields[0]!, id: id(41), label: "Объём", requiresEntryIds: [id(40)] },
   );
+  delete data.items[0]!.fields[2]!.labelKey;
   render(
     <ImportReview
       sessionId={id(1)}
@@ -1397,6 +1404,249 @@ it.each(["ru", "en"] as const)(
       expect(screen.getByText(id(91))).toBeTruthy();
       expect(screen.getByText(id(92))).toBeTruthy();
       expect(screen.queryByRole("link")).toBeNull();
+    } finally {
+      await i18n.changeLanguage("ru");
+    }
+  },
+);
+
+it.each(["ru", "en"] as const)(
+  "shows supplied capped selection and manual decision context in %s",
+  async (language) => {
+    const { default: i18n } = await import("../src/i18n/index.js");
+    await i18n.changeLanguage(language);
+    const tr = (key: string) => i18n.t(`pages.catalog.import.${key}`);
+    try {
+      const selection = render(
+        <ImportSelection
+          session={{ ...sessionFixture, loaded: 100000, reason: "session_row_limit" }}
+          data={{
+            ...itemsFixture,
+            items: itemsFixture.items.map((item) => ({
+              ...item,
+              brand: "Farm brand",
+              statusKeys: ["published", "unknown"],
+            })),
+          }}
+          query={initialItemsQuery}
+          onQuery={vi.fn()}
+          onSelection={vi.fn()}
+          onPrepare={vi.fn()}
+          canWrite
+          busy={false}
+        />,
+        { wrapper: MemoryRouter },
+      );
+      expect(screen.getByText("Farm brand")).toBeTruthy();
+      expect(screen.getByRole("table").textContent).toContain(tr("statuses.published"));
+      expect(screen.getByRole("table").textContent).toContain(tr("statuses.unknown"));
+      expect(
+        screen.getByText(
+          new RegExp(language === "ru" ? "Загружено строк: 100000" : "Rows loaded: 100000"),
+        ),
+      ).toBeTruthy();
+      expect(screen.getByText(tr("sessionRowLimit"))).toBeTruthy();
+      expect(
+        selection.container.querySelector(`time[datetime="${sessionFixture.startedAt}"]`),
+      ).not.toBeNull();
+      selection.unmount();
+      const data = structuredClone(previewFixture);
+      data.items[0]!.fields[0]!.source = "manual";
+      const view = render(
+        <ImportReview
+          sessionId={id(1)}
+          data={data}
+          canWrite
+          busy={false}
+          onPrepare={vi.fn()}
+          onApply={vi.fn()}
+          onPhoto={vi.fn()}
+          onRetry={vi.fn()}
+        />,
+        { wrapper: MemoryRouter },
+      );
+      expect(screen.getByText(new RegExp(tr("manualSource")))).toBeTruthy();
+      expect(screen.queryByText(new RegExp(`${tr("after")}:`))).toBeNull();
+      expect(screen.getByLabelText(tr("confirmationSummary"))).toBeTruthy();
+      view.unmount();
+    } finally {
+      await i18n.changeLanguage("ru");
+    }
+  },
+);
+it("retries only the failed photo preparation while retaining explicit field decisions", async () => {
+  const data = structuredClone(previewFixture);
+  data.items[0]!.productId = id(21);
+  data.items[0]!.photos = [
+    {
+      candidateId: id(30),
+      state: "failed",
+      previewPath: null,
+      primary: true,
+      selectedByDefault: false,
+      reason: "download_failed",
+    },
+  ];
+  const onPhoto = vi.fn();
+  const props = {
+    sessionId: id(1),
+    data,
+    canWrite: true,
+    busy: false,
+    canPreparePhotos: true,
+    onPrepare: vi.fn(),
+    onApply: vi.fn(),
+    onPhoto,
+    onRetry: vi.fn(),
+  };
+  const view = render(<ImportReview {...props} />, { wrapper: MemoryRouter });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("checkbox", { name: "Название товара" }));
+  await user.click(screen.getByRole("button", { name: "Повторить подготовку фото" }));
+  expect(onPhoto).toHaveBeenCalledWith(id(12), id(30));
+  const ready = structuredClone(data);
+  ready.items[0]!.photos[0]!.state = "ready";
+  ready.items[0]!.photos[0]!.reason = null;
+  view.rerender(<ImportReview {...props} data={ready} />);
+  expect(
+    screen.getByRole("checkbox", { name: "Название товара" }).getAttribute("aria-checked"),
+  ).toBe("true");
+});
+
+it.each([
+  { reason: "invalid_barcode", canWrite: true, canPreparePhotos: true, busy: false },
+  { reason: "download_failed", canWrite: false, canPreparePhotos: true, busy: false },
+  { reason: "download_failed", canWrite: true, canPreparePhotos: false, busy: false },
+  { reason: "download_failed", canWrite: true, canPreparePhotos: true, busy: true },
+] as const)(
+  "blocks failed-photo preparation outside its candidate and current access gates: %j",
+  async (gates) => {
+    const data = structuredClone(previewFixture);
+    data.items[0]!.photos = [
+      {
+        candidateId: id(30),
+        state: "failed",
+        previewPath: null,
+        primary: true,
+        selectedByDefault: false,
+        reason: gates.reason,
+      },
+    ];
+    const onPhoto = vi.fn();
+    render(
+      <ImportReview
+        sessionId={id(1)}
+        data={data}
+        {...gates}
+        onPrepare={vi.fn()}
+        onApply={vi.fn()}
+        onPhoto={onPhoto}
+        onRetry={vi.fn()}
+      />,
+      { wrapper: MemoryRouter },
+    );
+    const button = screen.queryByRole("button", { name: "Повторить подготовку фото" });
+    if (button) {
+      expect(button.hasAttribute("disabled")).toBe(true);
+      await userEvent.setup().click(button);
+    }
+    expect(onPhoto).not.toHaveBeenCalled();
+  },
+);
+
+it.each(["selection", "preparation"] as const)(
+  "keeps polling deferred automatic %s work until completion",
+  async (kind) => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const server = mockServer();
+    if (kind === "selection") {
+      server.state.session.automaticWorkPending = true;
+      renderImport(selectionRoute);
+      await screen.findByText(/Загружено строк: 2/);
+      server.state.session = {
+        ...server.state.session,
+        loaded: 3,
+        state: "ready",
+        complete: true,
+        automaticWorkPending: false,
+      };
+      await screen.findByText(/Загружено строк: 3/, {}, { timeout: 4000 });
+    } else {
+      server.state.preparation = {
+        ...server.state.preparation,
+        preparation: {
+          ...server.state.preparation.preparation,
+          state: "partial",
+          completed: 0,
+          automaticWorkPending: true,
+        },
+        items: [],
+      };
+      renderImport(reviewRoute);
+      await screen.findByRole("heading", { name: "Сравнение" });
+      server.state.preparation = structuredClone(previewFixture);
+      await screen.findByLabelText("Название вручную", {}, { timeout: 4000 });
+    }
+  },
+);
+it.each(["ru", "en"] as const)(
+  "derives mixed confirmation totals from current valid choices and localizes owned labels in %s",
+  async (language) => {
+    const { default: i18n } = await import("../src/i18n/index.js");
+    await i18n.changeLanguage(language);
+    const tr = (key: string) => i18n.t(`pages.catalog.import.${key}`);
+    try {
+      const data = structuredClone(previewFixture);
+      data.preparation.total = 3;
+      data.preparation.completed = 3;
+      data.items = [0, 1, 2].map((index) => ({
+        ...structuredClone(previewFixture.items[0]!),
+        id: id(70 + index),
+        itemId: id(80 + index),
+        productId: index ? id(90 + index) : null,
+        linkAction: index === 2 ? "replace" : "attach",
+        fields: [
+          {
+            ...previewFixture.items[0]!.fields[0]!,
+            id: id(100 + index),
+            label: "Untranslated backend owned label",
+            source: "manual",
+          },
+        ],
+        photos: [],
+      }));
+      render(
+        <ImportReview
+          sessionId={id(1)}
+          data={data}
+          canWrite
+          busy={false}
+          onPrepare={vi.fn()}
+          onApply={vi.fn()}
+          onPhoto={vi.fn()}
+          onRetry={vi.fn()}
+        />,
+        { wrapper: MemoryRouter },
+      );
+      expect(screen.queryByText("Untranslated backend owned label")).toBeNull();
+      const user = userEvent.setup();
+      await user.click(screen.getAllByRole("checkbox", { name: tr("fields.name") })[1]!);
+      await user.click(screen.getByRole("checkbox", { name: tr("confirmReplace") }));
+      expect(screen.getByLabelText(tr("confirmationSummary")).textContent).toBe(
+        i18n.t("pages.catalog.import.confirmationTotals", {
+          created: 1,
+          attached: 2,
+          replaced: 1,
+          changed: 1,
+          photos: 0,
+        }),
+      );
+      await user.click(screen.getAllByRole("checkbox", { name: tr("fields.name") })[0]!);
+      expect(screen.getByRole("button", { name: tr("apply") }).hasAttribute("disabled")).toBe(true);
+      expect(screen.getByLabelText(tr("confirmationSummary")).textContent).toBe(
+        tr("confirmationIncomplete"),
+      );
     } finally {
       await i18n.changeLanguage("ru");
     }

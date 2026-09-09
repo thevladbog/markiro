@@ -69,6 +69,7 @@ export const previewFixture = importPrepareResponseSchema.parse({
         {
           id: id(13),
           label: "Название товара",
+          labelKey: "name",
           before: null,
           after: "Молоко",
           applicable: true,
