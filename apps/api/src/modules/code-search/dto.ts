@@ -1,6 +1,13 @@
 import { z } from "zod";
 import type { SchemaObject } from "@nestjs/swagger";
 import type { DateBound } from "../../lib/date-range";
+import { isIanaTimeZone } from "../../lib/time-zone";
+
+/** The box card uses the viewer's timezone; old report URLs retain UTC. */
+export const boxReportQuerySchema = z.object({
+  timeZone: z.string().refine(isIanaTimeZone, "timeZone must be an IANA timezone").default("UTC"),
+});
+export type BoxReportQueryDto = z.infer<typeof boxReportQuerySchema>;
 
 /** `^YYYY-MM-DD$`; must be checked against the RAW query string, not the coerced `Date` -- see `date-range.ts`. */
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -169,6 +176,8 @@ export interface BoxCardDto {
   sscc: string | null;
   status: "open" | "closed" | "disassembled";
   shiftId: string;
+  /** Saved human-readable shift number, e.g. `AUG26-003/S`. */
+  shiftNumber: string | null;
   productId: string | null;
   productName: string | null;
   terminalId: string | null;
@@ -455,6 +464,7 @@ export const boxCardOpenApiSchema: SchemaObject = {
     "sscc",
     "status",
     "shiftId",
+    "shiftNumber",
     "productId",
     "productName",
     "terminalId",
@@ -471,6 +481,7 @@ export const boxCardOpenApiSchema: SchemaObject = {
     sscc: { ...ssccSchema, nullable: true },
     status: { type: "string", enum: ["open", "closed", "disassembled"] },
     shiftId: uuidSchema,
+    shiftNumber: { type: "string", nullable: true },
     productId: { ...uuidSchema, nullable: true },
     productName: { type: "string", nullable: true },
     terminalId: { ...uuidSchema, nullable: true },

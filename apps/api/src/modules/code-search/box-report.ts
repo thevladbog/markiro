@@ -28,13 +28,19 @@ export interface BoxReportData {
   codes: BoxReportCode[];
 }
 
-function pad2(n: number): string {
-  return n < 10 ? `0${n}` : `${n}`;
-}
-
-/** "23.07.2026 14:05" — UTC, so the printed form reads the same regardless of the server's local timezone. */
-function formatDateTime(d: Date): string {
-  return `${pad2(d.getUTCDate())}.${pad2(d.getUTCMonth() + 1)}.${d.getUTCFullYear()} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
+/** Match the box card's viewer timezone without depending on the server's timezone. */
+function formatDateTime(d: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone,
+  })
+    .format(d)
+    .replace(",", "");
 }
 
 function escapeHtml(value: string): string {
@@ -175,7 +181,7 @@ function dataMatrix(rawKm: string): string {
   }
 }
 
-function metadataBlock(data: BoxReportData): string {
+function metadataBlock(data: BoxReportData, timeZone: string): string {
   const orgBlock = data.org
     ? `<span class="rep-meta-value">${escapeHtml(data.org.name)}</span>
       <span class="rep-meta-detail">${data.org.inn ? `ИНН ${escapeHtml(data.org.inn)}` : "ИНН не указан"}</span>`
@@ -183,9 +189,11 @@ function metadataBlock(data: BoxReportData): string {
       <span class="rep-meta-detail">Профиль организации не заполнен</span>`;
 
   const lifecycle = [
-    `открыт ${formatDateTime(data.openedAt)}`,
-    ...(data.closedAt ? [`закрыт ${formatDateTime(data.closedAt)}`] : []),
-    ...(data.disassembledAt ? [`расформирован ${formatDateTime(data.disassembledAt)}`] : []),
+    `открыт ${formatDateTime(data.openedAt, timeZone)}`,
+    ...(data.closedAt ? [`закрыт ${formatDateTime(data.closedAt, timeZone)}`] : []),
+    ...(data.disassembledAt
+      ? [`расформирован ${formatDateTime(data.disassembledAt, timeZone)}`]
+      : []),
   ].join(" · ");
 
   return `<div class="rep-meta">
@@ -288,12 +296,12 @@ function contentsUnits(data: BoxReportData): ReportUnit[] {
 // ---- document --------------------------------------------------------------
 
 /** Pure: builds the print-ready A4 "Состав короба" document. No I/O, no `Date.now()`. */
-export function renderBoxReportHtml(data: BoxReportData): string {
+export function renderBoxReportHtml(data: BoxReportData, timeZone = "UTC"): string {
   const units = contentsUnits(data);
   const pages = paginateUnits(units, TABLE_HEAD_MM);
   const totalPages = pages.length;
   const logo = brandLogo(data);
-  const metadata = metadataBlock(data);
+  const metadata = metadataBlock(data, timeZone);
   const titleDoc = data.sscc ? ssccHri(data.sscc) : "Без SSCC";
   const footBarcode = data.sscc
     ? `<span class="code128-box">${ssccBarcode(data.sscc)}</span>`
@@ -314,7 +322,7 @@ export function renderBoxReportHtml(data: BoxReportData): string {
       <div class="rep-title">
         <span class="rep-title-label">Состав короба</span>
         <span class="rep-title-doc">${escapeHtml(titleDoc)}</span>
-        <span class="rep-title-detail">открыт ${formatDateTime(data.openedAt)} · статус: <strong>${STATUS_LABEL[data.status]}</strong></span>
+        <span class="rep-title-detail">открыт ${formatDateTime(data.openedAt, timeZone)} · статус: <strong>${STATUS_LABEL[data.status]}</strong></span>
       </div>
     </header>
     ${metadata}

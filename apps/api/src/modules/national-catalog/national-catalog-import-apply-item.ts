@@ -1,9 +1,13 @@
 import { retainedObservationForConfirmation } from "./national-catalog-confirmation-observation";
-import { buildCatalogProjection } from "./national-catalog-observation-projection";
+import {
+  buildCatalogProjection,
+  catalogProjectionHash,
+} from "./national-catalog-observation-projection";
 import { reviewedPhotoForConfirmation } from "./national-catalog-image-state";
 import { randomUUID } from "node:crypto";
 import { BadRequestException, ConflictException } from "@nestjs/common";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { readCatalogProductFields } from "./national-catalog-product-fields";
 import { schema } from "@markiro/db";
 import {
   isValidGtin,
@@ -22,7 +26,6 @@ import {
   storedDecisionSchema,
   sourceEnvelopeSchema,
   previousValuesSchema,
-  meaningfulCatalogHash,
   appliedEvidenceSchema,
 } from "./national-catalog-import-apply-state";
 import { hashContent } from "./national-catalog-preparation-state";
@@ -208,14 +211,37 @@ export async function applyImportItem(
     throw new BadRequestException("name_required");
   if (name?.target === "name" && name.currentValue !== (product?.name ?? null))
     throw new ConflictException("name_changed");
+  const productFields = readCatalogProductFields(source.normalized.attributes, source.boundGtin14);
+  const acceptedProductFields = decision.acceptedEntries.filter(
+    (entry) => entry.target === "product_field",
+  );
+  for (const entry of acceptedProductFields) {
+    const actual =
+      entry.targetField === "egais_code"
+        ? (product?.egaisCode ?? null)
+        : (product?.shelfLifeDays ?? null);
+    if (
+      actual !== entry.currentValue ||
+      !productFields.some(
+        (field) =>
+          field.targetField === entry.targetField &&
+          field.sourceAttributeId === entry.sourceAttributeId &&
+          field.mappingVersion === entry.mappingVersion &&
+          field.value === entry.proposedValue,
+      )
+    )
+      throw new ConflictException("product_changed");
+  }
   const targets = decision.acceptedEntries.map((entry) =>
     entry.target === "mapped"
       ? entry.entry.target === "attribute"
         ? `attribute:${entry.entry.targetSchemaVersionId}:${entry.entry.targetAttributeId}`
         : `stable:${entry.entry.targetField}`
-      : entry.target === "name"
-        ? "stable:name"
-        : "category",
+      : entry.target === "product_field"
+        ? `stable:${entry.targetField}`
+        : entry.target === "name"
+          ? "stable:name"
+          : "category",
   );
   if (new Set(targets).size !== targets.length) throw new BadRequestException("duplicate_target");
   const productId =
@@ -347,6 +373,35 @@ export async function applyImportItem(
     )
       throw new ConflictException("profile_changed");
   }
+  for (const entry of acceptedProductFields) {
+    if (entry.targetField === "egais_code") {
+      await productWriter.importPrimaryEgaisCode(
+        tx,
+        actor.tenantId,
+        productId,
+        entry.proposedValue,
+        sourceRef,
+        preview.createdAt,
+      );
+    } else {
+      await tx
+        .update(schema.products)
+        .set({ shelfLifeDays: entry.proposedValue })
+        .where(
+          and(eq(schema.products.tenantId, actor.tenantId), eq(schema.products.id, productId)),
+        );
+    }
+  }
+  if (acceptedProductFields.length && !mapped.length && !category)
+    await tx
+      .update(schema.productRegulatoryProfiles)
+      .set({ revision: sql`${schema.productRegulatoryProfiles.revision} + 1`, updatedAt: now })
+      .where(
+        and(
+          eq(schema.productRegulatoryProfiles.tenantId, actor.tenantId),
+          eq(schema.productRegulatoryProfiles.productId, productId),
+        ),
+      );
   const currentValues = new Map<string, ProductAttributeValue>();
   for (const row of currentAttributes) {
     const parsed = productAttributeValueSchema.safeParse(row.value);
@@ -393,6 +448,7 @@ export async function applyImportItem(
   const projection = buildCatalogProjection({
     providerName: source.normalized.name,
     mappedEntries: baselineEntries,
+    productFields,
     imageChecksum: photoReview?.checksum ?? null,
     context:
       version && mapping
@@ -405,11 +461,7 @@ export async function applyImportItem(
           }
         : null,
   });
-  const meaningfulHash = meaningfulCatalogHash({
-    providerName: source.normalized.name,
-    mappedEntries: baselineEntries,
-    imageChecksum: photoReview?.checksum ?? null,
-  });
+  const meaningfulHash = catalogProjectionHash(projection);
   if (link && decision.linkAction === "replace")
     await closeNationalCatalogLinkInTransaction(tx, actor, productId, link.revision, "replaced");
   const linkValues = {

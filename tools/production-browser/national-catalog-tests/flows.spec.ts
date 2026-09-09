@@ -288,24 +288,34 @@ test("own partial feed, cross-page choices, link-only and draft, independent pho
   await page.getByRole("button", { name: t.previousPage, exact: true }).click();
   await expect(page.getByRole("checkbox", { name: /04006381333931/ })).toBeChecked();
   await page.getByRole("button", { name: t.compare, exact: true }).click();
-  await expect(page.locator(".mk-nc-review-item")).toHaveCount(2);
-  const newProduct = page.locator(".mk-nc-review-item").nth(1);
+  await expect(page.getByRole("tab")).toHaveCount(2);
+  await expect(page.locator(".mk-nc-review-item")).toHaveCount(1);
+  await page.getByRole("tab").nth(1).click();
+  const newProduct = page.getByRole("tabpanel");
   await newProduct
     .getByLabel(t.manualName, { exact: true })
     .fill("Йогурт фермерский натуральный 3,5 %, 500 г");
   await expect(page.getByRole("button", { name: t.apply, exact: true })).toBeDisabled();
   await newProduct.getByLabel(t.initialCategory, { exact: true }).selectOption(id(500));
+  await newProduct
+    .getByRole("radio", { name: `${t.fields.name} — ${t.proposedColumn}`, exact: true })
+    .click();
+  await newProduct
+    .getByRole("radio", { name: `${t.fields.category} — ${t.proposedColumn}`, exact: true })
+    .click();
   await expect(page.getByRole("button", { name: t.apply, exact: true })).toBeEnabled();
   expect(prepareWrites.at(-1)).toMatchObject({
     itemIds: [id(2), id(3)],
     manualNames: [{ itemId: id(3), name: "Йогурт фермерский натуральный 3,5 %, 500 г" }],
     categoryChoices: [{ itemId: id(3), optionId: id(500) }],
   });
+  await page.getByRole("tab").nth(0).click();
   await page
     .locator(".mk-nc-review-item")
     .first()
     .getByRole("button", { name: t.linkOnly, exact: true })
     .click();
+  await page.getByRole("tab").nth(1).click();
   await expect(newProduct.getByRole("img").nth(1)).toHaveJSProperty("naturalWidth", 120);
   const choose = newProduct.getByRole("radio", { name: t.choosePhoto, exact: true }).nth(1);
   await choose.focus();
@@ -347,7 +357,8 @@ test("own partial feed, cross-page choices, link-only and draft, independent pho
   await page.goto(
     open(`/catalog/import?sessionId=${id(1)}&preparationId=${preparation.preparation.id}`),
   );
-  await expect(page.locator(".mk-nc-review-item")).toHaveCount(2);
+  await expect(page.getByRole("tab")).toHaveCount(2);
+  await expect(page.locator(".mk-nc-review-item")).toHaveCount(1);
   await expect(page.getByLabel(t.manualName, { exact: true }).first()).toBeDisabled();
   await expect(page.getByRole("button", { name: t.apply })).toHaveCount(0);
   await page.goto(open(`/catalog/${productFixture.id}/chz`));
@@ -476,7 +487,8 @@ for (const lang of ["ru", "en"] as const)
       open(`/catalog/import?sessionId=${id(1)}&preparationId=${preparation.preparation.id}`) +
         `&lang=${lang}`,
     );
-    await expect(page.locator(".mk-nc-review-item")).toHaveCount(3);
+    await expect(page.getByRole("tab")).toHaveCount(3);
+    await expect(page.locator(".mk-nc-review-item")).toHaveCount(1);
     await expect(page.getByText("Название исправлено вручную", { exact: true })).toBeVisible();
     if (process.env.NC_UPDATE_SCREENSHOTS === "1") {
       await page.getByText("Название исправлено вручную", { exact: true }).scrollIntoViewIfNeeded();
@@ -486,9 +498,9 @@ for (const lang of ["ru", "en"] as const)
         animations: "disabled",
       });
     }
+    await page.getByRole("tab").nth(2).click();
     await page
       .getByRole("radio", { name: `${text.fields.name} — ${text.proposedColumn}`, exact: true })
-      .nth(1)
       .click();
     await page.getByRole("checkbox", { name: text.confirmReplace }).click();
     await expect(page.getByRole("button", { name: text.apply, exact: true })).toBeEnabled();

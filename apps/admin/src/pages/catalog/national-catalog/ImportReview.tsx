@@ -3,13 +3,19 @@ import type {
   ImportPrepareResponse,
   ImportPreview,
 } from "@markiro/platform-contracts";
-import { Alert, Button, Checkbox, Input, Select, RadioCard, Spinner } from "@markiro/ui";
-import { useId, useState } from "react";
+import { Alert, Button, Checkbox, DataTabs, Input, Select, RadioCard, Spinner } from "@markiro/ui";
+import { useEffect, useId, useRef, useState } from "react";
 import { productImageUrl, type ProductDto } from "../api.js";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { photoUrl } from "./api.js";
-import { currentChoice, keepPhoto, toggleField, type ReviewChoice } from "./reviewState.js";
+import {
+  currentChoice,
+  keepPhoto,
+  reconcileChoice,
+  toggleField,
+  type ReviewChoice,
+} from "./reviewState.js";
 export interface ReviewDrafts {
   manualNames: Record<string, string>;
   categoryChoices: Record<string, string>;
@@ -44,7 +50,50 @@ export function ImportReview({
   const { t } = useTranslation();
   const choiceGroup = useId();
   const tr = (key: string) => t(`pages.catalog.import.${key}`);
-  const [choices, setChoices] = useState<Record<string, ReviewChoice>>({});
+  const [choices, setChoices] = useState<
+    Record<string, { preview: ImportPreview; choice: ReviewChoice }>
+  >(() =>
+    Object.fromEntries(
+      data.items.map((preview) => [
+        preview.itemId,
+        { preview, choice: currentChoice(preview, undefined) },
+      ]),
+    ),
+  );
+  const [previousData, setPreviousData] = useState(data);
+  if (previousData !== data) {
+    setPreviousData(data);
+    setChoices((previous) => ({
+      ...previous,
+      ...Object.fromEntries(
+        data.items.map((preview) => {
+          const stored = previous[preview.itemId];
+          return [
+            preview.itemId,
+            {
+              preview,
+              choice: stored
+                ? reconcileChoice(preview, stored.preview, stored.choice)
+                : currentChoice(preview, undefined),
+            },
+          ];
+        }),
+      ),
+    }));
+  }
+  const [activeItemId, setActiveItemId] = useState(data.items[0]?.itemId);
+  const [showOnlyMappedFields, setShowOnlyMappedFields] = useState(false);
+  const activeIndex = Math.max(
+    0,
+    data.items.findIndex((p) => p.itemId === activeItemId),
+  );
+  const activePreview = data.items[activeIndex];
+  const navigationRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    navigationRef.current
+      ?.querySelector('[aria-selected="true"]')
+      ?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [activePreview?.itemId]);
   const [drafts, setDrafts] = useState<ReviewDrafts>(() => ({
     manualNames: Object.fromEntries(
       data.items.flatMap((p) =>
@@ -79,10 +128,14 @@ export function ImportReview({
       ...drafts.categoryChoices,
     },
   };
-  const [dirty, setDirty] = useState(false);
-  const choiceFor = (p: ImportPreview) => currentChoice(p, choices[p.id]);
+  const [dirtyPreparationId, setDirtyPreparationId] = useState<string | null>(null);
+  const dirty = dirtyPreparationId === data.preparation.id;
+  const choiceFor = (p: ImportPreview) => currentChoice(p, choices[p.itemId]?.choice);
   function update(p: ImportPreview, fn: (choice: ReviewChoice) => ReviewChoice) {
-    setChoices((previous) => ({ ...previous, [p.id]: fn(currentChoice(p, previous[p.id])) }));
+    setChoices((previous) => ({
+      ...previous,
+      [p.itemId]: { preview: p, choice: fn(currentChoice(p, previous[p.itemId]?.choice)) },
+    }));
   }
   const applicable = data.items.filter((p) => p.canApply);
   const preparing =
@@ -170,279 +223,351 @@ export function ImportReview({
           {tr("retryComparison")}
         </Button>
       )}
-      {data.items.map((preview) => {
+      {activePreview && (
+        <div className="mk-nc-product-navigation" ref={navigationRef}>
+          <div className="mk-nc-product-navigation__controls">
+            <p className="mk-nc-hint">
+              {t("pages.catalog.import.productPosition", {
+                position: activeIndex + 1,
+                total: data.items.length,
+              })}
+            </p>
+            <div className="mk-nc-product-navigation__buttons">
+              <Button
+                variant="secondary"
+                disabled={activeIndex === 0}
+                onClick={() => setActiveItemId(data.items[activeIndex - 1]?.itemId)}
+              >
+                {tr("previousProduct")}
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={activeIndex === data.items.length - 1}
+                onClick={() => setActiveItemId(data.items[activeIndex + 1]?.itemId)}
+              >
+                {tr("nextProduct")}
+              </Button>
+            </div>
+          </div>
+          <DataTabs
+            className="mk-nc-product-tabs"
+            label={tr("productTabs")}
+            activeId={activePreview.itemId}
+            onChange={setActiveItemId}
+            items={data.items.map((preview, index) => {
+              const status = !preview.canApply
+                ? tr("tabBlocked")
+                : comparisonRejected && rejectedPreviewIds.includes(preview.id)
+                  ? tr("tabStale")
+                  : !validChoices.includes(preview)
+                    ? tr("tabIncomplete")
+                    : undefined;
+              return {
+                id: preview.itemId,
+                label: `${index + 1}. ${preview.identity.name ?? tr("unnamed")} · ${preview.identity.gtin14}${status ? ` · ${status}` : ""}`,
+                panelId: `${choiceGroup}-${preview.itemId}-panel`,
+                ...(status ? { count: status } : {}),
+              };
+            })}
+          />
+          <Checkbox
+            label={tr("showOnlyMappedFields")}
+            checked={showOnlyMappedFields}
+            onCheckedChange={setShowOnlyMappedFields}
+          />
+        </div>
+      )}
+      {(activePreview ? [activePreview] : []).map((preview) => {
         const choice = choiceFor(preview);
         const product = products.find((item) => item.id === preview.productId);
         const currentPhoto = product ? productImageUrl(product) : null;
         return (
-          <fieldset className="mk-nc-review-item" key={preview.id}>
-            <legend>
-              {preview.identity.gtin14} · {preview.identity.name ?? tr("unnamed")}
-            </legend>
-            {comparisonRejected && rejectedPreviewIds.includes(preview.id) && (
-              <Alert tone="error">{tr("rejectedItem")}</Alert>
-            )}
-            <p>
-              {tr(
-                preview.linkAction === "replace"
-                  ? "matches.other_link"
-                  : preview.linkAction === "keep"
-                    ? "matches.linked"
-                    : preview.productId
-                      ? "matches.existing"
-                      : "matches.new",
+          <div
+            role="tabpanel"
+            tabIndex={0}
+            aria-label={`${preview.identity.gtin14} · ${preview.identity.name ?? tr("unnamed")}`}
+            id={`${choiceGroup}-${preview.itemId}-panel`}
+            className="mk-nc-review-product"
+            key={preview.itemId}
+          >
+            <fieldset className="mk-nc-review-item">
+              <legend>
+                {preview.identity.gtin14} · {preview.identity.name ?? tr("unnamed")}
+              </legend>
+              {comparisonRejected && rejectedPreviewIds.includes(preview.id) && (
+                <Alert tone="error">{tr("rejectedItem")}</Alert>
               )}
-            </p>
-            {preview.productId && (
-              <Link to={`/catalog/${preview.productId}/edit`}>{tr("openProduct")}</Link>
-            )}
-            {!preview.canApply && (
-              <Alert tone="error">
-                {t(`pages.catalog.import.reasons.${preview.reason}`, {
-                  defaultValue: tr("itemUnavailable"),
-                })}
-              </Alert>
-            )}
-            <Input
-              disabled={!canWrite || busy}
-              label={tr("manualName")}
-              hint={tr("manualNameHint")}
-              maxLength={200}
-              value={effectiveDrafts.manualNames[preview.itemId] ?? ""}
-              onChange={(e) => {
-                setDirty(true);
-                setDrafts({
-                  ...effectiveDrafts,
-                  manualNames: { ...effectiveDrafts.manualNames, [preview.itemId]: e.target.value },
-                });
-              }}
-            />
-            {preview.categoryOptions.length > 0 && (
-              <Select
-                native
+              <p>
+                {tr(
+                  preview.linkAction === "replace"
+                    ? "matches.other_link"
+                    : preview.linkAction === "keep"
+                      ? "matches.linked"
+                      : preview.productId
+                        ? "matches.existing"
+                        : "matches.new",
+                )}
+              </p>
+              {preview.productId && (
+                <Link to={`/catalog/${preview.productId}/edit`}>{tr("openProduct")}</Link>
+              )}
+              {!preview.canApply && (
+                <Alert tone="error">
+                  {t(`pages.catalog.import.reasons.${preview.reason}`, {
+                    defaultValue: tr("itemUnavailable"),
+                  })}
+                </Alert>
+              )}
+              <Input
                 disabled={!canWrite || busy}
-                label={tr("initialCategory")}
-                value={
-                  effectiveDrafts.categoryChoices[preview.itemId] ??
-                  preview.categoryOptions.find((o) => o.selected)?.optionId ??
-                  ""
-                }
-                options={[
-                  { value: "", label: tr("noCategory") },
-                  ...preview.categoryOptions.map((o) => ({ value: o.optionId, label: o.label })),
-                ]}
-                onValueChange={(optionId) => {
-                  const next = {
+                label={tr("manualName")}
+                hint={tr("manualNameHint")}
+                maxLength={200}
+                value={effectiveDrafts.manualNames[preview.itemId] ?? ""}
+                onChange={(e) => {
+                  setDirtyPreparationId(data.preparation.id);
+                  setDrafts({
                     ...effectiveDrafts,
-                    categoryChoices: {
-                      ...effectiveDrafts.categoryChoices,
-                      [preview.itemId]: optionId,
+                    manualNames: {
+                      ...effectiveDrafts.manualNames,
+                      [preview.itemId]: e.target.value,
                     },
-                  };
-                  setDrafts(next);
-                  setDirty(true);
-                  if (!invalidName) onPrepare(next);
+                  });
                 }}
               />
-            )}
-            <div className="mk-nc-fields">
-              <div className="mk-nc-comparison-head" aria-hidden="true">
-                <span>{tr("currentColumn")}</span>
-                <span>{tr("proposedColumn")}</span>
-              </div>
-              {preview.fields.map((field) => {
-                const title = field.labelKey ? tr(`fields.${field.labelKey}`) : field.label;
-                const accepted = choice.decision.acceptedEntryIds.includes(field.id);
-                const missing = field.requiresEntryIds.filter(
-                  (id) => !choice.decision.acceptedEntryIds.includes(id),
-                );
-                const reason = missing.length
-                  ? t("pages.catalog.import.requiresFields", {
-                      fields: missing
-                        .map((id) => {
-                          const required = preview.fields.find((entry) => entry.id === id);
-                          return required?.labelKey
-                            ? tr(`fields.${required.labelKey}`)
-                            : (required?.label ?? id);
+              {preview.categoryOptions.length > 0 && (
+                <Select
+                  native
+                  disabled={!canWrite || busy}
+                  label={tr("initialCategory")}
+                  value={
+                    effectiveDrafts.categoryChoices[preview.itemId] ??
+                    preview.categoryOptions.find((o) => o.selected)?.optionId ??
+                    ""
+                  }
+                  options={[
+                    { value: "", label: tr("noCategory") },
+                    ...preview.categoryOptions.map((o) => ({ value: o.optionId, label: o.label })),
+                  ]}
+                  onValueChange={(optionId) => {
+                    const next = {
+                      ...effectiveDrafts,
+                      categoryChoices: {
+                        ...effectiveDrafts.categoryChoices,
+                        [preview.itemId]: optionId,
+                      },
+                    };
+                    setDrafts(next);
+                    setDirtyPreparationId(data.preparation.id);
+                    if (!invalidName) onPrepare(next);
+                  }}
+                />
+              )}
+              <div className="mk-nc-fields">
+                <div className="mk-nc-comparison-head" aria-hidden="true">
+                  <span>{tr("currentColumn")}</span>
+                  <span>{tr("proposedColumn")}</span>
+                </div>
+                {preview.fields
+                  .filter((field) => !showOnlyMappedFields || field.applicable)
+                  .map((field) => {
+                    const title = field.labelKey ? tr(`fields.${field.labelKey}`) : field.label;
+                    const accepted = choice.decision.acceptedEntryIds.includes(field.id);
+                    const missing = field.requiresEntryIds.filter(
+                      (id) => !choice.decision.acceptedEntryIds.includes(id),
+                    );
+                    const reason = missing.length
+                      ? t("pages.catalog.import.requiresFields", {
+                          fields: missing
+                            .map((id) => {
+                              const required = preview.fields.find((entry) => entry.id === id);
+                              return required?.labelKey
+                                ? tr(`fields.${required.labelKey}`)
+                                : (required?.label ?? id);
+                            })
+                            .join(", "),
                         })
-                        .join(", "),
-                    })
-                  : field.reason
-                    ? t(`pages.catalog.import.reasons.${field.reason}`, {
-                        defaultValue: tr("fieldUnavailable"),
-                      })
-                    : undefined;
-                return (
-                  <fieldset className="mk-nc-comparison-row" key={field.id}>
-                    <legend className="mk-nc-sr-only">{title}</legend>
-                    <RadioCard
-                      name={`${choiceGroup}-${preview.id}-${field.id}`}
-                      label={`${title} — ${tr("currentColumn")}`}
-                      title={title}
-                      caption={tr("currentColumn")}
-                      checked={!accepted}
-                      disabled={!canWrite || busy || !preview.canApply || !field.applicable}
-                      onSelect={() =>
-                        update(preview, (c) => toggleField(preview, c, field.id, false))
-                      }
-                    >
-                      {field.before ?? tr(preview.productId ? "emptyValue" : "doNotAdd")}
-                    </RadioCard>
-                    <RadioCard
-                      name={`${choiceGroup}-${preview.id}-${field.id}`}
-                      label={`${title} — ${tr("proposedColumn")}`}
-                      title={title}
-                      caption={tr(field.source === "manual" ? "manualSource" : "providerSource")}
-                      checked={accepted}
-                      disabled={
-                        !canWrite ||
-                        busy ||
-                        !preview.canApply ||
-                        !field.applicable ||
-                        missing.length > 0
-                      }
-                      description={reason}
-                      onSelect={() =>
-                        update(preview, (c) => toggleField(preview, c, field.id, true))
-                      }
-                    >
-                      {field.after ?? tr("emptyValue")}
-                    </RadioCard>
-                  </fieldset>
-                );
-              })}
-            </div>
-            {preview.productId && canWrite && (
-              <Button
-                variant="secondary"
-                onClick={() =>
-                  update(preview, (c) => ({
-                    ...c,
-                    decision: { ...c.decision, acceptedEntryIds: [] },
-                  }))
-                }
-              >
-                {tr("linkOnly")}
-              </Button>
-            )}
-            {preview.linkAction === "replace" && (
-              <Checkbox
-                disabled={!canWrite || busy}
-                label={tr("confirmReplace")}
-                checked={choice.replaceConfirmed}
-                onCheckedChange={(replaceConfirmed) =>
-                  update(preview, (c) => ({ ...c, replaceConfirmed }))
-                }
-              />
-            )}
-            <fieldset className="mk-nc-photo-comparison">
-              <legend>{tr("photo")}</legend>
-              <div className="mk-nc-comparison-row">
-                <RadioCard
-                  name={`${choiceGroup}-${preview.id}-photo`}
-                  label={tr(preview.productId ? "keepPhoto" : "noPhoto")}
-                  title={tr("photo")}
-                  caption={tr("currentColumn")}
-                  checked={choice.decision.photo.kind === "keep"}
-                  disabled={!canWrite || busy || !preview.canApply}
-                  onSelect={() => update(preview, keepPhoto)}
-                >
-                  {currentPhoto && (
-                    <img src={currentPhoto} alt={tr("currentPhoto")} width={120} height={120} />
-                  )}
-                  {tr(preview.productId ? "keepPhoto" : "noPhoto")}
-                </RadioCard>
-                <div className="mk-nc-photo-candidates">
-                  {preview.photos.length === 0 && <p>{tr("noSourcePhoto")}</p>}
-                  {!canPreparePhotos &&
-                    preview.photos.some((photo) => photo.state === "pending") && (
-                      <p>{tr("photosUnavailable")}</p>
-                    )}
-                  {preview.photos.map((photo) => {
-                    const available =
-                      photo.state === "ready" &&
-                      (photo.reason === null || photo.reason === "barcode_mismatch");
+                      : field.reason
+                        ? t(`pages.catalog.import.reasons.${field.reason}`, {
+                            defaultValue: tr("fieldUnavailable"),
+                          })
+                        : undefined;
                     return (
-                      <div className="mk-nc-photo-candidate" key={photo.candidateId}>
+                      <fieldset className="mk-nc-comparison-row" key={field.id}>
+                        <legend className="mk-nc-sr-only">{title}</legend>
                         <RadioCard
-                          name={`${choiceGroup}-${preview.id}-photo`}
-                          label={tr("choosePhoto")}
-                          title={tr("photo")}
-                          caption={tr("providerSource")}
-                          checked={
-                            choice.decision.photo.kind === "candidate" &&
-                            choice.decision.photo.candidateId === photo.candidateId
-                          }
-                          disabled={!canWrite || busy || !preview.canApply || !available}
-                          description={
-                            photo.reason
-                              ? t(`pages.catalog.import.reasons.${photo.reason}`, {
-                                  defaultValue: tr("photoFailed"),
-                                })
-                              : undefined
-                          }
+                          name={`${choiceGroup}-${preview.id}-${field.id}`}
+                          label={`${title} — ${tr("currentColumn")}`}
+                          title={title}
+                          caption={tr("currentColumn")}
+                          checked={!accepted}
+                          disabled={!canWrite || busy || !preview.canApply || !field.applicable}
                           onSelect={() =>
-                            update(preview, (c) => ({
-                              ...c,
-                              photoExplicit: true,
-                              decision: {
-                                ...c.decision,
-                                photo: { kind: "candidate", candidateId: photo.candidateId },
-                              },
-                            }))
+                            update(preview, (c) => toggleField(preview, c, field.id, false))
                           }
                         >
-                          {available && (
-                            <img
-                              src={photoUrl(sessionId, photo.candidateId)}
-                              alt={tr("photoPreview")}
-                              width={120}
-                              height={120}
-                              onLoad={() =>
-                                update(preview, (c) =>
-                                  c.loadedCandidateIds.includes(photo.candidateId)
-                                    ? c
-                                    : {
-                                        ...c,
-                                        loadedCandidateIds: [
-                                          ...c.loadedCandidateIds,
-                                          photo.candidateId,
-                                        ],
-                                      },
-                                )
-                              }
-                            />
-                          )}
-                          {tr(
-                            available
-                              ? "choosePhoto"
-                              : photo.state === "pending"
-                                ? photo.automaticWorkPending === false
-                                  ? "photoNotPrepared"
-                                  : "photoPending"
-                                : "photoFailed",
-                          )}
+                          {field.before ?? tr(preview.productId ? "emptyValue" : "doNotAdd")}
                         </RadioCard>
-                        {!available &&
-                          ((photo.state === "pending" && photo.automaticWorkPending !== true) ||
-                            (photo.state === "failed" && photo.reason === "download_failed")) && (
-                            <Button
-                              variant="secondary"
-                              disabled={!canWrite || busy || !canPreparePhotos}
-                              onClick={() => onPhoto(preview.id, photo.candidateId)}
-                            >
-                              {tr(
-                                photo.state === "failed" ? "retryPhotoPreparation" : "preparePhoto",
-                              )}
-                            </Button>
+                        <RadioCard
+                          name={`${choiceGroup}-${preview.id}-${field.id}`}
+                          label={`${title} — ${tr("proposedColumn")}`}
+                          title={title}
+                          caption={tr(
+                            field.source === "manual" ? "manualSource" : "providerSource",
                           )}
-                      </div>
+                          checked={accepted}
+                          disabled={
+                            !canWrite ||
+                            busy ||
+                            !preview.canApply ||
+                            !field.applicable ||
+                            missing.length > 0
+                          }
+                          description={reason}
+                          onSelect={() =>
+                            update(preview, (c) => toggleField(preview, c, field.id, true))
+                          }
+                        >
+                          {field.after ?? tr("emptyValue")}
+                        </RadioCard>
+                      </fieldset>
                     );
                   })}
-                </div>
               </div>
+              {preview.productId && canWrite && (
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    update(preview, (c) => ({
+                      ...c,
+                      decision: { ...c.decision, acceptedEntryIds: [] },
+                    }))
+                  }
+                >
+                  {tr("linkOnly")}
+                </Button>
+              )}
+              {preview.linkAction === "replace" && (
+                <Checkbox
+                  disabled={!canWrite || busy}
+                  label={tr("confirmReplace")}
+                  checked={choice.replaceConfirmed}
+                  onCheckedChange={(replaceConfirmed) =>
+                    update(preview, (c) => ({ ...c, replaceConfirmed }))
+                  }
+                />
+              )}
+              <fieldset className="mk-nc-photo-comparison">
+                <legend>{tr("photo")}</legend>
+                <div className="mk-nc-comparison-row">
+                  <RadioCard
+                    name={`${choiceGroup}-${preview.id}-photo`}
+                    label={tr(preview.productId ? "keepPhoto" : "noPhoto")}
+                    title={tr("photo")}
+                    caption={tr("currentColumn")}
+                    checked={choice.decision.photo.kind === "keep"}
+                    disabled={!canWrite || busy || !preview.canApply}
+                    onSelect={() => update(preview, keepPhoto)}
+                  >
+                    {currentPhoto && (
+                      <img src={currentPhoto} alt={tr("currentPhoto")} width={120} height={120} />
+                    )}
+                    {tr(preview.productId ? "keepPhoto" : "noPhoto")}
+                  </RadioCard>
+                  <div className="mk-nc-photo-candidates">
+                    {preview.photos.length === 0 && <p>{tr("noSourcePhoto")}</p>}
+                    {!canPreparePhotos &&
+                      preview.photos.some((photo) => photo.state === "pending") && (
+                        <p>{tr("photosUnavailable")}</p>
+                      )}
+                    {preview.photos.map((photo) => {
+                      const available =
+                        photo.state === "ready" &&
+                        (photo.reason === null || photo.reason === "barcode_mismatch");
+                      return (
+                        <div className="mk-nc-photo-candidate" key={photo.candidateId}>
+                          <RadioCard
+                            name={`${choiceGroup}-${preview.id}-photo`}
+                            label={tr("choosePhoto")}
+                            title={tr("photo")}
+                            caption={tr("providerSource")}
+                            checked={
+                              choice.decision.photo.kind === "candidate" &&
+                              choice.decision.photo.candidateId === photo.candidateId
+                            }
+                            disabled={!canWrite || busy || !preview.canApply || !available}
+                            description={
+                              photo.reason
+                                ? t(`pages.catalog.import.reasons.${photo.reason}`, {
+                                    defaultValue: tr("photoFailed"),
+                                  })
+                                : undefined
+                            }
+                            onSelect={() =>
+                              update(preview, (c) => ({
+                                ...c,
+                                photoExplicit: true,
+                                decision: {
+                                  ...c.decision,
+                                  photo: { kind: "candidate", candidateId: photo.candidateId },
+                                },
+                              }))
+                            }
+                          >
+                            {available && (
+                              <img
+                                src={photoUrl(sessionId, photo.candidateId)}
+                                alt={tr("photoPreview")}
+                                width={120}
+                                height={120}
+                                onLoad={() =>
+                                  update(preview, (c) =>
+                                    c.loadedCandidateIds.includes(photo.candidateId)
+                                      ? c
+                                      : {
+                                          ...c,
+                                          loadedCandidateIds: [
+                                            ...c.loadedCandidateIds,
+                                            photo.candidateId,
+                                          ],
+                                        },
+                                  )
+                                }
+                              />
+                            )}
+                            {tr(
+                              available
+                                ? "choosePhoto"
+                                : photo.state === "pending"
+                                  ? photo.automaticWorkPending === false
+                                    ? "photoNotPrepared"
+                                    : "photoPending"
+                                  : "photoFailed",
+                            )}
+                          </RadioCard>
+                          {!available &&
+                            ((photo.state === "pending" && photo.automaticWorkPending !== true) ||
+                              (photo.state === "failed" && photo.reason === "download_failed")) && (
+                              <Button
+                                variant="secondary"
+                                disabled={!canWrite || busy || !canPreparePhotos}
+                                onClick={() => onPhoto(preview.id, photo.candidateId)}
+                              >
+                                {tr(
+                                  photo.state === "failed"
+                                    ? "retryPhotoPreparation"
+                                    : "preparePhoto",
+                                )}
+                              </Button>
+                            )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </fieldset>
             </fieldset>
-          </fieldset>
+          </div>
         );
       })}
       {canWrite && ready && (

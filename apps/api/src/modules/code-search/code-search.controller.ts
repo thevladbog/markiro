@@ -34,6 +34,7 @@ import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard"
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   boxCardOpenApiSchema,
+  boxReportQuerySchema,
   classifyNotFoundOpenApiSchema,
   classifyQuerySchema,
   classifySearchResponseOpenApiSchema,
@@ -42,6 +43,7 @@ import {
   listCodesOpenApiSchema,
   listCodesQuerySchema,
   type BoxCardDto,
+  type BoxReportQueryDto,
   type ClassifyQueryDto,
   type ClassifySearchResponseDto,
   type CodeCardDto,
@@ -207,15 +209,18 @@ export class CodeSearchController {
   })
   @ApiParam({ name: "boxId", schema: { type: "string", format: "uuid" } })
   @ApiProduces("text/html")
+  @ApiZodQuery(boxReportQuerySchema)
+  @ApiZodValidationError()
   @ApiOkResponse({ schema: { type: "string" }, description: "Print-ready HTML document." })
   @ApiHttpErrors(401, 403, 404)
   async boxReport(
     @Req() req: RequestWithTenant,
     @Param("boxId", new ParseUUIDPipe()) boxId: string,
     @Res({ passthrough: true }) res: Response,
+    @Query(new ZodValidationPipe(boxReportQuerySchema)) query: BoxReportQueryDto,
   ): Promise<string> {
     const data = await this.codeSearchService.boxReportData(req.tenantId!, boxId);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    return renderBoxReportHtml(data);
+    return renderBoxReportHtml(data, query.timeZone);
   }
 }

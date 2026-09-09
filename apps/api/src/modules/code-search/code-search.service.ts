@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { formatSsccWithAi } from "@markiro/domain";
+import { formatShiftNumber, formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { upperBoundCondition } from "../../lib/date-range";
 import { classifySearchInput } from "./input-classifier";
@@ -712,6 +712,9 @@ export class CodeSearchService {
         id: schema.boxes.id,
         sscc: schema.boxes.sscc,
         shiftId: schema.boxes.shiftId,
+        shiftNumberMonthKey: schema.shifts.numberMonthKey,
+        shiftNumberSeq: schema.shifts.numberSeq,
+        shiftCreatedFrom: schema.shifts.createdFrom,
         terminalId: schema.boxes.terminalId,
         operatorId: schema.boxes.operatorId,
         openedAt: schema.boxes.openedAt,
@@ -833,6 +836,16 @@ export class CodeSearchService {
       sscc: box.sscc === null ? null : formatSsccWithAi(box.sscc),
       status,
       shiftId: box.shiftId,
+      shiftNumber:
+        box.shiftNumberMonthKey !== null &&
+        box.shiftNumberSeq !== null &&
+        box.shiftCreatedFrom !== null
+          ? formatShiftNumber({
+              monthKey: box.shiftNumberMonthKey,
+              seq: box.shiftNumberSeq,
+              createdFrom: box.shiftCreatedFrom,
+            })
+          : null,
       productId: box.productId,
       productName: box.productName,
       terminalId: box.terminalId,

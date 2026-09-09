@@ -136,6 +136,8 @@ export interface BoxCardDto {
   sscc: string | null;
   status: "open" | "closed" | "disassembled";
   shiftId: string;
+  /** Saved human-readable shift number, e.g. `AUG26-003/S`. */
+  shiftNumber: string | null;
   productId: string | null;
   productName: string | null;
   terminalId: string | null;

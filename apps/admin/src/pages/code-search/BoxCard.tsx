@@ -149,7 +149,10 @@ export function BoxCardPage() {
               type="button"
               variant="secondary"
               onClick={() => {
-                window.open(`/api/code-search/boxes/${box.id}/report`);
+                const query = new URLSearchParams({
+                  timeZone: new Intl.DateTimeFormat().resolvedOptions().timeZone,
+                });
+                window.open(`/api/code-search/boxes/${box.id}/report?${query}`);
               }}
             >
               {t("pages.codeSearch.boxCard.printAction")}
@@ -174,7 +177,14 @@ export function BoxCardPage() {
             label={t("pages.codeSearch.boxCard.productLabel")}
             value={box.productName ?? "—"}
           />
-          <DetailField label={t("pages.codeSearch.boxCard.shiftLabel")} value={box.shiftId} />
+          <DetailField
+            label={t("pages.codeSearch.boxCard.shiftLabel")}
+            value={
+              <Link to={`/shifts/${box.shiftId}`}>
+                {box.shiftNumber ?? t("pages.codeSearch.boxCard.shiftLabel")}
+              </Link>
+            }
+          />
           <DetailField
             label={t("pages.codeSearch.boxCard.openedAtLabel")}
             value={formatCreatedAt(box.openedAt, i18n.language)}

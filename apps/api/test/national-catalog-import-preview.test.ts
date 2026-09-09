@@ -52,6 +52,25 @@ function feed(products: NationalCatalogProduct[]) {
     usage: { total: null, method: null },
   };
 }
+function cardWithProductFields() {
+  const source = card();
+  // Synthetic attribute IDs; source names/units and value formats match the reported card.
+  source.attributes = [
+    { id: 900001, name: "Код продукции в ЕГАИС", value: "0300005753630000036", gtin: GTIN },
+    { id: 900002, name: "Срок годности, дней", value: "365", gtin: null },
+  ].map((a) => ({
+    ...a,
+    valueId: null,
+    attributeValueId: null,
+    valueType: null,
+    groupId: null,
+    groupName: null,
+    locationId: null,
+    level: null,
+    multiplier: null,
+  }));
+  return source;
+}
 it("requires explicit field acceptance for an existing product", () => {
   const fields = [
     {
@@ -253,6 +272,310 @@ describe("immutable pre-product comparisons and durable preparation", () => {
     if (!p) throw new Error("fixture");
     return p;
   }
+  it("imports EGAIS and shelf life into unbound product fields with source evidence", async () => {
+    const source = cardWithProductFields();
+    detail.mockResolvedValue(feed([source]));
+    const result = await run();
+    const p = result.items[0]!;
+    expect(p.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          labelKey: "egais_code",
+          before: null,
+          after: "0300005753630000036",
+          applicable: true,
+          requiresEntryIds: [],
+        }),
+        expect.objectContaining({
+          labelKey: "shelf_life_days",
+          before: null,
+          after: "365",
+          applicable: true,
+          requiresEntryIds: [],
+        }),
+      ]),
+    );
+    const { NationalCatalogImportApplyService } =
+      await import("../src/modules/national-catalog/national-catalog-import-apply.service");
+    const applies = new NationalCatalogImportApplyService(
+      new NationalCatalogImportRepository(db),
+      sessions,
+    );
+    const accepted = await applies.start(actor, sessionId, {
+      requestId: randomUUID(),
+      decisions: [
+        {
+          previewId: p.id,
+          acceptedEntryIds: p.fields.filter((f) => f.applicable).map((f) => f.id),
+          linkAction: p.linkAction,
+          photo: { kind: "keep" },
+        },
+      ],
+    });
+    await applies.resume(actor.tenantId, accepted.operationId);
+    const receipt = await applies.read(actor.tenantId, sessionId, accepted.operationId);
+    expect(receipt.items[0]?.product).toBe("applied");
+    const productId = receipt.items[0]!.productId!;
+    const [product] = await db
+      .select()
+      .from(schema.products)
+      .where(eq(schema.products.id, productId));
+    expect(product).toMatchObject({
+      egaisCode: "0300005753630000036",
+      shelfLifeDays: 365,
+      chzProductGroupCode: null,
+    });
+    const codes = await db
+      .select()
+      .from(schema.productEgaisCodes)
+      .where(eq(schema.productEgaisCodes.productId, productId));
+    expect(codes).toEqual([
+      expect.objectContaining({
+        tenantId: actor.tenantId,
+        code: "0300005753630000036",
+        isPrimary: true,
+        source: "national_catalog",
+        sourceRef: expect.stringMatching(/^national-catalog-snapshot:/),
+      }),
+    ]);
+    const [audit] = await db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.targetId, productId),
+          eq(schema.tenantAuditEvents.action, "national_catalog.link.confirmed"),
+        ),
+      );
+    expect(audit).toMatchObject({
+      organizationId: actor.tenantId,
+      actorUserId: actor.userId,
+      outcome: "success",
+      targetType: "product",
+      after: {
+        acceptedEntries: expect.arrayContaining([
+          expect.objectContaining({
+            target: "product_field",
+            targetField: "egais_code",
+            sourceAttributeId: 900001,
+          }),
+        ]),
+      },
+    });
+    const [link] = await db
+      .select()
+      .from(schema.nationalCatalogProductLinks)
+      .where(eq(schema.nationalCatalogProductLinks.productId, productId));
+    expect(link?.reviewedProjection).toMatchObject({
+      values: { "stable:egais_code": "0300005753630000036", "stable:shelf_life_days": 365 },
+      productFieldMappings: [
+        { targetField: "egais_code", sourceAttributeId: 900001, mappingVersion: 1 },
+        { targetField: "shelf_life_days", sourceAttributeId: 900002, mappingVersion: 1 },
+      ],
+    });
+  });
+  it.each([
+    { acceptedKeys: [] },
+    { acceptedKeys: ["egais_code"] },
+    { acceptedKeys: ["shelf_life_days"] },
+    { acceptedKeys: ["egais_code", "shelf_life_days"] },
+  ])(
+    "preserves unselected fields and alternate EGAIS codes when selecting $acceptedKeys",
+    async ({ acceptedKeys }) => {
+      const p = await local();
+      await db
+        .update(schema.nationalCatalogImportItems)
+        .set({ productId: p.id, match: "existing" })
+        .where(eq(schema.nationalCatalogImportItems.id, itemId));
+      const oldCode = "0000000000000000001";
+      const alternateCode = "0000000000000000002";
+      await db
+        .update(schema.products)
+        .set({ egaisCode: oldCode, shelfLifeDays: 90 })
+        .where(eq(schema.products.id, p.id));
+      await db.insert(schema.productEgaisCodes).values([
+        {
+          tenantId: actor.tenantId,
+          productId: p.id,
+          code: oldCode,
+          isPrimary: true,
+          source: "manual",
+        },
+        {
+          tenantId: actor.tenantId,
+          productId: p.id,
+          code: alternateCode,
+          isPrimary: false,
+          source: "manual",
+        },
+      ]);
+      detail.mockResolvedValue(feed([cardWithProductFields()]));
+      const preview = (await run()).items[0]!;
+      expect(preview.fields).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            labelKey: "egais_code",
+            before: oldCode,
+            selectedByDefault: false,
+          }),
+          expect.objectContaining({
+            labelKey: "shelf_life_days",
+            before: "90",
+            selectedByDefault: false,
+          }),
+        ]),
+      );
+      const { NationalCatalogImportApplyService } =
+        await import("../src/modules/national-catalog/national-catalog-import-apply.service");
+      const applies = new NationalCatalogImportApplyService(
+        new NationalCatalogImportRepository(db),
+        sessions,
+      );
+      const accepted = await applies.start(actor, sessionId, {
+        requestId: randomUUID(),
+        decisions: [
+          {
+            previewId: preview.id,
+            acceptedEntryIds: preview.fields
+              .filter((f) => f.labelKey && acceptedKeys.includes(f.labelKey))
+              .map((f) => f.id),
+            linkAction: preview.linkAction,
+            photo: { kind: "keep" },
+          },
+        ],
+      });
+      await applies.resume(actor.tenantId, accepted.operationId);
+      const receipt = await applies.read(actor.tenantId, sessionId, accepted.operationId);
+      expect(receipt.items[0]).toMatchObject({ product: "applied", reason: null });
+      const [actual] = await db.select().from(schema.products).where(eq(schema.products.id, p.id));
+      expect(actual).toMatchObject({
+        name: "Моё",
+        egaisCode: acceptedKeys.includes("egais_code") ? "0300005753630000036" : oldCode,
+        shelfLifeDays: acceptedKeys.includes("shelf_life_days") ? 365 : 90,
+      });
+      const codes = await db
+        .select()
+        .from(schema.productEgaisCodes)
+        .where(eq(schema.productEgaisCodes.productId, p.id));
+      expect(codes.map((c) => c.code)).toEqual(expect.arrayContaining([oldCode, alternateCode]));
+      expect(codes.filter((c) => c.isPrimary).map((c) => c.code)).toEqual([actual!.egaisCode]);
+      await applies.resume(actor.tenantId, accepted.operationId);
+      expect(
+        await db
+          .select()
+          .from(schema.productEgaisCodes)
+          .where(eq(schema.productEgaisCodes.productId, p.id)),
+      ).toEqual(codes);
+    },
+  );
+  it("rejects a concurrent EGAIS edit before applying the accepted product field", async () => {
+    const p = await local();
+    await db
+      .update(schema.nationalCatalogImportItems)
+      .set({ productId: p.id, match: "existing" })
+      .where(eq(schema.nationalCatalogImportItems.id, itemId));
+    detail.mockResolvedValue(feed([cardWithProductFields()]));
+    const preview = (await run()).items[0]!;
+    const { NationalCatalogImportApplyService } =
+      await import("../src/modules/national-catalog/national-catalog-import-apply.service");
+    const applies = new NationalCatalogImportApplyService(
+      new NationalCatalogImportRepository(db),
+      sessions,
+    );
+    const accepted = await applies.start(actor, sessionId, {
+      requestId: randomUUID(),
+      decisions: [
+        {
+          previewId: preview.id,
+          acceptedEntryIds: preview.fields
+            .filter((f) => f.labelKey === "egais_code")
+            .map((f) => f.id),
+          linkAction: preview.linkAction,
+          photo: { kind: "keep" },
+        },
+      ],
+    });
+    await db
+      .update(schema.products)
+      .set({ egaisCode: "0000000000000000009" })
+      .where(eq(schema.products.id, p.id));
+    await applies.resume(actor.tenantId, accepted.operationId);
+    const receipt = await applies.read(actor.tenantId, sessionId, accepted.operationId);
+    expect(receipt.items[0]).toMatchObject({ product: "conflict", reason: "product_changed" });
+    const [actual] = await db.select().from(schema.products).where(eq(schema.products.id, p.id));
+    expect(actual?.egaisCode).toBe("0000000000000000009");
+    expect(
+      await db
+        .select()
+        .from(schema.nationalCatalogProductLinks)
+        .where(eq(schema.nationalCatalogProductLinks.productId, p.id)),
+    ).toEqual([]);
+  });
+  it("keeps a full EGAIS collection and requires an explicit collection edit before adding code 21", async () => {
+    const p = await local();
+    await db
+      .update(schema.nationalCatalogImportItems)
+      .set({ productId: p.id, match: "existing" })
+      .where(eq(schema.nationalCatalogImportItems.id, itemId));
+    const codes = Array.from({ length: 20 }, (_, index) => String(index + 1).padStart(19, "0"));
+    await db
+      .update(schema.products)
+      .set({ egaisCode: codes[0] })
+      .where(eq(schema.products.id, p.id));
+    await db.insert(schema.productEgaisCodes).values(
+      codes.map((code, index) => ({
+        tenantId: actor.tenantId,
+        productId: p.id,
+        code,
+        isPrimary: index === 0,
+        source: "manual" as const,
+      })),
+    );
+    const source = cardWithProductFields();
+    detail.mockResolvedValue(feed([source]));
+    const preview = (await run()).items[0]!;
+    expect(preview.fields.find((f) => f.labelKey === "egais_code")).toMatchObject({
+      applicable: false,
+      reason: "egais_code_limit",
+      before: codes[0],
+    });
+    source.attributes[0]!.value = codes[1]!;
+    const existing = (await run()).items[0]!;
+    expect(existing.fields.find((f) => f.labelKey === "egais_code")).toMatchObject({
+      applicable: true,
+      reason: null,
+      after: codes[1],
+    });
+  });
+  it("does not offer equal product fields or accept a provider ID shared by two field labels", async () => {
+    const p = await local();
+    const source = cardWithProductFields();
+    await db
+      .update(schema.products)
+      .set({ egaisCode: "0300005753630000036", shelfLifeDays: 365 })
+      .where(eq(schema.products.id, p.id));
+    detail.mockResolvedValue(feed([source]));
+    const same = (await run()).items[0]!;
+    expect(
+      same.fields.filter(
+        (field) => field.labelKey === "egais_code" || field.labelKey === "shelf_life_days",
+      ),
+    ).toEqual([]);
+    await db
+      .update(schema.products)
+      .set({ egaisCode: null, shelfLifeDays: null })
+      .where(eq(schema.products.id, p.id));
+    source.attributes[1]!.id = source.attributes[0]!.id;
+    const ambiguous = (await run()).items[0]!;
+    expect(
+      ambiguous.fields.filter(
+        (field) => field.labelKey === "egais_code" || field.labelKey === "shelf_life_days",
+      ),
+    ).toEqual([
+      expect.objectContaining({ applicable: false }),
+      expect.objectContaining({ applicable: false }),
+    ]);
+  });
   it("creates immutable name-only comparison for an unbound new product without product/profile/link/snapshot/proposal writes", async () => {
     const result = await run();
     expect(importPrepareResponseSchema.safeParse(result).success).toBe(true);
@@ -583,6 +906,99 @@ describe("immutable pre-product comparisons and durable preparation", () => {
     detail.mockResolvedValue(feed([value]));
     return { id, categoryId, value };
   }
+  it.each([
+    { existingProfile: false, mapped: false },
+    { existingProfile: true, mapped: false },
+    { existingProfile: true, mapped: true },
+  ])(
+    "imports ordinary fields independently of a competing category mapping: $existingProfile/$mapped",
+    async ({ existingProfile, mapped }) => {
+      const c = await category(15);
+      c.value.attributes.push(...cardWithProductFields().attributes);
+      await db.insert(schema.nationalCatalogAttributeMappings).values({
+        schemaVersionId: c.id,
+        sourceAttributeId: "900002",
+        targetField: "shelf_life_days",
+        conversion: { kind: "positive_integer" },
+        mappingVersion: 1,
+      });
+      if (existingProfile) {
+        const p = await local();
+        await db
+          .update(schema.products)
+          .set({ chzProductGroupCode: 15, boxCapacity: 12, palletCapacity: 20, status: "active" })
+          .where(eq(schema.products.id, p.id));
+        await db
+          .update(schema.nationalCatalogImportItems)
+          .set({ productId: p.id, match: "existing" })
+          .where(eq(schema.nationalCatalogImportItems.id, itemId));
+        await db.insert(schema.productRegulatoryProfiles).values({
+          tenantId: actor.tenantId,
+          productId: p.id,
+          categoryId: c.categoryId,
+          categoryName: "Категория",
+          schemaVersionId: c.id,
+          source: "manual",
+          revision: 7,
+          confirmedAt: new Date(),
+        });
+      }
+      const initial = await run();
+      const prepared = existingProfile
+        ? initial
+        : await run({
+            ...request(),
+            categoryChoices: [{ itemId, optionId: initial.items[0]!.categoryOptions[0]!.optionId }],
+          });
+      const p = prepared.items[0]!;
+      const shelf = p.fields.filter((f) => f.labelKey === "shelf_life_days");
+      expect(shelf).toHaveLength(1);
+      expect(shelf[0]).toMatchObject({ applicable: true, requiresEntryIds: [] });
+      const { NationalCatalogImportApplyService } =
+        await import("../src/modules/national-catalog/national-catalog-import-apply.service");
+      const applies = new NationalCatalogImportApplyService(
+        new NationalCatalogImportRepository(db),
+        sessions,
+      );
+      const accepted = await applies.start(actor, sessionId, {
+        requestId: randomUUID(),
+        decisions: [
+          {
+            previewId: p.id,
+            acceptedEntryIds: p.fields
+              .filter(
+                (f) =>
+                  f.labelKey === "shelf_life_days" ||
+                  f.labelKey === "egais_code" ||
+                  f.labelKey === "name" ||
+                  (mapped && f.label === "Цвет"),
+              )
+              .map((f) => f.id),
+            linkAction: p.linkAction,
+            photo: { kind: "keep" },
+          },
+        ],
+      });
+      await applies.resume(actor.tenantId, accepted.operationId);
+      const receipt = await applies.read(actor.tenantId, sessionId, accepted.operationId);
+      expect(receipt.items[0]).toMatchObject({ product: "applied", reason: null });
+      const productId = receipt.items[0]!.productId!;
+      const [product] = await db
+        .select()
+        .from(schema.products)
+        .where(eq(schema.products.id, productId));
+      expect(product).toMatchObject({
+        shelfLifeDays: 365,
+        egaisCode: "0300005753630000036",
+        status: existingProfile ? "active" : "draft",
+      });
+      const profiles = await db
+        .select()
+        .from(schema.productRegulatoryProfiles)
+        .where(eq(schema.productRegulatoryProfiles.productId, productId));
+      expect(profiles).toEqual(existingProfile ? [expect.objectContaining({ revision: 8 })] : []);
+    },
+  );
   it("keeps accepted failed-photo bytes recoverable after session payload cleanup and provider removal", async () => {
     const source = card();
     source.images = [

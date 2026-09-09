@@ -1,6 +1,12 @@
 import { newImageCheckpoint } from "./national-catalog-image-state";
 import { chooseDefaultPhoto } from "./national-catalog-photo-selection";
 import { randomUUID } from "node:crypto";
+import {
+  catalogProductFieldForLabel,
+  productFieldEntrySchema,
+  readCatalogProductFields,
+  type CatalogProductFieldEntry,
+} from "./national-catalog-product-fields";
 import { isDeepStrictEqual } from "node:util";
 import { ConflictException, UnprocessableEntityException } from "@nestjs/common";
 import { schema } from "@markiro/db";
@@ -32,6 +38,7 @@ import { hashContent } from "./national-catalog-preparation-state";
 type ProductRow = typeof schema.products.$inferSelect;
 type MappedEntry = ReturnType<typeof buildNationalCatalogImportEntries>["entries"][number];
 export type ImportPreviewEntry =
+  | CatalogProductFieldEntry
   | {
       entryId: string;
       target: "name";
@@ -354,6 +361,7 @@ export async function buildImportPreview(
     if (parsed.success) currentValues.set(row.attributeId, parsed.data);
   }
   let stableMappings: NationalCatalogStableFieldMapping[] = [];
+  const productFields = readCatalogProductFields(source.attributes, item.gtin14);
   const importedAttributes = new Set<string>();
   if (target) {
     const definition = parseCategorySchemaDefinition(target.version.definition);
@@ -395,6 +403,14 @@ export async function buildImportPreview(
       ]),
     });
     for (const entry of built.entries) {
+      if (
+        productFields.some((field) =>
+          entry.target === "stable_field"
+            ? field.targetField === entry.targetField
+            : String(field.sourceAttributeId) === entry.targetAttributeId,
+        )
+      )
+        continue;
       if (entry.target === "attribute") importedAttributes.add(entry.targetAttributeId);
       if (isDeepStrictEqual(entry.currentValue, entry.proposedValue)) continue;
       entries.push({
@@ -422,15 +438,71 @@ export async function buildImportPreview(
       });
     }
   }
+  const egaisCodes =
+    product && productFields.some((field) => field.targetField === "egais_code")
+      ? await tx
+          .select({ code: schema.productEgaisCodes.code })
+          .from(schema.productEgaisCodes)
+          .where(
+            and(
+              eq(schema.productEgaisCodes.tenantId, tenantId),
+              eq(schema.productEgaisCodes.productId, product.id),
+            ),
+          )
+          .for("share")
+      : [];
+  for (const field of productFields) {
+    importedAttributes.add(String(field.sourceAttributeId));
+    const currentValue =
+      field.targetField === "egais_code"
+        ? (product?.egaisCode ?? null)
+        : (product?.shelfLifeDays ?? null);
+    if (currentValue === field.value) continue;
+    const entry = productFieldEntrySchema.parse({
+      targetField: field.targetField,
+      sourceAttributeId: field.sourceAttributeId,
+      mappingVersion: field.mappingVersion,
+      entryId: randomUUID(),
+      target: "product_field",
+      source: "national_catalog",
+      currentValue,
+      proposedValue: field.value,
+    });
+    entries.push(entry);
+    const applicable =
+      field.targetField !== "egais_code" ||
+      egaisCodes.length < 20 ||
+      egaisCodes.some((row) => row.code === field.value);
+    fields.push({
+      id: entry.entryId,
+      label: field.targetField,
+      labelKey: field.targetField,
+      before: currentValue === null ? null : String(currentValue),
+      after: String(field.value),
+      applicable,
+      reason: applicable ? null : "egais_code_limit",
+      source: "national_catalog",
+      selectedByDefault: !product && applicable,
+      requiresEntryIds: [],
+    });
+  }
   for (const attribute of source.attributes) {
     if (importedAttributes.has(String(attribute.id))) continue;
+    const productField = catalogProductFieldForLabel(attribute.name);
+    const currentValue =
+      productField === "egais_code"
+        ? product?.egaisCode
+        : productField === "shelf_life_days"
+          ? product?.shelfLifeDays
+          : null;
     fields.push({
       id: randomUUID(),
       label: attribute.name,
-      before: null,
+      ...(productField ? { labelKey: productField } : {}),
+      before: currentValue == null ? null : String(currentValue),
       after: attribute.value,
       applicable: false,
-      reason: target ? "attribute_not_importable" : "compatible_schema_required",
+      reason: target || productField ? "attribute_not_importable" : "compatible_schema_required",
       source: "national_catalog",
       selectedByDefault: false,
       requiresEntryIds: [],
