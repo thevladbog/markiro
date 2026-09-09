@@ -604,7 +604,9 @@ const BOX_LABEL_SIZES: ReadonlyArray<{ w: number; h: number }> = [
 const PRINT_NAME_SUFFIX = " [Назв. для печати]";
 
 function stockName(w: number, h: number, dates: DateFields, suffix = ""): string {
-  return dates === "with-dates" ? `Коробка ${w}×${h}${suffix}` : `Коробка ${w}×${h} без дат${suffix}`;
+  return dates === "with-dates"
+    ? `Коробка ${w}×${h}${suffix}`
+    : `Коробка ${w}×${h} без дат${suffix}`;
 }
 
 /**

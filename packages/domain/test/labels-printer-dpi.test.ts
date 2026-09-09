@@ -41,8 +41,12 @@ describe("withPrinterDpi", () => {
   });
 
   it("makes the emitters convert millimetres into the printer's own dots", async () => {
-    const at203 = await generateZpl(withPrinterDpi(SPEC, 203), sampleLabelData(), { rasterizeText });
-    const at300 = await generateZpl(withPrinterDpi(SPEC, 300), sampleLabelData(), { rasterizeText });
+    const at203 = await generateZpl(withPrinterDpi(SPEC, 203), sampleLabelData(), {
+      rasterizeText,
+    });
+    const at300 = await generateZpl(withPrinterDpi(SPEC, 300), sampleLabelData(), {
+      rasterizeText,
+    });
     // 58 mm is 464 dots at 203 dpi and 685 at 300 dpi.
     expect(at203).toContain("^PW464");
     expect(at300).toContain("^PW685");

@@ -189,7 +189,9 @@ describe("buildDefaultLabelTemplates", () => {
         [300, 3],
       ] as const) {
         const printed = withPrinterDpi(spec, dpi);
-        expect(mmToDots(sscc.moduleWidthMm, printed.dpi), `${name} @${dpi}: module dots`).toBe(dots);
+        expect(mmToDots(sscc.moduleWidthMm, printed.dpi), `${name} @${dpi}: module dots`).toBe(
+          dots,
+        );
         // Symbol plus both quiet zones, at the width the printer will really draw.
         const moduleMm = (25.4 / dpi) * dots;
         const left = sscc.xMm - GS1_128_QUIET_ZONE_MODULES * moduleMm;
