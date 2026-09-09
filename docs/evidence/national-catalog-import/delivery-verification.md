@@ -7,8 +7,10 @@ independent scoped review. Task14 and the one whole-branch review completed. The
 Its scoped re-review addressed all 14 original findings and identified two residual
 correctness defects at `703440ebd`: a late expiry/failure-recording race (R1) and
 old-wire confirmation compatibility (R2). The explicitly bounded continuation
-corrects only these two defects. Its package/browser results and remaining
-source-unchanged API failure are recorded below; exact-diff re-review is pending.
+corrected only these two defects in `6d2e201a32979e6c0ed76345b824bbc628fc4ffc`.
+The independent exact-diff re-review approved both corrections with no new
+Important/Critical breakage. Its package/browser results and remaining
+source-unchanged API failure are recorded below.
 Provider import flags remain false, image host allowlist empty, production unenabled.
 
 ## Delivery
@@ -21,10 +23,11 @@ unlink. Task14 adds realistic browser fixtures and CI, deterministic carried tes
 proof, local two-worker PgBoss retry proof, storage-capacity and failed-result identity
 corrections, and the operating/enablement runbook.
 
-Areas: `apps/admin` import/state/browser fixtures and RU/EN copy; API image/auth tests;
-DB migration-test prerequisites; production-browser config/specs/script/typecheck;
-existing production-bundle CI and its contract; scoped architecture/runbook/spec/plan;
-tracked visual and delivery evidence. No Rust/offline media architecture changes.
+Areas: `apps/admin` catalog/import UI and RU/EN copy; `apps/api` discovery,
+comparison, apply, photo processing, authorization and jobs; shared domain/contracts
+and additive DB schema/migrations; browser fixtures and CI contracts; architecture,
+runbook, specification, plan and delivery evidence. No Rust/offline media architecture
+changes.
 
 ## Residual R1/R2 continuation (current verification)
 
@@ -77,9 +80,33 @@ The fixtures remain representative because neither correction changes layout.
 Unchanged contracts100/domain633/DB401/production536/CI38 evidence is reused.
 All124 chronological rulings and costs appear below. Historical failed runs remain
 failed; no aggregate or broad Station rerun was performed. Exact-diff independent
-re-review is pending with the existing reviewer under ruling123. Provider/CDN,
+re-review under ruling123 is complete: R1 and R2 are addressed, with no new
+Important/Critical breakage found. Provider/CDN,
 hardware/offline-photo and live enablement acceptance remain unperformed; flags
 stay disabled and no push, PR, deployment or cleanup occurred.
+
+## Review closure and local delivery
+
+The [original scoped review](final-fix-scoped-review.md) records all14 original
+findings addressed and the two subsequently corrected residuals at `703440ebd`.
+The [final residual review](residual-correctness-review.md) covers exactly
+`703440ebd09cf35fc9090e2c0107131383c98c0a` →
+`6d2e201a32979e6c0ed76345b824bbc628fc4ffc`: both residuals are addressed and no
+new Important/Critical breakage was found. These complete reports preserve their
+historical scope and evidence limits. All124 rulings below remain verbatim.
+
+The controller independently verified all148 current source hashes, the four-file
+residual delta,43 screenshot hashes/sizes, all124 exact chronological rulings and
+all eight selected entries against the retained295-entry full API metadata.
+The final catalog and comparison screenshots were visually inspected. The earlier
+24 images and75 protected artifacts retain the implementer's recorded identity
+proof; no new capture was made. After review only these documentation/status
+records changed; runtime source and the tested artifacts remain frozen.
+
+Implementation is locally complete on `codex/national-catalog-import-design`.
+It is not an aggregate-green or production-enable approval: the two source-unchanged
+Station/inventory concerns and live acceptance requirements remain open. The branch
+and local evidence are retained; no push, PR, merge, deployment or cleanup occurred.
 
 ## Single final fix wave (historical verification at 703440ebd)
 

@@ -98,11 +98,17 @@ expiry-ended core work and cancellation clear impossible image eligibility. A
 successfully applied product's eligible cached-photo retry retains its required
 bytes and evidence after TTL. Cleanup does not delete accepted history or change
 confirmed product values, and bounded batches may leave a short cleanup backlog.
+A late core error recorder preserves an expiry-ended terminal receipt and its
+once-only audit; it cannot restore retry intent. Genuine due infrastructure retries
+still use the existing attempt budget.
 
 Session/preparation responses expose server-derived `automaticWorkPending` for
 focused-page polling through provider delays; legacy responses default false.
 Terminal 401/403/404/410 polling stops. App-owned `labelKey` values are translated;
-provider labels remain source text. Every mapped field requiring an initial
+provider labels remain source text. When an older compatible API response omits
+that optional name key, confirmation retains the existing server-validated path.
+When the key is supplied, new-product name acceptance remains explicit.
+Every mapped field requiring an initial
 regulatory profile depends on the explicitly accepted category, including stable
 print-name and shelf-life fields. Legacy saved previews are projected in memory
 without rewriting stored source/diff/hash or accepted decisions.
