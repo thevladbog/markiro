@@ -270,13 +270,13 @@ describe("Settings form", () => {
     ).toBeNull();
   });
 
-  it("a dpi change round-trips into the spec Save POSTs", async () => {
+  it("a preview-resolution change round-trips into the spec Save POSTs", async () => {
     const user = userEvent.setup();
     const fetchMock = stubCreateFetch("new-1");
 
     renderCreateFlow();
 
-    await chooseOption(user, "DPI", "300");
+    await chooseOption(user, "Разрешение предпросмотра", "300");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -1113,7 +1113,7 @@ it.each([
     const raster = vi.fn(fakeRasterizeText);
     renderCreateFlow({ rasterizeText: raster });
     await chooseOption(userEvent.setup(), "Назначение", "Дубликат товара");
-    if (dpi === 300) await chooseOption(userEvent.setup(), "DPI", "300");
+    if (dpi === 300) await chooseOption(userEvent.setup(), "Разрешение предпросмотра", "300");
     fireEvent.click(screen.getByRole("button", { name: label }));
     await waitFor(() => expect(blobs).toHaveLength(1));
     const blob = blobs[0];

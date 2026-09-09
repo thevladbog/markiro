@@ -592,7 +592,8 @@ function LabelEditorContent({
             </div>
           )}
           <Select
-            label={t("pages.labels.editor.dpiLabel")}
+            label={t("pages.labels.editor.previewDpiLabel")}
+            hint={t("pages.labels.editor.previewDpiHint")}
             options={DPI_OPTIONS}
             value={String(spec.dpi)}
             onValueChange={(value) =>
