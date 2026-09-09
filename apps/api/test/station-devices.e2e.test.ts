@@ -245,10 +245,7 @@ describe.skipIf(!ready)("station device lifecycle e2e", () => {
     expect(flipped.body.kind).toBe("station");
 
     const paired = await createTestStationDevice(app!, agent, "Paired TSD", { kind: "handheld" });
-    await agent
-      .patch(`/station-devices/${paired.deviceId}`)
-      .send({ kind: "station" })
-      .expect(409);
+    await agent.patch(`/station-devices/${paired.deviceId}`).send({ kind: "station" }).expect(409);
     const list = await agent.get("/station-devices").expect(200);
     const row = list.body.items.find((item: { id: string }) => item.id === paired.deviceId);
     expect(row.kind).toBe("handheld");

@@ -41,7 +41,13 @@ export class StationDevicesService {
       this.entitlements.withQuotaSlot(tx, tenantId, "stations", async () => {
         const [created] = await tx
           .insert(schema.stationDevices)
-          .values({ tenantId, name: dto.name, lineId: dto.lineId, kind: dto.kind, apiKeyId: null })
+          .values({
+            tenantId,
+            name: dto.name,
+            lineId: dto.lineId,
+            kind: dto.kind ?? "station",
+            apiKeyId: null,
+          })
           .returning();
         return created;
       }),

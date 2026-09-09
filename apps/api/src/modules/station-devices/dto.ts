@@ -11,7 +11,8 @@ export const createStationDeviceSchema = z.object({
   lineId: z.string().uuid().nullable(),
   kind: z.enum(stationDeviceKinds).default("station"),
 });
-export type CreateStationDeviceDto = z.infer<typeof createStationDeviceSchema>;
+/** Input shape: `kind` is optional for callers; the pipe and the service both default it. */
+export type CreateStationDeviceDto = z.input<typeof createStationDeviceSchema>;
 
 /** PATCH /station-devices/:id body. Omitted fields are preserved; `kind` is fixed once paired. */
 export const updateStationDeviceSchema = z.object({

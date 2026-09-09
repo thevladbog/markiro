@@ -54,10 +54,11 @@ export class StationPairController {
         device: {
           type: "object",
           additionalProperties: false,
-          required: ["id", "name", "tenantId", "organizationName", "line"],
+          required: ["id", "name", "kind", "tenantId", "organizationName", "line"],
           properties: {
             id: { type: "string" },
             name: { type: "string" },
+            kind: { type: "string", enum: ["station", "handheld"] },
             tenantId: { type: "string" },
             organizationName: { type: "string" },
             line: {
@@ -92,7 +93,7 @@ export class StationPairController {
   @ApiOperation({
     summary: "Pair a station by code",
     description:
-      "Unauthenticated by design: an unpaired station has no credential, so the single-use code and its rate limiter are the boundary.",
+      "Unauthenticated by design: an unpaired station has no credential, so the single-use code and its rate limiter are the boundary. A handheld app sends `handheld-v1` in x-station-capabilities; a code issued for the other device kind answers PAIR_KIND_MISMATCH and stays live.",
   })
   @ApiZodBody(pairStationSchema)
   @ApiStationPairSecretResponse()
@@ -101,14 +102,17 @@ export class StationPairController {
     status: 401,
     schema: stationPairErrorOpenApiSchema,
     description:
-      "Pairing rejected; `code` distinguishes invalid, expired, locked, and rate-limited attempts.",
+      "Pairing rejected; `code` distinguishes invalid, expired, locked, rate-limited, and kind-mismatched attempts.",
   })
   async pair(
     @Body(new ZodValidationPipe(pairStationSchema)) body: PairStationDto,
     @Ip() ip: string,
     @Headers("x-station-capabilities") capabilities: string | undefined,
   ): Promise<PairStationResultDto> {
-    return this.pairing.redeem(body.code, ip, hasCapability(capabilities, "subscription-state-v1"));
+    return this.pairing.redeem(body.code, ip, {
+      includeSubscription: hasCapability(capabilities, "subscription-state-v1"),
+      handheldClient: hasCapability(capabilities, "handheld-v1"),
+    });
   }
 }
 

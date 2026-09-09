@@ -54,6 +54,7 @@ describe("StationDevicesService lifecycle", () => {
       tenantId: "tenant-1",
       name: "Packing station",
       lineId: null,
+      kind: "station",
       apiKeyId: null,
     });
     expect(result).toMatchObject({
