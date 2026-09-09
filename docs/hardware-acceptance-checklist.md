@@ -25,41 +25,47 @@ beside each item.
       "not an SSCC" message. Skip always works, including with the scanner
       disconnected — confirm neither button is ever disabled or hidden.
 - [ ] **Long product name on the stock 58×40 template.** Print the seeded
-      "Коробка 58×40 (203 dpi)" template with a 40+ character Cyrillic product
-      name, on both a Zebra (ZPL) and a TSC (TSPL) printer. Confirm the name
-      wraps within the label — nothing runs off the physical edge, and no
-      character is silently dropped.
-- [ ] **SSCC barcode module width at 300 dpi.** The GS1-128 is emitted with no
-      explicit module width, so it takes the printer's default (nominally 2
-      dots). At 300 dpi that is an X-dimension of roughly 0.169 mm, below the
-      GS1 minimum of 0.25 mm. Scan the "Коробка 58×40 (300 dpi)" template's
-      barcode with a real warehouse scanner — not a phone camera. Also print a
-      label at a different module width first, then this template, to confirm
-      the emitter is not inheriting a stale module-width setting from the
-      previous job.
+      "Коробка 58×40" template with a 40+ character Cyrillic product name, on
+      both a Zebra (ZPL) and a TSC (TSPL) printer. Confirm the name wraps
+      within the label — nothing runs off the physical edge, and no character
+      is silently dropped.
+- [ ] **Printer resolution set on the station; SSCC module at both
+      resolutions.** Templates are resolution-neutral (spec 2026-09-10): the
+      station prints every template at the resolution configured in its
+      printer settings. Set it on a 203 dpi and on a 300 dpi station, print
+      the same seeded "Коробка 58×40" on each, and confirm the SSCC module is
+      2 dots (0.25 mm) on the 203 and 3 dots (0.254 mm) on the 300 — measure
+      with the scanner's decode report, not by eye — and that the whole label
+      sits inside the stock. Also print a label at a different module width
+      first, then this template, to confirm the emitter is not inheriting a
+      stale module-width setting from the previous job.
 - [ ] **SSCC barcode bar height.** On the small stock templates the barcode is
       only a few millimetres tall, well below the GS1 recommendation for
       logistics labels. Verify the read rate at normal warehouse scanner
       distance and angle, not just square-on and close.
-- [ ] **Date-free family.** Print "Коробка 58×40 без дат (203 dpi)" alongside
+- [ ] **Date-free family.** Print "Коробка 58×40 без дат" alongside
       the dated 58×40 and confirm: no production or expiry date appears
       anywhere on it; the quantity caption and value read as one row; and its
       taller bars (7.6 mm against 4.8 mm) scan at a distance and angle where
       the dated label's do not.
-- [ ] **Human-readable SSCC line.** On both 58×40 templates (203 and 300 dpi),
+- [ ] **Human-readable SSCC line.** On the 58×40 template printed at 203 and at 300 dpi,
       on both printer languages, confirm the readable SSCC digits beneath the
       barcode actually print and are not clipped at the label's bottom edge.
 - [ ] **Small caption legibility.** The column captions ("Дата производства:",
       "Годен до:", "Кол-во в упаковке:", etc.) are rasterized Cyrillic at a
       small point size. Verify they are readable on the actual label stock at
       both 203 and 300 dpi, not just in the admin preview.
-- [ ] **DPI mismatch has no warning.** The station has no printer-resolution
-      setting, so nothing tells an operator that a template's `spec.dpi`
-      doesn't match the printer. Deliberately print the 203 dpi default
-      ("Коробка 58×40 (203 dpi)") on a 300 dpi printer and confirm the
-      resulting roughly two-thirds-scale label is obviously wrong, not merely
-      "a bit small."
-- [ ] **All five stock templates, printed once each.** The three larger sizes
+- [ ] **Unset printer resolution falls back to the template.** On a station
+      whose printer resolution is "Не указано", close a box and confirm the
+      label prints at the template's own 203 dpi geometry and the setup
+      screen shows the hint under the resolution select. Then set the
+      resolution and confirm the next label prints at the printer's dpi.
+- [ ] **Duplicate Data Matrix at both resolutions.** With a shift printing
+      duplicates from the seeded "Дубликат Data Matrix 58×40", accept one
+      unit on a 203 dpi and one on a 300 dpi station and scan both labels
+      back: the full code must decode on each, and the station must have
+      refused to accept a unit while the resolution was unset.
+- [ ] **All four stock sizes, printed once each.** The three larger sizes
       (75×120, 100×100, 100×150) leave a large empty lower region on the
       label. Print one of each and confirm that is acceptable before this
       catalogue ships as-is to every tenant.
