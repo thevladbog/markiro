@@ -31,13 +31,13 @@ able to start with one handheld and one Wi-Fi label printer.
 
 ## Scope decisions
 
-| Decision      | Choice                                                                                                                                                                                                                                                                                    |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Contours (v1) | **Line mode** (validation + aggregation, as a peer terminal of the shift), **inventory** (check and repack while walking), **code check** (read-only lookup). Out of v1: receiving/shipping/warehouse movements, disposal, box-sell display, pallet building outside a shift. **Reverse aggregation** with a pre-printed SSCC pool is a later phase but is drawn (§6a) so the shell accommodates it.              |
-| Devices       | Industrial Android handhelds with a hardware trigger are the primary target (Zebra TC2x, Honeywell EDA5x, Urovo DT50, Атол Smart, Chainway). An ordinary Android phone with camera scanning is a **secondary** target for inventory and code check only; the line mode is not designed for a camera. |
-| Printing      | The handheld prints box labels **itself**: a network printer near the line over Wi-Fi (TCP 9100, ZPL/TSPL from `@markiro/domain`) and a belt-worn mobile printer over Bluetooth. No hardware agent.                                                                                       |
-| Stack         | **Native Kotlin.** The design is a standalone handheld mode in the Markiro language; it does not reuse station React components.                                                                                                                                                        |
-| Navigation    | **Hub with modes.** After sign-in a hub with large tiles; each mode is self-contained. No bottom tabs, no scan-first ambiguity.                                                                                                                                                             |
+| Decision      | Choice                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Contours (v1) | **Line mode** (validation + aggregation, as a peer terminal of the shift), **inventory** (check and repack while walking), **code check** (read-only lookup). Out of v1: receiving/shipping/warehouse movements, disposal, box-sell display, pallet building outside a shift. **Reverse aggregation** with a pre-printed SSCC pool is a later phase but is drawn (§6a) so the shell accommodates it. |
+| Devices       | Industrial Android handhelds with a hardware trigger are the primary target (Zebra TC2x, Honeywell EDA5x, Urovo DT50, Атол Smart, Chainway). An ordinary Android phone with camera scanning is a **secondary** target for inventory and code check only; the line mode is not designed for a camera.                                                                                                 |
+| Printing      | The handheld prints box labels **itself**: a network printer near the line over Wi-Fi (TCP 9100, ZPL/TSPL from `@markiro/domain`) and a belt-worn mobile printer over Bluetooth. No hardware agent.                                                                                                                                                                                                  |
+| Stack         | **Native Kotlin.** The design is a standalone handheld mode in the Markiro language; it does not reuse station React components.                                                                                                                                                                                                                                                                     |
+| Navigation    | **Hub with modes.** After sign-in a hub with large tiles; each mode is self-contained. No bottom tabs, no scan-first ambiguity.                                                                                                                                                                                                                                                                      |
 
 ### Assumptions carried over from existing briefs and specs
 
@@ -66,19 +66,19 @@ able to start with one handheld and one Wi-Fi label printer.
 Handheld mode sits between office and floor mode: the screen is small, but
 the hands may be gloved and the eyes are often on the shelf, not the screen.
 
-| Property         | Value                                                                                                                                  |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Base frame       | **360×640 dp portrait** (5″ 720×1280, the tightest target). Key screens also checked at 360×720 (5.7″ handhelds) and 412×915 (phone). |
-| Safe areas       | Android status bar on top. The bottom system bar is **not** treated as safe: many rugged devices have hardware navigation keys, so primary actions do not sit on the very bottom edge. |
-| Scan input       | Hardware trigger only on handhelds; **no on-screen scan button**. Phone variant adds a full-width 64 dp «Сканировать» button that opens the camera.                          |
-| Touch targets    | Primary actions 64 dp full-width; list rows 56 dp; icon buttons ≥ 48 dp; keypad keys 72 dp.                                            |
-| Type ramp        | `hh-body` 400 16/22 · `hh-body-strong` 600 18/24 · `hh-title` 700 22/28 · `hh-code` mono 500 20/24 · `hh-counter` mono 600 40/44 · `hh-counter-lg` mono 600 56/60. Tabular numerals everywhere. Fonts: IBM Plex Sans / IBM Plex Mono as in `packages/ui/src/tokens.css`. |
-| Colors           | Tokens from `packages/ui/src/tokens.css`, dark set by default: surfaces `#131216 / #1c1b21 / #232228`, text `#fafaf8 / #b6b3ab / #8e8b83`, accent `#3ddc7a`, statuses ok/err/warn/info with their `-solid`, `-bg`, `-border`, `fg-on-*-solid` pairs. Brand stays monochrome; color is reserved for statuses and one primary CTA per screen. |
-| Spacing / radius | `sp-2..sp-6` (8–24) for layout, `r-2` (8) for cards and buttons, `r-round` for chips. Borders over shadows: the "instrument" character from brief 02. |
-| Status strip     | 32 dp strip under the system bar: network, sync queue with count, printer, scanner. Present on the hub and inside modes; hidden on signal overlays. |
+| Property         | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Base frame       | **360×640 dp portrait** (5″ 720×1280, the tightest target). Key screens also checked at 360×720 (5.7″ handhelds) and 412×915 (phone).                                                                                                                                                                                                                                                                                                                       |
+| Safe areas       | Android status bar on top. The bottom system bar is **not** treated as safe: many rugged devices have hardware navigation keys, so primary actions do not sit on the very bottom edge.                                                                                                                                                                                                                                                                      |
+| Scan input       | Hardware trigger only on handhelds; **no on-screen scan button**. Phone variant adds a full-width 64 dp «Сканировать» button that opens the camera.                                                                                                                                                                                                                                                                                                         |
+| Touch targets    | Primary actions 64 dp full-width; list rows 56 dp; icon buttons ≥ 48 dp; keypad keys 72 dp.                                                                                                                                                                                                                                                                                                                                                                 |
+| Type ramp        | `hh-body` 400 16/22 · `hh-body-strong` 600 18/24 · `hh-title` 700 22/28 · `hh-code` mono 500 20/24 · `hh-counter` mono 600 40/44 · `hh-counter-lg` mono 600 56/60. Tabular numerals everywhere. Fonts: IBM Plex Sans / IBM Plex Mono as in `packages/ui/src/tokens.css`.                                                                                                                                                                                    |
+| Colors           | Tokens from `packages/ui/src/tokens.css`, dark set by default: surfaces `#131216 / #1c1b21 / #232228`, text `#fafaf8 / #b6b3ab / #8e8b83`, accent `#3ddc7a`, statuses ok/err/warn/info with their `-solid`, `-bg`, `-border`, `fg-on-*-solid` pairs. Brand stays monochrome; color is reserved for statuses and one primary CTA per screen.                                                                                                                 |
+| Spacing / radius | `sp-2..sp-6` (8–24) for layout, `r-2` (8) for cards and buttons, `r-round` for chips. Borders over shadows: the "instrument" character from brief 02.                                                                                                                                                                                                                                                                                                       |
+| Status strip     | 32 dp strip under the system bar: network, sync queue with count, printer, scanner. Present on the hub and inside modes; hidden on signal overlays.                                                                                                                                                                                                                                                                                                         |
 | Signals          | Same four as brief 04 (success, error, duplicate, box complete) as **full-screen states**; the error signal is drawn in two variants (bad code, foreign GTIN), so the canvas holds five overlays; plus a third channel the station lacks: **vibration**. Success = one short pulse; error = two long pulses; duplicate = one long pulse; box complete = short-short. Sound and vibration can each be muted; the visual signal alone must remain sufficient. |
-| Hardware keys    | Trigger = scan. Hardware Back = in-app back and never leaves a shift or task without confirmation. No other key mappings required in v1.   |
-| Motion           | 140 ms for state changes (`mk-motion-fast`); the success flash is ~400 ms, the error flash holds ~1.5 s or until the next scan.        |
+| Hardware keys    | Trigger = scan. Hardware Back = in-app back and never leaves a shift or task without confirmation. No other key mappings required in v1.                                                                                                                                                                                                                                                                                                                    |
+| Motion           | 140 ms for state changes (`mk-motion-fast`); the success flash is ~400 ms, the error flash holds ~1.5 s or until the next scan.                                                                                                                                                                                                                                                                                                                             |
 
 ## Screens
 
@@ -243,8 +243,8 @@ Print status block (inside box close, repack, reprint):
   `accepted` (green «Принято»), `already counted` here or on another
   terminal (amber «Уже посчитано», with terminal and time), `ineligible`
   status (red «Не подлежит учёту» with the status name), `protected
-  MOVING_BY_UD` (chip «Защищён» with text, never color alone), `not in
-  snapshot` (red «Нет в снимке»). Scanning an SSCC counts the whole box from
+MOVING_BY_UD` (chip «Защищён» with text, never color alone), `not in
+snapshot` (red «Нет в снимке»). Scanning an SSCC counts the whole box from
   the snapshot; the result shows how many units were counted.
 - Counters: «Проверено 1 240 / 4 116», «Этот ТСД 312», «Расхождения 7».
 - **Repack** stepper: scan the old box → scan units into the new box until
@@ -303,28 +303,28 @@ feed loses one row to make room. Line mode has no phone variant.
 All interactive components have default / pressed / disabled / loading
 states; no hover. Names are the intended Pencil component names.
 
-| Component            | Notes                                                                                                   |
-| -------------------- | ------------------------------------------------------------------------------------------------------- |
-| `hh/SystemBar`       | 24 dp Android status bar stand-in (time, signal, battery)                                              |
-| `hh/StatusStrip`     | 32 dp; four `hh/Indicator` instances (icon + short label): network, sync with count, printer, scanner; never icon alone in error |
-| `hh/AppBar`          | 56 dp; back, title, context chip (shift/task), overflow                                                 |
-| `hh/Tile`            | hub tile: icon, label, status line; 2×2 grid                                                            |
-| `hh/ContextCard`     | active shift or task with progress and «Продолжить»                                                     |
-| `hh/ShiftCard`       | 96 dp list card with chips and tolling badge; inventory task cards are instances with overrides        |
-| `hh/ScanResult`, `hh/ScanResultCompact` | large (200 dp) and one-line variants; verdicts ok / error / duplicate / attention / info |
-| `hh/SignalOverlay`   | success / error / duplicate / box-complete; documents the vibration pattern per variant                 |
-| `hh/CounterRow`      | label + mono tabular number, 2–3 per row                                                                |
-| `hh/BoxFill`         | compact grid, capacity-driven, filled / current / empty cells; `hh/PalletStrip` beneath                 |
-| `hh/Key`, `hh/Keypad`, `hh/PinDots` | 72 dp key; 4×3 keypad with backspace and confirm; PIN dots                                  |
-| `hh/ListRow` 56, `hh/ActionRow` 64 | list rows and exception actions                                                           |
-| `hh/StepHeader`      | «Шаг 1 из 3 · …»                                                                                        |
-| `hh/Button`          | primary 64 full-width, secondary 56, destructive, text                                                  |
-| `hh/Banner`          | offline / syncing / attention                                                                           |
-| `hh/State`           | full-screen empty / loading / error / offline / hardware                                                |
-| `hh/Chip`            | mode, ЧЗ status, tolling, teammates, protected                                                          |
-| Bottom sheet         | pattern, not a component: overlay + sheet frame built inline on each screen that needs it              |
-| `hh/PrintStatus`     | printing / printed / failed with reason and actions                                                     |
-| `hh/ScanButton`      | phone variant only                                                                                      |
+| Component                               | Notes                                                                                                                            |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `hh/SystemBar`                          | 24 dp Android status bar stand-in (time, signal, battery)                                                                        |
+| `hh/StatusStrip`                        | 32 dp; four `hh/Indicator` instances (icon + short label): network, sync with count, printer, scanner; never icon alone in error |
+| `hh/AppBar`                             | 56 dp; back, title, context chip (shift/task), overflow                                                                          |
+| `hh/Tile`                               | hub tile: icon, label, status line; 2×2 grid                                                                                     |
+| `hh/ContextCard`                        | active shift or task with progress and «Продолжить»                                                                              |
+| `hh/ShiftCard`                          | 96 dp list card with chips and tolling badge; inventory task cards are instances with overrides                                  |
+| `hh/ScanResult`, `hh/ScanResultCompact` | large (200 dp) and one-line variants; verdicts ok / error / duplicate / attention / info                                         |
+| `hh/SignalOverlay`                      | success / error / duplicate / box-complete; documents the vibration pattern per variant                                          |
+| `hh/CounterRow`                         | label + mono tabular number, 2–3 per row                                                                                         |
+| `hh/BoxFill`                            | compact grid, capacity-driven, filled / current / empty cells; `hh/PalletStrip` beneath                                          |
+| `hh/Key`, `hh/Keypad`, `hh/PinDots`     | 72 dp key; 4×3 keypad with backspace and confirm; PIN dots                                                                       |
+| `hh/ListRow` 56, `hh/ActionRow` 64      | list rows and exception actions                                                                                                  |
+| `hh/StepHeader`                         | «Шаг 1 из 3 · …»                                                                                                                 |
+| `hh/Button`                             | primary 64 full-width, secondary 56, destructive, text                                                                           |
+| `hh/Banner`                             | offline / syncing / attention                                                                                                    |
+| `hh/State`                              | full-screen empty / loading / error / offline / hardware                                                                         |
+| `hh/Chip`                               | mode, ЧЗ status, tolling, teammates, protected                                                                                   |
+| Bottom sheet                            | pattern, not a component: overlay + sheet frame built inline on each screen that needs it                                        |
+| `hh/PrintStatus`                        | printing / printed / failed with reason and actions                                                                              |
+| `hh/ScanButton`                         | phone variant only                                                                                                               |
 
 ## Pencil file structure (as drawn, 2026-09-10)
 
@@ -334,19 +334,19 @@ states; no hover. Names are the intended Pencil component names.
 copies carry `theme: {mode: "light"}` on the frame, phone copies are
 412×915.
 
-| Row (`y`) | Prefix         | Frames | Contents                                                                                               |
-| --------- | -------------- | -----: | ------------------------------------------------------------------------------------------------------ |
-| 0         | `hh/`          |     28 | Tokens as variables (dark/light axis `mode`) and the components listed above                            |
-| 700       | `02-`          |     10 | Pairing (enter, binding, 3 errors, success), sign-in (badge/login, PIN, name search, lock)             |
-| 1500      | `03-hub/`      |      4 | Active shift, idle, offline, active inventory                                                          |
-| 2300      | `04-shift/`, `04-work/validation`, `04-signal/` | 11 | Shift list, other-line confirm, ad-hoc shift ×3, validation, 5 signal overlays (4 types, error ×2) |
-| 3100      | `04-work/`, `04-exceptions/` | 10 | Aggregation, box close ×4 (printing, printed, failed, unknown), exceptions list, disassemble, replace, reprint, label queue |
-| 3900      | `04-work/`     |      8 | Offline, sync conflicts, scanner unavailable, teammates, more-sheet, close confirm/draining/summary    |
-| 4700      | `05-inv/`      |     12 | Tasks, task confirm, check, 5 verdicts, repack ×3, leave blocked                                       |
-| 5500      | `06-check/`, `07-settings/` | 9 | Scan, unit, box, offline, needs network; settings list, scanner, printer, sound              |
-| 6300      | `08-light/`, `09-phone/` | 11 | Light theme ×7, phone ×4 (with `hh/ScanButton`)                                                 |
-| 7100      | `10-reverse/`  |     12 | Reverse aggregation: shift step 2 toggle, await box, box open/filling, partial-close sheet, box closed, await pallet, 5 signals |
-| 7900      | `07-settings/` |      7 | Scanner sources with Bluetooth, scanner pairing ×2, add printer, Bluetooth printer pairing, test print, printer error |
+| Row (`y`) | Prefix                                          | Frames | Contents                                                                                                                        |
+| --------- | ----------------------------------------------- | -----: | ------------------------------------------------------------------------------------------------------------------------------- |
+| 0         | `hh/`                                           |     28 | Tokens as variables (dark/light axis `mode`) and the components listed above                                                    |
+| 700       | `02-`                                           |     10 | Pairing (enter, binding, 3 errors, success), sign-in (badge/login, PIN, name search, lock)                                      |
+| 1500      | `03-hub/`                                       |      4 | Active shift, idle, offline, active inventory                                                                                   |
+| 2300      | `04-shift/`, `04-work/validation`, `04-signal/` |     11 | Shift list, other-line confirm, ad-hoc shift ×3, validation, 5 signal overlays (4 types, error ×2)                              |
+| 3100      | `04-work/`, `04-exceptions/`                    |     10 | Aggregation, box close ×4 (printing, printed, failed, unknown), exceptions list, disassemble, replace, reprint, label queue     |
+| 3900      | `04-work/`                                      |      8 | Offline, sync conflicts, scanner unavailable, teammates, more-sheet, close confirm/draining/summary                             |
+| 4700      | `05-inv/`                                       |     12 | Tasks, task confirm, check, 5 verdicts, repack ×3, leave blocked                                                                |
+| 5500      | `06-check/`, `07-settings/`                     |      9 | Scan, unit, box, offline, needs network; settings list, scanner, printer, sound                                                 |
+| 6300      | `08-light/`, `09-phone/`                        |     11 | Light theme ×7, phone ×4 (with `hh/ScanButton`)                                                                                 |
+| 7100      | `10-reverse/`                                   |     12 | Reverse aggregation: shift step 2 toggle, await box, box open/filling, partial-close sheet, box closed, await pallet, 5 signals |
+| 7900      | `07-settings/`                                  |      7 | Scanner sources with Bluetooth, scanner pairing ×2, add printer, Bluetooth printer pairing, test print, printer error           |
 
 Component ids worth knowing when editing instances: `hh/Key` (`s2WFw`),
 `hh/Keypad` (`ZgiDi`), `hh/ScanResult` (`ydVm0`), `hh/SignalOverlay`
