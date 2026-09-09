@@ -24,6 +24,7 @@ import {
 import type { NationalCatalogClient } from "../src/modules/national-catalog/national-catalog.client";
 import type { ChzTokenService } from "../src/modules/chz-exports/chz-token.service";
 import type { NationalCatalogProduct } from "../src/modules/national-catalog/national-catalog.types";
+import type { DbTx } from "../src/modules/national-catalog/national-catalog-import.types";
 import { createManagedSubscription, createOrganization } from "./support/subscription-fixtures";
 const GTIN = "04601234567893";
 const preparations = schema.nationalCatalogImportPreparations;
@@ -686,6 +687,235 @@ describe("immutable pre-product comparisons and durable preparation", () => {
     expect(after!.decision).toEqual(before!.decision);
     expect(after!.appliedEvidence).toEqual(before!.appliedEvidence);
     expect(download).toHaveBeenCalledOnce();
+  });
+  it.each(["closed-session", "infrastructure"] as const)(
+    "preserves collector terminal outcome between rollback and late %s catch",
+    async (failure) => {
+      const { NationalCatalogImportApplyService } =
+        await import("../src/modules/national-catalog/national-catalog-import-apply.service");
+      const p = (await run()).items[0]!;
+      let afterRollback: (() => Promise<void>) | null = null;
+      const repository = new (class extends NationalCatalogImportRepository {
+        override async transaction<T>(fn: (tx: DbTx) => Promise<T>): Promise<T> {
+          try {
+            return await super.transaction(fn);
+          } catch (error) {
+            const continuation = afterRollback;
+            afterRollback = null;
+            if (continuation) await continuation();
+            throw error;
+          }
+        }
+      })(db);
+      const applies = new NationalCatalogImportApplyService(repository, sessions);
+      const operation = await applies.start(actor, sessionId, {
+        requestId: randomUUID(),
+        decisions: [
+          {
+            previewId: p.id,
+            acceptedEntryIds: p.fields.filter((f) => f.applicable).map((f) => f.id),
+            linkAction: p.linkAction,
+            photo: { kind: "keep" },
+          },
+        ],
+      });
+      const receipts = schema.nationalCatalogImportOperationItems;
+      const readReceipt = async () =>
+        (
+          await db.select().from(receipts).where(eq(receipts.operationId, operation.operationId))
+        )[0]!;
+      const readFailures = () =>
+        db
+          .select()
+          .from(schema.tenantAuditEvents)
+          .where(
+            and(
+              eq(schema.tenantAuditEvents.organizationId, actor.tenantId),
+              eq(schema.tenantAuditEvents.action, "national_catalog.import.item_failed"),
+            ),
+          );
+      const before = await readReceipt();
+      const [beforeSession] = await db
+        .select()
+        .from(schema.nationalCatalogImportSessions)
+        .where(eq(schema.nationalCatalogImportSessions.id, sessionId));
+      await db
+        .update(schema.nationalCatalogImportSessions)
+        .set({ startedAt: new Date(0), expiresAt: new Date(1) })
+        .where(eq(schema.nationalCatalogImportSessions.id, sessionId));
+      const phases: string[] = [];
+      const originalAccess = sessions.assertSessionAccess.bind(sessions);
+      const access = vi
+        .spyOn(sessions, "assertSessionAccess")
+        .mockImplementationOnce(async (tx, currentActor, currentSession) => {
+          phases.push("product-transaction");
+          await tx
+            .update(schema.nationalCatalogImportSessions)
+            .set({ incompleteReason: "rollback_marker" })
+            .where(eq(schema.nationalCatalogImportSessions.id, sessionId));
+          if (failure === "infrastructure") throw Error("injected stale infrastructure failure");
+          await originalAccess(tx, currentActor, currentSession);
+        });
+      let collected: typeof receipts.$inferSelect | undefined;
+      let collectedAudits: Awaited<ReturnType<typeof readFailures>> = [];
+      afterRollback = async () => {
+        const [rolledBack] = await db
+          .select()
+          .from(schema.nationalCatalogImportSessions)
+          .where(eq(schema.nationalCatalogImportSessions.id, sessionId));
+        expect(rolledBack?.incompleteReason).toBe(beforeSession?.incompleteReason);
+        expect((await readReceipt()).productResult).toBe("pending");
+        phases.push("rolled-back");
+        await sessions.releaseExpired(new Date(), 1);
+        collected = await readReceipt();
+        collectedAudits = await readFailures();
+        expect(collected).toMatchObject({
+          productResult: "failed",
+          errorCode: "import_session_closed",
+          attempts: before.attempts,
+          nextAttemptAt: null,
+          nextImageAttemptAt: null,
+          imageRetryEligible: false,
+          decision: before.decision,
+          appliedEvidence: before.appliedEvidence,
+        });
+        expect(collectedAudits).toHaveLength(1);
+        expect(collectedAudits[0]).toMatchObject({
+          organizationId: actor.tenantId,
+          actorUserId: actor.userId,
+          action: "national_catalog.import.item_failed",
+          outcome: "failure",
+          targetType: "national_catalog_import_preview",
+          targetId: p.id,
+          before: null,
+          after: {
+            operationId: operation.operationId,
+            previewId: p.id,
+            result: "failed",
+            reason: "import_session_closed",
+          },
+        });
+        phases.push("collector-committed");
+      };
+      try {
+        await applies.resume(actor.tenantId, operation.operationId);
+      } finally {
+        access.mockRestore();
+      }
+      phases.push("catch-returned");
+      expect(phases).toEqual([
+        "product-transaction",
+        "rolled-back",
+        "collector-committed",
+        "catch-returned",
+      ]);
+      expect.soft(await readReceipt()).toEqual(collected);
+      expect.soft(await readFailures()).toEqual(collectedAudits);
+      const [savedOperation] = await db
+        .select()
+        .from(schema.nationalCatalogImportOperations)
+        .where(eq(schema.nationalCatalogImportOperations.id, operation.operationId));
+      expect.soft(savedOperation).toMatchObject({ state: "finished", enqueuePending: false });
+      expect(
+        await db.select().from(schema.products).where(eq(schema.products.tenantId, actor.tenantId)),
+      ).toHaveLength(0);
+    },
+  );
+  it("records a genuine due infrastructure retry before applying without duplicate terminal replay", async () => {
+    const { NationalCatalogImportApplyService } =
+      await import("../src/modules/national-catalog/national-catalog-import-apply.service");
+    const p = (await run()).items[0]!;
+    const applies = new NationalCatalogImportApplyService(
+      new NationalCatalogImportRepository(db),
+      sessions,
+    );
+    const operation = await applies.start(actor, sessionId, {
+      requestId: randomUUID(),
+      decisions: [
+        {
+          previewId: p.id,
+          acceptedEntryIds: p.fields.filter((f) => f.applicable).map((f) => f.id),
+          linkAction: p.linkAction,
+          photo: { kind: "keep" },
+        },
+      ],
+    });
+    const readReceipt = async () =>
+      (
+        await db
+          .select()
+          .from(schema.nationalCatalogImportOperationItems)
+          .where(eq(schema.nationalCatalogImportOperationItems.operationId, operation.operationId))
+      )[0]!;
+    const before = await readReceipt();
+    const access = vi
+      .spyOn(sessions, "assertSessionAccess")
+      .mockRejectedValueOnce(Error("injected first failure"))
+      .mockRejectedValueOnce(Error("injected second failure"));
+    const now = vi.spyOn(Date, "now");
+    try {
+      await applies.resume(actor.tenantId, operation.operationId);
+      const first = await readReceipt();
+      expect(first).toMatchObject({
+        productResult: "failed",
+        errorCode: "infrastructure_failure",
+        attempts: 1,
+        decision: before.decision,
+        appliedEvidence: null,
+      });
+      await applies.resume(actor.tenantId, operation.operationId);
+      expect(access).toHaveBeenCalledTimes(1);
+      now.mockReturnValue(first.nextAttemptAt!.getTime() + 1);
+      await applies.resume(actor.tenantId, operation.operationId);
+      const second = await readReceipt();
+      expect(second).toMatchObject({
+        productResult: "failed",
+        errorCode: "infrastructure_failure",
+        attempts: 2,
+        decision: before.decision,
+        appliedEvidence: null,
+      });
+      expect(second.nextAttemptAt!.getTime()).toBeGreaterThan(first.nextAttemptAt!.getTime());
+      now.mockReturnValue(second.nextAttemptAt!.getTime() + 1);
+      await applies.resume(actor.tenantId, operation.operationId);
+      const applied = await readReceipt();
+      expect(applied).toMatchObject({
+        productResult: "applied",
+        nextAttemptAt: null,
+        decision: before.decision,
+      });
+      await applies.resume(actor.tenantId, operation.operationId);
+      expect(await readReceipt()).toEqual(applied);
+      const failures = await db
+        .select()
+        .from(schema.tenantAuditEvents)
+        .where(
+          and(
+            eq(schema.tenantAuditEvents.organizationId, actor.tenantId),
+            eq(schema.tenantAuditEvents.action, "national_catalog.import.item_failed"),
+          ),
+        );
+      expect(failures).toHaveLength(2);
+      for (const audit of failures)
+        expect(audit).toMatchObject({
+          organizationId: actor.tenantId,
+          actorUserId: actor.userId,
+          action: "national_catalog.import.item_failed",
+          outcome: "failure",
+          targetType: "national_catalog_import_preview",
+          targetId: p.id,
+          before: null,
+          after: {
+            operationId: operation.operationId,
+            previewId: p.id,
+            result: "failed",
+            reason: "infrastructure_failure",
+          },
+        });
+    } finally {
+      access.mockRestore();
+      now.mockRestore();
+    }
   });
   it("ends expired pending core work without rewriting its accepted decision or duplicating failure audit", async () => {
     const { NationalCatalogImportApplyService } =

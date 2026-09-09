@@ -101,6 +101,7 @@ export function ImportReview({
         ),
       ) &&
       (p.productId !== null ||
+        !p.fields.some((f) => f.labelKey === "name") ||
         choice.decision.acceptedEntryIds.some((id) =>
           p.fields.some((f) => f.id === id && f.labelKey === "name"),
         )) &&

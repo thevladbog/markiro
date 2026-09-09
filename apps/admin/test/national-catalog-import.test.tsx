@@ -135,12 +135,61 @@ import { act, fireEvent, waitFor } from "@testing-library/react";
 import {
   importApplySchema,
   importPrepareSchema,
+  importPrepareResponseSchema,
   importSelectionSchema,
   type ImportItem,
 } from "@markiro/platform-contracts";
 import { previewFixture, resultFixture } from "./national-catalog-fixtures.js";
 import { identityKey, loadIntent } from "../src/pages/catalog/national-catalog/pendingIntent.js";
 import { ImportReview } from "../src/pages/catalog/national-catalog/ImportReview.js";
+it.each([false, true])(
+  "submits schema-valid older wire choices with mixed batch %s",
+  async (mixed) => {
+    const data = structuredClone(previewFixture);
+    const fresh = data.items[0]!;
+    fresh.photos = [];
+    for (const field of fresh.fields) {
+      delete field.labelKey;
+      field.label = "Opaque older API field";
+    }
+    if (mixed) {
+      data.items.push({
+        ...structuredClone(fresh),
+        id: id(71),
+        itemId: id(81),
+        productId: id(91),
+        fields: fresh.fields.map((field, index) => ({ ...field, id: id(101 + index) })),
+      });
+      data.preparation.total = 2;
+      data.preparation.completed = 2;
+    }
+    const onApply = vi.fn();
+    render(
+      <ImportReview
+        sessionId={id(1)}
+        data={importPrepareResponseSchema.parse(data)}
+        canWrite
+        busy={false}
+        onPrepare={vi.fn()}
+        onApply={onApply}
+        onPhoto={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+      { wrapper: MemoryRouter },
+    );
+    const apply = screen.getByRole("button", { name: "Добавить выбранные изменения" });
+    expect(apply.hasAttribute("disabled")).toBe(false);
+    await userEvent.setup().click(apply);
+    expect(onApply).toHaveBeenCalledTimes(1);
+    const choices = onApply.mock.calls[0]![0];
+    expect(choices).toHaveLength(mixed ? 2 : 1);
+    expect(choices[0]).toMatchObject({
+      previewId: fresh.id,
+      acceptedEntryIds: [fresh.fields[0]!.id],
+    });
+    if (mixed) expect(choices[1]).toMatchObject({ previewId: id(71), acceptedEntryIds: [] });
+  },
+);
 import {
   ImportSelection,
   initialItemsQuery,

@@ -17,8 +17,14 @@ local verification are complete, with one unchanged Station aggregate test failu
 retained for review; Task14 API/admin/browser gates passed separately at its pre-fix head. The one
 whole-branch review identified 6 Important and 8 Minor corrections. Their single
 fix wave has final package and scoped layout/auth proof, while the full API
-fixture failure and Station aggregate remain recorded as failed runs. One scoped
-controller-owned re-review remains. The current
+fixture failure and Station aggregate remain recorded as failed runs. The completed
+scoped re-review addressed all 14 original findings and identified residual R1
+(expiry/catch audit and retry race) and R2 (optional-labelKey wire compatibility).
+An explicit bounded workflow-cap exception permits only these two corrections;
+both are now implemented with focused83/67, fulladmin1124, statics/builds and
+browser21 passing. Fresh full API remains failed3226/1/1 in unchanged inventory
+sync; its single complete-file diagnostic passed17 without source changes. A
+re-review of only the residual diff remains pending. The current
 integration/browser/CI evidence and operating documentation are recorded in the
 [delivery report](../../evidence/national-catalog-import/delivery-verification.md).
 That report is the current verification record; the task checklists below preserve

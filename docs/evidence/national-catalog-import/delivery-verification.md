@@ -3,8 +3,12 @@
 Date: 2026-09-09 (local execution timestamps Europe/Moscow unless marked UTC).
 Task14 starts from `7bb8706a7b27b272318464569f34f268e701e17a`; Tasks1–13 have
 independent scoped review. Task14 and the one whole-branch review completed. The whole-branch review found
-6 Important and 8 Minor corrections; the single fix wave is recorded below and
-awaits the controller-owned scoped re-review.
+6 Important and 8 Minor corrections; the single fix wave is recorded below.
+Its scoped re-review addressed all 14 original findings and identified two residual
+correctness defects at `703440ebd`: a late expiry/failure-recording race (R1) and
+old-wire confirmation compatibility (R2). The explicitly bounded continuation
+corrects only these two defects. Its package/browser results and remaining
+source-unchanged API failure are recorded below; exact-diff re-review is pending.
 Provider import flags remain false, image host allowlist empty, production unenabled.
 
 ## Delivery
@@ -22,10 +26,66 @@ DB migration-test prerequisites; production-browser config/specs/script/typechec
 existing production-bundle CI and its contract; scoped architecture/runbook/spec/plan;
 tracked visual and delivery evidence. No Rust/offline media architecture changes.
 
-## Single final fix wave (current verification)
+## Residual R1/R2 continuation (current verification)
+
+Base: `703440ebd09cf35fc9090e2c0107131383c98c0a`. Both authorized residual fixes are
+implemented and have focused RED/GREEN proof. The API failure recorder now reuses
+the existing failed-receipt retry predicate, preserving a terminal outcome committed
+by expiry cleanup between rollback and catch. Tests force that exact real-PG order
+for closed-session and infrastructure errors, checking unchanged full receipt/audit,
+actor/tenant/target/reason, attempts, retry intent and accepted evidence. A positive
+due-infrastructure retry still records failures, delays, applies and replays correctly.
+
+Admin requires explicit name acceptance when the owned name key is supplied; an
+older schema-valid response without that optional metadata retains its prior
+submission path and authoritative server validation. New/mixed old-wire DOM
+submissions and RU/EN current-key required-name checks pass. No layout, schema,
+contract, provider configuration or Station/inventory source changed.
+
+| Current gate                                  | Actual result                                                     |
+| --------------------------------------------- | ----------------------------------------------------------------- |
+| R1 focused RED → full preview/apply GREEN     | 2 failed /1 positive passed /44 filtered →83/83;7.81s             |
+| R2 focused RED → full import DOM GREEN        | 2 failed /65 filtered →67/67;18.66s                               |
+| Fresh full API with local infrastructure      | **FAILED**:3226 passed /1 failed /1 intentional live skip;578.08s |
+| One complete failed inventory-file diagnostic | 17/17;1.72s; no source change or full rerun                       |
+| Fresh full admin                              | 95 files;1124/1124;167.14s                                        |
+| API/admin typecheck, lint, build              | All six passed; configs also typecheck tests                      |
+| Fresh browser after all builds                | 21/21;53.9s; screenshot updates verified unset                    |
+
+The sole API failure is the pre-existing competing-device repack path in
+`station-inventory-sync.e2e.test.ts:1380` / `station-inventory-sync.service.ts:633`:
+PostgreSQL23503 prevents changing a result's observed production date while an
+active repack item references the old composite key. The winner update precedes
+repack membership removal. The service, test and inventory schema are byte-identical
+to both this continuation's base and original import base `f78928a0`. The test
+constructs the inventory service directly; no changed National Catalog dependency
+was found. The one17-case diagnostic passed, but neither resolves that ordering
+issue nor converts the full API run to green. This source-unchanged integration
+concern remains alongside the earlier unchanged Station aggregate failure.
+
+Full295-entry metadata was snapshotted before the diagnostic. The
+[selected actual results](residual-correctness-api-full-selected-metadata.json)
+confirm local Mailpit/MinIO963.66ms, provisioning15118.56ms, inventory
+documents3633.84ms/lifecycle4522.84ms/snapshot3143.12ms, all successful. The sole
+intentional skip is the unconfigured National Catalog live read contract. No
+DB-dependent suite was silently skipped and no other DB workload overlapped API.
+
+The [fresh148-file source freeze](residual-correctness-source-freeze.json) records
+exactly four changed runtime/test files. All previous source/visual manifests,
+43 fix-wave and24 inherited PNGs are preserved; current21 did not regenerate them.
+The fixtures remain representative because neither correction changes layout.
+Unchanged contracts100/domain633/DB401/production536/CI38 evidence is reused.
+All124 chronological rulings and costs appear below. Historical failed runs remain
+failed; no aggregate or broad Station rerun was performed. Exact-diff independent
+re-review is pending with the existing reviewer under ruling123. Provider/CDN,
+hardware/offline-photo and live enablement acceptance remain unperformed; flags
+stay disabled and no push, PR, deployment or cleanup occurred.
+
+## Single final fix wave (historical verification at 703440ebd)
 
 Source/test commit: `10b66d13924a2e82a25c60bcadb0b614457cd292`. All requested final-review corrections are
-implemented; the controller-owned single scoped re-review remains pending. Final
+implemented. The completed scoped re-review addressed all 14 and found residual R1/R2,
+tracked in the bounded continuation below. Final
 root format and diff checks passed; exact failed-run and scoped-proof limits below
 remain part of acceptance. No push, PR, merge, deployment or cleanup was performed.
 
@@ -89,7 +149,7 @@ Both owned loopback migration journals were freshly checked read-only at exact01
 timestamp1788925596383, SQL sha256
 559d55d190df3a0948f53a0d5f20fb5a84bdce4ee3e4ff6e0c263f952776e429.
 
-There is no single all-green21 browser run. Final distinct coverage comprises the
+At the initial fix-wave freeze there was no single all-green21 browser run. Its distinct coverage comprised the
 unchanged original flow1, corrected import2, RU/EN contexts2, and final layout
 matrix16. The initial failed run is retained. The group correction was required
 because the first name minimum squeezed Group to49.1875px; final group minimum140
@@ -654,3 +714,22 @@ Ruling: Final I5 may capture a local fetchedAt immediately after the successful 
 Ruling: Complete M7 inside the same active final fix wave by adding a catalog-only group content wrapper with a 140px minimum alongside the existing 220px name minimum, preserving automatic table layout, permitted horizontal scrolling and safe wrapping of unusually long tokens. Controller compared the final1280RU screenshot with Task14 and verified that the name fix shifted word fragmentation into Group, so this is fix-introduced layout breakage rather than unchanged historical wrapping. Require focused visual RED, affected catalog checks plus admin statics/build, then the16-case width/locale/theme matrix and refreshed affected screenshots after build; preserve earlier manifests and identify this runtime layout delta explicitly. Do not repeat full API/admin business suites or unaffected flows — cost if wrong: additional horizontal scrolling and one bounded layout verification run; existing fulladmin1122 evidence predates this final layout-only delta, while final browser/build evidence covers it.
 
 Ruling: Repair the authorization fixture that manually inserts state=ready with checkpoint={} by supplying the actual terminal version1 checkpoint, retaining real READ200/WRITE403/cross-tenant404 assertions and adding automaticWorkPending=false. Controller verified current start and the reviewed5a4a773e1 producer always create valid version1 work, and retry/resume/expiry already parsed that format before the fix; no supported live or legacy producer of an active ready empty/null checkpoint was demonstrated. A nullable DB column alone does not establish such a supported active-session contract. Do not add a speculative runtime fallback or weaken checkpoint validation to accommodate this fixture. Run the complete auth file plus existing service DTO/continuation tests and relevant test type/lint checks, preserving fullAPI3223passed/1failed/1intentional live skip as a failed historical run rather than rerunning the full suite for a green headline — cost if wrong: a malformed active historical row outside known producers could still fail a READ and would need separately evidenced recovery; final whole-suite output remains failed, with the exact isolated fixture correction and affected-file success recorded separately.
+
+## Residual correctness continuation: chronological rulings 120–122
+
+The explicit workflow-cap exception, scope, verification requirements and full costs
+are retained verbatim. Earlier rulings and evidence remain historical and unchanged.
+
+Ruling: Make one explicit bounded exception to the SDD final fix-dispatch/re-review cap for the two verified fix-introduced residuals R1 and R2 at703440ebd. The independent scoped review addressed all14 original findings but found a real Important expiry/catch race that can duplicate terminal audit and resurrect retry intent, plus a Minor supported-wire regression. These are inside the already approved audit/recovery and additive-contract requirements; higher-priority developer instructions require finishing authorized work and prohibit inferring another permission gate solely from a skill exception. Resume the original implementer for only these two concrete corrections, then the existing reviewer for only their exact diff; no new whole-branch review, new product scope or external action — cost if wrong: one additional bounded correction/review cycle and new-code verification time beyond the workflow cap, explicitly visible rather than silently parking a known audit invariant defect.
+
+Ruling: R1 must preserve a terminal failure already committed by expiry cleanup when the original worker later records an error after its rolled-back transaction. Fence the stale failure recorder using the existing receipt/operation state or a precise attempt comparison; do not reclassify a terminal import_session_closed outcome, increment its attempt count, duplicate item_failed audit, or restore retry/enqueue intent. Keep genuine due infrastructure retries and cancellation/applied/conflict replay behavior. Add deterministic real-PG rollback→collector→catch regressions for closed-session and delayed infrastructure classifications, using the existing uniquely-owned scratch fixture and exact audit/receipt/retry/evidence assertions — source inspection confirms the split-transaction gap and sequential replay tests do not cover it — cost if wrong: an overbroad stale-error guard could suppress a legitimate retry outcome, so positive due-retry coverage is required; no migration or new job architecture.
+
+Ruling: R2 keeps optional labelKey as presentation metadata and a discriminator only when supplied. Current responses with an identifiable owned name must still require its explicit acceptance for new products; schema-valid older responses without that key retain the previously supported submission path, with authoritative server name validation unchanged. Do not guess semantics from translated/provider label text or make the optional field mandatory. Cover old-wire new/mixed batches and current-key required-name decisions in focused DOM tests. After both runtime changes and focused RED/GREEN settle, rebuild affected consumers and run one new guarded full API plus full admin/static/build as required for current code, with API using actual LOCAL_INFRA_SMOKE and no overlapping DB workloads; then one current21 browser run after all builds, scoped format/diff and only the R1/R2 independent re-review. Reuse unchanged contracts/domain/DB/production/CI evidence; preserve all earlier failures, manifests and ruling history — cost if wrong: older responses may still defer missing-name errors to their existing server authority, and current full verification adds time, but valid old-wire imports must not be categorically blocked.
+
+## Residual reviewer routing: chronological ruling 123
+
+Ruling: Resume the existing independent review_task7 agent for the exact residual R1/R2 diff after the implementer commits, in place of final_fix_rereview. The controller attempted to contact final_fix_rereview and the collaboration tool returned "agent thread limit reached"; the current agent inventory contains only root, final_fix_wave, review_task4 and review_task7, so the original scoped reviewer cannot be restored through the available tool. Give the substitute the complete original findings/report, binding rulings, new report and exact703440ebd-to-newHEAD package; retain the same narrow scope and no suite reruns or whole-branch review — cost if wrong: replacement-reviewer context acquisition and less continuity, bounded by the verbatim evidence and source diff; no change to implementation scope or acceptance standards.
+
+## Residual full-API diagnostic: chronological ruling 124
+
+Ruling: Preserve the residual full API run as failed3226passed/1failed/1intentional live skip,578.08s, and snapshot full metadata before any focused API result overwrite. Its only failure is station-inventory-sync.e2e competing-device repack at service633/test1380 with FK23503 inventory_repack_items_tenant_result_active_date_fk. Do bounded read-only attribution of the failing source/test/schema against the import source base; if no changed import dependency is found, run only the complete failed file once under the same owned-local preflight, with no overlapping DB workload. Continue unaffected browser21 and do not modify Station or repeat full API/aggregate merely to obtain a green headline — the full failure is real evidence requiring attribution, but it does not authorize unrelated inventory redesign or erase the result — cost if wrong: a source-unchanged integration issue can remain unresolved and prevents an aggregate-green claim; preserve exact follow-up result and causal uncertainty for review and final delivery.

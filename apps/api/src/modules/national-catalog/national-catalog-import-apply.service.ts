@@ -253,6 +253,15 @@ export class NationalCatalogImportApplyService {
             item.productResult === "cancelled"
           )
             return;
+          // Expiry cleanup may commit a terminal failure after the product rollback.
+          if (
+            item.productResult === "failed" &&
+            (item.errorCode !== "infrastructure_failure" ||
+              item.attempts >= 4 ||
+              !item.nextAttemptAt ||
+              item.nextAttemptAt.getTime() > Date.now())
+          )
+            return;
           const attempts = item.attempts + 1;
           await tx
             .update(receipts)
