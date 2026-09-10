@@ -3,12 +3,15 @@ import { test } from "node:test";
 
 import {
   DEFAULT_LAYOUT,
+  buildAbstractPage,
   buildContentsLines,
+  extractAbstract,
   layoutDocument,
   paginateListing,
   selectFragment,
   wrapLine,
   wrapPath,
+  wrapWords,
 } from "../listing.mjs";
 
 const layout = { ...DEFAULT_LAYOUT, columns: 40, linesPerPage: 12, minimumLinesForFileHeader: 3 };
@@ -103,4 +106,33 @@ test("layoutDocument accounts for title and contents pages and reports real star
   assert.match(contents.at(-2) ?? "", /^1 {3}a\.ts/u);
   assert.match(contents.at(-1) ?? "", /3–20 из 30 {2,}\d+$/u);
   assert.ok(document.pages.every((page) => page.lines.length <= tall.linesPerPage));
+});
+
+test("wrapWords keeps words whole and hard-splits only oversized ones", () => {
+  assert.deepEqual(wrapWords("раз два три четыре", 8), ["раз два", "три", "четыре"]);
+  assert.deepEqual(wrapWords("abcdefghij kl", 4), ["abcd", "efgh", "ij", "kl"]);
+  assert.deepEqual(wrapWords("   ", 4), []);
+});
+
+test("extractAbstract returns one edition as a single paragraph", () => {
+  const markdown =
+    "# Реферат\n\nвступление\n\n## Основная редакция\n\nПервая строка\nвторая строка.\n\n## Короткая редакция\n\nКоротко.\n";
+  assert.equal(extractAbstract(markdown, "Основная редакция"), "Первая строка вторая строка.");
+  assert.equal(extractAbstract(markdown, "Короткая редакция"), "Коротко.");
+  assert.throws(() => extractAbstract(markdown, "Нет такой"), /no section/u);
+  assert.throws(() => extractAbstract("## Пустая\n\n## Другая\n", "Пустая"), /empty/u);
+});
+
+test("buildAbstractPage wraps the abstract and reports its length", () => {
+  const meta = {
+    title: "Маркиро",
+    holder: "Правообладатель",
+    authors: ["Автор"],
+    version: "1.0",
+    year: 2026,
+  };
+  const lines = buildAbstractPage(meta, "слово ".repeat(30).trim(), 40);
+  assert.ok(lines.every((line) => Array.from(line).length <= 40));
+  assert.ok(lines.includes("Год создания: 2026"));
+  assert.ok(lines.includes("Объём реферата: 179 знаков."));
 });

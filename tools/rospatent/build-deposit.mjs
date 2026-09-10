@@ -15,7 +15,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { DEFAULT_LAYOUT, layoutDocument, selectFragment } from "./listing.mjs";
+import {
+  DEFAULT_LAYOUT,
+  buildAbstractPage,
+  extractAbstract,
+  layoutDocument,
+  selectFragment,
+} from "./listing.mjs";
 import { A4, PdfDocument, parseTrueTypeFont } from "./pdf.mjs";
 
 const TOOL_ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -23,6 +29,9 @@ export const REPOSITORY_ROOT = path.resolve(TOOL_ROOT, "../..");
 const FONT_ROOT = path.join(REPOSITORY_ROOT, "packages/legal-documents/fonts");
 const DEFAULT_MANIFEST = "docs/registration/rospatent/deposit-manifest.json";
 const DEFAULT_OUT = "docs/registration/rospatent/build";
+const DEFAULT_ABSTRACT = "docs/registration/rospatent/abstract.md";
+const ABSTRACT_EDITION = "Основная редакция";
+const ABSTRACT_COLUMNS = 80;
 
 const ALLOWED_EXTENSIONS = new Set([".ts", ".tsx", ".rs", ".kt", ".sql", ".mjs", ".astro", ".css"]);
 const FORBIDDEN_SEGMENTS = new Set(["node_modules", "dist", "target", "build", ".git"]);
@@ -73,6 +82,14 @@ export function validateManifest(manifest) {
   }
   if (!Array.isArray(manifest.files) || manifest.files.length === 0) {
     throw new Error("manifest.files must list at least one file");
+  }
+  if (manifest.abstract !== undefined) {
+    if (typeof manifest.abstract !== "string" || !manifest.abstract.endsWith(".md")) {
+      throw new Error("manifest.abstract must point at a Markdown file");
+    }
+    if (path.isAbsolute(manifest.abstract) || manifest.abstract.split("/").includes("..")) {
+      throw new Error("manifest.abstract must stay inside the repository");
+    }
   }
   const seen = new Set();
   for (const file of manifest.files) {
@@ -130,53 +147,121 @@ async function loadEntries(manifest, root) {
   return entries;
 }
 
-export function renderPdf({ pdf, document, meta, regular, bold }) {
+async function loadFonts(pdf) {
+  const regular = pdf.registerFont(
+    parseTrueTypeFont(await readFile(path.join(FONT_ROOT, "IBMPlexMono-Regular.ttf"))),
+    "IBMPlexMono-Regular",
+  );
+  const bold = pdf.registerFont(
+    parseTrueTypeFont(await readFile(path.join(FONT_ROOT, "IBMPlexMono-Bold.ttf"))),
+    "IBMPlexMono-Bold",
+  );
+  return { regular, bold };
+}
+
+function pageRuns({ page, pageNumber, totalPages, headerLeft, footer, regular, bold }) {
   const columnWidth = (GEOMETRY.bodySize * 600) / 1000;
   const rightEdge = GEOMETRY.left + columnWidth * DEFAULT_LAYOUT.columns;
-  document.pages.forEach((page, pageIndex) => {
-    const pageNumber = pageIndex + 1;
-    const runs = [];
-    const headerLeft = `${meta.title} — депонируемые материалы (исходный текст)`;
-    const headerRight = `Лист ${pageNumber} из ${document.totalPages}`;
-    runs.push({
+  const headerRight = `Лист ${pageNumber} из ${totalPages}`;
+  const runs = [
+    {
       usage: bold,
       size: GEOMETRY.headerSize,
       x: GEOMETRY.left,
       y: GEOMETRY.headerBaseline,
       text: headerLeft,
-    });
-    runs.push({
+    },
+    {
       usage: bold,
       size: GEOMETRY.headerSize,
       x: rightEdge - bold.measure(headerRight) * GEOMETRY.headerSize,
       y: GEOMETRY.headerBaseline,
       text: headerRight,
-    });
-    page.lines.forEach((line, lineIndex) => {
-      if (line === "") return;
-      runs.push({
-        usage: regular,
-        size: GEOMETRY.bodySize,
-        x: GEOMETRY.left,
-        y: GEOMETRY.firstBaseline - lineIndex * GEOMETRY.bodyLeading,
-        text: line,
-      });
-    });
-    const footer = page.file ? `Файл: ${page.file}` : `${meta.holder}. ${meta.sourceState}`;
+    },
+  ];
+  page.lines.forEach((line, lineIndex) => {
+    if (line === "") return;
     runs.push({
       usage: regular,
-      size: GEOMETRY.headerSize,
+      size: GEOMETRY.bodySize,
       x: GEOMETRY.left,
-      y: GEOMETRY.footerBaseline,
-      text: footer,
-    });
-    pdf.addPage({
-      runs,
-      lines: [
-        { x1: GEOMETRY.left, y1: GEOMETRY.ruleY, x2: rightEdge, y2: GEOMETRY.ruleY, width: 0.6 },
-      ],
+      y: GEOMETRY.firstBaseline - lineIndex * GEOMETRY.bodyLeading,
+      text: line,
     });
   });
+  runs.push({
+    usage: regular,
+    size: GEOMETRY.headerSize,
+    x: GEOMETRY.left,
+    y: GEOMETRY.footerBaseline,
+    text: footer,
+  });
+  return {
+    runs,
+    lines: [
+      { x1: GEOMETRY.left, y1: GEOMETRY.ruleY, x2: rightEdge, y2: GEOMETRY.ruleY, width: 0.6 },
+    ],
+  };
+}
+
+export function renderPdf({ pdf, document, meta, regular, bold }) {
+  const headerLeft = `${meta.title} — депонируемые материалы (исходный текст)`;
+  document.pages.forEach((page, pageIndex) => {
+    const footer = page.file ? `Файл: ${page.file}` : `${meta.holder}. ${meta.sourceState}`;
+    pdf.addPage(
+      pageRuns({
+        page,
+        pageNumber: pageIndex + 1,
+        totalPages: document.totalPages,
+        headerLeft,
+        footer,
+        regular,
+        bold,
+      }),
+    );
+  });
+}
+
+async function buildAbstractPdf({ root, manifest, meta, creationDate, outDir }) {
+  const abstractPath = path.resolve(root, manifest.abstract ?? DEFAULT_ABSTRACT);
+  const text = extractAbstract(await readFile(abstractPath, "utf8"), ABSTRACT_EDITION);
+  const lines = buildAbstractPage(meta, text, ABSTRACT_COLUMNS);
+  if (lines.length > DEFAULT_LAYOUT.linesPerPage) {
+    throw new Error("abstract does not fit on one page; shorten the main edition");
+  }
+  const pdf = new PdfDocument({
+    title: `${manifest.title} — реферат программы для ЭВМ`,
+    author: manifest.holder,
+    subject: `Реферат программы для ЭВМ «${manifest.title}», версия ${manifest.version}`,
+    creator: "Markiro tools/rospatent/build-deposit.mjs",
+    creationDate,
+  });
+  const { regular, bold } = await loadFonts(pdf);
+  pdf.addPage(
+    pageRuns({
+      page: { lines },
+      pageNumber: 1,
+      totalPages: 1,
+      headerLeft: `${meta.title} — реферат`,
+      footer: `${meta.holder}. ${meta.sourceState}`,
+      regular,
+      bold,
+    }),
+  );
+  const bytes = pdf.render();
+  const pdfPath = path.join(outDir, "abstract.pdf");
+  await writeFile(pdfPath, bytes);
+  return {
+    pdfPath,
+    summary: {
+      path: path.relative(root, pdfPath),
+      source: path.relative(root, abstractPath),
+      edition: ABSTRACT_EDITION,
+      characters: Array.from(text).length,
+      bytes: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    },
+  };
 }
 
 export async function buildDeposit(options) {
@@ -210,14 +295,7 @@ export async function buildDeposit(options) {
     creator: "Markiro tools/rospatent/build-deposit.mjs",
     creationDate,
   });
-  const regular = pdf.registerFont(
-    parseTrueTypeFont(await readFile(path.join(FONT_ROOT, "IBMPlexMono-Regular.ttf"))),
-    "IBMPlexMono-Regular",
-  );
-  const bold = pdf.registerFont(
-    parseTrueTypeFont(await readFile(path.join(FONT_ROOT, "IBMPlexMono-Bold.ttf"))),
-    "IBMPlexMono-Bold",
-  );
+  const { regular, bold } = await loadFonts(pdf);
   renderPdf({ pdf, document, meta, regular, bold });
   const bytes = pdf.render();
 
@@ -225,6 +303,7 @@ export async function buildDeposit(options) {
   await mkdir(outDir, { recursive: true });
   const pdfPath = path.join(outDir, "deposit.pdf");
   await writeFile(pdfPath, bytes);
+  const abstract = await buildAbstractPdf({ root, manifest, meta, creationDate, outDir });
   const summary = {
     title: manifest.title,
     version: manifest.version,
@@ -239,6 +318,7 @@ export async function buildDeposit(options) {
       bytes: bytes.length,
       sha256: createHash("sha256").update(bytes).digest("hex"),
     },
+    abstract: abstract.summary,
     files: entries.map((entry, index) => ({
       path: entry.path,
       lines: [entry.from, entry.to],
@@ -249,20 +329,23 @@ export async function buildDeposit(options) {
   };
   const summaryPath = path.join(outDir, "deposit-summary.json");
   await writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
-  return { summary, pdfPath, summaryPath };
+  return { summary, pdfPath, abstractPath: abstract.pdfPath, summaryPath };
 }
 
 const invokedDirectly =
   process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
   try {
-    const { summary, pdfPath, summaryPath } = await buildDeposit(
+    const { summary, pdfPath, abstractPath, summaryPath } = await buildDeposit(
       parseArguments(process.argv.slice(2)),
     );
     console.log(
       `Deposit listing: ${summary.pages} pages, ${summary.files.length} files, ${summary.sourceLines} source lines`,
     );
     console.log(`PDF: ${pdfPath} (${summary.pdf.bytes} bytes, sha256 ${summary.pdf.sha256})`);
+    console.log(
+      `Abstract: ${abstractPath} (${summary.abstract.characters} characters, sha256 ${summary.abstract.sha256})`,
+    );
     console.log(`Summary: ${summaryPath}`);
   } catch (error) {
     console.error(`build-deposit: ${error instanceof Error ? error.message : String(error)}`);

@@ -48,6 +48,8 @@ test("validateManifest rejects incomplete manifests and duplicates", () => {
   assert.throws(() => validateManifest({ ...baseManifest, title: " " }), /title/u);
   assert.throws(() => validateManifest({ ...baseManifest, authors: [] }), /authors/u);
   assert.throws(() => validateManifest({ ...baseManifest, maxPages: 0 }), /maxPages/u);
+  assert.throws(() => validateManifest({ ...baseManifest, abstract: "/etc/x.md" }), /inside/u);
+  assert.throws(() => validateManifest({ ...baseManifest, abstract: "docs/a.txt" }), /Markdown/u);
   assert.throws(
     () =>
       validateManifest({ ...baseManifest, files: [...baseManifest.files, ...baseManifest.files] }),
@@ -76,6 +78,11 @@ test("buildDeposit writes the PDF and a summary, and enforces maxPages", async (
     const written = JSON.parse(await readFile(path.join(out, "deposit-summary.json"), "utf8"));
     assert.equal(written.pdf.sha256, summary.pdf.sha256);
     assert.equal(written.generatedAt, "2026-09-10T00:00:00.000Z");
+    const abstract = await readFile(path.join(out, "abstract.pdf"));
+    assert.ok(abstract.subarray(0, 8).toString("latin1").startsWith("%PDF-1.5"));
+    assert.equal(summary.abstract.bytes, abstract.length);
+    assert.equal(summary.abstract.edition, "Основная редакция");
+    assert.ok(summary.abstract.characters > 500);
 
     await writeFile(manifestPath, JSON.stringify({ ...baseManifest, maxPages: 2 }));
     await assert.rejects(

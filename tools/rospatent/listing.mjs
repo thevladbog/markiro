@@ -238,3 +238,71 @@ export function layoutDocument(meta, entries, layout = DEFAULT_LAYOUT) {
   if (pages.length !== totalPages) throw new Error("page accounting drifted");
   return { pages, totalPages, sourceLines, bodyStartPage, starts: body.starts };
 }
+
+/** Word-wraps prose to `width` columns; words longer than the width are hard-split. */
+export function wrapWords(text, width) {
+  const lines = [];
+  let current = "";
+  for (const word of text.split(/\s+/u).filter(Boolean)) {
+    const candidate = current === "" ? word : `${current} ${word}`;
+    if (Array.from(candidate).length <= width) {
+      current = candidate;
+      continue;
+    }
+    if (current !== "") lines.push(current);
+    const chunks = wrapLine(word, width);
+    lines.push(...chunks.slice(0, -1));
+    current = chunks.at(-1) ?? "";
+  }
+  if (current !== "") lines.push(current);
+  return lines;
+}
+
+/**
+ * Pulls one edition of the abstract out of abstract.md: the prose under the
+ * `## <heading>` section, joined into a single paragraph.
+ */
+export function extractAbstract(markdown, heading) {
+  const lines = markdown.split("\n");
+  const start = lines.findIndex((line) => line.trim() === `## ${heading}`);
+  if (start === -1) throw new Error(`abstract.md has no section "## ${heading}"`);
+  const body = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^#{1,6} /u.test(line)) break;
+    body.push(line);
+  }
+  const text = body.join(" ").replace(/\s+/gu, " ").trim();
+  if (text === "") throw new Error(`abstract section "${heading}" is empty`);
+  return text;
+}
+
+export function buildAbstractPage(meta, abstractText, columns) {
+  const center = (text) => {
+    const pad = Math.max(0, Math.floor((columns - Array.from(text).length) / 2));
+    return " ".repeat(pad) + text;
+  };
+  const authors = meta.authors.join(", ");
+  return [
+    "",
+    "",
+    center("РЕФЕРАТ"),
+    center("программы для ЭВМ"),
+    "",
+    "",
+    `Название программы для ЭВМ: ${meta.title}`,
+    `Правообладатель: ${meta.holder}`,
+    `Автор${meta.authors.length > 1 ? "ы" : ""}: ${authors}`,
+    `Версия программы: ${meta.version}`,
+    `Год создания: ${meta.year}`,
+    "",
+    "",
+    ...wrapWords(abstractText, columns),
+    "",
+    "",
+    `Объём реферата: ${Array.from(abstractText).length} знаков.`,
+    "",
+    "",
+    "",
+    center(`${meta.holder}, ${meta.year}`),
+  ].flatMap((line) => wrapLine(line, columns));
+}
