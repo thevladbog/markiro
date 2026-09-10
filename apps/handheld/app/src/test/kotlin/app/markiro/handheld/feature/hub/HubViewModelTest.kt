@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.MainDispatcherRule
 import app.markiro.handheld.core.auth.OperatorRecord
+import app.markiro.handheld.core.inventory.InventorySyncEngine
 import app.markiro.handheld.core.network.IdentityResponse
 import app.markiro.handheld.core.network.InventoryBundlePageDto
 import app.markiro.handheld.core.network.InventoryManifestDto
@@ -27,6 +28,7 @@ import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.network.ValidationPrintDto
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.InventoryFixtures
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.sync.SyncEngine
 import app.markiro.handheld.core.sync.SyncTransport
@@ -107,10 +109,25 @@ class HubViewModelTest {
             db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
         )
+        val inventoryEngine = InventorySyncEngine(
+            db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
+            NetworkModule.strictJson(), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+        )
         return HubViewModel(
-            api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(),
+            api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(),
             scannerLabel = { "встроенный" }, now = { clock }, tick = flowOf(Unit),
         )
+    }
+
+    @Test
+    fun anActiveInventoryIsPinnedForContinuing() = runTest {
+        db.inventoryTaskDao().upsert(InventoryFixtures.task("i1"))
+        db.deviceConfigDao().upsert(paired.copy(activeInventoryId = "i1"))
+        val vm = vm(api())
+        val ui = vm.state.first { it.activeInventoryId != null }
+        assertEquals("INV-0007", ui.continueInventoryNumber)
+        db.inventoryTaskDao().setState("i1", "closed")
+        assertNull(vm.state.first { it.activeInventoryId == null }.continueInventoryNumber)
     }
 
     @Test

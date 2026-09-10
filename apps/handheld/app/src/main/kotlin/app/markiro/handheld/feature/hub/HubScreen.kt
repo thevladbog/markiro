@@ -92,7 +92,14 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit) {
                     tile,
                     statusTone = if (state.continueShiftNumber != null) Tone.Ok else Tone.Neutral,
                 )
-                Tile(Icons.Outlined.Inventory2, stringResource(R.string.hub_tile_inventory), inventoriesLabel(state.inventories), { onTile(HubTile.INVENTORY) }, tile)
+                Tile(
+                    Icons.Outlined.Inventory2,
+                    stringResource(R.string.hub_tile_inventory),
+                    state.continueInventoryNumber?.let { stringResource(R.string.hub_inventory_continue, it) } ?: inventoriesLabel(state.inventories),
+                    { onTile(HubTile.INVENTORY) },
+                    tile,
+                    statusTone = if (state.continueInventoryNumber != null) Tone.Ok else Tone.Neutral,
+                )
             }
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
                 Tile(Icons.Outlined.QrCodeScanner, stringResource(R.string.hub_tile_check), stringResource(R.string.hub_check_status), { onTile(HubTile.CHECK) }, tile)
