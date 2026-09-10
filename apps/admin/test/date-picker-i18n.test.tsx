@@ -38,7 +38,7 @@ function listSourceFiles(directory: string): string[] {
 /** Slices out each `<DatePicker ... />`, ignoring `>` nested inside braces. */
 function extractDatePickerElements(source: string): string[] {
   const elements: string[] = [];
-  for (let start = source.indexOf("<DatePicker"); start !== -1; ) {
+  for (let start = source.indexOf("<DatePicker"); start !== -1;) {
     let depth = 0;
     for (let index = start; index < source.length; index += 1) {
       const char = source[index];
@@ -64,7 +64,10 @@ function jsonResponse(body: unknown): Response {
 }
 
 function renderInventoryParameters() {
-  vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ items: [] })));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => jsonResponse({ items: [] })),
+  );
   render(
     <QueryClientProvider
       client={
@@ -124,7 +127,10 @@ describe("inventory parameters date pickers", () => {
 
   it("shows the English empty-value placeholder when no period is set yet", async () => {
     await i18n.changeLanguage("en");
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ items: [] })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ items: [] })),
+    );
     render(
       <QueryClientProvider
         client={
