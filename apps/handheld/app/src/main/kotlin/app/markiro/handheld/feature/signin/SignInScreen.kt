@@ -23,10 +23,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.markiro.handheld.R
 import app.markiro.handheld.core.auth.OperatorRecord
 import app.markiro.handheld.core.design.AppBar
 import app.markiro.handheld.core.design.Keypad
@@ -70,20 +72,20 @@ private fun LoginStep(state: SignInUi.Login, cb: SignInCallbacks) {
             verticalArrangement = Arrangement.Center,
         ) {
             Icon(Icons.Outlined.QrCodeScanner, contentDescription = null, tint = c.fg1, modifier = Modifier.size(36.dp))
-            Text("Сканируйте бейдж", style = t.strong, color = c.fg1)
+            Text(stringResource(R.string.signin_scan_badge), style = t.strong, color = c.fg1)
             Text(
-                "нажмите триггер · или введите табельный номер ниже",
+                stringResource(R.string.signin_scan_hint),
                 style = t.caption,
                 color = c.fg3,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = MarkiroSizes.sp4),
             )
-            if (state.error == SignInError.BADGE_UNKNOWN) Text("Бейдж не найден", style = t.caption, color = c.errFg)
-            if (state.error == SignInError.ROSTER_EMPTY) Text("Список операторов ещё не загружен", style = t.caption, color = c.warnFg)
+            if (state.error == SignInError.BADGE_UNKNOWN) Text(stringResource(R.string.signin_badge_unknown), style = t.caption, color = c.errFg)
+            if (state.error == SignInError.ROSTER_EMPTY) Text(stringResource(R.string.signin_roster_empty), style = t.caption, color = c.warnFg)
         }
-        Field(label = "Табельный №", value = state.login)
+        Field(label = stringResource(R.string.signin_login_field), value = state.login)
         Keypad(cb.onDigit, cb.onBackspace, cb.onConfirm, confirmEnabled = state.login.isNotEmpty())
-        MarkiroTextButton("Найти по имени", cb.onOpenSearch)
+        MarkiroTextButton(stringResource(R.string.signin_find_by_name), cb.onOpenSearch)
     }
 }
 
@@ -97,10 +99,14 @@ private fun PinStep(state: SignInUi.Pin, cb: SignInCallbacks) {
             Box(Modifier.size(44.dp).clip(CircleShape).background(c.surfacePanel), contentAlignment = Alignment.Center) {
                 Text(initials, style = t.strong.copy(fontSize = 16.sp), color = c.fg1)
             }
-            Text(state.operatorName ?: "Табельный ${state.login}", style = t.strong, color = c.fg1)
-            Text(if (state.lockMode) "Введите PIN или сканируйте бейдж" else "табельный ${state.login}", style = t.caption, color = c.fg3)
-            if (state.error == SignInError.WRONG_PIN) Text("Неверный PIN", style = t.caption, color = c.errFg)
-            if (state.error == SignInError.BADGE_UNKNOWN) Text("Бейдж не найден", style = t.caption, color = c.errFg)
+            Text(state.operatorName ?: stringResource(R.string.signin_login_title, state.login), style = t.strong, color = c.fg1)
+            Text(
+                if (state.lockMode) stringResource(R.string.signin_lock_hint) else stringResource(R.string.signin_login_caption, state.login),
+                style = t.caption,
+                color = c.fg3,
+            )
+            if (state.error == SignInError.WRONG_PIN) Text(stringResource(R.string.signin_wrong_pin), style = t.caption, color = c.errFg)
+            if (state.error == SignInError.BADGE_UNKNOWN) Text(stringResource(R.string.signin_badge_unknown), style = t.caption, color = c.errFg)
         }
         Row(
             Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(MarkiroSizes.radius)).background(c.surfaceCard)
@@ -108,12 +114,12 @@ private fun PinStep(state: SignInUi.Pin, cb: SignInCallbacks) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("PIN", style = t.body.copy(fontSize = 15.sp), color = c.fg3)
+            Text(stringResource(R.string.signin_pin), style = t.body.copy(fontSize = 15.sp), color = c.fg3)
             PinDots(total = maxOf(4, state.pin.length), filled = state.pin.length)
         }
         Keypad(cb.onDigit, cb.onBackspace, cb.onConfirm, confirmEnabled = state.pin.length >= 4)
         MarkiroTextButton(
-            if (state.lockMode) "Сменить оператора" else "Не тот сотрудник",
+            if (state.lockMode) stringResource(R.string.signin_switch_operator) else stringResource(R.string.signin_not_me),
             if (state.lockMode) cb.onSwitchOperator else cb.onBack,
         )
     }
@@ -124,16 +130,16 @@ private fun SearchStep(state: SignInUi.Search, cb: SignInCallbacks) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     Column(Modifier.fillMaxSize()) {
-        AppBar("Найти по имени", onBack = cb.onBack)
+        AppBar(stringResource(R.string.signin_find_by_name), onBack = cb.onBack)
         Column(Modifier.padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
             OutlinedTextField(
                 value = state.query,
                 onValueChange = cb.onSearchQuery,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Фамилия или имя") },
+                label = { Text(stringResource(R.string.signin_search_field)) },
             )
-            Text("Показаны первые 5 совпадений. Уточните запрос, если нужного нет.", style = t.caption, color = c.fg3)
+            Text(stringResource(R.string.signin_search_hint), style = t.caption, color = c.fg3)
             state.results.forEach { operator ->
                 Row(
                     Modifier.fillMaxWidth().height(MarkiroSizes.controlRow).clickable { cb.onPickOperator(operator) },
@@ -141,7 +147,7 @@ private fun SearchStep(state: SignInUi.Search, cb: SignInCallbacks) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(operator.name, style = t.body.copy(fontWeight = FontWeight.SemiBold), color = c.fg1)
-                    Text("№ ${operator.login}", style = t.caption, color = c.fg3)
+                    Text(stringResource(R.string.signin_number_short, operator.login), style = t.caption, color = c.fg3)
                 }
             }
         }

@@ -20,6 +20,11 @@ import javax.inject.Singleton
 @Retention(AnnotationRetention.BINARY)
 annotation class Bare
 
+/** JSON for sync payloads: explicit nulls (zod `.nullable()` requires the key) and stable output. */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class Strict
+
 @Module
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
@@ -28,6 +33,15 @@ object NetworkModule {
     fun json(): Json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
+    }
+
+    @Provides
+    @Singleton
+    @Strict
+    fun strictJson(): Json = Json {
+        ignoreUnknownKeys = true
+        explicitNulls = true
+        encodeDefaults = true
     }
 
     @Provides

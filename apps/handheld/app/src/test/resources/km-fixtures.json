@@ -1,0 +1,407 @@
+{
+  "parse": [
+    {
+      "name": "plain gtin and serial",
+      "raw": "010460068200001321abcDEF1234567",
+      "expected": {
+        "canonicalRaw": "010460068200001321abcDEF1234567",
+        "gtin14": "04600682000013",
+        "serial": "abcDEF1234567",
+        "ais": {},
+        "key": "010460068200001321abcDEF1234567",
+        "hash": "857a0dac39c8a99151a9829fb6235f723e165151e60118364e0a025cd50ade8b"
+      }
+    },
+    {
+      "name": "crypto tail 93",
+      "raw": "010460068200001321abcDEF1234567\u001d93AbCd",
+      "expected": {
+        "canonicalRaw": "010460068200001321abcDEF1234567\u001d93AbCd",
+        "gtin14": "04600682000013",
+        "serial": "abcDEF1234567",
+        "ais": {
+          "93": "AbCd"
+        },
+        "key": "010460068200001321abcDEF1234567",
+        "hash": "857a0dac39c8a99151a9829fb6235f723e165151e60118364e0a025cd50ade8b"
+      }
+    },
+    {
+      "name": "crypto tail 91 92 93",
+      "raw": "010460068200001321abcDEF1234567\u001d91EE07\u001d92dGVzdA==\u001d93AbCd",
+      "expected": {
+        "canonicalRaw": "010460068200001321abcDEF1234567\u001d91EE07\u001d92dGVzdA==\u001d93AbCd",
+        "gtin14": "04600682000013",
+        "serial": "abcDEF1234567",
+        "ais": {
+          "91": "EE07",
+          "92": "dGVzdA==",
+          "93": "AbCd"
+        },
+        "key": "010460068200001321abcDEF1234567",
+        "hash": "857a0dac39c8a99151a9829fb6235f723e165151e60118364e0a025cd50ade8b"
+      }
+    },
+    {
+      "name": "aim prefix",
+      "raw": "]d2010460068200001321abcDEF1234567\u001d93AbCd",
+      "expected": {
+        "canonicalRaw": "010460068200001321abcDEF1234567\u001d93AbCd",
+        "gtin14": "04600682000013",
+        "serial": "abcDEF1234567",
+        "ais": {
+          "93": "AbCd"
+        },
+        "key": "010460068200001321abcDEF1234567",
+        "hash": "857a0dac39c8a99151a9829fb6235f723e165151e60118364e0a025cd50ade8b"
+      }
+    },
+    {
+      "name": "leading and trailing space and tab",
+      "raw": " \t010460068200001321abcDEF1234567\t ",
+      "expected": {
+        "canonicalRaw": "010460068200001321abcDEF1234567",
+        "gtin14": "04600682000013",
+        "serial": "abcDEF1234567",
+        "ais": {},
+        "key": "010460068200001321abcDEF1234567",
+        "hash": "857a0dac39c8a99151a9829fb6235f723e165151e60118364e0a025cd50ade8b"
+      }
+    },
+    {
+      "name": "aim prefix then space",
+      "raw": "]d2 010460068200001321abcDEF1234567",
+      "expected": {
+        "canonicalRaw": "010460068200001321abcDEF1234567",
+        "gtin14": "04600682000013",
+        "serial": "abcDEF1234567",
+        "ais": {},
+        "key": "010460068200001321abcDEF1234567",
+        "hash": "857a0dac39c8a99151a9829fb6235f723e165151e60118364e0a025cd50ade8b"
+      }
+    },
+    {
+      "name": "serial with symbols",
+      "raw": "010460068200001321!\"%&'()*+,-./:;<=>?_",
+      "expected": {
+        "canonicalRaw": "010460068200001321!\"%&'()*+,-./:;<=>?_",
+        "gtin14": "04600682000013",
+        "serial": "!\"%&'()*+,-./:;<=>?_",
+        "ais": {},
+        "key": "010460068200001321!\"%&'()*+,-./:;<=>?_",
+        "hash": "0e6a777f50660237e45e7ed7224dca9bbad51490b682474f45aea706ef135ff2"
+      }
+    },
+    {
+      "name": "serial of one character",
+      "raw": "010460068200001321x",
+      "expected": {
+        "canonicalRaw": "010460068200001321x",
+        "gtin14": "04600682000013",
+        "serial": "x",
+        "ais": {},
+        "key": "010460068200001321x",
+        "hash": "ab9ebbf2c07815d17f54193469357410e59a033d771b75e0d2b8eed31cf7c9a1"
+      }
+    },
+    {
+      "name": "gtin13 zero padded",
+      "raw": "01460068200001321x",
+      "expected": {
+        "error": "KM_NO_SERIAL"
+      }
+    },
+    {
+      "name": "unicode serial",
+      "raw": "010460068200001321сериЯ",
+      "expected": {
+        "canonicalRaw": "010460068200001321сериЯ",
+        "gtin14": "04600682000013",
+        "serial": "сериЯ",
+        "ais": {},
+        "key": "010460068200001321сериЯ",
+        "hash": "c3e9a72d444b2354cb189b301507260b2cdcb1eaabc9d6cf0989d6025c0df66e"
+      }
+    },
+    {
+      "name": "exactly 1024 bytes",
+      "raw": "010460068200001321aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected": {
+        "canonicalRaw": "010460068200001321aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "gtin14": "04600682000013",
+        "serial": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "ais": {},
+        "key": "010460068200001321aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "hash": "4ff4a52599c27d47f6910fef07bf513bd0d58aaa563d8a746bdd8c0e83f57379"
+      }
+    },
+    {
+      "name": "empty",
+      "raw": "",
+      "expected": {
+        "error": "KM_EMPTY"
+      }
+    },
+    {
+      "name": "only spaces",
+      "raw": "   ",
+      "expected": {
+        "error": "KM_EMPTY"
+      }
+    },
+    {
+      "name": "sscc not a km",
+      "raw": "00346006820000000014",
+      "expected": {
+        "error": "KM_NO_GTIN"
+      }
+    },
+    {
+      "name": "plain gtin not a km",
+      "raw": "04600682000013",
+      "expected": {
+        "error": "KM_NO_GTIN"
+      }
+    },
+    {
+      "name": "wrong first ai",
+      "raw": "020460068200001321x",
+      "expected": {
+        "error": "KM_NO_GTIN"
+      }
+    },
+    {
+      "name": "short gtin field",
+      "raw": "01046006820000",
+      "expected": {
+        "error": "KM_BAD_GTIN"
+      }
+    },
+    {
+      "name": "gtin with letter",
+      "raw": "0104600682A0001321x",
+      "expected": {
+        "error": "KM_BAD_GTIN"
+      }
+    },
+    {
+      "name": "bad check digit",
+      "raw": "010460068200001421x",
+      "expected": {
+        "error": "GTIN_INVALID"
+      }
+    },
+    {
+      "name": "missing serial ai",
+      "raw": "0104600682000013",
+      "expected": {
+        "error": "KM_NO_SERIAL"
+      }
+    },
+    {
+      "name": "empty serial",
+      "raw": "010460068200001321",
+      "expected": {
+        "error": "KM_NO_SERIAL"
+      }
+    },
+    {
+      "name": "empty serial before gs",
+      "raw": "010460068200001321\u001d93AbCd",
+      "expected": {
+        "error": "KM_NO_SERIAL"
+      }
+    },
+    {
+      "name": "terminal gs",
+      "raw": "010460068200001321abcDEF1234567\u001d",
+      "expected": {
+        "error": "KM_EMPTY_AI"
+      }
+    },
+    {
+      "name": "double gs",
+      "raw": "010460068200001321abcDEF1234567\u001d\u001d93AbCd",
+      "expected": {
+        "error": "KM_EMPTY_AI"
+      }
+    },
+    {
+      "name": "ai too short",
+      "raw": "010460068200001321abcDEF1234567\u001d9",
+      "expected": {
+        "error": "KM_BAD_AI"
+      }
+    },
+    {
+      "name": "ai two characters no value",
+      "raw": "010460068200001321abcDEF1234567\u001d93",
+      "expected": {
+        "error": "KM_BAD_AI"
+      }
+    },
+    {
+      "name": "non digit ai",
+      "raw": "010460068200001321abcDEF1234567\u001d9xAbCd",
+      "expected": {
+        "error": "KM_BAD_AI"
+      }
+    },
+    {
+      "name": "empty ai value then more",
+      "raw": "010460068200001321abcDEF1234567\u001d91\u001d93AbCd",
+      "expected": {
+        "error": "KM_EMPTY_AI"
+      }
+    },
+    {
+      "name": "duplicate ai",
+      "raw": "010460068200001321abcDEF1234567\u001d93AbCd\u001d93EfGh",
+      "expected": {
+        "error": "KM_DUPLICATE_AI"
+      }
+    },
+    {
+      "name": "newline inside",
+      "raw": "010460068200001321ab\ncd",
+      "expected": {
+        "error": "KM_BAD_CONTROL"
+      }
+    },
+    {
+      "name": "carriage return at end",
+      "raw": "010460068200001321abcDEF1234567\r",
+      "expected": {
+        "error": "KM_BAD_CONTROL"
+      }
+    },
+    {
+      "name": "nul inside",
+      "raw": "010460068200001321ab\u0000cd",
+      "expected": {
+        "error": "KM_BAD_CONTROL"
+      }
+    },
+    {
+      "name": "del inside",
+      "raw": "010460068200001321abcd",
+      "expected": {
+        "error": "KM_BAD_CONTROL"
+      }
+    },
+    {
+      "name": "replacement character",
+      "raw": "010460068200001321ab�cd",
+      "expected": {
+        "error": "KM_BAD_ENCODING"
+      }
+    },
+    {
+      "name": "unpaired high surrogate",
+      "raw": "010460068200001321ab\ud83dcd",
+      "expected": {
+        "error": "KM_BAD_ENCODING"
+      }
+    },
+    {
+      "name": "unpaired low surrogate",
+      "raw": "010460068200001321ab\ude00cd",
+      "expected": {
+        "error": "KM_BAD_ENCODING"
+      }
+    },
+    {
+      "name": "paired surrogate ok",
+      "raw": "010460068200001321ab😀cd",
+      "expected": {
+        "canonicalRaw": "010460068200001321ab😀cd",
+        "gtin14": "04600682000013",
+        "serial": "ab😀cd",
+        "ais": {},
+        "key": "010460068200001321ab😀cd",
+        "hash": "f73b2d0064436c67fa2e1d6001b15c862e6a3b3622fdcf8850835e9953f902b1"
+      }
+    },
+    {
+      "name": "1025 bytes",
+      "raw": "010460068200001321aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected": {
+        "error": "KM_TOO_LONG"
+      }
+    },
+    {
+      "name": "1024 bytes by utf8 not chars",
+      "raw": "010460068200001321яяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяя",
+      "expected": {
+        "canonicalRaw": "010460068200001321яяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяя",
+        "gtin14": "04600682000013",
+        "serial": "яяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяя",
+        "ais": {},
+        "key": "010460068200001321яяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяя",
+        "hash": "e8d5331c2e4d64365f53df04ddb157a6ec49844427ca1197bdee52f05048ad69"
+      }
+    }
+  ],
+  "verdict": [
+    {
+      "name": "accepted",
+      "raw": "010460068200001321abcDEF1234567\u001d93AbCd",
+      "expectedGtin14": "04600682000013",
+      "knownHashes": [],
+      "verdict": "ok"
+    },
+    {
+      "name": "duplicate by hash ignoring crypto tail",
+      "raw": "010460068200001321abcDEF1234567\u001d93ZZZZ",
+      "expectedGtin14": "04600682000013",
+      "knownHashes": [
+        "857a0dac39c8a99151a9829fb6235f723e165151e60118364e0a025cd50ade8b"
+      ],
+      "verdict": "duplicate"
+    },
+    {
+      "name": "wrong gtin",
+      "raw": "010460068200001321abcDEF1234567\u001d93AbCd",
+      "expectedGtin14": "04600000000015",
+      "knownHashes": [],
+      "verdict": "wrong_gtin"
+    },
+    {
+      "name": "wrong gtin beats duplicate",
+      "raw": "010460068200001321abcDEF1234567\u001d93AbCd",
+      "expectedGtin14": "04600000000015",
+      "knownHashes": [
+        "857a0dac39c8a99151a9829fb6235f723e165151e60118364e0a025cd50ade8b"
+      ],
+      "verdict": "wrong_gtin"
+    },
+    {
+      "name": "garbage is invalid",
+      "raw": "hello",
+      "expectedGtin14": "04600682000013",
+      "knownHashes": [],
+      "verdict": "invalid"
+    },
+    {
+      "name": "sscc is invalid",
+      "raw": "00346006820000000014",
+      "expectedGtin14": "04600682000013",
+      "knownHashes": [],
+      "verdict": "invalid"
+    },
+    {
+      "name": "plain gtin is invalid",
+      "raw": "04600682000013",
+      "expectedGtin14": "04600682000013",
+      "knownHashes": [],
+      "verdict": "invalid"
+    },
+    {
+      "name": "bad check digit is invalid",
+      "raw": "010460068200001421x",
+      "expectedGtin14": "04600682000013",
+      "knownHashes": [],
+      "verdict": "invalid"
+    }
+  ]
+}

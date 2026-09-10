@@ -1595,7 +1595,8 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
   });
 
   // ---------------------------------------------------------------------
-  // Device-key surface (Task 9): lines are cabinet-only; shifts is a mix --
+  // Device-key surface (Task 9): lines are shared (the handheld lists other
+  // lines to pick a shift there); shifts is a mix --
   // the station's own six routes (list, create, open, bundle, reference bundle,
   // box-label-templates -- covered by
   // station-auth.e2e.test.ts, shifts-bundle.e2e.test.ts) stay reachable, but
@@ -1605,14 +1606,14 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
   // `/station-devices`, `/lines`, `/shifts`, matching employees.e2e.test.ts.
   // ---------------------------------------------------------------------
 
-  it("rejects a station api-key: lines are cabinet-only", async () => {
+  it("serves lines to a station api-key: the handheld lists other lines", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
 
     const device = await createTestStationDevice(app!, agent, "Line 1 terminal");
     const apiKey = device.apiKey;
 
-    await request(app!.getHttpServer()).get("/lines").set("x-api-key", apiKey).expect(403);
+    await request(app!.getHttpServer()).get("/lines").set("x-api-key", apiKey).expect(200);
   });
 
   it("still serves lines to a signed-in cabinet user", async () => {

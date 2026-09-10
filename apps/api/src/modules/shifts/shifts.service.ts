@@ -7,6 +7,7 @@ import {
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   InternalServerErrorException,
@@ -448,9 +449,30 @@ export class ShiftsService {
     return readProductLabelEventHistory(this.db, tenantId, id, jobId, query);
   }
 
-  async getShiftSummary(tenantId: string, id: string): Promise<ShiftSummaryDto> {
+  async getShiftSummary(
+    tenantId: string,
+    id: string,
+    deviceId: string | null = null,
+  ): Promise<ShiftSummaryDto> {
     return this.db.transaction(
       async (tx) => {
+        // A device sees only shifts it has entered; the cabinet sees every shift.
+        if (deviceId !== null) {
+          const [participant] = await tx
+            .select({ deviceId: schema.shiftDeviceParticipants.deviceId })
+            .from(schema.shiftDeviceParticipants)
+            .where(
+              and(
+                eq(schema.shiftDeviceParticipants.tenantId, tenantId),
+                eq(schema.shiftDeviceParticipants.shiftId, id),
+                eq(schema.shiftDeviceParticipants.deviceId, deviceId),
+              ),
+            )
+            .limit(1);
+          if (!participant) {
+            throw new ForbiddenException("Device is not a participant of this shift");
+          }
+        }
         const outputResult = await tx.execute(sql<ShiftSummaryOutputRow>`
           with target_shift as (
             select shift.tenant_id, shift.id, shift.mode

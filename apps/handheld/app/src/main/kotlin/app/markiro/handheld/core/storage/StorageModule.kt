@@ -17,13 +17,37 @@ object StorageModule {
     @Provides
     @Singleton
     fun database(@ApplicationContext context: Context): HandheldDatabase =
-        Room.databaseBuilder(context, HandheldDatabase::class.java, "handheld.db").build()
+        Room.databaseBuilder(context, HandheldDatabase::class.java, "handheld.db")
+            .addMigrations(MIGRATION_1_2)
+            .build()
 
     @Provides
     fun deviceConfigDao(db: HandheldDatabase): DeviceConfigDao = db.deviceConfigDao()
 
     @Provides
     fun operatorDao(db: HandheldDatabase): OperatorDao = db.operatorDao()
+
+    @Provides
+    fun shiftDao(db: HandheldDatabase): ShiftDao = db.shiftDao()
+
+    @Provides
+    fun codeDao(db: HandheldDatabase): CodeDao = db.codeDao()
+
+    @Provides
+    fun scanEventDao(db: HandheldDatabase): ScanEventDao = db.scanEventDao()
+
+    @Provides
+    fun outboxDao(db: HandheldDatabase): OutboxDao = db.outboxDao()
+
+    @Provides
+    fun conflictDao(db: HandheldDatabase): ConflictDao = db.conflictDao()
+
+    @Provides
+    fun shiftCloseDao(db: HandheldDatabase): ShiftCloseDao = db.shiftCloseDao()
+
+    @Provides
+    @Singleton
+    fun metaStore(db: HandheldDatabase): MetaStore = MetaStore(db.metaDao())
 
     @Provides
     @Singleton
@@ -40,6 +64,5 @@ object StorageModule {
     fun operatorAuth(roster: OperatorRoster): OperatorAuth = OperatorAuth(roster)
 
     @Provides
-    fun deviceWipe(config: DeviceConfigDao, operators: OperatorDao, credential: CredentialStore): DeviceWipe =
-        DeviceWipe(config, operators, credential)
+    fun deviceWipe(db: HandheldDatabase, credential: CredentialStore): DeviceWipe = DeviceWipe(db, credential)
 }

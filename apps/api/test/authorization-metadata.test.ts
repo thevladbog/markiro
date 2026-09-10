@@ -120,7 +120,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
   [
     LinesController,
     {
-      listLines: readPolicy,
+      listLines: sharedReadPolicy,
       listPresence: readPolicy,
       getLine: readPolicy,
       createLine: writePolicy,
@@ -227,7 +227,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
       getPlanningConfig: sharedReadPolicy,
       listBoxLabelTemplates: sharedReadPolicy,
       listProductLabelTemplates: sharedReadPolicy,
-      getShiftSummary: readPolicy,
+      getShiftSummary: sharedReadPolicy,
       getProductLabels: readPolicy,
       getProductLabelEvents: readPolicy,
       getShift: readPolicy,
