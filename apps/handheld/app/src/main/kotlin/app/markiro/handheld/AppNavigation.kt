@@ -1,9 +1,13 @@
 package app.markiro.handheld
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
@@ -74,7 +78,12 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             StartDestination.SIGN_IN -> Routes.SIGN_IN
             StartDestination.HUB -> Routes.HUB
         }
-        NavHost(nav, startDestination = startRoute) {
+        NavHost(
+            nav,
+            startDestination = startRoute,
+            // API 35 draws edge-to-edge; keep every screen below the status bar and above the gesture area.
+            modifier = Modifier.fillMaxSize().background(MarkiroTheme.colors.surfacePage).safeDrawingPadding(),
+        ) {
             composable(Routes.PAIRING) {
                 val vm: PairingViewModel = hiltViewModel()
                 val state by vm.state.collectAsStateWithLifecycle()

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -31,6 +32,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -194,14 +196,21 @@ fun Tile(icon: ImageVector, label: String, status: String, onClick: () -> Unit, 
     val c = MarkiroTheme.colors
     val shape = RoundedCornerShape(MarkiroSizes.radius)
     Column(
-        modifier = modifier.height(116.dp).clip(shape).background(c.surfaceCard).border(1.dp, c.line, shape)
+        // Minimum height from the brief; a two-line status (offline timestamp) grows the tile instead of clipping.
+        modifier = modifier.heightIn(min = 116.dp).clip(shape).background(c.surfaceCard).border(1.dp, c.line, shape)
             .clickable(onClick = onClick).padding(14.dp),
         verticalArrangement = Arrangement.Bottom,
     ) {
         Icon(icon, contentDescription = null, tint = c.fg1, modifier = Modifier.size(28.dp))
         Spacer(Modifier.height(MarkiroSizes.sp2))
         Text(label, style = MarkiroTheme.type.strong.copy(fontSize = 16.sp), color = c.fg1)
-        Text(status, style = MarkiroTheme.type.caption, color = if (statusTone == Tone.Neutral) c.fg3 else c.tone(statusTone).fg, maxLines = 2)
+        Text(
+            status,
+            style = MarkiroTheme.type.caption,
+            color = if (statusTone == Tone.Neutral) c.fg3 else c.tone(statusTone).fg,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

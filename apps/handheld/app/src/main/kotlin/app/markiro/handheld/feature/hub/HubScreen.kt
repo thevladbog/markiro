@@ -3,7 +3,9 @@ package app.markiro.handheld.feature.hub
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -65,13 +67,15 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit) {
             val stamp = state.countsAt?.takeIf { !state.reachable }
                 ?.let { " · данные на " + SimpleDateFormat("HH:mm", Locale.forLanguageTag("ru")).format(Date(it)) }
                 .orEmpty()
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-                Tile(Icons.Outlined.Factory, "Смена", shiftsLabel(state.shifts) + stamp, { onTile(HubTile.SHIFT) }, Modifier.weight(1f))
-                Tile(Icons.Outlined.Inventory2, "Инвентаризация", inventoriesLabel(state.inventories), { onTile(HubTile.INVENTORY) }, Modifier.weight(1f))
+            // Intrinsic height keeps both tiles of a row equal when one status wraps to two lines.
+            val tile = Modifier.weight(1f).fillMaxHeight()
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
+                Tile(Icons.Outlined.Factory, "Смена", shiftsLabel(state.shifts) + stamp, { onTile(HubTile.SHIFT) }, tile)
+                Tile(Icons.Outlined.Inventory2, "Инвентаризация", inventoriesLabel(state.inventories), { onTile(HubTile.INVENTORY) }, tile)
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-                Tile(Icons.Outlined.QrCodeScanner, "Проверка кода", "нажмите триггер", { onTile(HubTile.CHECK) }, Modifier.weight(1f))
-                Tile(Icons.Outlined.Settings, "Настройки", "принтер не настроен", { onTile(HubTile.SETTINGS) }, Modifier.weight(1f), statusTone = Tone.Warn)
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
+                Tile(Icons.Outlined.QrCodeScanner, "Проверка кода", "нажмите триггер", { onTile(HubTile.CHECK) }, tile)
+                Tile(Icons.Outlined.Settings, "Настройки", "принтер не настроен", { onTile(HubTile.SETTINGS) }, tile, statusTone = Tone.Warn)
             }
         }
     }

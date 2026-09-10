@@ -40,7 +40,9 @@ class RoomProvisioningStore(
                 lineId = device.line?.id,
                 lineName = device.line?.name,
                 kind = device.kind,
-                serverUrl = response.credential.serverUrl.ifBlank { enteredServerUrl },
+                // The origin the device just reached wins over the server's advertised one: a dev API
+                // answers with its own public URL (localhost), which the device cannot dial later.
+                serverUrl = enteredServerUrl.ifBlank { response.credential.serverUrl },
                 pairedAt = now(),
                 rosterFetchedAt = now(),
             ),

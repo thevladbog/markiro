@@ -15,6 +15,7 @@ import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.feature.signin.SessionHolder
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -72,7 +73,7 @@ class HubViewModelTest {
 
     @Test
     fun refreshCountsOpenShiftsAndTasksAndStoresThem() = runTest {
-        val vm = HubViewModel(api(), config, session, reachability, scannerLabel = { "встроенный" }, now = { clock })
+        val vm = HubViewModel(api(), config, session, reachability, scannerLabel = { "встроенный" }, now = { clock }, tick = flowOf(Unit))
         vm.refresh()
         advanceUntilIdle()
         val ui = vm.state.value
@@ -86,7 +87,7 @@ class HubViewModelTest {
     @Test
     fun offlineKeepsCachedCountsAndReportsUnreachable() = runTest {
         configFlow.value = configFlow.value!!.copy(shiftsCount = 3, inventoryCount = 0, countsAt = 900_000L)
-        val vm = HubViewModel(api(fail = true), config, session, reachability, scannerLabel = { "встроенный" }, now = { clock })
+        val vm = HubViewModel(api(fail = true), config, session, reachability, scannerLabel = { "встроенный" }, now = { clock }, tick = flowOf(Unit))
         vm.refresh()
         advanceUntilIdle()
         val ui = vm.state.value
@@ -97,7 +98,7 @@ class HubViewModelTest {
 
     @Test
     fun signOutClearsTheSession() = runTest {
-        val vm = HubViewModel(api(), config, session, reachability, scannerLabel = { "встроенный" }, now = { clock })
+        val vm = HubViewModel(api(), config, session, reachability, scannerLabel = { "встроенный" }, now = { clock }, tick = flowOf(Unit))
         vm.signOut()
         assertNull(session.state.value.operator)
     }
