@@ -3,8 +3,9 @@
 **Date:** 2026-09-10
 
 **Status:** Implemented on 2026-09-11 on branch `worktree-tsd-aggregation`.
-Automated gates green; the manual emulator walk-through is **not yet done** —
-see «Risks and open points».
+Automated gates green. The emulator walk-through was run and found six defects,
+listed under «Risks and open points»; the last of them is why a full box could
+sit refusing to close.
 
 **Scope:** Fifth implementation slice of design brief 10
 (`docs/design-briefs/10-tsd-handheld.md`), after the foundation
@@ -286,13 +287,27 @@ more of.
 
 ## Risks and open points
 
-- **The manual emulator walk-through has not been run.** It needs a cabinet
-  stand with an aggregation shift that has a box capacity, a box template and a
-  counterparty with a GLN as its SSCC issuer, plus an emulator and a stand-in
-  printer. This is not a formality: in the printing slice the same step found
-  four defects no unit test caught, all of them in the seam between screens and
-  states, which is what this slice has more of. Until it runs, delivery can
-  claim the logic and not the flow.
+- **What the walk-through found.** Six defects, none of which a unit test could
+  have failed on, and four of which made the slice unreachable or unreadable
+  rather than wrong: aggregation shifts could not be entered at all (three
+  separate gates, one of them a bare early return with no name to grep for);
+  the cards still read «агрегация: в следующем срезе»; the box only appeared
+  after the first scan; a deferred label claimed the print had failed; the fill
+  grid sat as a small patch in a large empty zone; and a shift-list refresh
+  silently stripped the SSCC issuer and the box template off a shift already
+  entered, after which a full box refused to close for a reason nothing on
+  screen connected to a list refresh minutes earlier.
+- **What the walk-through confirmed**, against a stand-in printer that holds
+  the line open the way a real one does: the SSCC block and box template arrive
+  in the bundle; a serial is burned at close and the cursor advances; the label
+  carries the Cyrillic name as an image field, the barcode as a native command
+  with the GS1 prefix, and an expiry exactly one day short of production plus
+  shelf life; out of paper refuses before anything is sent; a box closes with no
+  printer and the label becomes a visible debt on both the hub and the shift
+  header; and a device whose data was wiped is handed a block seeded past what
+  the server already recorded as consumed, so it cannot reissue a printed serial.
+- **Not walked:** «Напечатать все» skipping an unknown attempt, and closing a
+  shift with a non-empty queue. Both are covered by tests, neither by hand.
 - **Bluetooth printing on hardware.** Still unverifiable on an emulator. The
   pull request must say so plainly rather than implying coverage.
 - **How the label looks on paper.** Only a printed label answers that, and
