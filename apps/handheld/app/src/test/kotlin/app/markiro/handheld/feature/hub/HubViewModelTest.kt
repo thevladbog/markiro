@@ -18,6 +18,7 @@ import app.markiro.handheld.core.network.LineListResponse
 import app.markiro.handheld.core.network.ResolveTaskRequest
 import app.markiro.handheld.core.network.ResolveTaskResponse
 import app.markiro.handheld.core.network.NetworkModule
+import app.markiro.handheld.core.print.PrinterEntity
 import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.network.RosterResponse
 import app.markiro.handheld.core.network.ShiftBundleDto
@@ -34,6 +35,7 @@ import app.markiro.handheld.core.sync.SyncEngine
 import app.markiro.handheld.core.sync.SyncTransport
 import app.markiro.handheld.feature.shift.ShiftEntityFixtures
 import app.markiro.handheld.feature.signin.SessionHolder
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -64,6 +66,13 @@ class HubViewModelTest {
         lineName = "Линия 2", kind = "handheld", serverUrl = "https://x", pairedAt = 1L,
     )
 
+    /**
+     * The engines below publish their state with an eagerly started flow, which keeps reading Room
+     * for as long as its scope lives. Left running past the database it reads, it throws into
+     * whichever test happens to run next, so the scope is owned here and cancelled before the close.
+     */
+    private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+
     @Before
     fun setUp() = runTest {
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java)
@@ -73,7 +82,10 @@ class HubViewModelTest {
     }
 
     @After
-    fun tearDown() = db.close()
+    fun tearDown() {
+        engineScope.cancel()
+        db.close()
+    }
 
     private fun dto(id: String, number: String, status: String) =
         ShiftDto(id, number, status, mode = "validation", validationPrint = ValidationPrintDto("none"), productId = "p1", palletsEnabled = false)
@@ -107,14 +119,14 @@ class HubViewModelTest {
     private fun vm(api: StationApi): HubViewModel {
         val engine = SyncEngine(
             db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
-            NetworkModule.strictJson(), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            NetworkModule.strictJson(), engineScope,
         )
         val inventoryEngine = InventorySyncEngine(
             db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
-            NetworkModule.strictJson(), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            NetworkModule.strictJson(), engineScope,
         )
         return HubViewModel(
-            api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(),
+            api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(), db.printerDao(),
             scannerLabel = { "встроенный" }, now = { clock }, tick = flowOf(Unit),
         )
     }
@@ -167,5 +179,18 @@ class HubViewModelTest {
         val vm = vm(api())
         vm.signOut()
         assertNull(session.state.value.operator)
+    }
+
+    @Test
+    fun theHubKnowsWhetherAPrinterIsConfigured() = runTest {
+        val model = vm(api())
+        assertEquals(false, model.state.first { it.organization.isNotEmpty() }.printerConfigured)
+        db.printerDao().upsert(
+            PrinterEntity(
+                id = "p1", name = "Zebra ZD421", transport = "wifi", address = "192.168.1.40:9100",
+                language = "zpl", dpi = 203, selected = true, lastStatus = "ready", lastSeenAt = 1L,
+            ),
+        )
+        assertEquals(true, model.state.first { it.printerConfigured }.printerConfigured)
     }
 }

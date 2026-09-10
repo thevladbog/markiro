@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.BuildConfig
 import app.markiro.handheld.core.inventory.InventorySyncEngine
+import app.markiro.handheld.core.print.PrinterDao
 import app.markiro.handheld.core.scan.ScanEvent
 import app.markiro.handheld.core.scan.ScanEvents
 import app.markiro.handheld.core.scan.ScanPreferences
@@ -42,6 +43,8 @@ data class SettingsUi(
     val queue: Int = 0,
     val lastSyncAt: Long? = null,
     val installId: String = "",
+    /** `null` until a printer is configured; the settings row falls back to a hint. */
+    val printerLabel: String? = null,
 )
 
 @HiltViewModel
@@ -55,6 +58,7 @@ class SettingsViewModel @Inject constructor(
     sync: SyncEngine,
     inventorySync: InventorySyncEngine,
     meta: MetaStore,
+    printers: PrinterDao,
 ) : ViewModel() {
     private val _state = MutableStateFlow(
         SettingsUi(
@@ -75,6 +79,12 @@ class SettingsViewModel @Inject constructor(
             }
         }
         viewModelScope.launch { val id = meta.installId(); _state.update { it.copy(installId = id) } }
+        viewModelScope.launch {
+            printers.observeSelected().collect { printer ->
+                val label = printer?.let { "${it.name} · ${it.language.uppercase()} ${it.dpi} dpi" }
+                _state.update { it.copy(printerLabel = label) }
+            }
+        }
     }
 
     fun setSource(kind: ScanSourceKind) {

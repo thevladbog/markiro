@@ -7,6 +7,7 @@ class DeviceWipe(private val db: HandheldDatabase, private val credential: Crede
     suspend fun wipeAll() {
         credential.clear()
         db.withTransaction {
+            db.printerDao().clear()
             db.outboxDao().clear()
             db.scanEventDao().clear()
             db.codeDao().clear()

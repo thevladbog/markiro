@@ -12,6 +12,7 @@ import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.sync.SyncEngine
 import app.markiro.handheld.core.sync.SyncTransport
 import app.markiro.handheld.feature.signin.SessionHolder
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,6 +37,13 @@ class CloseViewModelTest {
     private lateinit var db: HandheldDatabase
     private lateinit var server: MockWebServer
 
+    /**
+     * The engines below publish their state with an eagerly started flow, which keeps reading Room
+     * for as long as its scope lives. Left running past the database it reads, it throws into
+     * whichever test happens to run next, so the scope is owned here and cancelled before the close.
+     */
+    private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+
     @Before
     fun setUp() = runTest {
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java)
@@ -53,6 +61,7 @@ class CloseViewModelTest {
 
     @After
     fun tearDown() {
+        engineScope.cancel()
         server.shutdown()
         db.close()
     }
@@ -60,7 +69,7 @@ class CloseViewModelTest {
     private fun vm(): CloseViewModel {
         val engine = SyncEngine(
             db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { server.url("/").toString() },
-            NetworkModule.strictJson(), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            NetworkModule.strictJson(), engineScope,
         )
         return CloseViewModel(SavedStateHandle(mapOf("shiftId" to "s1")), ShiftCloser(db), engine, db, SessionHolder())
     }
