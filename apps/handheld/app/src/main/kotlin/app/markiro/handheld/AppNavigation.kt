@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
@@ -38,8 +39,8 @@ object Routes {
     const val HUB = "hub"
     const val SETTINGS = "settings"
     const val SCANNER = "settings/scanner"
-    const val SOON = "soon/{title}"
-    fun soon(title: String) = "soon/$title"
+    const val SOON = "soon/{tile}"
+    fun soon(tile: HubTile) = "soon/${tile.name}"
 }
 
 @Composable
@@ -127,9 +128,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     state,
                     onTile = { tile ->
                         when (tile) {
-                            HubTile.SHIFT -> nav.navigate(Routes.soon("Смена"))
-                            HubTile.INVENTORY -> nav.navigate(Routes.soon("Инвентаризация"))
-                            HubTile.CHECK -> nav.navigate(Routes.soon("Проверка кода"))
+                            HubTile.SHIFT, HubTile.INVENTORY, HubTile.CHECK -> nav.navigate(Routes.soon(tile))
                             HubTile.SETTINGS -> nav.navigate(Routes.SETTINGS)
                         }
                     },
@@ -161,7 +160,12 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                 )
             }
             composable(Routes.SOON) { entry ->
-                ComingSoonScreen(entry.arguments?.getString("title") ?: "", onBack = { nav.popBackStack() })
+                val title = when (entry.arguments?.getString("tile")) {
+                    HubTile.SHIFT.name -> R.string.hub_tile_shift
+                    HubTile.INVENTORY.name -> R.string.hub_tile_inventory
+                    else -> R.string.hub_tile_check
+                }
+                ComingSoonScreen(stringResource(title), onBack = { nav.popBackStack() })
             }
         }
     }

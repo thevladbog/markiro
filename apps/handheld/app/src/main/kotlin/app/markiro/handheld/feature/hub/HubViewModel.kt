@@ -1,7 +1,9 @@
 package app.markiro.handheld.feature.hub
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.markiro.handheld.R
 import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.scan.ScanPreferences
@@ -10,6 +12,7 @@ import app.markiro.handheld.core.scan.VendorProfiles
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.feature.signin.SessionHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
@@ -56,6 +59,7 @@ class HubViewModel(
 ) : ViewModel() {
     @Inject
     constructor(
+        @ApplicationContext context: Context,
         api: StationApi,
         config: DeviceConfigDao,
         session: SessionHolder,
@@ -69,8 +73,8 @@ class HubViewModel(
         scannerLabel = {
             when (scan.sourceKind) {
                 ScanSourceKind.BUILTIN_INTENT -> VendorProfiles.byId(scan.profileId).label.substringBefore(" ·")
-                ScanSourceKind.KEYBOARD_WEDGE -> "клавиатурный"
-                ScanSourceKind.DEBUG -> "отладка"
+                ScanSourceKind.KEYBOARD_WEDGE -> context.getString(R.string.scanner_source_wedge)
+                ScanSourceKind.DEBUG -> context.getString(R.string.scanner_source_debug)
             }
         },
     )

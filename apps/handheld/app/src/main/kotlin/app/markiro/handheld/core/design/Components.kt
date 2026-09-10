@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.markiro.handheld.R
 
 data class StatusItem(val icon: ImageVector, val label: String, val tone: Tone = Tone.Neutral)
 data class StateAction(val label: String, val onClick: () -> Unit)
@@ -67,7 +69,7 @@ fun AppBar(title: String, onBack: (() -> Unit)? = null, actions: @Composable Row
             .padding(start = if (onBack == null) MarkiroSizes.sp4 else MarkiroSizes.sp1, end = MarkiroSizes.sp1),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (onBack != null) IconAction(Icons.AutoMirrored.Outlined.ArrowBack, "Назад", onBack)
+        if (onBack != null) IconAction(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.common_back), onBack)
         Text(
             title,
             style = MarkiroTheme.type.title.copy(fontSize = 20.sp, lineHeight = 26.sp),
@@ -147,6 +149,7 @@ fun MarkiroTextButton(label: String, onClick: () -> Unit, tone: Tone = Tone.Acce
 
 @Composable
 fun Keypad(onDigit: (Char) -> Unit, onBackspace: () -> Unit, onConfirm: () -> Unit, confirmEnabled: Boolean) {
+    val backspaceLabel = stringResource(R.string.common_backspace)
     Column(verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2), modifier = Modifier.fillMaxWidth()) {
         listOf("123", "456", "789").forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2), modifier = Modifier.fillMaxWidth()) {
@@ -154,7 +157,7 @@ fun Keypad(onDigit: (Char) -> Unit, onBackspace: () -> Unit, onConfirm: () -> Un
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2), modifier = Modifier.fillMaxWidth()) {
-            Key(Modifier.weight(1f).semantics { contentDescription = "Стереть" }, onClick = onBackspace) {
+            Key(Modifier.weight(1f).semantics { contentDescription = backspaceLabel }, onClick = onBackspace) {
                 Icon(Icons.Outlined.Backspace, contentDescription = null, tint = MarkiroTheme.colors.fg1, modifier = Modifier.size(26.dp))
             }
             Key(Modifier.weight(1f), onClick = { onDigit('0') }) { KeyLabel("0") }

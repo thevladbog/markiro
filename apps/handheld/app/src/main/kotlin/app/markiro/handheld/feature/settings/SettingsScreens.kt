@@ -26,8 +26,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.markiro.handheld.R
 import app.markiro.handheld.core.design.AppBar
 import app.markiro.handheld.core.design.FullScreenState
 import app.markiro.handheld.core.design.MarkiroChip
@@ -40,9 +42,7 @@ import app.markiro.handheld.core.scan.ScanEvent
 import app.markiro.handheld.core.scan.ScanSourceKind
 import app.markiro.handheld.core.scan.VendorProfiles
 import app.markiro.handheld.core.storage.DeviceConfigEntity
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import app.markiro.handheld.core.util.TimeText
 
 @Composable
 fun SettingsScreen(
@@ -55,36 +55,36 @@ fun SettingsScreen(
 ) {
     val c = MarkiroTheme.colors
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
-        AppBar("Настройки", onBack)
+        AppBar(stringResource(R.string.settings_title), onBack)
         Column(Modifier.padding(horizontal = MarkiroSizes.sp4)) {
-            SettingRow("Сканер", sourceLabel(state), onScanner)
-            SettingRow("Язык", if (state.language == "en") "English" else "Русский") {
+            SettingRow(stringResource(R.string.settings_scanner), sourceLabel(state), onScanner)
+            SettingRow(stringResource(R.string.settings_language), if (state.language == "en") "English" else "Русский") {
                 onLanguage(if (state.language == "en") "ru" else "en")
             }
             SettingRow(
-                "Тема",
+                stringResource(R.string.settings_theme),
                 when (state.theme) {
-                    ThemeMode.DARK -> "Тёмная"
-                    ThemeMode.LIGHT -> "Светлая"
-                    ThemeMode.SYSTEM -> "Как в системе"
+                    ThemeMode.DARK -> stringResource(R.string.theme_dark)
+                    ThemeMode.LIGHT -> stringResource(R.string.theme_light)
+                    ThemeMode.SYSTEM -> stringResource(R.string.theme_system)
                 },
             ) { onTheme(ThemeMode.entries[(state.theme.ordinal + 1) % ThemeMode.entries.size]) }
             Text(
-                "ОБ УСТРОЙСТВЕ",
+                stringResource(R.string.settings_about),
                 style = MarkiroTheme.type.label,
                 color = c.fg3,
                 modifier = Modifier.padding(top = MarkiroSizes.sp4, bottom = MarkiroSizes.sp2),
             )
-            InfoRow("Имя", listOfNotNull(config?.deviceName, config?.lineName).joinToString(" · "))
-            InfoRow("Сервер", config?.serverUrl.orEmpty().removePrefix("https://"))
-            InfoRow("Версия", state.version)
+            InfoRow(stringResource(R.string.settings_name), listOfNotNull(config?.deviceName, config?.lineName).joinToString(" · "))
+            InfoRow(stringResource(R.string.settings_server), config?.serverUrl.orEmpty().removePrefix("https://"))
+            InfoRow(stringResource(R.string.settings_version), state.version)
             InfoRow(
-                "Операторы",
-                config?.rosterFetchedAt?.let { "обновлены " + SimpleDateFormat("dd.MM HH:mm", Locale.forLanguageTag("ru")).format(Date(it)) }
-                    ?: "не загружены",
+                stringResource(R.string.settings_operators),
+                config?.rosterFetchedAt?.let { stringResource(R.string.settings_operators_updated, TimeText.ddmmHhmm(it)) }
+                    ?: stringResource(R.string.settings_operators_missing),
             )
             Text(
-                "Отвязать устройство можно только из кабинета.",
+                stringResource(R.string.settings_unbind_note),
                 style = MarkiroTheme.type.caption,
                 color = c.fg3,
                 modifier = Modifier.padding(top = MarkiroSizes.sp3),
@@ -93,10 +93,12 @@ fun SettingsScreen(
     }
 }
 
+@Composable
 private fun sourceLabel(state: SettingsUi): String = when (state.sourceKind) {
-    ScanSourceKind.BUILTIN_INTENT -> "встроенный · " + VendorProfiles.byId(state.profileId).label.substringBefore(" ·")
-    ScanSourceKind.KEYBOARD_WEDGE -> "клавиатурный wedge"
-    ScanSourceKind.DEBUG -> "отладка"
+    ScanSourceKind.BUILTIN_INTENT ->
+        stringResource(R.string.settings_source_builtin, VendorProfiles.byId(state.profileId).label.substringBefore(" ·"))
+    ScanSourceKind.KEYBOARD_WEDGE -> stringResource(R.string.settings_source_wedge)
+    ScanSourceKind.DEBUG -> stringResource(R.string.settings_source_debug)
 }
 
 @Composable
@@ -109,34 +111,41 @@ fun ScannerSettingsScreen(
 ) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
+    val current = VendorProfiles.byId(state.profileId)
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
-        AppBar("Сканер", onBack)
+        AppBar(stringResource(R.string.scanner_title), onBack)
         Column(Modifier.padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
-            Text("ИСТОЧНИК СКАНОВ", style = t.label, color = c.fg3)
-            OptionRow("Встроенный сканер", VendorProfiles.byId(state.profileId).setupHint, state.sourceKind == ScanSourceKind.BUILTIN_INTENT) {
-                onSource(ScanSourceKind.BUILTIN_INTENT)
-            }
-            OptionRow("Клавиатурный wedge", "универсальный запасной путь: сканер печатает код как клавиатура", state.sourceKind == ScanSourceKind.KEYBOARD_WEDGE) {
-                onSource(ScanSourceKind.KEYBOARD_WEDGE)
-            }
+            Text(stringResource(R.string.scanner_sources), style = t.label, color = c.fg3)
+            OptionRow(
+                stringResource(R.string.scanner_builtin_title),
+                stringResource(current.setupHintRes, current.action),
+                state.sourceKind == ScanSourceKind.BUILTIN_INTENT,
+            ) { onSource(ScanSourceKind.BUILTIN_INTENT) }
+            OptionRow(
+                stringResource(R.string.scanner_wedge_title),
+                stringResource(R.string.scanner_wedge_hint),
+                state.sourceKind == ScanSourceKind.KEYBOARD_WEDGE,
+            ) { onSource(ScanSourceKind.KEYBOARD_WEDGE) }
             if (state.sourceKind == ScanSourceKind.BUILTIN_INTENT) {
-                Text("ПРОФИЛЬ ВЕНДОРА", style = t.label, color = c.fg3)
+                Text(stringResource(R.string.scanner_profiles), style = t.label, color = c.fg3)
                 VendorProfiles.ALL.forEach { profile ->
-                    OptionRow(profile.label, "действие ${profile.action}", state.profileId == profile.id) { onProfile(profile.id) }
+                    OptionRow(profile.label, stringResource(R.string.scanner_action, profile.action), state.profileId == profile.id) {
+                        onProfile(profile.id)
+                    }
                 }
             }
-            Text("ТЕСТОВЫЙ СКАН", style = t.label, color = c.fg3)
+            Text(stringResource(R.string.scanner_test), style = t.label, color = c.fg3)
             TestScan(state.lastScan)
             if (state.debugScanEnabled) {
                 var text by remember { mutableStateOf("") }
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
-                    label = { Text("Отладочный скан (только debug)") },
+                    label = { Text(stringResource(R.string.scanner_debug_field)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                PrimaryButton("Отправить как скан", {
+                PrimaryButton(stringResource(R.string.scanner_debug_send), {
                     onDebugScan(text)
                     text = ""
                 }, enabled = text.isNotEmpty())
@@ -155,7 +164,7 @@ private fun TestScan(event: ScanEvent?) {
         verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2),
     ) {
         if (event == null) {
-            Text("Нажмите триггер — здесь появится сырая строка с разделителями GS.", style = t.caption, color = c.fg3)
+            Text(stringResource(R.string.scanner_test_hint), style = t.caption, color = c.fg3)
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp1), verticalAlignment = Alignment.CenterVertically) {
                 event.raw.split('\u001d').forEachIndexed { index, part ->
@@ -164,7 +173,12 @@ private fun TestScan(event: ScanEvent?) {
                 }
             }
             Text(
-                "${event.symbology ?: "символика неизвестна"} · источник ${event.source} · ${event.raw.length} симв.",
+                stringResource(
+                    R.string.scanner_test_meta,
+                    event.symbology ?: stringResource(R.string.scanner_symbology_unknown),
+                    event.source,
+                    event.raw.length,
+                ),
                 style = t.caption,
                 color = c.okFg,
             )
@@ -179,9 +193,9 @@ fun ComingSoonScreen(title: String, onBack: () -> Unit) {
         AppBar(title, onBack)
         FullScreenState(
             Icons.Outlined.Construction,
-            "В следующем срезе",
-            "Этот раздел появится после того, как ТСД научится работать в смене.",
-            primary = StateAction("Назад", onBack),
+            stringResource(R.string.soon_title),
+            stringResource(R.string.soon_text),
+            primary = StateAction(stringResource(R.string.common_back), onBack),
             primaryIsAccent = false,
         )
     }
