@@ -55,6 +55,7 @@ export type {
   BoxLabelTemplateEligibility,
 } from "./labels/eligibility.js";
 export { formatLabelDate, LABEL_DATE_FORMAT } from "./labels/date.js";
+export { addCalendarDays, shelfLifeExpiryDate } from "./labels/shelf-life.js";
 export {
   code128ModuleCount,
   CODE128_FNC1_MODULES,
