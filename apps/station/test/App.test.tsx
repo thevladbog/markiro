@@ -855,6 +855,7 @@ async function renderActiveShiftForOperatorSwitch(
   invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
     if (cmd === "plugin:sql|select") {
       const { query } = (payload ?? {}) as { query: string; values?: unknown[] };
+      if (query.includes("WITH local_closures")) return Promise.resolve([]);
       if (/FROM operators_mirror\b/.test(query)) {
         return Promise.resolve([
           operatorMirrorRow(firstPinHash),

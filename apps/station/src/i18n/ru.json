@@ -166,6 +166,8 @@
     "templatePagination": "Страницы шаблонов",
     "serverUnavailable": "Не удалось загрузить смены. Проверьте доступ к серверу.",
     "active": "Смена активна",
+    "closing": "Закрывается",
+    "localCloseStateUnavailable": "Не удалось проверить закрытие смен на станции. Обновите список.",
     "notStarted": "Не начата",
     "validation": "Проверка",
     "aggregation": "Агрегация",
