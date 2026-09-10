@@ -91,7 +91,8 @@ class InventoryBundleMirror(
             previous = item.codeHash
             if (!flagsMatch(item, manifest)) return "row flags"
         }
-        if (page.nextCursor != null && page.nextCursor != previous) return "page cursor"
+        // As on the station: a continuation must point past this page's last row, so an empty page can never ask to be re-read.
+        if (page.nextCursor != null && (page.items.isEmpty() || page.nextCursor != previous)) return "page cursor"
         val digest = InventoryDigests.pageDigest(manifest.snapshotId, manifest.snapshotFixedAt, manifest.contentDigest, cursor, page.items, page.nextCursor)
         if (digest != page.pageDigest) return "page digest"
         return null

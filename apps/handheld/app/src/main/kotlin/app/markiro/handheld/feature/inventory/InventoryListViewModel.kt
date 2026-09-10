@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
+import java.io.IOException
 import javax.inject.Inject
 
 enum class InventoryError { NOT_RUNNING, OPERATOR_UNAVAILABLE, LINE_REQUIRED, BARCODE_UNKNOWN, NEEDS_NETWORK, DOWNLOAD_FAILED, INVALID_SNAPSHOT, REPACK }
@@ -157,7 +159,14 @@ class InventoryListViewModel @Inject constructor(
 
     private suspend fun onScan(raw: String) {
         if (dialog.value != null) return
-        val resolved = runCatching { repository.resolveBarcode(raw.trim()) }.getOrNull()
+        // Only a 404 means an unknown barcode; a lookup that never got an answer is a network problem, not a bad label.
+        val resolved = try {
+            repository.resolveBarcode(raw.trim())
+        } catch (_: IOException) {
+            return fail(InventoryError.NEEDS_NETWORK)
+        } catch (e: HttpException) {
+            return fail(InventoryError.NEEDS_NETWORK, detail = "HTTP ${e.code()}")
+        }
         if (resolved == null) {
             dialog.value = InventoryDialog.Error(InventoryError.BARCODE_UNKNOWN)
             return

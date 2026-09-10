@@ -158,20 +158,19 @@ class InventorySyncEngine(
         db.withTransaction {
             for (outcome in response.outcomes) {
                 db.inventoryEventDao().setServerStatus(outcome.eventId, outcome.status)
-                when (outcome.status) {
-                    "duplicate" -> outcome.claims.filter { it.status == "duplicate" }.forEach { claim ->
-                        val existing = db.inventoryResultDao().get(id, claim.codeHash)
-                        db.inventoryResultDao().upsert(
-                            InventoryResultEntity(
-                                inventoryId = id, snapshotId = task.snapshotId, codeHash = claim.codeHash, firstAcceptedEventId = claim.winner.eventId,
-                                winningDeviceId = claim.winner.deviceId, winningScannedAt = claim.winner.scannedAt,
-                                observedProductionDate = existing?.observedProductionDate, classification = existing?.classification ?: "expected",
-                                source = "server", updatedAt = Iso.format(at),
-                            ),
-                        )
-                    }
-                    "quarantined" -> quarantined = true
+                // A box event can be `applied` for some children and lose others: every lost claim names its winner.
+                outcome.claims.filter { it.status == "duplicate" }.forEach { claim ->
+                    val existing = db.inventoryResultDao().get(id, claim.codeHash)
+                    db.inventoryResultDao().upsert(
+                        InventoryResultEntity(
+                            inventoryId = id, snapshotId = task.snapshotId, codeHash = claim.codeHash, firstAcceptedEventId = claim.winner.eventId,
+                            winningDeviceId = claim.winner.deviceId, winningScannedAt = claim.winner.scannedAt,
+                            observedProductionDate = existing?.observedProductionDate, classification = existing?.classification ?: "expected",
+                            source = "server", updatedAt = Iso.format(at),
+                        ),
+                    )
                 }
+                if (outcome.status == "quarantined") quarantined = true
             }
             db.inventoryOutboxDao().deleteIds(rows.map { it.id })
             db.metaDao().remove(MetaStore.inventoryPin(id))
@@ -214,8 +213,10 @@ class InventorySyncEngine(
             val result = transport.get(path) as? TransportResult.Ok ?: return false
             if (result.code !in 200..299) return false
             val page = runCatching { json.decodeFromString(ProgressPageDto.serializer(), result.body) }.getOrNull() ?: return false
+            // `parseInventoryProgressPage`: the continuation is exactly the last item's cursor, null only for an empty page.
+            val expectedNext = page.items.lastOrNull()?.let { "${it.revision}:${it.id}" }
             if (page.inventoryId != id || page.snapshotId != task.snapshotId || page.cursor != cursor || page.resultRevision < revision ||
-                !ordered(page, cursor)
+                !ordered(page, cursor) || page.nextCursor != expectedNext
             ) {
                 return false
             }

@@ -20,12 +20,16 @@ import app.markiro.handheld.core.storage.InventoryTerminalStateEntity
 import app.markiro.handheld.feature.signin.SessionHolder
 import app.markiro.handheld.feature.work.SignalPort
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -63,6 +67,7 @@ data class InventoryWorkUi(
 )
 
 private const val REACHABLE_WINDOW_MS = 2 * 60 * 1000L
+private const val REACHABLE_TICK_MS = 30 * 1000L
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -105,6 +110,17 @@ class InventoryWorkViewModel(
         ) { v -> InventoryProgress(verified = v[0], discrepancies = v[1] + v[2] + v[3], protected = v[4], thisTerminal = v[5], rejected = v[6]) }
     }
 
+    /**
+     * Re-evaluates the reachability window while nothing else emits (an idle handheld that just went offline).
+     * Runs off the main dispatcher so test schedulers never see an endless timer.
+     */
+    private val ticker = flow {
+        while (true) {
+            emit(Unit)
+            delay(REACHABLE_TICK_MS)
+        }
+    }.flowOn(Dispatchers.Default)
+
     val state: StateFlow<InventoryWorkUi> = combine(
         db.inventoryTaskDao().observe(inventoryId),
         db.inventoryTerminalStateDao().observe(inventoryId),
@@ -114,6 +130,7 @@ class InventoryWorkViewModel(
         sync.state,
         reachability.lastSuccessAt,
         held,
+        ticker,
     ) { v ->
         val task = v[0] as InventoryTaskEntity?
         val terminal = v[1] as InventoryTerminalStateEntity?

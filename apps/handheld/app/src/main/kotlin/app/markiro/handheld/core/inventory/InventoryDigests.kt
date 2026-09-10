@@ -21,7 +21,9 @@ object InventoryDigests {
 
     fun itemJson(e: InventorySnapshotCodeEntity): String = itemJson(
         InventoryBundleCodeDto(
-            e.codeHash, e.canonicalRaw, e.gtin14, e.serial, e.sourceStatus, e.sourceState, e.sourceProductionDate, e.parentSscc, e.expected, e.protected,
+            codeHash = e.codeHash, canonicalRaw = e.canonicalRaw, gtin14 = e.gtin14, serial = e.serial, sourceStatus = e.sourceStatus,
+            sourceState = e.sourceState, sourceProductionDate = e.sourceProductionDate, parentSscc = e.parentSscc, expected = e.expected,
+            protected = e.protected,
         ),
     )
 

@@ -111,6 +111,15 @@ class InventoryBundleMirrorTest {
     }
 
     @Test
+    fun anEmptyPageThatRepeatsItsCursorIsDiscarded() = runTest {
+        server.enqueue(MockResponse().setBody(pageJson(null, items.take(2), items[1].codeHash)))
+        server.enqueue(MockResponse().setBody(pageJson(items[1].codeHash, emptyList(), items[1].codeHash)))
+        assertEquals(MirrorResult.Invalid("page cursor"), mirror().mirror(manifest()) { _, _ -> })
+        assertEquals(2, server.requestCount)
+        assertEquals("staging", db.inventoryTaskDao().get("i1")?.state)
+    }
+
+    @Test
     fun repackIsRefusedBeforeAnyDownload() = runTest {
         assertEquals(MirrorResult.Repack, mirror().mirror(manifest(mode = "repack")) { _, _ -> })
         assertEquals(0, server.requestCount)

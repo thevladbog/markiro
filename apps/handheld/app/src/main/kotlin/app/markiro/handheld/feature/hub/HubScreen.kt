@@ -95,7 +95,7 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit) {
                 Tile(
                     Icons.Outlined.Inventory2,
                     stringResource(R.string.hub_tile_inventory),
-                    state.continueInventoryNumber?.let { stringResource(R.string.hub_inventory_continue, it) } ?: inventoriesLabel(state.inventories),
+                    state.continueInventoryNumber?.let { stringResource(R.string.hub_inventory_continue, it) } ?: (inventoriesLabel(state.inventories) + stamp),
                     { onTile(HubTile.INVENTORY) },
                     tile,
                     statusTone = if (state.continueInventoryNumber != null) Tone.Ok else Tone.Neutral,

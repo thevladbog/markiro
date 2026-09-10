@@ -54,4 +54,12 @@ class InventoryLeaveViewModelTest {
         advanceUntilIdle()
         assertEquals(LeaveStep.Failed, vm.step.value)
     }
+
+    @Test
+    fun anUnexpectedFailureIsShownAsFailedToo() = runTest {
+        // An empty queue makes the gateway throw from `leave`.
+        val vm = vm(Gateway(ArrayDeque(), pending = 0), drained = true)
+        advanceUntilIdle()
+        assertEquals(LeaveStep.Failed, vm.step.value)
+    }
 }

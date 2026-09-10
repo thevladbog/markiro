@@ -154,6 +154,19 @@ class InventorySyncEngineTest {
     }
 
     @Test
+    fun aLostClaimInsideAnAppliedOutcomeStillReplacesTheWinner() = runTest {
+        event(1)
+        val e = engine()
+        val lost = """[{"codeHash":"${hashOf(1)}","status":"duplicate","winner":{"codeHash":"${hashOf(1)}","eventId":"x","deviceId":"dev-2","scannedAt":"2026-08-25T09:00:00.000Z"}}]"""
+        answerPinned(e, outcome("e1", "applied", "CLAIM_APPLIED", lost, conflicts = 1))
+        assertTrue(e.drainAll())
+        val row = db.inventoryResultDao().get("i1", hashOf(1))
+        assertEquals("dev-2", row?.winningDeviceId)
+        assertEquals("server", row?.source)
+        assertEquals("applied", db.inventoryEventDao().get("e1")?.serverStatus)
+    }
+
+    @Test
     fun quarantineClosesTheTaskAndKeepsTheRest() = runTest {
         event(1)
         event(2)
@@ -192,14 +205,34 @@ class InventorySyncEngineTest {
                 """[{"id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","revision":6,"correctedAt":"2026-08-25T10:01:00.000Z","kind":"correction","codeHash":"$hash",""" +
                     """"classification":"voided","observedProductionDate":null,"winner":null}]""",
                 cursor = "5:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                next = "6:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
             ),
         )
+        // The server always continues past a non-empty page; only an empty page ends the feed.
+        server.enqueue(progress(cursor = "6:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"))
         assertTrue(e.drainAll())
         assertEquals("/station/inventories/i1/progress?limit=200", server.takeRequest().path)
         assertEquals("/station/inventories/i1/progress?cursor=5%3Aaaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa&limit=200", server.takeRequest().path)
+        assertEquals("/station/inventories/i1/progress?cursor=6%3Abbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb&limit=200", server.takeRequest().path)
         assertNull(db.inventoryResultDao().get("i1", hash))
         assertEquals(7L, db.inventoryTerminalStateDao().get("i1")?.progressResultRevision)
-        assertEquals("5:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", db.inventoryTerminalStateDao().get("i1")?.progressCursor)
+        assertEquals("6:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", db.inventoryTerminalStateDao().get("i1")?.progressCursor)
+    }
+
+    @Test
+    fun aProgressPageWhoseNextCursorDoesNotFollowItsItemsIsRejected() = runTest {
+        val hash = "9".padStart(64, '0')
+        val claim = """[{"id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","revision":5,"correctedAt":"2026-08-25T10:00:00.000Z","kind":"claim","codeHash":"$hash",""" +
+            """"classification":"expected","observedProductionDate":"2026-08-20","winner":{"codeHash":"$hash","eventId":"z","deviceId":"dev-2","scannedAt":"2026-08-25T09:00:00.000Z"}}]"""
+        // Items without a continuation would silently end the feed early.
+        server.enqueue(progress(claim))
+        assertFalse(engine().drainAll())
+        // A continuation without items would be re-read forever.
+        server.enqueue(progress(next = "5:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
+        assertFalse(engine().drainAll())
+        assertEquals(2, server.requestCount)
+        assertNull(db.inventoryResultDao().get("i1", hash))
+        assertNull(db.inventoryTerminalStateDao().get("i1")?.progressCursor)
     }
 
     @Test
@@ -209,8 +242,10 @@ class InventorySyncEngineTest {
             progress(
                 """[{"id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","revision":5,"correctedAt":"2026-08-25T10:00:00.000Z","kind":"claim","codeHash":"$hash",""" +
                     """"classification":"expected","observedProductionDate":"2026-08-20","winner":{"codeHash":"$hash","eventId":"z","deviceId":"dev-2","scannedAt":"2026-08-25T09:00:00.000Z"}}]""",
+                next = "5:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             ),
         )
+        server.enqueue(progress(cursor = "5:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
         assertTrue(engine().drainAll())
         val row = db.inventoryResultDao().get("i1", hash)
         assertEquals("dev-2", row?.winningDeviceId)

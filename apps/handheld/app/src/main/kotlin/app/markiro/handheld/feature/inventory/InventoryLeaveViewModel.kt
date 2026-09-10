@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.core.inventory.InventorySyncEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -33,13 +34,20 @@ class InventoryLeaveViewModel(
 
     init {
         viewModelScope.launch {
-            _step.value = LeaveStep.Draining(repository.queued(inventoryId))
-            drain()
-            _step.value = when (val result = repository.leave(inventoryId)) {
-                LeaveResult.Left -> LeaveStep.Left
-                is LeaveResult.Pending -> LeaveStep.Offline(result.queued)
-                LeaveResult.Offline -> LeaveStep.Offline(repository.queued(inventoryId))
-                LeaveResult.Failed -> LeaveStep.Failed
+            _step.value = try {
+                _step.value = LeaveStep.Draining(repository.queued(inventoryId))
+                drain()
+                when (val result = repository.leave(inventoryId)) {
+                    LeaveResult.Left -> LeaveStep.Left
+                    is LeaveResult.Pending -> LeaveStep.Offline(result.queued)
+                    LeaveResult.Offline -> LeaveStep.Offline(repository.queued(inventoryId))
+                    LeaveResult.Failed -> LeaveStep.Failed
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Anything the gateway did not classify (a storage error, a parser) must not leave the screen on «draining».
+                LeaveStep.Failed
             }
         }
     }

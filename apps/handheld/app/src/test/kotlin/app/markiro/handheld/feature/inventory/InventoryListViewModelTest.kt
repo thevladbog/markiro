@@ -29,6 +29,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.IOException
 
 @RunWith(AndroidJUnit4::class)
 class InventoryListViewModelTest {
@@ -48,7 +49,11 @@ class InventoryListViewModelTest {
         val joins = mutableListOf<Triple<String, Boolean, String?>>()
         override fun observeTasks() = db.inventoryTaskDao().observeAll()
         override suspend fun listTasks(scope: String?) = if (scope == "all") listOf(own, other, repack) else listOf(own, repack)
-        override suspend fun resolveBarcode(barcode: String) = if (barcode.endsWith("i2")) ResolvedTask(other, requiresConfirmation = true) else null
+        override suspend fun resolveBarcode(barcode: String) = when {
+            barcode.endsWith("i2") -> ResolvedTask(other, requiresConfirmation = true)
+            barcode.endsWith("offline") -> throw IOException("no route")
+            else -> null
+        }
         override suspend fun join(task: InventoryTaskDto, operatorId: String, confirmDifferentLine: Boolean, barcode: String?): JoinResult {
             joins += Triple(task.inventoryId, confirmDifferentLine, barcode)
             return joinResult
@@ -141,6 +146,18 @@ class InventoryListViewModelTest {
         vm.confirmOther()
         advanceUntilIdle()
         assertEquals(Triple("i2", true, "markiro:inventory:v1:i2"), repo.joins.single())
+    }
+
+    @Test
+    fun aBarcodeLookupTellsAnUnknownLabelFromAMissingNetwork() = runTest {
+        val vm = vm()
+        vm.state.first { !it.loading }
+        scans.tryEmit(ScanEvent("markiro:inventory:v1:zz", null, "debug", 0))
+        assertEquals(InventoryError.BARCODE_UNKNOWN, (vm.state.first { it.dialog != null }.dialog as InventoryDialog.Error).kind)
+        vm.dismissDialog()
+        vm.state.first { it.dialog == null }
+        scans.tryEmit(ScanEvent("markiro:inventory:v1:offline", null, "debug", 0))
+        assertEquals(InventoryError.NEEDS_NETWORK, (vm.state.first { it.dialog != null }.dialog as InventoryDialog.Error).kind)
     }
 
     @Test
