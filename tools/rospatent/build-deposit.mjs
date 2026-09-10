@@ -32,6 +32,7 @@ const DEFAULT_OUT = "docs/registration/rospatent/build";
 const DEFAULT_ABSTRACT = "docs/registration/rospatent/abstract.md";
 const ABSTRACT_EDITION = "Основная редакция";
 const ABSTRACT_COLUMNS = 80;
+const ABSTRACT_MAX_CHARACTERS = 900;
 
 const ALLOWED_EXTENSIONS = new Set([".ts", ".tsx", ".rs", ".kt", ".sql", ".mjs", ".astro", ".css"]);
 const FORBIDDEN_SEGMENTS = new Set(["node_modules", "dist", "target", "build", ".git"]);
@@ -225,6 +226,13 @@ export function renderPdf({ pdf, document, meta, regular, bold }) {
 async function buildAbstractPdf({ root, manifest, meta, creationDate, outDir }) {
   const abstractPath = path.resolve(root, manifest.abstract ?? DEFAULT_ABSTRACT);
   const text = extractAbstract(await readFile(abstractPath, "utf8"), ABSTRACT_EDITION);
+  const characters = Array.from(text).length;
+  if (characters > ABSTRACT_MAX_CHARACTERS) {
+    throw new Error(
+      `abstract "${ABSTRACT_EDITION}" is ${characters} characters, above the Rospatent limit of ` +
+        `${ABSTRACT_MAX_CHARACTERS}; shorten ${path.relative(root, abstractPath)}`,
+    );
+  }
   const lines = buildAbstractPage(meta, text, ABSTRACT_COLUMNS);
   if (lines.length > DEFAULT_LAYOUT.linesPerPage) {
     throw new Error("abstract does not fit on one page; shorten the main edition");
@@ -257,7 +265,8 @@ async function buildAbstractPdf({ root, manifest, meta, creationDate, outDir }) 
       path: path.relative(root, pdfPath),
       source: path.relative(root, abstractPath),
       edition: ABSTRACT_EDITION,
-      characters: Array.from(text).length,
+      characters,
+      maxCharacters: ABSTRACT_MAX_CHARACTERS,
       bytes: bytes.length,
       sha256: createHash("sha256").update(bytes).digest("hex"),
     },
