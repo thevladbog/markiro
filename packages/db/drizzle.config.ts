@@ -16,6 +16,7 @@ export default defineConfig({
     "./src/schema/mail.ts",
     "./src/schema/team.ts",
     "./src/schema/platform-auth.ts",
+    "./src/schema/platform-reports.ts",
     "./src/schema/saas.ts",
     "./src/schema/billing.ts",
     "./src/schema/tenant-billing.ts",

@@ -259,6 +259,87 @@ const LABEL_TEMPLATE = {
 const SHIFT_PLANNING_CONFIG = { defaultBoxLabelTemplateId: TEMPLATE_ID };
 
 /**
+ * `GET /shifts/:id/summary` feeds the details panel's «Результат смены» and
+ * «Сотрудники в смене» blocks (`ShiftDetailsPanel.tsx:72,93-142`). Not
+ * zod-parsed, so the shape has to mirror `ShiftSummaryDto` field for field:
+ * a wrong name renders an empty tile instead of throwing.
+ */
+const PRODUCT_LABEL_TEMPLATE_ID = "40000000-0000-4000-8000-000000000002";
+/**
+ * Validated by the strict `productLabelTemplateListSchema`
+ * (packages/domain/src/product-labels/contracts.ts:147) -- an extra field
+ * throws inside the form instead of rendering.
+ */
+const PRODUCT_LABEL_TEMPLATES = {
+  items: [
+    {
+      id: PRODUCT_LABEL_TEMPLATE_ID,
+      name: "Дубликат Data Matrix 58×40 [Краткое наименование]",
+      widthMm: 58,
+      heightMm: 40,
+      dpi: 203,
+    },
+  ],
+};
+const DUPLICATE_PLANNING_CONFIG = {
+  defaultBoxLabelTemplateId: TEMPLATE_ID,
+  validationPrintProtocol: "validation-dm-duplicate-v1",
+};
+/** Strict `productLabelHistorySchema` (packages/domain/src/product-labels/history.ts:20). */
+const PRODUCT_LABEL_HISTORY = {
+  summary: { sentAttempts: 1240, verifiedAttempts: 1238, unresolvedJobs: 1, reprintAttempts: 3 },
+  items: [
+    {
+      jobId: "a0000000-0000-4000-8000-000000000001",
+      deviceId: STATION_ID,
+      codeSuffix: "…0128",
+      acceptedAt: "2026-09-02T11:04:00.000Z",
+      status: "completed",
+      verificationOutcome: "verified",
+      attemptNo: 1,
+      ownershipConflict: false,
+    },
+    {
+      jobId: "a0000000-0000-4000-8000-000000000002",
+      deviceId: STATION_ID,
+      codeSuffix: "…0129",
+      acceptedAt: "2026-09-02T11:05:00.000Z",
+      status: "attention",
+      verificationOutcome: "pending",
+      attemptNo: 2,
+      ownershipConflict: false,
+    },
+  ],
+  nextCursor: null,
+};
+
+const SHIFT_SUMMARY = {
+  generatedAt: "2026-09-02T11:20:00.000Z",
+  output: { mode: "aggregation", closedBoxes: 96, containedUnits: 1152 },
+  participants: [
+    {
+      employeeId: "60000000-0000-4000-8000-000000000001",
+      fullName: "Мария Кузнецова",
+      role: "Оператор линии",
+      firstActivityAt: "2026-09-02T04:15:00.000Z",
+      lastActivityAt: "2026-09-02T11:05:00.000Z",
+      acceptedScans: 812,
+      closedBoxes: 68,
+    },
+    {
+      employeeId: "60000000-0000-4000-8000-000000000002",
+      fullName: "Пётр Смирнов",
+      role: null,
+      firstActivityAt: "2026-09-02T04:20:00.000Z",
+      lastActivityAt: "2026-09-02T10:40:00.000Z",
+      acceptedScans: 340,
+      closedBoxes: 28,
+    },
+  ],
+  unattributed: { eventCount: 4, acceptedScans: 4, closedBoxes: 0 },
+};
+
+/**
  * Number format comes from `formatInventoryNumber`'s sibling for shifts --
  * `apps/admin/src/pages/shifts/api.ts:24` documents it as `AUG26-003`, with
  * a `/S` suffix for station-created shifts. A hand-invented format would put
@@ -289,6 +370,10 @@ const PLANNED_SHIFT = {
   lateDataAt: null,
   closeReason: null,
   createdAt: "2026-08-30T05:40:00.000Z",
+  // Actual output so far, added to the list by #474: a planned shift has
+  // produced nothing yet, an active one is part-way, a closed one carries
+  // its final tally.
+  output: { mode: "aggregation", closedBoxes: 0, containedUnits: 0 },
 };
 const ACTIVE_SHIFT = {
   ...PLANNED_SHIFT,
@@ -299,6 +384,7 @@ const ACTIVE_SHIFT = {
   productionDate: "2026-08-30",
   openedAt: "2026-08-30T04:10:00.000Z",
   createdAt: "2026-08-29T14:00:00.000Z",
+  output: { mode: "aggregation", closedBoxes: 153, containedUnits: 1836 },
 };
 
 const STATION_DEVICE = {
@@ -331,6 +417,18 @@ const ACTIVE_SHIFT_09 = {
   productionDate: "2026-09-02",
   openedAt: "2026-09-02T04:10:00.000Z",
   createdAt: "2026-09-01T14:00:00.000Z",
+  output: { mode: "aggregation", closedBoxes: 96, containedUnits: 1152 },
+};
+const DUPLICATE_SHIFT = {
+  ...ACTIVE_SHIFT_09,
+  mode: "validation",
+  output: { mode: "validation", acceptedUnits: 1240 },
+  validationPrint: {
+    mode: "duplicate_dm",
+    templateId: PRODUCT_LABEL_TEMPLATE_ID,
+    verification: "required",
+    snapshot: { name: "Дубликат Data Matrix 58×40 [Краткое наименование]" },
+  },
 };
 const CLOSED_SHIFT = {
   ...ACTIVE_SHIFT_09,
@@ -343,6 +441,7 @@ const CLOSED_SHIFT = {
   closedAt: "2026-09-01T12:40:00.000Z",
   closeReason: "Смена завершена по плану",
   createdAt: "2026-08-31T14:00:00.000Z",
+  output: { mode: "aggregation", closedBoxes: 400, containedUnits: 4800 },
 };
 const LATE_SHIFT = {
   ...CLOSED_SHIFT,
@@ -618,7 +717,9 @@ type Scenario =
   | "exportsCatalog"
   | "exportsHistory"
   | "exportsFailed"
-  | "exportsStale";
+  | "exportsStale"
+  | "shiftDuplicate"
+  | "shiftLabels";
 
 /**
  * Every scenario shares the shell fetches (profile, access, pending
@@ -638,6 +739,33 @@ async function installApi(page: Page, scenario: Scenario) {
       return json(route, scenario === "deviceDrawer" ? ACCESS_ADMIN : ACCESS);
     }
     if (path === "/api/pickup-orders") return json(route, PICKUP_ORDERS_EMPTY);
+    // The details panel loads the summary for every shift status.
+    if (/^\/api\/shifts\/[0-9a-f-]+\/summary$/.test(path)) return json(route, SHIFT_SUMMARY);
+
+    if (scenario === "shiftDuplicate" || scenario === "shiftLabels") {
+      if (path === "/api/shifts") return json(route, { items: [DUPLICATE_SHIFT] });
+      if (path === "/api/products") {
+        return json(route, { items: [PRODUCT, DRAFT_PRODUCT, ARCHIVED_PRODUCT] });
+      }
+      if (path === "/api/lines") return json(route, { items: [LINE, SECOND_LINE, THIRD_LINE] });
+      if (path === "/api/counterparties") return json(route, { items: [COUNTERPARTY] });
+      if (path === "/api/label-templates") return json(route, { items: [LABEL_TEMPLATE] });
+      if (path === "/api/shifts/planning-config") return json(route, DUPLICATE_PLANNING_CONFIG);
+      if (path === "/api/shifts/product-label-templates") {
+        return json(route, PRODUCT_LABEL_TEMPLATES);
+      }
+      if (/^\/api\/shifts\/[0-9a-f-]+\/product-labels$/.test(path)) {
+        return json(route, PRODUCT_LABEL_HISTORY);
+      }
+      if (path === "/api/operators") {
+        return json(route, {
+          items: SHIFT_SUMMARY.participants.map(({ employeeId, fullName }) => ({
+            employeeId,
+            fullName,
+          })),
+        });
+      }
+    }
     // Only the admin shell reaches this one: the badge is gated on
     // `billing.read`, which the manager role does not carry.
     if (scenario === "deviceDrawer" && path === "/api/billing/attention") {
@@ -737,6 +865,19 @@ async function installApi(page: Page, scenario: Scenario) {
     return route.abort();
   });
   return unexpected;
+}
+
+/**
+ * Every row action moved into the details panel (`e177cea30`, 2026-09-02):
+ * the list now carries only «Подробнее». Tests that used to click an action
+ * in the row open the panel first.
+ */
+async function openShiftDetails(page: Page, shiftNumber: string) {
+  await page
+    .getByRole("row", { name: new RegExp(shiftNumber) })
+    .getByRole("button", { name: "Подробнее" })
+    .click();
+  await expect(page.getByRole("heading", { name: `Смена ${shiftNumber}` })).toBeVisible();
 }
 
 async function openHarness(page: Page, route: string) {
@@ -904,7 +1045,8 @@ test("saving an active shift asks for confirmation", async ({ page }) => {
 test("deleting a planned shift asks for confirmation", async ({ page }) => {
   const unexpected = await installApi(page, "shiftsPlanned");
   await openHarness(page, "/shifts");
-  await page.getByRole("button", { name: "Удалить" }).first().click();
+  await openShiftDetails(page, "AUG26-003");
+  await page.getByRole("button", { name: "Удалить" }).click();
   await expect(page.getByText("Удалить смену?")).toBeVisible();
   await screenshotFullMain(page, screenshotPath("shift-delete"));
   expect(unexpected).toEqual([]);
@@ -970,10 +1112,11 @@ test("dashboard: needs attention over late data", async ({ page }) => {
   expect(unexpected).toEqual([]);
 });
 
-test("shifts list: active shift offers the close action", async ({ page }) => {
+test("the details panel of an active shift offers the close action", async ({ page }) => {
   const unexpected = await installApi(page, "shiftsClose");
   await openHarness(page, "/shifts");
-  await expect(page.getByText("SEP26-004")).toBeVisible();
+  await openShiftDetails(page, "SEP26-004");
+  await expect(page.getByRole("heading", { name: "Действия со сменой" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Закрыть смену" })).toBeVisible();
   await screenshotFullMain(page, screenshotPath09("shifts-active"));
   expect(unexpected).toEqual([]);
@@ -982,6 +1125,7 @@ test("shifts list: active shift offers the close action", async ({ page }) => {
 test("closing a shift from the cabinet asks for a reason", async ({ page }) => {
   const unexpected = await installApi(page, "shiftsClose");
   await openHarness(page, "/shifts");
+  await openShiftDetails(page, "SEP26-004");
   await page.getByRole("button", { name: "Закрыть смену" }).click();
   await expect(page.getByText("Причина закрытия")).toBeVisible();
   await screenshotFullMain(page, screenshotPath09("shift-close"));
@@ -1001,20 +1145,20 @@ test("late data badge on a closed shift", async ({ page }) => {
  * for `row.status === "closed"`, apps/admin/src/pages/shifts/index.tsx:372),
  * so every export frame starts from CLOSED_SHIFT's row.
  */
-test("report dialog: format catalog and split controls", async ({ page }) => {
+test("shift reports: format catalog and split controls", async ({ page }) => {
   const unexpected = await installApi(page, "exportsCatalog");
   await openHarness(page, "/shifts");
-  await page.getByRole("button", { name: "Сформировать отчет" }).click();
+  await openShiftDetails(page, "SEP26-003");
   await expect(page.getByText("[XML][ГИСМТ] Отчет об агрегации")).toBeVisible();
   await expect(page.getByText("Разделить отчет на части")).toBeVisible();
   await screenshotFullMain(page, screenshotPath09("exports-catalog"));
   expect(unexpected).toEqual([]);
 });
 
-test("report dialog: history with ready parts and a processing run", async ({ page }) => {
+test("shift reports: history with ready parts and a processing run", async ({ page }) => {
   const unexpected = await installApi(page, "exportsHistory");
   await openHarness(page, "/shifts");
-  await page.getByRole("button", { name: "Сформировать отчет" }).click();
+  await openShiftDetails(page, "SEP26-003");
   await expect(page.getByText("Готов", { exact: true })).toBeVisible();
   await expect(page.getByText("Формируется")).toBeVisible();
   await expect(page.getByText("Часть 1")).toBeVisible();
@@ -1022,21 +1166,49 @@ test("report dialog: history with ready parts and a processing run", async ({ pa
   expect(unexpected).toEqual([]);
 });
 
-test("report dialog: failed run explains itself and offers a retry", async ({ page }) => {
+test("shift reports: failed run explains itself and offers a retry", async ({ page }) => {
   const unexpected = await installApi(page, "exportsFailed");
   await openHarness(page, "/shifts");
-  await page.getByRole("button", { name: "Сформировать отчет" }).click();
+  await openShiftDetails(page, "SEP26-003");
   await expect(page.getByText("Не все коды смены распределены по коробам.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Повторить" })).toBeVisible();
   await screenshotFullMain(page, screenshotPath09("exports-failed"));
   expect(unexpected).toEqual([]);
 });
 
-test("report dialog: stale run warns after late data", async ({ page }) => {
+test("shift reports: stale run warns after late data", async ({ page }) => {
   const unexpected = await installApi(page, "exportsStale");
   await openHarness(page, "/shifts");
-  await page.getByRole("button", { name: "Сформировать отчет" }).click();
+  await openShiftDetails(page, "SEP26-003");
   await expect(page.getByText("Данные смены изменились — сформируйте новый отчет.")).toBeVisible();
   await screenshotFullMain(page, screenshotPath09("exports-stale"));
+  expect(unexpected).toEqual([]);
+});
+
+/**
+ * Validation shifts can now duplicate the product's Data Matrix onto the
+ * outer packaging (`728863928`). The option only unlocks when planning-config
+ * reports the protocol, and it replaces the «Шаблоны» section with «Печать
+ * дубликата» -- both facts the printed instruction has to state.
+ */
+test("planning a validation shift offers the Data Matrix duplicate", async ({ page }) => {
+  const unexpected = await installApi(page, "shiftDuplicate");
+  await openHarness(page, "/shifts/new");
+  await page.getByRole("combobox", { name: "Продукт" }).click();
+  await page.getByRole("option", { name: PRODUCT.name, exact: true }).click();
+  await page.getByRole("radio", { name: "Валидация" }).check();
+  await page.getByRole("radio", { name: "Дублировать Data Matrix" }).check();
+  await expect(page.getByText("Шаблон этикетки продукции")).toBeVisible();
+  await expect(page.getByText("Обязательная проверка этикетки")).toBeVisible();
+  await screenshotFullMain(page, screenshotPath("shift-duplicate-print"));
+  expect(unexpected).toEqual([]);
+});
+
+test("the details panel lists duplicate label attempts", async ({ page }) => {
+  const unexpected = await installApi(page, "shiftLabels");
+  await openHarness(page, "/shifts");
+  await openShiftDetails(page, "SEP26-004");
+  await expect(page.getByRole("heading", { name: "История этикеток" })).toBeVisible();
+  await screenshotFullMain(page, screenshotPath09("shift-labels-history"));
   expect(unexpected).toEqual([]);
 });

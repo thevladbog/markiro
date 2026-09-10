@@ -20,6 +20,37 @@ const env = loadEnv({
 } as NodeJS.ProcessEnv);
 
 describe("ObjectStorageService", () => {
+  it("accepts only canonical platform report attempt ZIP paths at every boundary", async () => {
+    const send = vi.fn().mockResolvedValue({
+      ContentLength: 0,
+      Metadata: { sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
+    });
+    const storage = new ObjectStorageService(env, { send } as never, async () => "signed-read");
+    const key = "platform-reports/41b815db-1475-4af8-8a7d-b9141d184e35/attempt-1/report.zip";
+    const checksum = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    await expect(
+      storage.putVerified(key, Buffer.alloc(0), "application/zip", checksum),
+    ).resolves.toEqual({ byteSize: 0, sha256: checksum });
+    await expect(storage.presignRead(key)).resolves.toBe("signed-read");
+    await storage.delete(key);
+    for (const bad of [
+      key.replace("attempt-1", "attempt-0"),
+      key.replace("attempt-1", "attempt-4"),
+      key.replace("attempt-1", "attempt-01"),
+      key.replace("report.zip", "extra/report.zip"),
+      key.replace("report.zip", "../report.zip"),
+      key.replace("41b815db-1475-4af8-8a7d-b9141d184e35", "tenant"),
+      `${key}/`,
+      key.replace("report.zip", "report.csv"),
+    ]) {
+      await expect(storage.put(bad, Buffer.alloc(0), "application/zip")).rejects.toThrow(
+        "Unsafe object key",
+      );
+      await expect(storage.verifyObject(bad, 0, checksum)).rejects.toThrow("Unsafe object key");
+      await expect(storage.presignRead(bad)).rejects.toThrow("Unsafe object key");
+      await expect(storage.deleteConfirmed(bad)).rejects.toThrow("Unsafe object key");
+    }
+  });
   it("bounds S3 retries and uses the timeout-aware Node HTTP handler", async () => {
     const client = createS3Client(env);
     try {

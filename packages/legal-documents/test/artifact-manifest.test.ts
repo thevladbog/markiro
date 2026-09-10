@@ -302,16 +302,19 @@ function artifactEntry(
     "MKR-INS-02",
     "MKR-INS-03",
     "MKR-INS-05",
-    "MKR-INS-09",
+    "MKR-INS-08",
     "MKR-INS-10",
   ];
-  const revision = SEPTEMBER_CODES.includes(code)
-    ? "2026.09/01"
-    : code === "MKR-INS-06" || code === "MKR-INS-07"
-      ? "2026.08/03"
-      : code === "MKR-INS-04"
-        ? "2026.08/02"
-        : "2026.08/01";
+  const revision =
+    code === "MKR-INS-09"
+      ? "2026.09/02"
+      : SEPTEMBER_CODES.includes(code)
+        ? "2026.09/01"
+        : code === "MKR-INS-06" || code === "MKR-INS-07"
+          ? "2026.08/03"
+          : code === "MKR-INS-04"
+            ? "2026.08/02"
+            : "2026.08/01";
   const fileName = `markiro_${code.toLowerCase()}_${revision.replace("/", "-")}_${locale}.${extension}`;
   const bytes = artifactBytes(fileName);
   return {
@@ -320,15 +323,13 @@ function artifactEntry(
       code,
       revision,
       effectiveDate:
-        code === "MKR-INS-10"
+        code === "MKR-INS-08" || code === "MKR-INS-09" || code === "MKR-INS-10"
           ? "2026-09-10"
           : SEPTEMBER_CODES.includes(code)
             ? "2026-09-02"
-            : code === "MKR-INS-08"
-              ? "2026-08-30"
-              : code === "MKR-INS-04" || code === "MKR-INS-06" || code === "MKR-INS-07"
-                ? "2026-09-01"
-                : "2026-08-15",
+            : code === "MKR-INS-04" || code === "MKR-INS-06" || code === "MKR-INS-07"
+              ? "2026-09-01"
+              : "2026-08-15",
       locale,
       kind,
       fileName,
@@ -1307,15 +1308,15 @@ describe("legal artifact release generation", () => {
       "MKR-INS-05|en|legal-pdf|https://markiro.app/d/MKR-INS-05/2026.09/01/02.09.2026",
       "MKR-INS-06|ru|legal-pdf|https://markiro.app/d/MKR-INS-06/2026.08/03/01.09.2026",
       "MKR-INS-07|ru|legal-pdf|https://markiro.app/d/MKR-INS-07/2026.08/03/01.09.2026",
-      "MKR-INS-08|ru|legal-pdf|https://markiro.app/d/MKR-INS-08/2026.08/01/30.08.2026",
-      "MKR-INS-09|ru|legal-pdf|https://markiro.app/d/MKR-INS-09/2026.09/01/02.09.2026",
+      "MKR-INS-08|ru|legal-pdf|https://markiro.app/d/MKR-INS-08/2026.09/01/10.09.2026",
+      "MKR-INS-09|ru|legal-pdf|https://markiro.app/d/MKR-INS-09/2026.09/02/10.09.2026",
       "MKR-INS-10|ru|legal-pdf|https://markiro.app/d/MKR-INS-10/2026.09/01/10.09.2026",
     ]);
     expect(new Set(entries.map(({ revision }) => revision))).toEqual(
-      new Set(["2026.08/01", "2026.08/02", "2026.08/03", "2026.09/01"]),
+      new Set(["2026.08/01", "2026.08/02", "2026.08/03", "2026.09/01", "2026.09/02"]),
     );
     expect(new Set(entries.map(({ effectiveDate }) => effectiveDate))).toEqual(
-      new Set(["2026-08-15", "2026-08-30", "2026-09-01", "2026-09-02", "2026-09-10"]),
+      new Set(["2026-08-15", "2026-09-01", "2026-09-02", "2026-09-10"]),
     );
     expect(entries.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(23);
     expect(await readdir(path.dirname(outDir))).toEqual(["legal"]);

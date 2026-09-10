@@ -7,6 +7,8 @@ import {
   platformNationalCatalogContracts,
   platformTeamContracts,
   platformTenantContracts,
+  platformReportContracts,
+  platformErrorSchema,
 } from "@markiro/platform-contracts";
 import type { ZodType } from "zod";
 
@@ -34,6 +36,22 @@ const route = (
 ): PlatformRouteContract => ({ method, path, status, response, ...options });
 
 export const CURRENT_SAAS_ROUTES = [
+  route("post", "/platform/reports", "201", platformReportContracts.create.response, {
+    body: platformReportContracts.create.body,
+  }),
+  route("get", "/platform/reports", "200", platformReportContracts.list.response, {
+    query: platformReportContracts.list.query,
+  }),
+  route("get", "/platform/reports/options", "200", platformReportContracts.options.response, {
+    query: platformReportContracts.options.query,
+  }),
+  route(
+    "post",
+    "/platform/reports/{id}/download",
+    "200",
+    platformReportContracts.download.response,
+    { errors: [{ status: "410", schema: platformErrorSchema }] },
+  ),
   route("get", "/platform/me", "200", platformAuthContracts.me.response),
   route(
     "post",
