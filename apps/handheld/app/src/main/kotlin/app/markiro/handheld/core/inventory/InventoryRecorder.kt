@@ -151,7 +151,7 @@ class InventoryRecorder(private val db: HandheldDatabase, private val clock: () 
         val winner = event.winnerEventId?.let {
             LocalClaim(event.codeHash ?: event.normalizedIdentity, it, event.winnerDeviceId.orEmpty(), event.winnerScannedAt.orEmpty())
         }
-        val tail = if (event.kind == "item") tailOfSerial(event.canonicalRaw.orEmpty().drop(18)) else "…" + event.canonicalRaw.orEmpty().takeLast(4)
+        val tail = InventoryTail.ofEvent(event.kind, event.canonicalRaw)
         return RecordOutcome.Recorded(InventoryVerdict.fromWire(event.localVerdict), event.kind, tail, event.claimedCount, 0, winner, null, event.scannedAt, event.eventId)
     }
 
@@ -241,14 +241,9 @@ class InventoryRecorder(private val db: HandheldDatabase, private val clock: () 
     }
 
     private fun tail(identity: Identity) = when (identity) {
-        is Identity.Item -> tailOfSerial(identity.serial)
-        is Identity.KnownBox -> "…" + identity.sscc.takeLast(4)
-        is Identity.OldBox -> "…" + identity.sscc.takeLast(4)
-    }
-
-    private fun tailOfSerial(serial: String): String? {
-        val chars = serial.filter { it.isLetterOrDigit() }
-        return if (chars.isEmpty()) null else "…" + chars.takeLast(4)
+        is Identity.Item -> InventoryTail.ofSerial(identity.serial)
+        is Identity.KnownBox -> InventoryTail.ofSscc(identity.sscc)
+        is Identity.OldBox -> InventoryTail.ofSscc(identity.sscc)
     }
 
     private fun InventorySnapshotCodeEntity.toRow() =

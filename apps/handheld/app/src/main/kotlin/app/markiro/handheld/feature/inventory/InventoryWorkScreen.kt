@@ -57,6 +57,7 @@ import app.markiro.handheld.core.design.StatusItem
 import app.markiro.handheld.core.design.StatusStrip
 import app.markiro.handheld.core.design.Tone
 import app.markiro.handheld.core.design.tone
+import app.markiro.handheld.core.inventory.InventoryTail
 import app.markiro.handheld.core.inventory.InventoryVerdict
 import app.markiro.handheld.core.util.Iso
 import app.markiro.handheld.core.util.TimeText
@@ -179,7 +180,7 @@ fun InventoryWorkScreen(state: InventoryWorkUi, cb: InventoryWorkCallbacks) {
                 val verdict = InventoryVerdict.fromWire(event.localVerdict)
                 Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(Iso.parse(event.scannedAt)?.let { TimeText.hhmm(it) } ?: "", style = t.caption, color = c.fg3)
-                    Text("…" + (event.canonicalRaw ?: event.normalizedIdentity).takeLast(8), style = t.code.copy(fontSize = 14.sp), color = c.fg1)
+                    Text(InventoryTail.ofEvent(event.kind, event.canonicalRaw) ?: "…", style = t.code.copy(fontSize = 14.sp), color = c.fg1)
                     Text(stringResource(verdict.label()), style = t.caption, color = c.tone(verdict.tone()).fg)
                 }
             }

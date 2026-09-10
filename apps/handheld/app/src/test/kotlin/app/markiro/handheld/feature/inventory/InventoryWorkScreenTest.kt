@@ -47,6 +47,7 @@ class InventoryWorkScreenTest {
         compose.onNodeWithText("ДУБЛЬ").assertIsDisplayed()
         compose.onNodeWithText("на другом терминале в", substring = true).assertIsDisplayed()
         compose.onNodeWithText("${n.format(1240)} / ${n.format(4116)}").assertIsDisplayed()
+        compose.onNodeWithText("…S1").assertIsDisplayed()
         compose.onNodeWithText("312").assertIsDisplayed()
         compose.onNodeWithText("Защищено 3 · Отклонено сервером 1").assertIsDisplayed()
         compose.onNodeWithText("Дата 20.08.2026").assertIsDisplayed()
