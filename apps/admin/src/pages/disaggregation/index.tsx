@@ -199,6 +199,7 @@ export function DisaggregationPage() {
         </div>
         <div style={{ width: 180 }}>
           <DatePicker
+            placeholder={t("common.datePicker.placeholder")}
             label={t("pages.disaggregation.filters.fromLabel")}
             {...(from !== undefined ? { value: from } : {})}
             onValueChange={(value) => {
@@ -209,6 +210,7 @@ export function DisaggregationPage() {
         </div>
         <div style={{ width: 180 }}>
           <DatePicker
+            placeholder={t("common.datePicker.placeholder")}
             label={t("pages.disaggregation.filters.toLabel")}
             {...(to !== undefined ? { value: to } : {})}
             onValueChange={(value) => {
