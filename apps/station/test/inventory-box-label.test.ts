@@ -47,6 +47,16 @@ const raster: RasterResult = {
 };
 
 describe("inventory box label", () => {
+  it("prints the inclusive last day for a 365-day product", () => {
+    expect(
+      inventoryBoxLabelFields({
+        ...INPUT,
+        productionDate: "2026-09-10",
+        shelfLifeDays: 365,
+      }).expiry,
+    ).toBe("09.09.2027");
+  });
+
   it("freezes the observed civil date, quantity, product facts, expiry and bare SSCC", () => {
     expect(inventoryBoxLabelFields(INPUT)).toEqual({
       "product.name": "Пиво светлое 0,45 л",
@@ -57,7 +67,7 @@ describe("inventory box label", () => {
       sscc: "046006820000621515",
       "shift.no": "",
       date: "19.08.2026",
-      expiry: "19.02.2027",
+      expiry: "18.02.2027",
       qty: "6",
       operator: "",
       "counterparty.name": "",
@@ -75,10 +85,10 @@ describe("inventory box label", () => {
     const tspl = await renderInventoryBoxLabel(SPEC, INPUT, "tspl", rasterize);
 
     expect(new TextDecoder("latin1").decode(zpl)).toBe(
-      "^XA\n^PW464\n^LL320\n^FO16,16^GFA,1,1,1,A5^FS\n^FO16,96^BCN,64,N,N,N^FD>;>800046006820000621515^FS\n^FO16,192^A0N,23,23^FD19.08.2026^FS\n^FO176,192^A0N,23,23^FD19.02.2027^FS\n^FO384,192^GFA,1,1,1,A5^FS\n^XZ\n",
+      "^XA\n^PW464\n^LL320\n^FO16,16^GFA,1,1,1,A5^FS\n^FO16,96^BCN,64,N,N,N^FD>;>800046006820000621515^FS\n^FO16,192^A0N,23,23^FD19.08.2026^FS\n^FO176,192^A0N,23,23^FD18.02.2027^FS\n^FO384,192^GFA,1,1,1,A5^FS\n^XZ\n",
     );
     expect(new TextDecoder("latin1").decode(tspl)).toBe(
-      'SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBITMAP 16,16,1,1,0,Z\nBARCODE 16,96,"128",64,0,0,2,2,"!100046006820000621515"\nTEXT 16,192,"0",0,8,8,"19.08.2026"\nTEXT 176,192,"0",0,8,8,"19.02.2027"\nBITMAP 384,192,1,1,0,Z\nPRINT 1\n',
+      'SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBITMAP 16,16,1,1,0,Z\nBARCODE 16,96,"128",64,0,0,2,2,"!100046006820000621515"\nTEXT 16,192,"0",0,8,8,"19.08.2026"\nTEXT 176,192,"0",0,8,8,"18.02.2027"\nBITMAP 384,192,1,1,0,Z\nPRINT 1\n',
     );
     expect(rasterize).toHaveBeenCalledWith(
       "Пиво 0,45 л",

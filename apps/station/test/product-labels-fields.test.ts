@@ -65,6 +65,19 @@ afterEach(() => {
 });
 
 describe("duplicate label preparation", () => {
+  it("prints the inclusive last day for a 365-day product", () => {
+    const value = input();
+    const fields = duplicateLabelFields({
+      ...value.labelContext,
+      canonicalRaw: value.raw,
+      acceptedAt: value.acceptedAt,
+      productionDate: "2026-09-10",
+      shelfLifeDays: 365,
+    });
+    expect(fields.date).toBe("10.09.2026");
+    expect(fields.expiry).toBe("09.09.2027");
+  });
+
   it("uses the same full code, one unit, product fallback and declared production date", () => {
     const value = input();
     const fields = duplicateLabelFields({
@@ -76,7 +89,7 @@ describe("duplicate label preparation", () => {
     expect(fields.qty).toBe("1");
     expect(fields.sscc).toBe("");
     expect(fields.date).toBe("08.09.2026");
-    expect(fields.expiry).toBe("08.10.2026");
+    expect(fields.expiry).toBe("07.10.2026");
     expect(fields["product.printName"]).toBe("Сироп «Клюква»");
   });
 
