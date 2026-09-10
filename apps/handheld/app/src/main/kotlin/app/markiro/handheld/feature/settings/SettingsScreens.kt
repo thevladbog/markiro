@@ -54,6 +54,7 @@ fun SettingsScreen(
     config: DeviceConfigEntity?,
     onBack: () -> Unit,
     onScanner: () -> Unit,
+    onPrinter: () -> Unit = {},
     onTheme: (ThemeMode) -> Unit,
     onLanguage: (String) -> Unit,
     onToggleSound: () -> Unit = {},
@@ -66,6 +67,11 @@ fun SettingsScreen(
         AppBar(stringResource(R.string.settings_title), onBack)
         Column(Modifier.padding(horizontal = MarkiroSizes.sp4)) {
             SettingRow(stringResource(R.string.settings_scanner), sourceLabel(state), onScanner)
+            SettingRow(
+                stringResource(R.string.printer_title),
+                state.printerLabel ?: stringResource(R.string.printer_none),
+                onPrinter,
+            )
             SettingRow(stringResource(R.string.settings_language), if (state.language == "en") "English" else "Русский") {
                 onLanguage(if (state.language == "en") "ru" else "en")
             }

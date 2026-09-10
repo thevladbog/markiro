@@ -31,6 +31,20 @@ import app.markiro.handheld.feature.inventory.InventoryWorkViewModel
 import app.markiro.handheld.feature.pairing.PairingCallbacks
 import app.markiro.handheld.feature.pairing.PairingScreen
 import app.markiro.handheld.feature.pairing.PairingViewModel
+import app.markiro.handheld.core.label.PrinterLanguage
+import app.markiro.handheld.core.print.NotReadyReason
+import app.markiro.handheld.feature.printer.AddPrinterCallbacks
+import app.markiro.handheld.feature.printer.AddPrinterScreen
+import app.markiro.handheld.feature.printer.BluetoothPairCallbacks
+import app.markiro.handheld.feature.printer.BluetoothPairScreen
+import app.markiro.handheld.feature.printer.PrinterErrorCallbacks
+import app.markiro.handheld.feature.printer.PrinterErrorScreen
+import app.markiro.handheld.feature.printer.PrinterListCallbacks
+import app.markiro.handheld.feature.printer.PrinterListScreen
+import app.markiro.handheld.feature.printer.PrinterViewModel
+import app.markiro.handheld.feature.printer.TestPrintCallbacks
+import app.markiro.handheld.feature.printer.TestPrintScreen
+import app.markiro.handheld.feature.printer.TransportKind
 import app.markiro.handheld.feature.settings.AppPreferences
 import app.markiro.handheld.feature.settings.ComingSoonScreen
 import app.markiro.handheld.feature.settings.ScannerSettingsScreen
@@ -60,6 +74,10 @@ object Routes {
     const val HUB = "hub"
     const val SETTINGS = "settings"
     const val SCANNER = "settings/scanner"
+    const val PRINTER = "settings/printer"
+    const val PRINTER_ADD = "settings/printer/add"
+    const val PRINTER_BLUETOOTH = "settings/printer/bluetooth"
+    const val PRINTER_TEST = "settings/printer/test"
     const val SHIFTS = "shifts"
     const val WORK = "work/{shiftId}"
     const val CLOSE = "close/{shiftId}"
@@ -287,12 +305,101 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     config,
                     onBack = { nav.popBackStack() },
                     onScanner = { nav.navigate(Routes.SCANNER) },
+                    onPrinter = { nav.navigate(Routes.PRINTER) },
                     onTheme = vm::setTheme,
                     onLanguage = vm::setLanguage,
                     onToggleSound = vm::toggleSound,
                     onVolume = vm::setVolume,
                     onToggleVibration = vm::toggleVibration,
                     onTest = vm::testSignal,
+                )
+            }
+            composable(Routes.PRINTER) {
+                val vm: PrinterViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                PrinterListScreen(
+                    state,
+                    PrinterListCallbacks(
+                        onBack = { nav.popBackStack() },
+                        onSelect = vm::select,
+                        onTest = {
+                            vm.printTest()
+                            nav.navigate(Routes.PRINTER_TEST)
+                        },
+                        onAdd = {
+                            vm.startAdd(TransportKind.WIFI)
+                            nav.navigate(Routes.PRINTER_ADD)
+                        },
+                    ),
+                )
+            }
+            composable(Routes.PRINTER_ADD) {
+                val vm: PrinterViewModel = hiltViewModel()
+                val form by vm.addForm.collectAsStateWithLifecycle()
+                // An unreachable printer gets its own screen; every other refusal stays on the form
+                // with the printer's own words.
+                if (form.error == NotReadyReason.UNREACHABLE) {
+                    PrinterErrorScreen(
+                        form.host,
+                        PrinterErrorCallbacks(
+                            onBack = { nav.popBackStack() },
+                            onRetry = vm::checkAndSave,
+                            onEdit = { vm.editHost(form.host) },
+                        ),
+                    )
+                } else {
+                    AddPrinterScreen(
+                        form,
+                        AddPrinterCallbacks(
+                            onBack = { nav.popBackStack() },
+                            onTransport = vm::startAdd,
+                            onHost = vm::editHost,
+                            onPort = vm::editPort,
+                            onLanguage = vm::setLanguage,
+                            onDpi = vm::setDpi,
+                            onCheck = vm::checkAndSave,
+                            onBluetooth = { nav.navigate(Routes.PRINTER_BLUETOOTH) },
+                        ),
+                    )
+                }
+            }
+            composable(Routes.PRINTER_BLUETOOTH) {
+                val vm: PrinterViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                LaunchedEffect(Unit) { vm.loadPairedDevices() }
+                BluetoothPairScreen(
+                    state,
+                    BluetoothPairCallbacks(
+                        onBack = { nav.popBackStack() },
+                        onGrant = { vm.loadPairedDevices() },
+                        onSearchAgain = { vm.loadPairedDevices() },
+                        onPick = { device ->
+                            vm.pickPairedDevice(device)
+                            nav.popBackStack(Routes.PRINTER, inclusive = false)
+                        },
+                    ),
+                )
+            }
+            composable(Routes.PRINTER_TEST) {
+                val vm: PrinterViewModel = hiltViewModel()
+                val step by vm.testStep.collectAsStateWithLifecycle()
+                val state by vm.state.collectAsStateWithLifecycle()
+                val printer = state.selected
+                TestPrintScreen(
+                    step,
+                    printer?.let { PrinterLanguage.fromWire(it.language) } ?: PrinterLanguage.ZPL,
+                    printer?.dpi ?: 203,
+                    TestPrintCallbacks(
+                        onBack = {
+                            vm.dismissTest()
+                            nav.popBackStack()
+                        },
+                        onConfirm = {
+                            vm.confirmTestPrinted()
+                            nav.popBackStack()
+                        },
+                        onRetry = vm::retryTest,
+                    ),
                 )
             }
             composable(Routes.SCANNER) {
