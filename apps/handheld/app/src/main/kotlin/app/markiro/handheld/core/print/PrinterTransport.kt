@@ -2,6 +2,7 @@ package app.markiro.handheld.core.print
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.IOException
 import java.io.InputStream
@@ -66,18 +67,18 @@ interface PrinterTransport {
 class StreamPrinterTransport(private val connectors: (PrinterEntity) -> PrinterConnector) : PrinterTransport {
 
     override suspend fun status(printer: PrinterEntity): PrinterStatus = withContext(Dispatchers.IO) {
-        val query = if (printer.language == "tspl") TSPL_STATUS_QUERY else ZPL_STATUS_QUERY
+        val tspl = printer.language == "tspl"
         val reply = try {
             connectors(printer).open(printer).use { connection ->
-                connection.output.write(query)
+                connection.output.write(if (tspl) TSPL_STATUS_QUERY else ZPL_STATUS_QUERY)
                 connection.output.flush()
-                connection.input.readBytes()
+                readStatusReply(connection.input) { if (tspl) it.isNotEmpty() else zplReplyIsComplete(it) }
             }
         } catch (_: IOException) {
             return@withContext PrinterStatus.NotReady(NotReadyReason.UNREACHABLE)
         }
         if (reply.isEmpty()) return@withContext PrinterStatus.NotReady(NotReadyReason.UNREACHABLE)
-        if (printer.language == "tspl") decodeTsplStatus(reply) else decodeZplStatus(reply)
+        if (tspl) decodeTsplStatus(reply) else decodeZplStatus(reply)
     }
 
     override suspend fun send(printer: PrinterEntity, document: ByteArray): SendOutcome = withContext(Dispatchers.IO) {
@@ -116,6 +117,46 @@ class StreamPrinterTransport(private val connectors: (PrinterEntity) -> PrinterC
         const val CHUNK_BYTES = 512
     }
 }
+
+/**
+ * Reads a status reply.
+ *
+ * Deliberately not `readBytes()`. That reads to end of stream, and a printer on a raw printing port
+ * answers without closing the connection, so the whole five seconds would be spent waiting for an
+ * end that never comes and then the socket timeout would throw the reply away. Every healthy printer
+ * would be reported unreachable. Instead this stops as soon as the reply has said what is decoded
+ * from it, keeps whatever arrived if the printer then falls silent, and is bounded so a printer that
+ * answers with a stream cannot grow it without limit.
+ */
+internal fun readStatusReply(input: InputStream, isComplete: (ByteArray) -> Boolean): ByteArray {
+    val reply = ByteArrayOutputStream()
+    val chunk = ByteArray(256)
+    while (reply.size() < STATUS_REPLY_LIMIT) {
+        val read = try {
+            input.read(chunk)
+        } catch (e: IOException) {
+            // Nothing came at all, so the printer is not answering and the caller has to hear that.
+            if (reply.size() == 0) throw e
+            break
+        }
+        if (read <= 0) break
+        reply.write(chunk, 0, minOf(read, STATUS_REPLY_LIMIT - reply.size()))
+        if (isComplete(reply.toByteArray())) break
+    }
+    return reply.toByteArray()
+}
+
+/** Both replies are tens of bytes. The cap is what stops a talkative printer from filling memory. */
+private const val STATUS_REPLY_LIMIT = 4096
+
+/**
+ * The ZPL reply is complete once the error line is there whole, terminator included. Without the
+ * terminator a mask split across two packets would read as a shorter, wrong mask.
+ */
+private val ZPL_ERRORS_LINE_END = Regex("ERRORS:\\s*\\d\\s+[0-9A-Fa-f]+\\s+[0-9A-Fa-f]+\\s*[\\r\\n]")
+
+private fun zplReplyIsComplete(reply: ByteArray) =
+    ZPL_ERRORS_LINE_END.containsMatchIn(String(reply, Charsets.US_ASCII))
 
 /** Host status query. The reply's error line carries a flag and two masks. */
 private val ZPL_STATUS_QUERY = "~HQES".toByteArray(Charsets.US_ASCII)

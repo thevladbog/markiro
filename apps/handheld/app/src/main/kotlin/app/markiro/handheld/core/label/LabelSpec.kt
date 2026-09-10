@@ -38,7 +38,15 @@ enum class LabelField(val wire: String) {
     }
 }
 
-enum class TextFormat(val wire: String) { KM_WITHOUT_CRYPTO("km_without_crypto") }
+enum class TextFormat(val wire: String) {
+    KM_WITHOUT_CRYPTO("km_without_crypto"),
+    ;
+
+    companion object {
+        fun fromWire(value: String): TextFormat =
+            entries.firstOrNull { it.wire == value } ?: throw LabelRenderException("unknown text format: $value")
+    }
+}
 
 enum class LabelAlign(val wire: String) {
     LEFT("left"),

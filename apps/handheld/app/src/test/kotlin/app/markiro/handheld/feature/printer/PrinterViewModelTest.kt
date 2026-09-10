@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.MainDispatcherRule
 import app.markiro.handheld.core.label.LabelRenderer
+import app.markiro.handheld.core.label.PrinterLanguage
 import app.markiro.handheld.core.label.RasterResult
 import app.markiro.handheld.core.label.RasterizeText
 import app.markiro.handheld.core.print.DiscoveredPrinter
@@ -14,8 +15,12 @@ import app.markiro.handheld.core.print.PrinterStatus
 import app.markiro.handheld.core.print.PrinterTransport
 import app.markiro.handheld.core.print.SendOutcome
 import app.markiro.handheld.core.storage.HandheldDatabase
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -161,6 +166,61 @@ class PrinterViewModelTest {
     }
 
     @Test
+    fun aPortOutsideTheRangeIsStoredAsThePortThatWillActuallyBeUsed() = runTest {
+        // The connector falls back for an unusable port. Storing the typed one anyway would show the
+        // operator an address the socket never dials.
+        val model = vm()
+        model.startAdd(TransportKind.WIFI)
+        model.editHost("192.168.1.40")
+        model.editPort("99999")
+        model.checkAndSave()
+        advanceUntilIdle()
+        assertEquals("192.168.1.40:9100", model.state.first { it.selected != null }.selected?.address)
+    }
+
+    @Test
+    fun aSavedPrinterTellsTheFormItHasNothingLeftToShow() = runTest {
+        val model = vm()
+        model.startAdd(TransportKind.WIFI)
+        model.editHost("192.168.1.40")
+        // Subscribed before the check, because the signal is a one-shot with nothing replayed.
+        val signalled = async { model.saved.first() }
+        runCurrent()
+        model.checkAndSave()
+        signalled.await()
+        // Arriving here is the point: without the signal the form simply blanks and says nothing.
+        assertEquals(AddPrinterForm(), model.addForm.value)
+    }
+
+    @Test
+    fun aPrinterThatRefusesNeverSignalsASave() = runTest {
+        val model = vm(FakeTransport(nextStatus = PrinterStatus.NotReady(NotReadyReason.NO_PAPER)))
+        val saved = mutableListOf<Unit>()
+        backgroundScope.launch { model.saved.toList(saved) }
+        runCurrent()
+        model.startAdd(TransportKind.WIFI)
+        model.editHost("192.168.1.40")
+        model.checkAndSave()
+        model.addForm.first { it.error != null }
+        assertEquals(0, saved.size)
+    }
+
+    @Test
+    fun switchingTransportKeepsTheLanguageAndResolutionAlreadyPicked() = runTest {
+        // The Bluetooth path carries both over to the paired device, so resetting them here would
+        // silently print the belt printer's label in the wrong language.
+        val model = vm()
+        model.startAdd(TransportKind.WIFI)
+        model.setLanguage(PrinterLanguage.TSPL)
+        model.setDpi(300)
+        model.setTransport(TransportKind.BLUETOOTH)
+        val form = model.addForm.value
+        assertEquals(TransportKind.BLUETOOTH, form.transport)
+        assertEquals(PrinterLanguage.TSPL, form.language)
+        assertEquals(300, form.dpi)
+    }
+
+    @Test
     fun pairedBluetoothDevicesAreOffered() = runTest {
         val model = vm(paired = listOf(DiscoveredPrinter("AA:BB", "Zebra ZQ320", bonded = true)))
         model.loadPairedDevices()
@@ -169,6 +229,22 @@ class PrinterViewModelTest {
         model.pickPairedDevice(DiscoveredPrinter("AA:BB", "Zebra ZQ320", bonded = true))
         advanceUntilIdle()
         assertEquals("AA:BB", model.state.first { it.selected != null }.selected?.address)
+    }
+
+    @Test
+    fun pickingTheSamePairedDeviceTwiceUpdatesTheSameRow() = runTest {
+        // The same rule the network path already follows: one address is one printer, or the list
+        // fills with rows the operator cannot tell apart or remove the right one of.
+        val device = DiscoveredPrinter("AA:BB", "Zebra ZQ320", bonded = true)
+        val model = vm(paired = listOf(device))
+        model.setTransport(TransportKind.BLUETOOTH)
+        model.pickPairedDevice(device)
+        model.state.first { it.selected?.language == "zpl" }
+        // The second pick changes the language, so the row it lands on is observable.
+        model.setLanguage(PrinterLanguage.TSPL)
+        model.pickPairedDevice(device)
+        model.state.first { it.selected?.language == "tspl" }
+        assertEquals(1, db.printerDao().all().size)
     }
 
     private suspend fun saveSelected(model: PrinterViewModel) {

@@ -13,6 +13,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.ServerSocket
+import java.net.SocketTimeoutException
 
 class PrinterTransportTest {
     private fun printer(address: String, language: String = "zpl") = PrinterEntity(
@@ -139,5 +140,75 @@ class PrinterTransportTest {
     fun anAddressWithoutAPortFallsBackToTheRawPrintingPort() {
         assertEquals("192.168.1.40" to 9100, WifiPrinterConnector.parseAddress("192.168.1.40"))
         assertEquals("192.168.1.40" to 6101, WifiPrinterConnector.parseAddress("192.168.1.40:6101"))
+    }
+
+    @Test
+    fun aPortOutsideTheRangeFallsBackInsteadOfReachingTheSocket() {
+        // A port the socket rejects throws IllegalArgumentException, which is not the IOException
+        // the transport catches, so it would surface as a crash rather than as a printer refusing.
+        assertEquals("192.168.1.40" to 9100, WifiPrinterConnector.parseAddress("192.168.1.40:99999"))
+        assertEquals("192.168.1.40" to 9100, WifiPrinterConnector.parseAddress("192.168.1.40:0"))
+        assertEquals("192.168.1.40" to 9100, WifiPrinterConnector.parseAddress("192.168.1.40:printer"))
+        assertEquals(65535, WifiPrinterConnector.normalizePort("65535"))
+        assertEquals(9100, WifiPrinterConnector.normalizePort("65536"))
+        assertEquals(9100, WifiPrinterConnector.normalizePort(""))
+    }
+
+    /** Answers once, then holds the line open the way a printer on a raw printing port does. */
+    private class HoldingConnection(private vararg val chunks: ByteArray) : PrinterConnection {
+        private var next = 0
+        override val input: InputStream = object : InputStream() {
+            override fun read(): Int = throw UnsupportedOperationException("read into a buffer")
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                if (next >= chunks.size) throw SocketTimeoutException("read timed out")
+                val chunk = chunks[next++]
+                val length = minOf(len, chunk.size)
+                chunk.copyInto(b, off, 0, length)
+                return length
+            }
+        }
+        override val output: OutputStream = ByteArrayOutputStream()
+        override fun close() = Unit
+    }
+
+    @Test
+    fun aPrinterThatAnswersAndThenHoldsTheLineOpenIsStillDecoded() = runTest {
+        // Reading to end of stream would spend the whole five seconds waiting for a close that never
+        // comes and then throw the reply away with the timeout, reporting a healthy printer as
+        // unreachable. This is the case that only a real printer would have shown.
+        val ready = "PRINTER STATUS\r\n ERRORS: 0 00000000 00000000\r\n".toByteArray(Charsets.US_ASCII)
+        val outcome = transport { HoldingConnection(ready) }.status(printer("host:9100"))
+        assertEquals(PrinterStatus.Ready, outcome)
+    }
+
+    @Test
+    fun aReplySplitAcrossPacketsIsReadWholeBeforeItIsDecoded() = runTest {
+        // Stopping at the first packet would read the mask as `000000`, which is neither the mask the
+        // printer sent nor a refusal: it would decode as a printer with nothing wrong.
+        val outcome = transport {
+            HoldingConnection(
+                "PRINTER STATUS\r\n ERRORS: 1 00000000 000000".toByteArray(Charsets.US_ASCII),
+                "01\r\n".toByteArray(Charsets.US_ASCII),
+            )
+        }.status(printer("host:9100"))
+        assertEquals(PrinterStatus.NotReady(NotReadyReason.NO_PAPER), outcome)
+    }
+
+    @Test
+    fun aPrinterThatSaysNothingAtAllIsUnreachable() = runTest {
+        val outcome = transport { HoldingConnection() }.status(printer("host:9100"))
+        assertEquals(PrinterStatus.NotReady(NotReadyReason.UNREACHABLE), outcome)
+    }
+
+    @Test
+    fun aPrinterThatNeverStopsTalkingIsNotReadWithoutLimit() {
+        val endless = object : InputStream() {
+            override fun read(): Int = 'x'.code
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                b.fill('x'.code.toByte(), off, off + len)
+                return len
+            }
+        }
+        assertEquals(4096, readStatusReply(endless) { false }.size)
     }
 }

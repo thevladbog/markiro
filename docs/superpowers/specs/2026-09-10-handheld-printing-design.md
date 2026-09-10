@@ -249,7 +249,11 @@ timeout state.
   is not later mistaken for a defect.
 - **Status query coverage.** The reason vocabulary is limited to what each
   command language reports. A printer that answers neither query falls back to
-  «не отвечает».
+  «не отвечает». The reply is read up to the answer rather than to end of
+  stream, because a printer on a raw printing port answers without closing the
+  connection: reading to the end would spend the whole timeout and then discard
+  the reply, reporting every healthy printer as unreachable. Where the answer
+  ends is therefore part of what real hardware has to confirm.
 - **Bluetooth on hardware.** Verifiable only on a real device. The pull request
   must say so plainly rather than implying emulator coverage.
 - **What a delivered send can claim.** Measured during the walk-through against a

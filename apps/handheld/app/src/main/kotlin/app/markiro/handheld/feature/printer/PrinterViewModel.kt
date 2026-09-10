@@ -15,7 +15,9 @@ import app.markiro.handheld.core.print.PrinterTransport
 import app.markiro.handheld.core.print.SendOutcome
 import app.markiro.handheld.core.print.WifiPrinterConnector
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -84,6 +86,14 @@ class PrinterViewModel(
     private val _testStep = MutableStateFlow<TestPrintStep>(TestPrintStep.Idle)
     val testStep: StateFlow<TestPrintStep> = _testStep
 
+    private val _saved = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    /**
+     * A printer answered and was stored. The form has nothing left to say at that point, so without
+     * this the operator watches it blank itself and has to guess whether anything happened.
+     */
+    val saved: SharedFlow<Unit> = _saved
+
     fun select(id: String) {
         viewModelScope.launch { printers.select(id) }
     }
@@ -92,9 +102,16 @@ class PrinterViewModel(
         viewModelScope.launch { printers.delete(id) }
     }
 
+    /** Enters the add flow with an empty form. */
     fun startAdd(transport: TransportKind) {
         _addForm.value = AddPrinterForm(transport = transport)
     }
+
+    /**
+     * Switches the transport within the flow the operator is already in, keeping the language and
+     * resolution they picked. The Bluetooth path needs both: they carry over to the paired device.
+     */
+    fun setTransport(transport: TransportKind) = _addForm.update { it.copy(transport = transport, error = null) }
 
     fun editHost(value: String) = _addForm.update { it.copy(host = value, error = null) }
 
@@ -110,7 +127,9 @@ class PrinterViewModel(
      */
     fun checkAndSave() {
         val form = _addForm.value
-        val port = form.port.toIntOrNull() ?: WifiPrinterConnector.DEFAULT_PORT
+        // Normalized here as well as in the connector, so the address the list shows is the address
+        // the socket will actually use.
+        val port = WifiPrinterConnector.normalizePort(form.port)
         val transportWire = form.transport.wire
         val address = if (form.transport == TransportKind.WIFI) "${form.host}:$port" else form.host
         _addForm.update { it.copy(checking = true, error = null) }
@@ -135,6 +154,7 @@ class PrinterViewModel(
                     printers.upsert(candidate.copy(lastStatus = "ready", lastSeenAt = clock()))
                     printers.select(candidate.id)
                     _addForm.value = AddPrinterForm()
+                    _saved.tryEmit(Unit)
                 }
                 is PrinterStatus.NotReady -> _addForm.update { it.copy(checking = false, error = status.reason) }
             }
@@ -153,18 +173,21 @@ class PrinterViewModel(
 
     fun pickPairedDevice(device: DiscoveredPrinter) {
         val form = _addForm.value
-        val printer = PrinterEntity(
-            id = UUID.randomUUID().toString(),
-            name = device.name,
-            transport = TransportKind.BLUETOOTH.wire,
-            address = device.address,
-            language = form.language.wire,
-            dpi = form.dpi,
-            selected = true,
-            lastStatus = null,
-            lastSeenAt = null,
-        )
         viewModelScope.launch {
+            // The same device picked twice is the same printer, exactly as for a network address.
+            // Without this the list fills with identical rows the operator cannot tell apart.
+            val existing = printers.findByAddress(TransportKind.BLUETOOTH.wire, device.address)
+            val printer = PrinterEntity(
+                id = existing?.id ?: UUID.randomUUID().toString(),
+                name = device.name,
+                transport = TransportKind.BLUETOOTH.wire,
+                address = device.address,
+                language = form.language.wire,
+                dpi = form.dpi,
+                selected = true,
+                lastStatus = null,
+                lastSeenAt = null,
+            )
             printers.upsert(printer)
             printers.select(printer.id)
         }

@@ -342,6 +342,11 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                 composable(Routes.PRINTER_ADD) { entry ->
                     val vm = printerViewModel(nav, entry)
                     val form by vm.addForm.collectAsStateWithLifecycle()
+                    // A saved printer leaves the form, which has nothing left to show, and lands on
+                    // the list where the new row is already selected.
+                    LaunchedEffect(vm) {
+                        vm.saved.collect { nav.popBackStack(Routes.PRINTER, inclusive = false) }
+                    }
                     // An unreachable printer gets its own screen; every other refusal stays on the form
                     // with the printer's own words.
                     if (form.error == NotReadyReason.UNREACHABLE) {
@@ -358,13 +363,18 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                             form,
                             AddPrinterCallbacks(
                                 onBack = { nav.popBackStack() },
-                                onTransport = vm::startAdd,
+                                onTransport = vm::setTransport,
                                 onHost = vm::editHost,
                                 onPort = vm::editPort,
                                 onLanguage = vm::setLanguage,
                                 onDpi = vm::setDpi,
                                 onCheck = vm::checkAndSave,
-                                onBluetooth = { nav.navigate(Routes.PRINTER_BLUETOOTH) },
+                                // The form has to know it went to Bluetooth, or backing out of
+                                // pairing returns to a screen still asking for a network address.
+                                onBluetooth = {
+                                    vm.setTransport(TransportKind.BLUETOOTH)
+                                    nav.navigate(Routes.PRINTER_BLUETOOTH)
+                                },
                             ),
                         )
                     }
