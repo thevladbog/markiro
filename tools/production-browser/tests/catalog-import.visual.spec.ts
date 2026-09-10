@@ -4,7 +4,9 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 import {
   catalogCapabilitiesSchema,
+  chzLinkDetailSchema,
   importPrepareResponseSchema,
+  importResultSchema,
 } from "../../../packages/platform-contracts/dist/index.js";
 
 import {
@@ -198,11 +200,38 @@ const PREVIEW_BLOCKED = importPrepareResponseSchema.parse({
     },
   ],
 });
-const RESULT_RUNNING = {
+/**
+ * The shared result fixture is a finished operation whose photo failed. This
+ * one is the state in between: the product is already in the catalog while
+ * its photo is still being saved, which is what disables "Открыть товар в
+ * каталоге" and prints the wait notice.
+ */
+const RESULT_RUNNING = importResultSchema.parse({
   ...resultFixture,
   state: "running",
-  items: resultFixture.items.map((item) => ({ ...item, outcome: "applied", image: "pending" })),
-};
+  items: resultFixture.items.map((item) => ({
+    ...item,
+    product: "applied",
+    image: "pending",
+    imageReason: null,
+    reason: null,
+  })),
+});
+
+/**
+ * A saved link whose last status check failed. The cabinet keeps showing the
+ * stored card details and marks the check itself as failed -- the state the
+ * refresh button leaves behind, and the one a reload shows again.
+ */
+const LINK_CHECK_FAILED = chzLinkDetailSchema.parse({
+  summary: {
+    ...linkFixture.summary,
+    lastAttemptAt: "2026-09-09T09:12:00.000Z",
+    lastOutcome: "error",
+    lastErrorCode: "card_unavailable",
+  },
+  link: { ...linkFixture.link },
+});
 
 type Scenario =
   | "unavailable"
@@ -212,7 +241,8 @@ type Scenario =
   | "reviewBlocked"
   | "result"
   | "resultPhoto"
-  | "link";
+  | "link"
+  | "linkError";
 
 async function installApi(page: Page, scenario: Scenario) {
   const unexpected: string[] = [];
@@ -233,7 +263,8 @@ async function installApi(page: Page, scenario: Scenario) {
       return json(route, { items: [] });
     }
     if (path === "/api/products") {
-      return json(route, { items: scenario === "link" ? [productFixture] : [] });
+      const linked = scenario === "link" || scenario === "linkError";
+      return json(route, { items: linked ? [productFixture] : [] });
     }
     if (path === "/api/national-catalog/capabilities") {
       return json(
@@ -241,7 +272,12 @@ async function installApi(page: Page, scenario: Scenario) {
         scenario === "unavailable" ? CAPABILITIES_UNAVAILABLE : capabilitiesFixture,
       );
     }
-    if (path.endsWith("/national-catalog/link")) return json(route, linkFixture);
+    const detail = scenario === "linkError" ? LINK_CHECK_FAILED : linkFixture;
+    // The refresh answers with the summary alone, then the panel refetches the
+    // detail -- both have to carry the same outcome or the frame would show a
+    // failure that the very next request erases.
+    if (path.endsWith("/national-catalog/link/refresh")) return json(route, detail.summary);
+    if (path.endsWith("/national-catalog/link")) return json(route, detail);
     if (path.endsWith("/items")) return json(route, { ...itemsFixture, nextCursor: null });
     if (path.endsWith("/selection")) {
       return json(route, { ...SESSION_READY, selected: 1, selectedItemIds: [id(2)], revision: 1 });
@@ -330,5 +366,57 @@ test("the review step offers the National Catalog photo", async ({ page }) => {
   await expect(photos).toBeVisible();
   await settle(page);
   await photos.screenshot({ path: screenshotPath("import-photo"), scale: "css" });
+  expect(unexpected).toEqual([]);
+});
+
+/**
+ * The result step is addressed by `operationId` in the query string, so the
+ * frames below open it directly instead of re-walking selection and review --
+ * the same URL the cabinet writes when the manager applies the import.
+ */
+function resultRoute(): string {
+  return `/catalog/import?sessionId=${id(1)}&operationId=${id(20)}`;
+}
+
+test("the result step reports the product and its photo separately", async ({ page }) => {
+  const unexpected = await installApi(page, "result");
+  await openRoute(page, resultRoute());
+  await expect(page.getByRole("button", { name: "Открыть товар в каталоге" })).toBeEnabled();
+  await screenshotFullMain(page, screenshotPath("import-result"));
+  expect(unexpected).toEqual([]);
+});
+
+test("an unfinished photo holds back the link to the product", async ({ page }) => {
+  const unexpected = await installApi(page, "resultPhoto");
+  await openRoute(page, resultRoute());
+  await expect(page.getByRole("button", { name: "Открыть товар в каталоге" })).toBeDisabled();
+  await expect(
+    page.getByText("Сохраняем фото. После завершения можно открыть карточку товара."),
+  ).toBeVisible();
+  await screenshotFullMain(page, screenshotPath("import-result-photo"));
+  expect(unexpected).toEqual([]);
+});
+
+test("the link panel shows the bound card and its actions", async ({ page }) => {
+  const unexpected = await installApi(page, "link");
+  await openRoute(page, `/catalog/${id(99)}/chz`);
+  await expect(page.getByRole("dialog", { name: "Связь с Честным знаком" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Обновить статус" })).toBeEnabled();
+  await screenshotFullMain(page, screenshotPath("chz-link"));
+  expect(unexpected).toEqual([]);
+});
+
+test("a failed status check keeps the saved details and names the reason", async ({ page }) => {
+  const unexpected = await installApi(page, "linkError");
+  await openRoute(page, `/catalog/${id(99)}/chz`);
+  await page.getByRole("button", { name: "Обновить статус" }).click();
+  await expect(
+    page.getByText("Последняя проверка не удалась. Показаны сохранённые сведения."),
+  ).toBeVisible();
+  // The reason itself lives behind the collapsed `<details>`; open it so the
+  // frame shows where the manager reads what went wrong.
+  await page.locator("details > summary").click();
+  await expect(page.getByText("Связанная карточка недоступна в ЧЗ.")).toBeVisible();
+  await screenshotFullMain(page, screenshotPath("chz-refresh-error"));
   expect(unexpected).toEqual([]);
 });
