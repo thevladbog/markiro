@@ -49,6 +49,12 @@ export const stationInventoryProgressQuerySchema = z.strictObject({
 export type StationInventoryProgressQueryDto = z.infer<typeof stationInventoryProgressQuerySchema>;
 export type StationInventoryProgressDto = InventoryProgressPage;
 
+/** `all` lists every running inventory for a handheld; a station always gets its line. Other query keys are ignored, as before. */
+export const stationInventoryTaskListQuerySchema = z.object({
+  scope: z.enum(["line", "all"]).default("line"),
+});
+export type StationInventoryTaskListQueryDto = z.infer<typeof stationInventoryTaskListQuerySchema>;
+
 export const leaveStationInventorySchema = z.strictObject({
   pendingEventCount: z.literal(0),
   openBoxCount: z.number().int().nonnegative().safe(),
