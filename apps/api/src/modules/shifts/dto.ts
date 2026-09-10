@@ -163,6 +163,8 @@ export interface ShiftDto {
   createdAt: Date;
   /** Station close authority, computed from station participation. */
   stationCloseAccess?: StationCloseAccess;
+  /** Actual production output so far, computed from factual scan/box events (same shape as the summary endpoint's). */
+  output: ShiftOutputDto;
 }
 
 /** GET /shifts response. */
@@ -451,6 +453,30 @@ const stationCloseAccessOpenApiSchema = {
   ],
 };
 
+const shiftOutputOpenApiSchema: SchemaObject = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["mode", "acceptedUnits"],
+      properties: {
+        mode: { type: "string", enum: ["validation"] },
+        acceptedUnits: { type: "integer", minimum: 0 },
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["mode", "closedBoxes", "containedUnits"],
+      properties: {
+        mode: { type: "string", enum: ["aggregation"] },
+        closedBoxes: { type: "integer", minimum: 0 },
+        containedUnits: { type: "integer", minimum: 0 },
+      },
+    },
+  ],
+};
+
 const shiftRequiredFields = [
   "id",
   "number",
@@ -478,6 +504,7 @@ const shiftRequiredFields = [
   "closeReason",
   "lateDataAt",
   "createdAt",
+  "output",
 ];
 
 export const shiftOpenApiSchema = {
@@ -513,6 +540,7 @@ export const shiftOpenApiSchema = {
     lateDataAt: nullableDateTimeOpenApiSchema,
     createdAt: { type: "string", format: "date-time" },
     stationCloseAccess: stationCloseAccessOpenApiSchema,
+    output: shiftOutputOpenApiSchema,
   },
 };
 
@@ -545,29 +573,7 @@ export const shiftSummaryOpenApiSchema: SchemaObject = {
   required: ["generatedAt", "output", "participants", "unattributed"],
   properties: {
     generatedAt: { type: "string", format: "date-time" },
-    output: {
-      oneOf: [
-        {
-          type: "object",
-          additionalProperties: false,
-          required: ["mode", "acceptedUnits"],
-          properties: {
-            mode: { type: "string", enum: ["validation"] },
-            acceptedUnits: { type: "integer", minimum: 0 },
-          },
-        },
-        {
-          type: "object",
-          additionalProperties: false,
-          required: ["mode", "closedBoxes", "containedUnits"],
-          properties: {
-            mode: { type: "string", enum: ["aggregation"] },
-            closedBoxes: { type: "integer", minimum: 0 },
-            containedUnits: { type: "integer", minimum: 0 },
-          },
-        },
-      ],
-    },
+    output: shiftOutputOpenApiSchema,
     participants: { type: "array", items: shiftParticipantOpenApiSchema },
     unattributed: {
       type: "object",

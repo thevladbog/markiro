@@ -2139,6 +2139,8 @@
         "line": "Line",
         "mode": "Mode",
         "plannedQty": "Plan, units",
+        "outputValidation": "{{count}} pcs",
+        "outputAggregation": "{{units}} pcs · {{boxes}} bx",
         "status": "Status",
         "lateData": "Data after close",
         "actions": "Actions"

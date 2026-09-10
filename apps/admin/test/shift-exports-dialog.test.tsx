@@ -38,6 +38,7 @@ const SHIFT = {
   lateDataAt: null,
   closeReason: "Смена закончена",
   createdAt: "2026-08-13T08:00:00.000Z",
+  output: { mode: "validation", acceptedUnits: 200 },
 } as const;
 
 const FORMATS = [
