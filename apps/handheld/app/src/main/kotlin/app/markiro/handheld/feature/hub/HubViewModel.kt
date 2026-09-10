@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.R
 import app.markiro.handheld.core.inventory.InventorySyncEngine
+import app.markiro.handheld.core.print.PrinterDao
+import app.markiro.handheld.core.print.PrinterEntity
 import app.markiro.handheld.core.inventory.InventorySyncState
 import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.network.StationApi
@@ -51,6 +53,8 @@ data class HubUi(
     val continueShiftNumber: String? = null,
     val activeInventoryId: String? = null,
     val continueInventoryNumber: String? = null,
+    /** Drives both the settings tile's hint and the printer indicator's tone. */
+    val printerConfigured: Boolean = false,
 )
 
 enum class HubTile { SHIFT, INVENTORY, CHECK, SETTINGS }
@@ -71,6 +75,7 @@ class HubViewModel(
     shifts: ShiftDao,
     inventorySync: InventorySyncEngine,
     inventories: InventoryTaskDao,
+    printers: PrinterDao,
     private val scannerLabel: () -> String,
     private val now: () -> Long = System::currentTimeMillis,
     /** Re-evaluates the online indicator while nothing else changes; tests pass a single tick. */
@@ -92,6 +97,7 @@ class HubViewModel(
         shifts: ShiftDao,
         inventorySync: InventorySyncEngine,
         inventories: InventoryTaskDao,
+        printers: PrinterDao,
         scan: ScanPreferences,
     ) : this(
         api,
@@ -102,6 +108,7 @@ class HubViewModel(
         shifts,
         inventorySync,
         inventories,
+        printers,
         scannerLabel = {
             when (scan.sourceKind) {
                 ScanSourceKind.BUILTIN_INTENT -> VendorProfiles.byId(scan.profileId).label.substringBefore(" ·")
@@ -119,6 +126,7 @@ class HubViewModel(
 
     val state: StateFlow<HubUi> = combine(
         config.observe(), session.state, reachability.lastSuccessAt, tick, sync.state, activeShift, inventorySync.state, activeInventory,
+        printers.observeSelected(),
     ) { values ->
         val cfg = values[0] as DeviceConfigEntity?
         val ses = values[1] as SessionState
@@ -127,7 +135,9 @@ class HubViewModel(
         val current = (values[5] as ShiftEntity?)?.takeIf { it.status != "closed" }
         val inventoryState = values[6] as InventorySyncState
         val inventory = (values[7] as InventoryTaskEntity?)?.takeIf { it.state == "active" }
+        val printer = values[8] as PrinterEntity?
         HubUi(
+            printerConfigured = printer != null,
             organization = cfg?.organizationName.orEmpty(),
             operatorName = ses.operator?.name.orEmpty(),
             lineName = cfg?.lineName,

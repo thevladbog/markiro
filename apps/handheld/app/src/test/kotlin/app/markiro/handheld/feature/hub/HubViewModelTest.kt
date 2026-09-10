@@ -18,6 +18,7 @@ import app.markiro.handheld.core.network.LineListResponse
 import app.markiro.handheld.core.network.ResolveTaskRequest
 import app.markiro.handheld.core.network.ResolveTaskResponse
 import app.markiro.handheld.core.network.NetworkModule
+import app.markiro.handheld.core.print.PrinterEntity
 import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.network.RosterResponse
 import app.markiro.handheld.core.network.ShiftBundleDto
@@ -125,7 +126,7 @@ class HubViewModelTest {
             NetworkModule.strictJson(), engineScope,
         )
         return HubViewModel(
-            api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(),
+            api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(), db.printerDao(),
             scannerLabel = { "встроенный" }, now = { clock }, tick = flowOf(Unit),
         )
     }
@@ -178,5 +179,18 @@ class HubViewModelTest {
         val vm = vm(api())
         vm.signOut()
         assertNull(session.state.value.operator)
+    }
+
+    @Test
+    fun theHubKnowsWhetherAPrinterIsConfigured() = runTest {
+        val model = vm(api())
+        assertEquals(false, model.state.first { it.organization.isNotEmpty() }.printerConfigured)
+        db.printerDao().upsert(
+            PrinterEntity(
+                id = "p1", name = "Zebra ZD421", transport = "wifi", address = "192.168.1.40:9100",
+                language = "zpl", dpi = 203, selected = true, lastStatus = "ready", lastSeenAt = 1L,
+            ),
+        )
+        assertEquals(true, model.state.first { it.printerConfigured }.printerConfigured)
     }
 }

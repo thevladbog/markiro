@@ -3,7 +3,8 @@
 Native Android app for industrial handheld terminals. Design: `docs/design-briefs/10-tsd-handheld.md`;
 slices: `docs/superpowers/specs/2026-09-10-handheld-foundation-design.md` (pairing, sign-in, hub) and
 `docs/superpowers/specs/2026-09-10-handheld-shift-validation-design.md` (shifts, scans, sync, close) and
-`docs/superpowers/specs/2026-09-10-handheld-inventory-check-design.md` (inventory check).
+`docs/superpowers/specs/2026-09-10-handheld-inventory-check-design.md` (inventory check) and
+`docs/superpowers/specs/2026-09-10-handheld-printing-design.md` (printing).
 
 ## Build and test
 
@@ -70,6 +71,35 @@ Robolectric tests run under `ru-RU`.
 The classifier and the batch digests are verified against
 `app/src/test/resources/inventory-fixtures.json`
 (`pnpm --filter @markiro/domain fixtures:inventory`).
+
+## Printing
+
+The handheld renders labels itself. `core/label` is a Kotlin port of the ZPL and TSPL emitters in
+`packages/domain`, pinned to them by fixtures: run
+`pnpm --filter @markiro/domain fixtures:labels` after changing either side, and
+`app/src/test/resources/label-fixtures.json` is what the Kotlin tests assert against.
+
+Text inside printable ASCII is emitted as native printer commands and matches the TypeScript source
+character for character. Text outside it, which on this market means every Cyrillic product name, is
+rasterized with Android's own font engine and cannot match the station's pixels: the station and the
+cabinet editor share one implementation and are deliberately identical to each other, and this is a
+third. The fixtures pin command framing and bitmap dimensions for those cases, never glyph pixels.
+
+No barcode is encoded on the device. Both emitters hand the payload to a native printer command, so
+bar quality is the printer's business and carries no risk from the port.
+
+Printers live only on this device, in the `printers` table, following the rule stated in
+`apps/station/src/lib/hardware-config.ts`. Settings, then «Принтер», adds one over Wi-Fi by address
+or over Bluetooth from the paired devices, and prints a test label carrying a Cyrillic line and an
+SSCC barcode, which is the pair that can actually go wrong.
+
+A send has three outcomes and the last two differ in a way that matters: refused means nothing was
+printed and we know it, unknown means the bytes may or may not have arrived. Nothing resends from
+unknown on its own, because a retry could put a second label on a box the server already accepted.
+Only a person who has looked at the printer resolves it.
+
+The status query runs before every send. Neither printer language acknowledges a job afterwards, so
+without asking first the only failure this app could ever report is silence.
 
 ## Scanner sources
 
