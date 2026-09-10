@@ -100,6 +100,9 @@ const TeamPage = lazy(() =>
 const AuditPage = lazy(() =>
   import("./pages/audit/AuditPage.js").then((module) => ({ default: module.AuditPage })),
 );
+const ReportsPage = lazy(() =>
+  import("./pages/reports/ReportsPage.js").then((module) => ({ default: module.ReportsPage })),
+);
 const OrganizationPage = lazy(() =>
   import("./pages/settings/OrganizationPage.js").then((module) => ({
     default: module.OrganizationPage,
@@ -164,6 +167,7 @@ export const appRoutes = createRoutesFromElements(
         <Route path="/monitoring" element={<MonitoringPage />} />
         <Route path="/team" element={<TeamPage />} />
         <Route path="/audit" element={<AuditPage />} />
+        <Route path="/reports" element={<ReportsPage />} />
         <Route path="/settings/organization" element={<OrganizationPage />} />
         <Route path="/tenants" element={<TenantsPage />} />
         <Route path="/tenants/new" element={<CreateTenantPanel />} />

@@ -3545,6 +3545,88 @@ textarea {
   }
 }
 
+.report-form {
+  display: grid;
+  gap: 18px;
+  margin-block: 24px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  background: var(--surface-card);
+}
+
+.report-form fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+}
+
+.report-form legend {
+  padding-inline: 6px;
+  font: 600 13px/1.4 var(--font-ui);
+}
+
+.report-form label,
+.report-tenants {
+  display: grid;
+  gap: 6px;
+  font: var(--text-body);
+}
+
+.report-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.report-form input:not([type="checkbox"]):not([type="radio"]),
+.report-form select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-md);
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-card);
+  color: var(--fg-1);
+}
+
+.report-tenants > label,
+.report-form fieldset > label:has(input[type="radio"]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.report-pagination,
+.report-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.report-help {
+  max-width: 78ch;
+  color: var(--fg-2);
+}
+
+.reports-page .commerce-ledger {
+  overflow-x: auto;
+}
+
+.reports-page td small {
+  display: block;
+  margin-top: 4px;
+  white-space: normal;
+}
+
+@media (max-width: 700px) {
+  .report-form__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 560px) {
   .workspace-header {
     gap: 10px;

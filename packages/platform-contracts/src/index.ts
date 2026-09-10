@@ -15,6 +15,17 @@ export type {
   PlatformUuid,
 } from "./primitives.js";
 export {
+  platformReportContracts,
+  platformReportErrorCodeSchema,
+  platformReportInputSchema,
+  platformReportPeriodBasisSchema,
+  platformReportPrivacySchema,
+  platformReportSchema,
+  platformReportStatusSchema,
+  platformReportTypeSchema,
+} from "./platform-reports.js";
+export type { PlatformReport, PlatformReportInput } from "./platform-reports.js";
+export {
   parseTenantBillingActObjectKey,
   parseTenantBillingRequestAttachmentObjectKey,
   tenantBillingActObjectKey,

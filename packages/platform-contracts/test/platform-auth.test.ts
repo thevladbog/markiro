@@ -22,6 +22,10 @@ const ADMIN_CAPABILITIES = [
   "platformTeam.write",
   "audit.read",
   "diagnostics.read",
+  "reports.read",
+  "reports.create",
+  "reports.download",
+  "reports.identified",
 ] as const;
 
 describe("platform identity contracts", () => {

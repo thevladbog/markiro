@@ -5,6 +5,8 @@ import { z, type ZodType } from "zod";
 import { describe, expect, it } from "vitest";
 
 import { DB } from "../src/auth/auth.module";
+import { PlatformReportsController } from "../src/platform-reports/platform-reports.controller";
+import { PlatformReportsService } from "../src/platform-reports/platform-reports.service";
 import { BillingApplicationService } from "../src/modules/billing/billing-application.service";
 import { BillingDocumentsService } from "../src/modules/billing/billing-documents.service";
 import { BillingController } from "../src/modules/billing/billing.controller";
@@ -110,6 +112,7 @@ async function createPlatformDocument(): Promise<{
   close: () => Promise<void>;
 }> {
   const providers = [
+    PlatformReportsService,
     PlatformActivationService,
     PlatformTeamService,
     PlatformTenantsService,
@@ -131,6 +134,7 @@ async function createPlatformDocument(): Promise<{
   ].map((provide) => ({ provide, useValue: {} }));
   const moduleRef = await Test.createTestingModule({
     controllers: [
+      PlatformReportsController,
       PlatformMeController,
       PlatformActivationController,
       PlatformTeamController,
@@ -170,7 +174,7 @@ async function createPlatformDocument(): Promise<{
 
 describe("current SaaS platform OpenAPI contracts", () => {
   it("converts all current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(121);
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(129);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }
@@ -179,7 +183,10 @@ describe("current SaaS platform OpenAPI contracts", () => {
   it("publishes the strict shared 404 error for public activation without cookie security", async () => {
     const platformDocument = await createPlatformDocument();
     try {
-      const activation = operation(platformDocument.document, CURRENT_SAAS_ROUTES[1]);
+      const activation = operation(
+        platformDocument.document,
+        CURRENT_SAAS_ROUTES.find((route) => route.path === "/platform/activation/complete")!,
+      );
       expect(inlineJsonSchema(activation.responses["404"])).toEqual(
         jsonSchema(platformErrorSchema),
       );

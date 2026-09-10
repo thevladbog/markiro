@@ -13,6 +13,9 @@ import { PgBoss, type JobWithMetadata } from "pg-boss";
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
+import { PlatformReportRunnerService } from "../platform-reports/platform-report-runner.service";
+import { PlatformReportSourceService } from "../platform-reports/report-source.service";
+import { PlatformAuditModule } from "../platform-auth/platform-audit.module";
 import type { Env } from "../env";
 import { describeErrorForLog } from "../lib/error-log";
 import { ExchangeSessionService } from "../modules/exchange/exchange-session.service";
@@ -411,6 +414,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     @Inject(NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID)
     private readonly nationalCatalogSchemaSourceTenantId?: string,
     @Optional() private readonly nationalCatalogJobs?: NationalCatalogJobsService,
+    @Optional() private readonly platformReports?: PlatformReportRunnerService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -779,6 +783,21 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         }),
       );
 
+      if (this.platformReports) {
+        await boss.createQueue("platform-report-repair", {
+          policy: "stately",
+          retryLimit: 3,
+          retryDelay: 60,
+        });
+        await boss.schedule("platform-report-repair", "* * * * *");
+        this.workerIds.push(
+          await boss.work("platform-report-repair", async () => {
+            await this.platformReports!.reconcile();
+          }),
+        );
+        await boss.send("platform-report-repair", {});
+      }
+
       // Also run all ten maintenance paths once immediately at boot rather
       // than waiting for the first tick of any schedule.
       await this.runEnsurePartitions();
@@ -819,6 +838,11 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     const jobId = await this.boss.send(BUILD_SHIFT_EXPORT_QUEUE, { exportId });
     if (!jobId) throw new Error("shift export enqueue failed");
     return jobId;
+  }
+
+  async wakePlatformReports(): Promise<void> {
+    if (!this.boss || !this.started) return;
+    await this.boss.send("platform-report-repair", {});
   }
 
   /** Call after the intent commits. The minute repair schedule remains the recovery path. */
@@ -988,7 +1012,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       throw new Error("pg-boss database probe failed");
     }
     if (
-      this.workerIds.length !== 23 ||
+      this.workerIds.length !== 23 + (this.platformReports ? 1 : 0) ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {
@@ -1145,10 +1169,12 @@ export class JobsModule {
   static forRoot(connectionString: string, env: Env): DynamicModule {
     return {
       module: JobsModule,
-      imports: [MailModule.forRoot(env)],
+      imports: [MailModule.forRoot(env), PlatformAuditModule],
       providers: [
         { provide: PG_CONNECTION_STRING, useValue: connectionString },
         PgBossService,
+        PlatformReportRunnerService,
+        PlatformReportSourceService,
         JournalService,
         ExchangeSessionService,
         ShiftExportSourceService,

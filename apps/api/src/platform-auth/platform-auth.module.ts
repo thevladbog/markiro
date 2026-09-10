@@ -2,7 +2,7 @@ import { Global, Module, type DynamicModule } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import type { PlatformAuth } from "@markiro/db";
 import { PlatformAuthGuard } from "./platform-auth.guard";
-import { PlatformAuditService } from "./platform-audit.service";
+import { PlatformAuditModule } from "./platform-audit.module";
 import { PlatformMeController } from "./platform-me.controller";
 import { PLATFORM_AUTH } from "./platform-auth.setup";
 import {
@@ -22,6 +22,7 @@ export class PlatformAuthModule {
   static forRoot(auth: PlatformAuth, activationBaseUrl: string): DynamicModule {
     return {
       module: PlatformAuthModule,
+      imports: [PlatformAuditModule],
       controllers: [
         PlatformMeController,
         PlatformActivationController,
@@ -32,7 +33,6 @@ export class PlatformAuthModule {
         { provide: PLATFORM_AUTH, useValue: auth },
         PlatformAuthGuard,
         { provide: APP_GUARD, useExisting: PlatformAuthGuard },
-        PlatformAuditService,
         PlatformActivationService,
         PlatformTeamService,
         { provide: PLATFORM_ACTIVATION_BASE_URL, useValue: activationBaseUrl },
@@ -40,7 +40,7 @@ export class PlatformAuthModule {
       exports: [
         PLATFORM_AUTH,
         PlatformAuthGuard,
-        PlatformAuditService,
+        PlatformAuditModule,
         PlatformActivationService,
         PlatformTeamService,
       ],
