@@ -97,13 +97,17 @@ export async function createTestStationDevice(
   app: INestApplication,
   agent: ReturnType<typeof request.agent>,
   name: string,
+  options: { kind?: "station" | "handheld" } = {},
 ): Promise<{ apiKey: string; deviceId: string; body: { apiKey: string; deviceId: string } }> {
   if (process.env.NODE_ENV !== "test") {
     throw new Error("createTestStationDevice is restricted to tests");
   }
   const db = app.get<Db>(DB);
 
-  const created = await agent.post("/station-devices").send({ name, lineId: null }).expect(201);
+  const created = await agent
+    .post("/station-devices")
+    .send({ name, lineId: null, kind: options.kind ?? "station" })
+    .expect(201);
   const deviceId = (created.body as { id: string }).id;
   const [device] = await db
     .select({ tenantId: schema.stationDevices.tenantId })

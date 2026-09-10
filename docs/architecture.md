@@ -14,6 +14,8 @@ apps/
   api/        NestJS 11 + Drizzle + Postgres — SaaS backend, public API
   admin/      React 19 + Vite 8 — admin panel (office mode)
   station/    Tauri 2 + React 19 — line station (floor mode), Windows MVP
+  handheld/   Kotlin + Compose — Android app for industrial handheld terminals (ТСД);
+              a station-kind device reusing the station credential and endpoints
   kiosk/      React 19 + Vite 8 + IndexedDB — offline-first self-service
               pickup kiosk (installable PWA), paired to the api by device token
   landing/    Astro 7 — marketing site

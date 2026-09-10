@@ -22,6 +22,7 @@ import {
 import { OperatorsService } from "../operators/operators.service";
 import { SecurityAuditService } from "../../authorization/security-audit.service";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
+import type { StationDeviceKind } from "../station-devices/dto";
 import type {
   IssueStationPairingCodeResultDto,
   PairStationResultDto,
@@ -30,6 +31,12 @@ import type {
 } from "./dto";
 
 const MINT_ATTEMPTS = 5;
+
+/** Parsed from `x-station-capabilities`; `handheldClient` is the `handheld-v1` capability. */
+export interface RedeemOptions {
+  includeSubscription?: boolean;
+  handheldClient?: boolean;
+}
 
 class StationPairingException extends UnauthorizedException {
   constructor(code: StationPairErrorCode) {
@@ -71,6 +78,7 @@ export class StationPairingService {
         id: schema.stationDevices.id,
         tenantId: schema.stationDevices.tenantId,
         name: schema.stationDevices.name,
+        kind: schema.stationDevices.kind,
         lineId: schema.stationDevices.lineId,
         lineName: schema.lines.name,
         organizationName: schema.organization.name,
@@ -96,6 +104,7 @@ export class StationPairingService {
       device: {
         id: station.id,
         name: station.name,
+        kind: station.kind as StationDeviceKind,
         tenantId: station.tenantId,
         organizationName: station.organizationName,
         line:
@@ -176,7 +185,7 @@ export class StationPairingService {
   async redeem(
     code: string,
     source: string,
-    includeSubscription = false,
+    options: RedeemOptions = {},
   ): Promise<PairStationResultDto> {
     const now = new Date();
     const windowStart = pairAttemptWindowStart(now);
@@ -195,7 +204,7 @@ export class StationPairingService {
         }
         throw error;
       }
-      result = await this.attemptRedeem(code, now, auditContext, includeSubscription);
+      result = await this.attemptRedeem(code, now, auditContext, options);
     } catch (error) {
       this.auditPairing(auditContext, "failed");
       throw error;
@@ -211,7 +220,7 @@ export class StationPairingService {
     code: string,
     now: Date,
     auditContext: StationPairAuditContext,
-    includeSubscription: boolean,
+    options: RedeemOptions,
   ): Promise<PairStationResultDto> {
     const codeHash = hashPairingCode(code, loadEnv().PAIRING_CODE_PEPPER);
     const rows = await this.db
@@ -270,6 +279,7 @@ export class StationPairingService {
         id: schema.stationDevices.id,
         tenantId: schema.stationDevices.tenantId,
         name: schema.stationDevices.name,
+        kind: schema.stationDevices.kind,
         lineId: schema.stationDevices.lineId,
         lineName: schema.lines.name,
         organizationName: schema.organization.name,
@@ -290,6 +300,14 @@ export class StationPairingService {
         ),
       );
     if (!station) throw new StationPairingException("PAIR_INVALID");
+
+    // A handheld code must be redeemed by the handheld app and a station code
+    // by the station. The code stays live and its attempt counter untouched:
+    // this is a client mix-up, not a guess. The per-source rate limit above
+    // still applies.
+    if ((station.kind === "handheld") !== (options.handheldClient ?? false)) {
+      throw new StationPairingException("PAIR_KIND_MISMATCH");
+    }
 
     await this.entitlements.assertWriteAccess(candidate.tenantId, this.db, new Date());
 
@@ -401,6 +419,7 @@ export class StationPairingService {
       device: {
         id: station.id,
         name: station.name,
+        kind: station.kind as StationDeviceKind,
         tenantId: station.tenantId,
         organizationName: station.organizationName,
         line:
@@ -410,7 +429,7 @@ export class StationPairingService {
       },
       credential: { apiKey: key.key, serverUrl: loadEnv().BETTER_AUTH_URL },
       operators,
-      ...(includeSubscription
+      ...(options.includeSubscription
         ? { subscription: await this.entitlements.accessSnapshot(candidate.tenantId) }
         : {}),
     };
