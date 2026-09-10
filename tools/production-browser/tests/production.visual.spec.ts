@@ -2,6 +2,8 @@ import { join } from "node:path";
 
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+import { adminI18n, type AdminLocale } from "./admin-i18n.js";
+
 /**
  * MKR-INS-08 (printed shift-planning instruction) screenshot targets. Mock
  * shapes follow the real response contracts in
@@ -10,16 +12,37 @@ import { expect, test, type Page, type Route } from "@playwright/test";
  * `zod`, so a wrong shape renders as blank cells instead of throwing --
  * every fixture below therefore mirrors its DTO field for field.
  *
- * Same synthetic "Марка Ко" organisation as the inventory evidence suite,
- * and the same manager (Игорь Волков), so the printed series reads as one
- * cabinet.
+ * Same synthetic organisation as the inventory evidence suite («Марка Ко» /
+ * "Marka Co"), and the same manager (Игорь Волков / Igor Volkov), so the
+ * printed series reads as one cabinet.
+ *
+ * Every frame is captured once per locale: the Russian instruction and its
+ * English twin are shot from the SAME assertions, so the two documents can
+ * never drift into illustrating different states of the cabinet.
  */
-const SCREENSHOT_DIR = join(
-  import.meta.dirname,
-  "../../../packages/legal-documents/assets/instructions/mkr-ins-08/ru",
-);
-function screenshotPath(name: string): string {
-  return join(SCREENSHOT_DIR, `${name}.png`);
+const LOCALES: readonly AdminLocale[] = ["ru", "en"];
+
+type Translate = ReturnType<typeof adminI18n>["t"];
+
+function screenshotDir(locale: AdminLocale): string {
+  return join(
+    import.meta.dirname,
+    `../../../packages/legal-documents/assets/instructions/mkr-ins-08/${locale}`,
+  );
+}
+function screenshotPath(locale: AdminLocale, name: string): string {
+  return join(screenshotDir(locale), `${name}.png`);
+}
+
+/** MKR-INS-09 (shift monitoring, closing and reports) screenshot targets. */
+function screenshotDir09(locale: AdminLocale): string {
+  return join(
+    import.meta.dirname,
+    `../../../packages/legal-documents/assets/instructions/mkr-ins-09/${locale}`,
+  );
+}
+function screenshotPath09(locale: AdminLocale, name: string): string {
+  return join(screenshotDir09(locale), `${name}.png`);
 }
 
 /**
@@ -108,7 +131,63 @@ function json(route: Route, body: unknown) {
   });
 }
 
-const PROFILE = { firstName: "Игорь", middleName: null, lastName: "Волков", hasAvatar: false };
+/**
+ * Fixture text the frames actually SHOW. Interface strings come from the
+ * app's dictionaries (see `adminI18n`), but product names, line names and
+ * people are the tenant's own data, which no dictionary carries -- so the
+ * English cabinet gets an English tenant instead of Cyrillic rows under an
+ * English chrome. The `ru` column is verbatim what the Russian series has
+ * always carried, so those frames stay byte-comparable.
+ */
+const COPY = {
+  ru: {
+    managerFirstName: "Игорь",
+    managerLastName: "Волков",
+    managerFullName: "Игорь Волков",
+    product: "Сироп «Клюква», 0.5 л",
+    productPrintName: "Сироп Клюква 0.5",
+    draftProduct: "Сироп «Малина», 0.5 л",
+    draftProductPrintName: "Сироп Малина 0.5",
+    archivedProduct: "Сироп «Груша», 0.5 л",
+    archivedProductPrintName: "Сироп Груша 0.5",
+    productGroup: "Безалкогольные напитки",
+    line: "Линия розлива №1",
+    secondLine: "Линия розлива №2",
+    thirdLine: "Линия фасовки",
+    counterparty: "ООО «Ягодный дом»",
+    boxLabelTemplate: "Короб 100×150",
+    productLabelTemplate: "Дубликат Data Matrix 58×40 [Краткое наименование]",
+    station: "Станция розлива 1",
+    closeReason: "Смена завершена по плану",
+    participant: "Мария Кузнецова",
+    participantRole: "Оператор линии",
+    secondParticipant: "Пётр Смирнов",
+  },
+  en: {
+    managerFirstName: "Igor",
+    managerLastName: "Volkov",
+    managerFullName: "Igor Volkov",
+    product: "Cranberry syrup, 0.5 L",
+    productPrintName: "Cranberry syrup 0.5",
+    draftProduct: "Raspberry syrup, 0.5 L",
+    draftProductPrintName: "Raspberry syrup 0.5",
+    archivedProduct: "Pear syrup, 0.5 L",
+    archivedProductPrintName: "Pear syrup 0.5",
+    productGroup: "Soft drinks",
+    line: "Bottling line 1",
+    secondLine: "Bottling line 2",
+    thirdLine: "Packing line",
+    counterparty: "Berry House LLC",
+    boxLabelTemplate: "Box 100×150",
+    productLabelTemplate: "Data Matrix duplicate 58×40 [Short name]",
+    station: "Bottling station 1",
+    closeReason: "Shift finished as planned",
+    participant: "Maria Kuznetsova",
+    participantRole: "Line operator",
+    secondParticipant: "Pyotr Smirnov",
+  },
+} as const satisfies Record<AdminLocale, Record<string, string>>;
+
 /**
  * `RequireCapability` (apps/admin/src/access/context.tsx) reads capabilities
  * from `AccessProvider`, which `pages/Shell.tsx` populates from this
@@ -154,301 +233,10 @@ const COUNTERPARTY_ID = "70000000-0000-4000-8000-000000000001";
 const SHIFT_ID = "80000000-0000-4000-8000-000000000001";
 const ACTIVE_SHIFT_ID = "80000000-0000-4000-8000-000000000002";
 const STATION_ID = "90000000-0000-4000-8000-000000000001";
-
-const PRODUCT = {
-  id: PRODUCT_ID,
-  gtin14: "04600000000006",
-  name: "Сироп «Клюква», 0.5 л",
-  productGroup: "Безалкогольные напитки",
-  chzProductGroupCode: 15,
-  boxCapacity: 12,
-  palletCapacity: 48,
-  unitPrice: "189.00",
-  printName: "Сироп Клюква 0.5",
-  egaisCode: null,
-  shelfLifeDays: 365,
-  externalRef: null,
-  status: "active",
-  archived: false,
-  defaultCounterpartyId: COUNTERPARTY_ID,
-  createdAt: "2026-08-03T07:12:00.000Z",
-  image: null,
-};
-const DRAFT_PRODUCT = {
-  ...PRODUCT,
-  id: DRAFT_PRODUCT_ID,
-  gtin14: "04600000000013",
-  name: "Сироп «Малина», 0.5 л",
-  printName: "Сироп Малина 0.5",
-  status: "draft",
-  defaultCounterpartyId: null,
-  createdAt: "2026-08-24T09:40:00.000Z",
-};
-const ARCHIVED_PRODUCT = {
-  ...PRODUCT,
-  id: ARCHIVED_PRODUCT_ID,
-  gtin14: "04600000000020",
-  name: "Сироп «Груша», 0.5 л",
-  printName: "Сироп Груша 0.5",
-  archived: true,
-  defaultCounterpartyId: null,
-  createdAt: "2026-05-18T11:05:00.000Z",
-};
-
-const LINE = { id: LINE_ID, name: "Линия розлива №1", createdAt: "2026-08-01T06:00:00.000Z" };
-const SECOND_LINE = {
-  id: SECOND_LINE_ID,
-  name: "Линия розлива №2",
-  createdAt: "2026-08-14T06:00:00.000Z",
-};
-const THIRD_LINE = {
-  id: THIRD_LINE_ID,
-  name: "Линия фасовки",
-  createdAt: "2026-08-28T06:00:00.000Z",
-};
-
-/**
- * `LinesPage` renders "Станции не назначены" when `assignedStations === 0`,
- * the "Онлайн · {{online}} из {{total}} станций" chip when
- * `onlineStations > 0`, and "Офлайн" otherwise
- * (apps/admin/src/pages/lines/index.tsx:129-148). All three states appear on
- * the `lines-list` frame, because the document names all three.
- */
-const LINE_PRESENCE = [
-  {
-    lineId: LINE_ID,
-    lineName: LINE.name,
-    assignedStations: 3,
-    onlineStations: 2,
-    lastSeenAt: "2026-08-30T05:58:00.000Z",
-  },
-  {
-    lineId: SECOND_LINE_ID,
-    lineName: SECOND_LINE.name,
-    assignedStations: 1,
-    onlineStations: 0,
-    lastSeenAt: "2026-08-29T18:20:00.000Z",
-  },
-  {
-    lineId: THIRD_LINE_ID,
-    lineName: THIRD_LINE.name,
-    assignedStations: 0,
-    onlineStations: 0,
-    lastSeenAt: null,
-  },
-];
-
-const COUNTERPARTY = {
-  id: COUNTERPARTY_ID,
-  name: "ООО «Ягодный дом»",
-  gln: "4600000000001",
-  inn: "7736207543",
-  gs1Prefixes: ["0460000"],
-  notes: null,
-  createdAt: "2026-07-11T08:00:00.000Z",
-};
-const LABEL_TEMPLATE = {
-  id: TEMPLATE_ID,
-  name: "Короб 100×150",
-  widthMm: 100,
-  heightMm: 150,
-  dpi: 203,
-  language: "zpl",
-  updatedAt: "2026-08-20T10:00:00.000Z",
-};
-const SHIFT_PLANNING_CONFIG = { defaultBoxLabelTemplateId: TEMPLATE_ID };
-
-/**
- * `GET /shifts/:id/summary` feeds the details panel's «Результат смены» and
- * «Сотрудники в смене» blocks (`ShiftDetailsPanel.tsx:72,93-142`). Not
- * zod-parsed, so the shape has to mirror `ShiftSummaryDto` field for field:
- * a wrong name renders an empty tile instead of throwing.
- */
 const PRODUCT_LABEL_TEMPLATE_ID = "40000000-0000-4000-8000-000000000002";
-/**
- * Validated by the strict `productLabelTemplateListSchema`
- * (packages/domain/src/product-labels/contracts.ts:147) -- an extra field
- * throws inside the form instead of rendering.
- */
-const PRODUCT_LABEL_TEMPLATES = {
-  items: [
-    {
-      id: PRODUCT_LABEL_TEMPLATE_ID,
-      name: "Дубликат Data Matrix 58×40 [Краткое наименование]",
-      widthMm: 58,
-      heightMm: 40,
-      dpi: 203,
-    },
-  ],
-};
-const DUPLICATE_PLANNING_CONFIG = {
-  defaultBoxLabelTemplateId: TEMPLATE_ID,
-  validationPrintProtocol: "validation-dm-duplicate-v1",
-};
-/** Strict `productLabelHistorySchema` (packages/domain/src/product-labels/history.ts:20). */
-const PRODUCT_LABEL_HISTORY = {
-  summary: { sentAttempts: 1240, verifiedAttempts: 1238, unresolvedJobs: 1, reprintAttempts: 3 },
-  items: [
-    {
-      jobId: "a0000000-0000-4000-8000-000000000001",
-      deviceId: STATION_ID,
-      codeSuffix: "…0128",
-      acceptedAt: "2026-09-02T11:04:00.000Z",
-      status: "completed",
-      verificationOutcome: "verified",
-      attemptNo: 1,
-      ownershipConflict: false,
-    },
-    {
-      jobId: "a0000000-0000-4000-8000-000000000002",
-      deviceId: STATION_ID,
-      codeSuffix: "…0129",
-      acceptedAt: "2026-09-02T11:05:00.000Z",
-      status: "attention",
-      verificationOutcome: "pending",
-      attemptNo: 2,
-      ownershipConflict: false,
-    },
-  ],
-  nextCursor: null,
-};
-
-const SHIFT_SUMMARY = {
-  generatedAt: "2026-09-02T11:20:00.000Z",
-  output: { mode: "aggregation", closedBoxes: 96, containedUnits: 1152 },
-  participants: [
-    {
-      employeeId: "60000000-0000-4000-8000-000000000001",
-      fullName: "Мария Кузнецова",
-      role: "Оператор линии",
-      firstActivityAt: "2026-09-02T04:15:00.000Z",
-      lastActivityAt: "2026-09-02T11:05:00.000Z",
-      acceptedScans: 812,
-      closedBoxes: 68,
-    },
-    {
-      employeeId: "60000000-0000-4000-8000-000000000002",
-      fullName: "Пётр Смирнов",
-      role: null,
-      firstActivityAt: "2026-09-02T04:20:00.000Z",
-      lastActivityAt: "2026-09-02T10:40:00.000Z",
-      acceptedScans: 340,
-      closedBoxes: 28,
-    },
-  ],
-  unattributed: { eventCount: 4, acceptedScans: 4, closedBoxes: 0 },
-};
-
-/**
- * Number format comes from `formatInventoryNumber`'s sibling for shifts --
- * `apps/admin/src/pages/shifts/api.ts:24` documents it as `AUG26-003`, with
- * a `/S` suffix for station-created shifts. A hand-invented format would put
- * a number in the printed instruction that the product never produces.
- */
-const PLANNED_SHIFT = {
-  id: SHIFT_ID,
-  number: "AUG26-003",
-  status: "planned",
-  mode: "aggregation",
-  productId: PRODUCT_ID,
-  productName: PRODUCT.name,
-  lineId: LINE_ID,
-  lineName: LINE.name,
-  counterpartyId: COUNTERPARTY_ID,
-  counterpartyName: COUNTERPARTY.name,
-  ssccIssuerCounterpartyId: null,
-  boxLabelTemplateId: TEMPLATE_ID,
-  plannedQty: 4800,
-  plannedDate: "2026-08-31",
-  productionDate: "2026-08-31",
-  boxCapacity: 12,
-  palletCapacity: 48,
-  palletsEnabled: true,
-  createdFrom: "admin",
-  openedAt: null,
-  closedAt: null,
-  lateDataAt: null,
-  closeReason: null,
-  createdAt: "2026-08-30T05:40:00.000Z",
-  // Actual output so far, added to the list by #474: a planned shift has
-  // produced nothing yet, an active one is part-way, a closed one carries
-  // its final tally.
-  output: { mode: "aggregation", closedBoxes: 0, containedUnits: 0 },
-};
-const ACTIVE_SHIFT = {
-  ...PLANNED_SHIFT,
-  id: ACTIVE_SHIFT_ID,
-  number: "AUG26-002",
-  status: "active",
-  plannedDate: "2026-08-30",
-  productionDate: "2026-08-30",
-  openedAt: "2026-08-30T04:10:00.000Z",
-  createdAt: "2026-08-29T14:00:00.000Z",
-  output: { mode: "aggregation", closedBoxes: 153, containedUnits: 1836 },
-};
-
-const STATION_DEVICE = {
-  id: STATION_ID,
-  type: "station",
-  name: "Станция розлива 1",
-  place: { id: LINE_ID, name: LINE.name },
-  status: "online",
-  lastSeenAt: "2026-08-30T05:59:00.000Z",
-  paired: true,
-};
-const DEVICES_RESPONSE = { items: [STATION_DEVICE], page: 1, pageSize: 20, total: 1 };
-
-// --- MKR-INS-09 (shift monitoring, closing and reports) fixtures ----------
-
-const SCREENSHOT_DIR_09 = join(
-  import.meta.dirname,
-  "../../../packages/legal-documents/assets/instructions/mkr-ins-09/ru",
-);
-function screenshotPath09(name: string): string {
-  return join(SCREENSHOT_DIR_09, `${name}.png`);
-}
-
 const ACTIVE_SHIFT_09_ID = "80000000-0000-4000-8000-000000000005";
-const ACTIVE_SHIFT_09 = {
-  ...ACTIVE_SHIFT,
-  id: ACTIVE_SHIFT_09_ID,
-  number: "SEP26-004",
-  plannedDate: "2026-09-02",
-  productionDate: "2026-09-02",
-  openedAt: "2026-09-02T04:10:00.000Z",
-  createdAt: "2026-09-01T14:00:00.000Z",
-  output: { mode: "aggregation", closedBoxes: 96, containedUnits: 1152 },
-};
-const DUPLICATE_SHIFT = {
-  ...ACTIVE_SHIFT_09,
-  mode: "validation",
-  output: { mode: "validation", acceptedUnits: 1240 },
-  validationPrint: {
-    mode: "duplicate_dm",
-    templateId: PRODUCT_LABEL_TEMPLATE_ID,
-    verification: "required",
-    snapshot: { name: "Дубликат Data Matrix 58×40 [Краткое наименование]" },
-  },
-};
-const CLOSED_SHIFT = {
-  ...ACTIVE_SHIFT_09,
-  id: "80000000-0000-4000-8000-000000000003",
-  number: "SEP26-003",
-  status: "closed",
-  plannedDate: "2026-09-01",
-  productionDate: "2026-09-01",
-  openedAt: "2026-09-01T04:05:00.000Z",
-  closedAt: "2026-09-01T12:40:00.000Z",
-  closeReason: "Смена завершена по плану",
-  createdAt: "2026-08-31T14:00:00.000Z",
-  output: { mode: "aggregation", closedBoxes: 400, containedUnits: 4800 },
-};
-const LATE_SHIFT = {
-  ...CLOSED_SHIFT,
-  id: "80000000-0000-4000-8000-000000000004",
-  number: "SEP26-002",
-  lateDataAt: "2026-09-01T14:05:00.000Z",
-};
+const CLOSED_SHIFT_ID = "80000000-0000-4000-8000-000000000003";
+const LATE_SHIFT_ID = "80000000-0000-4000-8000-000000000004";
 
 function dashboardWindow(
   start: string,
@@ -472,111 +260,16 @@ function dashboardWindow(
 }
 
 /**
- * `/api/dashboard/overview` is parsed with a `.strict()` zod schema
- * (apps/admin/src/pages/dashboard/api.ts:71-118), so these fixtures mirror
- * it field for field. Verdict, quality and the shift list must AGREE — a
- * verdict reason with no matching data on the same frame is a fabrication
- * (the same rule the inventory close-preview fixtures follow).
- *
- * «Производство под контролем»: no reasons, one active shift, so the
- * quality signal is honestly "provisional" with the active_shifts reason.
- */
-const DASHBOARD_UNDER_CONTROL = {
-  generatedAt: "2026-09-02T05:30:00.000Z",
-  timeZone: "Europe/Moscow",
-  metricVersion: "operations-dashboard-v1",
-  setup: { productCount: 3, shiftCount: 12, hasRunShift: true },
-  verdict: { status: "under_control", reasons: [] },
-  today: {
-    validationAcceptedUnits: 1180,
-    aggregationClosedBoxes: 74,
-    aggregationContainedUnits: 888,
-    activeShiftCount: 1,
-    includedClosedShiftCount: 1,
-  },
-  dynamics: {
-    period: "today",
-    grain: "hour",
-    currentWindow: dashboardWindow(
-      "2026-09-02T00:00:00.000Z",
-      "2026-09-02T08:00:00.000Z",
-      1180,
-      74,
-      888,
-    ),
-    comparisonWindow: dashboardWindow(
-      "2026-09-01T00:00:00.000Z",
-      "2026-09-01T08:00:00.000Z",
-      1050,
-      66,
-      792,
-    ),
-    buckets: [
-      {
-        label: "04:00",
-        ...dashboardWindow("2026-09-02T04:00:00.000Z", "2026-09-02T05:00:00.000Z", 260, 16, 192),
-      },
-      {
-        label: "05:00",
-        ...dashboardWindow("2026-09-02T05:00:00.000Z", "2026-09-02T06:00:00.000Z", 300, 19, 228),
-      },
-      {
-        label: "06:00",
-        ...dashboardWindow("2026-09-02T06:00:00.000Z", "2026-09-02T07:00:00.000Z", 310, 20, 240),
-      },
-      {
-        label: "07:00",
-        ...dashboardWindow("2026-09-02T07:00:00.000Z", "2026-09-02T08:00:00.000Z", 310, 19, 228),
-      },
-    ],
-    quality: {
-      status: "provisional",
-      reasons: ["active_shifts"],
-      activeShiftCount: 1,
-      lateDataShiftCount: 0,
-      sources: ["code_registry", "boxes", "box_items"],
-    },
-  },
-  activeShifts: [
-    {
-      id: ACTIVE_SHIFT_09_ID,
-      number: "SEP26-004",
-      productName: PRODUCT.name,
-      lineName: LINE.name,
-      openedAt: "2026-09-02T04:10:00.000Z",
-      lateDataAt: null,
-      output: { mode: "aggregation", closedBoxes: 74, containedUnits: 888 },
-    },
-  ],
-};
-
-/**
- * «Требует внимания» over late data: the reason appears in verdict.reasons,
- * in the quality signal AND as a late-data shift count — one coherent story.
- */
-const DASHBOARD_ATTENTION = {
-  ...DASHBOARD_UNDER_CONTROL,
-  verdict: {
-    status: "needs_attention",
-    reasons: [{ code: "late_data", severity: "needs_attention", count: 1, route: "/shifts" }],
-  },
-  dynamics: {
-    ...DASHBOARD_UNDER_CONTROL.dynamics,
-    quality: {
-      ...DASHBOARD_UNDER_CONTROL.dynamics.quality,
-      reasons: ["active_shifts", "late_data"],
-      lateDataShiftCount: 1,
-    },
-  },
-};
-
-/**
  * The five report formats the server offers, copied VERBATIM from
  * `SHIFT_EXPORT_FORMATS` in packages/domain/src/shift-exports.ts (this
  * package installs with --ignore-workspace, so the domain package is not
  * importable here). If the catalog changes, this copy must follow — the
  * strict /api/ interception makes any shape drift visible as a blank
  * dialog, and the document quotes these labels from the frame.
+ *
+ * These labels are NOT localized: the domain package hardcodes them in
+ * Russian and the server sends them as-is, so the English frame shows the
+ * same Russian catalog the English cabinet really shows today.
  */
 const SHIFT_EXPORT_FORMATS_FIXTURE = [
   {
@@ -621,85 +314,519 @@ const SHIFT_EXPORT_FORMATS_FIXTURE = [
   },
 ];
 
-/** Shapes follow `ShiftExportDto` (apps/admin/src/pages/shifts/shift-exports-api.ts:21-41). */
-const EXPORT_READY = {
-  id: "a0000000-0000-4000-8000-000000000001",
-  shiftId: CLOSED_SHIFT.id,
-  formatId: "shift_xml_gismt_aggregation",
-  formatVersion: 1,
-  maxLines: 1000,
-  status: "ready",
-  errorCode: null,
-  productNameSnapshot: PRODUCT.name,
-  shiftDateSnapshot: "2026-09-01",
-  totalCodeCount: 888,
-  totalBoxCount: 74,
-  createdByUserId: "browser_manager",
-  createdByName: "Игорь Волков",
-  sourceSnapshotStartedAt: "2026-09-01T12:45:00.000Z",
-  completedAt: "2026-09-01T12:45:40.000Z",
-  attemptCount: 1,
-  createdAt: "2026-09-01T12:45:00.000Z",
-  stale: false,
-  artifacts: [
+/**
+ * Everything the mocked API serves, rebuilt per locale. Only the tenant's
+ * own text differs between the two builds -- ids, dates and counts are
+ * shared, so the RU and EN frames document the same numbers.
+ */
+function fixtures(locale: AdminLocale) {
+  const copy = COPY[locale];
+
+  const PROFILE = {
+    firstName: copy.managerFirstName,
+    middleName: null,
+    lastName: copy.managerLastName,
+    hasAvatar: false,
+  };
+
+  const PRODUCT = {
+    id: PRODUCT_ID,
+    gtin14: "04600000000006",
+    name: copy.product,
+    productGroup: copy.productGroup,
+    chzProductGroupCode: 15,
+    boxCapacity: 12,
+    palletCapacity: 48,
+    unitPrice: "189.00",
+    printName: copy.productPrintName,
+    egaisCode: null,
+    shelfLifeDays: 365,
+    externalRef: null,
+    status: "active",
+    archived: false,
+    defaultCounterpartyId: COUNTERPARTY_ID,
+    createdAt: "2026-08-03T07:12:00.000Z",
+    image: null,
+  };
+  const DRAFT_PRODUCT = {
+    ...PRODUCT,
+    id: DRAFT_PRODUCT_ID,
+    gtin14: "04600000000013",
+    name: copy.draftProduct,
+    printName: copy.draftProductPrintName,
+    status: "draft",
+    defaultCounterpartyId: null,
+    createdAt: "2026-08-24T09:40:00.000Z",
+  };
+  const ARCHIVED_PRODUCT = {
+    ...PRODUCT,
+    id: ARCHIVED_PRODUCT_ID,
+    gtin14: "04600000000020",
+    name: copy.archivedProduct,
+    printName: copy.archivedProductPrintName,
+    archived: true,
+    defaultCounterpartyId: null,
+    createdAt: "2026-05-18T11:05:00.000Z",
+  };
+
+  const LINE = { id: LINE_ID, name: copy.line, createdAt: "2026-08-01T06:00:00.000Z" };
+  const SECOND_LINE = {
+    id: SECOND_LINE_ID,
+    name: copy.secondLine,
+    createdAt: "2026-08-14T06:00:00.000Z",
+  };
+  const THIRD_LINE = {
+    id: THIRD_LINE_ID,
+    name: copy.thirdLine,
+    createdAt: "2026-08-28T06:00:00.000Z",
+  };
+
+  /**
+   * `LinesPage` renders the "no stations assigned" line when
+   * `assignedStations === 0`, the "online · {{online}} of {{total}}" chip
+   * when `onlineStations > 0`, and the offline one otherwise
+   * (apps/admin/src/pages/lines/index.tsx:129-148). All three states appear
+   * on the `lines-list` frame, because the document names all three.
+   */
+  const LINE_PRESENCE = [
     {
-      id: "b0000000-0000-4000-8000-000000000001",
-      partNumber: 1,
-      physicalLineCount: 640,
-      codeCount: 600,
-      boxCount: 50,
-      filename: "shift-SEP26-003-aggregation-part1.xml",
-      mimeType: "application/xml; charset=utf-8",
-      byteSize: 118400,
-      sha256: "0123456789abcdef".repeat(4),
+      lineId: LINE_ID,
+      lineName: LINE.name,
+      assignedStations: 3,
+      onlineStations: 2,
+      lastSeenAt: "2026-08-30T05:58:00.000Z",
     },
     {
-      id: "b0000000-0000-4000-8000-000000000002",
-      partNumber: 2,
-      physicalLineCount: 322,
-      codeCount: 288,
-      boxCount: 24,
-      filename: "shift-SEP26-003-aggregation-part2.xml",
-      mimeType: "application/xml; charset=utf-8",
-      byteSize: 61240,
-      sha256: "89abcdef01234567".repeat(4),
+      lineId: SECOND_LINE_ID,
+      lineName: SECOND_LINE.name,
+      assignedStations: 1,
+      onlineStations: 0,
+      lastSeenAt: "2026-08-29T18:20:00.000Z",
     },
-  ],
-};
-const EXPORT_PROCESSING = {
-  ...EXPORT_READY,
-  id: "a0000000-0000-4000-8000-000000000002",
-  formatId: "shift_csv_boxes",
-  formatVersion: 1,
-  maxLines: null,
-  status: "processing",
-  completedAt: null,
-  totalCodeCount: null,
-  totalBoxCount: null,
-  sourceSnapshotStartedAt: "2026-09-01T12:50:00.000Z",
-  createdAt: "2026-09-01T12:50:00.000Z",
-  artifacts: [],
-};
-const EXPORT_FAILED = {
-  ...EXPORT_READY,
-  id: "a0000000-0000-4000-8000-000000000003",
-  formatId: "shift_txt_boxes",
-  formatVersion: 2,
-  status: "failed",
-  errorCode: "BOX_COVERAGE_INCOMPLETE",
-  completedAt: null,
-  totalCodeCount: null,
-  totalBoxCount: null,
-  attemptCount: 2,
-  createdAt: "2026-09-01T12:47:00.000Z",
-  artifacts: [],
-};
-const EXPORT_STALE = {
-  ...EXPORT_READY,
-  id: "a0000000-0000-4000-8000-000000000004",
-  stale: true,
-  createdAt: "2026-09-01T13:20:00.000Z",
-};
+    {
+      lineId: THIRD_LINE_ID,
+      lineName: THIRD_LINE.name,
+      assignedStations: 0,
+      onlineStations: 0,
+      lastSeenAt: null,
+    },
+  ];
+
+  const COUNTERPARTY = {
+    id: COUNTERPARTY_ID,
+    name: copy.counterparty,
+    gln: "4600000000001",
+    inn: "7736207543",
+    gs1Prefixes: ["0460000"],
+    notes: null,
+    createdAt: "2026-07-11T08:00:00.000Z",
+  };
+  const LABEL_TEMPLATE = {
+    id: TEMPLATE_ID,
+    name: copy.boxLabelTemplate,
+    widthMm: 100,
+    heightMm: 150,
+    dpi: 203,
+    language: "zpl",
+    updatedAt: "2026-08-20T10:00:00.000Z",
+  };
+  const SHIFT_PLANNING_CONFIG = { defaultBoxLabelTemplateId: TEMPLATE_ID };
+
+  /**
+   * Validated by the strict `productLabelTemplateListSchema`
+   * (packages/domain/src/product-labels/contracts.ts:147) -- an extra field
+   * throws inside the form instead of rendering.
+   */
+  const PRODUCT_LABEL_TEMPLATES = {
+    items: [
+      {
+        id: PRODUCT_LABEL_TEMPLATE_ID,
+        name: copy.productLabelTemplate,
+        widthMm: 58,
+        heightMm: 40,
+        dpi: 203,
+      },
+    ],
+  };
+  const DUPLICATE_PLANNING_CONFIG = {
+    defaultBoxLabelTemplateId: TEMPLATE_ID,
+    validationPrintProtocol: "validation-dm-duplicate-v1",
+  };
+  /** Strict `productLabelHistorySchema` (packages/domain/src/product-labels/history.ts:20). */
+  const PRODUCT_LABEL_HISTORY = {
+    summary: { sentAttempts: 1240, verifiedAttempts: 1238, unresolvedJobs: 1, reprintAttempts: 3 },
+    items: [
+      {
+        jobId: "a0000000-0000-4000-8000-000000000001",
+        deviceId: STATION_ID,
+        codeSuffix: "…0128",
+        acceptedAt: "2026-09-02T11:04:00.000Z",
+        status: "completed",
+        verificationOutcome: "verified",
+        attemptNo: 1,
+        ownershipConflict: false,
+      },
+      {
+        jobId: "a0000000-0000-4000-8000-000000000002",
+        deviceId: STATION_ID,
+        codeSuffix: "…0129",
+        acceptedAt: "2026-09-02T11:05:00.000Z",
+        status: "attention",
+        verificationOutcome: "pending",
+        attemptNo: 2,
+        ownershipConflict: false,
+      },
+    ],
+    nextCursor: null,
+  };
+
+  /**
+   * `GET /shifts/:id/summary` feeds the details panel's shift-result and
+   * participants blocks (`ShiftDetailsPanel.tsx:72,93-142`). Not zod-parsed,
+   * so the shape has to mirror `ShiftSummaryDto` field for field: a wrong
+   * name renders an empty tile instead of throwing.
+   */
+  const SHIFT_SUMMARY = {
+    generatedAt: "2026-09-02T11:20:00.000Z",
+    output: { mode: "aggregation", closedBoxes: 96, containedUnits: 1152 },
+    participants: [
+      {
+        employeeId: "60000000-0000-4000-8000-000000000001",
+        fullName: copy.participant,
+        role: copy.participantRole,
+        firstActivityAt: "2026-09-02T04:15:00.000Z",
+        lastActivityAt: "2026-09-02T11:05:00.000Z",
+        acceptedScans: 812,
+        closedBoxes: 68,
+      },
+      {
+        employeeId: "60000000-0000-4000-8000-000000000002",
+        fullName: copy.secondParticipant,
+        role: null,
+        firstActivityAt: "2026-09-02T04:20:00.000Z",
+        lastActivityAt: "2026-09-02T10:40:00.000Z",
+        acceptedScans: 340,
+        closedBoxes: 28,
+      },
+    ],
+    unattributed: { eventCount: 4, acceptedScans: 4, closedBoxes: 0 },
+  };
+
+  /**
+   * Number format comes from `formatInventoryNumber`'s sibling for shifts --
+   * `apps/admin/src/pages/shifts/api.ts:24` documents it as `AUG26-003`, with
+   * a `/S` suffix for station-created shifts. A hand-invented format would put
+   * a number in the printed instruction that the product never produces.
+   */
+  const PLANNED_SHIFT = {
+    id: SHIFT_ID,
+    number: "AUG26-003",
+    status: "planned",
+    mode: "aggregation",
+    productId: PRODUCT_ID,
+    productName: PRODUCT.name,
+    lineId: LINE_ID,
+    lineName: LINE.name,
+    counterpartyId: COUNTERPARTY_ID,
+    counterpartyName: COUNTERPARTY.name,
+    ssccIssuerCounterpartyId: null,
+    boxLabelTemplateId: TEMPLATE_ID,
+    plannedQty: 4800,
+    plannedDate: "2026-08-31",
+    productionDate: "2026-08-31",
+    boxCapacity: 12,
+    palletCapacity: 48,
+    palletsEnabled: true,
+    createdFrom: "admin",
+    openedAt: null,
+    closedAt: null,
+    lateDataAt: null,
+    closeReason: null,
+    createdAt: "2026-08-30T05:40:00.000Z",
+    // Actual output so far, added to the list by #474: a planned shift has
+    // produced nothing yet, an active one is part-way, a closed one carries
+    // its final tally.
+    output: { mode: "aggregation", closedBoxes: 0, containedUnits: 0 },
+  };
+  const ACTIVE_SHIFT = {
+    ...PLANNED_SHIFT,
+    id: ACTIVE_SHIFT_ID,
+    number: "AUG26-002",
+    status: "active",
+    plannedDate: "2026-08-30",
+    productionDate: "2026-08-30",
+    openedAt: "2026-08-30T04:10:00.000Z",
+    createdAt: "2026-08-29T14:00:00.000Z",
+    output: { mode: "aggregation", closedBoxes: 153, containedUnits: 1836 },
+  };
+
+  const STATION_DEVICE = {
+    id: STATION_ID,
+    type: "station",
+    name: copy.station,
+    place: { id: LINE_ID, name: LINE.name },
+    status: "online",
+    lastSeenAt: "2026-08-30T05:59:00.000Z",
+    paired: true,
+  };
+  const DEVICES_RESPONSE = { items: [STATION_DEVICE], page: 1, pageSize: 20, total: 1 };
+
+  // --- MKR-INS-09 (shift monitoring, closing and reports) fixtures --------
+
+  const ACTIVE_SHIFT_09 = {
+    ...ACTIVE_SHIFT,
+    id: ACTIVE_SHIFT_09_ID,
+    number: "SEP26-004",
+    plannedDate: "2026-09-02",
+    productionDate: "2026-09-02",
+    openedAt: "2026-09-02T04:10:00.000Z",
+    createdAt: "2026-09-01T14:00:00.000Z",
+    output: { mode: "aggregation", closedBoxes: 96, containedUnits: 1152 },
+  };
+  const DUPLICATE_SHIFT = {
+    ...ACTIVE_SHIFT_09,
+    mode: "validation",
+    output: { mode: "validation", acceptedUnits: 1240 },
+    validationPrint: {
+      mode: "duplicate_dm",
+      templateId: PRODUCT_LABEL_TEMPLATE_ID,
+      verification: "required",
+      snapshot: { name: copy.productLabelTemplate },
+    },
+  };
+  const CLOSED_SHIFT = {
+    ...ACTIVE_SHIFT_09,
+    id: CLOSED_SHIFT_ID,
+    number: "SEP26-003",
+    status: "closed",
+    plannedDate: "2026-09-01",
+    productionDate: "2026-09-01",
+    openedAt: "2026-09-01T04:05:00.000Z",
+    closedAt: "2026-09-01T12:40:00.000Z",
+    closeReason: copy.closeReason,
+    createdAt: "2026-08-31T14:00:00.000Z",
+    output: { mode: "aggregation", closedBoxes: 400, containedUnits: 4800 },
+  };
+  const LATE_SHIFT = {
+    ...CLOSED_SHIFT,
+    id: LATE_SHIFT_ID,
+    number: "SEP26-002",
+    lateDataAt: "2026-09-01T14:05:00.000Z",
+  };
+
+  /**
+   * `/api/dashboard/overview` is parsed with a `.strict()` zod schema
+   * (apps/admin/src/pages/dashboard/api.ts:71-118), so these fixtures mirror
+   * it field for field. Verdict, quality and the shift list must AGREE — a
+   * verdict reason with no matching data on the same frame is a fabrication
+   * (the same rule the inventory close-preview fixtures follow).
+   *
+   * "Production is under control": no reasons, one active shift, so the
+   * quality signal is honestly "provisional" with the active_shifts reason.
+   */
+  const DASHBOARD_UNDER_CONTROL = {
+    generatedAt: "2026-09-02T05:30:00.000Z",
+    timeZone: "Europe/Moscow",
+    metricVersion: "operations-dashboard-v1",
+    setup: { productCount: 3, shiftCount: 12, hasRunShift: true },
+    verdict: { status: "under_control", reasons: [] },
+    today: {
+      validationAcceptedUnits: 1180,
+      aggregationClosedBoxes: 74,
+      aggregationContainedUnits: 888,
+      activeShiftCount: 1,
+      includedClosedShiftCount: 1,
+    },
+    dynamics: {
+      period: "today",
+      grain: "hour",
+      currentWindow: dashboardWindow(
+        "2026-09-02T00:00:00.000Z",
+        "2026-09-02T08:00:00.000Z",
+        1180,
+        74,
+        888,
+      ),
+      comparisonWindow: dashboardWindow(
+        "2026-09-01T00:00:00.000Z",
+        "2026-09-01T08:00:00.000Z",
+        1050,
+        66,
+        792,
+      ),
+      buckets: [
+        {
+          label: "04:00",
+          ...dashboardWindow("2026-09-02T04:00:00.000Z", "2026-09-02T05:00:00.000Z", 260, 16, 192),
+        },
+        {
+          label: "05:00",
+          ...dashboardWindow("2026-09-02T05:00:00.000Z", "2026-09-02T06:00:00.000Z", 300, 19, 228),
+        },
+        {
+          label: "06:00",
+          ...dashboardWindow("2026-09-02T06:00:00.000Z", "2026-09-02T07:00:00.000Z", 310, 20, 240),
+        },
+        {
+          label: "07:00",
+          ...dashboardWindow("2026-09-02T07:00:00.000Z", "2026-09-02T08:00:00.000Z", 310, 19, 228),
+        },
+      ],
+      quality: {
+        status: "provisional",
+        reasons: ["active_shifts"],
+        activeShiftCount: 1,
+        lateDataShiftCount: 0,
+        sources: ["code_registry", "boxes", "box_items"],
+      },
+    },
+    activeShifts: [
+      {
+        id: ACTIVE_SHIFT_09_ID,
+        number: "SEP26-004",
+        productName: PRODUCT.name,
+        lineName: LINE.name,
+        openedAt: "2026-09-02T04:10:00.000Z",
+        lateDataAt: null,
+        output: { mode: "aggregation", closedBoxes: 74, containedUnits: 888 },
+      },
+    ],
+  };
+
+  /**
+   * "Needs attention" over late data: the reason appears in verdict.reasons,
+   * in the quality signal AND as a late-data shift count — one coherent story.
+   */
+  const DASHBOARD_ATTENTION = {
+    ...DASHBOARD_UNDER_CONTROL,
+    verdict: {
+      status: "needs_attention",
+      reasons: [{ code: "late_data", severity: "needs_attention", count: 1, route: "/shifts" }],
+    },
+    dynamics: {
+      ...DASHBOARD_UNDER_CONTROL.dynamics,
+      quality: {
+        ...DASHBOARD_UNDER_CONTROL.dynamics.quality,
+        reasons: ["active_shifts", "late_data"],
+        lateDataShiftCount: 1,
+      },
+    },
+  };
+
+  /** Shapes follow `ShiftExportDto` (apps/admin/src/pages/shifts/shift-exports-api.ts:21-41). */
+  const EXPORT_READY = {
+    id: "a0000000-0000-4000-8000-000000000001",
+    shiftId: CLOSED_SHIFT.id,
+    formatId: "shift_xml_gismt_aggregation",
+    formatVersion: 1,
+    maxLines: 1000,
+    status: "ready",
+    errorCode: null,
+    productNameSnapshot: PRODUCT.name,
+    shiftDateSnapshot: "2026-09-01",
+    totalCodeCount: 888,
+    totalBoxCount: 74,
+    createdByUserId: "browser_manager",
+    createdByName: copy.managerFullName,
+    sourceSnapshotStartedAt: "2026-09-01T12:45:00.000Z",
+    completedAt: "2026-09-01T12:45:40.000Z",
+    attemptCount: 1,
+    createdAt: "2026-09-01T12:45:00.000Z",
+    stale: false,
+    artifacts: [
+      {
+        id: "b0000000-0000-4000-8000-000000000001",
+        partNumber: 1,
+        physicalLineCount: 640,
+        codeCount: 600,
+        boxCount: 50,
+        filename: "shift-SEP26-003-aggregation-part1.xml",
+        mimeType: "application/xml; charset=utf-8",
+        byteSize: 118400,
+        sha256: "0123456789abcdef".repeat(4),
+      },
+      {
+        id: "b0000000-0000-4000-8000-000000000002",
+        partNumber: 2,
+        physicalLineCount: 322,
+        codeCount: 288,
+        boxCount: 24,
+        filename: "shift-SEP26-003-aggregation-part2.xml",
+        mimeType: "application/xml; charset=utf-8",
+        byteSize: 61240,
+        sha256: "89abcdef01234567".repeat(4),
+      },
+    ],
+  };
+  const EXPORT_PROCESSING = {
+    ...EXPORT_READY,
+    id: "a0000000-0000-4000-8000-000000000002",
+    formatId: "shift_csv_boxes",
+    formatVersion: 1,
+    maxLines: null,
+    status: "processing",
+    completedAt: null,
+    totalCodeCount: null,
+    totalBoxCount: null,
+    sourceSnapshotStartedAt: "2026-09-01T12:50:00.000Z",
+    createdAt: "2026-09-01T12:50:00.000Z",
+    artifacts: [],
+  };
+  const EXPORT_FAILED = {
+    ...EXPORT_READY,
+    id: "a0000000-0000-4000-8000-000000000003",
+    formatId: "shift_txt_boxes",
+    formatVersion: 2,
+    status: "failed",
+    errorCode: "BOX_COVERAGE_INCOMPLETE",
+    completedAt: null,
+    totalCodeCount: null,
+    totalBoxCount: null,
+    attemptCount: 2,
+    createdAt: "2026-09-01T12:47:00.000Z",
+    artifacts: [],
+  };
+  const EXPORT_STALE = {
+    ...EXPORT_READY,
+    id: "a0000000-0000-4000-8000-000000000004",
+    stale: true,
+    createdAt: "2026-09-01T13:20:00.000Z",
+  };
+
+  return {
+    PROFILE,
+    PRODUCT,
+    DRAFT_PRODUCT,
+    ARCHIVED_PRODUCT,
+    LINE,
+    SECOND_LINE,
+    THIRD_LINE,
+    LINE_PRESENCE,
+    COUNTERPARTY,
+    LABEL_TEMPLATE,
+    SHIFT_PLANNING_CONFIG,
+    PRODUCT_LABEL_TEMPLATES,
+    DUPLICATE_PLANNING_CONFIG,
+    PRODUCT_LABEL_HISTORY,
+    SHIFT_SUMMARY,
+    PLANNED_SHIFT,
+    ACTIVE_SHIFT,
+    STATION_DEVICE,
+    DEVICES_RESPONSE,
+    ACTIVE_SHIFT_09,
+    DUPLICATE_SHIFT,
+    CLOSED_SHIFT,
+    LATE_SHIFT,
+    DASHBOARD_UNDER_CONTROL,
+    DASHBOARD_ATTENTION,
+    EXPORT_READY,
+    EXPORT_PROCESSING,
+    EXPORT_FAILED,
+    EXPORT_STALE,
+  };
+}
+
+type Fixtures = ReturnType<typeof fixtures>;
 
 type Scenario =
   | "lines"
@@ -728,38 +855,42 @@ type Scenario =
  * needs one more endpoint fails the test instead of rendering a
  * false-positive empty state.
  */
-async function installApi(page: Page, scenario: Scenario) {
+async function installApi(page: Page, scenario: Scenario, fx: Fixtures) {
   const unexpected: string[] = [];
   await page.route(/^http:\/\/127\.0\.0\.1:\d+\/api\//, async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
 
-    if (path === "/api/profile") return json(route, PROFILE);
+    if (path === "/api/profile") return json(route, fx.PROFILE);
     if (path === "/api/access/me") {
       return json(route, scenario === "deviceDrawer" ? ACCESS_ADMIN : ACCESS);
     }
     if (path === "/api/pickup-orders") return json(route, PICKUP_ORDERS_EMPTY);
     // The details panel loads the summary for every shift status.
-    if (/^\/api\/shifts\/[0-9a-f-]+\/summary$/.test(path)) return json(route, SHIFT_SUMMARY);
+    if (/^\/api\/shifts\/[0-9a-f-]+\/summary$/.test(path)) return json(route, fx.SHIFT_SUMMARY);
 
     if (scenario === "shiftDuplicate" || scenario === "shiftLabels") {
-      if (path === "/api/shifts") return json(route, { items: [DUPLICATE_SHIFT] });
+      if (path === "/api/shifts") return json(route, { items: [fx.DUPLICATE_SHIFT] });
       if (path === "/api/products") {
-        return json(route, { items: [PRODUCT, DRAFT_PRODUCT, ARCHIVED_PRODUCT] });
+        return json(route, { items: [fx.PRODUCT, fx.DRAFT_PRODUCT, fx.ARCHIVED_PRODUCT] });
       }
-      if (path === "/api/lines") return json(route, { items: [LINE, SECOND_LINE, THIRD_LINE] });
-      if (path === "/api/counterparties") return json(route, { items: [COUNTERPARTY] });
-      if (path === "/api/label-templates") return json(route, { items: [LABEL_TEMPLATE] });
-      if (path === "/api/shifts/planning-config") return json(route, DUPLICATE_PLANNING_CONFIG);
+      if (path === "/api/lines") {
+        return json(route, { items: [fx.LINE, fx.SECOND_LINE, fx.THIRD_LINE] });
+      }
+      if (path === "/api/counterparties") return json(route, { items: [fx.COUNTERPARTY] });
+      if (path === "/api/label-templates") return json(route, { items: [fx.LABEL_TEMPLATE] });
+      if (path === "/api/shifts/planning-config") {
+        return json(route, fx.DUPLICATE_PLANNING_CONFIG);
+      }
       if (path === "/api/shifts/product-label-templates") {
-        return json(route, PRODUCT_LABEL_TEMPLATES);
+        return json(route, fx.PRODUCT_LABEL_TEMPLATES);
       }
       if (/^\/api\/shifts\/[0-9a-f-]+\/product-labels$/.test(path)) {
-        return json(route, PRODUCT_LABEL_HISTORY);
+        return json(route, fx.PRODUCT_LABEL_HISTORY);
       }
       if (path === "/api/operators") {
         return json(route, {
-          items: SHIFT_SUMMARY.participants.map(({ employeeId, fullName }) => ({
+          items: fx.SHIFT_SUMMARY.participants.map(({ employeeId, fullName }) => ({
             employeeId,
             fullName,
           })),
@@ -773,8 +904,10 @@ async function installApi(page: Page, scenario: Scenario) {
     }
 
     if (scenario === "lines" || scenario === "linesDeleteBlocked") {
-      if (path === "/api/lines") return json(route, { items: [LINE, SECOND_LINE, THIRD_LINE] });
-      if (path === "/api/lines/presence") return json(route, { items: LINE_PRESENCE });
+      if (path === "/api/lines") {
+        return json(route, { items: [fx.LINE, fx.SECOND_LINE, fx.THIRD_LINE] });
+      }
+      if (path === "/api/lines/presence") return json(route, { items: fx.LINE_PRESENCE });
       if (scenario === "linesDeleteBlocked" && path === `/api/lines/${LINE_ID}`) {
         return route.fulfill({
           status: 409,
@@ -785,9 +918,11 @@ async function installApi(page: Page, scenario: Scenario) {
     }
 
     if (scenario === "devices" || scenario === "deviceDrawer") {
-      if (path === "/api/devices") return json(route, DEVICES_RESPONSE);
+      if (path === "/api/devices") return json(route, fx.DEVICES_RESPONSE);
       // The add-device drawer offers the line select, so it loads the lines.
-      if (path === "/api/lines") return json(route, { items: [LINE, SECOND_LINE, THIRD_LINE] });
+      if (path === "/api/lines") {
+        return json(route, { items: [fx.LINE, fx.SECOND_LINE, fx.THIRD_LINE] });
+      }
     }
 
     if (
@@ -798,23 +933,26 @@ async function installApi(page: Page, scenario: Scenario) {
     ) {
       if (path === "/api/shifts") {
         return json(route, {
-          items: scenario === "shiftsPlanned" ? [PLANNED_SHIFT, ACTIVE_SHIFT] : [ACTIVE_SHIFT],
+          items:
+            scenario === "shiftsPlanned" ? [fx.PLANNED_SHIFT, fx.ACTIVE_SHIFT] : [fx.ACTIVE_SHIFT],
         });
       }
       if (path === "/api/products") {
-        return json(route, { items: [PRODUCT, DRAFT_PRODUCT, ARCHIVED_PRODUCT] });
+        return json(route, { items: [fx.PRODUCT, fx.DRAFT_PRODUCT, fx.ARCHIVED_PRODUCT] });
       }
-      if (path === "/api/lines") return json(route, { items: [LINE, SECOND_LINE, THIRD_LINE] });
-      if (path === "/api/counterparties") return json(route, { items: [COUNTERPARTY] });
-      if (path === "/api/label-templates") return json(route, { items: [LABEL_TEMPLATE] });
-      if (path === "/api/shifts/planning-config") return json(route, SHIFT_PLANNING_CONFIG);
+      if (path === "/api/lines") {
+        return json(route, { items: [fx.LINE, fx.SECOND_LINE, fx.THIRD_LINE] });
+      }
+      if (path === "/api/counterparties") return json(route, { items: [fx.COUNTERPARTY] });
+      if (path === "/api/label-templates") return json(route, { items: [fx.LABEL_TEMPLATE] });
+      if (path === "/api/shifts/planning-config") return json(route, fx.SHIFT_PLANNING_CONFIG);
     }
 
     if (scenario === "dashboardCalm" || scenario === "dashboardAttention") {
       if (path === "/api/dashboard/overview") {
         return json(
           route,
-          scenario === "dashboardCalm" ? DASHBOARD_UNDER_CONTROL : DASHBOARD_ATTENTION,
+          scenario === "dashboardCalm" ? fx.DASHBOARD_UNDER_CONTROL : fx.DASHBOARD_ATTENTION,
         );
       }
     }
@@ -829,34 +967,36 @@ async function installApi(page: Page, scenario: Scenario) {
         return json(route, {
           items:
             scenario === "shiftsClose"
-              ? [ACTIVE_SHIFT_09]
+              ? [fx.ACTIVE_SHIFT_09]
               : scenario === "shiftsLate"
-                ? [ACTIVE_SHIFT_09, LATE_SHIFT, CLOSED_SHIFT]
-                : [CLOSED_SHIFT],
+                ? [fx.ACTIVE_SHIFT_09, fx.LATE_SHIFT, fx.CLOSED_SHIFT]
+                : [fx.CLOSED_SHIFT],
         });
       }
       // The shifts page loads the planning references regardless of what the
       // frame is about -- same set the 08 scenarios serve.
       if (path === "/api/products") {
-        return json(route, { items: [PRODUCT, DRAFT_PRODUCT, ARCHIVED_PRODUCT] });
+        return json(route, { items: [fx.PRODUCT, fx.DRAFT_PRODUCT, fx.ARCHIVED_PRODUCT] });
       }
-      if (path === "/api/lines") return json(route, { items: [LINE, SECOND_LINE, THIRD_LINE] });
-      if (path === "/api/counterparties") return json(route, { items: [COUNTERPARTY] });
-      if (path === "/api/label-templates") return json(route, { items: [LABEL_TEMPLATE] });
-      if (path === "/api/shifts/planning-config") return json(route, SHIFT_PLANNING_CONFIG);
+      if (path === "/api/lines") {
+        return json(route, { items: [fx.LINE, fx.SECOND_LINE, fx.THIRD_LINE] });
+      }
+      if (path === "/api/counterparties") return json(route, { items: [fx.COUNTERPARTY] });
+      if (path === "/api/label-templates") return json(route, { items: [fx.LABEL_TEMPLATE] });
+      if (path === "/api/shifts/planning-config") return json(route, fx.SHIFT_PLANNING_CONFIG);
     }
     if (exportScenario) {
       if (path === "/api/shift-exports/formats") return json(route, SHIFT_EXPORT_FORMATS_FIXTURE);
-      if (path === `/api/shifts/${CLOSED_SHIFT.id}/exports`) {
+      if (path === `/api/shifts/${CLOSED_SHIFT_ID}/exports`) {
         return json(
           route,
           scenario === "exportsCatalog"
             ? []
             : scenario === "exportsHistory"
-              ? [EXPORT_PROCESSING, EXPORT_READY]
+              ? [fx.EXPORT_PROCESSING, fx.EXPORT_READY]
               : scenario === "exportsFailed"
-                ? [EXPORT_FAILED]
-                : [EXPORT_STALE],
+                ? [fx.EXPORT_FAILED]
+                : [fx.EXPORT_STALE],
         );
       }
     }
@@ -869,346 +1009,420 @@ async function installApi(page: Page, scenario: Scenario) {
 
 /**
  * Every row action moved into the details panel (`e177cea30`, 2026-09-02):
- * the list now carries only «Подробнее». Tests that used to click an action
- * in the row open the panel first.
+ * the list now carries only the "details" button. Tests that used to click an
+ * action in the row open the panel first.
  */
-async function openShiftDetails(page: Page, shiftNumber: string) {
+async function openShiftDetails(page: Page, t: Translate, shiftNumber: string) {
   await page
     .getByRole("row", { name: new RegExp(shiftNumber) })
-    .getByRole("button", { name: "Подробнее" })
+    .getByRole("button", { name: t("pages.shifts.details.action") })
     .click();
-  await expect(page.getByRole("heading", { name: `Смена ${shiftNumber}` })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: t("pages.shifts.details.title", { number: shiftNumber }) }),
+  ).toBeVisible();
 }
 
-async function openHarness(page: Page, route: string) {
+/**
+ * `?locale=` is what the harness feeds to `i18n.changeLanguage` before the
+ * first paint (apps/admin/test/browser/cabinet-harness.tsx), so the frame is
+ * rendered in that language from the very first frame instead of flashing
+ * the default one.
+ */
+async function openHarness(page: Page, locale: AdminLocale, route: string) {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`/test/browser/production.html?route=${encodeURIComponent(route)}`);
+  await page.goto(
+    `/test/browser/production.html?route=${encodeURIComponent(route)}&locale=${locale}`,
+  );
 }
 
-test("lines list shows all three presence states", async ({ page }) => {
-  const unexpected = await installApi(page, "lines");
-  await openHarness(page, "/lines");
-  await expect(page.getByText("Производственные линии")).toBeVisible();
-  await expect(page.getByText("Онлайн · 2 из 3 станций")).toBeVisible();
-  await expect(page.getByText("Офлайн")).toBeVisible();
-  await expect(page.getByText("Станции не назначены")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath("lines-list"));
-  expect(unexpected).toEqual([]);
-});
+for (const locale of LOCALES) {
+  const { t } = adminI18n(locale);
 
-test("line form", async ({ page }) => {
-  const unexpected = await installApi(page, "lines");
-  await openHarness(page, "/lines/new");
-  await expect(page.getByText("Новая линия")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath("line-form"));
-  expect(unexpected).toEqual([]);
-});
+  const shot = (name: string) => screenshotPath(locale, name);
+  const shot09 = (name: string) => screenshotPath09(locale, name);
 
-test("deleting a referenced line is refused", async ({ page }) => {
-  const unexpected = await installApi(page, "linesDeleteBlocked");
-  await openHarness(page, "/lines");
-  await page.getByRole("button", { name: "Удалить" }).first().click();
-  await page.getByRole("button", { name: "Удалить", exact: true }).last().click();
-  await expect(
-    page.getByText("Линия используется в сменах или назначена", { exact: false }),
-  ).toBeVisible();
-  await screenshotFullMain(page, screenshotPath("line-delete-blocked"));
-  expect(unexpected).toEqual([]);
-});
-
-/**
- * The devices LIST shows the line under a column headed "Место", not
- * "Линия" -- the "Линия" label with its explanatory hint lives in the
- * device's own drawer (`DeviceDrawer.tsx:316-320`). Both frames exist so the
- * document can name each string against the screen that actually shows it.
- */
-test("device list shows its line under Место", async ({ page }) => {
-  const unexpected = await installApi(page, "devices");
-  await openHarness(page, "/devices");
-  await expect(page.getByText("Станция розлива 1")).toBeVisible();
-  await expect(page.getByRole("columnheader", { name: "Место" })).toBeVisible();
-  await screenshotFullMain(page, screenshotPath("device-list"));
-  expect(unexpected).toEqual([]);
-});
-
-test("device drawer assigns the line", async ({ page }) => {
-  const unexpected = await installApi(page, "deviceDrawer");
-  await openHarness(page, "/devices");
-  await page.getByRole("button", { name: "Добавить устройство" }).click();
-  await expect(
-    page.getByText("Выбранная линия задаёт для станции", { exact: false }),
-  ).toBeVisible();
-  await screenshotFullMain(page, screenshotPath("device-line"));
-  expect(unexpected).toEqual([]);
-});
-
-test("shifts list before planning", async ({ page }) => {
-  const unexpected = await installApi(page, "shiftsList");
-  await openHarness(page, "/shifts");
-  await expect(page.getByText("AUG26-002")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath("shifts-list"));
-  expect(unexpected).toEqual([]);
-});
-
-/**
- * A draft or archived product is listed but NOT selectable: `ShiftForm.tsx`
- * builds each option with `disabled: product.archived || product.status ===
- * "draft"` (:286) and appends "(черновик — недоступно)" / "(не
- * используется)" to the label (:281-285). This is the opposite of the
- * inventory form, where an archived product is deliberately selectable --
- * hence its own frame, so the printed claim rests on a picture.
- */
-test("shift form: draft and archived products are listed but disabled", async ({ page }) => {
-  const unexpected = await installApi(page, "shiftCreate");
-  await openHarness(page, "/shifts/new");
-  await page.getByRole("combobox", { name: "Продукт" }).click();
-  await expect(page.getByText("черновик — недоступно")).toBeVisible();
-  await expect(page.getByText("не используется")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath("shift-product-options"));
-  expect(unexpected).toEqual([]);
-});
-
-/**
- * Picking a product prefills the counterparty and the capacities from that
- * product's defaults (`ShiftForm.tsx:205,221-234`), which is a frequent
- * "why did this appear?" question -- so the frame shows the form after the
- * choice, not an empty one.
- */
-test("shift form: choosing a product prefills the counterparty", async ({ page }) => {
-  const unexpected = await installApi(page, "shiftCreate");
-  await openHarness(page, "/shifts/new");
-  await page.getByRole("combobox", { name: "Продукт" }).click();
-  await page.getByRole("option", { name: PRODUCT.name, exact: true }).click();
-  await expect(page.getByRole("combobox", { name: "Для контрагента (толлинг)" })).toHaveText(
-    COUNTERPARTY.name,
-  );
-  await screenshotFullMain(page, screenshotPath("shift-filled"));
-  expect(unexpected).toEqual([]);
-});
-
-/**
- * The "Агрегация" section only renders while `shiftMode === "aggregation"`
- * (`ShiftForm.tsx:536`), and a new form starts in "validation" (form
- * defaults, :101). So the capacities and pallet fields genuinely do not
- * exist until the manager picks the mode. Shot after the product is chosen
- * too, so the prefilled capacities (12 / 48 from the product) are visible.
- */
-test("shift form: templates and aggregation", async ({ page }) => {
-  const unexpected = await installApi(page, "shiftCreate");
-  await openHarness(page, "/shifts/new");
-  await page.getByRole("combobox", { name: "Продукт" }).click();
-  await page.getByRole("option", { name: PRODUCT.name, exact: true }).click();
-  await page.getByRole("radio", { name: "Агрегация" }).check();
-  await expect(page.getByText("Использовать паллеты")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath("shift-aggregation"));
-  expect(unexpected).toEqual([]);
-});
-
-test("shifts list after planning", async ({ page }) => {
-  const unexpected = await installApi(page, "shiftsPlanned");
-  await openHarness(page, "/shifts");
-  await expect(page.getByText("AUG26-003")).toBeVisible();
-  await expect(page.getByText("Запланирована")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath("shift-planned"));
-  expect(unexpected).toEqual([]);
-});
-
-/**
- * While a shift is active the form locks everything except the planned
- * quantity and the two dates (`ShiftForm.tsx`'s `activeEdit` flag disables
- * product, mode, line, counterparty, SSCC issuer, template and capacities).
- */
-test("an active shift locks most of its form", async ({ page }) => {
-  const unexpected = await installApi(page, "shiftActiveEdit");
-  await openHarness(page, `/shifts/${ACTIVE_SHIFT_ID}/edit`);
-  await expect(page.getByText("Изменить смену · AUG26-002")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath("shift-active-locked"));
-  expect(unexpected).toEqual([]);
-});
-
-/**
- * Submitting ANY edit of an active shift routes through the confirmation
- * instead of persisting: `ShiftPanelRoute.tsx:254-258` sets `criticalInput`
- * whenever `shift.status === "active"`, which opens the "Критическое
- * изменение активной смены" dialog.
- */
-test("saving an active shift asks for confirmation", async ({ page }) => {
-  const unexpected = await installApi(page, "shiftActiveEdit");
-  await openHarness(page, `/shifts/${ACTIVE_SHIFT_ID}/edit`);
-  await page.getByLabel("Плановое количество, шт").fill("5200");
-  await page.getByRole("button", { name: "Сохранить" }).click();
-  await expect(page.getByText("Критическое изменение активной смены")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath("shift-active-edit"));
-  expect(unexpected).toEqual([]);
-});
-
-test("deleting a planned shift asks for confirmation", async ({ page }) => {
-  const unexpected = await installApi(page, "shiftsPlanned");
-  await openHarness(page, "/shifts");
-  await openShiftDetails(page, "AUG26-003");
-  await page.getByRole("button", { name: "Удалить" }).click();
-  await expect(page.getByText("Удалить смену?")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath("shift-delete"));
-  expect(unexpected).toEqual([]);
-});
-
-// --- MKR-INS-09 frames -----------------------------------------------------
-
-test("dashboard: production under control", async ({ page }) => {
-  const unexpected = await installApi(page, "dashboardCalm");
-  await openHarness(page, "/");
-  await expect(page.getByText("Производство под контролем")).toBeVisible();
-  await expect(page.getByText("Активных причин для вмешательства нет.")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath09("dashboard-under-control"));
-  expect(unexpected).toEqual([]);
-});
-
-test("dashboard: keeps the content scroll rail inside the viewport", async ({ page }) => {
-  const unexpected = await installApi(page, "dashboardCalm");
-  await openHarness(page, "/");
-  await page.setViewportSize({ width: 1512, height: 809 });
-  await expect(page.getByText("Производство под контролем")).toBeVisible();
-
-  const layout = await page.evaluate(() => {
-    const shell = document.querySelector<HTMLElement>(".mk-app-shell");
-    const content = document.querySelector<HTMLElement>(".mk-app-shell__content");
-    const main = content?.querySelector<HTMLElement>("main");
-    const scrollingElement = document.scrollingElement;
-    if (!shell || !content || !main || !scrollingElement) {
-      throw new Error("Expected the complete admin shell");
-    }
-
-    main.scrollTop = main.scrollHeight;
-
-    return {
-      documentOverflow: scrollingElement.scrollHeight - scrollingElement.clientHeight,
-      shellBottom: Math.round(shell.getBoundingClientRect().bottom),
-      contentBottom: Math.round(content.getBoundingClientRect().bottom),
-      mainBottom: Math.round(main.getBoundingClientRect().bottom),
-      mainScrolled: main.scrollTop > 0,
-      viewportHeight: window.innerHeight,
-      windowScrollY: window.scrollY,
-    };
+  test(`lines list shows all three presence states (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "lines", fx);
+    await openHarness(page, locale, "/lines");
+    await expect(page.getByText(t("pages.lines.title"))).toBeVisible();
+    await expect(
+      page.getByText(t("pages.lines.presence.online", { online: 2, total: 3 })),
+    ).toBeVisible();
+    await expect(page.getByText(t("pages.lines.presence.offline"))).toBeVisible();
+    await expect(page.getByText(t("pages.lines.presence.unassigned"))).toBeVisible();
+    await screenshotFullMain(page, shot("lines-list"));
+    expect(unexpected).toEqual([]);
   });
 
-  expect(layout).toEqual({
-    documentOverflow: 0,
-    shellBottom: 809,
-    contentBottom: 809,
-    mainBottom: 809,
-    mainScrolled: true,
-    viewportHeight: 809,
-    windowScrollY: 0,
+  test(`line form (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "lines", fx);
+    await openHarness(page, locale, "/lines/new");
+    await expect(page.getByText(t("pages.lines.form.createTitle"))).toBeVisible();
+    await screenshotFullMain(page, shot("line-form"));
+    expect(unexpected).toEqual([]);
   });
-  expect(unexpected).toEqual([]);
-});
 
-test("dashboard: needs attention over late data", async ({ page }) => {
-  const unexpected = await installApi(page, "dashboardAttention");
-  await openHarness(page, "/");
-  await expect(page.getByText("Требует внимания")).toBeVisible();
-  await expect(page.getByText("Поздние данные затронули 1 смену")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath09("dashboard-attention"));
-  expect(unexpected).toEqual([]);
-});
+  test(`deleting a referenced line is refused (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "linesDeleteBlocked", fx);
+    await openHarness(page, locale, "/lines");
+    await page
+      .getByRole("button", { name: t("pages.lines.delete") })
+      .first()
+      .click();
+    await page
+      .getByRole("button", { name: t("pages.lines.deleteConfirmAction"), exact: true })
+      .last()
+      .click();
+    await expect(
+      page.getByText(t("pages.lines.deleteReferencedError"), { exact: false }),
+    ).toBeVisible();
+    await screenshotFullMain(page, shot("line-delete-blocked"));
+    expect(unexpected).toEqual([]);
+  });
 
-test("the details panel of an active shift offers the close action", async ({ page }) => {
-  const unexpected = await installApi(page, "shiftsClose");
-  await openHarness(page, "/shifts");
-  await openShiftDetails(page, "SEP26-004");
-  await expect(page.getByRole("heading", { name: "Действия со сменой" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Закрыть смену" })).toBeVisible();
-  await screenshotFullMain(page, screenshotPath09("shifts-active"));
-  expect(unexpected).toEqual([]);
-});
+  /**
+   * The devices LIST shows the line under the "place" column, not a "line"
+   * one -- the line label with its explanatory hint lives in the device's own
+   * drawer (`DeviceDrawer.tsx:316-320`). Both frames exist so the document
+   * can name each string against the screen that actually shows it.
+   */
+  test(`device list shows its line under the place column (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "devices", fx);
+    await openHarness(page, locale, "/devices");
+    await expect(page.getByText(fx.STATION_DEVICE.name)).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: t("pages.devices.table.place") }),
+    ).toBeVisible();
+    await screenshotFullMain(page, shot("device-list"));
+    expect(unexpected).toEqual([]);
+  });
 
-test("closing a shift from the cabinet asks for a reason", async ({ page }) => {
-  const unexpected = await installApi(page, "shiftsClose");
-  await openHarness(page, "/shifts");
-  await openShiftDetails(page, "SEP26-004");
-  await page.getByRole("button", { name: "Закрыть смену" }).click();
-  await expect(page.getByText("Причина закрытия")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath09("shift-close"));
-  expect(unexpected).toEqual([]);
-});
+  test(`device drawer assigns the line (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "deviceDrawer", fx);
+    await openHarness(page, locale, "/devices");
+    await page.getByRole("button", { name: t("pages.devices.add") }).click();
+    await expect(page.getByText(t("pages.devices.lineHint"), { exact: false })).toBeVisible();
+    await screenshotFullMain(page, shot("device-line"));
+    expect(unexpected).toEqual([]);
+  });
 
-test("late data badge on a closed shift", async ({ page }) => {
-  const unexpected = await installApi(page, "shiftsLate");
-  await openHarness(page, "/shifts");
-  await expect(page.getByText("Данные после закрытия")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath09("shifts-late-badge"));
-  expect(unexpected).toEqual([]);
-});
+  test(`shifts list before planning (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftsList", fx);
+    await openHarness(page, locale, "/shifts");
+    await expect(page.getByText("AUG26-002")).toBeVisible();
+    await screenshotFullMain(page, shot("shifts-list"));
+    expect(unexpected).toEqual([]);
+  });
 
-/**
- * The report dialog only exists on CLOSED shifts (`ShiftExportAction` renders
- * for `row.status === "closed"`, apps/admin/src/pages/shifts/index.tsx:372),
- * so every export frame starts from CLOSED_SHIFT's row.
- */
-test("shift reports: format catalog and split controls", async ({ page }) => {
-  const unexpected = await installApi(page, "exportsCatalog");
-  await openHarness(page, "/shifts");
-  await openShiftDetails(page, "SEP26-003");
-  await expect(page.getByText("[XML][ГИСМТ] Отчет об агрегации")).toBeVisible();
-  await expect(page.getByText("Разделить отчет на части")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath09("exports-catalog"));
-  expect(unexpected).toEqual([]);
-});
+  /**
+   * A draft or archived product is listed but NOT selectable: `ShiftForm.tsx`
+   * builds each option with `disabled: product.archived || product.status ===
+   * "draft"` (:286) and appends the draft / archived hint to the label
+   * (:281-285). This is the opposite of the inventory form, where an archived
+   * product is deliberately selectable -- hence its own frame, so the printed
+   * claim rests on a picture.
+   */
+  test(`shift form: draft and archived products are listed but disabled (${locale})`, async ({
+    page,
+  }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftCreate", fx);
+    await openHarness(page, locale, "/shifts/new");
+    await page.getByRole("combobox", { name: t("pages.shifts.form.productLabel") }).click();
+    await expect(page.getByText(t("pages.shifts.form.draftHint"))).toBeVisible();
+    await expect(page.getByText(t("pages.shifts.form.archivedHint"))).toBeVisible();
+    await screenshotFullMain(page, shot("shift-product-options"));
+    expect(unexpected).toEqual([]);
+  });
 
-test("shift reports: history with ready parts and a processing run", async ({ page }) => {
-  const unexpected = await installApi(page, "exportsHistory");
-  await openHarness(page, "/shifts");
-  await openShiftDetails(page, "SEP26-003");
-  await expect(page.getByText("Готов", { exact: true })).toBeVisible();
-  await expect(page.getByText("Формируется")).toBeVisible();
-  await expect(page.getByText("Часть 1")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath09("exports-history"));
-  expect(unexpected).toEqual([]);
-});
+  /**
+   * Picking a product prefills the counterparty and the capacities from that
+   * product's defaults (`ShiftForm.tsx:205,221-234`), which is a frequent
+   * "why did this appear?" question -- so the frame shows the form after the
+   * choice, not an empty one.
+   */
+  test(`shift form: choosing a product prefills the counterparty (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftCreate", fx);
+    await openHarness(page, locale, "/shifts/new");
+    await page.getByRole("combobox", { name: t("pages.shifts.form.productLabel") }).click();
+    await page.getByRole("option", { name: fx.PRODUCT.name, exact: true }).click();
+    await expect(
+      page.getByRole("combobox", { name: t("pages.shifts.form.counterpartyLabel") }),
+    ).toHaveText(fx.COUNTERPARTY.name);
+    await screenshotFullMain(page, shot("shift-filled"));
+    expect(unexpected).toEqual([]);
+  });
 
-test("shift reports: failed run explains itself and offers a retry", async ({ page }) => {
-  const unexpected = await installApi(page, "exportsFailed");
-  await openHarness(page, "/shifts");
-  await openShiftDetails(page, "SEP26-003");
-  await expect(page.getByText("Не все коды смены распределены по коробам.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Повторить" })).toBeVisible();
-  await screenshotFullMain(page, screenshotPath09("exports-failed"));
-  expect(unexpected).toEqual([]);
-});
+  /**
+   * The aggregation section only renders while `shiftMode === "aggregation"`
+   * (`ShiftForm.tsx:536`), and a new form starts in "validation" (form
+   * defaults, :101). So the capacities and pallet fields genuinely do not
+   * exist until the manager picks the mode. Shot after the product is chosen
+   * too, so the prefilled capacities (12 / 48 from the product) are visible.
+   */
+  test(`shift form: templates and aggregation (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftCreate", fx);
+    await openHarness(page, locale, "/shifts/new");
+    await page.getByRole("combobox", { name: t("pages.shifts.form.productLabel") }).click();
+    await page.getByRole("option", { name: fx.PRODUCT.name, exact: true }).click();
+    await page.getByRole("radio", { name: t("pages.shifts.form.modeAggregation") }).check();
+    await expect(page.getByText(t("pages.shifts.form.palletsEnabledLabel"))).toBeVisible();
+    await screenshotFullMain(page, shot("shift-aggregation"));
+    expect(unexpected).toEqual([]);
+  });
 
-test("shift reports: stale run warns after late data", async ({ page }) => {
-  const unexpected = await installApi(page, "exportsStale");
-  await openHarness(page, "/shifts");
-  await openShiftDetails(page, "SEP26-003");
-  await expect(page.getByText("Данные смены изменились — сформируйте новый отчет.")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath09("exports-stale"));
-  expect(unexpected).toEqual([]);
-});
+  test(`shifts list after planning (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftsPlanned", fx);
+    await openHarness(page, locale, "/shifts");
+    await expect(page.getByText("AUG26-003")).toBeVisible();
+    await expect(page.getByText(t("pages.shifts.status.planned"))).toBeVisible();
+    await screenshotFullMain(page, shot("shift-planned"));
+    expect(unexpected).toEqual([]);
+  });
 
-/**
- * Validation shifts can now duplicate the product's Data Matrix onto the
- * outer packaging (`728863928`). The option only unlocks when planning-config
- * reports the protocol, and it replaces the «Шаблоны» section with «Печать
- * дубликата» -- both facts the printed instruction has to state.
- */
-test("planning a validation shift offers the Data Matrix duplicate", async ({ page }) => {
-  const unexpected = await installApi(page, "shiftDuplicate");
-  await openHarness(page, "/shifts/new");
-  await page.getByRole("combobox", { name: "Продукт" }).click();
-  await page.getByRole("option", { name: PRODUCT.name, exact: true }).click();
-  await page.getByRole("radio", { name: "Валидация" }).check();
-  await page.getByRole("radio", { name: "Дублировать Data Matrix" }).check();
-  await expect(page.getByText("Шаблон этикетки продукции")).toBeVisible();
-  await expect(page.getByText("Обязательная проверка этикетки")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath("shift-duplicate-print"));
-  expect(unexpected).toEqual([]);
-});
+  /**
+   * While a shift is active the form locks everything except the planned
+   * quantity and the two dates (`ShiftForm.tsx`'s `activeEdit` flag disables
+   * product, mode, line, counterparty, SSCC issuer, template and capacities).
+   */
+  test(`an active shift locks most of its form (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftActiveEdit", fx);
+    await openHarness(page, locale, `/shifts/${ACTIVE_SHIFT_ID}/edit`);
+    await expect(page.getByText(`${t("pages.shifts.form.editTitle")} · AUG26-002`)).toBeVisible();
+    await screenshotFullMain(page, shot("shift-active-locked"));
+    expect(unexpected).toEqual([]);
+  });
 
-test("the details panel lists duplicate label attempts", async ({ page }) => {
-  const unexpected = await installApi(page, "shiftLabels");
-  await openHarness(page, "/shifts");
-  await openShiftDetails(page, "SEP26-004");
-  await expect(page.getByRole("heading", { name: "История этикеток" })).toBeVisible();
-  await screenshotFullMain(page, screenshotPath09("shift-labels-history"));
-  expect(unexpected).toEqual([]);
-});
+  /**
+   * Submitting ANY edit of an active shift routes through the confirmation
+   * instead of persisting: `ShiftPanelRoute.tsx:254-258` sets `criticalInput`
+   * whenever `shift.status === "active"`, which opens the critical-change
+   * dialog.
+   */
+  test(`saving an active shift asks for confirmation (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftActiveEdit", fx);
+    await openHarness(page, locale, `/shifts/${ACTIVE_SHIFT_ID}/edit`);
+    await page.getByLabel(t("pages.shifts.form.plannedQtyLabel")).fill("5200");
+    await page.getByRole("button", { name: t("pages.shifts.form.submitUpdate") }).click();
+    await expect(page.getByText(t("pages.shifts.activeEdit.title"))).toBeVisible();
+    await screenshotFullMain(page, shot("shift-active-edit"));
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`deleting a planned shift asks for confirmation (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftsPlanned", fx);
+    await openHarness(page, locale, "/shifts");
+    await openShiftDetails(page, t, "AUG26-003");
+    await page.getByRole("button", { name: t("pages.shifts.delete") }).click();
+    await expect(page.getByText(t("pages.shifts.deleteConfirmTitle"))).toBeVisible();
+    await screenshotFullMain(page, shot("shift-delete"));
+    expect(unexpected).toEqual([]);
+  });
+
+  // --- MKR-INS-09 frames ---------------------------------------------------
+
+  test(`dashboard: production under control (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "dashboardCalm", fx);
+    await openHarness(page, locale, "/");
+    await expect(page.getByText(t("pages.dashboard.verdict.status.under_control"))).toBeVisible();
+    await expect(page.getByText(t("pages.dashboard.verdict.noReasons"))).toBeVisible();
+    await screenshotFullMain(page, shot09("dashboard-under-control"));
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`dashboard: keeps the content scroll rail inside the viewport (${locale})`, async ({
+    page,
+  }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "dashboardCalm", fx);
+    await openHarness(page, locale, "/");
+    await page.setViewportSize({ width: 1512, height: 809 });
+    await expect(page.getByText(t("pages.dashboard.verdict.status.under_control"))).toBeVisible();
+
+    const layout = await page.evaluate(() => {
+      const shell = document.querySelector<HTMLElement>(".mk-app-shell");
+      const content = document.querySelector<HTMLElement>(".mk-app-shell__content");
+      const main = content?.querySelector<HTMLElement>("main");
+      const scrollingElement = document.scrollingElement;
+      if (!shell || !content || !main || !scrollingElement) {
+        throw new Error("Expected the complete admin shell");
+      }
+
+      main.scrollTop = main.scrollHeight;
+
+      return {
+        documentOverflow: scrollingElement.scrollHeight - scrollingElement.clientHeight,
+        shellBottom: Math.round(shell.getBoundingClientRect().bottom),
+        contentBottom: Math.round(content.getBoundingClientRect().bottom),
+        mainBottom: Math.round(main.getBoundingClientRect().bottom),
+        mainScrolled: main.scrollTop > 0,
+        viewportHeight: window.innerHeight,
+        windowScrollY: window.scrollY,
+      };
+    });
+
+    expect(layout).toEqual({
+      documentOverflow: 0,
+      shellBottom: 809,
+      contentBottom: 809,
+      mainBottom: 809,
+      mainScrolled: true,
+      viewportHeight: 809,
+      windowScrollY: 0,
+    });
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`dashboard: needs attention over late data (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "dashboardAttention", fx);
+    await openHarness(page, locale, "/");
+    await expect(page.getByText(t("pages.dashboard.verdict.status.needs_attention"))).toBeVisible();
+    await expect(
+      page.getByText(t("pages.dashboard.verdict.reason.late_data_one", { count: 1 })),
+    ).toBeVisible();
+    await screenshotFullMain(page, shot09("dashboard-attention"));
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`the details panel of an active shift offers the close action (${locale})`, async ({
+    page,
+  }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftsClose", fx);
+    await openHarness(page, locale, "/shifts");
+    await openShiftDetails(page, t, "SEP26-004");
+    await expect(
+      page.getByRole("heading", { name: t("pages.shifts.details.actionsTitle") }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: t("pages.shifts.close") })).toBeVisible();
+    await screenshotFullMain(page, shot09("shifts-active"));
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`closing a shift from the cabinet asks for a reason (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftsClose", fx);
+    await openHarness(page, locale, "/shifts");
+    await openShiftDetails(page, t, "SEP26-004");
+    await page.getByRole("button", { name: t("pages.shifts.close") }).click();
+    await expect(page.getByText(t("pages.shifts.closeModal.reasonLabel"))).toBeVisible();
+    await screenshotFullMain(page, shot09("shift-close"));
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`late data badge on a closed shift (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftsLate", fx);
+    await openHarness(page, locale, "/shifts");
+    await expect(page.getByText(t("pages.shifts.table.lateData"))).toBeVisible();
+    await screenshotFullMain(page, shot09("shifts-late-badge"));
+    expect(unexpected).toEqual([]);
+  });
+
+  /**
+   * The report dialog only exists on CLOSED shifts (`ShiftExportAction` renders
+   * for `row.status === "closed"`, apps/admin/src/pages/shifts/index.tsx:372),
+   * so every export frame starts from CLOSED_SHIFT's row.
+   */
+  test(`shift reports: format catalog and split controls (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "exportsCatalog", fx);
+    await openHarness(page, locale, "/shifts");
+    await openShiftDetails(page, t, "SEP26-003");
+    // Domain string: `SHIFT_EXPORT_FORMATS` hardcodes the format labels in
+    // Russian, so the cabinet shows them untranslated in either locale.
+    await expect(page.getByText("[XML][ГИСМТ] Отчет об агрегации")).toBeVisible();
+    await expect(page.getByText(t("pages.shifts.exports.splitLabel"))).toBeVisible();
+    await screenshotFullMain(page, shot09("exports-catalog"));
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`shift reports: history with ready parts and a processing run (${locale})`, async ({
+    page,
+  }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "exportsHistory", fx);
+    await openHarness(page, locale, "/shifts");
+    await openShiftDetails(page, t, "SEP26-003");
+    await expect(
+      page.getByText(t("pages.shifts.exports.status.ready"), { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText(t("pages.shifts.exports.status.processing"))).toBeVisible();
+    await expect(page.getByText(t("pages.shifts.exports.part", { number: 1 }))).toBeVisible();
+    await screenshotFullMain(page, shot09("exports-history"));
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`shift reports: failed run explains itself and offers a retry (${locale})`, async ({
+    page,
+  }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "exportsFailed", fx);
+    await openHarness(page, locale, "/shifts");
+    await openShiftDetails(page, t, "SEP26-003");
+    await expect(
+      page.getByText(t("pages.shifts.exports.errors.BOX_COVERAGE_INCOMPLETE")),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: t("pages.shifts.exports.retry") })).toBeVisible();
+    await screenshotFullMain(page, shot09("exports-failed"));
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`shift reports: stale run warns after late data (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "exportsStale", fx);
+    await openHarness(page, locale, "/shifts");
+    await openShiftDetails(page, t, "SEP26-003");
+    await expect(page.getByText(t("pages.shifts.exports.stale"))).toBeVisible();
+    await screenshotFullMain(page, shot09("exports-stale"));
+    expect(unexpected).toEqual([]);
+  });
+
+  /**
+   * Validation shifts can now duplicate the product's Data Matrix onto the
+   * outer packaging (`728863928`). The option only unlocks when planning-config
+   * reports the protocol, and it replaces the templates section with the
+   * duplicate-print one -- both facts the printed instruction has to state.
+   */
+  test(`planning a validation shift offers the Data Matrix duplicate (${locale})`, async ({
+    page,
+  }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftDuplicate", fx);
+    await openHarness(page, locale, "/shifts/new");
+    await page.getByRole("combobox", { name: t("pages.shifts.form.productLabel") }).click();
+    await page.getByRole("option", { name: fx.PRODUCT.name, exact: true }).click();
+    await page.getByRole("radio", { name: t("pages.shifts.form.modeValidation") }).check();
+    await page.getByRole("radio", { name: t("pages.shifts.duplicate.on") }).check();
+    await expect(page.getByText(t("pages.shifts.duplicate.template"))).toBeVisible();
+    await expect(page.getByText(t("pages.shifts.duplicate.verification"))).toBeVisible();
+    await screenshotFullMain(page, shot("shift-duplicate-print"));
+    expect(unexpected).toEqual([]);
+  });
+
+  test(`the details panel lists duplicate label attempts (${locale})`, async ({ page }) => {
+    const fx = fixtures(locale);
+    const unexpected = await installApi(page, "shiftLabels", fx);
+    await openHarness(page, locale, "/shifts");
+    await openShiftDetails(page, t, "SEP26-004");
+    await expect(
+      page.getByRole("heading", { name: t("pages.shifts.productLabels.title") }),
+    ).toBeVisible();
+    await screenshotFullMain(page, shot09("shift-labels-history"));
+    expect(unexpected).toEqual([]);
+  });
+}

@@ -302,15 +302,16 @@ function artifactEntry(
     "MKR-INS-02",
     "MKR-INS-03",
     "MKR-INS-05",
+    "MKR-INS-06",
     "MKR-INS-08",
     "MKR-INS-10",
   ];
   const revision =
     code === "MKR-INS-09"
-      ? "2026.09/02"
+      ? "2026.09/03"
       : SEPTEMBER_CODES.includes(code)
         ? "2026.09/01"
-        : code === "MKR-INS-06" || code === "MKR-INS-07"
+        : code === "MKR-INS-07"
           ? "2026.08/03"
           : code === "MKR-INS-04"
             ? "2026.08/02"
@@ -323,11 +324,14 @@ function artifactEntry(
       code,
       revision,
       effectiveDate:
-        code === "MKR-INS-08" || code === "MKR-INS-09" || code === "MKR-INS-10"
+        code === "MKR-INS-06" ||
+        code === "MKR-INS-08" ||
+        code === "MKR-INS-09" ||
+        code === "MKR-INS-10"
           ? "2026-09-10"
           : SEPTEMBER_CODES.includes(code)
             ? "2026-09-02"
-            : code === "MKR-INS-04" || code === "MKR-INS-06" || code === "MKR-INS-07"
+            : code === "MKR-INS-04" || code === "MKR-INS-07"
               ? "2026-09-01"
               : "2026-08-15",
       locale,
@@ -371,9 +375,13 @@ function validArtifacts(): {
   artifacts.push(artifactEntry("MKR-INS-05", "ru", "pdfa-2b"));
   artifacts.push(artifactEntry("MKR-INS-05", "en", "pdfa-2b"));
   artifacts.push(artifactEntry("MKR-INS-06", "ru", "pdfa-2b"));
+  artifacts.push(artifactEntry("MKR-INS-06", "en", "pdfa-2b"));
   artifacts.push(artifactEntry("MKR-INS-07", "ru", "pdfa-2b"));
+  artifacts.push(artifactEntry("MKR-INS-07", "en", "pdfa-2b"));
   artifacts.push(artifactEntry("MKR-INS-08", "ru", "pdfa-2b"));
+  artifacts.push(artifactEntry("MKR-INS-08", "en", "pdfa-2b"));
   artifacts.push(artifactEntry("MKR-INS-09", "ru", "pdfa-2b"));
+  artifacts.push(artifactEntry("MKR-INS-09", "en", "pdfa-2b"));
   artifacts.push(artifactEntry("MKR-INS-10", "ru", "pdfa-2b"));
   return {
     entries: artifacts.map(({ entry }) => entry),
@@ -1276,9 +1284,9 @@ describe("legal artifact release generation", () => {
     );
 
     expect(beforePublishCalls).toBe(1);
-    expect(entries).toHaveLength(27);
-    expect(dependencies.converted).toHaveLength(23);
-    expect(dependencies.requests).toHaveLength(27);
+    expect(entries).toHaveLength(31);
+    expect(dependencies.converted).toHaveLength(27);
+    expect(dependencies.requests).toHaveLength(31);
     expect(
       dependencies.requests.map(
         ({ code, locale, kind, verificationUrl }) => `${code}|${locale}|${kind}|${verificationUrl}`,
@@ -1306,22 +1314,26 @@ describe("legal artifact release generation", () => {
       "MKR-INS-04|en|legal-pdf|https://markiro.app/d/MKR-INS-04/2026.08/02/01.09.2026",
       "MKR-INS-05|ru|legal-pdf|https://markiro.app/d/MKR-INS-05/2026.09/01/02.09.2026",
       "MKR-INS-05|en|legal-pdf|https://markiro.app/d/MKR-INS-05/2026.09/01/02.09.2026",
-      "MKR-INS-06|ru|legal-pdf|https://markiro.app/d/MKR-INS-06/2026.08/03/01.09.2026",
+      "MKR-INS-06|ru|legal-pdf|https://markiro.app/d/MKR-INS-06/2026.09/01/10.09.2026",
+      "MKR-INS-06|en|legal-pdf|https://markiro.app/d/MKR-INS-06/2026.09/01/10.09.2026",
       "MKR-INS-07|ru|legal-pdf|https://markiro.app/d/MKR-INS-07/2026.08/03/01.09.2026",
+      "MKR-INS-07|en|legal-pdf|https://markiro.app/d/MKR-INS-07/2026.08/03/01.09.2026",
       "MKR-INS-08|ru|legal-pdf|https://markiro.app/d/MKR-INS-08/2026.09/01/10.09.2026",
-      "MKR-INS-09|ru|legal-pdf|https://markiro.app/d/MKR-INS-09/2026.09/02/10.09.2026",
+      "MKR-INS-08|en|legal-pdf|https://markiro.app/d/MKR-INS-08/2026.09/01/10.09.2026",
+      "MKR-INS-09|ru|legal-pdf|https://markiro.app/d/MKR-INS-09/2026.09/03/10.09.2026",
+      "MKR-INS-09|en|legal-pdf|https://markiro.app/d/MKR-INS-09/2026.09/03/10.09.2026",
       "MKR-INS-10|ru|legal-pdf|https://markiro.app/d/MKR-INS-10/2026.09/01/10.09.2026",
     ]);
     expect(new Set(entries.map(({ revision }) => revision))).toEqual(
-      new Set(["2026.08/01", "2026.08/02", "2026.08/03", "2026.09/01", "2026.09/02"]),
+      new Set(["2026.08/01", "2026.08/02", "2026.08/03", "2026.09/01", "2026.09/03"]),
     );
     expect(new Set(entries.map(({ effectiveDate }) => effectiveDate))).toEqual(
       new Set(["2026-08-15", "2026-09-01", "2026-09-02", "2026-09-10"]),
     );
-    expect(entries.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(23);
+    expect(entries.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(27);
     expect(await readdir(path.dirname(outDir))).toEqual(["legal"]);
     expect(await readdir(outDir)).toEqual(["artifacts.json", "files"]);
-    expect(await readdir(path.join(outDir, "files"))).toHaveLength(27);
+    expect(await readdir(path.join(outDir, "files"))).toHaveLength(31);
     expect(await readFile(path.join(outDir, "artifacts.json"), "utf8")).toBe(
       canonicalArtifactManifest(entries),
     );
@@ -1437,7 +1449,7 @@ describe("legal artifact release generation", () => {
     );
     await expect(
       generateLegalArtifacts({ ...generation, check: true }, fakeGenerationDependencies()),
-    ).resolves.toHaveLength(27);
+    ).resolves.toHaveLength(31);
 
     const changed = path.join(outDir, "files", "markiro_mkr-pd-01_2026.08-01_ru.pdf");
     await writeFile(changed, "%PDF-1.7\nchanged\n%%EOF\n");
@@ -1448,7 +1460,7 @@ describe("legal artifact release generation", () => {
 });
 
 describe("instruction artifact bounds", () => {
-  it("expects bilingual PDFs for MKR-INS-01 and a Russian-only PDF for MKR-INS-06", () => {
+  it("expects bilingual PDFs for MKR-INS-01 and a Russian-only PDF for MKR-INS-10", () => {
     const release = findLegalRelease("MKR-INS-01");
     expect(
       artifactFileName({
@@ -1470,10 +1482,10 @@ describe("instruction artifact bounds", () => {
         verificationUrl: legalVerificationUrl(release),
       }),
     ).toBe("markiro_mkr-ins-01_2026.09-01_en.pdf");
-    const cabinetRelease = findLegalRelease("MKR-INS-06");
+    const cabinetRelease = findLegalRelease("MKR-INS-10");
     expect(() =>
       artifactFileName({
-        code: "MKR-INS-06",
+        code: "MKR-INS-10",
         revision: cabinetRelease.revision,
         effectiveDate: cabinetRelease.effectiveDate,
         locale: "en",
