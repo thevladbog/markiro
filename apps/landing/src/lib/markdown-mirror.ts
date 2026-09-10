@@ -134,7 +134,10 @@ function walk(element: Element, blocks: string[], baseUrl: string): void {
       const rows = [...child.querySelectorAll("tr")].map((row) =>
         [...row.children].map((cell) => collapse(inline(cell, baseUrl))).join(" | "),
       );
-      if (rows.length > 0) blocks.push(rows.join("\n"));
+      // The caption sits outside every `tr`, so it needs its own line.
+      const caption = child.querySelector("caption");
+      const lines = caption ? [collapse(inline(caption, baseUrl)), ...rows] : rows;
+      if (rows.length > 0) blocks.push(lines.filter((line) => line.length > 0).join("\n"));
       continue;
     }
     if (tag === "A") {

@@ -2796,6 +2796,52 @@ input:focus-visible {
   margin: 0;
 }
 
+/* A narrow viewport scrolls the table instead of crushing its columns, so the
+   wrapper is focusable for keyboard users and named for assistive tech. */
+.legal-table__scroll {
+  margin: 0 0 1.5rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.legal-table__scroll:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.legal-table {
+  width: 100%;
+  min-width: 32rem;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.legal-table caption {
+  margin: 0 0 0.75rem;
+  color: var(--fg-2);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  text-align: left;
+}
+
+.legal-table th,
+.legal-table td {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--line);
+  color: var(--fg-2);
+  font-size: 1rem;
+  line-height: 1.6;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+
+.legal-table th {
+  background: var(--surface-panel);
+  color: var(--fg-1);
+  font-weight: 600;
+}
+
 .legal-contact {
   margin-top: 2rem;
   padding: 2rem;
