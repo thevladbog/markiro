@@ -34,7 +34,10 @@ export function resolveCatalogProductGroup(
     const category = matches[0];
     if (matches.length !== 1 || !category || (!category.active && category.gismtCodes.length))
       return { code: null, reason: "product_group_unavailable" };
-    if (category.active && category.gismtCodes.length) groups.push(new Set(category.gismtCodes));
+    if (category.active) {
+      if (!category.gismtCodes.length) return { code: null, reason: "product_group_unavailable" };
+      groups.push(new Set(category.gismtCodes));
+    }
   }
   const first = groups[0];
   if (!first) return { code: null, reason: "product_group_unavailable" };

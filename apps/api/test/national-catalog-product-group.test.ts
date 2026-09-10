@@ -14,6 +14,17 @@ describe("provider category group resolution", () => {
       ),
     ).toEqual({ code: 23, reason: null });
   });
+  it("requires codes for every active source category", () => {
+    expect(
+      resolveCatalogProductGroup(
+        [{ id: 1 }, { id: 2 }],
+        [
+          { id: 1, active: true, gismtCodes: [23] },
+          { id: 2, active: true, gismtCodes: [] },
+        ],
+      ),
+    ).toEqual({ code: null, reason: "product_group_unavailable" });
+  });
   it.each([
     [[{ id: 1 }], [{ id: 1, active: true, gismtCodes: [7, 23] }], "product_group_ambiguous"],
     [
