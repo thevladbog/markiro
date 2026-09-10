@@ -264,6 +264,55 @@ const SHIFT_PLANNING_CONFIG = { defaultBoxLabelTemplateId: TEMPLATE_ID };
  * zod-parsed, so the shape has to mirror `ShiftSummaryDto` field for field:
  * a wrong name renders an empty tile instead of throwing.
  */
+const PRODUCT_LABEL_TEMPLATE_ID = "40000000-0000-4000-8000-000000000002";
+/**
+ * Validated by the strict `productLabelTemplateListSchema`
+ * (packages/domain/src/product-labels/contracts.ts:147) -- an extra field
+ * throws inside the form instead of rendering.
+ */
+const PRODUCT_LABEL_TEMPLATES = {
+  items: [
+    {
+      id: PRODUCT_LABEL_TEMPLATE_ID,
+      name: "Дубликат Data Matrix 58×40 [Краткое наименование]",
+      widthMm: 58,
+      heightMm: 40,
+      dpi: 203,
+    },
+  ],
+};
+const DUPLICATE_PLANNING_CONFIG = {
+  defaultBoxLabelTemplateId: TEMPLATE_ID,
+  validationPrintProtocol: "validation-dm-duplicate-v1",
+};
+/** Strict `productLabelHistorySchema` (packages/domain/src/product-labels/history.ts:20). */
+const PRODUCT_LABEL_HISTORY = {
+  summary: { sentAttempts: 1240, verifiedAttempts: 1238, unresolvedJobs: 1, reprintAttempts: 3 },
+  items: [
+    {
+      jobId: "a0000000-0000-4000-8000-000000000001",
+      deviceId: STATION_ID,
+      codeSuffix: "…0128",
+      acceptedAt: "2026-09-02T11:04:00.000Z",
+      status: "completed",
+      verificationOutcome: "verified",
+      attemptNo: 1,
+      ownershipConflict: false,
+    },
+    {
+      jobId: "a0000000-0000-4000-8000-000000000002",
+      deviceId: STATION_ID,
+      codeSuffix: "…0129",
+      acceptedAt: "2026-09-02T11:05:00.000Z",
+      status: "attention",
+      verificationOutcome: "pending",
+      attemptNo: 2,
+      ownershipConflict: false,
+    },
+  ],
+  nextCursor: null,
+};
+
 const SHIFT_SUMMARY = {
   generatedAt: "2026-09-02T11:20:00.000Z",
   output: { mode: "aggregation", closedBoxes: 96, containedUnits: 1152 },
@@ -369,6 +418,17 @@ const ACTIVE_SHIFT_09 = {
   openedAt: "2026-09-02T04:10:00.000Z",
   createdAt: "2026-09-01T14:00:00.000Z",
   output: { mode: "aggregation", closedBoxes: 96, containedUnits: 1152 },
+};
+const DUPLICATE_SHIFT = {
+  ...ACTIVE_SHIFT_09,
+  mode: "validation",
+  output: { mode: "validation", acceptedUnits: 1240 },
+  validationPrint: {
+    mode: "duplicate_dm",
+    templateId: PRODUCT_LABEL_TEMPLATE_ID,
+    verification: "required",
+    snapshot: { name: "Дубликат Data Matrix 58×40 [Краткое наименование]" },
+  },
 };
 const CLOSED_SHIFT = {
   ...ACTIVE_SHIFT_09,
@@ -657,7 +717,9 @@ type Scenario =
   | "exportsCatalog"
   | "exportsHistory"
   | "exportsFailed"
-  | "exportsStale";
+  | "exportsStale"
+  | "shiftDuplicate"
+  | "shiftLabels";
 
 /**
  * Every scenario shares the shell fetches (profile, access, pending
@@ -679,6 +741,31 @@ async function installApi(page: Page, scenario: Scenario) {
     if (path === "/api/pickup-orders") return json(route, PICKUP_ORDERS_EMPTY);
     // The details panel loads the summary for every shift status.
     if (/^\/api\/shifts\/[0-9a-f-]+\/summary$/.test(path)) return json(route, SHIFT_SUMMARY);
+
+    if (scenario === "shiftDuplicate" || scenario === "shiftLabels") {
+      if (path === "/api/shifts") return json(route, { items: [DUPLICATE_SHIFT] });
+      if (path === "/api/products") {
+        return json(route, { items: [PRODUCT, DRAFT_PRODUCT, ARCHIVED_PRODUCT] });
+      }
+      if (path === "/api/lines") return json(route, { items: [LINE, SECOND_LINE, THIRD_LINE] });
+      if (path === "/api/counterparties") return json(route, { items: [COUNTERPARTY] });
+      if (path === "/api/label-templates") return json(route, { items: [LABEL_TEMPLATE] });
+      if (path === "/api/shifts/planning-config") return json(route, DUPLICATE_PLANNING_CONFIG);
+      if (path === "/api/shifts/product-label-templates") {
+        return json(route, PRODUCT_LABEL_TEMPLATES);
+      }
+      if (/^\/api\/shifts\/[0-9a-f-]+\/product-labels$/.test(path)) {
+        return json(route, PRODUCT_LABEL_HISTORY);
+      }
+      if (path === "/api/operators") {
+        return json(route, {
+          items: SHIFT_SUMMARY.participants.map(({ employeeId, fullName }) => ({
+            employeeId,
+            fullName,
+          })),
+        });
+      }
+    }
     // Only the admin shell reaches this one: the badge is gated on
     // `billing.read`, which the manager role does not carry.
     if (scenario === "deviceDrawer" && path === "/api/billing/attention") {
@@ -1095,5 +1182,33 @@ test("shift reports: stale run warns after late data", async ({ page }) => {
   await openShiftDetails(page, "SEP26-003");
   await expect(page.getByText("Данные смены изменились — сформируйте новый отчет.")).toBeVisible();
   await screenshotFullMain(page, screenshotPath09("exports-stale"));
+  expect(unexpected).toEqual([]);
+});
+
+/**
+ * Validation shifts can now duplicate the product's Data Matrix onto the
+ * outer packaging (`728863928`). The option only unlocks when planning-config
+ * reports the protocol, and it replaces the «Шаблоны» section with «Печать
+ * дубликата» -- both facts the printed instruction has to state.
+ */
+test("planning a validation shift offers the Data Matrix duplicate", async ({ page }) => {
+  const unexpected = await installApi(page, "shiftDuplicate");
+  await openHarness(page, "/shifts/new");
+  await page.getByRole("combobox", { name: "Продукт" }).click();
+  await page.getByRole("option", { name: PRODUCT.name, exact: true }).click();
+  await page.getByRole("radio", { name: "Валидация" }).check();
+  await page.getByRole("radio", { name: "Дублировать Data Matrix" }).check();
+  await expect(page.getByText("Шаблон этикетки продукции")).toBeVisible();
+  await expect(page.getByText("Обязательная проверка этикетки")).toBeVisible();
+  await screenshotFullMain(page, screenshotPath("shift-duplicate-print"));
+  expect(unexpected).toEqual([]);
+});
+
+test("the details panel lists duplicate label attempts", async ({ page }) => {
+  const unexpected = await installApi(page, "shiftLabels");
+  await openHarness(page, "/shifts");
+  await openShiftDetails(page, "SEP26-004");
+  await expect(page.getByRole("heading", { name: "История этикеток" })).toBeVisible();
+  await screenshotFullMain(page, screenshotPath09("shift-labels-history"));
   expect(unexpected).toEqual([]);
 });
