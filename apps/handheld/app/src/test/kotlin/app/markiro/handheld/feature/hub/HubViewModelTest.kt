@@ -34,6 +34,7 @@ import app.markiro.handheld.core.sync.SyncEngine
 import app.markiro.handheld.core.sync.SyncTransport
 import app.markiro.handheld.feature.shift.ShiftEntityFixtures
 import app.markiro.handheld.feature.signin.SessionHolder
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -64,6 +65,13 @@ class HubViewModelTest {
         lineName = "Линия 2", kind = "handheld", serverUrl = "https://x", pairedAt = 1L,
     )
 
+    /**
+     * The engines below publish their state with an eagerly started flow, which keeps reading Room
+     * for as long as its scope lives. Left running past the database it reads, it throws into
+     * whichever test happens to run next, so the scope is owned here and cancelled before the close.
+     */
+    private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+
     @Before
     fun setUp() = runTest {
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java)
@@ -73,7 +81,10 @@ class HubViewModelTest {
     }
 
     @After
-    fun tearDown() = db.close()
+    fun tearDown() {
+        engineScope.cancel()
+        db.close()
+    }
 
     private fun dto(id: String, number: String, status: String) =
         ShiftDto(id, number, status, mode = "validation", validationPrint = ValidationPrintDto("none"), productId = "p1", palletsEnabled = false)
@@ -107,11 +118,11 @@ class HubViewModelTest {
     private fun vm(api: StationApi): HubViewModel {
         val engine = SyncEngine(
             db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
-            NetworkModule.strictJson(), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            NetworkModule.strictJson(), engineScope,
         )
         val inventoryEngine = InventorySyncEngine(
             db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
-            NetworkModule.strictJson(), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            NetworkModule.strictJson(), engineScope,
         )
         return HubViewModel(
             api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(),
