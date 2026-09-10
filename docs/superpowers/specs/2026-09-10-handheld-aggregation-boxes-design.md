@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-10
 
-**Status:** Implemented on 2026-09-11 on branch `worktree-tsd-aggregation`.
+**Status:** Implemented in https://github.com/thevladbog/markiro/pull/502 (2026-09-11).
 Automated gates green. The emulator walk-through was run and found six defects,
 listed under «Risks and open points»; the last of them is why a full box could
 sit refusing to close.
