@@ -194,6 +194,16 @@ secrets проверяет владельца репозитория и точн
 source repository `thevladbog/markiro`, не передавайте значение в workflow input
 и не используйте токен из локальной `gh auth` session как неявную замену.
 
+Отдельно создайте второй fine-grained token владельца с Contents read/write и
+Workflows read/write только для source repository `thevladbog/markiro` и
+сохраните его в Environment secret `STATION_SOURCE_REPOSITORY_TOKEN` того же
+`station-release`. Он нужен только для push ветки-кандидата и тега релиза в
+source repository: `github.token` не может получить право `workflows`, а GitHub
+сверяет workflow-файлы новой ветки с default branch, поэтому без него публикация
+падает, как только `main` уходит вперёд правкой `.github/workflows`. Не выдавайте
+этому token доступ к `thevladbog/markiro-station-releases` и не объединяйте его
+с `STATION_RELEASE_REPOSITORY_TOKEN`.
+
 **STOP 2 — SECRETS.** Получите явное подтверждение release owner, затем введите
 маркер и передайте значения только через stdin:
 
