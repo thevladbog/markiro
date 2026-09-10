@@ -37,6 +37,7 @@ describe.skipIf(!databaseUrl)("product label migration", () => {
   const pool = new pg.Pool({ connectionString: url.toString() });
   let created = false;
   let legacy = "";
+  let upgraded = "";
 
   beforeAll(async () => {
     await maintenance.query(`CREATE DATABASE "${name}"`);
@@ -78,7 +79,17 @@ describe.skipIf(!databaseUrl)("product label migration", () => {
         f.tenant,
       ]);
     }
-    await migrate(drizzle(pool), { migrationsFolder });
+    // Upgrade through 0122 only: this file pins the 0113–0115 duplicate
+    // seeding, and migration 0123 (spec 2026-09-10) renames the seeded
+    // "(203 dpi)" preset and disables the 300 twin, which would rewrite the
+    // very rows the assertions below look up by their legacy name.
+    upgraded = await mkdtemp(join(tmpdir(), "markiro-product-label-upgraded-"));
+    await copyMigrationsThroughIndex({
+      sourceFolder: migrationsFolder,
+      targetFolder: upgraded,
+      lastIncludedIndex: 122,
+    });
+    await migrate(drizzle(pool), { migrationsFolder: upgraded });
   }, 120_000);
 
   afterAll(async () => {
@@ -86,6 +97,7 @@ describe.skipIf(!databaseUrl)("product label migration", () => {
     if (created) await maintenance.query(`DROP DATABASE "${name}"`);
     await maintenance.end();
     if (legacy) await rm(legacy, { recursive: true, force: true });
+    if (upgraded) await rm(upgraded, { recursive: true, force: true });
   });
 
   it("upgrades ordinary shifts without enabling print or changing box defaults", async () => {

@@ -8,6 +8,7 @@ import {
   buildDefaultLabelTemplates,
   buildLegacyDateFreeBoxLabelTemplates,
   buildLegacyDatedBoxLabelTemplates,
+  buildLegacyDuplicateLabelTemplates,
   buildLegacyPrintNameBoxLabelTemplates,
   buildPrintNameBoxLabelTemplates,
   code128ModuleCount,
@@ -947,6 +948,37 @@ describe("buildDefaultLabelTemplates", () => {
   it("matches the jsonb inlined into db migration 0059 (drift guard)", async () => {
     expect(await inlinedRows("0059_print_name_label_templates.sql")).toEqual(
       buildLegacyPrintNameBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
+    );
+  });
+
+  /**
+   * Migration 0123 (spec 2026-09-10) renames the 203 stock rows and disables
+   * the untouched 300 twins by exact jsonb match. Both tables are generated
+   * from the legacy builders; whoever changes them regenerates the SQL.
+   */
+  it("matches the rename table and the twin jsonb inlined into db migration 0123 (drift guard)", async () => {
+    const legacy = [
+      ...buildLegacyDatedBoxLabelTemplates(),
+      ...buildLegacyDateFreeBoxLabelTemplates(),
+      ...buildLegacyPrintNameBoxLabelTemplates(),
+      ...buildLegacyDuplicateLabelTemplates(),
+    ];
+    const file = "0123_dpi_neutral_stock_label_templates.sql";
+    expect(await inlinedRows(file)).toEqual(
+      legacy.filter((t) => t.renamedTo === null).map((t) => ({ name: t.name, spec: t.spec })),
+    );
+    const sql = await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), "utf8");
+    const renames = [...sql.matchAll(/\('([^']+)', '([^']+)', '(box|product_duplicate)'\)/g)].map(
+      (m) => [m[1], m[2], m[3]],
+    );
+    expect(renames).toEqual(
+      legacy
+        .filter((t) => t.renamedTo !== null)
+        .map((t) => [
+          t.name,
+          t.renamedTo,
+          t.name.startsWith("Дубликат") ? "product_duplicate" : "box",
+        ]),
     );
   });
 });
