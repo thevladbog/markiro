@@ -198,16 +198,16 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-08",
-    revision: "2026.08/01",
-    effectiveDate: "2026-08-30",
+    revision: "2026.09/01",
+    effectiveDate: "2026-09-10",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: { ru: "/instruktsii/smena-planirovanie/" },
   },
   {
     code: "MKR-INS-09",
-    revision: "2026.09/01",
-    effectiveDate: "2026-09-02",
+    revision: "2026.09/02",
+    effectiveDate: "2026-09-10",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
     routes: { ru: "/instruktsii/smena-zakrytie/" },
@@ -234,8 +234,8 @@ export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
   { releaseKey: "MKR-INS-05/2026.09/01", content: STATION_INVENTORY_COUNT_CONTENT },
   { releaseKey: "MKR-INS-06/2026.08/03", content: CABINET_INVENTORY_PREP_CONTENT },
   { releaseKey: "MKR-INS-07/2026.08/03", content: CABINET_INVENTORY_CLOSE_CONTENT },
-  { releaseKey: "MKR-INS-08/2026.08/01", content: CABINET_SHIFT_PLANNING_CONTENT },
-  { releaseKey: "MKR-INS-09/2026.09/01", content: CABINET_SHIFT_CLOSE_CONTENT },
+  { releaseKey: "MKR-INS-08/2026.09/01", content: CABINET_SHIFT_PLANNING_CONTENT },
+  { releaseKey: "MKR-INS-09/2026.09/02", content: CABINET_SHIFT_CLOSE_CONTENT },
   { releaseKey: "MKR-INS-10/2026.09/01", content: CABINET_CATALOG_PRODUCT_CONTENT },
 ];
 
