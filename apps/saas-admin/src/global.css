@@ -3650,3 +3650,216 @@ textarea {
     border-right: 0;
   }
 }
+
+/* Offers: a compact ledger and a document-first detail surface. */
+.offers-page,
+.offer-detail {
+  min-width: 0;
+}
+.offer-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(2, minmax(160px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.offer-filters > * {
+  min-width: 0;
+}
+.offer-pagination,
+.offer-action-bar,
+.offer-section__header,
+.offer-detail__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.offer-pagination {
+  padding: 14px 20px;
+  justify-content: flex-end;
+  align-items: flex-end;
+}
+.offer-pagination > .mk-field {
+  margin-right: auto;
+}
+.offer-pagination__navigation {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.offer-cell {
+  display: grid;
+  gap: 5px;
+  min-width: 150px;
+  max-width: 320px;
+}
+.offer-cell small,
+.offer-muted,
+.offer-facts dt,
+.offer-party-details dt {
+  color: var(--fg-3);
+}
+.offer-cell small {
+  font-size: 12px;
+}
+.offer-money,
+.offer-party-details dd {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.offer-detail__total {
+  margin-left: auto;
+  font-size: 22px;
+  font-weight: 600;
+}
+.offer-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 40px;
+  margin: 0;
+}
+.offer-facts div {
+  display: grid;
+  gap: 5px;
+}
+.offer-facts dd,
+.offer-party-details dd {
+  margin: 0;
+}
+.offer-section {
+  min-width: 0;
+  padding-top: 24px;
+  border-top: 1px solid var(--line-strong);
+}
+.offer-section h2 {
+  margin: 0 0 16px;
+  font: var(--text-h2);
+}
+.offer-section h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+.offer-section__header {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.offer-section__header h2 {
+  margin: 0;
+}
+.offer-total {
+  display: flex;
+  justify-content: flex-end;
+  gap: 24px;
+  padding: 18px 16px;
+  background: var(--surface-card);
+  border-bottom: 1px solid var(--line-strong);
+}
+.offer-terms {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  max-width: 85ch;
+}
+.offer-preview iframe {
+  display: block;
+  width: 100%;
+  height: 720px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-card);
+  margin-top: 16px;
+}
+.offer-parties {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 32px;
+}
+.offer-parties p {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.offer-party-details {
+  display: grid;
+  gap: 12px;
+}
+.offer-party-details > div {
+  display: grid;
+  gap: 5px;
+}
+.offer-document-variant {
+  padding: 16px 0;
+}
+.offer-document-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+}
+.offer-document-row > :last-child {
+  margin-left: auto;
+}
+.offer-document-row + .offer-document-row {
+  border-top: 1px solid var(--line);
+}
+.offer-revisions {
+  padding: 0;
+  list-style: none;
+}
+.offer-revisions li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  padding: 10px 0;
+}
+.offer-revisions a[aria-current="page"] {
+  font-weight: 600;
+}
+.offer-decision time {
+  margin-left: 16px;
+  color: var(--fg-3);
+}
+.offer-technical {
+  border-top: 1px solid var(--line-strong);
+  padding-top: 16px;
+}
+.offer-technical summary {
+  cursor: pointer;
+}
+.offer-technical p {
+  overflow-wrap: anywhere;
+}
+.offer-detail a:focus-visible,
+.offer-technical summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 4px;
+}
+@media (max-width: 767px) {
+  .offer-filters,
+  .offer-parties {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .offer-detail__total {
+    margin-left: 0;
+    width: 100%;
+  }
+  .offer-facts {
+    gap: 16px;
+  }
+  .offer-preview iframe {
+    height: 540px;
+  }
+  .offer-pagination {
+    padding: 12px;
+    justify-content: flex-start;
+  }
+  .offer-action-bar {
+    align-items: stretch;
+  }
+  .offer-action-bar > * {
+    max-width: 100%;
+    white-space: normal;
+  }
+  .offer-party-details dd {
+    overflow-wrap: anywhere;
+  }
+}

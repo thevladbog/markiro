@@ -1,5 +1,13 @@
 import * as RadixPopover from "@radix-ui/react-popover";
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 
 import { cn } from "../cn.js";
 import { useOverlayPortalContainer } from "./OverlayLayer.js";
@@ -27,6 +35,8 @@ export interface ComboboxProps<TValue extends string = string> {
   disabled?: boolean;
   error?: string;
   className?: string;
+  /** Actions below the options, e.g. remote pagination or retry. */
+  footer?: ReactNode;
 }
 
 function matchesQuery(option: ComboboxOption, query: string) {
@@ -68,6 +78,7 @@ export function Combobox<TValue extends string = string>({
   disabled = false,
   error,
   className,
+  footer,
 }: ComboboxProps<TValue>) {
   const overlayPortalContainer = useOverlayPortalContainer();
   const autoId = useId();
@@ -273,6 +284,7 @@ export function Combobox<TValue extends string = string>({
                 ))
               )}
             </div>
+            {footer ? <div className="mk-combobox__footer">{footer}</div> : null}
           </RadixPopover.Content>
         </RadixPopover.Portal>
       </RadixPopover.Root>

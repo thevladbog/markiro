@@ -4,6 +4,7 @@ import {
   platformCatalogContracts,
   platformCommercialContracts,
   platformOperationsContracts,
+  platformOfferWorkspaceContracts,
   platformNationalCatalogContracts,
   platformTeamContracts,
   platformTenantContracts,
@@ -204,7 +205,26 @@ export const CURRENT_SAAS_ROUTES = [
     { body: platformCatalogContracts.setDefaultDemo.body },
   ),
   route("get", "/platform/offers", "200", platformCommercialContracts.offers.list.response),
+  route(
+    "get",
+    "/platform/offers/registry",
+    "200",
+    platformOfferWorkspaceContracts.registry.response,
+    { query: platformOfferWorkspaceContracts.registry.query },
+  ),
+  route(
+    "get",
+    "/platform/offers/{id}/workspace",
+    "200",
+    platformOfferWorkspaceContracts.workspace.response,
+  ),
   route("get", "/platform/offers/{id}", "200", platformCommercialContracts.offers.detail.response),
+  route(
+    "get",
+    "/platform/offers/{id}/preview",
+    "200",
+    platformOfferWorkspaceContracts.preview.response,
+  ),
   route("post", "/platform/offers", "201", platformCommercialContracts.offers.create.response, {
     body: platformCommercialContracts.offers.create.body,
   }),
@@ -220,6 +240,7 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/offers/{id}/publish",
     "200",
     platformCommercialContracts.offers.publish.response,
+    { body: platformCommercialContracts.offers.publish.body },
   ),
   route(
     "get",
@@ -232,6 +253,7 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/offers/{id}/documents",
     "201",
     platformCommercialContracts.offers.documents.render.response,
+    { body: platformCommercialContracts.offers.documents.render.body },
   ),
   route(
     "get",

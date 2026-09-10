@@ -28,6 +28,8 @@ import {
 } from "../src/modules/platform-catalog/platform-catalog.controller";
 import { PlatformCatalogService } from "../src/modules/platform-catalog/platform-catalog.service";
 import { OfferDocumentsService } from "../src/modules/platform-offers/offer-documents.service";
+import { OfferWorkspaceService } from "../src/modules/platform-offers/offer-workspace.service";
+import { OfferPreviewService } from "../src/modules/platform-offers/offer-preview.service";
 import { PlatformOffersController } from "../src/modules/platform-offers/platform-offers.controller";
 import { PlatformOffersService } from "../src/modules/platform-offers/platform-offers.service";
 import { PlatformOperationsController } from "../src/modules/platform-operations/platform-operations.controller";
@@ -119,6 +121,8 @@ async function createPlatformDocument(): Promise<{
     PlatformCatalogService,
     PlatformOffersService,
     OfferDocumentsService,
+    OfferWorkspaceService,
+    OfferPreviewService,
     BillingService,
     BillingDocumentsService,
     BillingApplicationService,
@@ -174,7 +178,7 @@ async function createPlatformDocument(): Promise<{
 
 describe("current SaaS platform OpenAPI contracts", () => {
   it("converts all current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(129);
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(135);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }

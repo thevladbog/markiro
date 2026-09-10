@@ -124,6 +124,8 @@ textarea {
 }
 
 .mk-combobox__content {
+  display: flex;
+  flex-direction: column;
   z-index: var(--z-overlay-popover);
   width: min(360px, calc(100vw - 32px));
   max-height: min(400px, calc(100dvh - 32px));
@@ -135,6 +137,7 @@ textarea {
 }
 
 .mk-combobox__search {
+  flex-shrink: 0;
   width: 100%;
   min-height: 44px;
   padding: 0 var(--sp-3);
@@ -147,9 +150,16 @@ textarea {
 }
 
 .mk-combobox__listbox {
+  min-height: 0;
   max-height: min(320px, calc(100dvh - 112px));
   overflow-y: auto;
   padding: var(--sp-1);
+}
+
+.mk-combobox__footer {
+  flex-shrink: 0;
+  padding: var(--sp-2);
+  border-top: 1px solid var(--line);
 }
 
 .mk-combobox__group + .mk-combobox__group {
