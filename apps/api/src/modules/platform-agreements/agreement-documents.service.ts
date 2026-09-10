@@ -17,6 +17,11 @@ import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import { ObjectStorageService } from "../storage/object-storage.service";
+import {
+  agreementAttachmentObjectKey,
+  agreementDraftObjectKey,
+  agreementSignedObjectKey,
+} from "./agreement-object-key";
 import { toAgreementFields } from "./agreement-fields";
 import { parseRequisites, parseSignatory, parseTerms } from "./agreement-state";
 
@@ -68,7 +73,7 @@ export class AgreementDocumentsService {
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     // One stable key per agreement: re-rendering a preview overwrites it
     // instead of leaving an object behind for every click.
-    const objectKey = `agreements/${agreement.id}/draft.docx`;
+    const objectKey = agreementDraftObjectKey(agreement.id);
     await this.storage.putVerified(objectKey, bytes, DOCX_MEDIA_TYPE, sha256);
 
     const filename = `${agreement.number}-проект.docx`;
@@ -133,7 +138,7 @@ export class AgreementDocumentsService {
   ): Promise<{ document: AgreementDocumentRow; sha256: string }> {
     const bytes = await this.render(agreement, "ДОГОВОР");
     const sha256 = createHash("sha256").update(bytes).digest("hex");
-    const objectKey = `agreements/${agreement.id}/signed-${sha256}.docx`;
+    const objectKey = agreementSignedObjectKey(agreement.id, sha256);
     await this.storage.putVerified(objectKey, bytes, DOCX_MEDIA_TYPE, sha256);
 
     const [saved] = await tx
@@ -171,7 +176,7 @@ export class AgreementDocumentsService {
     assertAllowedAttachment(file.mimetype, file.buffer);
     const sha256 = createHash("sha256").update(file.buffer).digest("hex");
     // The client filename never reaches the bucket path.
-    const objectKey = `agreements/${agreement.id}/attachments/${randomUUID()}`;
+    const objectKey = agreementAttachmentObjectKey(agreement.id, randomUUID());
     await this.storage.putVerified(objectKey, file.buffer, file.mimetype, sha256);
 
     const row = await this.db.transaction(async (tx) => {

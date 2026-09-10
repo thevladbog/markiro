@@ -5,6 +5,12 @@ import {
   assertAllowedAttachment,
   MAX_ATTACHMENT_BYTES,
 } from "../src/modules/platform-agreements/agreement-documents.service";
+import {
+  agreementAttachmentObjectKey,
+  agreementDraftObjectKey,
+  agreementSignedObjectKey,
+  isAgreementObjectKey,
+} from "../src/modules/platform-agreements/agreement-object-key";
 import { PlatformAgreementsController } from "../src/modules/platform-agreements/platform-agreements.controller";
 import {
   hasPlatformCapabilities,
@@ -89,5 +95,29 @@ describe("attachment gate", () => {
     const oversized = Buffer.alloc(MAX_ATTACHMENT_BYTES + 1);
     PDF.copy(oversized);
     expect(() => assertAllowedAttachment("application/pdf", oversized)).toThrow(/20 MB/);
+  });
+});
+
+describe("agreement object keys", () => {
+  const AGREEMENT = "6915caba-c643-4edb-b4ed-df5a95522942";
+  const SHA = "a".repeat(64);
+
+  it("accepts exactly the three shapes the service writes", () => {
+    expect(isAgreementObjectKey(agreementDraftObjectKey(AGREEMENT))).toBe(true);
+    expect(isAgreementObjectKey(agreementSignedObjectKey(AGREEMENT, SHA))).toBe(true);
+    expect(isAgreementObjectKey(agreementAttachmentObjectKey(AGREEMENT, AGREEMENT))).toBe(true);
+  });
+
+  it("refuses anything else under the namespace", () => {
+    // The object store allowlists namespaces; a loose prefix would widen it.
+    expect(isAgreementObjectKey(`agreements/${AGREEMENT}/anything.docx`)).toBe(false);
+    expect(isAgreementObjectKey(`agreements/${AGREEMENT}/../escape`)).toBe(false);
+    expect(isAgreementObjectKey("agreements/not-a-uuid/draft.docx")).toBe(false);
+    expect(isAgreementObjectKey(`agreements/${AGREEMENT}/attachments/report.pdf`)).toBe(false);
+  });
+
+  it("refuses to build a key from an unsafe identifier", () => {
+    expect(() => agreementDraftObjectKey("../../etc")).toThrow(/Unsafe object key/);
+    expect(() => agreementAttachmentObjectKey(AGREEMENT, "../escape")).toThrow(/Unsafe object key/);
   });
 });
