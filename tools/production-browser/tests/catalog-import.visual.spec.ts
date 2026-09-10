@@ -58,9 +58,19 @@ async function settle(page: Page): Promise<void> {
   });
 }
 
-async function screenshotFullMain(page: Page, path: string): Promise<void> {
+/**
+ * `widen: "vertical"` grows the viewport only downwards. The link panel sits
+ * over the full catalog table, whose columns scroll sideways behind it; widening
+ * for that overflow would capture dimmed table the frame does not document and
+ * shrink the panel's text below the rest of the series when the page is printed.
+ */
+async function screenshotFullMain(
+  page: Page,
+  path: string,
+  widen: "both" | "vertical" = "both",
+): Promise<void> {
   await settle(page);
-  const overflow = await page.evaluate(() =>
+  const measured = await page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>("*")].reduce(
       (worst, element) => {
         const style = getComputedStyle(element);
@@ -77,6 +87,7 @@ async function screenshotFullMain(page: Page, path: string): Promise<void> {
       { x: 0, y: 0 },
     ),
   );
+  const overflow = { ...measured, x: widen === "both" ? measured.x : 0 };
   if (overflow.x > 0 || overflow.y > 0) {
     const viewport = page.viewportSize() ?? { width: 1280, height: 900 };
     await page.setViewportSize({
@@ -402,7 +413,7 @@ test("the link panel shows the bound card and its actions", async ({ page }) => 
   await openRoute(page, `/catalog/${id(99)}/chz`);
   await expect(page.getByRole("dialog", { name: "Связь с Честным знаком" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Обновить статус" })).toBeEnabled();
-  await screenshotFullMain(page, screenshotPath("chz-link"));
+  await screenshotFullMain(page, screenshotPath("chz-link"), "vertical");
   expect(unexpected).toEqual([]);
 });
 
@@ -417,6 +428,6 @@ test("a failed status check keeps the saved details and names the reason", async
   // frame shows where the manager reads what went wrong.
   await page.locator("details > summary").click();
   await expect(page.getByText("Связанная карточка недоступна в ЧЗ.")).toBeVisible();
-  await screenshotFullMain(page, screenshotPath("chz-refresh-error"));
+  await screenshotFullMain(page, screenshotPath("chz-refresh-error"), "vertical");
   expect(unexpected).toEqual([]);
 });
