@@ -259,6 +259,38 @@ const LABEL_TEMPLATE = {
 const SHIFT_PLANNING_CONFIG = { defaultBoxLabelTemplateId: TEMPLATE_ID };
 
 /**
+ * `GET /shifts/:id/summary` feeds the details panel's «Результат смены» and
+ * «Сотрудники в смене» blocks (`ShiftDetailsPanel.tsx:72,93-142`). Not
+ * zod-parsed, so the shape has to mirror `ShiftSummaryDto` field for field:
+ * a wrong name renders an empty tile instead of throwing.
+ */
+const SHIFT_SUMMARY = {
+  generatedAt: "2026-09-02T11:20:00.000Z",
+  output: { mode: "aggregation", closedBoxes: 96, containedUnits: 1152 },
+  participants: [
+    {
+      employeeId: "60000000-0000-4000-8000-000000000001",
+      fullName: "Мария Кузнецова",
+      role: "Оператор линии",
+      firstActivityAt: "2026-09-02T04:15:00.000Z",
+      lastActivityAt: "2026-09-02T11:05:00.000Z",
+      acceptedScans: 812,
+      closedBoxes: 68,
+    },
+    {
+      employeeId: "60000000-0000-4000-8000-000000000002",
+      fullName: "Пётр Смирнов",
+      role: null,
+      firstActivityAt: "2026-09-02T04:20:00.000Z",
+      lastActivityAt: "2026-09-02T10:40:00.000Z",
+      acceptedScans: 340,
+      closedBoxes: 28,
+    },
+  ],
+  unattributed: { eventCount: 4, acceptedScans: 4, closedBoxes: 0 },
+};
+
+/**
  * Number format comes from `formatInventoryNumber`'s sibling for shifts --
  * `apps/admin/src/pages/shifts/api.ts:24` documents it as `AUG26-003`, with
  * a `/S` suffix for station-created shifts. A hand-invented format would put
@@ -645,6 +677,8 @@ async function installApi(page: Page, scenario: Scenario) {
       return json(route, scenario === "deviceDrawer" ? ACCESS_ADMIN : ACCESS);
     }
     if (path === "/api/pickup-orders") return json(route, PICKUP_ORDERS_EMPTY);
+    // The details panel loads the summary for every shift status.
+    if (/^\/api\/shifts\/[0-9a-f-]+\/summary$/.test(path)) return json(route, SHIFT_SUMMARY);
     // Only the admin shell reaches this one: the badge is gated on
     // `billing.read`, which the manager role does not carry.
     if (scenario === "deviceDrawer" && path === "/api/billing/attention") {
@@ -744,6 +778,19 @@ async function installApi(page: Page, scenario: Scenario) {
     return route.abort();
   });
   return unexpected;
+}
+
+/**
+ * Every row action moved into the details panel (`e177cea30`, 2026-09-02):
+ * the list now carries only «Подробнее». Tests that used to click an action
+ * in the row open the panel first.
+ */
+async function openShiftDetails(page: Page, shiftNumber: string) {
+  await page
+    .getByRole("row", { name: new RegExp(shiftNumber) })
+    .getByRole("button", { name: "Подробнее" })
+    .click();
+  await expect(page.getByRole("heading", { name: `Смена ${shiftNumber}` })).toBeVisible();
 }
 
 async function openHarness(page: Page, route: string) {
@@ -911,7 +958,8 @@ test("saving an active shift asks for confirmation", async ({ page }) => {
 test("deleting a planned shift asks for confirmation", async ({ page }) => {
   const unexpected = await installApi(page, "shiftsPlanned");
   await openHarness(page, "/shifts");
-  await page.getByRole("button", { name: "Удалить" }).first().click();
+  await openShiftDetails(page, "AUG26-003");
+  await page.getByRole("button", { name: "Удалить" }).click();
   await expect(page.getByText("Удалить смену?")).toBeVisible();
   await screenshotFullMain(page, screenshotPath("shift-delete"));
   expect(unexpected).toEqual([]);
@@ -977,10 +1025,11 @@ test("dashboard: needs attention over late data", async ({ page }) => {
   expect(unexpected).toEqual([]);
 });
 
-test("shifts list: active shift offers the close action", async ({ page }) => {
+test("the details panel of an active shift offers the close action", async ({ page }) => {
   const unexpected = await installApi(page, "shiftsClose");
   await openHarness(page, "/shifts");
-  await expect(page.getByText("SEP26-004")).toBeVisible();
+  await openShiftDetails(page, "SEP26-004");
+  await expect(page.getByRole("heading", { name: "Действия со сменой" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Закрыть смену" })).toBeVisible();
   await screenshotFullMain(page, screenshotPath09("shifts-active"));
   expect(unexpected).toEqual([]);
@@ -989,6 +1038,7 @@ test("shifts list: active shift offers the close action", async ({ page }) => {
 test("closing a shift from the cabinet asks for a reason", async ({ page }) => {
   const unexpected = await installApi(page, "shiftsClose");
   await openHarness(page, "/shifts");
+  await openShiftDetails(page, "SEP26-004");
   await page.getByRole("button", { name: "Закрыть смену" }).click();
   await expect(page.getByText("Причина закрытия")).toBeVisible();
   await screenshotFullMain(page, screenshotPath09("shift-close"));
@@ -1008,20 +1058,20 @@ test("late data badge on a closed shift", async ({ page }) => {
  * for `row.status === "closed"`, apps/admin/src/pages/shifts/index.tsx:372),
  * so every export frame starts from CLOSED_SHIFT's row.
  */
-test("report dialog: format catalog and split controls", async ({ page }) => {
+test("shift reports: format catalog and split controls", async ({ page }) => {
   const unexpected = await installApi(page, "exportsCatalog");
   await openHarness(page, "/shifts");
-  await page.getByRole("button", { name: "Сформировать отчет" }).click();
+  await openShiftDetails(page, "SEP26-003");
   await expect(page.getByText("[XML][ГИСМТ] Отчет об агрегации")).toBeVisible();
   await expect(page.getByText("Разделить отчет на части")).toBeVisible();
   await screenshotFullMain(page, screenshotPath09("exports-catalog"));
   expect(unexpected).toEqual([]);
 });
 
-test("report dialog: history with ready parts and a processing run", async ({ page }) => {
+test("shift reports: history with ready parts and a processing run", async ({ page }) => {
   const unexpected = await installApi(page, "exportsHistory");
   await openHarness(page, "/shifts");
-  await page.getByRole("button", { name: "Сформировать отчет" }).click();
+  await openShiftDetails(page, "SEP26-003");
   await expect(page.getByText("Готов", { exact: true })).toBeVisible();
   await expect(page.getByText("Формируется")).toBeVisible();
   await expect(page.getByText("Часть 1")).toBeVisible();
@@ -1029,20 +1079,20 @@ test("report dialog: history with ready parts and a processing run", async ({ pa
   expect(unexpected).toEqual([]);
 });
 
-test("report dialog: failed run explains itself and offers a retry", async ({ page }) => {
+test("shift reports: failed run explains itself and offers a retry", async ({ page }) => {
   const unexpected = await installApi(page, "exportsFailed");
   await openHarness(page, "/shifts");
-  await page.getByRole("button", { name: "Сформировать отчет" }).click();
+  await openShiftDetails(page, "SEP26-003");
   await expect(page.getByText("Не все коды смены распределены по коробам.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Повторить" })).toBeVisible();
   await screenshotFullMain(page, screenshotPath09("exports-failed"));
   expect(unexpected).toEqual([]);
 });
 
-test("report dialog: stale run warns after late data", async ({ page }) => {
+test("shift reports: stale run warns after late data", async ({ page }) => {
   const unexpected = await installApi(page, "exportsStale");
   await openHarness(page, "/shifts");
-  await page.getByRole("button", { name: "Сформировать отчет" }).click();
+  await openShiftDetails(page, "SEP26-003");
   await expect(page.getByText("Данные смены изменились — сформируйте новый отчет.")).toBeVisible();
   await screenshotFullMain(page, screenshotPath09("exports-stale"));
   expect(unexpected).toEqual([]);
