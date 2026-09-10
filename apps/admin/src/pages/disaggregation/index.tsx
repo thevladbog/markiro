@@ -199,6 +199,7 @@ export function DisaggregationPage() {
         </div>
         <div style={{ width: 180 }}>
           <DatePicker
+            placeholder={t("common.datePicker.placeholder")}
             label={t("pages.disaggregation.filters.fromLabel")}
             placeholder={t("common.datePicker.placeholder")}
             clearLabel={t("common.datePicker.clear")}
@@ -215,6 +216,7 @@ export function DisaggregationPage() {
         </div>
         <div style={{ width: 180 }}>
           <DatePicker
+            placeholder={t("common.datePicker.placeholder")}
             label={t("pages.disaggregation.filters.toLabel")}
             placeholder={t("common.datePicker.placeholder")}
             clearLabel={t("common.datePicker.clear")}

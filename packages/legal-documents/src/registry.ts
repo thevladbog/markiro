@@ -73,6 +73,10 @@ const INSTRUCTION_EN_PUBLISHED: ReadonlySet<LegalDocumentCode> = new Set([
   "MKR-INS-03",
   "MKR-INS-04",
   "MKR-INS-05",
+  "MKR-INS-06",
+  "MKR-INS-07",
+  "MKR-INS-08",
+  "MKR-INS-09",
 ]);
 
 export function legalReleaseLocales(code: LegalDocumentCode): readonly LegalLocale[] {
@@ -182,11 +186,14 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-INS-06",
-    revision: "2026.08/03",
-    effectiveDate: "2026-09-01",
+    revision: "2026.09/01",
+    effectiveDate: "2026-09-10",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
-    routes: { ru: "/instruktsii/inventarizatsiya-podgotovka/" },
+    routes: {
+      ru: "/instruktsii/inventarizatsiya-podgotovka/",
+      en: "/en/instructions/inventory-preparation/",
+    },
   },
   {
     code: "MKR-INS-07",
@@ -194,7 +201,10 @@ export const LEGAL_RELEASES = [
     effectiveDate: "2026-09-01",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
-    routes: { ru: "/instruktsii/inventarizatsiya-zakrytie/" },
+    routes: {
+      ru: "/instruktsii/inventarizatsiya-zakrytie/",
+      en: "/en/instructions/inventory-closing/",
+    },
   },
   {
     code: "MKR-INS-08",
@@ -202,15 +212,21 @@ export const LEGAL_RELEASES = [
     effectiveDate: "2026-09-10",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
-    routes: { ru: "/instruktsii/smena-planirovanie/" },
+    routes: {
+      ru: "/instruktsii/smena-planirovanie/",
+      en: "/en/instructions/shift-planning/",
+    },
   },
   {
     code: "MKR-INS-09",
-    revision: "2026.09/02",
+    revision: "2026.09/03",
     effectiveDate: "2026-09-10",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
-    routes: { ru: "/instruktsii/smena-zakrytie/" },
+    routes: {
+      ru: "/instruktsii/smena-zakrytie/",
+      en: "/en/instructions/shift-closing/",
+    },
   },
   {
     code: "MKR-INS-10",
@@ -232,10 +248,10 @@ export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
   { releaseKey: "MKR-INS-03/2026.09/01", content: STATION_EXCEPTIONS_CONTENT },
   { releaseKey: "MKR-INS-04/2026.08/02", content: STATION_WORKSTATION_SETUP_CONTENT },
   { releaseKey: "MKR-INS-05/2026.09/01", content: STATION_INVENTORY_COUNT_CONTENT },
-  { releaseKey: "MKR-INS-06/2026.08/03", content: CABINET_INVENTORY_PREP_CONTENT },
+  { releaseKey: "MKR-INS-06/2026.09/01", content: CABINET_INVENTORY_PREP_CONTENT },
   { releaseKey: "MKR-INS-07/2026.08/03", content: CABINET_INVENTORY_CLOSE_CONTENT },
   { releaseKey: "MKR-INS-08/2026.09/01", content: CABINET_SHIFT_PLANNING_CONTENT },
-  { releaseKey: "MKR-INS-09/2026.09/02", content: CABINET_SHIFT_CLOSE_CONTENT },
+  { releaseKey: "MKR-INS-09/2026.09/03", content: CABINET_SHIFT_CLOSE_CONTENT },
   { releaseKey: "MKR-INS-10/2026.09/01", content: CABINET_CATALOG_PRODUCT_CONTENT },
 ];
 

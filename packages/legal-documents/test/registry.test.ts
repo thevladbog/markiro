@@ -61,14 +61,16 @@ describe("legal document registry", () => {
       "MKR-INS-03": "2026.09/01",
       "MKR-INS-04": "2026.08/02",
       "MKR-INS-05": "2026.09/01",
-      "MKR-INS-06": "2026.08/03",
+      // 2026-09-10: обе редакции исправлены по факту экрана при съёмке
+      // английских кадров.
+      "MKR-INS-06": "2026.09/01",
       "MKR-INS-07": "2026.08/03",
       // 2026-09-10: the shift cabinet was reworked -- row actions moved into
       // the details panel, the list gained an actual-output line and
       // validation shifts can duplicate the Data Matrix -- so both shift
       // documents were reissued.
       "MKR-INS-08": "2026.09/01",
-      "MKR-INS-09": "2026.09/02",
+      "MKR-INS-09": "2026.09/03",
       "MKR-INS-10": "2026.09/01",
     };
     expect(
@@ -96,12 +98,12 @@ describe("legal document registry", () => {
     expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-09-02");
     expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-09-01");
     expect(findLegalRelease("MKR-INS-05").effectiveDate).toBe("2026-09-02");
-    expect(findLegalRelease("MKR-INS-06").effectiveDate).toBe("2026-09-01");
+    expect(findLegalRelease("MKR-INS-06").effectiveDate).toBe("2026-09-10");
     expect(findLegalRelease("MKR-INS-07").effectiveDate).toBe("2026-09-01");
     expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-09-10");
     expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-09-10");
     expect(findLegalRelease("MKR-INS-10").effectiveDate).toBe("2026-09-10");
-    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(23);
+    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(27);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
     expect(findLegalRelease("MKR-PD-02", "2026.08/01")).toBe(LEGAL_RELEASES[1]);
   });
@@ -211,18 +213,18 @@ describe("legal document registry", () => {
     expect(legalReleaseLocales("MKR-INS-03")).toEqual(["ru", "en"]);
     expect(legalReleaseLocales("MKR-INS-04")).toEqual(["ru", "en"]);
     expect(legalReleaseLocales("MKR-INS-05")).toEqual(["ru", "en"]);
-    expect(legalReleaseLocales("MKR-INS-06")).toEqual(["ru"]);
-    expect(legalReleaseLocales("MKR-INS-07")).toEqual(["ru"]);
-    expect(legalReleaseLocales("MKR-INS-08")).toEqual(["ru"]);
-    expect(legalReleaseLocales("MKR-INS-09")).toEqual(["ru"]);
+    expect(legalReleaseLocales("MKR-INS-06")).toEqual(["ru", "en"]);
+    expect(legalReleaseLocales("MKR-INS-07")).toEqual(["ru", "en"]);
+    expect(legalReleaseLocales("MKR-INS-08")).toEqual(["ru", "en"]);
+    expect(legalReleaseLocales("MKR-INS-09")).toEqual(["ru", "en"]);
   });
 
   it("accepts a Russian-only cabinet instruction release and rejects Russian-only legal releases", () => {
     // MKR-INS-06 is still outside INSTRUCTION_EN_PUBLISHED; the station
     // instructions (01-05) now require paired en routes like legal documents.
     const instructionRelease = {
-      code: "MKR-INS-06",
-      revision: "2026.09/01",
+      code: "MKR-INS-10",
+      revision: "2026.09/02",
       effectiveDate: "2026-09-02",
       status: "draft",
       operatorProfileId: "operator-2026-08-15",
