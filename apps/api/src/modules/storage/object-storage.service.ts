@@ -16,6 +16,7 @@ import {
   parseTenantBillingRequestAttachmentObjectKey,
 } from "@markiro/platform-contracts";
 import type { Env } from "../../env";
+import { isPlatformReportObjectKey } from "../../platform-reports/report-object-key";
 
 type S3Boundary = Pick<S3Client, "send"> & { destroy?: () => void };
 type Presigner = typeof getSignedUrl;
@@ -292,6 +293,7 @@ function assertSafeKey(key: string): void {
     (!key.startsWith("users/") &&
       !key.startsWith("tenants/") &&
       !parseTenantBillingActObjectKey(key) &&
+      !isPlatformReportObjectKey(key) &&
       !parseTenantBillingRequestAttachmentObjectKey(key)) ||
     key.includes("..") ||
     key.includes("\\") ||

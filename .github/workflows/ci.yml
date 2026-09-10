@@ -289,6 +289,18 @@ jobs:
           pnpm test:inventory:browser
       - name: Verify National Catalog cabinet fixtures
         run: pnpm --dir tools/production-browser --ignore-workspace test:national-catalog
+      - name: Verify asynchronous SaaS report downloads
+        run: |
+          pnpm turbo run build --filter='@markiro/saas-admin^...'
+          pnpm --dir tools/production-browser --ignore-workspace test:reports
+      - name: Preserve report browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reports-browser-${{ github.sha }}
+          path: tools/production-browser/test-results/reports
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Preserve National Catalog browser failure evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

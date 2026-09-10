@@ -182,6 +182,10 @@ export const PLATFORM_ADMIN_ME = {
     "platformTeam.write",
     "audit.read",
     "diagnostics.read",
+    "reports.read",
+    "reports.create",
+    "reports.download",
+    "reports.identified",
   ],
   twoFactorReady: true,
 } satisfies PlatformPrincipal;

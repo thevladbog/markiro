@@ -389,6 +389,12 @@ const profile: RouteExemption = {
 };
 
 const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
+  "PlatformReportsController.create": platform(
+    "cross-tenant report creation uses platform reports.create capability and revalidated platform identity",
+  ),
+  "PlatformReportsController.download": platform(
+    "private report download uses platform reports.download capability and creator ownership",
+  ),
   "BillingAccountsController.archiveOperator": platform(
     "operator bank-account archival is guarded by platform billing capabilities",
   ),

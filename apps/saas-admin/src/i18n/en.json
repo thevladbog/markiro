@@ -771,6 +771,115 @@
       "activation_policy_unsupported": "Activation policy is unavailable"
     }
   },
+  "reports": {
+    "calendar": {
+      "placeholder": "Choose a date",
+      "clear": "Clear date",
+      "title": "Calendar",
+      "previousMonth": "Previous month",
+      "nextMonth": "Next month"
+    },
+    "title": "Operational reports",
+    "description": "Generate an auditable CSV and definitions ZIP without production SQL access.",
+    "forbidden": "Reports are unavailable for your role.",
+    "sections": {
+      "report": "Report and scope",
+      "period": "Period",
+      "filters": "Optional filters",
+      "privacy": "Data mode"
+    },
+    "fields": {
+      "template": "Template",
+      "tenants": "Tenants",
+      "from": "Date from",
+      "to": "Date to",
+      "timezone": "IANA timezone",
+      "basis": "Period basis",
+      "outcome": "Exchange outcome",
+      "status": "Status",
+      "optionSearch": "Search options",
+      "gtin14": "GTIN-14",
+      "line": "Line",
+      "product": "Product",
+      "operator": "Operator",
+      "scope": "Scope and period",
+      "created": "Created / retained until",
+      "rows": "Rows",
+      "actions": "Actions"
+    },
+    "types": {
+      "shifts": "Shifts",
+      "shift_operators": "Shift operators",
+      "inventories": "Inventories",
+      "summary": "Summary",
+      "commerceml": "CommerceML"
+    },
+    "basis": { "events": "Events in period", "production_date": "Shift production date" },
+    "privacy": {
+      "identified": "Identified",
+      "pseudonymous": "Pseudonymous",
+      "aggregate": "Aggregate"
+    },
+    "privacyHelp": {
+      "identified": "Includes permitted employee names and IDs. Badges and PINs are never exported.",
+      "pseudonymous": "Operators use export-local labels. This does not guarantee full anonymity.",
+      "aggregate": "No person-level rows or timestamps; production identifiers may still permit inference."
+    },
+    "statuses": {
+      "queued": "Queued",
+      "processing": "Processing",
+      "ready": "Ready",
+      "failed": "Failed",
+      "expired": "Expired"
+    },
+    "outcomes": { "ok": "Successful", "warn": "Warning", "error": "Error" },
+    "filterStatuses": {
+      "planned": "Planned",
+      "active": "Active",
+      "closed": "Closed",
+      "draft": "Draft",
+      "preparing": "Preparing",
+      "ready": "Ready",
+      "cancelled": "Cancelled",
+      "running": "Running",
+      "completed": "Completed"
+    },
+    "errors": {
+      "REPORT_LIMIT_EXCEEDED": "Report limit exceeded",
+      "REPORT_INVALID_PARAMETERS": "Invalid parameters",
+      "REPORT_PERMISSION_REVOKED": "Permission revoked",
+      "REPORT_SOURCE_FAILED": "Source unavailable",
+      "REPORT_SOURCE_TIMEOUT": "Source timeout",
+      "REPORT_STORAGE_FAILED": "Storage failure",
+      "REPORT_RETRY_EXHAUSTED": "Retries exhausted",
+      "REPORT_GENERATION_FAILED": "Generation failed"
+    },
+    "help": {
+      "title": "What the export means",
+      "metrics": "Confirmed labels use print_verified_at; reprint requests are separate facts. Inventory values are current projections, not historical snapshots.",
+      "metadata": "The ZIP includes CSV and definitions.json with parameters, snapshot time and definitions. Dates are inclusive in the selected timezone; event timestamps remain UTC.",
+      "commerceml": "CommerceML reports the journal and current temporary upload presence. A historical source file can be unavailable and is not reconstructed."
+    },
+    "history": "Generation history",
+    "previous": "Previous",
+    "next": "Next",
+    "moreOptions": "Next options",
+    "loadingTenants": "Loading tenants",
+    "tenantError": "Could not load tenants.",
+    "optionError": "Could not load filter options.",
+    "any": "Any",
+    "noFilters": "This template has no optional filters.",
+    "create": "Generate report",
+    "retry": "Repeat",
+    "retryDelivery": "Retry delivery",
+    "download": "Download",
+    "expires": "until",
+    "empty": "No reports yet",
+    "createError": "Could not queue the report. The delivery can be retried safely.",
+    "loadError": "Could not load report history.",
+    "validationError": "Check required fields, period, timezone, and filter compatibility.",
+    "downloadError": "Could not obtain a link. History was refreshed; check status and retry."
+  },
   "shell": {
     "routeLoading": "Loading section",
     "skip": "Skip to content",
@@ -796,6 +905,7 @@
     "monitoring": "Monitoring",
     "team": "Team",
     "audit": "Audit",
+    "reports": "Reports",
     "organization": "Our organization",
     "language": "Interface language",
     "sessionConfirmed": "2FA · session secured"

@@ -445,3 +445,7 @@ cascades on tenant deletion; no additional history GC is introduced.
 - Linux/Android stations; optional standalone hardware agent (web mode).
 - Optional code-pool tracking is in scope for MVP dashboards (KPI «остатки
   кодов») when clients pre-load ordered code files.
+
+# Operational report exports
+
+Platform operational exports are durable, creator-scoped intents processed asynchronously from a read-only, repeatable-read snapshot. The platform API exposes fixed templates and typed filters instead of production SQL. Artifacts are verified private ZIP objects with bounded signed downloads and seven-day retention; PostgreSQL remains authoritative for lifecycle and audit state. See [the operational guide](operations/platform-report-exports.md).
