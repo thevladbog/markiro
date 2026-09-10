@@ -359,10 +359,19 @@ jobs:
         if: inputs.mode == 'publish' || inputs.mode == 'seed-baseline'
         env:
           GH_TOKEN: ${{ secrets.STATION_RELEASE_REPOSITORY_TOKEN }}
-          SOURCE_REPOSITORY_TOKEN: ${{ github.token }}
+          # A fine-grained owner token with Contents + Workflows write on the
+          # source repository. `github.token` cannot carry `workflows`, and
+          # GitHub checks a NEW ref's workflow files against the default
+          # branch, so a candidate built from an older base fails to push as
+          # soon as main gains any `.github/workflows` change (2026-09-10).
+          SOURCE_REPOSITORY_TOKEN: ${{ secrets.STATION_SOURCE_REPOSITORY_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
+          if [ -z "${SOURCE_REPOSITORY_TOKEN:-}" ]; then
+            echo "STATION_SOURCE_REPOSITORY_TOKEN is missing in the station-release environment: the source repository push needs a token with Contents and Workflows write" >&2
+            exit 1
+          fi
           github_tree="$RUNNER_TEMP/station-candidate/github"
           candidate_ref="station-release-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           if gh release view "$tag" --repo "$STATION_RELEASE_REPOSITORY" >/dev/null 2>&1; then

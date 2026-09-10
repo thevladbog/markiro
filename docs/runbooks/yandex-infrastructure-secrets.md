@@ -69,6 +69,15 @@ Environment:
   read/write только для публичного binary-only repository
   `thevladbog/markiro-station-releases`; доступ к source repository
   `thevladbog/markiro` этому token не выдаётся;
+- secret `STATION_SOURCE_REPOSITORY_TOKEN`: fine-grained token владельца с
+  Contents read/write и Workflows read/write только для source repository
+  `thevladbog/markiro`; нужен исключительно шагам «Publish immutable GitHub
+  beta/stable» для push ветки-кандидата и тега. `github.token` не может нести
+  право `workflows`, а GitHub сверяет workflow-файлы новой ветки с default
+  branch, поэтому кандидат, собранный от более старого base, не пушится, как
+  только в `main` меняется любой файл `.github/workflows` (сбой stable 1.4.0,
+  2026-09-10). Доступ к `thevladbog/markiro-station-releases` этому token не
+  выдаётся;
 - secret `YANDEX_STATION_RELEASE_ACCESS_KEY_ID`;
 - secret `YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY`;
 - variable `YANDEX_STATION_RELEASE_BUCKET`;
