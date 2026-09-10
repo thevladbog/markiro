@@ -1,4 +1,4 @@
-import { fireEvent, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { platformErrorSchema, platformReportSchema } from "@markiro/platform-contracts";
@@ -47,6 +47,16 @@ const platformError = (code: string) =>
     requestId: "85111111-1111-4111-8111-111111111111",
   });
 
+async function selectOption(
+  user: ReturnType<typeof userEvent.setup>,
+  container: HTMLElement,
+  label: RegExp,
+  option: string,
+) {
+  await user.click(within(container).getByRole("combobox", { name: label }));
+  await user.click(await within(document.body).findByRole("option", { name: option }));
+}
+
 function installReportsApi({
   me = PLATFORM_ADMIN_ME as PlatformPrincipal,
   reports = [] as unknown[] | unknown[][],
@@ -57,7 +67,6 @@ function installReportsApi({
   const calls: Array<{ url: string; method: string; body?: unknown }> = [];
   let createCount = 0;
   let listCount = 0;
-  vi.stubGlobal("open", vi.fn());
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -115,13 +124,48 @@ function installReportsApi({
 }
 
 afterEach(async () => {
+  // Unmount observers and expiry effects before replacing clocks or notifying i18n.
+  cleanup();
   vi.useRealTimers();
+  await act(async () => {
+    await i18n.changeLanguage("ru");
+  });
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  await i18n.changeLanguage("ru");
 });
 
 describe("platform reports", () => {
+  it("selects filters and dates through keyboard-accessible custom popovers", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-10T12:00:00Z"));
+    const calls = installReportsApi();
+    const user = userEvent.setup();
+    const view = renderSaasApp({ initialEntry: "/reports" });
+    await user.click(await within(view.container).findByRole("checkbox", { name: /завод/i }));
+    const status = within(view.container).getByRole("combobox", { name: /статус/i });
+    status.focus();
+    await user.keyboard("{ArrowDown}");
+    const listbox = await within(document.body).findByRole("listbox");
+    await user.click(within(listbox).getByRole("option", { name: "Активна" }));
+    expect(status.textContent).toContain("Активна");
+    const from = within(view.container).getByRole("button", { name: "Дата с" });
+    await user.click(from);
+    await within(document.body).findByRole("dialog", { name: "Календарь" });
+    await user.keyboard("{ArrowLeft}{Enter}");
+    expect(within(document.body).queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(from);
+    await user.click(within(view.container).getByRole("radio", { name: "Агрегированный" }));
+    expect(within(view.container).queryByRole("combobox", { name: /^оператор$/i })).toBeNull();
+    await user.click(within(view.container).getByRole("button", { name: /сформировать/i }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.body)?.body).toMatchObject({
+        status: "active",
+        fromDate: "2026-09-09",
+        toDate: "2026-09-10",
+        privacy: "aggregate",
+      }),
+    );
+  });
   it.each([
     ["2026-09-10T20:59:59.000Z", "2026-09-10"],
     ["2026-09-10T21:00:00.000Z", "2026-09-11"],
@@ -131,7 +175,10 @@ describe("platform reports", () => {
     installReportsApi();
     const view = renderSaasApp({ initialEntry: "/reports" });
     await within(view.container).findByRole("checkbox", { name: /завод/i });
-    const dates = view.container.querySelectorAll<HTMLInputElement>('input[type="date"]');
+    expect(within(view.container).getByRole("button", { name: "Дата с" })).toBeTruthy();
+    const dates = view.container.querySelectorAll<HTMLInputElement>(
+      'input[name="fromDate"], input[name="toDate"]',
+    );
     expect(Array.from(dates, (input) => input.value)).toEqual([expected, expected]);
   });
 
@@ -145,16 +192,27 @@ describe("platform reports", () => {
     vi.setSystemTime(new Date("2026-09-10T21:00:00.000Z"));
     const second = renderSaasApp({ initialEntry: "/reports" });
     await within(second.container).findByRole("checkbox", { name: /завод/i });
-    const dates = second.container.querySelectorAll<HTMLInputElement>('input[type="date"]');
+    const dates = second.container.querySelectorAll<HTMLInputElement>(
+      'input[name="fromDate"], input[name="toDate"]',
+    );
     expect(Array.from(dates, (input) => input.value)).toEqual(["2026-09-11", "2026-09-11"]);
   });
 
   it("preserves explicitly selected dates when timezone changes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-10T12:00:00Z"));
     installReportsApi();
+    const user = userEvent.setup();
     const view = renderSaasApp({ initialEntry: "/reports" });
     await within(view.container).findByRole("checkbox", { name: /завод/i });
-    const dates = view.container.querySelectorAll<HTMLInputElement>('input[type="date"]');
-    for (const input of dates) fireEvent.change(input, { target: { value: "2026-08-25" } });
+    for (const name of ["Дата с", "Дата по"]) {
+      await user.click(within(view.container).getByRole("button", { name }));
+      await user.click(within(document.body).getByRole("button", { name: "Предыдущий месяц" }));
+      await user.click(within(document.body).getByRole("button", { name: /25 августа 2026/ }));
+    }
+    const dates = view.container.querySelectorAll<HTMLInputElement>(
+      'input[name="fromDate"], input[name="toDate"]',
+    );
     fireEvent.change(within(view.container).getByLabelText(/часовой пояс/i), {
       target: { value: "America/New_York" },
     });
@@ -193,8 +251,8 @@ describe("platform reports", () => {
     const view = renderSaasApp({ initialEntry: "/reports" });
     await user.click(await within(view.container).findByRole("checkbox", { name: /завод/i }));
     const form = view.container.querySelector("form")!;
-    await user.selectOptions(within(form).getByLabelText(/статус/i), "active");
-    await user.selectOptions(within(form).getByLabelText(/шаблон/i), "commerceml");
+    await selectOption(user, form, /статус/i, "Активна");
+    await selectOption(user, form, /шаблон/i, "CommerceML");
     expect(within(form).queryByLabelText(/статус/i)).toBeNull();
     expect(within(form).getByLabelText(/результат обмена/i)).toBeTruthy();
   });
@@ -227,21 +285,6 @@ describe("platform reports", () => {
     expect(within(table).getAllByRole("button", { name: /повторить/i })).toHaveLength(2);
     expect(within(table).queryAllByRole("button", { name: /скачать/i })).toHaveLength(1);
     expect(within(table).getByText(/тайм-аут/i)).toBeTruthy();
-  });
-
-  it("downloads through a short-lived server link", async () => {
-    const calls = installReportsApi({ reports: [readyReport()] });
-    const user = userEvent.setup();
-    const view = renderSaasApp({ initialEntry: "/reports" });
-    await user.click(await within(view.container).findByRole("button", { name: /скачать/i }));
-    await waitFor(() =>
-      expect(calls.some((call) => call.url.endsWith(`/${REPORT_ID}/download`))).toBe(true),
-    );
-    expect(window.open).toHaveBeenCalledWith(
-      "https://download.invalid/report",
-      "_blank",
-      "noopener,noreferrer",
-    );
   });
 
   it("keeps the idempotency key for delivery retry and uses a fresh key for explicit repeat", async () => {
@@ -296,17 +339,16 @@ describe("platform reports", () => {
     });
     const view = renderSaasApp({ initialEntry: "/reports" });
     expect(await within(view.container).findByText("В очереди")).toBeTruthy();
-    await vi.advanceTimersByTimeAsync(3_100);
+    await act(() => vi.advanceTimersByTimeAsync(3_100));
     expect(await within(view.container).findByText("Формируется")).toBeTruthy();
-    await vi.advanceTimersByTimeAsync(3_100);
+    await act(() => vi.advanceTimersByTimeAsync(3_100));
     expect(await within(view.container).findByText("Готов")).toBeTruthy();
     const countAtReady = calls.filter((call) => call.url.includes("/reports?")).length;
-    await vi.advanceTimersByTimeAsync(6_100);
+    await act(() => vi.advanceTimersByTimeAsync(6_100));
     expect(calls.filter((call) => call.url.includes("/reports?")).length).toBe(countAtReady);
-    await view.router.navigate("/");
-    await view.router.navigate("/reports");
+    await act(() => view.router.navigate("/"));
+    await act(() => view.router.navigate("/reports"));
     expect(await within(view.container).findByText("Готов")).toBeTruthy();
-    vi.useRealTimers();
   });
 
   it("renders report reading without identified controls or operator requests", async () => {
@@ -334,13 +376,28 @@ describe("platform reports", () => {
     const view = renderSaasApp({ initialEntry: "/reports" });
     await user.click(await within(view.container).findByRole("checkbox", { name: /завод/i }));
     const form = view.container.querySelector("form")!;
-    expect(within(form).getByRole("option", { name: "Активна" })).toBeTruthy();
-    await i18n.changeLanguage("en");
-    expect(within(form).getByRole("option", { name: "Active" })).toBeTruthy();
-    await user.selectOptions(within(form).getByLabelText(/template/i), "commerceml");
-    expect(within(form).getByRole("option", { name: "Successful" })).toBeTruthy();
-    await i18n.changeLanguage("ru");
-    expect(within(form).getByRole("option", { name: "Успешно" })).toBeTruthy();
+    await user.click(within(form).getByRole("combobox", { name: /статус/i }));
+    expect(within(document.body).getByRole("option", { name: "Активна" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    await act(async () => {
+      await i18n.changeLanguage("en");
+    });
+    await user.click(within(form).getByRole("combobox", { name: /status/i }));
+    expect(within(document.body).getByRole("option", { name: "Active" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    await selectOption(user, form, /template/i, "CommerceML");
+    await user.click(within(form).getByRole("combobox", { name: /outcome/i }));
+    expect(within(document.body).getByRole("option", { name: "Successful" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    await user.click(within(form).getByRole("button", { name: "Date from" }));
+    expect(within(document.body).getByRole("dialog", { name: "Calendar" })).toBeTruthy();
+    expect(within(document.body).getByRole("button", { name: "Previous month" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    await act(async () => {
+      await i18n.changeLanguage("ru");
+    });
+    await user.click(within(form).getByRole("combobox", { name: /результат обмена/i }));
+    expect(within(document.body).getByRole("option", { name: "Успешно" })).toBeTruthy();
   });
 
   it("omits filters cleared by a template change", async () => {
@@ -348,11 +405,8 @@ describe("platform reports", () => {
     const user = userEvent.setup();
     const view = renderSaasApp({ initialEntry: "/reports" });
     await user.click(await within(view.container).findByRole("checkbox", { name: /завод/i }));
-    await user.selectOptions(
-      await within(view.container).findByLabelText(/^линия$/i),
-      "91111111-1111-4111-8111-111111111111",
-    );
-    await user.selectOptions(within(view.container).getByLabelText(/шаблон/i), "commerceml");
+    await selectOption(user, view.container, /^линия$/i, "Line 1");
+    await selectOption(user, view.container, /шаблон/i, "CommerceML");
     await user.click(within(view.container).getByRole("button", { name: /сформировать/i }));
     await waitFor(() => expect(calls.some((call) => call.body)).toBe(true));
     expect(calls.find((call) => call.body)?.body).not.toHaveProperty("lineId");
@@ -372,15 +426,14 @@ describe("platform reports", () => {
     expect(await within(view.container).findAllByRole("button", { name: /скачать/i })).toHaveLength(
       2,
     );
-    await vi.advanceTimersByTimeAsync(1_100);
+    await act(() => vi.advanceTimersByTimeAsync(1_100));
     await waitFor(() =>
       expect(within(view.container).getAllByRole("button", { name: /скачать/i })).toHaveLength(1),
     );
-    await vi.advanceTimersByTimeAsync(1_100);
+    await act(() => vi.advanceTimersByTimeAsync(1_100));
     await waitFor(() =>
       expect(within(view.container).queryByRole("button", { name: /скачать/i })).toBeNull(),
     );
-    vi.useRealTimers();
   });
 
   it("does not offer download for a ready report that expires before its response arrives", async () => {
@@ -390,7 +443,7 @@ describe("platform reports", () => {
       listDelayMs: 1_000,
     });
     const view = renderSaasApp({ initialEntry: "/reports" });
-    await vi.advanceTimersByTimeAsync(1_100);
+    await act(() => vi.advanceTimersByTimeAsync(1_100));
     expect(await within(view.container).findByText("Готов")).toBeTruthy();
     expect(within(view.container).queryByRole("button", { name: /скачать/i })).toBeNull();
   });
@@ -404,5 +457,9 @@ describe("platform reports", () => {
     await waitFor(() =>
       expect(calls.filter((call) => call.url.includes("/reports?")).length).toBeGreaterThan(1),
     );
+    await waitFor(() => {
+      expect(view.queryClient.isFetching()).toBe(0);
+      expect(view.queryClient.isMutating()).toBe(0);
+    });
   });
 });

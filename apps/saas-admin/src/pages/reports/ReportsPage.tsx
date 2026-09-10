@@ -2,7 +2,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, SectionHeader, StatusChip, Table } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  DatePicker,
+  Input,
+  RadioGroup,
+  SectionHeader,
+  Select,
+  StatusChip,
+  Table,
+} from "@markiro/ui";
 import {
   platformReportInputSchema,
   type PlatformReport,
@@ -32,7 +43,15 @@ function statusTone(status: PlatformReport["status"]) {
 }
 
 export function ReportsPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const calendarProps = {
+    locale: i18n.language,
+    placeholder: t("reports.calendar.placeholder"),
+    clearLabel: t("reports.calendar.clear"),
+    calendarLabel: t("reports.calendar.title"),
+    previousMonthLabel: t("reports.calendar.previousMonth"),
+    nextMonthLabel: t("reports.calendar.nextMonth"),
+  };
   const principal = usePlatformPrincipal();
   const queryClient = useQueryClient();
   const canRead = principal.capabilities.includes("reports.read");
@@ -123,7 +142,7 @@ export function ReportsPage() {
     mutationFn: downloadReport,
     onSuccess: async ({ url }) => {
       setActionError(false);
-      window.open(url, "_blank", "noopener,noreferrer");
+      window.location.assign(url);
       await queryClient.invalidateQueries({ queryKey: ["platform", principal.userId, "reports"] });
     },
     onError: async () => {
@@ -217,40 +236,33 @@ export function ReportsPage() {
       >
         <fieldset>
           <legend>{t("reports.sections.report")}</legend>
-          <label>
-            {t("reports.fields.template")}
-            <select
-              value={reportType}
-              onChange={(event) => changeType(event.target.value as PlatformReportType)}
-            >
-              {["shifts", "shift_operators", "inventories", "summary", "commerceml"].map((type) => (
-                <option key={type} value={type}>
-                  {t(`reports.types.${type}`)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Select<PlatformReportType>
+            label={t("reports.fields.template")}
+            value={reportType}
+            onValueChange={changeType}
+            options={(
+              ["shifts", "shift_operators", "inventories", "summary", "commerceml"] as const
+            ).map((value) => ({ value, label: t(`reports.types.${value}`) }))}
+          />
           <div className="report-tenants">
             <span>{t("reports.fields.tenants")}</span>
             {(tenants.data?.items ?? []).map((tenant) => (
-              <label key={tenant.id}>
-                <input
-                  type="checkbox"
-                  checked={tenantIds.includes(tenant.id)}
-                  onChange={(event) => {
-                    setLineId("");
-                    setProductId("");
-                    setOperatorId("");
-                    setOptionOffsets({ lines: 0, products: 0, operators: 0 });
-                    setTenantIds((current) =>
-                      event.target.checked
-                        ? [...current, tenant.id].slice(0, 10)
-                        : current.filter((id) => id !== tenant.id),
-                    );
-                  }}
-                />
-                {tenant.name}
-              </label>
+              <Checkbox
+                key={tenant.id}
+                label={tenant.name}
+                checked={tenantIds.includes(tenant.id)}
+                onCheckedChange={(checked) => {
+                  setLineId("");
+                  setProductId("");
+                  setOperatorId("");
+                  setOptionOffsets({ lines: 0, products: 0, operators: 0 });
+                  setTenantIds((current) =>
+                    checked
+                      ? [...current, tenant.id].slice(0, 10)
+                      : current.filter((id) => id !== tenant.id),
+                  );
+                }}
+              />
             ))}
             <div className="report-pagination">
               <Button
@@ -280,72 +292,78 @@ export function ReportsPage() {
         </fieldset>
         <fieldset className="report-form__grid">
           <legend>{t("reports.sections.period")}</legend>
-          <label>
-            {t("reports.fields.from")}
-            <input
-              type="date"
-              value={fromDate}
-              onChange={(event) => setFromDate(event.target.value)}
-            />
-          </label>
-          <label>
-            {t("reports.fields.to")}
-            <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
-          </label>
-          <label>
-            {t("reports.fields.timezone")}
-            <input value={timezone} onChange={(event) => setTimezone(event.target.value)} />
-          </label>
-          <label>
-            {t("reports.fields.basis")}
-            <select
-              value={periodBasis}
-              onChange={(event) => setPeriodBasis(event.target.value as typeof periodBasis)}
-            >
-              <option value="events">{t("reports.basis.events")}</option>
-              {["shifts", "shift_operators"].includes(reportType) ? (
-                <option value="production_date">{t("reports.basis.production_date")}</option>
-              ) : null}
-            </select>
-          </label>
+          <DatePicker
+            {...calendarProps}
+            label={t("reports.fields.from")}
+            name="fromDate"
+            value={fromDate}
+            onValueChange={(value) => setFromDate(value ?? "")}
+          />
+          <DatePicker
+            {...calendarProps}
+            label={t("reports.fields.to")}
+            name="toDate"
+            value={toDate}
+            onValueChange={(value) => setToDate(value ?? "")}
+          />
+          <Input
+            label={t("reports.fields.timezone")}
+            value={timezone}
+            onChange={(event) => setTimezone(event.target.value)}
+          />
+          <Select<"events" | "production_date">
+            label={t("reports.fields.basis")}
+            value={periodBasis}
+            onValueChange={setPeriodBasis}
+            options={[
+              { value: "events", label: t("reports.basis.events") },
+              ...(["shifts", "shift_operators"].includes(reportType)
+                ? [{ value: "production_date" as const, label: t("reports.basis.production_date") }]
+                : []),
+            ]}
+          />
         </fieldset>
         <fieldset className="report-form__grid">
           <legend>{t("reports.sections.filters")}</legend>
           {reportType === "commerceml" ? (
-            <label>
-              {t("reports.fields.outcome")}
-              <select value={outcome} onChange={(event) => setOutcome(event.target.value)}>
-                <option value="">{t("reports.any")}</option>
-                <option value="ok">{t("reports.outcomes.ok")}</option>
-                <option value="warn">{t("reports.outcomes.warn")}</option>
-                <option value="error">{t("reports.outcomes.error")}</option>
-              </select>
-            </label>
+            <Select
+              label={t("reports.fields.outcome")}
+              value={outcome}
+              onValueChange={setOutcome}
+              options={[
+                { value: "", label: t("reports.any") },
+                ...["ok", "warn", "error"].map((value) => ({
+                  value,
+                  label: t(`reports.outcomes.${value}`),
+                })),
+              ]}
+            />
           ) : (
             <>
-              <label>
-                {t("reports.fields.optionSearch")}
-                <input
-                  value={optionSearch}
-                  onChange={(event) => {
-                    setOptionSearch(event.target.value);
-                    setOptionOffsets({ lines: 0, products: 0, operators: 0 });
-                    setLineId("");
-                    setProductId("");
-                    setOperatorId("");
-                  }}
+              <Input
+                label={t("reports.fields.optionSearch")}
+                value={optionSearch}
+                onChange={(event) => {
+                  setOptionSearch(event.target.value);
+                  setOptionOffsets({ lines: 0, products: 0, operators: 0 });
+                  setLineId("");
+                  setProductId("");
+                  setOperatorId("");
+                }}
+              />
+              <div className="report-option-field">
+                <Select
+                  label={t("reports.fields.line")}
+                  value={lineId}
+                  onValueChange={setLineId}
+                  options={[
+                    { value: "", label: t("reports.any") },
+                    ...(optionQueries.lines.data?.items ?? []).map((option) => ({
+                      value: option.id,
+                      label: option.name,
+                    })),
+                  ]}
                 />
-              </label>
-              <label>
-                {t("reports.fields.line")}
-                <select value={lineId} onChange={(event) => setLineId(event.target.value)}>
-                  <option value="">{t("reports.any")}</option>
-                  {(optionQueries.lines.data?.items ?? []).map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.name}
-                    </option>
-                  ))}
-                </select>
                 {optionQueries.lines.data?.nextOffset != null ? (
                   <Button
                     type="button"
@@ -361,17 +379,20 @@ export function ReportsPage() {
                     {t("reports.moreOptions")}
                   </Button>
                 ) : null}
-              </label>
-              <label>
-                {t("reports.fields.product")}
-                <select value={productId} onChange={(event) => setProductId(event.target.value)}>
-                  <option value="">{t("reports.any")}</option>
-                  {(optionQueries.products.data?.items ?? []).map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.name}
-                    </option>
-                  ))}
-                </select>
+              </div>
+              <div className="report-option-field">
+                <Select
+                  label={t("reports.fields.product")}
+                  value={productId}
+                  onValueChange={setProductId}
+                  options={[
+                    { value: "", label: t("reports.any") },
+                    ...(optionQueries.products.data?.items ?? []).map((option) => ({
+                      value: option.id,
+                      label: option.name,
+                    })),
+                  ]}
+                />
                 {optionQueries.products.data?.nextOffset != null ? (
                   <Button
                     type="button"
@@ -387,22 +408,23 @@ export function ReportsPage() {
                     {t("reports.moreOptions")}
                   </Button>
                 ) : null}
-              </label>
-              <label>
-                {t("reports.fields.gtin14")}
-                <input
-                  inputMode="numeric"
-                  pattern="[0-9]{14}"
-                  value={gtin14}
-                  onChange={(event) => setGtin14(event.target.value)}
-                />
-              </label>
+              </div>
+              <Input
+                label={t("reports.fields.gtin14")}
+                mono
+                inputMode="numeric"
+                pattern="[0-9]{14}"
+                value={gtin14}
+                onChange={(event) => setGtin14(event.target.value)}
+              />
               {reportType !== "summary" ? (
-                <label>
-                  {t("reports.fields.status")}
-                  <select value={status} onChange={(event) => setStatus(event.target.value)}>
-                    <option value="">{t("reports.any")}</option>
-                    {(reportType === "inventories"
+                <Select
+                  label={t("reports.fields.status")}
+                  value={status}
+                  onValueChange={setStatus}
+                  options={[
+                    { value: "", label: t("reports.any") },
+                    ...(reportType === "inventories"
                       ? [
                           "draft",
                           "preparing",
@@ -413,31 +435,26 @@ export function ReportsPage() {
                           "completed",
                         ]
                       : ["planned", "active", "closed"]
-                    ).map((value) => (
-                      <option key={value} value={value}>
-                        {t(`reports.filterStatuses.${value}`)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    ).map((value) => ({ value, label: t(`reports.filterStatuses.${value}`) })),
+                  ]}
+                />
               ) : null}
               {canIdentify &&
               ["shifts", "shift_operators"].includes(reportType) &&
               privacy !== "aggregate" ? (
-                <div>
-                  <label htmlFor="report-operator">{t("reports.fields.operator")}</label>
-                  <select
-                    id="report-operator"
+                <div className="report-option-field">
+                  <Select
+                    label={t("reports.fields.operator")}
                     value={operatorId}
-                    onChange={(event) => setOperatorId(event.target.value)}
-                  >
-                    <option value="">{t("reports.any")}</option>
-                    {(optionQueries.operators.data?.items ?? []).map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.name}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setOperatorId}
+                    options={[
+                      { value: "", label: t("reports.any") },
+                      ...(optionQueries.operators.data?.items ?? []).map((option) => ({
+                        value: option.id,
+                        label: option.name,
+                      })),
+                    ]}
+                  />
                   {optionQueries.operators.data?.nextOffset != null ? (
                     <Button
                       type="button"
@@ -465,21 +482,18 @@ export function ReportsPage() {
         </fieldset>
         <fieldset>
           <legend>{t("reports.sections.privacy")}</legend>
-          {["pseudonymous", "aggregate", ...(canIdentify ? ["identified"] : [])].map((mode) => (
-            <label key={mode}>
-              <input
-                type="radio"
-                name="privacy"
-                value={mode}
-                checked={privacy === mode}
-                onChange={() => {
-                  setPrivacy(mode as PlatformReportPrivacy);
-                  if (mode === "aggregate") setOperatorId("");
-                }}
-              />
-              {t(`reports.privacy.${mode}`)}
-            </label>
-          ))}
+          <RadioGroup
+            aria-label={t("reports.sections.privacy")}
+            name="privacy"
+            value={privacy}
+            options={["pseudonymous", "aggregate", ...(canIdentify ? ["identified"] : [])].map(
+              (value) => ({ value, label: t(`reports.privacy.${value}`) }),
+            )}
+            onValueChange={(mode) => {
+              setPrivacy(mode as PlatformReportPrivacy);
+              if (mode === "aggregate") setOperatorId("");
+            }}
+          />
           <p className="report-help">{t(`reports.privacyHelp.${privacy}`)}</p>
         </fieldset>
         {validationError ? <Alert tone="error">{t("reports.validationError")}</Alert> : null}

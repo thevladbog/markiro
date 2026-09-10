@@ -62,7 +62,22 @@ export async function loadShiftRows(tx: ReportTransaction, input: PlatformReport
         ${input.productId ? sql`AND s.product_id=${input.productId}::uuid` : sql``}
         ${input.gtin14 ? sql`AND p.gtin14=${input.gtin14}` : sql``}
         ${input.status ? sql`AND s.status::text=${input.status}` : sql``}
-        ${input.periodBasis === "production_date" ? sql`AND s.production_date BETWEEN ${input.fromDate}::date AND ${input.toDate}::date` : sql``}
+        ${
+          input.periodBasis === "production_date"
+            ? sql`AND s.production_date BETWEEN ${input.fromDate}::date AND ${input.toDate}::date`
+            : sql`AND (
+          ${inWindow(sql`s.created_at`, input)} OR ${inWindow(sql`s.opened_at`, input)} OR ${inWindow(sql`s.closed_at`, input)}
+          OR EXISTS (SELECT 1 FROM scan_events v WHERE v.tenant_id=s.tenant_id AND v.shift_id=s.id
+            AND ${inWindow(sql`v.scanned_at`, input)})
+          OR EXISTS (SELECT 1 FROM boxes b WHERE b.tenant_id=s.tenant_id AND b.shift_id=s.id
+            AND (${inWindow(sql`b.opened_at`, input)} OR ${inWindow(sql`b.closed_at`, input)}
+              OR ${inWindow(sql`b.print_verified_at`, input)} OR ${inWindow(sql`b.disassembled_at`, input)}))
+          OR EXISTS (SELECT 1 FROM box_exceptions x WHERE x.tenant_id=s.tenant_id AND x.shift_id=s.id
+            AND x.kind='reprint' AND ${inWindow(sql`x.occurred_at`, input)})
+          OR EXISTS (SELECT 1 FROM code_conflicts c WHERE c.tenant_id=s.tenant_id AND c.losing_shift_id=s.id
+            AND ${inWindow(sql`c.detected_at`, input)})
+        )`
+        }
     ), facts AS (
       SELECT s.tenant_id, s.id AS shift_id, v.operator_id, v.scanned_at AS at, 'scan_' || v.verdict AS kind, 0 AS sscc
       FROM selected s JOIN scan_events v ON v.shift_id=s.id AND v.tenant_id=s.tenant_id

@@ -772,6 +772,13 @@
     }
   },
   "reports": {
+    "calendar": {
+      "placeholder": "Choose a date",
+      "clear": "Clear date",
+      "title": "Calendar",
+      "previousMonth": "Previous month",
+      "nextMonth": "Next month"
+    },
     "title": "Operational reports",
     "description": "Generate an auditable CSV and definitions ZIP without production SQL access.",
     "forbidden": "Reports are unavailable for your role.",

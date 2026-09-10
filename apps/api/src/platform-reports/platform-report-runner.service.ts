@@ -149,7 +149,7 @@ export class PlatformReportRunnerService {
     }
   }
 
-  async reconcile(): Promise<void> {
+  async reconcile(dispatch: (reportId: string) => Promise<unknown>): Promise<void> {
     const now = new Date();
     // Cleanup before clearing artifact fields, and retry even already-expired rows:
     // late stale PUTs remain discoverable using the three deterministic keys.
@@ -221,7 +221,7 @@ export class PlatformReportRunnerService {
             .returning();
           if (changed) await this.recordFailure(tx, changed, "REPORT_RETRY_EXHAUSTED");
         });
-      } else await this.run(row.id);
+      } else await dispatch(row.id);
     }
   }
 

@@ -784,6 +784,17 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       );
 
       if (this.platformReports) {
+        await boss.createQueue("platform-report-run", {
+          policy: "stately",
+          retryLimit: 3,
+          retryDelay: 60,
+          expireInSeconds: 600,
+        });
+        this.workerIds.push(
+          await boss.work<{ reportId: string }>("platform-report-run", async (jobs) => {
+            for (const job of jobs) await this.platformReports!.run(job.data.reportId);
+          }),
+        );
         await boss.createQueue("platform-report-repair", {
           policy: "stately",
           retryLimit: 3,
@@ -792,7 +803,9 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         await boss.schedule("platform-report-repair", "* * * * *");
         this.workerIds.push(
           await boss.work("platform-report-repair", async () => {
-            await this.platformReports!.reconcile();
+            await this.platformReports!.reconcile((reportId) =>
+              boss.send("platform-report-run", { reportId }, { singletonKey: reportId }),
+            );
           }),
         );
         await boss.send("platform-report-repair", {});
@@ -1012,7 +1025,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       throw new Error("pg-boss database probe failed");
     }
     if (
-      this.workerIds.length !== 23 + (this.platformReports ? 1 : 0) ||
+      this.workerIds.length !== 23 + (this.platformReports ? 2 : 0) ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {

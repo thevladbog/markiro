@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createDb, ensurePartitions, schema } from "@markiro/db";
 import type { PlatformReportInput } from "@markiro/platform-contracts";
-import { sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { strFromU8, unzipSync } from "fflate";
 import {
@@ -302,6 +302,100 @@ describe.skipIf(!local)("platform report real Postgres projections", () => {
         })
       ).rows,
     ).toEqual([]);
+  });
+  it("retains old shifts with only one in-window fact source and excludes unrelated shifts", async () => {
+    const ids: string[] = Array.from({ length: 9 }, () => randomUUID());
+    const old = new Date("2026-08-01T00:00:00Z");
+    const at = new Date("2026-09-01T12:00:00Z");
+    try {
+      await db.insert(schema.shifts).values(
+        ids.map((id, index) => ({
+          id,
+          tenantId: tenant,
+          productId: product,
+          lineId: line,
+          mode: "validation" as const,
+          numberMonthKey: "AUG26",
+          numberSeq: index + 1,
+          createdAt: index === 7 ? at : old,
+          openedAt: old,
+          closedAt: old,
+        })),
+      );
+      await db.insert(schema.scanEvents).values({
+        tenantId: tenant,
+        shiftId: ids[0]!,
+        verdict: "ok",
+        raw: "fixture",
+        scannedAt: at,
+      });
+      for (const [index, timestamp] of [
+        "openedAt",
+        "closedAt",
+        "printVerifiedAt",
+        "disassembledAt",
+      ].entries()) {
+        await db.insert(schema.boxes).values({
+          tenantId: tenant,
+          shiftId: ids[index + 1]!,
+          deviceBoxId: `fact-${index}`,
+          openedAt: old,
+          closedAt: old,
+          printVerifiedAt: old,
+          disassembledAt: old,
+          [timestamp]: at,
+        });
+      }
+      await db.insert(schema.boxExceptions).values({
+        tenantId: tenant,
+        shiftId: ids[5]!,
+        boxId: box,
+        kind: "reprint",
+        reason: "fixture",
+        occurredAt: at,
+      });
+      await db.insert(schema.codeConflicts).values({
+        tenantId: tenant,
+        codeHash: "b".repeat(64),
+        losingShiftId: ids[6]!,
+        winningShiftId: shift,
+        losingScannedAt: old,
+        winningScannedAt: old,
+        detectedAt: at,
+      });
+      const result = await service.load(input);
+      const included = result.rows.filter((row) => ids.includes(String(row.shift_id)));
+      expect(included.map((row) => row.shift_id).sort()).toEqual(ids.slice(0, 8).sort());
+      expect(included.find((row) => row.shift_id === ids[0])).toMatchObject({ accepted_scans: 1 });
+      expect(included.find((row) => row.shift_id === ids[2])).toMatchObject({ boxes: 1 });
+      expect(included.find((row) => row.shift_id === ids[3])).toMatchObject({
+        print_confirmed_boxes: 1,
+      });
+      expect(included.find((row) => row.shift_id === ids[4])).toMatchObject({
+        disassembled_boxes: 1,
+      });
+      expect(included.find((row) => row.shift_id === ids[5])).toMatchObject({
+        reprint_requests: 1,
+      });
+      expect(included.find((row) => row.shift_id === ids[6])).toMatchObject({ conflicts: 1 });
+    } finally {
+      // Keep other projection tests isolated from these additional historical shifts.
+      await db.execute(
+        sql`DELETE FROM code_conflicts WHERE tenant_id=${tenant} AND code_hash=${"b".repeat(64)}`,
+      );
+      await db.execute(
+        sql`DELETE FROM box_exceptions WHERE tenant_id=${tenant} AND shift_id=${ids[5]}::uuid`,
+      );
+      await db.execute(
+        sql`DELETE FROM scan_events WHERE tenant_id=${tenant} AND shift_id=${ids[0]}::uuid`,
+      );
+      await db
+        .delete(schema.boxes)
+        .where(and(eq(schema.boxes.tenantId, tenant), inArray(schema.boxes.shiftId, ids)));
+      await db
+        .delete(schema.shifts)
+        .where(and(eq(schema.shifts.tenantId, tenant), inArray(schema.shifts.id, ids)));
+    }
   });
   it("retains unknown operators and hides conflicts where attribution is unavailable", async () => {
     const result = await service.load({ ...input, reportType: "shift_operators" });

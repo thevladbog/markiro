@@ -3555,6 +3555,8 @@ textarea {
 }
 
 .report-form fieldset {
+  display: grid;
+  gap: 14px;
   min-width: 0;
   margin: 0;
   padding: 16px;
@@ -3566,8 +3568,8 @@ textarea {
   font: 600 13px/1.4 var(--font-ui);
 }
 
-.report-form label,
-.report-tenants {
+.report-tenants,
+.report-option-field {
   display: grid;
   gap: 6px;
   font: var(--text-body);
@@ -3577,25 +3579,11 @@ textarea {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+  align-items: start;
 }
 
-.report-form input:not([type="checkbox"]):not([type="radio"]),
-.report-form select {
-  width: 100%;
+.report-form .mk-field {
   min-width: 0;
-  min-height: var(--control-md);
-  padding: 8px 10px;
-  border: 1px solid var(--line-strong);
-  background: var(--surface-card);
-  color: var(--fg-1);
-}
-
-.report-tenants > label,
-.report-form fieldset > label:has(input[type="radio"]) {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
 }
 
 .report-pagination,

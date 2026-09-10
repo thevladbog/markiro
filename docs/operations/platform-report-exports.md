@@ -8,6 +8,10 @@ Apply the tracked PostgreSQL migrations before enabling the worker. The API, job
 
 History states are `queued`, `processing`, `ready`, `failed` and `expired`. A ready report with zero rows is successful. Pending rows are reconciled by the scheduled worker, fenced leases prevent stale attempts from publishing, and generation stops rather than truncating when row or byte limits are exceeded. Artifacts expire after seven days; cleanup retries confirmed deletion. Download links are issued only for ready, unexpired reports and live for at most 300 seconds.
 
+The minute-scheduled `platform-report-repair` queue dispatches separate `platform-report-run` jobs with the report ID as their singleton key. Generation cannot block the repair worker while it processes the rest of a batch. Expiry cleanup revisits already-expired rows to remove late stale uploads across all three deterministic attempt keys; a failed deletion preserves the previous status and artifact pointer for retry.
+
+SaaS downloads navigate the current tab after the download-link POST completes; they do not require popup permission. Run the isolated regression with `pnpm --dir tools/production-browser --ignore-workspace test:reports`. It uses synthetic API responses and no production database.
+
 Monitor failed rows by their safe error code and the corresponding audit event. Do not log signed download URLs, report payloads or credentials. Creation, terminal failure and download are audited against the current platform principal and explicit tenant selection.
 
 ## Artifact interpretation

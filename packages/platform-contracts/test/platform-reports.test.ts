@@ -83,7 +83,7 @@ describe("platform operational report contracts", () => {
       { reportType: "commerceml", gtin14: "04601234567890" },
       { reportType: "commerceml", operatorId: uuid },
       { reportType: "commerceml", status: "ready" },
-      { reportType: "shifts", outcome: "accepted" },
+      { reportType: "shifts", outcome: "ok" },
       { reportType: "inventories", operatorId: uuid },
       { reportType: "summary", operatorId: uuid },
       { reportType: "summary", status: "closed" },
@@ -100,6 +100,10 @@ describe("platform operational report contracts", () => {
         false,
       );
     }
+    const outcome = platformReportContracts.create.body.safeParse({ ...valid, outcome: "ok" });
+    expect(outcome.error?.issues).toEqual([
+      { code: "custom", path: ["outcome"], message: "Outcome is CommerceML-only" },
+    ]);
     expect(
       platformReportContracts.create.body.safeParse({
         ...valid,

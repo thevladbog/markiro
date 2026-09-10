@@ -87,8 +87,58 @@ describe.skipIf(!local)("platform report durable lifecycle", () => {
   };
   const service = new PlatformReportsService(db, audit, storage, wake as never);
   const runner = new PlatformReportRunnerService(db, source, storage, audit);
+  const dispatch = vi.fn(async (_reportId: string) => undefined);
   const create = (parameters = input) =>
     service.create(principal, { ...parameters, idempotencyKey: randomUUID() });
+  it("dispatches individual reports without running them and records exhausted claims once", async () => {
+    const queued = await create();
+    const stale = await create();
+    const exhausted = await create();
+    await db
+      .update(schema.platformReports)
+      .set({
+        status: "processing",
+        attemptCount: 1,
+        leaseExpiresAt: new Date(Date.now() - 1),
+      })
+      .where(eq(schema.platformReports.id, stale.id));
+    await db
+      .update(schema.platformReports)
+      .set({
+        status: "processing",
+        attemptCount: 3,
+        leaseExpiresAt: new Date(Date.now() - 1),
+      })
+      .where(eq(schema.platformReports.id, exhausted.id));
+    dispatch.mockClear();
+    await runner.reconcile(dispatch);
+    expect(dispatch).toHaveBeenCalledWith(queued.id);
+    expect(dispatch).toHaveBeenCalledWith(stale.id);
+    expect(dispatch).not.toHaveBeenCalledWith(exhausted.id);
+    const [untouched] = await db
+      .select()
+      .from(schema.platformReports)
+      .where(eq(schema.platformReports.id, queued.id));
+    expect(untouched).toMatchObject({ status: "queued", attemptCount: 0 });
+    await runner.reconcile(dispatch);
+    const events = await db
+      .select()
+      .from(schema.platformAuditEvents)
+      .where(eq(schema.platformAuditEvents.targetId, exhausted.id));
+    expect(events.filter((event) => event.action === "platform.report.failed")).toEqual([
+      expect.objectContaining({
+        actorPlatformUserId: userId,
+        actorRole: "platform_admin",
+        tenantId: tenant,
+        action: "platform.report.failed",
+        outcome: "failure",
+        targetType: "platform_report",
+        targetId: exhausted.id,
+        reason: "REPORT_RETRY_EXHAUSTED",
+        after: { tenantIds: [tenant] },
+      }),
+    ]);
+  });
   it("does not let a full batch of deletion failures starve later expired reports", async () => {
     const ids = Array.from({ length: 101 }, () => randomUUID());
     await db.insert(schema.platformReports).values(
@@ -108,8 +158,8 @@ describe.skipIf(!local)("platform report durable lifecycle", () => {
       await realDelete(key);
     });
     try {
-      await runner.reconcile();
-      await runner.reconcile();
+      await runner.reconcile(dispatch);
+      await runner.reconcile(dispatch);
       const [row] = await db
         .select()
         .from(schema.platformReports)
@@ -368,7 +418,7 @@ describe.skipIf(!local)("platform report durable lifecycle", () => {
       .update(schema.platformReports)
       .set({ expiresAt: new Date(Date.now() - 1) })
       .where(eq(schema.platformReports.id, report.id));
-    await runner.reconcile();
+    await runner.reconcile(dispatch);
     expect(objects.has(`platform-reports/${report.id}/attempt-1/report.zip`)).toBe(false);
     expect(objects.has(row!.artifactObjectKey!)).toBe(false);
   });
@@ -445,8 +495,12 @@ describe.skipIf(!local)("platform report durable lifecycle", () => {
       .update(schema.platformReports)
       .set({ completedAt, expiresAt: new Date(Date.now() - 1000) })
       .where(eq(schema.platformReports.id, report.id));
-    await runner.reconcile();
-    await runner.reconcile();
+    await runner.reconcile(dispatch);
+    // A stale PUT may finish after the first expiry sweep already cleared the pointer.
+    const lateKey = `platform-reports/${report.id}/attempt-3/report.zip`;
+    objects.set(lateKey, { body: Buffer.from("late upload"), sha256: "unused" });
+    await runner.reconcile(dispatch);
+    expect(objects.has(lateKey)).toBe(false);
     const [row] = await db
       .select()
       .from(schema.platformReports)
@@ -528,7 +582,7 @@ describe.skipIf(!local)("platform report durable lifecycle", () => {
       .set({ expiresAt: new Date(Date.now() - 1) })
       .where(eq(schema.platformReports.id, report.id));
     await expect(service.download(principal, report.id)).rejects.toMatchObject({ status: 410 });
-    await runner.reconcile();
+    await runner.reconcile(dispatch);
     expect(objects.has(row!.artifactObjectKey!)).toBe(false);
   });
   it("defers source contention without consuming attempts and recovers on scheduled reconciliation", async () => {
@@ -541,7 +595,10 @@ describe.skipIf(!local)("platform report durable lifecycle", () => {
       .where(eq(schema.platformReports.id, report.id));
     expect(row).toMatchObject({ status: "queued", attemptCount: 0, leaseExpiresAt: null });
     spy.mockRestore();
-    await runner.reconcile();
+    dispatch.mockClear();
+    await runner.reconcile(dispatch);
+    expect(dispatch).toHaveBeenCalledWith(report.id);
+    await runner.run(report.id);
     const [done] = await db
       .select()
       .from(schema.platformReports)
@@ -626,7 +683,7 @@ describe.skipIf(!local)("platform report durable lifecycle", () => {
       if (key.includes(report.id)) throw new Error("storage unavailable");
       await realDelete(key);
     });
-    await runner.reconcile();
+    await runner.reconcile(dispatch);
     spy.mockRestore();
     const [pending] = await db
       .select()
@@ -634,7 +691,7 @@ describe.skipIf(!local)("platform report durable lifecycle", () => {
       .where(eq(schema.platformReports.id, report.id));
     expect(pending?.status).toBe("ready");
     expect(pending?.artifactObjectKey).not.toBeNull();
-    await runner.reconcile();
+    await runner.reconcile(dispatch);
     const [expired] = await db
       .select()
       .from(schema.platformReports)
