@@ -6,7 +6,8 @@ export function Input({
 }) {
   const [focus, setFocus] = React.useState(false);
   const floor = mode === "floor";
-  const uid = React.useMemo(() => id || "in-" + Math.random().toString(36).slice(2, 7), [id]);
+  const generatedId = React.useId();
+  const uid = id || generatedId;
   return (
     <label htmlFor={uid} style={{ display: "flex", flexDirection: "column", gap: 6, ...style }}>
       {label && <span style={{ font: floor ? "var(--floor-body-strong)" : "var(--text-caption)", color: "var(--fg-2)" }}>{label}</span>}
