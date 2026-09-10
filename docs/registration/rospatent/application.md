@@ -62,7 +62,7 @@
 | Материал                       | Где взять                                                                                        |
 | ------------------------------ | ------------------------------------------------------------------------------------------------ |
 | Листинг исходного текста в PDF | `pnpm rospatent:deposit` собирает `docs/registration/rospatent/build/deposit.pdf`                |
-| Реферат                        | `docs/registration/rospatent/abstract.md`, основная редакция                                     |
+| Реферат                        | `docs/registration/rospatent/abstract.md`, основная редакция; PDF-версия `build/abstract.pdf`    |
 | Титульный лист                 | Первый лист `deposit.pdf`: название, правообладатель, автор, версия, состояние исходного текста  |
 | Сводка о составе               | `docs/registration/rospatent/build/deposit-summary.json`: файлы, диапазоны строк, sha256, коммит |
 

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
 import {
+  REPOSITORY_ROOT,
   assertDepositablePath,
   buildDeposit,
   parseArguments,
@@ -48,6 +49,8 @@ test("validateManifest rejects incomplete manifests and duplicates", () => {
   assert.throws(() => validateManifest({ ...baseManifest, title: " " }), /title/u);
   assert.throws(() => validateManifest({ ...baseManifest, authors: [] }), /authors/u);
   assert.throws(() => validateManifest({ ...baseManifest, maxPages: 0 }), /maxPages/u);
+  assert.throws(() => validateManifest({ ...baseManifest, abstract: "/etc/x.md" }), /inside/u);
+  assert.throws(() => validateManifest({ ...baseManifest, abstract: "docs/a.txt" }), /Markdown/u);
   assert.throws(
     () =>
       validateManifest({ ...baseManifest, files: [...baseManifest.files, ...baseManifest.files] }),
@@ -76,12 +79,35 @@ test("buildDeposit writes the PDF and a summary, and enforces maxPages", async (
     const written = JSON.parse(await readFile(path.join(out, "deposit-summary.json"), "utf8"));
     assert.equal(written.pdf.sha256, summary.pdf.sha256);
     assert.equal(written.generatedAt, "2026-09-10T00:00:00.000Z");
+    const abstract = await readFile(path.join(out, "abstract.pdf"));
+    assert.ok(abstract.subarray(0, 8).toString("latin1").startsWith("%PDF-1.5"));
+    assert.equal(summary.abstract.bytes, abstract.length);
+    assert.equal(summary.abstract.edition, "Основная редакция");
+    assert.ok(summary.abstract.characters > 500);
+    assert.ok(summary.abstract.characters <= summary.abstract.maxCharacters);
+    assert.equal(summary.abstract.maxCharacters, 900);
 
-    await writeFile(manifestPath, JSON.stringify({ ...baseManifest, maxPages: 2 }));
-    await assert.rejects(
-      buildDeposit({ manifest: manifestPath, out, date: null }),
-      /above manifest\.maxPages/u,
+    // The manifest guard only accepts repository paths, so the oversized
+    // abstract lives in the gitignored build directory for the test's duration.
+    const longAbstract = path.join(
+      REPOSITORY_ROOT,
+      "docs/registration/rospatent/build",
+      `test-abstract-${process.pid}.md`,
     );
+    await mkdir(path.dirname(longAbstract), { recursive: true });
+    try {
+      await writeFile(longAbstract, `## Основная редакция\n\n${"слово ".repeat(200)}\n`);
+      await writeFile(
+        manifestPath,
+        JSON.stringify({ ...baseManifest, abstract: path.relative(REPOSITORY_ROOT, longAbstract) }),
+      );
+      await assert.rejects(
+        buildDeposit({ manifest: manifestPath, out, date: null }),
+        /above the Rospatent limit of 900/u,
+      );
+    } finally {
+      await rm(longAbstract, { force: true });
+    }
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
