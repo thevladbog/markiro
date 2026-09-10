@@ -206,9 +206,12 @@ describe("legal artifact descriptors", () => {
     },
   );
 
-  it("keeps render-only dependencies outside the root entry", () => {
+  it("keeps registry-bound rendering outside the root entry", () => {
     expect(legalDocuments).not.toHaveProperty("renderLegalDocx");
     expect(legalDocuments).not.toHaveProperty("artifactFileName");
+    // renderLegalDocxDraft is the exception: the API resolves with node10 and
+    // cannot reach a subpath export, and a draft touches no release.
+    expect(legalDocuments).toHaveProperty("renderLegalDocxDraft");
   });
 });
 
