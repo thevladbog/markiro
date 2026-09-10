@@ -1226,6 +1226,132 @@ test("v-b smoke verifies independent release identity, canonical redirect and ex
   );
 });
 
+test("waits for each public authority to accept TLS before checking routes", async () => {
+  const client = smokeClient();
+  const original = client.request;
+  const attempts = new Map();
+  const delays = [];
+  const origins = [
+    "https://app.markiro.example",
+    "https://saas-admin.markiro.example",
+    "https://kiosk.markiro.example",
+    "https://markiro.example",
+  ];
+  client.request = async (url, init, signal) => {
+    const target = new URL(url);
+    if (init.method === "HEAD" && target.pathname === "/") {
+      assert.equal(init.redirect, "manual");
+      assert.ok(signal instanceof AbortSignal);
+      const attempt = (attempts.get(target.origin) ?? 0) + 1;
+      attempts.set(target.origin, attempt);
+      if (attempt === 1) throw new TypeError("fetch failed");
+    } else {
+      assert.deepEqual(
+        [...attempts.entries()],
+        origins.map((origin) => [origin, 2]),
+      );
+    }
+    return original(url, init);
+  };
+  const docker = {
+    async run(command, args) {
+      if (args.includes("ps")) return { code: 0, stdout: "container-id\n", stderr: "" };
+      if (args[0] === "inspect") return { code: 0, stdout: "null\n", stderr: "" };
+      if (args.includes("id")) return { code: 0, stdout: "10001\n", stderr: "" };
+      return { code: 1, stdout: "", stderr: "" };
+    },
+  };
+
+  await runSmoke(
+    {
+      adminBaseUrl: origins[0],
+      saasAdminBaseUrl: origins[1],
+      kioskBaseUrl: origins[2],
+      landingBaseUrl: origins[3],
+      environment: {},
+      readinessAttempts: 3,
+      readinessIntervalMs: 7,
+      sleep: async (delay) => delays.push(delay),
+    },
+    client,
+    docker,
+  );
+
+  assert.deepEqual(delays, [7, 7, 7, 7]);
+});
+
+test("bounds public TLS readiness and identifies the failing authority without running mutations", async () => {
+  let requests = 0;
+  const delays = [];
+  await assert.rejects(
+    runSmoke(
+      {
+        adminBaseUrl: "https://localhost:18443",
+        kioskBaseUrl: "https://kiosk.localhost:18443",
+        landingBaseUrl: "https://landing.localhost:18443",
+        environment: {},
+        readinessAttempts: 3,
+        readinessIntervalMs: 7,
+        sleep: async (delay) => delays.push(delay),
+      },
+      {
+        async request(url, init) {
+          requests += 1;
+          assert.equal(init.method, "HEAD");
+          throw new TypeError("fetch failed", {
+            cause: Object.assign(new Error("sensitive upstream detail"), {
+              code: "ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR",
+            }),
+          });
+        },
+      },
+      { run: async () => assert.fail("Docker must not run before public TLS readiness") },
+    ),
+    {
+      message:
+        "Public endpoint https://localhost:18443 is unreachable after 3 attempts (ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR)",
+    },
+  );
+  assert.equal(requests, 3);
+  assert.deepEqual(delays, [7, 7]);
+});
+
+test("public readiness does not retry HTTP failures or route mutations", async (t) => {
+  for (const failure of ["http", "post"]) {
+    await t.test(failure, async () => {
+      const client = smokeClient();
+      const original = client.request;
+      let failures = 0;
+      client.request = async (url, init) => {
+        if (failure === "http" && new URL(url).pathname === "/") {
+          failures += 1;
+          return response({ status: 503 });
+        }
+        if (failure === "post" && init.method === "POST") {
+          failures += 1;
+          throw new Error("POST failed");
+        }
+        return original(url, init);
+      };
+      await assert.rejects(
+        runSmoke(
+          {
+            adminBaseUrl: "https://app.markiro.example",
+            kioskBaseUrl: "https://kiosk.markiro.example",
+            landingBaseUrl: "https://markiro.example",
+            environment: {},
+            sleep: async () => assert.fail("Route failures must not be retried"),
+          },
+          client,
+          { run: async () => assert.fail("Docker must not run after a route failure") },
+        ),
+        failure === "http" ? /shell/ : /POST failed/,
+      );
+      assert.equal(failures, failure === "http" ? 4 : 1);
+    });
+  }
+});
+
 test("smokes public routing, headers, and unprivileged runtime without accepting a proxied SPA", async () => {
   const client = smokeClient();
   const dockerCalls = [];
@@ -1253,7 +1379,7 @@ test("smokes public routing, headers, and unprivileged runtime without accepting
 
   assert.equal(
     client.requests.length,
-    ROUTE_CHECKS.length + KIOSK_ROUTE_CHECKS.length + LANDING_ROUTE_CHECKS.length + 6,
+    ROUTE_CHECKS.length + KIOSK_ROUTE_CHECKS.length + LANDING_ROUTE_CHECKS.length + 9,
   );
   assert.deepEqual(
     client.requests
