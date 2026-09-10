@@ -12,11 +12,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Construction
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -41,6 +44,7 @@ import app.markiro.handheld.core.design.Tone
 import app.markiro.handheld.core.scan.ScanEvent
 import app.markiro.handheld.core.scan.ScanSourceKind
 import app.markiro.handheld.core.scan.VendorProfiles
+import app.markiro.handheld.core.signal.SignalKind
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.util.TimeText
 
@@ -52,9 +56,13 @@ fun SettingsScreen(
     onScanner: () -> Unit,
     onTheme: (ThemeMode) -> Unit,
     onLanguage: (String) -> Unit,
+    onToggleSound: () -> Unit = {},
+    onVolume: (Float) -> Unit = {},
+    onToggleVibration: () -> Unit = {},
+    onTest: (SignalKind) -> Unit = {},
 ) {
     val c = MarkiroTheme.colors
-    Column(Modifier.fillMaxSize().background(c.surfacePage)) {
+    Column(Modifier.fillMaxSize().background(c.surfacePage).verticalScroll(rememberScrollState())) {
         AppBar(stringResource(R.string.settings_title), onBack)
         Column(Modifier.padding(horizontal = MarkiroSizes.sp4)) {
             SettingRow(stringResource(R.string.settings_scanner), sourceLabel(state), onScanner)
@@ -70,6 +78,31 @@ fun SettingsScreen(
                 },
             ) { onTheme(ThemeMode.entries[(state.theme.ordinal + 1) % ThemeMode.entries.size]) }
             Text(
+                stringResource(R.string.settings_signals),
+                style = MarkiroTheme.type.label,
+                color = c.fg3,
+                modifier = Modifier.padding(top = MarkiroSizes.sp4, bottom = MarkiroSizes.sp2),
+            )
+            SettingRow(
+                stringResource(R.string.settings_sound),
+                stringResource(if (state.soundMuted) R.string.settings_off else R.string.settings_on),
+                onToggleSound,
+            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
+                Text(stringResource(R.string.settings_volume), style = MarkiroTheme.type.body, color = c.fg1)
+                Slider(value = state.soundVolume, onValueChange = onVolume, enabled = !state.soundMuted, modifier = Modifier.weight(1f))
+            }
+            SettingRow(
+                stringResource(R.string.settings_vibration),
+                stringResource(if (state.vibrationEnabled) R.string.settings_on else R.string.settings_off),
+                onToggleVibration,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+                TestButton(stringResource(R.string.settings_test_ok), Modifier.weight(1f)) { onTest(SignalKind.OK) }
+                TestButton(stringResource(R.string.settings_test_duplicate), Modifier.weight(1f)) { onTest(SignalKind.DUPLICATE) }
+                TestButton(stringResource(R.string.settings_test_error), Modifier.weight(1f)) { onTest(SignalKind.ERROR) }
+            }
+            Text(
                 stringResource(R.string.settings_about),
                 style = MarkiroTheme.type.label,
                 color = c.fg3,
@@ -78,6 +111,12 @@ fun SettingsScreen(
             InfoRow(stringResource(R.string.settings_name), listOfNotNull(config?.deviceName, config?.lineName).joinToString(" · "))
             InfoRow(stringResource(R.string.settings_server), config?.serverUrl.orEmpty().removePrefix("https://"))
             InfoRow(stringResource(R.string.settings_version), state.version)
+            InfoRow(
+                stringResource(R.string.settings_sync),
+                state.lastSyncAt?.let { stringResource(R.string.settings_sync_value, state.queue, TimeText.hhmm(it)) }
+                    ?: stringResource(R.string.settings_sync_never, state.queue),
+            )
+            InfoRow(stringResource(R.string.settings_install_id), state.installId.takeLast(8))
             InfoRow(
                 stringResource(R.string.settings_operators),
                 config?.rosterFetchedAt?.let { stringResource(R.string.settings_operators_updated, TimeText.ddmmHhmm(it)) }
@@ -199,6 +238,16 @@ fun ComingSoonScreen(title: String, onBack: () -> Unit) {
             primaryIsAccent = false,
         )
     }
+}
+
+@Composable
+private fun TestButton(label: String, modifier: Modifier, onClick: () -> Unit) {
+    val c = MarkiroTheme.colors
+    val shape = RoundedCornerShape(MarkiroSizes.radius)
+    Box(
+        modifier.height(MarkiroSizes.controlIcon).clip(shape).background(c.surfaceCard).border(1.dp, c.lineStrong, shape).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, style = MarkiroTheme.type.body, color = c.fg1) }
 }
 
 @Composable

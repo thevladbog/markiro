@@ -51,12 +51,21 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit) {
                 } else {
                     StatusItem(Icons.Outlined.WifiOff, stringResource(R.string.hub_offline), Tone.Warn)
                 },
-                StatusItem(Icons.Outlined.Sync, stringResource(R.string.hub_queue, 0)),
+                StatusItem(Icons.Outlined.Sync, stringResource(R.string.hub_queue, state.queue), if (state.stuck) Tone.Err else Tone.Neutral),
                 StatusItem(Icons.Outlined.Print, stringResource(R.string.hub_printer)),
                 StatusItem(Icons.Outlined.QrCodeScanner, state.scannerLabel.ifEmpty { stringResource(R.string.hub_scanner) }),
             ),
         )
-        if (!state.reachable) Banner(stringResource(R.string.hub_offline_banner), Tone.Warn, Icons.Outlined.WifiOff)
+        if (state.stuck) {
+            Banner(stringResource(R.string.hub_sync_stuck), Tone.Err, Icons.Outlined.Sync)
+        } else if (!state.reachable) {
+            val text = if (state.queue > 0) {
+                stringResource(R.string.hub_offline_banner_queue, pluralStringResource(R.plurals.scans_queued, state.queue, state.queue))
+            } else {
+                stringResource(R.string.hub_offline_banner)
+            }
+            Banner(text, Tone.Warn, Icons.Outlined.WifiOff)
+        }
         Column(Modifier.padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
             Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -75,7 +84,14 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit) {
             // Intrinsic height keeps both tiles of a row equal when one status wraps to two lines.
             val tile = Modifier.weight(1f).fillMaxHeight()
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-                Tile(Icons.Outlined.Factory, stringResource(R.string.hub_tile_shift), shiftsLabel(state.shifts) + stamp, { onTile(HubTile.SHIFT) }, tile)
+                Tile(
+                    Icons.Outlined.Factory,
+                    stringResource(R.string.hub_tile_shift),
+                    state.continueShiftNumber?.let { stringResource(R.string.hub_shift_continue, it) } ?: (shiftsLabel(state.shifts) + stamp),
+                    { onTile(HubTile.SHIFT) },
+                    tile,
+                    statusTone = if (state.continueShiftNumber != null) Tone.Ok else Tone.Neutral,
+                )
                 Tile(Icons.Outlined.Inventory2, stringResource(R.string.hub_tile_inventory), inventoriesLabel(state.inventories), { onTile(HubTile.INVENTORY) }, tile)
             }
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
