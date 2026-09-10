@@ -29,7 +29,8 @@ const BOX_CARD = {
   id: "b1",
   sscc: "00000000000000000001",
   status: "disassembled" as const,
-  shiftId: "sh1",
+  shiftId: "00000000-0000-4000-8000-000000000123",
+  shiftNumber: "AUG26-003/S",
   productId: "p1",
   productName: "Молоко 1л",
   terminalId: "t1",
@@ -71,11 +72,11 @@ const BOX_CARD = {
   pickupOrders: [{ orderId: "o1", orderNo: "PU-26-0001", status: "punched" }],
 };
 
-function stubFetch() {
+function stubFetch(card: unknown = BOX_CARD) {
   const fetchMock = vi.fn(async (url: string) => {
     const path = String(url);
     if (path.startsWith("/api/code-search/boxes/")) {
-      return jsonResponse(200, BOX_CARD);
+      return jsonResponse(200, card);
     }
     return jsonResponse(404, { message: "not found" });
   });
@@ -91,6 +92,7 @@ function renderPage() {
         <Route path="/codes/km/:codeHash" element={<div>Code card stub</div>} />
         <Route path="/disaggregation/:id" element={<div>Doc stub</div>} />
         <Route path="/pickup/:id" element={<div>Order stub</div>} />
+        <Route path="/shifts/:shiftId" element={<div>Shift detail stub</div>} />
       </>,
     ),
     { initialEntries: [`/codes/box/${BOX_CARD.id}`] },
@@ -114,9 +116,31 @@ function renderPage() {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("BoxCardPage", () => {
+  it("links the saved human shift number to its details without displaying the UUID", async () => {
+    stubFetch();
+    const { router } = renderPage();
+    const user = userEvent.setup();
+
+    const link = await screen.findByRole("link", { name: "AUG26-003/S" });
+    expect(link.getAttribute("href")).toBe(`/shifts/${BOX_CARD.shiftId}`);
+    expect(screen.queryByText(BOX_CARD.shiftId)).toBeNull();
+    await user.click(link);
+    expect(router.state.location.pathname).toBe(`/shifts/${BOX_CARD.shiftId}`);
+    expect(await screen.findByText("Shift detail stub")).toBeDefined();
+  });
+
+  it("keeps an honest shift link when its human number is unavailable", async () => {
+    stubFetch({ ...BOX_CARD, shiftNumber: null });
+    renderPage();
+    const link = await screen.findByRole("link", { name: "Смена" });
+    expect(link.getAttribute("href")).toBe(`/shifts/${BOX_CARD.shiftId}`);
+    expect(screen.queryByText(BOX_CARD.shiftId)).toBeNull();
+  });
+
   it("renders 2 items with the removed row badged, and the disassemble exception with its DSG number", async () => {
     stubFetch();
     renderPage();
@@ -143,16 +167,26 @@ describe("BoxCardPage", () => {
     expect(orderLink.getAttribute("href")).toBe("/pickup/o1");
   });
 
-  it("opens the print-ready box report in a new tab", async () => {
-    stubFetch();
-    const openMock = vi.fn();
-    vi.stubGlobal("open", openMock);
-    const user = userEvent.setup();
-    renderPage();
+  it.each(["Europe/Moscow", "Asia/Vladivostok"])(
+    "opens the print-ready box report in the viewer's %s timezone",
+    async (timeZone) => {
+      stubFetch();
+      const options = new Intl.DateTimeFormat().resolvedOptions();
+      vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({
+        ...options,
+        timeZone,
+      });
+      const openMock = vi.fn();
+      vi.stubGlobal("open", openMock);
+      const user = userEvent.setup();
+      renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Распечатать" }));
-    expect(openMock).toHaveBeenCalledWith(`/api/code-search/boxes/${BOX_CARD.id}/report`);
-  });
+      await user.click(await screen.findByRole("button", { name: "Распечатать" }));
+      expect(openMock).toHaveBeenCalledWith(
+        `/api/code-search/boxes/${BOX_CARD.id}/report?${new URLSearchParams({ timeZone })}`,
+      );
+    },
+  );
 
   it("offers a back link to the code registry", async () => {
     stubFetch();

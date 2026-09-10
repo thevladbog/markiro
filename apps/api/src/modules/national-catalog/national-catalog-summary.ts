@@ -52,6 +52,7 @@ export function summaryForCatalogLink(
     name: string;
     printName: string | null;
     shelfLifeDays: number | null;
+    egaisCode?: string | null;
     chzProductGroupCode: number | null;
   },
   imageChecksum: string | null,

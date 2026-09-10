@@ -155,3 +155,201 @@ it("keeps photo viewing separate from selection and retains the viewed-photo rec
     reviewedCandidateId: id(30),
   });
 });
+
+it("reviews one product at a time and applies choices from every tab", async () => {
+  const { props, preview, onApply } = review();
+  const second = structuredClone(preview);
+  second.id = id(50);
+  second.itemId = id(51);
+  second.productId = null;
+  second.identity.name = "Кефир";
+  second.fields[0]!.id = id(52);
+  second.fields[0]!.after = "Кефир";
+  props.data.items.push(second);
+  render(<ImportReview {...props} />, { wrapper: MemoryRouter });
+  const user = userEvent.setup();
+  expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
+  expect(screen.queryByRole("group", { name: /· Кефир/ })).toBeNull();
+  await user.click(screen.getByRole("radio", { name: /Название товара.*Предлагаемое/ }));
+  await user.click(screen.getByRole("tab", { name: /Кефир/ }));
+  expect(screen.queryByRole("group", { name: /· Молоко/ })).toBeNull();
+  await user.click(screen.getByRole("radio", { name: /Название товара.*Сейчас/ }));
+  await user.click(screen.getByRole("tab", { name: /Молоко/ }));
+  expect(
+    screen
+      .getByRole("radio", { name: /Название товара.*Предлагаемое/ })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
+  expect(screen.getByRole("tab", { name: /Кефир.*Требует выбора/ })).toBeDefined();
+  expect(screen.getByRole("button", { name: "Применить выбранное" }).hasAttribute("disabled")).toBe(
+    true,
+  );
+  await user.click(screen.getByRole("tab", { name: /Кефир/ }));
+  await user.click(screen.getByRole("radio", { name: /Название товара.*Предлагаемое/ }));
+  await user.click(screen.getByRole("button", { name: "Применить выбранное" }));
+  expect(onApply).toHaveBeenCalledWith([
+    {
+      previewId: id(12),
+      acceptedEntryIds: [id(13)],
+      linkAction: "attach",
+      photo: { kind: "keep" },
+    },
+    {
+      previewId: id(50),
+      acceptedEntryIds: [id(52)],
+      linkAction: "attach",
+      photo: { kind: "keep" },
+    },
+  ]);
+});
+
+it("keeps tab, drafts and matching choices through a new preparation without submitting stale IDs", async () => {
+  const { props, preview, onApply } = review();
+  preview.linkAction = "replace";
+  preview.categoryOptions = [{ optionId: id(40), label: "Молочная продукция", selected: false }];
+  preview.photos = [
+    {
+      candidateId: id(30),
+      state: "ready",
+      previewPath: null,
+      primary: true,
+      selectedByDefault: true,
+      reason: null,
+    },
+  ];
+  const second = structuredClone(preview);
+  second.id = id(50);
+  second.itemId = id(51);
+  second.identity.name = "Кефир";
+  second.linkAction = "attach";
+  second.fields[0]!.id = id(52);
+  props.data.items.push(second);
+  const view = render(<ImportReview {...props} />, { wrapper: MemoryRouter });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("radio", { name: /Название товара.*Предлагаемое/ }));
+  await user.click(screen.getByRole("checkbox", { name: /Подтверждаю замену/ }));
+  await user.click(screen.getByRole("radio", { name: "Сохранить текущее фото" }));
+  await user.type(screen.getByLabelText("Название вручную"), "Моё название");
+  await user.selectOptions(screen.getByLabelText("Начальная категория"), id(40));
+  await user.click(screen.getByRole("tab", { name: /Кефир/ }));
+  const refreshed = structuredClone(props.data);
+  refreshed.preparation.id = id(60);
+  refreshed.items[0]!.id = id(61);
+  refreshed.items[0]!.fields[0]!.id = id(62);
+  refreshed.items[1]!.id = id(63);
+  refreshed.items[1]!.fields[0]!.id = id(64);
+  view.rerender(<ImportReview {...props} data={refreshed} />);
+  expect(screen.getByRole("tab", { name: /Кефир/ }).getAttribute("aria-selected")).toBe("true");
+  await user.click(screen.getByRole("tab", { name: /Молоко/ }));
+  expect((screen.getByLabelText("Название вручную") as HTMLInputElement).value).toBe(
+    "Моё название",
+  );
+  expect((screen.getByLabelText("Начальная категория") as HTMLSelectElement).value).toBe(id(40));
+  expect(
+    screen.getByRole("checkbox", { name: /Подтверждаю замену/ }).getAttribute("aria-checked"),
+  ).toBe("false");
+  expect(screen.getByRole("button", { name: "Применить выбранное" }).hasAttribute("disabled")).toBe(
+    true,
+  );
+  await user.click(screen.getByRole("checkbox", { name: /Подтверждаю замену/ }));
+  await user.click(screen.getByRole("button", { name: "Применить выбранное" }));
+  expect(onApply).toHaveBeenCalledWith([
+    {
+      previewId: id(61),
+      acceptedEntryIds: [id(62)],
+      linkAction: "replace",
+      photo: { kind: "keep" },
+    },
+    { previewId: id(63), acceptedEntryIds: [], linkAction: "attach", photo: { kind: "keep" } },
+  ]);
+});
+
+it("does not carry accepted values or photo receipts onto changed provider data", async () => {
+  const { props, preview, onApply } = review();
+  preview.photos = [
+    {
+      candidateId: id(30),
+      state: "ready",
+      previewPath: null,
+      primary: true,
+      selectedByDefault: true,
+      reason: null,
+    },
+  ];
+  const view = render(<ImportReview {...props} />, { wrapper: MemoryRouter });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("radio", { name: /Название товара.*Предлагаемое/ }));
+  fireEvent.load(screen.getByRole("img", { name: "Подготовленное фото товара" }));
+  await user.click(screen.getByRole("radio", { name: "Выбрать это фото" }));
+  const refreshed = structuredClone(props.data);
+  refreshed.preparation.id = id(60);
+  refreshed.items[0]!.id = id(61);
+  refreshed.items[0]!.fields[0]!.id = id(62);
+  refreshed.items[0]!.fields[0]!.after = "Другое название";
+  refreshed.items[0]!.photos[0]!.candidateId = id(63);
+  view.rerender(<ImportReview {...props} data={refreshed} />);
+  expect(
+    screen.getByRole("radio", { name: /Название товара.*Сейчас/ }).getAttribute("aria-checked"),
+  ).toBe("true");
+  expect(
+    screen.getByRole("radio", { name: "Сохранить текущее фото" }).getAttribute("aria-checked"),
+  ).toBe("true");
+  await user.click(screen.getByRole("button", { name: "Применить выбранное" }));
+  expect(onApply).toHaveBeenCalledWith([
+    { previewId: id(61), acceptedEntryIds: [], linkAction: "attach", photo: { kind: "keep" } },
+  ]);
+});
+
+it("filters only unmapped fields across tabs without changing the batch decisions", async () => {
+  const { props, preview, onApply } = review();
+  preview.categoryOptions = [{ optionId: id(40), label: "Молочная продукция", selected: false }];
+  preview.fields.push({
+    id: id(41),
+    label: "Несопоставленная характеристика",
+    before: null,
+    after: "Значение из ЧЗ",
+    applicable: false,
+    reason: "attribute_not_importable",
+    source: "national_catalog",
+    selectedByDefault: false,
+    requiresEntryIds: [],
+  });
+  const second = structuredClone(preview);
+  second.id = id(50);
+  second.itemId = id(51);
+  second.identity.name = "Кефир";
+  second.fields[0]!.id = id(52);
+  second.fields[1]!.id = id(53);
+  props.data.items.push(second);
+  render(<ImportReview {...props} />, { wrapper: MemoryRouter });
+  const user = userEvent.setup();
+  const filter = screen.getByRole("checkbox", { name: "Отображать только сопоставимые поля" });
+  expect(filter.getAttribute("aria-checked")).toBe("false");
+  expect(screen.getByRole("group", { name: "Несопоставленная характеристика" })).toBeDefined();
+  await user.click(screen.getByRole("radio", { name: /Название товара.*Предлагаемое/ }));
+  await user.click(filter);
+  expect(screen.queryByRole("group", { name: "Несопоставленная характеристика" })).toBeNull();
+  expect(screen.getByLabelText("Название вручную")).toBeDefined();
+  expect(screen.getByLabelText("Начальная категория")).toBeDefined();
+  expect(screen.getByRole("radio", { name: "Сохранить текущее фото" })).toBeDefined();
+  await user.click(screen.getByRole("tab", { name: /Кефир/ }));
+  expect(screen.queryByRole("group", { name: "Несопоставленная характеристика" })).toBeNull();
+  await user.click(filter);
+  expect(screen.getByRole("group", { name: "Несопоставленная характеристика" })).toBeDefined();
+  await user.click(screen.getByRole("tab", { name: /Молоко/ }));
+  expect(
+    screen
+      .getByRole("radio", { name: /Название товара.*Предлагаемое/ })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
+  await user.click(screen.getByRole("button", { name: "Применить выбранное" }));
+  expect(onApply).toHaveBeenCalledWith([
+    {
+      previewId: id(12),
+      acceptedEntryIds: [id(13)],
+      linkAction: "attach",
+      photo: { kind: "keep" },
+    },
+    { previewId: id(50), acceptedEntryIds: [], linkAction: "attach", photo: { kind: "keep" } },
+  ]);
+});

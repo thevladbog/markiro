@@ -10,6 +10,7 @@ import {
 import {
   currentChoice,
   initialChoice,
+  reconcileChoice,
   toggleField,
 } from "../src/pages/catalog/national-catalog/reviewState.js";
 import { id, previewFixture } from "./national-catalog-fixtures.js";
@@ -19,6 +20,50 @@ afterEach(() => {
 });
 const identity = identityKey("tenant", "user");
 const expiresAt = "2026-09-09T00:00:01.000Z";
+it("never copies one accepted field onto ambiguous duplicate fields in a new preparation", () => {
+  const before = structuredClone(previewFixture.items[0]!);
+  const after = structuredClone(before);
+  after.id = id(60);
+  after.fields = [
+    { ...before.fields[0]!, id: id(61) },
+    { ...before.fields[0]!, id: id(62) },
+  ];
+  expect(reconcileChoice(after, before, initialChoice(before)).decision.acceptedEntryIds).toEqual(
+    [],
+  );
+});
+
+it("drops a dependent field when its category changes even when the displayed dependent value matches", () => {
+  const before = structuredClone(previewFixture.items[0]!);
+  before.fields.push(
+    {
+      ...before.fields[0]!,
+      id: id(40),
+      labelKey: "category",
+      label: "Категория",
+      after: "Молочные товары",
+    },
+    {
+      ...before.fields[0]!,
+      id: id(41),
+      labelKey: "print_name",
+      label: "Название для печати",
+      after: "Молоко",
+      requiresEntryIds: [id(40)],
+    },
+  );
+  before.categoryOptions = [{ optionId: id(42), label: "Молочные товары", selected: true }];
+  const after = structuredClone(before);
+  after.id = id(60);
+  after.fields[0]!.id = id(61);
+  after.fields[1]!.id = id(62);
+  after.fields[2]!.id = id(63);
+  after.fields[2]!.requiresEntryIds = [id(62)];
+  after.categoryOptions[0]!.optionId = id(64);
+  expect(reconcileChoice(after, before, initialChoice(before)).decision.acceptedEntryIds).toEqual([
+    id(61),
+  ]);
+});
 it("expires prepare intents but preserves unresolved applies beyond sessionTTL for receipt recovery", () => {
   const time = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-09T00:00:00Z"));
   const prepare = importPrepareSchema.parse({

@@ -99,22 +99,24 @@ export function UpdateCenter({
       }
     >
       <div className="station-update-center" data-update-severity={controller.severity}>
-        <p className="station-update-center__version" aria-live="polite">
-          <span>{t("updates.installed")}</span>
-          <strong>
-            {installedVersion === undefined
-              ? t("updates.versionLoading")
-              : (installedVersion ?? t("updates.versionUnavailable"))}
-          </strong>
-        </p>
-        {available ? (
-          <>
+        <div className="station-update-center__versions">
+          <p className="station-update-center__version" aria-live="polite">
+            <span>{t("updates.installed")}</span>
+            <strong>
+              {installedVersion === undefined
+                ? t("updates.versionLoading")
+                : (installedVersion ?? t("updates.versionUnavailable"))}
+            </strong>
+          </p>
+          {available ? (
             <p className="station-update-center__version">
               <span>{t("updates.available")}</span>
               <strong>{available.version}</strong>
             </p>
-            <p>{t(`updates.age.${controller.severity}`)}</p>
-          </>
+          ) : null}
+        </div>
+        {available ? (
+          <p>{t(`updates.age.${controller.severity}`)}</p>
         ) : (
           <p>{t("updates.current")}</p>
         )}
