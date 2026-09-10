@@ -108,6 +108,7 @@ class InventoryWorkViewModelTest {
         assertEquals(InventoryVerdict.DUPLICATE, vm.state.first { it.last?.verdict == InventoryVerdict.DUPLICATE }.last?.verdict)
         scans.tryEmit(ScanEvent("garbage", null, "debug", 0))
         assertEquals(InventoryVerdict.INVALID, vm.state.first { it.last?.verdict == InventoryVerdict.INVALID }.last?.verdict)
+        awaitSignals(3)
         assertEquals(listOf(SignalKind.OK, SignalKind.DUPLICATE, SignalKind.ERROR), played)
         // An invalid scan is not an event, so the feed holds the two recorded ones.
         assertEquals(2, vm.state.first { it.feed.size == 2 }.feed.size)
