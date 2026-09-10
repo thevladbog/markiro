@@ -270,7 +270,6 @@ export function CodeSearchPage() {
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
         <div style={{ width: 180 }}>
           <DatePicker
-            placeholder={t("common.datePicker.placeholder")}
             label={t("pages.codeSearch.filters.fromLabel")}
             placeholder={t("common.datePicker.placeholder")}
             clearLabel={t("common.datePicker.clear")}
@@ -287,7 +286,6 @@ export function CodeSearchPage() {
         </div>
         <div style={{ width: 180 }}>
           <DatePicker
-            placeholder={t("common.datePicker.placeholder")}
             label={t("pages.codeSearch.filters.toLabel")}
             placeholder={t("common.datePicker.placeholder")}
             clearLabel={t("common.datePicker.clear")}
@@ -304,7 +302,6 @@ export function CodeSearchPage() {
         </div>
         <div style={{ width: 180 }}>
           <DatePicker
-            placeholder={t("common.datePicker.placeholder")}
             label={t("pages.codeSearch.filters.productionFromLabel")}
             placeholder={t("common.datePicker.placeholder")}
             clearLabel={t("common.datePicker.clear")}
@@ -321,7 +318,6 @@ export function CodeSearchPage() {
         </div>
         <div style={{ width: 180 }}>
           <DatePicker
-            placeholder={t("common.datePicker.placeholder")}
             label={t("pages.codeSearch.filters.productionToLabel")}
             placeholder={t("common.datePicker.placeholder")}
             clearLabel={t("common.datePicker.clear")}
