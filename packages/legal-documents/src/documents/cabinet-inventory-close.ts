@@ -211,4 +211,220 @@ export const CABINET_INVENTORY_CLOSE_CONTENT = {
       },
     ],
   },
+  en: {
+    locale: "en",
+    title: "Cabinet: monitoring, closing and inventory documents",
+    summary:
+      "This is an informational translation. The matching Russian revision is authoritative. Manager's guide for the work after an inventory is launched: watching the progress, corrections, closing, late events, final documents and completion.",
+    sections: [
+      {
+        id: "purpose",
+        heading: "1. Purpose",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "This instruction covers the manager's work after an inventory is launched: watching the recount progress, corrections, closing the task, resolving late events, generating the final documents and completing the inventory. Preparation and launch are covered by instruction MKR-INS-06, and the operators' work on the terminals by MKR-INS-05.",
+          },
+          {
+            kind: "paragraph",
+            text: "A task goes through three states: “Running” — the recount is under way; “Closed” — the result is frozen, but late events can still be resolved and documents generated; “Completed” — the work is over and no changes are possible.",
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "The screenshots use demo data. The numbers, quantities and names in your cabinet will differ.",
+          },
+        ],
+      },
+      {
+        id: "live",
+        heading: "2. Inventory progress",
+        blocks: [
+          {
+            kind: "step",
+            title: "Watch the counters and the participants",
+            text: "The inventory page shows the current results: “Expected”, “Verified”, “Missing”, “Discrepancies”. Below them you see the participants — the terminals working on the task and the names of the operators on them — and their current state: in the screenshot these are “Active” and “Offline”; the cabinet also shows a state when an operator leaves the task. The “New boxes” and “Recent events” panels show the recount progress box by box — together with the print state of each — and the recent scans.",
+            image: {
+              id: "live",
+              caption: "Inventory progress: counters, participants, boxes",
+            },
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "A line about unsynced events means that some of the scans have not reached the server from the terminals yet. This is normal on a weak connection: wait for the sync before judging the discrepancies.",
+          },
+        ],
+      },
+      {
+        id: "corrections",
+        heading: "3. Corrections",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "Corrections are available only while the inventory is running. Every action requires a reason and is retained as immutable audit evidence: the record itself cannot be revoked. Some actions have a counterpart — a voided scan can be restored and a date can be set again; the rest have no counterpart.",
+          },
+          {
+            kind: "step",
+            title: "Find the event you need and pick an action",
+            text: "Open “Corrections”. The events are gathered in the “Scan events” panel: the “Discrepancies” tab shows only the items that need attention, “All scans” shows the whole list; the search and the “Event type” and “Classification” filters help you find a particular scan. Every event is labelled with its code in a readable form, and the full code is copied with the “Copy code” button. The set of buttons depends on the state of the item: on one event these are “Void scan” and “Change date”, on another “Void scan” and “Remove from box”, on an already voided one only “Restore scan”, and some events have no actions at all. The checkboxes on the left and “Select page” let you void scans or change the date on several events at once — the batch action buttons appear once you make a selection, and the reason and the outcome are recorded in the audit trail separately for every affected code. In the “New boxes” panel, “Invalidate box” is available on every box that has not been invalidated yet, while “Queue reprint request” is available only on a box that is closed and printed.",
+            image: {
+              id: "corrections-list",
+              caption: "Corrections: scan events and boxes",
+            },
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "“Invalidate box” is irreversible: there is no counter-correction for it, and the cabinet does not ask again — the box is invalidated as soon as you give a reason. A box invalidated from the cabinet stays a closing blocker forever: such an inventory can then only be closed as an emergency, and the box itself and its contents will not appear in the final box documents. Check the box number before saving. A box may also turn out invalidated without you — the cabinet marks such a box “Invalidated (scan conflict)”, and one invalidated from the cabinet “Invalidated (from the cabinet)”. The first one can still be returned to work on the line, see section 4.",
+          },
+          {
+            kind: "step",
+            title: "Give a reason and save",
+            text: "The “Correction” form with the selected code opens below the list. Fill in “Correction reason” — the field is required — and, for a date change, also “New production date”. The confirmation button is named after the action — in the screenshot it is “Change date”. Press it and the record goes to the audit trail.",
+            image: { id: "corrections-form", caption: "The correction form with a reason" },
+            expected: "The cabinet reported that the correction was saved to the audit trail.",
+          },
+        ],
+      },
+      {
+        id: "close",
+        heading: "4. Closing the inventory",
+        blocks: [
+          {
+            kind: "step",
+            title: "Run the pre-close check",
+            text: "Press “Close inventory”. The system checks the stations, the local queues, the boxes and the required discrepancies. A safe close is available only when not a single blocker is left: the operators have left the task, the terminal queues are empty, every box is closed and printed, and there are no discrepancies. The cabinet then reports that there are no blockers and that the result will freeze at the current revision — press “Close safely”.",
+            image: { id: "close-ready", caption: "The pre-close check: no blockers" },
+            expected: "The inventory is closed and the result is frozen.",
+          },
+          {
+            kind: "step",
+            title: "Resolve the blockers",
+            text: "The cabinet lists what stands in the way of closing. The blockers in the screenshot are cleared on the line: “Active stations” and “Offline stations” — ask the operators to leave the task; “Unsynced events” — wait until the terminals upload the scans; “Open boxes” and “Open boxes reported by stations” — ask for the boxes to be closed. Unfinished box printing is cleared the same way: the blocker goes away once the terminal finishes printing the label. Once the cause is gone, run the check again.",
+            image: { id: "close-blocked", caption: "The pre-close check: the list of blockers" },
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Two more blockers are not that easy to clear. The cabinet lists invalidated boxes as two separate lines, and what to do with them depends on which line you are looking at. “Boxes invalidated by a scan conflict” — the system invalidated those itself; an operator can return such a box to work from the terminal, which the cabinet says in a hint under the line — the blocker then clears, but the box has to be packed again (this is covered by instruction MKR-INS-05). “Boxes invalidated from the cabinet” is your own “Invalidate box” action; it cannot be undone, and that blocker stays until an emergency close. The same marker is shown on the box itself in the “New boxes” panel and on the “Corrections” page: “Invalidated (scan conflict)” or “Invalidated (from the cabinet)”. Required discrepancies without a decision are resolved in the cabinet. An unknown or ineligible scan is cleared by the “Void scan” button: voided scans do not count as a discrepancy and do not stand in the way of closing, and if you voided too much, “Restore scan” returns the code to its original category. A production-date discrepancy is cleared by “Change date”: the blocker goes away once the date you set matches the date from the snapshot. A code that lies in an open box has no such button at first — press “Remove from box” first and “Change date” appears; a code in a closed or invalidated box has no “Remove from box” either, and such a discrepancy is closed with the “Void scan” button as well. Only the blocker of boxes invalidated from the cabinet cannot be cleared: with it the task is closed as an emergency.",
+          },
+          {
+            kind: "step",
+            title: "An emergency close — only when the blockers cannot be cleared",
+            text: "If waiting is not an option (a terminal broke down, for example), an emergency close is available: fill in “Emergency close reason”, confirm “I understand that the blockers will remain in the frozen result”, then press “Emergency close”.",
+            image: {
+              id: "close-emergency",
+              caption: "An emergency close with a mandatory reason",
+            },
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "An emergency close does not clear the blockers: you confirm that they “will remain in the frozen result”. They will not be in the documents themselves — the final documents contain neither the list of blockers nor the reason for the emergency close, and both stay in the task and in the audit trail. The consequences show up differently: boxes left open or invalidated will not appear in the box documents at all, and the codes whose scans did not make it from the terminals stay missing and end up in the list of codes to write off. Use this path only when a normal close is truly impossible.",
+          },
+        ],
+      },
+      {
+        id: "late-events",
+        heading: "5. Late events",
+        blocks: [
+          {
+            kind: "step",
+            title: "Resolve the batches that arrived after the close",
+            text: "Events that caught up with the server after the close are gathered into batches with the “Decision required” status. Tick the batches you need, give a “Decision reason” and press “Exclude selected” — they will then not be counted in the result. No more than 100 batches can be selected at a time. If the data has to be reprocessed as a whole, use the “Reopen for replay” button: it returns the whole inventory to work rather than the selected batch alone, and works the same way as the “Reopen” button from section 7 — the result revision will increase, the close details will be cleared, and the documents that were already generated will be invalidated and can no longer be downloaded (see section 7).",
+            image: { id: "late-events", caption: "Late events: batches and decisions" },
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "While there are batches with the “Decision required” status, the inventory cannot be completed — the cabinet will ask you to resolve the late events first.",
+          },
+        ],
+      },
+      {
+        id: "documents",
+        heading: "6. Final documents",
+        blocks: [
+          {
+            kind: "step",
+            title: "Pick the formats and generate the documents",
+            text: "After the close, open “Final documents”, tick the formats you need from the approved catalog under “Documents to generate” and press “Generate documents”.",
+            image: { id: "documents-catalog", caption: "Picking the final document formats" },
+          },
+          {
+            kind: "step",
+            title: "Wait until they are ready and download them",
+            text: "The “Generation history” block shows the state of every run, for example “Processing” or “Ready” — other states occur too, including queuing and a generation failure. Ready documents are downloaded one by one or with the “Download ZIP” button. If the generation failed, the retry button does not appear for every error: when it is missing, tick the formats under “Documents to generate” and generate the documents again.",
+            image: { id: "documents-history", caption: "The generation history and downloading" },
+            expected: "Every document of the current result has been downloaded.",
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "Documents are bound to the result revision. If the inventory is reopened, the documents generated earlier are invalidated and can no longer be downloaded. The task returns to work at the same time, so the documents can only be generated again after another close.",
+          },
+        ],
+      },
+      {
+        id: "completion",
+        heading: "7. Completion and reopening",
+        blocks: [
+          {
+            kind: "step",
+            title: "Complete the inventory",
+            text: "Once the documents are downloaded and checked, tick “Final documents have been downloaded and checked” and press “Complete inventory”. After completion the task can no longer be changed.",
+            image: { id: "completion", caption: "Completing the inventory" },
+            expected: "The inventory is completed.",
+          },
+          {
+            kind: "step",
+            title: "Reopen only when it is truly necessary",
+            text: "A closed inventory can be reopened with the “Reopen” button. The cabinet lists the consequences and asks for a “Confirm reopen”. Reopening increases the result revision and clears the close details; the final documents that were already generated are invalidated and can no longer be downloaded — after another close they have to be generated again; pending late events become available for processing again. Confirm only if you are ready to rebuild the result and the documents from scratch.",
+            image: { id: "reopen", caption: "Confirming the inventory reopen" },
+          },
+        ],
+      },
+      {
+        id: "troubleshooting",
+        heading: "8. Frequently asked questions",
+        blocks: [
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "The close button does not work because of the terminals",
+                detail:
+                  "The operators are still in the task or a terminal has lost the connection. Ask them to leave the task and wait for the sync, then run the check again.",
+              },
+              {
+                term: "There are more discrepancies than expected",
+                detail:
+                  "First wait until every event is synced: unsynced scans are not counted in the counters. The remaining discrepancies are resolved with corrections: a mistaken or foreign scan is cleared by “Void scan” — voided scans do not count as a discrepancy — and a production-date discrepancy is closed by “Change date” (see section 4).",
+              },
+              {
+                term: "Completion is unavailable",
+                detail:
+                  "Completion opens up after the final documents are generated, downloaded and marked as checked, and the late events are resolved.",
+              },
+              {
+                term: "The documents are marked as invalidated",
+                detail:
+                  "The inventory was reopened — the documents belong to the previous result revision and can no longer be downloaded. Close the task once more, then generate the documents again and download them.",
+              },
+              {
+                term: "Made a mistake in a correction",
+                detail:
+                  "Corrections are immutable and stay in the audit trail. A voided scan is brought back by the “Restore scan” button and a date can be set again — the history keeps both actions. “Invalidate box” has no counterpart: the box stays invalidated, and the inventory can then only be closed as an emergency.",
+              },
+            ],
+          },
+          {
+            kind: "paragraph",
+            text: "If your problem is not listed above, contact Markiro support: hello@v-b.tech.",
+          },
+        ],
+      },
+    ],
+  },
 } as const satisfies LegalDocumentSource["content"];
