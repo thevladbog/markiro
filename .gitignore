@@ -58,3 +58,7 @@ apps/handheld/.kotlin/
 
 # Generated Rospatent deposit listing; sources and manifest stay tracked under docs/registration/.
 docs/registration/rospatent/build/
+
+# Locally rendered legal drafts that are not registry releases; published
+# artifacts live under apps/landing/public/legal/.
+packages/legal-documents/.local/

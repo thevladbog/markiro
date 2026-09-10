@@ -1,4 +1,5 @@
-export { renderLegalDocx } from "./docx.js";
+export { renderLegalDocx, renderLegalDocxDraft } from "./docx.js";
+export type { LegalDocxDraft } from "./docx.js";
 export { describeLegalArtifact } from "./manifest.js";
 export type { LegalArtifactDescriptor } from "./manifest.js";
 export { artifactFileName } from "./names.js";

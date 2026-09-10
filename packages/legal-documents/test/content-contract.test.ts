@@ -26,6 +26,11 @@ const blockText = (block: LegalBlock): string => {
   if (block.kind === "definition-list") {
     return block.items.map(({ term, detail }) => `${term} — ${detail}`).join(" ");
   }
+  if (block.kind === "table") {
+    return [block.columns.join(" "), ...block.rows.map((row) => row.join(" ")), block.caption]
+      .filter(Boolean)
+      .join(" ");
+  }
   if (block.kind === "step") {
     return [block.title, block.text, block.image?.caption, block.expected]
       .filter(Boolean)

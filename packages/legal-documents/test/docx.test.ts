@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+
 import { renderLiteralDataMatrixSvg } from "@markiro/domain/artifacts";
 import { unzipSync, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
@@ -12,7 +15,9 @@ import {
 import {
   artifactFileName,
   renderLegalDocx,
+  renderLegalDocxDraft,
   type LegalArtifactRequest,
+  type LegalDocxDraft,
 } from "../src/artifacts/index.js";
 import { normalizeCorePropertyTimestamps, normalizeZipDates } from "../src/artifacts/docx.js";
 
@@ -513,6 +518,120 @@ describe("instruction rendering", () => {
   it("rejects rendering when a step image is missing", async () => {
     await expect(renderLegalDocx(instructionRequest, { images: new Map() })).rejects.toThrow(
       /Missing instruction image/,
+    );
+  });
+});
+
+describe("table blocks and draft rendering", () => {
+  const draft = {
+    code: "MKR-TEST-01",
+    revision: "2026.09/01",
+    effectiveDate: "2026-09-10",
+    locale: "ru",
+    verificationUrl: "https://markiro.app/legal/",
+    classLabel: "ПРОЕКТ ДОГОВОРА",
+    operatorProfileId: "operator-2026-08-15",
+    content: {
+      locale: "ru",
+      title: "Проект договора",
+      summary: "Черновик, отрендеренный вне реестра.",
+      sections: [
+        {
+          id: "first",
+          heading: "1. Первый раздел",
+          blocks: [
+            {
+              kind: "table",
+              columns: ["Параметр", "Значение"],
+              columnRatios: [1, 3],
+              rows: [["Тариф", "[название]"]],
+              caption: "Пустое поле не означает безлимит.",
+            },
+          ],
+        },
+        {
+          id: "appendix",
+          heading: "Приложение № 1",
+          startsPage: true,
+          blocks: [{ kind: "paragraph", text: "Текст приложения." }],
+        },
+      ],
+    },
+  } as const satisfies LegalDocxDraft;
+
+  it("renders a table with a shaded header row and proportional columns", async () => {
+    const entries = docxEntries(await renderLegalDocxDraft(draft));
+    const documentXml = xml(entries, "word/document.xml");
+    const contentTable = xmlElements(documentXml, "w:tbl").at(-1);
+    if (!contentTable) throw new Error("Draft document has no content table");
+
+    // 9638 twips of text column split 1:3, last column absorbing the rounding.
+    expect(contentTable).toContain('<w:gridCol w:w="2410"/><w:gridCol w:w="7228"/>');
+    expect(visibleXmlText(contentTable)).toContain("Параметр");
+    expect(visibleXmlText(contentTable)).toContain("[название]");
+    expect(xmlElements(contentTable, "w:tr")[0]).toContain("<w:tblHeader/>");
+    expect(xmlElements(contentTable, "w:tr")[0]).toContain('w:fill="FAFAF8"');
+    expect(documentXml).toContain("Пустое поле не означает безлимит.");
+  });
+
+  it("starts a flagged section on a new page and prints the caller class label", async () => {
+    const bytes = await renderLegalDocxDraft(draft);
+    const entries = docxEntries(bytes);
+    const documentXml = xml(entries, "word/document.xml");
+    expect(documentXml.match(/<w:pageBreakBefore\/>/g)).toHaveLength(1);
+    for (const header of xmlParts(entries, "word/header")) {
+      expect(header).toContain("ПРОЕКТ ДОГОВОРА");
+    }
+    // A draft is reproducible the same way a published artifact is.
+    expect(Buffer.from(await renderLegalDocxDraft(draft))).toEqual(Buffer.from(bytes));
+  });
+
+  it("rejects a row that does not match its columns", async () => {
+    await expect(
+      renderLegalDocxDraft({
+        ...draft,
+        content: {
+          ...draft.content,
+          sections: [
+            {
+              id: "broken",
+              heading: "1. Раздел",
+              blocks: [{ kind: "table", columns: ["A", "B"], rows: [["only one"]] }],
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow(/row does not match its column count/);
+  });
+});
+
+describe("published artifacts are unchanged", () => {
+  const PUBLISHED = [
+    ["MKR-DPA-01", "ru"],
+    ["MKR-DPA-01", "en"],
+    ["MKR-BRD-01", "ru"],
+    ["MKR-BRD-01", "en"],
+  ] as const;
+
+  // The template became a function and `docx` became a runtime dependency;
+  // neither may move a byte of an artifact the attestation already pins.
+  it.each(PUBLISHED)("regenerates %s/%s byte-for-byte", async (code, locale) => {
+    const bytes = await renderLegalDocx({
+      code,
+      revision: "2026.08/01",
+      effectiveDate: "2026-08-15",
+      locale,
+      kind: "template-docx",
+      verificationUrl: `https://markiro.app/d/${code}/2026.08/01/15.08.2026`,
+    });
+    const published = await readFile(
+      new URL(
+        `../../../apps/landing/public/legal/files/markiro_${code.toLowerCase()}_2026.08-01_${locale}.docx`,
+        import.meta.url,
+      ),
+    );
+    expect(createHash("sha256").update(bytes).digest("hex")).toBe(
+      createHash("sha256").update(published).digest("hex"),
     );
   });
 });

@@ -34,6 +34,15 @@ export type LegalBlock =
       readonly items: readonly { readonly term: string; readonly detail: string }[];
     }
   | {
+      readonly kind: "table";
+      readonly columns: readonly string[];
+      readonly rows: readonly (readonly string[])[];
+      // Relative column widths. Omitted means equal columns; a form whose
+      // description column carries the text needs an explicit ratio.
+      readonly columnRatios?: readonly number[];
+      readonly caption?: string;
+    }
+  | {
       readonly kind: "step";
       readonly title: string;
       readonly text: string;
@@ -50,6 +59,9 @@ export interface LegalDocumentLocaleContent {
     readonly id: string;
     readonly heading: string;
     readonly blocks: readonly LegalBlock[];
+    // Multi-part documents whose parts are signed separately (a contract and
+    // its appendices) must not start a part mid-page.
+    readonly startsPage?: boolean;
   }[];
 }
 

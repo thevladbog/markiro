@@ -33,7 +33,12 @@ import {
   legalDocumentKind,
   requireLegalContent,
 } from "../registry.js";
-import type { LegalBlock, LegalLocale } from "../types.js";
+import type {
+  LegalBlock,
+  LegalDocumentLocaleContent,
+  LegalLocale,
+  LegalOperatorProfileId,
+} from "../types.js";
 import {
   MARKIRO_COLORS,
   prepareDataMatrixMedia,
@@ -68,6 +73,28 @@ const TABLE_BORDERS = {
 
 export interface LegalDocxAssets {
   readonly images?: ReadonlyMap<string, Uint8Array>;
+}
+
+// The page furniture only needs the printed identity, so a draft that is not
+// yet a registry release can reuse the same header, footer and metadata table.
+interface LegalDocxMeta {
+  readonly code: string;
+  readonly revision: string;
+  readonly effectiveDate: string;
+  readonly locale: LegalLocale;
+  readonly verificationUrl: string;
+}
+
+/**
+ * A document rendered in the Markiro house style that is not a published
+ * release: no registry entry, no landing route and no artifact manifest. The
+ * caller supplies the printed identity and the class label, so the reader can
+ * tell a draft from `ПУБЛИЧНЫЙ ДОКУМЕНТ` at a glance.
+ */
+export interface LegalDocxDraft extends LegalDocxMeta {
+  readonly classLabel: string;
+  readonly operatorProfileId: LegalOperatorProfileId;
+  readonly content: LegalDocumentLocaleContent;
 }
 
 // Instruction screenshots render at the full text column: the A4 content
@@ -116,15 +143,30 @@ export async function renderLegalDocx(
 ): Promise<Uint8Array> {
   assertLegalArtifactRequest(input);
   const release = findLegalRelease(input.code, input.revision);
-  const source = requireLegalContent(findLegalDocument(input.code, input.revision), input.locale);
-  const operator = OPERATOR_PROFILES[release.operatorProfileId];
+  return renderLegalDocxDraft(
+    {
+      ...input,
+      classLabel:
+        legalDocumentKind(input.code) === "instruction"
+          ? copy[input.locale].instructionClass
+          : copy[input.locale].documentClass,
+      operatorProfileId: release.operatorProfileId,
+      content: requireLegalContent(findLegalDocument(input.code, input.revision), input.locale),
+    },
+    assets,
+  );
+}
+
+export async function renderLegalDocxDraft(
+  input: LegalDocxDraft,
+  assets: LegalDocxAssets = {},
+): Promise<Uint8Array> {
+  const source = input.content;
+  const operator = OPERATOR_PROFILES[input.operatorProfileId];
   const markSvg = renderMarkiroSymbolSvg();
   const markPng = renderMarkiroSymbolPng();
   const dataMatrix = prepareDataMatrixMedia(renderLiteralDataMatrixSvg(input.verificationUrl));
-  const classLabel =
-    legalDocumentKind(input.code) === "instruction"
-      ? copy[input.locale].instructionClass
-      : copy[input.locale].documentClass;
+  const classLabel = input.classLabel;
 
   const document = new Document({
     title: source.title,
@@ -210,19 +252,24 @@ export async function renderLegalDocx(
             spacing: { after: 220 },
           }),
           createMetadataTable(input, operator),
-          ...source.sections.flatMap((section) => {
+          ...source.sections.flatMap((section, index) => {
             let stepNumber = 0;
             return [
               new Paragraph({
                 heading: HeadingLevel.HEADING_1,
+                // The leading section already starts a page.
+                pageBreakBefore: index > 0 && section.startsPage === true,
                 children: [new TextRun(section.heading)],
               }),
-              ...section.blocks.flatMap((block) => {
+              ...section.blocks.flatMap((block, blockIndex) => {
                 if (block.kind === "step") {
                   stepNumber += 1;
                   return renderStep(block, stepNumber, input.locale, assets);
                 }
-                return renderBlock(block, input.locale);
+                // A lead-in must not be stranded on the previous page when the
+                // table it introduces — a form or a signature block — moves on.
+                const keepWithTable = section.blocks[blockIndex + 1]?.kind === "table";
+                return renderBlock(block, input.locale, keepWithTable);
               }),
             ];
           }),
@@ -289,7 +336,7 @@ function createStyles(): IStylesOptions {
 }
 
 function createHeader(
-  input: LegalArtifactRequest,
+  input: LegalDocxMeta,
   markSvg: string,
   markPng: Uint8Array,
   height: number,
@@ -350,7 +397,7 @@ function createHeader(
 }
 
 function createFooter(
-  input: LegalArtifactRequest,
+  input: LegalDocxMeta,
   dataMatrix: { readonly svg: string; readonly png: Uint8Array },
 ): Table {
   const labels = copy[input.locale];
@@ -428,7 +475,7 @@ function createSvgImage(
 }
 
 function createMetadataTable(
-  input: LegalArtifactRequest,
+  input: LegalDocxMeta,
   operator: (typeof OPERATOR_PROFILES)[keyof typeof OPERATOR_PROFILES],
 ): Table {
   const labels = copy[input.locale];
@@ -482,27 +529,40 @@ function createMetadataTable(
   });
 }
 
-function renderBlock(block: LegalBlock, locale: LegalLocale): readonly FileChild[] {
+// Omitted rather than `keepNext: false`, so a block that does not precede a
+// table renders exactly the bytes it did before this option existed.
+function keepNextOn(apply: boolean): { readonly keepNext?: true } {
+  return apply ? { keepNext: true } : {};
+}
+
+function renderBlock(
+  block: LegalBlock,
+  locale: LegalLocale,
+  keepNext = false,
+): readonly FileChild[] {
+  const isLast = (index: number, length: number): boolean => index === length - 1;
   switch (block.kind) {
     case "paragraph":
-      return [new Paragraph({ children: [new TextRun(block.text)] })];
+      return [new Paragraph({ ...keepNextOn(keepNext), children: [new TextRun(block.text)] })];
     case "ordered-list":
     case "unordered-list":
       return block.items.map(
-        (item) =>
+        (item, index) =>
           new Paragraph({
             style: "ListParagraph",
             numbering: {
               reference: block.kind === "ordered-list" ? "legal-numbers" : "legal-bullets",
               level: 0,
             },
+            ...keepNextOn(keepNext && isLast(index, block.items.length)),
             children: [new TextRun(item)],
           }),
       );
     case "definition-list":
       return block.items.map(
-        ({ term, detail }) =>
+        ({ term, detail }, index) =>
           new Paragraph({
+            ...keepNextOn(keepNext && isLast(index, block.items.length)),
             children: [
               new TextRun({ text: term, bold: true }),
               new TextRun(" — "),
@@ -510,9 +570,12 @@ function renderBlock(block: LegalBlock, locale: LegalLocale): readonly FileChild
             ],
           }),
       );
+    case "table":
+      return renderTable(block, keepNext);
     case "callout":
       return [
         new Paragraph({
+          ...keepNextOn(keepNext),
           children: [
             new TextRun({
               text: `${block.tone === "warning" ? copy[locale].calloutWarning : copy[locale].calloutInfo}: `,
@@ -525,6 +588,115 @@ function renderBlock(block: LegalBlock, locale: LegalLocale): readonly FileChild
     case "step":
       throw new Error("Step blocks are rendered with their section-scoped number");
   }
+}
+
+export function legalTableColumnWidths(
+  columnCount: number,
+  ratios: readonly number[] | undefined,
+): readonly number[] {
+  if (columnCount < 1) throw new Error("Legal table needs at least one column");
+  const effective = ratios ?? Array.from({ length: columnCount }, () => 1);
+  if (effective.length !== columnCount) {
+    throw new Error("Legal table column ratios must match the column count");
+  }
+  let total = 0;
+  for (const ratio of effective) {
+    if (!Number.isFinite(ratio) || ratio <= 0) {
+      throw new Error("Legal table column ratios must be positive numbers");
+    }
+    total += ratio;
+  }
+
+  const widths: number[] = [];
+  let assigned = 0;
+  for (let index = 0; index < columnCount - 1; index += 1) {
+    // Non-null: the loop stays inside `effective`, which has `columnCount` entries.
+    const width = Math.round((CONTENT_WIDTH * (effective[index] as number)) / total);
+    widths.push(width);
+    assigned += width;
+  }
+  // The last column absorbs the rounding so the row always spans the text column.
+  widths.push(CONTENT_WIDTH - assigned);
+  return widths;
+}
+
+function renderTable(
+  block: Extract<LegalBlock, { kind: "table" }>,
+  keepNext = false,
+): readonly FileChild[] {
+  const widths = legalTableColumnWidths(block.columns.length, block.columnRatios);
+  for (const row of block.rows) {
+    if (row.length !== block.columns.length) {
+      throw new Error("Legal table row does not match its column count");
+    }
+  }
+
+  const cell = (text: string, width: number, header: boolean): TableCell =>
+    new TableCell({
+      verticalAlign: VerticalAlign.TOP,
+      width: { size: width, type: WidthType.DXA },
+      margins: { top: 80, bottom: 80, left: 120, right: 120 },
+      ...(header ? { shading: { type: ShadingType.CLEAR, fill: MARKIRO_COLORS.paper } } : {}),
+      children: [
+        new Paragraph({
+          spacing: { before: 0, after: 0, line: 240 },
+          children: [new TextRun({ text, size: 18, bold: header })],
+        }),
+      ],
+    });
+
+  const children: FileChild[] = [
+    new Table({
+      width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+      columnWidths: [...widths],
+      layout: TableLayoutType.FIXED,
+      borders: {
+        top: { style: BorderStyle.SINGLE, size: 4, color: MARKIRO_COLORS.line },
+        bottom: { style: BorderStyle.SINGLE, size: 4, color: MARKIRO_COLORS.line },
+        left: { style: BorderStyle.SINGLE, size: 4, color: MARKIRO_COLORS.line },
+        right: { style: BorderStyle.SINGLE, size: 4, color: MARKIRO_COLORS.line },
+        insideHorizontal: { style: BorderStyle.SINGLE, size: 2, color: MARKIRO_COLORS.line },
+        insideVertical: { style: BorderStyle.SINGLE, size: 2, color: MARKIRO_COLORS.line },
+      },
+      rows: [
+        new TableRow({
+          tableHeader: true,
+          cantSplit: true,
+          children: block.columns.map((column, index) =>
+            cell(column, widths[index] as number, true),
+          ),
+        }),
+        ...block.rows.map(
+          (row) =>
+            new TableRow({
+              cantSplit: true,
+              children: row.map((value, index) => cell(value, widths[index] as number, false)),
+            }),
+        ),
+      ],
+    }),
+  ];
+
+  if (block.caption) {
+    children.push(
+      new Paragraph({
+        style: "DocumentSummary",
+        spacing: { before: 80, after: 120 },
+        ...keepNextOn(keepNext),
+        children: [new TextRun(block.caption)],
+      }),
+    );
+  } else {
+    // Word merges tables that touch, so a form of stacked tables needs a spacer.
+    children.push(
+      new Paragraph({
+        spacing: { before: 0, after: 120 },
+        ...keepNextOn(keepNext),
+        children: [],
+      }),
+    );
+  }
+  return children;
 }
 
 function renderStep(
