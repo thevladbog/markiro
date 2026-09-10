@@ -198,6 +198,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         }
                     },
                     onSignOut = vm::signOut,
+                    onLabelQueue = { nav.navigate(Routes.LABEL_QUEUE) },
                 )
             }
             composable(Routes.SHIFTS) {

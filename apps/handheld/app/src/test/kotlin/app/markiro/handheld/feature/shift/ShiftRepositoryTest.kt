@@ -178,5 +178,9 @@ class ShiftRepositoryTest {
         assertEquals(365, shift.shelfLifeDays)
         assertNotNull(shift.boxLabelTemplate)
         assertEquals("04600682000013", shift.productGtin14)
+        // The bundle resolves these from the product and the list never carries a
+        // print name, so a refresh must not replace what gets printed.
+        assertEquals("Вода 0,5", shift.productName)
+        assertEquals("Вода", shift.productPrintName)
     }
 }

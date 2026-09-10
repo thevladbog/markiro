@@ -3,18 +3,16 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { buildBoxLabelFixtures } from "../src/labels/box-label-fixtures.js";
 import { withTimeZone } from "./support/timezone.js";
-
 const fixturePath = fileURLToPath(
   new URL("../../../apps/handheld/app/src/test/resources/box-label-fixtures.json", import.meta.url),
 );
 
 /**
- * Generated the way the export script generates it — pinned to UTC, because one
- * case deliberately exercises `localIsoDate` and would otherwise produce a
- * different day on a developer's machine than in CI.
+ * Each case pins its own zone while it is built, so this reproduces the same
+ * bytes on a developer's machine and in CI without an outer pin.
  */
 function generate() {
-  return withTimeZone("UTC", () => buildBoxLabelFixtures());
+  return buildBoxLabelFixtures(withTimeZone);
 }
 
 describe("box label fixtures shared with the handheld", () => {
@@ -38,9 +36,12 @@ describe("box label fixtures shared with the handheld", () => {
     }
   });
 
-  it("pin the zone they were generated in, so the Kotlin reader can apply it", () => {
-    // Without this the local-date case reproduces only on the machine that
-    // wrote it, and the Kotlin test would fail for a reason nothing explains.
-    expect(generate().timeZone).toBe("UTC");
+  it("carry a case whose local day differs from the UTC one", () => {
+    // Without it nothing exercises the fallback in a zone where the instant has
+    // already rolled over, which is the case a naive port gets wrong.
+    const shifted = generate().fields.find((c) => c.timeZone !== "UTC");
+    expect(shifted, "no non-UTC case").toBeDefined();
+    expect(shifted!.input.closedAt).toContain("2026-09-10");
+    expect(shifted!.fields.date).toBe("11.09.2026");
   });
 });

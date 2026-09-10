@@ -15,21 +15,29 @@ export interface SsccCase {
 
 export interface FieldCase {
   name: string;
+  /**
+   * The zone this case was generated in. `localIsoDate` resolves a stored UTC
+   * instant against the ambient zone, so a case that exercises the fallback is
+   * only reproducible when the reader applies the same one.
+   */
+  timeZone: string;
   input: BoxLabelInput;
   fields: Record<LabelField, string>;
 }
 
 export interface BoxLabelFixtures {
-  /**
-   * The zone the field cases were generated in. `localIsoDate` resolves a
-   * stored UTC instant against the machine's own zone, so these cases are
-   * reproducible only when the reader applies the same one. The export script
-   * pins it; the Kotlin test applies it.
-   */
-  timeZone: string;
   sscc: SsccCase[];
   fields: FieldCase[];
 }
+
+/**
+ * Runs `build` with the ambient timezone set to `tz`, then restores it.
+ *
+ * Supplied by the caller rather than implemented here: this package's sources
+ * are dependency-free and run in a browser as well as in Node, so they must not
+ * reach for `process`. The export script and the drift test each pass their own.
+ */
+export type InZone = <T>(tz: string, build: () => T) => T;
 
 function sscc(extensionDigit: number, gs1Prefix: string, serial: number): SsccCase {
   try {
@@ -58,9 +66,11 @@ const product: Omit<BoxLabelInput, "closedAt" | "productionDate" | "shelfLifeDay
   shiftNumber: "SEP26-003",
 };
 
-function field(
+function fieldCase(
+  inZone: InZone,
   name: string,
   overrides: Partial<BoxLabelInput> & Pick<BoxLabelInput, "closedAt">,
+  timeZone = "UTC",
 ): FieldCase {
   const input: BoxLabelInput = {
     ...product,
@@ -68,7 +78,7 @@ function field(
     productionDate: null,
     ...overrides,
   };
-  return { name, input, fields: boxLabelFields(input) };
+  return { name, timeZone, input, fields: inZone(timeZone, () => boxLabelFields(input)) };
 }
 
 /**
@@ -77,9 +87,13 @@ function field(
  * not reconcile at the receiver, or an expiry a day off the rest of the
  * platform's.
  */
-export function buildBoxLabelFixtures(): BoxLabelFixtures {
+export function buildBoxLabelFixtures(inZone: InZone): BoxLabelFixtures {
+  const field = (
+    name: string,
+    overrides: Partial<BoxLabelInput> & Pick<BoxLabelInput, "closedAt">,
+    timeZone?: string,
+  ) => fieldCase(inZone, name, overrides, timeZone);
   return {
-    timeZone: "UTC",
     sscc: [
       sscc(0, "468008990", 0),
       sscc(0, "468008990", 1),
@@ -146,6 +160,14 @@ export function buildBoxLabelFixtures(): BoxLabelFixtures {
         productionDate: "2026-09-10",
         itemCount: 1,
       }),
+      // The local-date fallback in a zone where the instant has already rolled
+      // over: 21:30Z on the 10th is the 11th in Moscow, and the label carries the
+      // day the person reading it is living in, not the day UTC is on.
+      field(
+        "an undeclared production date takes the device's local day, not UTC's",
+        { closedAt: "2026-09-10T21:30:00.000Z" },
+        "Europe/Moscow",
+      ),
     ],
   };
 }

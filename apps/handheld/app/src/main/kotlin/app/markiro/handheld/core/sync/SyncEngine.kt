@@ -65,7 +65,17 @@ class SyncEngine(
     private val now = MutableStateFlow(clock())
 
     val state: StateFlow<SyncState> =
-        combine(db.outboxDao().count(), db.conflictDao().count(), lastSuccess, now) { pending, conflicts, last, at ->
+        combine(
+            db.outboxDao().count(),
+            // A box closure is queued work too. Counting only scans showed
+            // «Очередь 0» while a closure sat unsent, and a queue that has
+            // stopped moving would never read as stuck.
+            db.boxDao().observeUnackedCount(),
+            db.conflictDao().count(),
+            lastSuccess,
+            now,
+        ) { scans, boxes, conflicts, last, at ->
+            val pending = scans + boxes
             val since = last ?: startedAt
             SyncState(pending = pending, lastSuccessAt = last, stuck = pending > 0 && at - since > STUCK_AFTER_MS, conflicts = conflicts)
         }.stateIn(scope, SharingStarted.Eagerly, SyncState())
@@ -122,10 +132,13 @@ class SyncEngine(
         // orders by (closedAt, boxId) and nothing can close earlier than a box that
         // already closed, so the first N rows are stable and a retry stays
         // byte-identical. Boxes closed since simply wait for the next batch.
-        val pendingBoxes = meta.get(MetaStore.SYNC_PENDING_BOX_COUNT)?.toIntOrNull()
-        val boxRows = db.boxDao().unacked(
-            if (pendingCeiling != null && pendingBoxes != null) pendingBoxes else MAX_BOX_CLOSURES,
-        )
+        // A pinned batch carries the box set it already chose and no more. When the
+        // count is missing -- a batch pinned by a build that predates it -- that set
+        // is empty, NOT everything unacknowledged: growing a batch whose id is
+        // already fixed is the exact way a closure gets answered `alreadyApplied`
+        // and lost. Those boxes ride the next batch.
+        val boxLimit = if (pendingCeiling != null) meta.get(MetaStore.SYNC_PENDING_BOX_COUNT)?.toIntOrNull() ?: 0 else MAX_BOX_CLOSURES
+        val boxRows = if (boxLimit == 0) emptyList() else db.boxDao().unacked(boxLimit)
         // An empty outbox with unacknowledged boxes is not empty.
         if (rows.isEmpty() && boxRows.isEmpty()) {
             if (pendingCeiling != null) clearPending()

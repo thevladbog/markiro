@@ -337,6 +337,34 @@ class SyncEngineTest {
     }
 
     @Test
+    fun aBatchPinnedBeforeBoxesExistedStaysBoxFree() = runTest {
+        // A pending batch written by a build that predates the box count must not
+        // grow one: its id is already fixed, so the server would answer
+        // alreadyApplied and the closure would be lost.
+        outbox("a")
+        server.enqueue(MockResponse().setResponseCode(500))
+        assertFalse(engine().drainAll())
+        server.takeRequest()
+        db.metaDao().remove(MetaStore.SYNC_PENDING_BOX_COUNT)
+        closedBox("box-1", "046800899000000018")
+
+        server.enqueue(ok(1))
+        server.enqueue(ok(0))
+        assertTrue(engine().drainAll())
+        assertEquals(0, bodyOf(server.takeRequest()).getValue("boxes").jsonArray.size)
+        // It rides the next batch instead.
+        assertEquals(1, bodyOf(server.takeRequest()).getValue("boxes").jsonArray.size)
+    }
+
+    @Test
+    fun theQueueIndicatorCountsClosuresNotJustScans() = runTest {
+        // A closed box waiting to be reported is queued work. Counting only scans
+        // showed «Очередь 0» while it sat unsent.
+        closedBox("box-1", "046800899000000018")
+        assertEquals(1, engine().state.first { it.pending == 1 }.pending)
+    }
+
+    @Test
     fun stateReportsPendingAndStuck() = runTest {
         outbox("a")
         val e = engine()

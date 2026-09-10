@@ -37,7 +37,8 @@ there is something to configure.
 ## Outcome
 
 An operator on a handheld enters a shift the cabinet created in aggregation
-mode — which the app refuses outright today — and scans units into a box. The
+mode — which the app refused outright before this slice — and scans units into
+a box. The
 fill grid shows how full it is. On the last unit the box closes itself: the
 device burns one serial from its own pool, builds the SSCC, renders the box
 label and prints it. About a second later the next box starts.
@@ -144,6 +145,15 @@ what the server knows was consumed, after a lost or restored device database.
 `ORDER BY from_serial` reason: a revoked block left in place keeps winning
 over the replacement.
 
+**Ranges are disjoint by contract, and the device does not re-check it.** Every
+range comes from `SsccService.allocateOrderedForBundle`, which cuts blocks from
+a single per-tenant counter; the device never invents one. Re-validating the
+intervals here would duplicate a server invariant on a device that could not
+repair a violation anyway — it holds no authority to reject a block the server
+granted, and refusing one would only stop a line. What the device does own is
+the consequence: `burnSerial` takes the lowest range with room and advances that
+row's cursor, so it never issues one serial twice from the ranges it holds.
+
 ### The box label template on the shift row
 
 The bundle's `boxLabelTemplate` spec is stored on the shift row as JSON.
@@ -205,9 +215,15 @@ unacknowledged box rows, capped at `MAX_BOX_CLOSURES_PER_SYNC_BATCH`.
 alone. If a box closes while that batch awaits acknowledgement, a retry sends
 the identical `batchId` with a different body, the server answers
 `alreadyApplied`, and the closure is lost silently. This is the defect review
-found on PR #33 for the station. The fix is the station's: a second pinned
-ceiling in `meta` for the box rowid, mirroring `SYNC_PENDING_CEILING`, folded
-into `batchId` as a compact box-set signature.
+found on PR #33 for the station. The fix pins **how many** closures the batch
+chose, in `SYNC_PENDING_BOX_COUNT` beside `SYNC_PENDING_CEILING`, and folds a
+compact box-set signature into `batchId`. A count is enough because `unacked`
+orders by `(closedAt, boxId)` and nothing can close earlier than a box that
+already closed, so a retry re-reads the same first N rows. A pinned batch with
+no count recorded — one written by a build that predates it — carries **no**
+boxes at all rather than everything unacknowledged: growing a batch whose id is
+already fixed is the very thing this prevents. Those boxes ride the next batch,
+which is also what happens to any box that closes mid-flight.
 
 **Acknowledgement is unconditional here, unlike the station's.** The station
 acknowledges only rows whose print-verification outcome still matches the

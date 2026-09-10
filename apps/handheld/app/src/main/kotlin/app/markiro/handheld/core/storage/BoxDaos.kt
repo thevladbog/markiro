@@ -73,6 +73,10 @@ interface BoxDao {
     @Query("SELECT * FROM boxes WHERE closedAt IS NOT NULL AND ackedAt IS NULL ORDER BY closedAt, boxId LIMIT :limit")
     suspend fun unacked(limit: Int): List<BoxEntity>
 
+    /** Closures still owed to the server; the sync indicator counts these too. */
+    @Query("SELECT COUNT(*) FROM boxes WHERE closedAt IS NOT NULL AND ackedAt IS NULL")
+    fun observeUnackedCount(): Flow<Int>
+
     @Query("UPDATE boxes SET ackedAt = :at WHERE boxId IN (:boxIds)")
     suspend fun markAcked(boxIds: List<String>, at: String)
 

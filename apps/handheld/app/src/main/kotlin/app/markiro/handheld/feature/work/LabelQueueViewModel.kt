@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 data class LabelQueueItem(
@@ -36,28 +37,20 @@ class LabelQueueViewModel @Inject constructor(
     private val printer: BoxPrinter,
 ) : ViewModel() {
     private val printing = MutableStateFlow(false)
+    private val busy = AtomicBoolean(false)
 
-    val state: StateFlow<LabelQueueUi> = combine(boxes.observeUnprinted(), printing) { rows, busy ->
+    val state: StateFlow<LabelQueueUi> = combine(boxes.observeUnprinted(), printing) { rows, inFlight ->
         LabelQueueUi(
             items = rows.mapNotNull { row ->
                 val sscc = row.sscc ?: return@mapNotNull null
                 val closedAt = row.closedAt ?: return@mapNotNull null
                 LabelQueueItem(row.boxId, sscc, closedAt, row.printState, row.printReason)
             },
-            printing = busy,
+            printing = inFlight,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, LabelQueueUi())
 
-    fun printOne(boxId: String) {
-        viewModelScope.launch {
-            printing.value = true
-            try {
-                printer.print(boxId)
-            } finally {
-                printing.value = false
-            }
-        }
-    }
+    fun printOne(boxId: String) = runPrint { printer.print(boxId) }
 
     /**
      * Every queued label except those whose last attempt is `unknown`.
@@ -66,16 +59,27 @@ class LabelQueueViewModel @Inject constructor(
      * already accepted, so only a person who has looked at the printer resolves
      * one — which is exactly why `failed` and `unknown` are different states.
      */
-    fun printAll() {
+    fun printAll() = runPrint {
+        for (item in state.value.items) {
+            if (item.skippedByPrintAll) continue
+            printer.print(item.boxId)
+        }
+    }
+
+    /**
+     * Runs one print operation at a time and drops any request arriving while one
+     * is in flight. Two overlapping runs would send the same label twice, which is
+     * the single thing this queue exists to avoid.
+     */
+    private fun runPrint(work: suspend () -> Unit) {
+        if (!busy.compareAndSet(false, true)) return
         viewModelScope.launch {
             printing.value = true
             try {
-                for (item in state.value.items) {
-                    if (item.skippedByPrintAll) continue
-                    printer.print(item.boxId)
-                }
+                work()
             } finally {
                 printing.value = false
+                busy.set(false)
             }
         }
     }

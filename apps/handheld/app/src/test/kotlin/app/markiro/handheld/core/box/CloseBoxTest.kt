@@ -5,6 +5,8 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.storage.CodeEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -135,7 +137,22 @@ class CloseBoxTest {
 
     @Test
     fun twoScansArrivingTogetherStillOpenOneBox() = runTest {
-        val ids = List(8) { boxes.currentBox("s1").boxId }.toSet()
+        val ids = List(8) { async { boxes.currentBox("s1").boxId } }.awaitAll().toSet()
         assertEquals(1, ids.size)
+    }
+
+    @Test
+    fun twoClosesArrivingTogetherBurnExactlyOneSerial() = runTest {
+        // The automatic close at capacity and «Закрыть короб досрочно» are separate
+        // coroutines. Without serialisation both pass the open-box read and each
+        // burn a serial; one lands on the box and the other is simply gone.
+        seedPool()
+        val box = boxes.currentBox("s1")
+        scanInto(box.boxId, "h1")
+        val results = List(4) { async { closer.close("s1", "468008990", null) } }.awaitAll()
+        assertEquals(1, results.count { it is CloseResult.Closed })
+        // One serial spent, not four.
+        assertEquals(9L, pool.remaining("468008990", 0))
+        assertEquals(Sscc.build(0, "468008990", 1), db.boxDao().get(box.boxId)!!.sscc)
     }
 }

@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 /** Seam for the signaller so tests can record kinds. */
@@ -144,6 +145,8 @@ class WorkViewModel(
     private val teamState = MutableStateFlow<TeamState?>(null)
     private val boxUi = MutableStateFlow<BoxUi?>(null)
 
+    private val closing = AtomicBoolean(false)
+
     private val _closeStep = MutableStateFlow<BoxCloseStep>(BoxCloseStep.Idle)
     val closeStep: StateFlow<BoxCloseStep> = _closeStep
 
@@ -220,9 +223,10 @@ class WorkViewModel(
     private suspend fun onScan(raw: String) {
         val shift = db.shiftDao().get(shiftId) ?: return
         if (shift.productGtin14 == null || shift.status == "closed") return
-        // A close is a full-screen state the operator is meant to look at; a scan
-        // arriving under it belongs to the next box, not this one.
-        if (_closeStep.value != BoxCloseStep.Idle) return
+        // A scan arriving while the close screen is up belongs to the NEXT box, and
+        // `currentBox` gives it exactly that: the closed row is no longer open. It
+        // is deliberately not dropped -- an operator whose unit vanished with no
+        // sound and no count has no way to know it needs scanning again.
         val aggregating = shift.mode == "aggregation"
         val box = if (aggregating) boxes.currentBox(shiftId) else null
         val outcome = recorder.record(shift, raw, session.state.value.operator?.operatorId, box?.boxId)
@@ -266,9 +270,17 @@ class WorkViewModel(
 
     /** «Закрыть короб досрочно», with the operator having seen the count inside. */
     fun closeEarly() {
+        // A second tap while the first close is still running would queue a close
+        // of the box that first one just opened. `CloseBox` serialises them
+        // anyway; this stops the pointless second attempt from being started.
+        if (!closing.compareAndSet(false, true)) return
         viewModelScope.launch {
-            val shift = db.shiftDao().get(shiftId) ?: return@launch
-            closeAndPrint(shift)
+            try {
+                val shift = db.shiftDao().get(shiftId) ?: return@launch
+                closeAndPrint(shift)
+            } finally {
+                closing.set(false)
+            }
         }
     }
 

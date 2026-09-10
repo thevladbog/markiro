@@ -30,8 +30,11 @@ fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
     status = if (existing?.status == "closed") "closed" else status,
     mode = mode,
     productId = productId,
-    productName = productName,
-    productPrintName = productPrintName,
+    // The bundle resolves these from the product; the list carries the shift's own
+    // snapshot, which can be older and never has a print name. Once a bundle has
+    // been fetched its values win, or a list refresh silently changes what prints.
+    productName = if (existing?.bundleFetchedAt != null) existing.productName else productName,
+    productPrintName = if (existing?.bundleFetchedAt != null) existing.productPrintName else productPrintName,
     productGtin14 = existing?.productGtin14,
     lineId = lineId,
     lineName = lineName,

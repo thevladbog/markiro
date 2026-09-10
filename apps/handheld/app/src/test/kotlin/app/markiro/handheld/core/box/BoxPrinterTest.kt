@@ -109,7 +109,12 @@ class BoxPrinterTest {
         assertTrue(document, document.contains("046800899000000018"))
         // Production day is day one: 2026-09-10 plus 365 days is usable through 2027-09-09.
         assertTrue(document, document.contains("09.09.2027"))
-        assertTrue(document, document.contains("20"))
+        // The quantity never reaches the document as text: its display value
+        // carries «шт.», so the field is rasterized like any other Cyrillic run.
+        // The old assertion looked for "20", which matched the SSCC and the font
+        // size and would have passed with no quantity on the label at all.
+        assertEquals(3, Regex("\\^FO").findAll(document).count())
+        assertTrue(document, document.contains("^GFA"))
         assertEquals(BoxPrint.PRINTED, db.boxDao().get("box-1")!!.printState)
     }
 

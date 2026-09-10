@@ -6,6 +6,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeParseException
+import java.util.Locale
 
 /**
  * Port of `packages/domain/src/labels/box-label.ts`, pinned by
@@ -35,6 +36,17 @@ data class BoxLabelInput(
 private val ISO_DATE = Regex("^(\\d{4})-(\\d{2})-(\\d{2})$")
 
 /**
+ * `YYYY-MM-DD` in ASCII digits whatever the device's locale is.
+ *
+ * `String.format` without a locale uses the default one, and a locale with
+ * non-Western numerals renders `%02d` in its own digits — which this module's
+ * own `ISO_DATE` would then reject, and a printed label would carry digits the
+ * receiver cannot read.
+ */
+private fun formatIso(year: Int, month: Int, day: Int): String =
+    String.format(Locale.ROOT, "%04d-%02d-%02d", year, month, day)
+
+/**
  * Plain calendar-day addition on a `YYYY-MM-DD` string — no timezone is
  * involved at any point, so a daylight-saving transition inside the window can
  * never shift the printed day by one.
@@ -56,7 +68,7 @@ fun addCalendarDays(isoDate: String, days: Int): String {
         return ""
     }
     if (moved.year < 1 || moved.year > 9999) return ""
-    return "%04d-%02d-%02d".format(moved.year, moved.monthValue, moved.dayOfMonth)
+    return formatIso(moved.year, moved.monthValue, moved.dayOfMonth)
 }
 
 /**
@@ -89,7 +101,7 @@ fun localIsoDate(instant: String, zone: ZoneId = ZoneId.systemDefault()): String
         return ""
     }
     val date = parsed.atZone(zone).toLocalDate()
-    return "%04d-%02d-%02d".format(date.year, date.monthValue, date.dayOfMonth)
+    return formatIso(date.year, date.monthValue, date.dayOfMonth)
 }
 
 /**

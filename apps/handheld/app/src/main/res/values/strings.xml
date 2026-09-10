@@ -376,7 +376,7 @@
     <string name="box_refused_invalid_serial_hint">Короб остался открытым. Попробуйте закрыть ещё раз.</string>
     <string name="box_refused_dismiss">Понятно</string>
     <string name="print_reason_no_paper">Нет бумаги</string>
-    <string name="print_reason_head_open">Открыта голова</string>
+    <string name="print_reason_head_open">Открыта крышка</string>
     <string name="print_reason_unreachable">Принтер не отвечает</string>
     <string name="print_reason_printer_unconfigured">Принтер не настроен</string>
     <string name="print_reason_template_missing">У смены нет шаблона этикетки</string>

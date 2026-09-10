@@ -45,6 +45,14 @@ data class BoxEntity(
  * serial space, so keying by GLN would let a device treat that single space as
  * two independent ones. `extensionDigit` keeps box ranges (0) and pallet ranges
  * (1) from ever mixing.
+ *
+ * Ranges are disjoint BY CONTRACT and this device does not re-check it. Every
+ * one comes from the server, which cuts blocks from a single per-tenant counter;
+ * the device never invents a range. Validating the intervals here would
+ * duplicate a server invariant on a device holding no authority to reject a
+ * block the server granted — refusing one would only stop a line. What is owned
+ * here is the consequence: `SsccPool.burn` takes the lowest range with room and
+ * advances that row's cursor, so no serial is issued twice from what is held.
  */
 @Entity(tableName = "sscc_pool", primaryKeys = ["issuerPrefix", "extensionDigit", "fromSerial"])
 data class SsccRangeEntity(

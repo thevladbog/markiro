@@ -1,5 +1,4 @@
 {
-  "timeZone": "UTC",
   "sscc": [
     {
       "extensionDigit": 0,
@@ -82,6 +81,7 @@
   "fields": [
     {
       "name": "declared production date",
+      "timeZone": "UTC",
       "input": {
         "sscc": "046800899000000000",
         "itemCount": 20,
@@ -113,6 +113,7 @@
     },
     {
       "name": "close date stands in for an undeclared production date",
+      "timeZone": "UTC",
       "input": {
         "sscc": "046800899000000000",
         "itemCount": 20,
@@ -144,6 +145,7 @@
     },
     {
       "name": "one-day shelf life expires on the production day",
+      "timeZone": "UTC",
       "input": {
         "sscc": "046800899000000000",
         "itemCount": 20,
@@ -175,6 +177,7 @@
     },
     {
       "name": "leap day",
+      "timeZone": "UTC",
       "input": {
         "sscc": "046800899000000000",
         "itemCount": 20,
@@ -206,6 +209,7 @@
     },
     {
       "name": "crossing a year boundary",
+      "timeZone": "UTC",
       "input": {
         "sscc": "046800899000000000",
         "itemCount": 20,
@@ -237,6 +241,7 @@
     },
     {
       "name": "no shelf life leaves the expiry empty",
+      "timeZone": "UTC",
       "input": {
         "sscc": "046800899000000000",
         "itemCount": 20,
@@ -268,6 +273,7 @@
     },
     {
       "name": "an impossible declared date yields empty dates",
+      "timeZone": "UTC",
       "input": {
         "sscc": "046800899000000000",
         "itemCount": 20,
@@ -299,6 +305,7 @@
     },
     {
       "name": "no print name falls back to the full name",
+      "timeZone": "UTC",
       "input": {
         "sscc": "046800899000000000",
         "itemCount": 20,
@@ -330,6 +337,7 @@
     },
     {
       "name": "absent optionals become empty strings",
+      "timeZone": "UTC",
       "input": {
         "sscc": "046800899000000000",
         "itemCount": 20,
@@ -361,6 +369,7 @@
     },
     {
       "name": "a single unit still prints its count",
+      "timeZone": "UTC",
       "input": {
         "sscc": "046800899000000000",
         "itemCount": 1,
@@ -386,6 +395,38 @@
         "date": "10.09.2026",
         "expiry": "09.09.2027",
         "qty": "1",
+        "operator": "Иванов И.",
+        "counterparty.name": "ООО «Завод»"
+      }
+    },
+    {
+      "name": "an undeclared production date takes the device's local day, not UTC's",
+      "timeZone": "Europe/Moscow",
+      "input": {
+        "sscc": "046800899000000000",
+        "itemCount": 20,
+        "productName": "Вода питьевая негазированная 0,5 л",
+        "productPrintName": "Вода 0,5 л",
+        "gtin14": "04680089900000",
+        "egaisCode": null,
+        "operatorName": "Иванов И.",
+        "counterpartyName": "ООО «Завод»",
+        "shiftNumber": "SEP26-003",
+        "shelfLifeDays": 365,
+        "productionDate": null,
+        "closedAt": "2026-09-10T21:30:00.000Z"
+      },
+      "fields": {
+        "product.name": "Вода питьевая негазированная 0,5 л",
+        "product.printName": "Вода 0,5 л",
+        "product.gtin": "04680089900000",
+        "product.egais": "",
+        "km.code": "",
+        "sscc": "046800899000000000",
+        "shift.no": "SEP26-003",
+        "date": "11.09.2026",
+        "expiry": "10.09.2027",
+        "qty": "20",
         "operator": "Иванов И.",
         "counterparty.name": "ООО «Завод»"
       }

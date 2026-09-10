@@ -20,8 +20,8 @@ import java.time.ZoneId
  * that disagrees is a number the receiver will reject, and an expiry a day out
  * is a claim about food that the rest of the platform contradicts.
  *
- * The fixture records the zone it was generated in, because one case
- * deliberately exercises the local-date path.
+ * Every case records the zone it was generated in, because one of them
+ * deliberately exercises the local-date path across a day boundary.
  */
 class BoxLabelFixturesTest {
     private val fixtures: JsonObject = Json.parseToJsonElement(
@@ -29,8 +29,6 @@ class BoxLabelFixturesTest {
             "run pnpm --filter @markiro/domain fixtures:box-labels"
         }.readText(),
     ).jsonObject
-
-    private val zone = ZoneId.of(fixtures.getValue("timeZone").jsonPrimitive.content)
 
     /** A JSON null reads as a Kotlin null, never as the string "null". */
     private fun JsonObject.textOrNull(key: String): String? =
@@ -64,6 +62,9 @@ class BoxLabelFixturesTest {
         for (element in cases) {
             val case = element.jsonObject
             val name = case.getValue("name").jsonPrimitive.content
+            // Per case: one of them exercises the local-date fallback in a zone
+            // where the instant has already rolled over into the next day.
+            val zone = ZoneId.of(case.getValue("timeZone").jsonPrimitive.content)
             val input = case.getValue("input").jsonObject
             val actual = boxLabelFields(
                 BoxLabelInput(
