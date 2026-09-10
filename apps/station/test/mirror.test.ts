@@ -14,6 +14,7 @@ import {
   type StationBundle,
 } from "../src/lib/mirror.js";
 import { openFileDatabase } from "./support/sqlite-exec.js";
+import { closeShiftOffline, markShiftCloseAccepted } from "../src/lib/shift-close.js";
 
 function nodeExecutor(db = new DatabaseSync(":memory:")): SqlExecutor {
   return {
@@ -78,6 +79,47 @@ const bundle: StationBundle = {
 };
 
 describe("mirror", () => {
+  it.each([false, true])(
+    "does not reopen a locally closed shift from a stale bundle (acknowledged: %s)",
+    async (acknowledged) => {
+      const exec = nodeExecutor();
+      await applyMigrations(exec);
+      await upsertBundle(exec, bundle);
+      const summary = await closeShiftOffline(exec, {
+        shiftId: "s1",
+        deviceId: "m1",
+        operatorId: null,
+        reasonCode: "equipment_stop",
+      });
+      if (acknowledged) await markShiftCloseAccepted(exec, summary.eventId);
+      await upsertBundle(exec, bundle);
+      expect((await readShiftMirror(exec, "s1"))?.status).toBe("closed");
+    },
+  );
+
+  it.each(["bundle", "acknowledgement"])(
+    "repairs a previously regressed mirror on %s",
+    async (repair) => {
+      const exec = nodeExecutor();
+      await applyMigrations(exec);
+      await upsertBundle(exec, bundle);
+      const summary = await closeShiftOffline(exec, {
+        shiftId: "s1",
+        deviceId: "m1",
+        operatorId: null,
+        reasonCode: "equipment_stop",
+      });
+      await exec.run("UPDATE shift_mirror SET status = 'active' WHERE id = ?", ["s1"]);
+      if (repair === "bundle") {
+        await upsertBundle(exec, bundle);
+        expect((await readShiftMirror(exec, "s1"))?.status).toBe("closed");
+      }
+      await markShiftCloseAccepted(exec, summary.eventId);
+      expect((await readShiftMirror(exec, "s1"))?.status).toBe("closed");
+      expect(await exec.all("SELECT event_id FROM shift_close_outbox")).toHaveLength(0);
+    },
+  );
+
   it("applies migrations then upserts a bundle and reads it back offline", async () => {
     const exec = nodeExecutor();
     await applyMigrations(exec);

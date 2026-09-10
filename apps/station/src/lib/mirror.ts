@@ -292,7 +292,13 @@ async function upsertBundleBody(
        opened_at, issuer_prefix, box_label_template_spec, number, validation_print_context
      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
-       status=excluded.status, mode=excluded.mode, product_id=excluded.product_id,
+       status=CASE
+         WHEN shift_mirror.status='closed' OR EXISTS (
+           SELECT 1 FROM shift_close_outbox WHERE shift_id=excluded.id
+         ) THEN 'closed'
+         ELSE excluded.status
+       END,
+       mode=excluded.mode, product_id=excluded.product_id,
        validation_print_context=excluded.validation_print_context,
        product_name=excluded.product_name,
        line_id=excluded.line_id, line_name=excluded.line_name,

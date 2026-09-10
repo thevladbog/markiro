@@ -33,7 +33,7 @@ function entryLease(order: string[] = []) {
 }
 
 describe("ShiftSelection", () => {
-  it("hides a locally closed shift while the server still reports it active", async () => {
+  it("shows a locally closing shift with rejoin disabled while the server reports it active", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -45,6 +45,7 @@ describe("ShiftSelection", () => {
               productName: "Waiting for close sync",
               plannedQty: 10,
               productId: "product-1",
+              image: null,
             },
           ],
         }),
@@ -54,14 +55,17 @@ describe("ShiftSelection", () => {
     const exec: SqlExecutor = {
       async run() {},
       async all<T>() {
-        return [{ id: "just-closed" }] as T[];
+        return [{ id: "just-closed", status: "closing" }] as T[];
       },
     };
 
     render(<ShiftSelection client={client} exec={exec} onSelected={() => {}} onNew={() => {}} />);
 
-    await waitFor(() => expect(screen.getByText("No open shifts")).toBeDefined());
-    expect(screen.queryByText("Waiting for close sync")).toBeNull();
+    await waitFor(() => expect(screen.getByText("Closing")).toBeDefined());
+    expect(screen.getByText("Waiting for close sync")).toBeDefined();
+    expect((screen.getByRole("button", { name: "Rejoin" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 
   it("prefers the catalog print name on the card and falls back to the full name", async () => {
@@ -567,8 +571,10 @@ describe("ShiftSelection", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Rejoin" })).toBeDefined());
     fireEvent.click(screen.getByRole("button", { name: "Rejoin" }));
 
-    expect(onSelected).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "s1", status: "active", mode: "aggregation" }),
+    await waitFor(() =>
+      expect(onSelected).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "s1", status: "active", mode: "aggregation" }),
+      ),
     );
     expect(fetchSpy).toHaveBeenCalledOnce();
   });

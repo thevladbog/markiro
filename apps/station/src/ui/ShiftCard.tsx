@@ -11,7 +11,7 @@ export interface ShiftCardProps {
   locale?: string;
   plannedQty?: number | null;
   mode?: "validation" | "aggregation";
-  status?: "planned" | "active" | "closed";
+  status?: "planned" | "active" | "closing" | "closed";
   modeLabel?: string;
   statusLabel?: string;
   noPlanLabel?: string;
