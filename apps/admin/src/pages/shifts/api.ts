@@ -53,6 +53,8 @@ export interface ShiftDto {
   lateDataAt: string | null;
   closeReason: string | null;
   createdAt: string;
+  /** Actual production output so far, computed from factual scan/box events. */
+  output: ShiftOutputDto;
 }
 
 /**
@@ -75,6 +77,10 @@ export interface CreateShiftInput {
   palletCapacity?: number | null;
   palletsEnabled?: boolean;
 }
+
+export type ShiftOutputDto =
+  | { mode: "validation"; acceptedUnits: number }
+  | { mode: "aggregation"; closedBoxes: number; containedUnits: number };
 
 export type UpdateShiftInput = Partial<CreateShiftInput>;
 

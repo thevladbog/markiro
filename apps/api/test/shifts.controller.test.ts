@@ -40,6 +40,7 @@ const shiftFixture: ShiftDto = {
   closeReason: null,
   lateDataAt: null,
   createdAt: new Date("2026-08-13T09:00:00.000Z"),
+  output: { mode: "validation", acceptedUnits: 0 },
 };
 
 describe("shift production date DTO boundary", () => {

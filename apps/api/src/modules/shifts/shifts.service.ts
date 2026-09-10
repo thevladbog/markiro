@@ -15,7 +15,7 @@ import {
   Optional,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { and, desc, eq, gte, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   formatShiftNumber,
@@ -51,6 +51,7 @@ import type {
   ShiftDto,
   ShiftMode,
   ShiftOrigin,
+  ShiftOutputDto,
   ShiftPlanningConfigDto,
   ShiftReferenceBundleDto,
   ShiftSummaryDto,
@@ -75,7 +76,7 @@ type CurrentShiftRow = Omit<ShiftRow, "labelTemplateId">;
 type ProductRow = Omit<typeof schema.products.$inferSelect, "defaultLabelTemplateId"> & {
   productGroupName: string | null;
 };
-type JoinedShiftRow = Omit<ShiftDto, "image" | "number" | "validationPrint"> &
+type JoinedShiftRow = Omit<ShiftDto, "image" | "number" | "validationPrint" | "output"> &
   ValidationPrintStorage & {
     numberMonthKey: string;
     numberSeq: number;
@@ -250,7 +251,14 @@ export class ShiftsService {
         desc(schema.shifts.createdAt),
       );
 
-    return { items: rows.map((row) => this.mapShiftRow(row)) };
+    const shifts = rows.map((row) => this.mapShiftRow(row));
+    const outputs = await this.fetchShiftOutputs(tenantId, shifts);
+    return {
+      items: shifts.map((shift) => ({
+        ...shift,
+        output: outputs.get(shift.id) ?? defaultShiftOutput(shift.mode),
+      })),
+    };
   }
 
   /** The one organisation setting needed by operations shift planning, resolved for a product when given. */
@@ -423,7 +431,9 @@ export class ShiftsService {
     if (!row) {
       throw new NotFoundException();
     }
-    return this.mapShiftRow(row);
+    const shift = this.mapShiftRow(row);
+    const outputs = await this.fetchShiftOutputs(tenantId, [shift]);
+    return { ...shift, output: outputs.get(shift.id) ?? defaultShiftOutput(shift.mode) };
   }
 
   getProductLabelHistory(tenantId: string, id: string, query: ProductLabelHistoryQuery) {
@@ -1293,6 +1303,7 @@ export class ShiftsService {
       closeReason: shift.closeReason,
       lateDataAt: shift.lateDataAt,
       createdAt: shift.createdAt,
+      output: shift.output,
     };
 
     let counterpartyGln: string | null = null;
@@ -1554,6 +1565,111 @@ export class ShiftsService {
       });
   }
 
+  /**
+   * Actual production output for a batch of shifts, keyed by shift id — the
+   * same factual counts as `getShiftSummary`'s `output`, but grouped by
+   * `shift_id` across the whole batch instead of one query per shift, so a
+   * shift list page costs three grouped queries total, not N.
+   */
+  private async fetchShiftOutputs(
+    tenantId: string,
+    shifts: { id: string; mode: ShiftMode }[],
+  ): Promise<Map<string, ShiftOutputDto>> {
+    const validationIds = shifts.filter((s) => s.mode === "validation").map((s) => s.id);
+    const aggregationIds = shifts.filter((s) => s.mode === "aggregation").map((s) => s.id);
+    const outputs = new Map<string, ShiftOutputDto>();
+
+    const tasks: Promise<void>[] = [];
+
+    if (validationIds.length > 0) {
+      tasks.push(
+        this.db
+          .select({
+            shiftId: schema.codeRegistry.shiftId,
+            acceptedUnits: sql<number>`count(*)::int`,
+          })
+          .from(schema.codeRegistry)
+          .where(
+            and(
+              eq(schema.codeRegistry.tenantId, tenantId),
+              inArray(schema.codeRegistry.shiftId, validationIds),
+            ),
+          )
+          .groupBy(schema.codeRegistry.shiftId)
+          .then((rows) => {
+            for (const row of rows) {
+              outputs.set(row.shiftId, { mode: "validation", acceptedUnits: row.acceptedUnits });
+            }
+          }),
+      );
+    }
+
+    if (aggregationIds.length > 0) {
+      tasks.push(
+        this.db
+          .select({ shiftId: schema.boxes.shiftId, closedBoxes: sql<number>`count(*)::int` })
+          .from(schema.boxes)
+          .where(
+            and(
+              eq(schema.boxes.tenantId, tenantId),
+              inArray(schema.boxes.shiftId, aggregationIds),
+              isNotNull(schema.boxes.closedAt),
+              isNull(schema.boxes.disassembledAt),
+            ),
+          )
+          .groupBy(schema.boxes.shiftId)
+          .then((rows) => {
+            for (const row of rows) {
+              const previous = outputs.get(row.shiftId);
+              outputs.set(row.shiftId, {
+                mode: "aggregation",
+                closedBoxes: row.closedBoxes,
+                containedUnits: previous?.mode === "aggregation" ? previous.containedUnits : 0,
+              });
+            }
+          }),
+      );
+
+      tasks.push(
+        this.db
+          .select({ shiftId: schema.boxes.shiftId, containedUnits: sql<number>`count(*)::int` })
+          .from(schema.boxItems)
+          .innerJoin(
+            schema.boxes,
+            and(
+              eq(schema.boxes.tenantId, schema.boxItems.tenantId),
+              eq(schema.boxes.id, schema.boxItems.boxId),
+            ),
+          )
+          .where(
+            and(
+              eq(schema.boxItems.tenantId, tenantId),
+              eq(schema.boxes.tenantId, tenantId),
+              inArray(schema.boxes.shiftId, aggregationIds),
+              isNotNull(schema.boxes.closedAt),
+              isNull(schema.boxes.disassembledAt),
+              isNull(schema.boxItems.displacedAt),
+              isNull(schema.boxItems.removedAt),
+            ),
+          )
+          .groupBy(schema.boxes.shiftId)
+          .then((rows) => {
+            for (const row of rows) {
+              const previous = outputs.get(row.shiftId);
+              outputs.set(row.shiftId, {
+                mode: "aggregation",
+                closedBoxes: previous?.mode === "aggregation" ? previous.closedBoxes : 0,
+                containedUnits: row.containedUnits,
+              });
+            }
+          }),
+      );
+    }
+
+    await Promise.all(tasks);
+    return outputs;
+  }
+
   private joinedSelection() {
     return {
       id: schema.shifts.id,
@@ -1596,7 +1712,7 @@ export class ShiftsService {
     };
   }
 
-  private mapShiftRow(row: JoinedShiftRow): ShiftDto {
+  private mapShiftRow(row: JoinedShiftRow): Omit<ShiftDto, "output"> {
     const {
       validationPrintMode,
       validationPrintVerification,
@@ -1705,6 +1821,12 @@ export class ShiftsService {
     }
     throw error;
   }
+}
+
+function defaultShiftOutput(mode: ShiftMode): ShiftOutputDto {
+  return mode === "validation"
+    ? { mode, acceptedUnits: 0 }
+    : { mode, closedBoxes: 0, containedUnits: 0 };
 }
 
 function toDatabaseNumber(value: unknown, label: string): number {
