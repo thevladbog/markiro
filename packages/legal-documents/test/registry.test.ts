@@ -63,9 +63,12 @@ describe("legal document registry", () => {
       "MKR-INS-05": "2026.09/01",
       "MKR-INS-06": "2026.08/03",
       "MKR-INS-07": "2026.08/03",
-      // Not a reissue: MKR-INS-09 and MKR-INS-10 simply FIRST shipped in the
-      // September series.
-      "MKR-INS-09": "2026.09/01",
+      // 2026-09-10: the shift cabinet was reworked -- row actions moved into
+      // the details panel, the list gained an actual-output line and
+      // validation shifts can duplicate the Data Matrix -- so both shift
+      // documents were reissued.
+      "MKR-INS-08": "2026.09/01",
+      "MKR-INS-09": "2026.09/02",
       "MKR-INS-10": "2026.09/01",
     };
     expect(
@@ -95,9 +98,9 @@ describe("legal document registry", () => {
     expect(findLegalRelease("MKR-INS-05").effectiveDate).toBe("2026-09-02");
     expect(findLegalRelease("MKR-INS-06").effectiveDate).toBe("2026-09-01");
     expect(findLegalRelease("MKR-INS-07").effectiveDate).toBe("2026-09-01");
+    expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-09-10");
+    expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-09-10");
     expect(findLegalRelease("MKR-INS-10").effectiveDate).toBe("2026-09-10");
-    expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-08-30");
-    expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-09-02");
     expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(23);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
     expect(findLegalRelease("MKR-PD-02", "2026.08/01")).toBe(LEGAL_RELEASES[1]);
