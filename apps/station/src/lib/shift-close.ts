@@ -226,6 +226,12 @@ export function readPendingShiftCloses(exec: SqlExecutor): Promise<PendingShiftC
 }
 
 export async function markShiftCloseAccepted(exec: SqlExecutor, eventId: string): Promise<void> {
+  // Repair a mirror overwritten by an older client before discarding the
+  // durable close event. A failed write leaves the event available for retry.
+  await exec.run(
+    "UPDATE shift_mirror SET status = 'closed' WHERE id = (SELECT shift_id FROM shift_close_outbox WHERE event_id = ?)",
+    [eventId],
+  );
   await exec.run("DELETE FROM shift_close_outbox WHERE event_id = ?", [eventId]);
 }
 

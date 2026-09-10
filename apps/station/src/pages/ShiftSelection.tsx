@@ -20,7 +20,7 @@ const SHIFT_REFRESH_MS = 30_000;
 interface ShiftListItem {
   id: string;
   number?: string | null;
-  status: "planned" | "active" | "closed";
+  status: "planned" | "active" | "closing" | "closed";
   mode: "validation" | "aggregation";
   productName: string | null;
   /** Short operator-facing name from the catalog; null = use productName. */
@@ -39,19 +39,30 @@ interface ShiftListItem {
   } | null;
 }
 
-async function excludeLocallyClosedShifts(
+async function reconcileLocallyClosedShifts(
   exec: SqlExecutor | undefined,
   items: ShiftListItem[],
 ): Promise<ShiftListItem[]> {
   if (!exec || items.length === 0) return items;
   const placeholders = items.map(() => "?").join(", ");
-  const rows = await exec.all<{ id: string }>(
-    `SELECT shift_id AS id FROM shift_close_outbox WHERE shift_id IN (${placeholders})`,
+  // The outbox disappears on acknowledgement, but the closed mirror must
+  // continue to override an active list response that was already in flight.
+  const rows = await exec.all<{ id: string; status: "closing" | "closed" }>(
+    `WITH local_closures AS (
+       SELECT id FROM shift_mirror WHERE status = 'closed'
+       UNION SELECT shift_id AS id FROM shift_close_outbox
+     )
+     SELECT c.id, CASE WHEN o.state = 'pending' THEN 'closing' ELSE 'closed' END AS status
+       FROM local_closures c LEFT JOIN shift_close_outbox o ON o.shift_id = c.id
+      WHERE c.id IN (${placeholders})`,
     items.map((shift) => shift.id),
   );
   if (rows.length === 0) return items;
-  const closedIds = new Set(rows.map((row) => row.id));
-  return items.filter((shift) => !closedIds.has(shift.id));
+  const localStates = new Map(rows.map((row) => [row.id, row.status]));
+  return items.map((shift) => ({
+    ...shift,
+    status: shift.status === "closed" ? "closed" : (localStates.get(shift.id) ?? shift.status),
+  }));
 }
 
 export interface ShiftSelectionProps {
@@ -183,11 +194,17 @@ export function ShiftSelection({
       const shiftRequest = client
         .get<{ items: ShiftListItem[] }>("/shifts")
         .then(async (response) => {
-          let visibleItems = response.items;
+          let visibleItems: ShiftListItem[];
           try {
-            visibleItems = await excludeLocallyClosedShifts(exec, response.items);
+            visibleItems = await reconcileLocallyClosedShifts(exec, response.items);
           } catch (err) {
             console.error("station: locally closed shift reconciliation failed", err);
+            if (!mounted.current || listRequest.current?.id !== id) return;
+            setItems([]);
+            setError(t("shifts.localCloseStateUnavailable"));
+            setLoadFailed(true);
+            setLoading(false);
+            return;
           }
           if (!mounted.current || listRequest.current?.id !== id) return;
           setItems(visibleItems);
@@ -267,6 +284,7 @@ export function ShiftSelection({
   }
 
   async function enterShift(
+    shift: ShiftListItem,
     resolveShift: () => Promise<{ id: string; status: string; mode: string }>,
   ): Promise<void> {
     if (controlsDisabled) return;
@@ -290,6 +308,17 @@ export function ShiftSelection({
       if (acquireShiftEntry) {
         lease = await acquireShiftEntry();
         if (!current()) return;
+      }
+      // A card can go stale while the entry lease/route barrier is acquired.
+      if (exec) {
+        const [reconciled] = await reconcileLocallyClosedShifts(exec, [shift]);
+        if (!current()) return;
+        if (reconciled?.status === "closing" || reconciled?.status === "closed") {
+          setItems((previous) =>
+            previous.map((item) => (item.id === shift.id ? reconciled : item)),
+          );
+          return;
+        }
       }
       const entered = await resolveShift();
       if (!current()) return;
@@ -315,26 +344,13 @@ export function ShiftSelection({
   }
 
   async function open(shift: ShiftListItem): Promise<void> {
-    await enterShift(() =>
+    await enterShift(shift, () =>
       client.post<{ id: string; status: string; mode: string }>(`/shifts/${shift.id}/open`),
     );
   }
 
   async function rejoin(shift: ShiftListItem): Promise<void> {
-    if (!onRouteIntent && !acquireShiftEntry) {
-      if (controlsDisabled || isCurrent?.() === false) return;
-      setError(null);
-      setBusy(true);
-      try {
-        await onSelected(shift);
-      } catch {
-        if (mounted.current && isCurrent?.() !== false) setError(t("shifts.actionFailed"));
-      } finally {
-        if (mounted.current && isCurrent?.() !== false) setBusy(false);
-      }
-      return;
-    }
-    await enterShift(() => Promise.resolve(shift));
+    await enterShift(shift, () => Promise.resolve(shift));
   }
 
   async function enterRoute(enter: () => void, options?: ShiftSelectionRouteIntentOptions) {
@@ -482,15 +498,23 @@ export function ShiftSelection({
                     shift.mode === "aggregation" ? t("shifts.aggregation") : t("shifts.validation")
                   }
                   statusLabel={
-                    shift.status === "active" ? t("shifts.active") : t("shifts.notStarted")
+                    shift.status === "closing"
+                      ? t("shifts.closing")
+                      : shift.status === "active"
+                        ? t("shifts.active")
+                        : t("shifts.notStarted")
                   }
                   plannedLabel={t("shifts.planned")}
                   noPlanLabel={t("shifts.noPlan")}
                   counterpartyName={shift.counterpartyName ?? null}
                   counterpartyLabel={t("shifts.forCounterparty")}
-                  actionLabel={shift.status === "active" ? t("shifts.rejoin") : t("shifts.open")}
+                  actionLabel={
+                    shift.status === "active" || shift.status === "closing"
+                      ? t("shifts.rejoin")
+                      : t("shifts.open")
+                  }
                   active={shift.status === "active"}
-                  disabled={controlsDisabled}
+                  disabled={controlsDisabled || shift.status === "closing"}
                   onSelect={() =>
                     shift.status === "active" ? void rejoin(shift) : void open(shift)
                   }

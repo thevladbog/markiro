@@ -166,6 +166,8 @@
     "templatePagination": "Template pages",
     "serverUnavailable": "Could not load shifts. Check server access.",
     "active": "Shift active",
+    "closing": "Closing",
+    "localCloseStateUnavailable": "Could not check locally closed shifts. Refresh the list.",
     "notStarted": "Not started",
     "validation": "Validation",
     "aggregation": "Aggregation",

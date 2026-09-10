@@ -91,7 +91,7 @@ An additive runtime migration creates `shift_close_outbox` with one durable row 
 - state `pending` or `conflict`, nullable safe `conflict_code`, and nullable
   `last_checked_at` for a bounded reconciliation poll.
 
-Inserting this row is the local commit point. Shift selection overlays queued/conflicted shift ids as locally closed, so a subsequent API refresh, restart, or stale active bundle cannot put the operator back into the shift. The record survives process restart and is removed only after an authoritative server acknowledgement. A conflict row remains durable until administrator reconciliation is observed.
+Inserting this row is the local commit point. Shift selection shows queued shifts as `Закрывается` with `Присоединиться` disabled; conflicted shifts remain excluded. Entry rechecks the durable local close state after acquiring its route/entry barrier. A subsequent API refresh, restart, or stale active bundle cannot put the operator back into the shift. The record survives process restart and is removed only after an authoritative server acknowledgement. The closed mirror remains authoritative after acknowledgement and cannot be overwritten by a stale active bundle. A conflict row remains durable until administrator reconciliation is observed.
 
 The scan source stays paused from summary opening through the local insert. If counting or insertion fails, the station shows a local-storage error, remains in the shift, and resumes scanning only after the operator dismisses the error. It never pretends the shift closed when the durable record was not written.
 
@@ -132,7 +132,7 @@ Each fixed-height card contains:
 - operation type: `Проверка` or `Агрегация`;
 - `Открыть` for planned shifts and `Присоединиться` for active shifts.
 
-The selection screen keeps three cards per page and the existing fixed footer. At 1280×800 it does not scroll or clip actions. Closed and locally-close-pending shifts are excluded.
+The selection screen keeps two cards per page and the existing fixed footer. At 1280×800 it does not scroll or clip actions. Locally pending closures show `Закрывается` with a disabled `Присоединиться` button until acknowledgement; confirmed closed shifts and local close conflicts are excluded.
 
 ### Work footer
 
