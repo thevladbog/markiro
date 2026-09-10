@@ -71,6 +71,8 @@ analogous fixes before editing.
 - `tools/station-release`: station release artifacts, changelog, promotion, and
   object-storage/GitHub mirror contracts.
 - `tools/evidence-package`: evidence package init, seal, and verification.
+- `tools/rospatent`: dependency-free PDF builder for the Rospatent deposit
+  listing; the file selection lives in `docs/registration/rospatent/`.
 - `tools/production-browser`: isolated Playwright checks for production docs,
   the landing site, kiosk touch flows, and station inventory.
 - `docs/architecture.md`: accepted system-level decisions and invariants.

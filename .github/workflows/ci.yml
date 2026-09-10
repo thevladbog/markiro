@@ -99,6 +99,7 @@ jobs:
       - run: pnpm check:deps
       - run: pnpm test:dependency-guard
       - run: pnpm test:indexnow
+      - run: pnpm test:rospatent
       - run: pnpm turbo lint typecheck build --concurrency=1 --force
 
   verify-api-tests:
