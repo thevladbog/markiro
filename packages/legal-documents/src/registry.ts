@@ -1,4 +1,5 @@
 import { BRAND_LETTERHEAD_CONTENT } from "./documents/brand-letterhead.js";
+import { CABINET_CATALOG_PRODUCT_CONTENT } from "./documents/cabinet-catalog-product.js";
 import { CABINET_INVENTORY_CLOSE_CONTENT } from "./documents/cabinet-inventory-close.js";
 import { CABINET_SHIFT_PLANNING_CONTENT } from "./documents/cabinet-shift-planning.js";
 import { CABINET_SHIFT_CLOSE_CONTENT } from "./documents/cabinet-shift-close.js";
@@ -38,6 +39,7 @@ const LEGAL_DOCUMENT_CODES = [
   "MKR-INS-07",
   "MKR-INS-08",
   "MKR-INS-09",
+  "MKR-INS-10",
 ] as const;
 const LEGAL_DOCUMENT_STATUSES = ["draft", "active", "superseded", "withdrawn"] as const;
 
@@ -55,6 +57,7 @@ export const LEGAL_DOCUMENT_KIND_BY_CODE = {
   "MKR-INS-07": "instruction",
   "MKR-INS-08": "instruction",
   "MKR-INS-09": "instruction",
+  "MKR-INS-10": "instruction",
 } as const satisfies Record<LegalDocumentCode, LegalDocumentKind>;
 
 export function legalDocumentKind(code: LegalDocumentCode): LegalDocumentKind {
@@ -209,6 +212,14 @@ export const LEGAL_RELEASES = [
     operatorProfileId: "operator-2026-08-15",
     routes: { ru: "/instruktsii/smena-zakrytie/" },
   },
+  {
+    code: "MKR-INS-10",
+    revision: "2026.09/01",
+    effectiveDate: "2026-09-10",
+    status: "active",
+    operatorProfileId: "operator-2026-08-15",
+    routes: { ru: "/instruktsii/katalog-kartochka-tovara/" },
+  },
 ] as const satisfies readonly LegalDocumentRelease[];
 
 export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
@@ -225,6 +236,7 @@ export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
   { releaseKey: "MKR-INS-07/2026.08/03", content: CABINET_INVENTORY_CLOSE_CONTENT },
   { releaseKey: "MKR-INS-08/2026.08/01", content: CABINET_SHIFT_PLANNING_CONTENT },
   { releaseKey: "MKR-INS-09/2026.09/01", content: CABINET_SHIFT_CLOSE_CONTENT },
+  { releaseKey: "MKR-INS-10/2026.09/01", content: CABINET_CATALOG_PRODUCT_CONTENT },
 ];
 
 function compareLegalRevisions(left: LegalRevision, right: LegalRevision): number {
