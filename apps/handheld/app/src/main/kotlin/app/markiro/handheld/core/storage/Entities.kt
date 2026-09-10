@@ -23,6 +23,8 @@ data class DeviceConfigEntity(
     val countsAt: Long? = null,
     /** Shift this handheld is working in or paused from; the hub pins «Продолжить» on it. */
     val activeShiftId: String? = null,
+    /** Inventory task this handheld is working in or paused from. */
+    val activeInventoryId: String? = null,
 )
 
 /** Roster mirror; hashes are PHC verifiers, never plaintext. */

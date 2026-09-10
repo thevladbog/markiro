@@ -10,7 +10,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Opens a hand-made version-1 database; Room validates every table after `MIGRATION_1_2` runs. */
+/** Opens a hand-made version-1 database; Room validates every table after `MIGRATION_1_2` and `MIGRATION_2_3` run. */
 @RunWith(AndroidJUnit4::class)
 class MigrationTest {
     @Test
@@ -38,17 +38,22 @@ class MigrationTest {
             legacy.version = 1
         }
         val db = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .allowMainThreadQueries()
             .build()
         try {
             val config = db.deviceConfigDao().get()
             assertEquals("dev-1", config?.deviceId)
             assertEquals(null, config?.activeShiftId)
+            assertEquals(null, config?.activeInventoryId)
             db.outboxDao().insert(
                 OutboxEntity(shiftId = "s", raw = "r", verdict = "invalid", scannedAt = "t", operatorId = null, codeHash = null, gtin14 = null, serial = null),
             )
             assertEquals(1, db.outboxDao().head(1).size)
+            db.inventoryOutboxDao().insert(
+                InventoryOutboxEntity(inventoryId = "i1", snapshotId = "snap", eventId = "e1", deviceSequence = 1, payloadJson = "{}", createdAt = "t"),
+            )
+            assertEquals(1, db.inventoryOutboxDao().head("i1", 10).size)
         } finally {
             db.close()
             context.deleteDatabase(name)

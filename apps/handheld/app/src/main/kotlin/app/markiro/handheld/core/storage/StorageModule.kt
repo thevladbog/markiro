@@ -18,8 +18,26 @@ object StorageModule {
     @Singleton
     fun database(@ApplicationContext context: Context): HandheldDatabase =
         Room.databaseBuilder(context, HandheldDatabase::class.java, "handheld.db")
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
+
+    @Provides
+    fun inventoryTaskDao(db: HandheldDatabase): InventoryTaskDao = db.inventoryTaskDao()
+
+    @Provides
+    fun inventorySnapshotCodeDao(db: HandheldDatabase): InventorySnapshotCodeDao = db.inventorySnapshotCodeDao()
+
+    @Provides
+    fun inventoryTerminalStateDao(db: HandheldDatabase): InventoryTerminalStateDao = db.inventoryTerminalStateDao()
+
+    @Provides
+    fun inventoryEventDao(db: HandheldDatabase): InventoryEventDao = db.inventoryEventDao()
+
+    @Provides
+    fun inventoryResultDao(db: HandheldDatabase): InventoryResultDao = db.inventoryResultDao()
+
+    @Provides
+    fun inventoryOutboxDao(db: HandheldDatabase): InventoryOutboxDao = db.inventoryOutboxDao()
 
     @Provides
     fun deviceConfigDao(db: HandheldDatabase): DeviceConfigDao = db.deviceConfigDao()
