@@ -3,7 +3,7 @@
  *
  * Every date in this system is carried as `YYYY-MM-DD` (or a full UTC ISO
  * instant in storage): it sorts lexicographically, it is what
- * `apps/station/src/lib/box-label.ts`'s calendar arithmetic operates on, and
+ * `labels/shelf-life.ts`'s calendar arithmetic operates on, and
  * it is unambiguous. But `YYYY-MM-DD` is NOT what a Russian warehouse reads
  * off a box: the customer-approved paper mock-up shows `дд.мм.гггг`, and the
  * first physical print of the stock 58×40 label came back with `2026-08-20`

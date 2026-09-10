@@ -1,5 +1,6 @@
 import {
   formatLabelDate,
+  shelfLifeExpiryDate,
   isValidSscc,
   type LabelField,
   type LabelTemplateSpec,
@@ -7,7 +8,6 @@ import {
   type RasterizeTextFn,
 } from "@markiro/domain";
 
-import { addCalendarDays } from "./box-label.js";
 import type { PrinterLanguage } from "./hardware-config.js";
 import { renderLabelBytes } from "./print-label.js";
 
@@ -24,10 +24,7 @@ export interface InventoryBoxLabelInput {
 
 export function inventoryBoxLabelFields(input: InventoryBoxLabelInput): Record<LabelField, string> {
   if (!isValidSscc(input.sscc)) throw new Error("inventory box SSCC is invalid");
-  const expiry =
-    input.shelfLifeDays !== null && Number.isInteger(input.shelfLifeDays) && input.shelfLifeDays > 0
-      ? addCalendarDays(input.productionDate, input.shelfLifeDays)
-      : "";
+  const expiry = shelfLifeExpiryDate(input.productionDate, input.shelfLifeDays);
   return {
     "product.name": input.productName,
     "product.printName": input.productPrintName ?? input.productName,
