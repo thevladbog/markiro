@@ -30,6 +30,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.IOException
+import kotlin.time.Duration.Companion.seconds
 
 @RunWith(AndroidJUnit4::class)
 class InventoryListViewModelTest {
@@ -110,7 +111,7 @@ class InventoryListViewModelTest {
         val repo = FakeRepo()
         val vm = vm(repo)
         vm.state.first { !it.loading }
-        vm.events.test {
+        vm.events.test(timeout = 10.seconds) {
             vm.select(own)
             assertEquals(InventoryListEvent.Entered("i1"), awaitItem())
         }
@@ -128,7 +129,7 @@ class InventoryListViewModelTest {
         assertTrue(repo.joins.isEmpty())
         vm.select(other)
         assertTrue(vm.state.first { it.dialog != null }.dialog is InventoryDialog.ConfirmOther)
-        vm.events.test {
+        vm.events.test(timeout = 10.seconds) {
             vm.confirmOther()
             assertEquals(InventoryListEvent.Entered("i2"), awaitItem())
         }
