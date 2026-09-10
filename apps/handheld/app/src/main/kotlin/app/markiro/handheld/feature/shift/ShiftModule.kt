@@ -22,4 +22,7 @@ object ShiftModule {
 
     @Provides
     fun teamRefresher(api: StationApi): TeamRefresher = ApiTeamRefresher(api)
+
+    @Provides
+    fun shiftCloser(db: HandheldDatabase): ShiftCloser = ShiftCloser(db)
 }
