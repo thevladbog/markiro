@@ -12,6 +12,7 @@
     "station-inventory-tests/**/*.ts",
     "product-labels-tests/**/*.ts",
     "national-catalog-tests/**/*.ts",
-    "reports-tests/**/*.ts"
+    "reports-tests/**/*.ts",
+    "offers-tests/**/*.ts"
   ]
 }

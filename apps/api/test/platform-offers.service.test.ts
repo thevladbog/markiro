@@ -8,6 +8,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createOfferSchema, type CreateOfferDto } from "../src/modules/platform-offers/dto";
 import type { OfferDocumentsService } from "../src/modules/platform-offers/offer-documents.service";
+import type { OfferWorkspaceService } from "../src/modules/platform-offers/offer-workspace.service";
+import type { OfferPreviewService } from "../src/modules/platform-offers/offer-preview.service";
 import { PlatformOffersController } from "../src/modules/platform-offers/platform-offers.controller";
 import { PlatformOffersService } from "../src/modules/platform-offers/platform-offers.service";
 import { BillingService } from "../src/modules/billing/billing.service";
@@ -227,7 +229,12 @@ describe("platform offer response boundary", () => {
         },
       ],
     } as unknown as PlatformOffersService;
-    const controller = new PlatformOffersController(service, {} as OfferDocumentsService);
+    const controller = new PlatformOffersController(
+      service,
+      {} as OfferDocumentsService,
+      {} as OfferWorkspaceService,
+      {} as OfferPreviewService,
+    );
     const request = {
       platformPrincipal: actor,
     } as unknown as Parameters<PlatformOffersController["list"]>[0];
@@ -241,7 +248,12 @@ describe("platform offer response boundary", () => {
         url: "https://objects.example.invalid/offers/offer.pdf?signature=redacted",
       })),
     } as unknown as OfferDocumentsService;
-    const controller = new PlatformOffersController({} as PlatformOffersService, documents);
+    const controller = new PlatformOffersController(
+      {} as PlatformOffersService,
+      documents,
+      {} as OfferWorkspaceService,
+      {} as OfferPreviewService,
+    );
 
     const failure = await controller
       .documentsDownload("41111111-1111-4111-8111-111111111111", "not-a-uuid")
@@ -620,6 +632,20 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
     const secondDraft = await service.revise(revisionActor, first!.id, {
       idempotencyKey: randomUUID(),
     });
+    await connection.db.insert(schema.commercialOfferLines).values({
+      tenantId,
+      offerId: secondDraft.id,
+      position: 1,
+      kind: "service",
+      nameRu: "Услуга",
+      nameEn: "Service",
+      quantity: 1,
+      unit: "шт",
+      agreedUnitPrice: "100.00",
+      vatRate: null,
+      vatIncluded: true,
+      lineTotal: "100.00",
+    });
     await service.publish(revisionActor, secondDraft.id);
     await service.cancel(revisionActor, secondDraft.id);
 
@@ -781,6 +807,22 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
         },
       ])
       .returning();
+    await connection.db.insert(schema.commercialOfferLines).values(
+      [firstDraft!, secondDraft!].map((offer) => ({
+        tenantId: offer.tenantId,
+        offerId: offer.id,
+        position: 1,
+        kind: "service" as const,
+        nameRu: "Услуга",
+        nameEn: "Service",
+        quantity: 1,
+        unit: "шт",
+        agreedUnitPrice: "100.00",
+        vatRate: null,
+        vatIncluded: true,
+        lineTotal: "100.00",
+      })),
+    );
     await connection.pool.query(`
       CREATE FUNCTION task6_offer_publish_delay() RETURNS trigger
       LANGUAGE plpgsql AS $$

@@ -10,12 +10,7 @@ import {
   type OfferServiceRecordSource,
 } from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
-import {
-  bankAccountLast4,
-  bankAccountSnapshot,
-  billingProfileSnapshot,
-  resolveCommercialBillingDetails,
-} from "../billing/commercial-snapshots";
+import { bankAccountLast4 } from "../billing/commercial-snapshots";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import type { EntitlementsExecutor } from "../../subscriptions/entitlements.types";
@@ -27,7 +22,7 @@ import {
 } from "../billing-workflow-locks";
 import type { CreateOfferDto, PaymentDto } from "./dto";
 import { createOfferDraft } from "./platform-offer-draft";
-import { normalizeOfferTerms } from "./offer-terms";
+import { resolveOfferPrintInput } from "./offer-preview.service";
 import {
   beginPlatformBillingMutation,
   commitPlatformBillingMutation,
@@ -68,7 +63,11 @@ export class PlatformOffersService {
     return this.detailWith(this.db, offer.tenantId, id);
   }
 
-  async publish(actor: PlatformPrincipal, id: string): Promise<OfferServiceDetailSource> {
+  async publish(
+    actor: PlatformPrincipal,
+    id: string,
+    previewFingerprint?: string,
+  ): Promise<OfferServiceDetailSource> {
     const canonicalOfferId = canonicalBillingUuid(id);
     return this.db.transaction(async (tx) => {
       const [located] = await tx
@@ -108,11 +107,11 @@ export class PlatformOffersService {
       if (family[0]?.id !== draft.id) {
         throw new ConflictException({ code: "offer_version_stale" });
       }
-      const { seller, buyer, sellerAccount, buyerAccount } = await resolveCommercialBillingDetails(
-        tx,
-        draft.tenantId,
-        draft.sellerBankAccountId,
-      );
+      const printInput = await resolveOfferPrintInput(tx, draft);
+      if (previewFingerprint !== undefined && previewFingerprint !== printInput.fingerprint) {
+        throw new ConflictException({ code: "offer_preview_changed" });
+      }
+      const { sellerAccount, buyerAccount } = printInput.details;
       const [latest] = await tx
         .select({ number: schema.commercialOffers.number })
         .from(schema.commercialOffers)
@@ -156,29 +155,13 @@ export class PlatformOffersService {
         throw error;
       }
       if (!updated) throw new ConflictException({ code: "offer_not_draft" });
-      const lines = await tx
-        .select()
-        .from(schema.commercialOfferLines)
-        .where(eq(schema.commercialOfferLines.offerId, canonicalOfferId))
-        .orderBy(asc(schema.commercialOfferLines.position));
-      const terms = normalizeOfferTerms(updated.termsMarkdown);
       await tx.insert(schema.commercialOfferPrintSnapshots).values({
+        ...printInput.snapshot,
         tenantId: updated.tenantId,
         offerId: updated.id,
         revision: updated.revision,
         number,
         publishedAt: updated.publishedAt ?? new Date(),
-        expiresAt: updated.expiresAt,
-        sellerSnapshot: billingProfileSnapshot(seller),
-        buyerSnapshot: billingProfileSnapshot(buyer),
-        sellerBankAccountSnapshot: bankAccountSnapshot(sellerAccount),
-        buyerBankAccountSnapshot: buyerAccount ? bankAccountSnapshot(buyerAccount) : null,
-        linesSnapshot: lines,
-        subtotal: updated.total,
-        vatTotal: "0.00",
-        total: updated.total,
-        termsMarkdown: terms.markdown,
-        termsHtml: terms.html,
       });
       await this.audit.record(tx, {
         actorPlatformUserId: actor.userId,

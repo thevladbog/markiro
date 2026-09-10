@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -53,6 +53,8 @@ function installInvoiceEditorApi({
   tenantItems = [TENANT_LIST_ITEM],
   offer = null,
   requestAuthority,
+  workspaceAuthority,
+  workspaceStatus = 200,
   me = ACCOUNTANT_ME,
 }: {
   createStatus?: number;
@@ -60,6 +62,8 @@ function installInvoiceEditorApi({
   tenantItems?: Array<Record<string, unknown>>;
   offer?: Record<string, unknown> | null;
   requestAuthority?: Record<string, unknown> | { status: 403 };
+  workspaceAuthority?: Record<string, unknown>;
+  workspaceStatus?: number;
   me?: Record<string, unknown>;
 } = {}) {
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
@@ -69,6 +73,11 @@ function installInvoiceEditorApi({
       const url = String(input);
       const method = init.method ?? "GET";
       if (url.endsWith("/api/platform/me")) return jsonResponse(200, me);
+      if (url.endsWith(`/api/platform/offers/${OFFER_ID}/workspace`) && workspaceAuthority)
+        return jsonResponse(
+          workspaceStatus,
+          workspaceStatus === 200 ? workspaceAuthority : { code: "workspace_unavailable" },
+        );
       if (url.endsWith("/api/platform/billing/operator/accounts") && method === "GET") {
         return jsonResponse(200, []);
       }
@@ -188,6 +197,162 @@ async function addPosition(
 }
 
 describe("invoice editor route", () => {
+  it.each(["error", "denied"] as const)(
+    "does not open from cached allowed authority after entry refresh is %s",
+    async (outcome) => {
+      const offer = publishedOffer({ lines: [] });
+      const allowed = {
+        offer,
+        tenant: { id: TENANT_ID, name: "Молочная мастерская", slug: "dairy" },
+        parties: { seller: null, buyer: null, sellerBankAccount: null, buyerBankAccount: null },
+        revisions: [],
+        documents: [],
+        decision: null,
+        request: null,
+        actions: {
+          publish: false,
+          cancel: false,
+          revise: false,
+          pay: false,
+          createInvoice: true,
+          addSignedVariant: false,
+        },
+      };
+      installInvoiceEditorApi({
+        offer,
+        workspaceAuthority: {
+          ...allowed,
+          actions: { ...allowed.actions, createInvoice: outcome !== "denied" },
+        },
+        workspaceStatus: outcome === "error" ? 503 : 200,
+      });
+      const app = renderSaasApp({ initialEntry: "/invoices" });
+      app.queryClient.setQueryData(["platform", "offers", OFFER_ID, "workspace"], allowed);
+      await act(async () => {
+        await app.router.navigate("/invoices/new", {
+          state: { sourceOfferId: OFFER_ID, sourceKind: "offer-workspace" },
+        });
+      });
+      await waitFor(() =>
+        expect(
+          app.queryClient.getQueryState(["platform", "offers", OFFER_ID, "workspace"])?.status,
+        ).toBe(outcome === "error" ? "error" : "success"),
+      );
+      expect(
+        await screen.findByText(
+          outcome === "error"
+            ? "Не удалось загрузить данные для счёта"
+            : "Источник счёта больше не доступен",
+        ),
+      ).toBeDefined();
+      expect(screen.queryByRole("button", { name: "Создать черновик счёта" })).toBeNull();
+    },
+  );
+  it("creates a standalone sourced invoice without inventing a request ID", async () => {
+    const offer = publishedOffer({
+      lines: [
+        {
+          id: "a1111111-1111-4111-8111-111111111111",
+          tenantId: TENANT_ID,
+          offerId: OFFER_ID,
+          position: 1,
+          kind: "service",
+          catalogVersionId: null,
+          nameRu: "Настройка линии",
+          nameEn: "Line setup",
+          descriptionRu: null,
+          descriptionEn: null,
+          quantity: 2,
+          unit: "шт",
+          catalogUnitPrice: null,
+          agreedUnitPrice: "6250.25",
+          vatRate: null,
+          vatIncluded: false,
+          priceOverrideReason: null,
+          activationPolicy: null,
+          lineTotal: "12500.50",
+          createdAt: CREATED_AT,
+        },
+      ],
+    });
+    const api = installInvoiceEditorApi({
+      offer,
+      workspaceAuthority: {
+        offer,
+        tenant: { id: TENANT_ID, name: "Молочная мастерская", slug: "dairy" },
+        parties: { seller: null, buyer: null, sellerBankAccount: null, buyerBankAccount: null },
+        revisions: [],
+        documents: [],
+        decision: null,
+        request: null,
+        actions: {
+          publish: false,
+          cancel: false,
+          revise: false,
+          pay: false,
+          createInvoice: true,
+          addSignedVariant: false,
+        },
+      },
+    });
+    const user = userEvent.setup();
+    renderSaasApp({
+      initialEntry: {
+        pathname: "/invoices/new",
+        state: { sourceOfferId: OFFER_ID, sourceKind: "offer-workspace" },
+      },
+    });
+    expect(await screen.findByText("Настройка линии")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
+    await waitFor(() => expect(api.calls()).toHaveLength(1));
+    expect(api.calls()[0]?.body).toMatchObject({ sourceOfferId: OFFER_ID, tenantId: TENANT_ID });
+    expect(api.calls()[0]?.body).not.toHaveProperty("sourceRequestId");
+  });
+  it.each([true, false])(
+    "checks standalone offer workspace authority before using source (%s)",
+    async (canCreate) => {
+      const offer = publishedOffer({ lines: [] });
+      installInvoiceEditorApi({
+        offer,
+        workspaceAuthority: {
+          offer,
+          tenant: { id: TENANT_ID, name: "Молочная мастерская", slug: "dairy" },
+          parties: { seller: null, buyer: null, sellerBankAccount: null, buyerBankAccount: null },
+          revisions: [],
+          documents: [],
+          decision: null,
+          request: null,
+          actions: {
+            publish: false,
+            cancel: false,
+            revise: false,
+            pay: false,
+            createInvoice: canCreate,
+            addSignedVariant: false,
+          },
+        },
+      });
+      renderSaasApp({
+        initialEntry: {
+          pathname: "/invoices/new",
+          state: { sourceOfferId: OFFER_ID, sourceKind: "offer-workspace" },
+        },
+      });
+      if (canCreate)
+        expect(await screen.findByRole("button", { name: "Создать черновик счёта" })).toBeDefined();
+      else expect(await screen.findByText("Источник счёта больше не доступен")).toBeDefined();
+    },
+  );
+  it("rejects malformed standalone offer navigation", async () => {
+    installInvoiceEditorApi();
+    renderSaasApp({
+      initialEntry: {
+        pathname: "/invoices/new",
+        state: { sourceOfferId: "invalid", sourceKind: "offer-workspace" },
+      },
+    });
+    expect(await screen.findByText("Источник счёта больше не доступен")).toBeDefined();
+  });
   it("reuses one invoice idempotency key after a lost successful response", async () => {
     const api = installInvoiceEditorApi({
       loseFirstCreateResponse: true,
