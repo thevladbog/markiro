@@ -41,3 +41,65 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
         db.execSQL("CREATE TABLE IF NOT EXISTS `meta` (`key` TEXT NOT NULL, `value` TEXT NOT NULL, PRIMARY KEY(`key`))")
     }
 }
+
+/** Version 2 (shift validation) → 3 (inventory check). Additive; shift tables are untouched. */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `device_config` ADD COLUMN `activeInventoryId` TEXT")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `inventory_tasks` (`inventoryId` TEXT NOT NULL, `inventoryNumber` TEXT NOT NULL, " +
+                "`productId` TEXT NOT NULL, `productName` TEXT NOT NULL, `productPrintName` TEXT, `gtin14` TEXT NOT NULL, " +
+                "`mode` TEXT NOT NULL, `lineId` TEXT NOT NULL, `lineName` TEXT NOT NULL, `productionDateFrom` TEXT NOT NULL, " +
+                "`productionDateTo` TEXT NOT NULL, `boxCapacity` INTEGER NOT NULL, `snapshotId` TEXT NOT NULL, " +
+                "`snapshotFixedAt` TEXT NOT NULL, `contentDigest` TEXT NOT NULL, `combinedDigest` TEXT NOT NULL, " +
+                "`codeCount` INTEGER NOT NULL, `expectedCount` INTEGER NOT NULL, `state` TEXT NOT NULL, `stagingCursor` TEXT, " +
+                "`stagedCount` INTEGER NOT NULL, `joinedAt` INTEGER, `leftAt` INTEGER, PRIMARY KEY(`inventoryId`))",
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `inventory_snapshot_codes` (`snapshotId` TEXT NOT NULL, `codeHash` TEXT NOT NULL, " +
+                "`canonicalRaw` TEXT NOT NULL, `gtin14` TEXT NOT NULL, `serial` TEXT NOT NULL, `sourceStatus` TEXT NOT NULL, " +
+                "`sourceState` TEXT, `sourceProductionDate` TEXT, `parentSscc` TEXT, `expected` INTEGER NOT NULL, " +
+                "`protected` INTEGER NOT NULL, PRIMARY KEY(`snapshotId`, `codeHash`))",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_inventory_snapshot_codes_snapshotId_parentSscc` " +
+                "ON `inventory_snapshot_codes` (`snapshotId`, `parentSscc`)",
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `inventory_terminal_state` (`inventoryId` TEXT NOT NULL, `snapshotId` TEXT NOT NULL, " +
+                "`operatorId` TEXT, `activeProductionDate` TEXT, `nextDeviceSequence` INTEGER NOT NULL, `progressCursor` TEXT, " +
+                "`progressResultRevision` INTEGER NOT NULL, `updatedAt` TEXT NOT NULL, PRIMARY KEY(`inventoryId`))",
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `inventory_events` (`eventId` TEXT NOT NULL, `inventoryId` TEXT NOT NULL, " +
+                "`snapshotId` TEXT NOT NULL, `deviceSequence` INTEGER NOT NULL, `operatorId` TEXT NOT NULL, `scannedAt` TEXT NOT NULL, " +
+                "`kind` TEXT NOT NULL, `normalizedIdentity` TEXT NOT NULL, `codeHash` TEXT, `canonicalRaw` TEXT, " +
+                "`activeProductionDate` TEXT NOT NULL, `localVerdict` TEXT NOT NULL, `claimedCount` INTEGER NOT NULL, " +
+                "`winnerEventId` TEXT, `winnerDeviceId` TEXT, `winnerScannedAt` TEXT, `serverStatus` TEXT, PRIMARY KEY(`eventId`))",
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `index_inventory_events_inventoryId_deviceSequence` " +
+                "ON `inventory_events` (`inventoryId`, `deviceSequence`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_inventory_events_inventoryId_normalizedIdentity` " +
+                "ON `inventory_events` (`inventoryId`, `normalizedIdentity`)",
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `inventory_results` (`inventoryId` TEXT NOT NULL, `snapshotId` TEXT NOT NULL, " +
+                "`codeHash` TEXT NOT NULL, `firstAcceptedEventId` TEXT NOT NULL, `winningDeviceId` TEXT NOT NULL, " +
+                "`winningScannedAt` TEXT NOT NULL, `observedProductionDate` TEXT, `classification` TEXT NOT NULL, " +
+                "`source` TEXT NOT NULL, `updatedAt` TEXT NOT NULL, PRIMARY KEY(`inventoryId`, `codeHash`))",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_inventory_results_inventoryId_firstAcceptedEventId` " +
+                "ON `inventory_results` (`inventoryId`, `firstAcceptedEventId`)",
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `inventory_outbox` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`inventoryId` TEXT NOT NULL, `snapshotId` TEXT NOT NULL, `eventId` TEXT NOT NULL, `deviceSequence` INTEGER NOT NULL, " +
+                "`payloadJson` TEXT NOT NULL, `createdAt` TEXT NOT NULL)",
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_inventory_outbox_eventId` ON `inventory_outbox` (`eventId`)")
+    }
+}

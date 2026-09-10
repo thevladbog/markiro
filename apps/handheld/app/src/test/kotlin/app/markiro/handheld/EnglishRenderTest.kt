@@ -8,6 +8,21 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.feature.hub.HubScreen
 import app.markiro.handheld.feature.hub.HubUi
+import app.markiro.handheld.core.inventory.InventorySyncState
+import app.markiro.handheld.core.inventory.InventoryVerdict
+import app.markiro.handheld.core.inventory.RecordOutcome
+import app.markiro.handheld.core.network.InventoryTaskDto
+import app.markiro.handheld.core.storage.InventoryFixtures
+import app.markiro.handheld.feature.inventory.InventoryLastScan
+import app.markiro.handheld.feature.inventory.InventoryLeaveScreen
+import app.markiro.handheld.feature.inventory.InventoryListCallbacks
+import app.markiro.handheld.feature.inventory.InventoryListScreen
+import app.markiro.handheld.feature.inventory.InventoryListUi
+import app.markiro.handheld.feature.inventory.InventoryProgress
+import app.markiro.handheld.feature.inventory.InventoryWorkCallbacks
+import app.markiro.handheld.feature.inventory.InventoryWorkScreen
+import app.markiro.handheld.feature.inventory.InventoryWorkUi
+import app.markiro.handheld.feature.inventory.LeaveStep
 import app.markiro.handheld.feature.pairing.PairingCallbacks
 import app.markiro.handheld.feature.pairing.PairingScreen
 import app.markiro.handheld.feature.pairing.PairingUi
@@ -59,6 +74,43 @@ class EnglishRenderTest {
     @Test
     fun signInRendersInEnglish() {
         compose.setContent { MarkiroTheme { SignInScreen(SignInUi.Pin("4127", "Anna Ivanova", lockMode = true), SignInCallbacks()) } }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun inventoryListRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                InventoryListScreen(
+                    InventoryListUi(
+                        loading = false,
+                        active = InventoryFixtures.task("i1").copy(productPrintName = "Water"),
+                        mine = listOf(InventoryTaskDto("i2", "INV-0008", "Juice", null, "repack", "l1", "Line 2", "2026-08-01", "2026-08-31")),
+                        others = emptyMap(), othersExpanded = false, othersLoading = false, reachable = false, ownLineName = "Line 2",
+                        listFetchedAt = 0L, dialog = null,
+                    ),
+                    InventoryListCallbacks(),
+                )
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun inventoryWorkRendersInEnglish() {
+        val ui = InventoryWorkUi(
+            task = InventoryFixtures.task("i1").copy(productPrintName = "Water"), expectedCount = 100, activeDate = "2026-08-20",
+            last = InventoryLastScan(InventoryVerdict.PROTECTED, "…1234", null, false, null, null, null, null),
+            progress = InventoryProgress(1, 2, 3, 4, 5), feed = emptyList(), sync = InventorySyncState(pending = 2), reachable = false,
+            held = RecordOutcome.DateMismatch("2026-08-20", "2026-08-22", false, "raw"), closed = false,
+        )
+        compose.setContent { MarkiroTheme { InventoryWorkScreen(ui, InventoryWorkCallbacks()) } }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun inventoryLeaveRendersInEnglish() {
+        compose.setContent { MarkiroTheme { InventoryLeaveScreen(LeaveStep.Offline(3), onDone = {}, onBack = {}) } }
         assertNoCyrillic()
     }
 }

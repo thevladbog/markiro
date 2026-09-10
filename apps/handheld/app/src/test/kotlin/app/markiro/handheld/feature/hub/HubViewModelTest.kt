@@ -5,10 +5,18 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.MainDispatcherRule
 import app.markiro.handheld.core.auth.OperatorRecord
+import app.markiro.handheld.core.inventory.InventorySyncEngine
 import app.markiro.handheld.core.network.IdentityResponse
+import app.markiro.handheld.core.network.InventoryBundlePageDto
+import app.markiro.handheld.core.network.InventoryManifestDto
 import app.markiro.handheld.core.network.InventoryTaskDto
 import app.markiro.handheld.core.network.InventoryTaskListResponse
+import app.markiro.handheld.core.network.JoinInventoryRequest
+import app.markiro.handheld.core.network.LeaveInventoryRequest
+import app.markiro.handheld.core.network.LeaveInventoryResponse
 import app.markiro.handheld.core.network.LineListResponse
+import app.markiro.handheld.core.network.ResolveTaskRequest
+import app.markiro.handheld.core.network.ResolveTaskResponse
 import app.markiro.handheld.core.network.NetworkModule
 import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.network.RosterResponse
@@ -20,6 +28,7 @@ import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.network.ValidationPrintDto
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.InventoryFixtures
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.sync.SyncEngine
 import app.markiro.handheld.core.sync.SyncTransport
@@ -78,14 +87,21 @@ class HubViewModelTest {
                 listOf(dto("s1", "SEP26-001", "active"), dto("s2", "SEP26-002", "planned"), dto("s3", "SEP26-003", "closed")),
             )
         }
-        override suspend fun inventoryTasks(): InventoryTaskListResponse {
+        override suspend fun inventoryTasks(scope: String?): InventoryTaskListResponse {
             if (fail) throw IOException("offline")
-            return InventoryTaskListResponse(listOf(InventoryTaskDto("i1", "7", "Вода 0,5 л")))
+            return InventoryTaskListResponse(
+                listOf(InventoryTaskDto("i1", "INV-0007", "Вода 0,5 л", null, "check", "line-2", "Линия 2", "2026-08-01", "2026-08-31")),
+            )
         }
         override suspend fun enter(id: String): ShiftDto = throw UnsupportedOperationException()
         override suspend fun bundle(id: String): ShiftBundleDto = throw UnsupportedOperationException()
         override suspend fun summary(id: String): ShiftSummaryDto = throw UnsupportedOperationException()
         override suspend fun lines(): LineListResponse = throw UnsupportedOperationException()
+        override suspend fun resolveInventoryBarcode(body: ResolveTaskRequest): ResolveTaskResponse = throw UnsupportedOperationException()
+        override suspend fun joinInventory(id: String, body: JoinInventoryRequest): InventoryManifestDto = throw UnsupportedOperationException()
+        override suspend fun inventoryManifest(id: String): InventoryManifestDto = throw UnsupportedOperationException()
+        override suspend fun inventoryCodes(id: String, cursor: String?, limit: Int): InventoryBundlePageDto = throw UnsupportedOperationException()
+        override suspend fun leaveInventory(id: String, body: LeaveInventoryRequest): LeaveInventoryResponse = throw UnsupportedOperationException()
     }
 
     private fun vm(api: StationApi): HubViewModel {
@@ -93,10 +109,25 @@ class HubViewModelTest {
             db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
         )
+        val inventoryEngine = InventorySyncEngine(
+            db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
+            NetworkModule.strictJson(), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+        )
         return HubViewModel(
-            api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(),
+            api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(),
             scannerLabel = { "встроенный" }, now = { clock }, tick = flowOf(Unit),
         )
+    }
+
+    @Test
+    fun anActiveInventoryIsPinnedForContinuing() = runTest {
+        db.inventoryTaskDao().upsert(InventoryFixtures.task("i1"))
+        db.deviceConfigDao().upsert(paired.copy(activeInventoryId = "i1"))
+        val vm = vm(api())
+        val ui = vm.state.first { it.activeInventoryId != null }
+        assertEquals("INV-0007", ui.continueInventoryNumber)
+        db.inventoryTaskDao().setState("i1", "closed")
+        assertNull(vm.state.first { it.activeInventoryId == null }.continueInventoryNumber)
     }
 
     @Test

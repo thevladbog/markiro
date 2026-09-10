@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.R
+import app.markiro.handheld.core.inventory.InventorySyncEngine
+import app.markiro.handheld.core.inventory.InventorySyncState
 import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.scan.ScanPreferences
@@ -11,6 +13,8 @@ import app.markiro.handheld.core.scan.ScanSourceKind
 import app.markiro.handheld.core.scan.VendorProfiles
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.DeviceConfigEntity
+import app.markiro.handheld.core.storage.InventoryTaskDao
+import app.markiro.handheld.core.storage.InventoryTaskEntity
 import app.markiro.handheld.core.storage.ShiftDao
 import app.markiro.handheld.core.storage.ShiftEntity
 import app.markiro.handheld.core.sync.SyncEngine
@@ -45,6 +49,8 @@ data class HubUi(
     val stuck: Boolean = false,
     val activeShiftId: String? = null,
     val continueShiftNumber: String? = null,
+    val activeInventoryId: String? = null,
+    val continueInventoryNumber: String? = null,
 )
 
 enum class HubTile { SHIFT, INVENTORY, CHECK, SETTINGS }
@@ -63,6 +69,8 @@ class HubViewModel(
     reachability: ReachabilityTracker,
     sync: SyncEngine,
     shifts: ShiftDao,
+    inventorySync: InventorySyncEngine,
+    inventories: InventoryTaskDao,
     private val scannerLabel: () -> String,
     private val now: () -> Long = System::currentTimeMillis,
     /** Re-evaluates the online indicator while nothing else changes; tests pass a single tick. */
@@ -82,6 +90,8 @@ class HubViewModel(
         reachability: ReachabilityTracker,
         sync: SyncEngine,
         shifts: ShiftDao,
+        inventorySync: InventorySyncEngine,
+        inventories: InventoryTaskDao,
         scan: ScanPreferences,
     ) : this(
         api,
@@ -90,6 +100,8 @@ class HubViewModel(
         reachability,
         sync,
         shifts,
+        inventorySync,
+        inventories,
         scannerLabel = {
             when (scan.sourceKind) {
                 ScanSourceKind.BUILTIN_INTENT -> VendorProfiles.byId(scan.profileId).label.substringBefore(" ·")
@@ -102,12 +114,19 @@ class HubViewModel(
     private val activeShift: Flow<ShiftEntity?> =
         config.observe().flatMapLatest { cfg -> cfg?.activeShiftId?.let { shifts.observe(it) } ?: flowOf(null) }
 
-    val state: StateFlow<HubUi> = combine(config.observe(), session.state, reachability.lastSuccessAt, tick, sync.state, activeShift) { values ->
+    private val activeInventory: Flow<InventoryTaskEntity?> =
+        config.observe().flatMapLatest { cfg -> cfg?.activeInventoryId?.let { inventories.observe(it) } ?: flowOf(null) }
+
+    val state: StateFlow<HubUi> = combine(
+        config.observe(), session.state, reachability.lastSuccessAt, tick, sync.state, activeShift, inventorySync.state, activeInventory,
+    ) { values ->
         val cfg = values[0] as DeviceConfigEntity?
         val ses = values[1] as SessionState
         val lastOk = values[2] as Long?
         val syncState = values[4] as SyncState
         val current = (values[5] as ShiftEntity?)?.takeIf { it.status != "closed" }
+        val inventoryState = values[6] as InventorySyncState
+        val inventory = (values[7] as InventoryTaskEntity?)?.takeIf { it.state == "active" }
         HubUi(
             organization = cfg?.organizationName.orEmpty(),
             operatorName = ses.operator?.name.orEmpty(),
@@ -117,10 +136,12 @@ class HubViewModel(
             countsAt = cfg?.countsAt,
             reachable = lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS,
             scannerLabel = scannerLabel(),
-            queue = syncState.pending,
-            stuck = syncState.stuck,
+            queue = syncState.pending + inventoryState.pending,
+            stuck = syncState.stuck || inventoryState.stuck,
             activeShiftId = current?.id,
             continueShiftNumber = current?.number,
+            activeInventoryId = inventory?.inventoryId,
+            continueInventoryNumber = inventory?.inventoryNumber,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, HubUi())
 

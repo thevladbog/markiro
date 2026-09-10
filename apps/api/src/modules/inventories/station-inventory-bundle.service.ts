@@ -51,9 +51,10 @@ export class StationInventoryBundleService {
     private readonly entitlements: EntitlementsService,
   ) {}
 
+  /** `lineId === null` lists every line (handheld `scope=all`). */
   async listRunningManifests(
     tenantId: string,
-    lineId: string,
+    lineId: string | null,
   ): Promise<StationInventoryManifest[]> {
     const access = await this.entitlements.resolveRecovery(tenantId, this.db, new Date());
     const rows = await this.selectStoredManifestFacts(this.db)
@@ -61,7 +62,7 @@ export class StationInventoryBundleService {
         and(
           eq(schema.inventories.tenantId, tenantId),
           eq(schema.inventories.status, "running"),
-          eq(schema.inventories.lineId, lineId),
+          ...(lineId === null ? [] : [eq(schema.inventories.lineId, lineId)]),
         ),
       )
       .orderBy(asc(schema.inventories.number), asc(schema.inventories.id));

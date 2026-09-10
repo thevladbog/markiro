@@ -5,6 +5,7 @@ import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.BuildConfig
+import app.markiro.handheld.core.inventory.InventorySyncEngine
 import app.markiro.handheld.core.scan.ScanEvent
 import app.markiro.handheld.core.scan.ScanEvents
 import app.markiro.handheld.core.scan.ScanPreferences
@@ -21,6 +22,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -51,6 +53,7 @@ class SettingsViewModel @Inject constructor(
     config: DeviceConfigDao,
     private val signaller: Signaller,
     sync: SyncEngine,
+    inventorySync: InventorySyncEngine,
     meta: MetaStore,
 ) : ViewModel() {
     private val _state = MutableStateFlow(
@@ -64,7 +67,13 @@ class SettingsViewModel @Inject constructor(
 
     init {
         viewModelScope.launch { scans.events.collect { event -> _state.update { it.copy(lastScan = event) } } }
-        viewModelScope.launch { sync.state.collect { s -> _state.update { it.copy(queue = s.pending, lastSyncAt = s.lastSuccessAt) } } }
+        viewModelScope.launch {
+            // Both queues count: shift scans and inventory events share the «Очередь синхронизации» row.
+            combine(sync.state, inventorySync.state) { s, i -> s to i }.collect { (s, i) ->
+                val last = maxOf(s.lastSuccessAt ?: 0L, i.lastSuccessAt ?: 0L).takeIf { it > 0L }
+                _state.update { it.copy(queue = s.pending + i.pending, lastSyncAt = last) }
+            }
+        }
         viewModelScope.launch { val id = meta.installId(); _state.update { it.copy(installId = id) } }
     }
 

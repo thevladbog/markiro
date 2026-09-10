@@ -22,9 +22,19 @@ export class StationInventoryAccessService {
     private readonly bundles: StationInventoryBundleService,
   ) {}
 
-  async list(tenantId: string, deviceLineId: string | null): Promise<StationInventoryTaskListDto> {
-    if (deviceLineId === null) return { items: [] };
-    const manifests = await this.bundles.listRunningManifests(tenantId, deviceLineId);
+  async list(
+    tenantId: string,
+    deviceLineId: string | null,
+    deviceKind: "station" | "handheld",
+    scope: "line" | "all",
+  ): Promise<StationInventoryTaskListDto> {
+    // Only a walking handheld sees other lines; a station keeps its line-only contract.
+    const everyLine = scope === "all" && deviceKind === "handheld";
+    if (!everyLine && deviceLineId === null) return { items: [] };
+    const manifests = await this.bundles.listRunningManifests(
+      tenantId,
+      everyLine ? null : deviceLineId,
+    );
     return {
       items: manifests.map((manifest) => this.taskFromManifest(manifest)),
     };
@@ -50,6 +60,7 @@ export class StationInventoryAccessService {
     tenantId: string,
     deviceId: string,
     deviceLineId: string | null,
+    deviceKind: "station" | "handheld",
     inventoryId: string,
     input: JoinStationInventoryDto,
   ): Promise<StationInventoryBundleManifestDto> {
@@ -102,7 +113,8 @@ export class StationInventoryAccessService {
       if (input.barcode !== undefined && barcodeInventoryId !== inventoryId) {
         throw new ConflictException({ code: "INVENTORY_TASK_BARCODE_INVALID" });
       }
-      if (differentLine && input.barcode === undefined) {
+      // A stationary terminal must prove it holds the task form; a handheld confirms on screen.
+      if (differentLine && input.barcode === undefined && deviceKind !== "handheld") {
         throw new ConflictException({ code: "INVENTORY_TASK_BARCODE_REQUIRED" });
       }
       if (differentLine && input.confirmDifferentLine !== true) {

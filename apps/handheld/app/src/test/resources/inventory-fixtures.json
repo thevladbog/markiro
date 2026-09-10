@@ -1,0 +1,1027 @@
+{
+  "classify": [
+    {
+      "name": "expected item with aim prefix and edges",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "5caee349f65fb39bddf3b2b284f2f6d8a718fe42b756b3485e369238fee44ab9",
+          "canonicalRaw": "010460000000001521EXPECTED-1\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "EXPECTED-1",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-20",
+          "expected": true,
+          "protected": false,
+          "parentSscc": null
+        }
+      ],
+      "claims": [],
+      "raw": " \t]d2010460000000001521EXPECTED-1\u001d91KEY\u001d92SIGNATURE\t ",
+      "expected": {
+        "kind": "expected",
+        "scanKind": "item",
+        "codeHash": "5caee349f65fb39bddf3b2b284f2f6d8a718fe42b756b3485e369238fee44ab9",
+        "canonicalRaw": "010460000000001521EXPECTED-1\u001d91KEY\u001d92SIGNATURE",
+        "gtin14": "04600000000015",
+        "serial": "EXPECTED-1",
+        "originClassification": "expected"
+      },
+      "sourceDate": {
+        "kind": "single",
+        "scanKind": "item",
+        "productionDate": "2026-08-20"
+      }
+    },
+    {
+      "name": "expected item plain",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "5caee349f65fb39bddf3b2b284f2f6d8a718fe42b756b3485e369238fee44ab9",
+          "canonicalRaw": "010460000000001521EXPECTED-1\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "EXPECTED-1",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-20",
+          "expected": true,
+          "protected": false,
+          "parentSscc": null
+        }
+      ],
+      "claims": [],
+      "raw": "010460000000001521EXPECTED-1\u001d91KEY\u001d92SIGNATURE",
+      "expected": {
+        "kind": "expected",
+        "scanKind": "item",
+        "codeHash": "5caee349f65fb39bddf3b2b284f2f6d8a718fe42b756b3485e369238fee44ab9",
+        "canonicalRaw": "010460000000001521EXPECTED-1\u001d91KEY\u001d92SIGNATURE",
+        "gtin14": "04600000000015",
+        "serial": "EXPECTED-1",
+        "originClassification": "expected"
+      },
+      "sourceDate": {
+        "kind": "single",
+        "scanKind": "item",
+        "productionDate": "2026-08-20"
+      }
+    },
+    {
+      "name": "expected item with its own date",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "8fd94220c5471245be4c3bd7991f764c05a6d5602df940b4a93eb6604ad0c06b",
+          "canonicalRaw": "010460000000001521DATED-1\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "DATED-1",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-05",
+          "expected": true,
+          "protected": false,
+          "parentSscc": null
+        }
+      ],
+      "claims": [],
+      "raw": "010460000000001521DATED-1\u001d91KEY\u001d92SIGNATURE",
+      "expected": {
+        "kind": "expected",
+        "scanKind": "item",
+        "codeHash": "8fd94220c5471245be4c3bd7991f764c05a6d5602df940b4a93eb6604ad0c06b",
+        "canonicalRaw": "010460000000001521DATED-1\u001d91KEY\u001d92SIGNATURE",
+        "gtin14": "04600000000015",
+        "serial": "DATED-1",
+        "originClassification": "expected"
+      },
+      "sourceDate": {
+        "kind": "single",
+        "scanKind": "item",
+        "productionDate": "2026-08-05"
+      }
+    },
+    {
+      "name": "wrong gtin",
+      "taskGtin14": "04600000000015",
+      "rows": [],
+      "claims": [],
+      "raw": "010460068200001321OTHER\u001d91KEY\u001d92SIGNATURE",
+      "expected": {
+        "kind": "invalid",
+        "reason": "wrong_gtin"
+      },
+      "sourceDate": {
+        "kind": "none"
+      }
+    },
+    {
+      "name": "bare gtin is unsupported",
+      "taskGtin14": "04600000000015",
+      "rows": [],
+      "claims": [],
+      "raw": "04600000000015",
+      "expected": {
+        "kind": "invalid",
+        "reason": "unsupported"
+      },
+      "sourceDate": {
+        "kind": "none"
+      }
+    },
+    {
+      "name": "malformed",
+      "taskGtin14": "04600000000015",
+      "rows": [],
+      "claims": [],
+      "raw": "not a code",
+      "expected": {
+        "kind": "invalid",
+        "reason": "malformed"
+      },
+      "sourceDate": {
+        "kind": "none"
+      }
+    },
+    {
+      "name": "emitted is known ineligible",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "3203434ad4f910571d6cd688dc5e3f2fd6deb8a05a0eec3a0341aba28e5e48be",
+          "canonicalRaw": "010460000000001521EMITTED\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "EMITTED",
+          "sourceStatus": "EMITTED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-20",
+          "expected": false,
+          "protected": false,
+          "parentSscc": null
+        }
+      ],
+      "claims": [],
+      "raw": "010460000000001521EMITTED\u001d91KEY\u001d92SIGNATURE",
+      "expected": {
+        "kind": "known-ineligible",
+        "scanKind": "item",
+        "codeHash": "3203434ad4f910571d6cd688dc5e3f2fd6deb8a05a0eec3a0341aba28e5e48be",
+        "canonicalRaw": "010460000000001521EMITTED\u001d91KEY\u001d92SIGNATURE",
+        "gtin14": "04600000000015",
+        "serial": "EMITTED",
+        "originClassification": "known-ineligible",
+        "sourceStatus": "EMITTED"
+      },
+      "sourceDate": {
+        "kind": "none"
+      }
+    },
+    {
+      "name": "retired is known ineligible",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "00903f6dcee0a72291f9293f01ab1e9bfa1c35de8967b1e5a9e694e12a7f5bf3",
+          "canonicalRaw": "010460000000001521RETIRED\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "RETIRED",
+          "sourceStatus": "RETIRED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-20",
+          "expected": false,
+          "protected": false,
+          "parentSscc": null
+        }
+      ],
+      "claims": [],
+      "raw": "010460000000001521RETIRED\u001d91KEY\u001d92SIGNATURE",
+      "expected": {
+        "kind": "known-ineligible",
+        "scanKind": "item",
+        "codeHash": "00903f6dcee0a72291f9293f01ab1e9bfa1c35de8967b1e5a9e694e12a7f5bf3",
+        "canonicalRaw": "010460000000001521RETIRED\u001d91KEY\u001d92SIGNATURE",
+        "gtin14": "04600000000015",
+        "serial": "RETIRED",
+        "originClassification": "known-ineligible",
+        "sourceStatus": "RETIRED"
+      },
+      "sourceDate": {
+        "kind": "none"
+      }
+    },
+    {
+      "name": "moving by ud is protected",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "b1914f9ef2559d041d02fe556e95059ec0ea906160dd9fcd5f815913b081817d",
+          "canonicalRaw": "010460000000001521MOVING\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "MOVING",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": "MOVING_BY_UD",
+          "sourceProductionDate": "2026-08-20",
+          "expected": true,
+          "protected": false,
+          "parentSscc": null
+        }
+      ],
+      "claims": [],
+      "raw": "010460000000001521MOVING\u001d91KEY\u001d92SIGNATURE",
+      "expected": {
+        "kind": "protected",
+        "scanKind": "item",
+        "codeHash": "b1914f9ef2559d041d02fe556e95059ec0ea906160dd9fcd5f815913b081817d",
+        "canonicalRaw": "010460000000001521MOVING\u001d91KEY\u001d92SIGNATURE",
+        "gtin14": "04600000000015",
+        "serial": "MOVING",
+        "originClassification": "protected",
+        "sourceStatus": "INTRODUCED"
+      },
+      "sourceDate": {
+        "kind": "none"
+      }
+    },
+    {
+      "name": "protected flag wins",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "b41619d7a7da4184508de096470780171b28d1708c271f2f7817e9711679fdd8",
+          "canonicalRaw": "010460000000001521FLAGGED\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "FLAGGED",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-20",
+          "expected": false,
+          "protected": true,
+          "parentSscc": null
+        }
+      ],
+      "claims": [],
+      "raw": "010460000000001521FLAGGED\u001d91KEY\u001d92SIGNATURE",
+      "expected": {
+        "kind": "protected",
+        "scanKind": "item",
+        "codeHash": "b41619d7a7da4184508de096470780171b28d1708c271f2f7817e9711679fdd8",
+        "canonicalRaw": "010460000000001521FLAGGED\u001d91KEY\u001d92SIGNATURE",
+        "gtin14": "04600000000015",
+        "serial": "FLAGGED",
+        "originClassification": "protected",
+        "sourceStatus": "INTRODUCED"
+      },
+      "sourceDate": {
+        "kind": "none"
+      }
+    },
+    {
+      "name": "unknown item",
+      "taskGtin14": "04600000000015",
+      "rows": [],
+      "claims": [],
+      "raw": "010460000000001521NOWHERE\u001d91KEY\u001d92SIGNATURE",
+      "expected": {
+        "kind": "unknown",
+        "scanKind": "item",
+        "codeHash": "e200d60731b69d591f0c1809b6726e02e1dc7e8d1f7f48b3beca04b5cfce3b27",
+        "canonicalRaw": "010460000000001521NOWHERE\u001d91KEY\u001d92SIGNATURE",
+        "gtin14": "04600000000015",
+        "serial": "NOWHERE"
+      },
+      "sourceDate": {
+        "kind": "none"
+      }
+    },
+    {
+      "name": "duplicate item here",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "5caee349f65fb39bddf3b2b284f2f6d8a718fe42b756b3485e369238fee44ab9",
+          "canonicalRaw": "010460000000001521EXPECTED-1\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "EXPECTED-1",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-20",
+          "expected": true,
+          "protected": false,
+          "parentSscc": null
+        }
+      ],
+      "claims": [
+        {
+          "codeHash": "5caee349f65fb39bddf3b2b284f2f6d8a718fe42b756b3485e369238fee44ab9",
+          "eventId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          "deviceId": "11111111-1111-4111-8111-111111111111",
+          "scannedAt": "2026-08-25T08:00:00.000Z"
+        }
+      ],
+      "raw": "010460000000001521EXPECTED-1\u001d91KEY\u001d92SIGNATURE",
+      "expected": {
+        "kind": "duplicate",
+        "scanKind": "item",
+        "codeHash": "5caee349f65fb39bddf3b2b284f2f6d8a718fe42b756b3485e369238fee44ab9",
+        "canonicalRaw": "010460000000001521EXPECTED-1\u001d91KEY\u001d92SIGNATURE",
+        "gtin14": "04600000000015",
+        "serial": "EXPECTED-1",
+        "firstWinning": {
+          "codeHash": "5caee349f65fb39bddf3b2b284f2f6d8a718fe42b756b3485e369238fee44ab9",
+          "eventId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          "deviceId": "11111111-1111-4111-8111-111111111111",
+          "scannedAt": "2026-08-25T08:00:00.000Z"
+        }
+      },
+      "sourceDate": {
+        "kind": "none"
+      }
+    },
+    {
+      "name": "box with aim prefix",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+          "canonicalRaw": "010460000000001521BOX-A\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-A",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-10",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        },
+        {
+          "codeHash": "ad46b81462fd64e851515d58a54943e67d0a8409e0738d681fa2fb6b0dc28ae6",
+          "canonicalRaw": "010460000000001521BOX-B\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-B",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-10",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        }
+      ],
+      "claims": [],
+      "raw": "]C100346006820000000014",
+      "expected": {
+        "kind": "expected",
+        "scanKind": "known_box",
+        "sscc": "346006820000000014",
+        "children": [
+          {
+            "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+            "originClassification": "expected",
+            "firstWinning": null
+          },
+          {
+            "codeHash": "ad46b81462fd64e851515d58a54943e67d0a8409e0738d681fa2fb6b0dc28ae6",
+            "originClassification": "expected",
+            "firstWinning": null
+          }
+        ],
+        "originClassification": "expected"
+      },
+      "sourceDate": {
+        "kind": "single",
+        "scanKind": "known_box",
+        "productionDate": "2026-08-10"
+      }
+    },
+    {
+      "name": "box with parentheses",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+          "canonicalRaw": "010460000000001521BOX-A\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-A",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-10",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        },
+        {
+          "codeHash": "ad46b81462fd64e851515d58a54943e67d0a8409e0738d681fa2fb6b0dc28ae6",
+          "canonicalRaw": "010460000000001521BOX-B\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-B",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-10",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        }
+      ],
+      "claims": [],
+      "raw": "(00)346006820000000014",
+      "expected": {
+        "kind": "expected",
+        "scanKind": "known_box",
+        "sscc": "346006820000000014",
+        "children": [
+          {
+            "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+            "originClassification": "expected",
+            "firstWinning": null
+          },
+          {
+            "codeHash": "ad46b81462fd64e851515d58a54943e67d0a8409e0738d681fa2fb6b0dc28ae6",
+            "originClassification": "expected",
+            "firstWinning": null
+          }
+        ],
+        "originClassification": "expected"
+      },
+      "sourceDate": {
+        "kind": "single",
+        "scanKind": "known_box",
+        "productionDate": "2026-08-10"
+      }
+    },
+    {
+      "name": "box bare twenty digits",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+          "canonicalRaw": "010460000000001521BOX-A\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-A",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-10",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        },
+        {
+          "codeHash": "ad46b81462fd64e851515d58a54943e67d0a8409e0738d681fa2fb6b0dc28ae6",
+          "canonicalRaw": "010460000000001521BOX-B\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-B",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-10",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        }
+      ],
+      "claims": [],
+      "raw": "00346006820000000014",
+      "expected": {
+        "kind": "expected",
+        "scanKind": "known_box",
+        "sscc": "346006820000000014",
+        "children": [
+          {
+            "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+            "originClassification": "expected",
+            "firstWinning": null
+          },
+          {
+            "codeHash": "ad46b81462fd64e851515d58a54943e67d0a8409e0738d681fa2fb6b0dc28ae6",
+            "originClassification": "expected",
+            "firstWinning": null
+          }
+        ],
+        "originClassification": "expected"
+      },
+      "sourceDate": {
+        "kind": "single",
+        "scanKind": "known_box",
+        "productionDate": "2026-08-10"
+      }
+    },
+    {
+      "name": "box bare eighteen digits mixed dates",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+          "canonicalRaw": "010460000000001521BOX-A\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-A",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-10",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        },
+        {
+          "codeHash": "f8028d0c2fdd51c93b05cff5065031d02b4c0987bc5dfee48af91cf15b2a10d3",
+          "canonicalRaw": "010460000000001521BOX-C\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-C",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-12",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        }
+      ],
+      "claims": [],
+      "raw": "346006820000000014",
+      "expected": {
+        "kind": "expected",
+        "scanKind": "known_box",
+        "sscc": "346006820000000014",
+        "children": [
+          {
+            "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+            "originClassification": "expected",
+            "firstWinning": null
+          },
+          {
+            "codeHash": "f8028d0c2fdd51c93b05cff5065031d02b4c0987bc5dfee48af91cf15b2a10d3",
+            "originClassification": "expected",
+            "firstWinning": null
+          }
+        ],
+        "originClassification": "expected"
+      },
+      "sourceDate": {
+        "kind": "mixed",
+        "scanKind": "known_box"
+      }
+    },
+    {
+      "name": "box partially claimed keeps single date",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+          "canonicalRaw": "010460000000001521BOX-A\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-A",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-10",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        },
+        {
+          "codeHash": "ad46b81462fd64e851515d58a54943e67d0a8409e0738d681fa2fb6b0dc28ae6",
+          "canonicalRaw": "010460000000001521BOX-B\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-B",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-10",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        },
+        {
+          "codeHash": "f8028d0c2fdd51c93b05cff5065031d02b4c0987bc5dfee48af91cf15b2a10d3",
+          "canonicalRaw": "010460000000001521BOX-C\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-C",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-12",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        }
+      ],
+      "claims": [
+        {
+          "codeHash": "f8028d0c2fdd51c93b05cff5065031d02b4c0987bc5dfee48af91cf15b2a10d3",
+          "eventId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "deviceId": "22222222-2222-4222-8222-222222222222",
+          "scannedAt": "2026-08-25T09:59:00.000Z"
+        }
+      ],
+      "raw": "346006820000000014",
+      "expected": {
+        "kind": "expected",
+        "scanKind": "known_box",
+        "sscc": "346006820000000014",
+        "children": [
+          {
+            "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+            "originClassification": "expected",
+            "firstWinning": null
+          },
+          {
+            "codeHash": "ad46b81462fd64e851515d58a54943e67d0a8409e0738d681fa2fb6b0dc28ae6",
+            "originClassification": "expected",
+            "firstWinning": null
+          },
+          {
+            "codeHash": "f8028d0c2fdd51c93b05cff5065031d02b4c0987bc5dfee48af91cf15b2a10d3",
+            "originClassification": "expected",
+            "firstWinning": {
+              "codeHash": "f8028d0c2fdd51c93b05cff5065031d02b4c0987bc5dfee48af91cf15b2a10d3",
+              "eventId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+              "deviceId": "22222222-2222-4222-8222-222222222222",
+              "scannedAt": "2026-08-25T09:59:00.000Z"
+            }
+          }
+        ],
+        "originClassification": "expected"
+      },
+      "sourceDate": {
+        "kind": "single",
+        "scanKind": "known_box",
+        "productionDate": "2026-08-10"
+      }
+    },
+    {
+      "name": "box fully claimed is duplicate with the earliest winner",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+          "canonicalRaw": "010460000000001521BOX-A\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-A",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-10",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        },
+        {
+          "codeHash": "ad46b81462fd64e851515d58a54943e67d0a8409e0738d681fa2fb6b0dc28ae6",
+          "canonicalRaw": "010460000000001521BOX-B\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-B",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-10",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        }
+      ],
+      "claims": [
+        {
+          "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+          "eventId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "deviceId": "11111111-1111-4111-8111-111111111111",
+          "scannedAt": "2026-08-25T10:00:00.000Z"
+        },
+        {
+          "codeHash": "ad46b81462fd64e851515d58a54943e67d0a8409e0738d681fa2fb6b0dc28ae6",
+          "eventId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "deviceId": "22222222-2222-4222-8222-222222222222",
+          "scannedAt": "2026-08-25T09:59:00.000Z"
+        }
+      ],
+      "raw": "346006820000000014",
+      "expected": {
+        "kind": "duplicate",
+        "scanKind": "known_box",
+        "sscc": "346006820000000014",
+        "children": [
+          {
+            "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+            "originClassification": "expected",
+            "firstWinning": {
+              "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+              "eventId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              "deviceId": "11111111-1111-4111-8111-111111111111",
+              "scannedAt": "2026-08-25T10:00:00.000Z"
+            }
+          },
+          {
+            "codeHash": "ad46b81462fd64e851515d58a54943e67d0a8409e0738d681fa2fb6b0dc28ae6",
+            "originClassification": "expected",
+            "firstWinning": {
+              "codeHash": "ad46b81462fd64e851515d58a54943e67d0a8409e0738d681fa2fb6b0dc28ae6",
+              "eventId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+              "deviceId": "22222222-2222-4222-8222-222222222222",
+              "scannedAt": "2026-08-25T09:59:00.000Z"
+            }
+          }
+        ],
+        "firstWinning": {
+          "codeHash": "ad46b81462fd64e851515d58a54943e67d0a8409e0738d681fa2fb6b0dc28ae6",
+          "eventId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "deviceId": "22222222-2222-4222-8222-222222222222",
+          "scannedAt": "2026-08-25T09:59:00.000Z"
+        }
+      },
+      "sourceDate": {
+        "kind": "none"
+      }
+    },
+    {
+      "name": "box with only protected left",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+          "canonicalRaw": "010460000000001521BOX-A\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-A",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-10",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        },
+        {
+          "codeHash": "056968f6395b26ddd1b552cf2a0aa44ff9219736a67bf2c98449dbdfe260b6af",
+          "canonicalRaw": "010460000000001521BOX-P\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-P",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": "MOVING_BY_UD",
+          "sourceProductionDate": "2026-08-20",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        }
+      ],
+      "claims": [
+        {
+          "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+          "eventId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "deviceId": "11111111-1111-4111-8111-111111111111",
+          "scannedAt": "2026-08-25T10:00:00.000Z"
+        }
+      ],
+      "raw": "346006820000000014",
+      "expected": {
+        "kind": "protected",
+        "scanKind": "known_box",
+        "sscc": "346006820000000014",
+        "children": [
+          {
+            "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+            "originClassification": "expected",
+            "firstWinning": {
+              "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+              "eventId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              "deviceId": "11111111-1111-4111-8111-111111111111",
+              "scannedAt": "2026-08-25T10:00:00.000Z"
+            }
+          },
+          {
+            "codeHash": "056968f6395b26ddd1b552cf2a0aa44ff9219736a67bf2c98449dbdfe260b6af",
+            "originClassification": "protected",
+            "firstWinning": null
+          }
+        ],
+        "originClassification": "protected"
+      },
+      "sourceDate": {
+        "kind": "none"
+      }
+    },
+    {
+      "name": "box with only ineligible left",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+          "canonicalRaw": "010460000000001521BOX-A\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-A",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-10",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        },
+        {
+          "codeHash": "19d60791f27b9d4bfb3fe6b64ca03c132fda46e6d363600f3a62a304e1a2ff5d",
+          "canonicalRaw": "010460000000001521BOX-I\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "BOX-I",
+          "sourceStatus": "APPLIED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-20",
+          "expected": false,
+          "protected": false,
+          "parentSscc": "346006820000000014"
+        }
+      ],
+      "claims": [
+        {
+          "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+          "eventId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "deviceId": "11111111-1111-4111-8111-111111111111",
+          "scannedAt": "2026-08-25T10:00:00.000Z"
+        }
+      ],
+      "raw": "346006820000000014",
+      "expected": {
+        "kind": "known-ineligible",
+        "scanKind": "known_box",
+        "sscc": "346006820000000014",
+        "children": [
+          {
+            "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+            "originClassification": "expected",
+            "firstWinning": {
+              "codeHash": "a3f3db78bf576dd00b60976017dbd9f3c64f606d973a47f4ad98c52a688dca9d",
+              "eventId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              "deviceId": "11111111-1111-4111-8111-111111111111",
+              "scannedAt": "2026-08-25T10:00:00.000Z"
+            }
+          },
+          {
+            "codeHash": "19d60791f27b9d4bfb3fe6b64ca03c132fda46e6d363600f3a62a304e1a2ff5d",
+            "originClassification": "known-ineligible",
+            "firstWinning": null
+          }
+        ],
+        "originClassification": "known-ineligible"
+      },
+      "sourceDate": {
+        "kind": "none"
+      }
+    },
+    {
+      "name": "box of protected and ineligible",
+      "taskGtin14": "04600000000015",
+      "rows": [
+        {
+          "codeHash": "55472c8a8b721eefdfc5fad17ab95d41c52023e316e790d5e75c185da8e0a3a2",
+          "canonicalRaw": "010460000000001521ONLY-P\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "ONLY-P",
+          "sourceStatus": "INTRODUCED",
+          "sourceState": "MOVING_BY_UD",
+          "sourceProductionDate": "2026-08-20",
+          "expected": true,
+          "protected": false,
+          "parentSscc": "346006820000000021"
+        },
+        {
+          "codeHash": "2b1e46b30aabb4bb7d9a7548756a22592c6926fb2c877ef4e21239a2aa7d2c95",
+          "canonicalRaw": "010460000000001521ONLY-I\u001d91KEY\u001d92SIGNATURE",
+          "gtin14": "04600000000015",
+          "serial": "ONLY-I",
+          "sourceStatus": "RETIRED",
+          "sourceState": null,
+          "sourceProductionDate": "2026-08-20",
+          "expected": false,
+          "protected": false,
+          "parentSscc": "346006820000000021"
+        }
+      ],
+      "claims": [],
+      "raw": "346006820000000021",
+      "expected": {
+        "kind": "protected",
+        "scanKind": "known_box",
+        "sscc": "346006820000000021",
+        "children": [
+          {
+            "codeHash": "55472c8a8b721eefdfc5fad17ab95d41c52023e316e790d5e75c185da8e0a3a2",
+            "originClassification": "protected",
+            "firstWinning": null
+          },
+          {
+            "codeHash": "2b1e46b30aabb4bb7d9a7548756a22592c6926fb2c877ef4e21239a2aa7d2c95",
+            "originClassification": "known-ineligible",
+            "firstWinning": null
+          }
+        ],
+        "originClassification": "protected"
+      },
+      "sourceDate": {
+        "kind": "none"
+      }
+    },
+    {
+      "name": "box unknown",
+      "taskGtin14": "04600000000015",
+      "rows": [],
+      "claims": [],
+      "raw": "346006820000000014",
+      "expected": {
+        "kind": "unknown",
+        "scanKind": "old_box",
+        "sscc": "346006820000000014"
+      },
+      "sourceDate": {
+        "kind": "none"
+      }
+    },
+    {
+      "name": "box with a bad check digit is malformed",
+      "taskGtin14": "04600000000015",
+      "rows": [],
+      "claims": [],
+      "raw": "346006820000000015",
+      "expected": {
+        "kind": "invalid",
+        "reason": "malformed"
+      },
+      "sourceDate": {
+        "kind": "none"
+      }
+    }
+  ],
+  "batchDigest": [
+    {
+      "name": "single expected item with unicode serial and gs",
+      "payload": {
+        "snapshotId": "33333333-3333-4333-8333-333333333333",
+        "snapshotRevision": 1,
+        "openBoxCount": 0,
+        "sequenceCeiling": 1,
+        "pendingEventCount": 0,
+        "events": [
+          {
+            "eventId": "44444441-4444-4444-8444-444444444444",
+            "deviceSequence": 1,
+            "operatorId": "55555555-5555-4555-8555-555555555555",
+            "scannedAt": "2026-08-25T10:00:00.000Z",
+            "activeProductionDate": "2026-08-20",
+            "kind": "item",
+            "normalizedIdentity": "item:83df15029fd259662af54805eaa3a9032173c5420fb0227f55fee82a1ea630f6",
+            "codeHash": "83df15029fd259662af54805eaa3a9032173c5420fb0227f55fee82a1ea630f6",
+            "canonicalRaw": "010460000000001521сериЯ-1\u001d91KEY\u001d92SIGNATURE",
+            "localVerdict": "expected"
+          }
+        ]
+      },
+      "digest": "4ffc31162846cff19f36fb7cffc2118d3f535d4ec15db1638fd011289113eb9a"
+    },
+    {
+      "name": "known box and old box",
+      "payload": {
+        "snapshotId": "33333333-3333-4333-8333-333333333333",
+        "snapshotRevision": 1,
+        "openBoxCount": 0,
+        "sequenceCeiling": 3,
+        "pendingEventCount": 7,
+        "events": [
+          {
+            "eventId": "44444442-4444-4444-8444-444444444444",
+            "deviceSequence": 2,
+            "operatorId": "55555555-5555-4555-8555-555555555555",
+            "scannedAt": "2026-08-25T10:00:00.000Z",
+            "activeProductionDate": "2026-08-20",
+            "kind": "known_box",
+            "normalizedIdentity": "known_box:346006820000000014",
+            "codeHash": null,
+            "canonicalRaw": "346006820000000014",
+            "localVerdict": "expected"
+          },
+          {
+            "eventId": "44444443-4444-4444-8444-444444444444",
+            "deviceSequence": 3,
+            "operatorId": "55555555-5555-4555-8555-555555555555",
+            "scannedAt": "2026-08-25T10:00:00.000Z",
+            "activeProductionDate": "2026-08-20",
+            "kind": "old_box",
+            "normalizedIdentity": "old_box:346006820000000021",
+            "codeHash": null,
+            "canonicalRaw": "346006820000000021",
+            "localVerdict": "unknown"
+          }
+        ]
+      },
+      "digest": "bb1341840fa97d13addfe445c00b67f32219379a3ac09278756a1780ec149d60"
+    },
+    {
+      "name": "duplicate with quote backslash slash and a non-ascii letter in the serial",
+      "payload": {
+        "snapshotId": "33333333-3333-4333-8333-333333333333",
+        "snapshotRevision": 1,
+        "openBoxCount": 0,
+        "sequenceCeiling": 4,
+        "pendingEventCount": 0,
+        "events": [
+          {
+            "eventId": "44444444-4444-4444-8444-444444444444",
+            "deviceSequence": 4,
+            "operatorId": "55555555-5555-4555-8555-555555555555",
+            "scannedAt": "2026-08-25T10:00:00.000Z",
+            "activeProductionDate": "2026-08-20",
+            "kind": "item",
+            "normalizedIdentity": "item:36b0d226bb70a8a81ba71708117ea4e6d0647a54d9e0a55c3d8b986196464b0f",
+            "codeHash": "36b0d226bb70a8a81ba71708117ea4e6d0647a54d9e0a55c3d8b986196464b0f",
+            "canonicalRaw": "010460000000001521Q\"\\/é\u001d91KEY\u001d92SIGNATURE",
+            "localVerdict": "duplicate"
+          }
+        ]
+      },
+      "digest": "dab1b03b115d833ed1d65dfc6abd47c7553085084c25c5ab96dddaa371e432aa"
+    }
+  ]
+}

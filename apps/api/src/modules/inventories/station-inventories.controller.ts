@@ -40,6 +40,7 @@ import {
   stationInventoryProgressOpenApiSchema,
   stationInventoryProgressQuerySchema,
   stationInventoryTaskListOpenApiSchema,
+  stationInventoryTaskListQuerySchema,
   type JoinStationInventoryDto,
   type LeaveStationInventoryDto,
   type LeaveStationInventoryResponseDto,
@@ -53,6 +54,7 @@ import {
   type StationInventoryProgressDto,
   type StationInventoryProgressQueryDto,
   type StationInventoryTaskListDto,
+  type StationInventoryTaskListQueryDto,
 } from "./station-inventory.dto";
 import { StationInventorySyncService } from "./station-inventory-sync.service";
 
@@ -72,12 +74,28 @@ export class StationInventoriesController {
   @ApiOperation({
     summary: "List available inventory tasks",
     description:
-      "Running inventories on the station's assigned production line; empty when the device has no line.",
+      "Running inventories on the station's assigned production line; empty when the device has no line. " +
+      "`scope=all` lists every line for a handheld device.",
+  })
+  @ApiQuery({
+    name: "scope",
+    required: false,
+    schema: { type: "string", enum: ["line", "all"], default: "line" },
   })
   @ApiOkResponse({ schema: stationInventoryTaskListOpenApiSchema })
+  @ApiZodValidationError()
   @ApiHttpErrors(401, 403)
-  list(@Req() req: RequestWithTenant): Promise<StationInventoryTaskListDto> {
-    return this.access.list(req.tenantId!, req.deviceLineId ?? null);
+  list(
+    @Req() req: RequestWithTenant,
+    @Query(new ZodValidationPipe(stationInventoryTaskListQuerySchema))
+    query: StationInventoryTaskListQueryDto,
+  ): Promise<StationInventoryTaskListDto> {
+    return this.access.list(
+      req.tenantId!,
+      req.deviceLineId ?? null,
+      req.deviceKind ?? "station",
+      query.scope,
+    );
   }
 
   @Post("inventory-tasks/resolve-barcode")
@@ -118,7 +136,14 @@ export class StationInventoriesController {
     @Body(new ZodValidationPipe(joinStationInventorySchema)) body: JoinStationInventoryDto,
   ): Promise<StationInventoryBundleManifestDto> {
     if (!req.deviceId) throw new Error("Station device identity is missing");
-    return this.access.join(req.tenantId!, req.deviceId, req.deviceLineId ?? null, id, body);
+    return this.access.join(
+      req.tenantId!,
+      req.deviceId,
+      req.deviceLineId ?? null,
+      req.deviceKind ?? "station",
+      id,
+      body,
+    );
   }
 
   @Get("inventories/:id/bundle/manifest")
