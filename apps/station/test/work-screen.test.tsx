@@ -2410,7 +2410,7 @@ describe("WorkScreen box progress, closing and printing", () => {
   });
 
   // A box label's «Дата производства» is the box's CLOSE date and «Годен до»
-  // is that plus the product's shelf life. `fieldsForClosedBox` used to build
+  // is that plus (the product's shelf life - 1). `fieldsForClosedBox` used to build
   // `closedAt: new Date().toISOString()` at render time, so a label printed
   // (or reprinted) later carried whatever day it happened to be -- two
   // physical labels for one SSCC bearing different expiry dates. Both tests
@@ -2452,7 +2452,7 @@ describe("WorkScreen box progress, closing and printing", () => {
 
     const zpl = new TextDecoder("latin1").decode(print.mock.calls[0]![1]);
     expect(zpl).toContain("24.07.2026"); // the box's own close date, in Moscow
-    expect(zpl).toContain("20.01.2027"); // + 180 days of shelf life
+    expect(zpl).toContain("19.01.2027"); // 180 days including production day
     expect(zpl).not.toContain("30.09.2026"); // never today's date
     expect(zpl).not.toMatch(/\d{4}-\d{2}-\d{2}/); // never the ISO form the first print shipped
   });
@@ -2480,7 +2480,7 @@ describe("WorkScreen box progress, closing and printing", () => {
       boxItemCount: 9,
       closeCurrentBox: close,
       productionDate: "2024-02-28",
-      productShelfLifeDays: 1,
+      productShelfLifeDays: 2,
       printing: { target: PRINT_TARGET, language: "zpl", print },
     });
     act(() => scan(KM));
@@ -2530,7 +2530,7 @@ describe("WorkScreen box progress, closing and printing", () => {
 
     const zpl = new TextDecoder("latin1").decode(print.mock.calls[0]![1]);
     expect(zpl).toContain("24.07.2026");
-    expect(zpl).toContain("20.01.2027");
+    expect(zpl).toContain("19.01.2027");
     expect(zpl).not.toContain("30.09.2026");
   });
 

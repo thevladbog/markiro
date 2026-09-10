@@ -126,61 +126,72 @@ describe("addCalendarDays", () => {
 });
 
 describe("expiryIsoDate", () => {
+  it.each([
+    ["2026-09-10", 365, "2027-09-09"],
+    ["2026-09-10", 1, "2026-09-10"],
+    ["2026-12-31", 2, "2027-01-01"],
+    ["2024-02-28", 2, "2024-02-29"],
+    ["2024-02-29", 2, "2024-03-01"],
+    ["2025-02-28", 2, "2025-03-01"],
+  ])("counts production day as day one: %s, %i days", (day, days, expected) => {
+    expect(expiryIsoDate("2026-09-10T09:00:00.000Z", days, day)).toBe(expected);
+  });
+
   it("counts from an explicit production date instead of the local close day", () => {
     expect(
       withTimeZone("Europe/Moscow", () =>
         expiryIsoDate("2026-03-01T22:30:00.000Z", 2, "2026-02-27"),
       ),
-    ).toBe("2026-03-01");
+    ).toBe("2026-02-28");
   });
 
   it("counts the shelf life from the LOCAL production date", () => {
     // 01:00 Moscow on 2025-05-20, stored as 22:00 UTC on the 19th.
     expect(
       withTimeZone("Europe/Moscow", () => expiryIsoDate("2025-05-19T22:00:00.000Z", 184)),
-    ).toBe("2025-11-20");
+    ).toBe("2025-11-19");
     // The same instant in UTC is still the 19th, so the expiry is a day earlier.
     expect(withTimeZone("UTC", () => expiryIsoDate("2025-05-19T22:00:00.000Z", 184))).toBe(
-      "2025-11-19",
+      "2025-11-18",
     );
     // Behind UTC: 04:00 UTC on the 20th is the 19th in Los Angeles.
     expect(
       withTimeZone("America/Los_Angeles", () => expiryIsoDate("2025-05-20T04:00:00.000Z", 184)),
-    ).toBe("2025-11-19");
+    ).toBe("2025-11-18");
   });
 
-  it("matches the mock-up in the station's own zone: 2025-05-20 + 184 = 2025-11-20", () => {
+  it("counts 184 days including production day in the station's own zone", () => {
     expect(
       withTimeZone("Europe/Moscow", () => expiryIsoDate("2025-05-20T10:15:00.000Z", 184)),
-    ).toBe("2025-11-20");
+    ).toBe("2025-11-19");
     expect(withTimeZone("UTC", () => expiryIsoDate("2025-05-20T10:15:00.000Z", 184))).toBe(
-      "2025-11-20",
+      "2025-11-19",
     );
   });
 
   it("is unshifted by a DST transition inside the shelf-life window", () => {
-    // 2025-03-01 local + 184 days = 2025-09-01, with spring-forward on
+    // 184 days including 2025-03-01 local end on 2025-08-31, with spring-forward on
     // 2025-03-09 (northern) and fall-back on 2025-04-06 (southern) in between.
     expect(
       withTimeZone("America/New_York", () => expiryIsoDate("2025-03-01T17:00:00.000Z", 184)),
-    ).toBe("2025-09-01");
+    ).toBe("2025-08-31");
     expect(
       withTimeZone("Australia/Sydney", () => expiryIsoDate("2025-03-01T01:00:00.000Z", 184)),
-    ).toBe("2025-09-01");
+    ).toBe("2025-08-31");
   });
 
   it("rolls over year and leap-day boundaries in local time", () => {
-    expect(withTimeZone("Europe/Moscow", () => expiryIsoDate("2026-12-31T09:00:00.000Z", 1))).toBe(
+    expect(withTimeZone("Europe/Moscow", () => expiryIsoDate("2026-12-31T09:00:00.000Z", 2))).toBe(
       "2027-01-01",
     );
-    expect(withTimeZone("Europe/Moscow", () => expiryIsoDate("2024-02-28T09:00:00.000Z", 1))).toBe(
+    expect(withTimeZone("Europe/Moscow", () => expiryIsoDate("2024-02-28T09:00:00.000Z", 2))).toBe(
       "2024-02-29",
     );
   });
 
   it("rolls an explicit production date over leap-day and year boundaries", () => {
-    expect(expiryIsoDate("2025-01-01T00:00:00.000Z", 1, "2024-02-28")).toBe("2024-02-29");
-    expect(expiryIsoDate("2025-01-01T00:00:00.000Z", 1, "2026-12-31")).toBe("2027-01-01");
+    expect(expiryIsoDate("2025-01-01T00:00:00.000Z", 2, "2024-02-28")).toBe("2024-02-29");
+    expect(expiryIsoDate("2025-01-01T00:00:00.000Z", 2, "2026-12-31")).toBe("2027-01-01");
   });
 
   it("fails safe instead of falling back when an explicit date is malformed", () => {
@@ -236,12 +247,23 @@ describe("boxLabelFields — egais/expiry", () => {
     shiftNumber: null,
   };
 
+  it("prints the inclusive last day for a 365-day product", () => {
+    const fields = boxLabelFields({
+      ...base,
+      productionDate: "2026-09-10",
+      egaisCode: null,
+      shelfLifeDays: 365,
+    });
+    expect(fields.date).toBe("10.09.2026");
+    expect(fields.expiry).toBe("09.09.2027");
+  });
+
   it("fills product.egais and computed expiry", () => {
     const fields = withTimeZone("Europe/Moscow", () =>
       boxLabelFields({ ...base, egaisCode: "0101234567890123456", shelfLifeDays: 184 }),
     );
     expect(fields["product.egais"]).toBe("0101234567890123456");
-    expect(fields.expiry).toBe("20.11.2025");
+    expect(fields.expiry).toBe("19.11.2025");
   });
 
   // The whole point of the change: both printed dates are the station's own
@@ -252,13 +274,13 @@ describe("boxLabelFields — egais/expiry", () => {
       boxLabelFields({ ...base, egaisCode: null, shelfLifeDays: 184 }),
     );
     expect(moscow.date).toBe("20.05.2025");
-    expect(moscow.expiry).toBe("20.11.2025");
+    expect(moscow.expiry).toBe("19.11.2025");
 
     const utc = withTimeZone("UTC", () =>
       boxLabelFields({ ...base, egaisCode: null, shelfLifeDays: 184 }),
     );
     expect(utc.date).toBe("19.05.2025");
-    expect(utc.expiry).toBe("19.11.2025");
+    expect(utc.expiry).toBe("18.11.2025");
   });
 
   it("prints one explicit production date and derives expiry from that same date", () => {
@@ -272,7 +294,7 @@ describe("boxLabelFields — egais/expiry", () => {
       }),
     );
     expect(fields.date).toBe("27.02.2026");
-    expect(fields.expiry).toBe("01.03.2026");
+    expect(fields.expiry).toBe("28.02.2026");
   });
 
   it("reprints the same explicit production and expiry dates across local close days", () => {
@@ -288,11 +310,11 @@ describe("boxLabelFields — egais/expiry", () => {
 
     expect({ date: firstPrint.date, expiry: firstPrint.expiry }).toEqual({
       date: "27.02.2026",
-      expiry: "01.03.2026",
+      expiry: "28.02.2026",
     });
     expect({ date: reprint.date, expiry: reprint.expiry }).toEqual({
       date: "27.02.2026",
-      expiry: "01.03.2026",
+      expiry: "28.02.2026",
     });
   });
 
@@ -309,7 +331,7 @@ describe("boxLabelFields — egais/expiry", () => {
       boxLabelFields({ ...base, egaisCode: null, shelfLifeDays: 184 }),
     );
     expect(fields.date).toBe("20.05.2025");
-    expect(fields.expiry).toBe("20.11.2025");
+    expect(fields.expiry).toBe("19.11.2025");
     expect(fields.date).not.toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(fields.expiry).not.toMatch(/^\d{4}-\d{2}-\d{2}$/);
     // Zero padding survives: a label column is a fixed width.
@@ -322,7 +344,7 @@ describe("boxLabelFields — egais/expiry", () => {
       }),
     );
     expect(padded.date).toBe("02.01.2026");
-    expect(padded.expiry).toBe("07.01.2026");
+    expect(padded.expiry).toBe("06.01.2026");
   });
 
   it("leaves the stored closedAt instant untouched", () => {
