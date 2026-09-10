@@ -510,6 +510,8 @@ function renderBlock(block: LegalBlock, locale: LegalLocale): readonly FileChild
             ],
           }),
       );
+    case "table":
+      return renderTable(block);
     case "callout":
       return [
         new Paragraph({
@@ -525,6 +527,105 @@ function renderBlock(block: LegalBlock, locale: LegalLocale): readonly FileChild
     case "step":
       throw new Error("Step blocks are rendered with their section-scoped number");
   }
+}
+
+export function legalTableColumnWidths(
+  columnCount: number,
+  ratios: readonly number[] | undefined,
+): readonly number[] {
+  if (columnCount < 1) throw new Error("Legal table needs at least one column");
+  const effective = ratios ?? Array.from({ length: columnCount }, () => 1);
+  if (effective.length !== columnCount) {
+    throw new Error("Legal table column ratios must match the column count");
+  }
+  let total = 0;
+  for (const ratio of effective) {
+    if (!Number.isFinite(ratio) || ratio <= 0) {
+      throw new Error("Legal table column ratios must be positive numbers");
+    }
+    total += ratio;
+  }
+
+  const widths: number[] = [];
+  let assigned = 0;
+  for (let index = 0; index < columnCount - 1; index += 1) {
+    // Non-null: the loop stays inside `effective`, which has `columnCount` entries.
+    const width = Math.round((CONTENT_WIDTH * (effective[index] as number)) / total);
+    widths.push(width);
+    assigned += width;
+  }
+  // The last column absorbs the rounding so the row always spans the text column.
+  widths.push(CONTENT_WIDTH - assigned);
+  return widths;
+}
+
+function renderTable(block: Extract<LegalBlock, { kind: "table" }>): readonly FileChild[] {
+  const widths = legalTableColumnWidths(block.columns.length, block.columnRatios);
+  for (const row of block.rows) {
+    if (row.length !== block.columns.length) {
+      throw new Error("Legal table row does not match its column count");
+    }
+  }
+
+  const cell = (text: string, width: number, header: boolean): TableCell =>
+    new TableCell({
+      verticalAlign: VerticalAlign.TOP,
+      width: { size: width, type: WidthType.DXA },
+      margins: { top: 80, bottom: 80, left: 120, right: 120 },
+      ...(header ? { shading: { type: ShadingType.CLEAR, fill: MARKIRO_COLORS.paper } } : {}),
+      children: [
+        new Paragraph({
+          spacing: { before: 0, after: 0, line: 240 },
+          children: [new TextRun({ text, size: 18, bold: header })],
+        }),
+      ],
+    });
+
+  const children: FileChild[] = [
+    new Table({
+      width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+      columnWidths: [...widths],
+      layout: TableLayoutType.FIXED,
+      borders: {
+        top: { style: BorderStyle.SINGLE, size: 4, color: MARKIRO_COLORS.line },
+        bottom: { style: BorderStyle.SINGLE, size: 4, color: MARKIRO_COLORS.line },
+        left: { style: BorderStyle.SINGLE, size: 4, color: MARKIRO_COLORS.line },
+        right: { style: BorderStyle.SINGLE, size: 4, color: MARKIRO_COLORS.line },
+        insideHorizontal: { style: BorderStyle.SINGLE, size: 2, color: MARKIRO_COLORS.line },
+        insideVertical: { style: BorderStyle.SINGLE, size: 2, color: MARKIRO_COLORS.line },
+      },
+      rows: [
+        new TableRow({
+          tableHeader: true,
+          cantSplit: true,
+          children: block.columns.map((column, index) =>
+            cell(column, widths[index] as number, true),
+          ),
+        }),
+        ...block.rows.map(
+          (row) =>
+            new TableRow({
+              cantSplit: true,
+              children: row.map((value, index) => cell(value, widths[index] as number, false)),
+            }),
+        ),
+      ],
+    }),
+  ];
+
+  if (block.caption) {
+    children.push(
+      new Paragraph({
+        style: "DocumentSummary",
+        spacing: { before: 80, after: 120 },
+        children: [new TextRun(block.caption)],
+      }),
+    );
+  } else {
+    // Word merges tables that touch, so a form of stacked tables needs a spacer.
+    children.push(new Paragraph({ spacing: { before: 0, after: 120 }, children: [] }));
+  }
+  return children;
 }
 
 function renderStep(
