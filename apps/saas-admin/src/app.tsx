@@ -50,6 +50,21 @@ const CreateTenantPanel = lazy(() =>
 const TenantPage = lazy(() =>
   import("./pages/tenants/TenantPage.js").then((module) => ({ default: module.TenantPage })),
 );
+const AgreementsPage = lazy(() =>
+  import("./pages/agreements/AgreementsPage.js").then((module) => ({
+    default: module.AgreementsPage,
+  })),
+);
+const CreateAgreementPage = lazy(() =>
+  import("./pages/agreements/CreateAgreementPage.js").then((module) => ({
+    default: module.CreateAgreementPage,
+  })),
+);
+const AgreementDetailPage = lazy(() =>
+  import("./pages/agreements/AgreementDetailPage.js").then((module) => ({
+    default: module.AgreementDetailPage,
+  })),
+);
 const OffersPage = lazy(() =>
   import("./pages/offers/OffersPage.js").then((module) => ({ default: module.OffersPage })),
 );
@@ -149,6 +164,9 @@ export const appRoutes = createRoutesFromElements(
       <Route element={<AppShell />}>
         <Route index element={<OverviewPage />} />
         <Route path="/catalog" element={<CatalogPage />} />
+        <Route path="/agreements" element={<AgreementsPage />} />
+        <Route path="/agreements/new" element={<CreateAgreementPage />} />
+        <Route path="/agreements/:id" element={<AgreementDetailPage />} />
         <Route path="/offers" element={<OffersPage />} />
         <Route path="/offers/new" element={<CreateOfferPage />} />
         <Route path="/billing-requests/:requestId/offers/new" element={<CreateOfferPage />} />
