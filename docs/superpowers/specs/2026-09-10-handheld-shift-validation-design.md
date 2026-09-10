@@ -172,7 +172,8 @@ New entities, all wiped by `DeviceWipe`:
   = accepted rows in `codes_mirror` for the shift, `errors`, `duplicates`),
   the last four `scan_events`, queue size, team count, conflicts count.
   «Всего» shows `thisTerminal` until the summary provides the shift total
-  (see Team), then the summary's `acceptedUnits`.
+  (see Team), then the larger of the summary's `acceptedUnits` and
+  `thisTerminal` (the summary is up to a minute old).
 - `Signaller`: tones synthesised with `AudioTrack` (PCM 16-bit, 44.1 kHz):
   `ok` 880 Hz sine 120 ms, `duplicate` 440 Hz triangle 300 ms, `error`
   (`wrong_gtin`, `invalid`) 220 Hz square 450 ms, exponential fade; vibration

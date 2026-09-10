@@ -117,7 +117,7 @@ class WorkViewModel(
         WorkUi(
             shift = shift,
             last = values[1] as LastScan?,
-            total = teamNow?.acceptedUnits ?: c.mine,
+            total = maxOf(teamNow?.acceptedUnits ?: 0, c.mine),
             plan = shift?.plannedQty,
             thisTerminal = c.mine,
             errors = c.errors,

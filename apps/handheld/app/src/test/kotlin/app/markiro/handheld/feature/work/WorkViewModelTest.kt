@@ -65,14 +65,14 @@ class WorkViewModelTest {
     @After
     fun tearDown() = db.close()
 
-    private fun vm(): WorkViewModel {
+    private fun vm(team: TeamRefresher = TeamRefresher { null }): WorkViewModel {
         val engine = SyncEngine(
             db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
         )
         return WorkViewModel(
             SavedStateHandle(mapOf("shiftId" to "s1")), db, ScanRecorder(db), ScanRouterAdapter(scans),
-            { kind -> played += kind }, engine, session, ReachabilityTracker(), { null }, null, flowOf(Unit),
+            { kind -> played += kind }, engine, session, ReachabilityTracker(), team, null, flowOf(Unit),
         )
     }
 
@@ -98,6 +98,16 @@ class WorkViewModelTest {
         assertEquals(1, s.duplicates)
         assertEquals(listOf(SignalKind.OK, SignalKind.DUPLICATE, SignalKind.ERROR, SignalKind.ERROR), played)
         assertNotNull(db.outboxDao().head(1).firstOrNull())
+    }
+
+    @Test
+    fun totalNeverLagsBehindThisTerminal() = runTest {
+        val vm = vm(team = TeamRefresher { TeamState(emptyList(), acceptedUnits = 0, at = 1L) })
+        advanceUntilIdle()
+        assertEquals(0, vm.state.first { it.team != null }.total)
+        scans.tryEmit(ScanEvent("010460068200001321abc${gs}93AAAA", null, "debug", 0))
+        advanceUntilIdle()
+        assertEquals(1, vm.state.first { it.thisTerminal == 1 }.total)
     }
 
     @Test
