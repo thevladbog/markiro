@@ -1,4 +1,5 @@
 import { retainedObservationForConfirmation } from "./national-catalog-confirmation-observation";
+import { resolveCatalogProductGroup } from "./national-catalog-product-group";
 import {
   buildCatalogProjection,
   catalogProjectionHash,
@@ -202,6 +203,27 @@ export async function applyImportItem(
   }
   const name = decision.acceptedEntries.find((entry) => entry.target === "name");
   const category = decision.acceptedEntries.find((entry) => entry.target === "category");
+  const group = decision.acceptedEntries.find((entry) => entry.target === "product_group");
+  if (group) {
+    const resolved = resolveCatalogProductGroup(
+      source.normalized.categories,
+      source.categoryGroups?.categories ?? [],
+    );
+    if (
+      resolved.code !== group.proposedValue ||
+      group.currentValue !== (product?.chzProductGroupCode ?? null) ||
+      product?.chzProductGroupCode != null ||
+      profile ||
+      category
+    )
+      throw new ConflictException("product_changed");
+    const [known] = await tx
+      .select({ code: schema.chzProductGroups.code })
+      .from(schema.chzProductGroups)
+      .where(eq(schema.chzProductGroups.code, group.proposedValue))
+      .for("share");
+    if (!known) throw new ConflictException("product_group_unknown");
+  }
   if (
     !product &&
     (!name ||
@@ -241,7 +263,9 @@ export async function applyImportItem(
         ? `stable:${entry.targetField}`
         : entry.target === "name"
           ? "stable:name"
-          : "category",
+          : entry.target === "product_group"
+            ? "stable:chz_product_group_code"
+            : "category",
   );
   if (new Set(targets).size !== targets.length) throw new BadRequestException("duplicate_target");
   const productId =
@@ -249,15 +273,19 @@ export async function applyImportItem(
     (await productWriter.createInTransaction(tx, actor.tenantId, {
       gtin: source.boundGtin14,
       name: name?.target === "name" ? name.proposedValue : "",
-      chzProductGroupCode: category?.target === "category" ? category.option.groupCode : null,
+      chzProductGroupCode:
+        group?.proposedValue ??
+        (category?.target === "category" ? category.option.groupCode : null),
     }));
   if (product && name?.target === "name")
     await tx
       .update(schema.products)
       .set({ name: name.proposedValue })
       .where(and(eq(schema.products.tenantId, actor.tenantId), eq(schema.products.id, productId)));
-  if (product && category?.target === "category" && product.chzProductGroupCode === null) {
-    const groupCode = category.option.groupCode;
+  const selectedGroup =
+    group?.proposedValue ?? (category?.target === "category" ? category.option.groupCode : null);
+  if (product && selectedGroup !== null && product.chzProductGroupCode === null) {
+    const groupCode = selectedGroup;
     await tx
       .update(schema.products)
       .set({

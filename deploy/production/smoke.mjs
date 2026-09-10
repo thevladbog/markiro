@@ -769,6 +769,44 @@ async function publicRequest(client, url, init) {
   return client.request(url, init, signal);
 }
 
+async function waitForPublicEndpoints(
+  options,
+  client,
+  { readinessAttempts, readinessIntervalMs, sleep },
+) {
+  const baseUrls = [
+    options.adminBaseUrl,
+    options.saasAdminBaseUrl,
+    options.kioskBaseUrl,
+    options.landingBaseUrl,
+    options.vbtechBaseUrl,
+    options.vbtechWwwBaseUrl,
+  ].filter(Boolean);
+  for (const baseUrl of baseUrls) {
+    const url = new URL("/", baseUrl);
+    for (let attempt = 1; attempt <= readinessAttempts; attempt += 1) {
+      try {
+        // Compose can report a running edge before its TLS certificates are ready.
+        // Any HTTP response proves connectivity; the route checks validate its status.
+        await publicRequest(client, url, { method: "HEAD", redirect: "manual" });
+        break;
+      } catch (error) {
+        if (attempt === readinessAttempts) {
+          const code = error?.cause?.code ?? error?.code;
+          const cause =
+            typeof code === "string" && /^[A-Z0-9_]+$/.test(code)
+              ? code
+              : "connection or TLS error";
+          throw new Error(
+            `Public endpoint ${url.origin} is unreachable after ${readinessAttempts} attempts (${cause})`,
+          );
+        }
+        await sleep(readinessIntervalMs);
+      }
+    }
+  }
+}
+
 function assertRoute(check, response, body, signature) {
   const candidateSignature = shellSignature(body);
   const isShell = Boolean(
@@ -1488,6 +1526,7 @@ export async function runSmoke(options, client = requestClient(), docker) {
       ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))),
   };
   const dockerClient = docker || dockerRunner(environment, runtimeOptions.commandTimeoutMs);
+  await waitForPublicEndpoints(options, client, runtimeOptions);
   await runPublicSmoke(options, client);
   const baseUrl = options.adminBaseUrl.replace(/\/$/, "");
   await runtimeSmoke(environment, dockerClient, client, baseUrl, runtimeOptions);

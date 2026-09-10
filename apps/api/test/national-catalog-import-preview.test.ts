@@ -164,6 +164,7 @@ describe("immutable pre-product comparisons and durable preparation", () => {
   let sessions: NationalCatalogImportService;
   let features = { ownCatalog: true, gtinLookup: true };
   const detail = vi.fn<NationalCatalogClient["getFeedProductsByIds"]>();
+  const categories = vi.fn<NationalCatalogClient["listCategories"]>();
   const beforeToken = vi.fn<() => Promise<void>>();
   beforeAll(async () => {
     await maintenance.pool.query(`CREATE DATABASE "${databaseName}"`);
@@ -247,10 +248,14 @@ describe("immutable pre-product comparisons and durable preparation", () => {
     service = new NationalCatalogImportPreviewService(
       repository,
       sessions,
-      { getFeedProductsByIds: detail },
+      { getFeedProductsByIds: detail, listCategories: categories },
       coordinator,
     );
     detail.mockReset().mockResolvedValue(feed([card()]));
+    categories.mockReset().mockResolvedValue({
+      ...feed([]),
+      value: { categories: [] },
+    });
     beforeToken.mockReset();
   });
   const request = (): ImportPrepare => ({
@@ -264,6 +269,79 @@ describe("immutable pre-product comparisons and durable preparation", () => {
     await service.resumePreparation(actor.tenantId, sessionId, started.preparation.id);
     return service.readPreparation(actor.tenantId, sessionId, started.preparation.id);
   }
+  it("offers an exact ChZ product group for a new product without an activated category schema", async () => {
+    const source = card();
+    source.categories = [{ id: 30064, name: "Категория товара" }];
+    detail.mockResolvedValue(feed([source]));
+    categories.mockResolvedValue({
+      ...feed([]),
+      value: {
+        categories: [
+          {
+            id: 30064,
+            name: "Категория товара",
+            parentId: null,
+            level: 1,
+            active: true,
+            gismtCodes: [23],
+            raw: {},
+          },
+        ],
+      },
+    });
+    const data = await run();
+    expect(data.items[0]?.fields).toContainEqual(
+      expect.objectContaining({
+        labelKey: "chz_product_group_code",
+        applicable: true,
+        selectedByDefault: true,
+        before: null,
+        after: expect.any(String),
+      }),
+    );
+    const [stored] = await db.select().from(previews).where(eq(previews.id, data.items[0]!.id));
+    expect(parseImportDiff(stored!.diff).entries).toContainEqual(
+      expect.objectContaining({
+        target: "product_group",
+        currentValue: null,
+        proposedValue: 23,
+      }),
+    );
+  });
+  it.each([
+    [[23, 25], "product_group_ambiguous"],
+    [[999999], "product_group_unknown"],
+    [[], "product_group_unavailable"],
+  ] as const)("does not auto-select unresolved ChZ group %j", async (codes, reason) => {
+    const source = card();
+    source.categories = [{ id: 30064, name: "Категория товара" }];
+    detail.mockResolvedValue(feed([source]));
+    categories.mockResolvedValue({
+      ...feed([]),
+      value: {
+        categories: [
+          {
+            id: 30064,
+            name: "Категория товара",
+            parentId: null,
+            level: 1,
+            active: true,
+            gismtCodes: [...codes],
+            raw: {},
+          },
+        ],
+      },
+    });
+    const data = await run();
+    expect(data.items[0]?.fields).toContainEqual(
+      expect.objectContaining({
+        labelKey: "chz_product_group_code",
+        applicable: false,
+        selectedByDefault: false,
+        reason,
+      }),
+    );
+  });
   async function local(name = "Моё", archived = false) {
     const [p] = await db
       .insert(schema.products)
@@ -780,7 +858,7 @@ describe("immutable pre-product comparisons and durable preparation", () => {
     await service.resumePreparation(actor.tenantId, sessionId, id);
     expect((await service.readPreparation(actor.tenantId, sessionId, id)).items).toHaveLength(1);
   });
-  it.each(["success", "failure"])(
+  it.each(["success", "failure", "categories"])(
     "rechecks revocation before accepting %s outcomes",
     async (outcome) => {
       detail.mockImplementation(async () => {
@@ -792,7 +870,11 @@ describe("immutable pre-product comparisons and durable preparation", () => {
               eq(schema.member.userId, actor.userId),
             ),
           );
-        return outcome === "success" ? feed([card()]) : { status: "unavailable" };
+        return outcome === "categories"
+          ? feed([{ ...card(), categories: [{ id: 30064, name: "Категория" }] }])
+          : outcome === "success"
+            ? feed([card()])
+            : { status: "unavailable" };
       });
       const started = await service.prepare(actor, sessionId, request());
       await service.resumePreparation(actor.tenantId, sessionId, started.preparation.id);
@@ -806,6 +888,7 @@ describe("immutable pre-product comparisons and durable preparation", () => {
         completed: [],
         failures: [],
       });
+      expect(categories).not.toHaveBeenCalled();
       expect(
         await db.select().from(previews).where(eq(previews.tenantId, actor.tenantId)),
       ).toHaveLength(0);

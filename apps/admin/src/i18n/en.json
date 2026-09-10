@@ -1608,6 +1608,7 @@
         "product": "Product",
         "unnamed": "Unnamed",
         "openProduct": "Open catalog product",
+        "waitForPhoto": "Saving the photo. You can open the product when it is ready.",
         "match": "Match",
         "itemUnavailable": "This card cannot be added. Check access and product details.",
         "archivedReadOnly": "Archived card: view only",
@@ -1713,6 +1714,10 @@
           "failed": "Failed"
         },
         "reasons": {
+          "product_group_unavailable": "The ChZ categories do not identify a product group. Select it in the product form.",
+          "product_group_ambiguous": "The ChZ categories indicate multiple or conflicting groups. Select the group in the product form.",
+          "product_group_unknown": "This ChZ group is not yet in the Markiro reference list.",
+          "product_group_change_separate": "The product already has another group or configured attributes. Change the group separately in the product form.",
           "egais_code_limit": "This product already has 20 EGAIS codes. To add another, first edit the code list in the product card.",
           "attribute_not_importable": "Import from Chestny ZNAK is not configured for this field. You can view the value in the source card and enter it in Markiro manually.",
           "compatible_schema_required": "Importing attributes requires a category with a configured Chestny ZNAK mapping.",
@@ -1748,6 +1753,7 @@
         "confirmationTotals": "Create products: {{created}} · Add links: {{attached}} · Replace links: {{replaced}} · Change products: {{changed}} · Upload photos: {{photos}}",
         "confirmationIncomplete": "Complete your choices and update the review to see the totals.",
         "fields": {
+          "chz_product_group_code": "Product group",
           "name": "Name",
           "category": "Category",
           "print_name": "Print name",

@@ -352,7 +352,7 @@ test("own partial feed, cross-page choices, link-only and draft, independent pho
   expect(receipt.items.map((value) => value.product)).toEqual(["applied", "applied"]);
   readOnly = true;
   await page.goto(open(resultRoute));
-  await expect(page.getByRole("link", { name: t.openProduct })).toHaveCount(2);
+  await expect(page.getByRole("button", { name: t.openProduct })).toHaveCount(2);
   await expect(page.getByRole("button", { name: t.retryImage })).toHaveCount(0);
   await page.goto(
     open(`/catalog/import?sessionId=${id(1)}&preparationId=${preparation.preparation.id}`),

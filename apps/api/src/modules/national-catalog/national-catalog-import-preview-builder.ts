@@ -1,4 +1,9 @@
 import { newImageCheckpoint } from "./national-catalog-image-state";
+import {
+  resolveCatalogProductGroup,
+  type CatalogCategoryGroup,
+  type CatalogProductGroupEntry,
+} from "./national-catalog-product-group";
 import { chooseDefaultPhoto } from "./national-catalog-photo-selection";
 import { randomUUID } from "node:crypto";
 import {
@@ -39,6 +44,7 @@ type ProductRow = typeof schema.products.$inferSelect;
 type MappedEntry = ReturnType<typeof buildNationalCatalogImportEntries>["entries"][number];
 export type ImportPreviewEntry =
   | CatalogProductFieldEntry
+  | CatalogProductGroupEntry
   | {
       entryId: string;
       target: "name";
@@ -155,6 +161,7 @@ export async function buildImportPreview(
   body: ImportPrepare,
   imagePreparation?: { actorId: string; enabled: boolean },
   fetchedAt = new Date(),
+  categoryGroups: readonly CatalogCategoryGroup[] = [],
 ): Promise<ImportPreview> {
   const tenantId = session.tenantId;
   if (!item.gtin14 || !item.cardId || String(source.id) !== item.cardId)
@@ -321,6 +328,53 @@ export async function buildImportPreview(
     });
   }
   let categoryEntryId: string | null = null;
+  if (!choice && source.categories.length) {
+    const resolvedGroup = resolveCatalogProductGroup(source.categories, categoryGroups);
+    const groupCodes = [resolvedGroup.code, product?.chzProductGroupCode].filter(
+      (code): code is number => code != null,
+    );
+    const groups = groupCodes.length
+      ? await tx
+          .select()
+          .from(schema.chzProductGroups)
+          .where(inArray(schema.chzProductGroups.code, groupCodes))
+          .for("share")
+      : [];
+    const group = groups.find((row) => row.code === resolvedGroup.code);
+    const before = product?.chzProductGroupCode ?? null;
+    if (!group || group.code !== before) {
+      const entryId = randomUUID();
+      const reason =
+        resolvedGroup.reason ??
+        (!group
+          ? "product_group_unknown"
+          : before !== null || profile
+            ? "product_group_change_separate"
+            : null);
+      if (group && !reason)
+        entries.push({
+          entryId,
+          target: "product_group",
+          source: "national_catalog",
+          currentValue: before,
+          proposedValue: group.code,
+        });
+      fields.push({
+        id: entryId,
+        label: "Группа продукции",
+        labelKey: "chz_product_group_code",
+        before:
+          groups.find((row) => row.code === before)?.name ??
+          (before === null ? null : String(before)),
+        after: group?.name ?? (resolvedGroup.code === null ? null : String(resolvedGroup.code)),
+        applicable: reason === null,
+        reason,
+        source: "national_catalog",
+        selectedByDefault: !product && reason === null,
+        requiresEntryIds: [],
+      });
+    }
+  }
   if (choice && target) {
     categoryEntryId = randomUUID();
     entries.push({
@@ -543,6 +597,16 @@ export async function buildImportPreview(
     access: item.access,
     raw: source.raw,
     normalized: source,
+    ...(categoryGroups.length
+      ? {
+          categoryGroups: {
+            sourceMethod: "categories",
+            categories: categoryGroups
+              .filter((category) => source.categories.some((c) => c.id === category.id))
+              .map(({ id, active, gismtCodes }) => ({ id, active, gismtCodes })),
+          },
+        }
+      : {}),
   };
   const sourceHash = hashContent(snapshot);
   await tx.insert(schema.nationalCatalogImportPreviews).values({

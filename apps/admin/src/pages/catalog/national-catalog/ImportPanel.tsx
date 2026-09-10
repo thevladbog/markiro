@@ -820,6 +820,15 @@ function ScopedImportPanel({ identity }: { identity: string }) {
         {result.data && showResult && (
           <ImportResult
             result={result.data}
+            onOpenProduct={(productId) =>
+              void run(async () => {
+                await client.invalidateQueries(
+                  { queryKey: PRODUCTS_QUERY_KEY },
+                  { throwOnError: true },
+                );
+                if (active.current) await navigate(`/catalog/${productId}/edit`);
+              })
+            }
             canWrite={canWrite}
             busy={busy}
             retryBlocked={retryBlocked}

@@ -651,7 +651,13 @@ it("accepts explicit automatic continuation and owned field labels while default
       items: [],
     }).preparation.automaticWorkPending,
   ).toBe(true);
-  for (const labelKey of ["name", "category", "print_name", "shelf_life_days"]) {
+  for (const labelKey of [
+    "name",
+    "category",
+    "print_name",
+    "shelf_life_days",
+    "chz_product_group_code",
+  ]) {
     expect(
       importPreviewSchema.parse({
         ...validPreview,

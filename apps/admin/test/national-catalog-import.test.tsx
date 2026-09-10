@@ -296,6 +296,62 @@ function mockServer() {
 const selectionRoute = `/catalog/import?sessionId=${id(1)}`;
 const reviewRoute = `${selectionRoute}&preparationId=${id(10)}`;
 const resultRoute = `${selectionRoute}&operationId=${id(20)}`;
+
+it("opens an imported product with its photo on the first visit after photo application and catalog refresh", async () => {
+  const server = mockServer();
+  server.state.result.state = "running";
+  server.state.result.items[0]!.image = "pending";
+  server.state.result.items[0]!.imageReason = null;
+  server.state.result.items[0]!.reason = null;
+  const product = { ...productFixture, id: id(21) };
+  const photo = {
+    checksum: "a".repeat(64),
+    contentType: "image/webp" as const,
+    byteSize: 100,
+    width: 10,
+    height: 10,
+    updatedAt: "2026-09-10T00:00:00.000Z",
+  };
+  let photoApplied = false;
+  let releaseCatalog: (() => void) | undefined;
+  let catalogRefresh: Promise<void> | null = null;
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).startsWith("/api/products?")) {
+        if (catalogRefresh) await catalogRefresh;
+        return new Response(
+          JSON.stringify({ items: [{ ...product, ...(photoApplied ? { image: photo } : {}) }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return server.fetchMock(url, init);
+    }),
+  );
+  const { user, router } = renderImport(resultRoute);
+  await user.click(await screen.findByText("Открыть товар в каталоге"));
+  expect(router.state.location.pathname).toBe("/catalog/import");
+
+  catalogRefresh = new Promise<void>((resolve) => {
+    releaseCatalog = resolve;
+  });
+  photoApplied = true;
+  server.state.result.state = "finished";
+  server.state.result.items[0]!.image = "applied";
+  await screen.findByText("Фото: Добавлено", {}, { timeout: 4000 });
+  await user.click(screen.getByText("Открыть товар в каталоге"));
+  expect(router.state.location.pathname).toBe("/catalog/import");
+
+  await act(async () => {
+    releaseCatalog?.();
+  });
+  const dialog = await screen.findByRole("dialog", { name: "Изменить продукт" });
+  expect(router.state.location.pathname).toBe(`/catalog/${product.id}/edit`);
+  expect(dialog.querySelector("img")?.getAttribute("src")).toBe(
+    `/api/products/${product.id}/image/${photo.checksum}`,
+  );
+});
 it("retains the active product and reviewed choices when the route receives a fresh preparation", async () => {
   const server = mockServer();
   const first = server.state.preparation.items[0]!;
@@ -1577,6 +1633,7 @@ it.each(["ru", "en"] as const)(
             retryBlocked={false}
             onRetry={() => {}}
             onCancel={() => {}}
+            onOpenProduct={() => {}}
           />
         </MemoryRouter>,
       );
