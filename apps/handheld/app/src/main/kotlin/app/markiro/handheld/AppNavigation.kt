@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
@@ -27,10 +28,22 @@ import app.markiro.handheld.feature.settings.ScannerSettingsScreen
 import app.markiro.handheld.feature.settings.SettingsScreen
 import app.markiro.handheld.feature.settings.SettingsViewModel
 import app.markiro.handheld.feature.settings.ThemeMode
+import app.markiro.handheld.feature.shift.CloseCallbacks
+import app.markiro.handheld.feature.shift.CloseScreen
+import app.markiro.handheld.feature.shift.CloseViewModel
+import app.markiro.handheld.feature.shift.ShiftListCallbacks
+import app.markiro.handheld.feature.shift.ShiftListEvent
+import app.markiro.handheld.feature.shift.ShiftListScreen
+import app.markiro.handheld.feature.shift.ShiftListViewModel
 import app.markiro.handheld.feature.signin.SessionHolder
 import app.markiro.handheld.feature.signin.SignInCallbacks
 import app.markiro.handheld.feature.signin.SignInScreen
 import app.markiro.handheld.feature.signin.SignInViewModel
+import app.markiro.handheld.feature.work.ConflictsScreen
+import app.markiro.handheld.feature.work.ConflictsViewModel
+import app.markiro.handheld.feature.work.WorkCallbacks
+import app.markiro.handheld.feature.work.WorkScreen
+import app.markiro.handheld.feature.work.WorkViewModel
 
 object Routes {
     const val PAIRING = "pairing"
@@ -38,8 +51,15 @@ object Routes {
     const val HUB = "hub"
     const val SETTINGS = "settings"
     const val SCANNER = "settings/scanner"
-    const val SOON = "soon/{title}"
-    fun soon(title: String) = "soon/$title"
+    const val SHIFTS = "shifts"
+    const val WORK = "work/{shiftId}"
+    const val CLOSE = "close/{shiftId}"
+    const val CONFLICTS = "conflicts/{shiftId}"
+    const val SOON = "soon/{tile}"
+    fun work(id: String) = "work/$id"
+    fun close(id: String) = "close/$id"
+    fun conflicts(id: String) = "conflicts/$id"
+    fun soon(tile: HubTile) = "soon/${tile.name}"
 }
 
 @Composable
@@ -127,14 +147,72 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     state,
                     onTile = { tile ->
                         when (tile) {
-                            HubTile.SHIFT -> nav.navigate(Routes.soon("Смена"))
-                            HubTile.INVENTORY -> nav.navigate(Routes.soon("Инвентаризация"))
-                            HubTile.CHECK -> nav.navigate(Routes.soon("Проверка кода"))
+                            HubTile.SHIFT -> state.activeShiftId?.let { nav.navigate(Routes.work(it)) } ?: nav.navigate(Routes.SHIFTS)
+                            HubTile.INVENTORY, HubTile.CHECK -> nav.navigate(Routes.soon(tile))
                             HubTile.SETTINGS -> nav.navigate(Routes.SETTINGS)
                         }
                     },
                     onSignOut = vm::signOut,
                 )
+            }
+            composable(Routes.SHIFTS) {
+                val vm: ShiftListViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                LaunchedEffect(Unit) {
+                    vm.events.collect { event ->
+                        when (event) {
+                            is ShiftListEvent.Entered -> nav.navigate(Routes.work(event.shiftId)) { popUpTo(Routes.HUB) }
+                        }
+                    }
+                }
+                ShiftListScreen(
+                    state,
+                    ShiftListCallbacks(
+                        onBack = { nav.popBackStack() },
+                        onContinue = vm::continueCurrent,
+                        onSelect = vm::select,
+                        onExpandOthers = vm::expandOthers,
+                        onSelectOther = vm::selectOther,
+                        onConfirmOther = vm::confirmOther,
+                        onDismiss = vm::dismissDialog,
+                        onRefresh = vm::refresh,
+                    ),
+                )
+            }
+            composable(Routes.WORK) { entry ->
+                val vm: WorkViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                val shiftId = entry.arguments?.getString("shiftId").orEmpty()
+                WorkScreen(
+                    state,
+                    WorkCallbacks(
+                        onLeave = {
+                            vm.leave()
+                            nav.popBackStack(Routes.HUB, inclusive = false)
+                        },
+                        onClose = { nav.navigate(Routes.close(shiftId)) },
+                        onConflicts = { nav.navigate(Routes.conflicts(shiftId)) },
+                    ),
+                )
+            }
+            composable(Routes.CLOSE) {
+                val vm: CloseViewModel = hiltViewModel()
+                val step by vm.step.collectAsStateWithLifecycle()
+                CloseScreen(
+                    step,
+                    CloseCallbacks(
+                        onConfirm = vm::confirm,
+                        onCancel = { nav.popBackStack() },
+                        onSelectReason = vm::selectReason,
+                        onSubmitReason = vm::submitReason,
+                        onDone = { nav.navigate(Routes.HUB) { popUpTo(Routes.HUB) { inclusive = true } } },
+                    ),
+                )
+            }
+            composable(Routes.CONFLICTS) {
+                val vm: ConflictsViewModel = hiltViewModel()
+                val rows by vm.rows.collectAsStateWithLifecycle()
+                ConflictsScreen(rows, onBack = { nav.popBackStack() })
             }
             composable(Routes.SETTINGS) {
                 val vm: SettingsViewModel = hiltViewModel()
@@ -147,6 +225,10 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     onScanner = { nav.navigate(Routes.SCANNER) },
                     onTheme = vm::setTheme,
                     onLanguage = vm::setLanguage,
+                    onToggleSound = vm::toggleSound,
+                    onVolume = vm::setVolume,
+                    onToggleVibration = vm::toggleVibration,
+                    onTest = vm::testSignal,
                 )
             }
             composable(Routes.SCANNER) {
@@ -161,7 +243,12 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                 )
             }
             composable(Routes.SOON) { entry ->
-                ComingSoonScreen(entry.arguments?.getString("title") ?: "", onBack = { nav.popBackStack() })
+                val title = when (entry.arguments?.getString("tile")) {
+                    HubTile.SHIFT.name -> R.string.hub_tile_shift
+                    HubTile.INVENTORY.name -> R.string.hub_tile_inventory
+                    else -> R.string.hub_tile_check
+                }
+                ComingSoonScreen(stringResource(title), onBack = { nav.popBackStack() })
             }
         }
     }

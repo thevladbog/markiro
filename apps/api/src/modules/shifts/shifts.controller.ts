@@ -220,9 +220,13 @@ export class ShiftsController {
   }
 
   @Get(":id/summary")
-  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
-  @ApiOperation({ summary: "Read factual shift output and participants" })
-  @ApiCabinetAuth()
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Read factual shift output and participants",
+    description:
+      "Cabinet users read any shift of the organisation; a station or handheld device reads only shifts it has entered.",
+  })
+  @ApiCabinetOrStationAuth()
   @ApiParam({ name: "id", format: "uuid" })
   @ApiOkResponse({ schema: shiftSummaryOpenApiSchema })
   @ApiHttpErrors(401, 403, 404)
@@ -230,7 +234,11 @@ export class ShiftsController {
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
   ): Promise<ShiftSummaryDto> {
-    return this.shiftsService.getShiftSummary(req.tenantId!, id);
+    return this.shiftsService.getShiftSummary(
+      req.tenantId!,
+      id,
+      req.authKind === "station" ? (req.deviceId ?? null) : null,
+    );
   }
 
   // Cabinet-only: a device reading an

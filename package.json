@@ -34,7 +34,9 @@
     "evidence:seal": "node tools/evidence-package/seal.mjs",
     "evidence:station-date": "node tools/evidence-package/station-date.mjs",
     "evidence:verify": "node tools/evidence-package/verify.mjs",
-    "test:evidence-package": "node --test tools/evidence-package/test/*.test.mjs"
+    "test:evidence-package": "node --test tools/evidence-package/test/*.test.mjs",
+    "rospatent:deposit": "node tools/rospatent/build-deposit.mjs",
+    "test:rospatent": "node --test tools/rospatent/test/*.test.mjs"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "3.1114.0",

@@ -51,6 +51,10 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+    lint {
+        // Both languages ship with every screen; a missing key in either file fails the gate.
+        error += listOf("MissingTranslation", "ExtraTranslation")
+    }
 }
 
 kotlin {

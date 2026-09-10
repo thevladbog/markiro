@@ -54,7 +54,7 @@ class StorageTest {
         val credential = InMemoryCredentialStore().apply { write("mk_live_secret") }
         db.deviceConfigDao().upsert(sampleConfig())
         RosterStore(db.operatorDao()).replace(listOf(record("op-1", "Анна")))
-        DeviceWipe(db.deviceConfigDao(), db.operatorDao(), credential).wipeAll()
+        DeviceWipe(db, credential).wipeAll()
         assertNull(db.deviceConfigDao().get())
         assertEquals(emptyList<OperatorEntity>(), db.operatorDao().all())
         assertNull(credential.read())

@@ -2,8 +2,10 @@ package app.markiro.handheld.core.network
 
 import kotlinx.serialization.Serializable
 
-const val HANDHELD_CAPABILITIES = "handheld-v1,subscription-state-v1"
+/** `station-recovery-v1` makes the server return `denied[]` on scan batches; `validation-dm-duplicate-v1` is deliberately absent. */
+const val HANDHELD_CAPABILITIES = "handheld-v1,subscription-state-v1,station-recovery-v1"
 const val REVOKED_CODE = "STATION_CREDENTIAL_REVOKED"
+const val UPDATE_REQUIRED_CODE = "STATION_UPDATE_REQUIRED"
 
 @Serializable
 data class PairRequest(val code: String)
@@ -44,8 +46,30 @@ data class IdentityResponse(val device: DeviceDto)
 @Serializable
 data class RosterResponse(val items: List<OperatorDto>)
 
+/** `GET /shifts` item; fields the handheld does not use (images, templates, dates of creation) are ignored. */
 @Serializable
-data class ShiftDto(val id: String, val number: String, val status: String, val lineId: String? = null)
+data class ShiftDto(
+    val id: String,
+    val number: String,
+    val status: String,
+    val mode: String,
+    val validationPrint: ValidationPrintDto,
+    val productId: String,
+    val productName: String? = null,
+    val productPrintName: String? = null,
+    val lineId: String? = null,
+    val lineName: String? = null,
+    val counterpartyName: String? = null,
+    val plannedQty: Int? = null,
+    val plannedDate: String? = null,
+    val productionDate: String? = null,
+    val boxCapacity: Int? = null,
+    val palletCapacity: Int? = null,
+    val palletsEnabled: Boolean,
+    val openedAt: String? = null,
+    val closedAt: String? = null,
+    val stationCloseAccess: StationCloseAccessDto? = null,
+)
 
 @Serializable
 data class ShiftListResponse(val items: List<ShiftDto>)
