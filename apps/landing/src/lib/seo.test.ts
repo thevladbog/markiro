@@ -112,7 +112,7 @@ describe("SEO generators", () => {
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(62);
+    expect(sitemap.match(/<url>/g)).toHaveLength(63);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
@@ -208,7 +208,7 @@ describe("SEO generators", () => {
         llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
       ).toHaveLength(1);
     }
-    expect(sitemap.match(/<url>/g)).toHaveLength(62);
+    expect(sitemap.match(/<url>/g)).toHaveLength(63);
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
     );
@@ -345,7 +345,7 @@ describe("SEO generators", () => {
       .sort()
       .at(-1);
 
-    expect(newest).toBe("2026-09-02");
+    expect(newest).toBe("2026-09-10");
     expect(sitemap).toMatch(
       new RegExp(`<loc>https://markiro\\.app/legal/</loc>[\\s\\S]*?<lastmod>${newest}</lastmod>`),
     );

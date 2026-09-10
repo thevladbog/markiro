@@ -36,10 +36,11 @@ const LEGAL_DOCUMENT_CODES = [
   "MKR-INS-07",
   "MKR-INS-08",
   "MKR-INS-09",
+  "MKR-INS-10",
 ] as const;
 const LEGAL_LOCALES = ["ru", "en"] as const;
 const SAFE_FILE_NAME =
-  /^markiro_mkr-(?:pd-01|pd-02|dpa-01|brd-01|ins-0[123456789])_\d{4}\.\d{2}-\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
+  /^markiro_mkr-(?:pd-01|pd-02|dpa-01|brd-01|ins-(?:0[1-9]|[1-9][0-9]))_\d{4}\.\d{2}-\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
 export interface PublishedLegalArtifact {

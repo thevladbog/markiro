@@ -16,7 +16,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
  */
 const SCREENSHOT_DIR = join(
   import.meta.dirname,
-  "../../../packages/legal-documents/assets/instructions/mkr-ins-08",
+  "../../../packages/legal-documents/assets/instructions/mkr-ins-08/ru",
 );
 function screenshotPath(name: string): string {
   return join(SCREENSHOT_DIR, `${name}.png`);
@@ -316,7 +316,7 @@ const DEVICES_RESPONSE = { items: [STATION_DEVICE], page: 1, pageSize: 20, total
 
 const SCREENSHOT_DIR_09 = join(
   import.meta.dirname,
-  "../../../packages/legal-documents/assets/instructions/mkr-ins-09",
+  "../../../packages/legal-documents/assets/instructions/mkr-ins-09/ru",
 );
 function screenshotPath09(name: string): string {
   return join(SCREENSHOT_DIR_09, `${name}.png`);

@@ -71,6 +71,10 @@ const DESCRIPTION_BY_CODE = {
     ru: "Печатная инструкция менеджера: наблюдение за производством, закрытие смены из кабинета, данные после закрытия, отчёты для ГИС МТ и разбор их отказов.",
     en: "Printable manager instruction: production monitoring, closing a shift from the cabinet, late data, GIS MT reports, and resolving their failures.",
   },
+  "MKR-INS-10": {
+    ru: "Печатная инструкция менеджера: каталог продукции, карточка товара, ГТИН и его владелец, доведение карточки до статуса «Активен», фотография и вывод товара из оборота.",
+    en: "Printable manager instruction: the product catalog, the product card, GTIN ownership, completing a card so it becomes active, the photo, and retiring a product.",
+  },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 
 export interface LegalDocumentPageDefinition {
