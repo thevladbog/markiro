@@ -1,0 +1,37 @@
+---
+import { legalTableColumnLayout, type LegalTableBlock } from "../lib/legal-table";
+
+interface Props {
+  block: LegalTableBlock;
+  /** Identifier for the caption, so the scroll region can point at it. */
+  captionId: string;
+  /** Names the scroll region when the block carries no caption. */
+  fallbackLabel: string;
+}
+
+const { block, captionId, fallbackLabel } = Astro.props;
+const columnPercents = legalTableColumnLayout(block);
+---
+
+<div
+  class="legal-table__scroll"
+  role="region"
+  tabindex="0"
+  aria-labelledby={block.caption ? captionId : undefined}
+  aria-label={block.caption ? undefined : fallbackLabel}
+>
+  <table class="legal-table">
+    {block.caption && <caption id={captionId}>{block.caption}</caption>}
+    <colgroup>
+      {columnPercents.map((percent) => <col style={`width: ${percent}%`} />)}
+    </colgroup>
+    <thead>
+      <tr>{block.columns.map((column) => <th scope="col">{column}</th>)}</tr>
+    </thead>
+    <tbody>
+      {block.rows.map((row) => (
+        <tr>{row.map((value) => <td>{value}</td>)}</tr>
+      ))}
+    </tbody>
+  </table>
+</div>
