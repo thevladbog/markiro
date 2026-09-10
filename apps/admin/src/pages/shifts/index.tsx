@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useNavigate } from "react-router";
@@ -42,6 +43,16 @@ const MODE_TO_BADGE_TONE: Record<ShiftDto["mode"], BadgeTone> = {
   validation: "neutral",
   aggregation: "accent",
 };
+
+function formatShiftOutput(output: ShiftDto["output"], t: TFunction, language: string): string {
+  const formatCount = (value: number) => new Intl.NumberFormat(language).format(value);
+  return output.mode === "validation"
+    ? t("pages.shifts.table.outputValidation", { count: formatCount(output.acceptedUnits) })
+    : t("pages.shifts.table.outputAggregation", {
+        units: formatCount(output.containedUnits),
+        boxes: formatCount(output.closedBoxes),
+      });
+}
 
 function AuthorizedCreateShiftAction() {
   const { t } = useTranslation();
@@ -157,6 +168,7 @@ export function ShiftsPage() {
         render: (row) => (
           <div className="mk-shifts-table__stack mk-shifts-table__product">
             <span>{row.productName ?? "—"}</span>
+            <span>{formatShiftOutput(row.output, t, i18n.language)}</span>
             {row.counterpartyName && (
               <span>{t("pages.shifts.forCounterparty", { name: row.counterpartyName })}</span>
             )}

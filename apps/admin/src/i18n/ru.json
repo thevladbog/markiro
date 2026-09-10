@@ -2145,6 +2145,8 @@
         "line": "Линия",
         "mode": "Режим",
         "plannedQty": "План, шт",
+        "outputValidation": "{{count}} шт",
+        "outputAggregation": "{{units}} шт · {{boxes}} кор.",
         "status": "Статус",
         "lateData": "Данные после закрытия",
         "actions": "Действия"

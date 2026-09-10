@@ -363,6 +363,7 @@ const PLANNED_SHIFT = {
   lateDataAt: null,
   closeReason: null,
   createdAt: "2026-07-20T00:00:00.000Z",
+  output: { mode: "validation", acceptedUnits: 0 },
 };
 
 const ACTIVE_TOLLING_SHIFT = {
@@ -383,6 +384,7 @@ const ACTIVE_TOLLING_SHIFT = {
   palletCapacity: 48,
   palletsEnabled: true,
   openedAt: "2026-07-23T08:00:00.000Z",
+  output: { mode: "aggregation", closedBoxes: 0, containedUnits: 0 },
 };
 
 const CLOSED_SHIFT = {
@@ -440,6 +442,8 @@ describe("ShiftsPage", () => {
     const table = within(await screen.findByRole("table"));
     expect(table.getAllByText("Молоко 1л").length).toBe(2);
     expect(table.getByText("Сыр Российский")).toBeDefined();
+    expect(table.getAllByText("0 шт").length).toBe(2); // validation output on the two "Молоко 1л" rows
+    expect(table.getByText("0 шт · 0 кор.")).toBeDefined(); // aggregation output on the tolling row
     expect(table.getByText("Линия 1")).toBeDefined();
     expect(table.getAllByText("—").length).toBe(2); // missing lineName on the other two rows
     expect(table.getAllByText("Валидация").length).toBe(2);

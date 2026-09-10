@@ -23,6 +23,7 @@ function chain(rows: unknown[], table: unknown, lockedTables: unknown[]) {
     innerJoin: () => typeof node;
     leftJoin: () => typeof node;
     where: () => typeof node;
+    groupBy: () => typeof node;
     limit: () => Promise<unknown[]>;
     for: (mode: string) => Promise<unknown[]>;
     then: typeof result.then;
@@ -30,6 +31,7 @@ function chain(rows: unknown[], table: unknown, lockedTables: unknown[]) {
     innerJoin: () => node,
     leftJoin: () => node,
     where: () => node,
+    groupBy: () => node,
     limit: async () => rows,
     for: async (mode) => {
       if (mode === "update") lockedTables.push(table);
@@ -328,14 +330,23 @@ function productionDateUpdateDb(
         return {
           where: (condition: SQL) => {
             const query = dialect.sqlToQuery(condition);
-            boxQueries.push({ sql: query.sql, params: query.params });
-            lockEvents.push("box-check");
             const [tenantId, shiftId] = query.params;
             const rows = (options.closedBoxes ?? []).filter(
               (box) =>
                 box.tenantId === tenantId && box.shiftId === shiftId && box.closedAt !== null,
             );
-            return { limit: async () => rows.slice(0, 1) };
+            return {
+              // The production-date lock's own already-closed-box check.
+              // Recorded here (not in `where` above), so it's distinguishable
+              // from `fetchShiftOutputs`'s unrelated batched box-count query
+              // below, which never calls `.limit()`.
+              limit: async () => {
+                boxQueries.push({ sql: query.sql, params: query.params });
+                lockEvents.push("box-check");
+                return rows.slice(0, 1);
+              },
+              groupBy: () => Promise.resolve([]),
+            };
           },
         };
       },
