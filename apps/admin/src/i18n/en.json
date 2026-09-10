@@ -3067,7 +3067,8 @@
       "emptyHint": "Add a station or kiosk to get started.",
       "type": {
         "station": "Station",
-        "kiosk": "Kiosk"
+        "kiosk": "Kiosk",
+        "handheld": "Handheld"
       },
       "status": {
         "awaiting_pairing": "Awaiting pairing",

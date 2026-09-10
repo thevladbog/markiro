@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { SchemaObject } from "@nestjs/swagger";
 
-export const deviceTypes = ["station", "kiosk"] as const;
+export const deviceTypes = ["station", "kiosk", "handheld"] as const;
 export type DeviceType = (typeof deviceTypes)[number];
 
 export const deviceStatuses = ["awaiting_pairing", "online", "offline", "revoked"] as const;
@@ -48,7 +48,7 @@ export const deviceOpenApiSchema: SchemaObject = {
       type: "object",
       required: ["id", "name"],
       description:
-        "A station's assigned line (id + name) or a kiosk's free-form location (id is always null).",
+        "A station's or handheld's assigned line (id + name) or a kiosk's free-form location (id is always null).",
       properties: {
         id: { ...uuidSchema, nullable: true },
         name: { type: "string", nullable: true },

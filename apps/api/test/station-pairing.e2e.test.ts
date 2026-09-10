@@ -311,6 +311,7 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       device: {
         id: deviceId,
         name: deviceName,
+        kind: "station",
         tenantId,
         organizationName: "Test Plant",
         line: { id: expect.any(String), name: "Packing" },
@@ -1130,5 +1131,59 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       .get("/station/operators")
       .set("x-api-key", orphan.key)
       .expect(401);
+  });
+
+  it("keeps a handheld code live when a station client redeems it, then pairs the handheld client", async () => {
+    const [line] = await db.insert(schema.lines).values({ tenantId, name: "Line 2" }).returning();
+    const handheld = await agent
+      .post("/station-devices")
+      .send({ name: "TSD kind", lineId: line!.id, kind: "handheld" })
+      .expect(201);
+    const issued = await agent
+      .post(`/station-devices/${handheld.body.id}/pairing-code`)
+      .send({})
+      .expect(201);
+    const code = issued.body.code as string;
+
+    const rejected = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code })
+      .expect(401);
+    expect(rejected.body).toEqual({ code: "PAIR_KIND_MISMATCH" });
+
+    const paired = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .set("x-station-capabilities", "handheld-v1,subscription-state-v1")
+      .send({ code })
+      .expect(201);
+    expect(paired.body.device).toMatchObject({ id: handheld.body.id, kind: "handheld" });
+    expect(paired.body.credential.apiKey).toEqual(expect.any(String));
+
+    const identity = await request(app!.getHttpServer())
+      .get("/station/identity")
+      .set("x-api-key", paired.body.credential.apiKey as string)
+      .expect(200);
+    expect(identity.body.device.kind).toBe("handheld");
+  });
+
+  it("rejects a station code redeemed by the handheld client and keeps it live", async () => {
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const code = issued.body.code as string;
+
+    const rejected = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .set("x-station-capabilities", "handheld-v1")
+      .send({ code })
+      .expect(401);
+    expect(rejected.body).toEqual({ code: "PAIR_KIND_MISMATCH" });
+
+    const paired = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code })
+      .expect(201);
+    expect(paired.body.device.kind).toBe("station");
   });
 });

@@ -325,4 +325,31 @@ describe.skipIf(!ready)("unified devices read model e2e", () => {
       .set("x-api-key", station.apiKey)
       .expect(403);
   });
+
+  it("lists a handheld with its own type and filters it apart from stations", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const [line] = await db.insert(schema.lines).values({ tenantId, name: "Line 2" }).returning();
+    await agent.post("/station-devices").send({ name: "Terminal", lineId: null }).expect(201);
+    const handheld = await agent
+      .post("/station-devices")
+      .send({ name: "TSD 1", lineId: line!.id, kind: "handheld" })
+      .expect(201);
+
+    const onlyHandhelds = await agent.get("/devices?type=handheld").expect(200);
+    expect(onlyHandhelds.body.total).toBe(1);
+    expect(onlyHandhelds.body.items[0]).toMatchObject({
+      id: handheld.body.id,
+      type: "handheld",
+      name: "TSD 1",
+      place: { id: line!.id, name: "Line 2" },
+      status: "awaiting_pairing",
+      paired: false,
+    });
+
+    const onlyStations = await agent.get("/devices?type=station").expect(200);
+    expect(onlyStations.body.items.map((item: { name: string }) => item.name)).toEqual([
+      "Terminal",
+    ]);
+  });
 });

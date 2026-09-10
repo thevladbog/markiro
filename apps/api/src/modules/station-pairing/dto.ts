@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { SchemaObject } from "@nestjs/swagger";
 import type { OperatorMirrorRecord } from "@markiro/db";
 import type { SubscriptionAccessSnapshot } from "../../subscriptions/entitlements.types";
+import type { StationDeviceKind } from "../station-devices/dto";
 
 export const pairStationSchema = z.object({
   code: z.string().regex(/^\d{8}$/),
@@ -9,7 +10,7 @@ export const pairStationSchema = z.object({
 export type PairStationDto = z.infer<typeof pairStationSchema>;
 
 export type StationPairErrorCode =
-  "PAIR_INVALID" | "PAIR_EXPIRED" | "PAIR_LOCKED" | "PAIR_RATE_LIMITED";
+  "PAIR_INVALID" | "PAIR_EXPIRED" | "PAIR_LOCKED" | "PAIR_RATE_LIMITED" | "PAIR_KIND_MISMATCH";
 
 /** 401 body of POST /station/pair; rate limiting also surfaces here, not as 429. */
 export const stationPairErrorOpenApiSchema: SchemaObject = {
@@ -18,7 +19,13 @@ export const stationPairErrorOpenApiSchema: SchemaObject = {
   properties: {
     code: {
       type: "string",
-      enum: ["PAIR_INVALID", "PAIR_EXPIRED", "PAIR_LOCKED", "PAIR_RATE_LIMITED"],
+      enum: [
+        "PAIR_INVALID",
+        "PAIR_EXPIRED",
+        "PAIR_LOCKED",
+        "PAIR_RATE_LIMITED",
+        "PAIR_KIND_MISMATCH",
+      ],
     },
   },
 };
@@ -32,6 +39,7 @@ export interface PairStationResultDto {
   device: {
     id: string;
     name: string;
+    kind: StationDeviceKind;
     tenantId: string;
     organizationName: string;
     line: { id: string; name: string } | null;

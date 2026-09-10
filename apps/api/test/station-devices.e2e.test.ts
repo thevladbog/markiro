@@ -221,4 +221,33 @@ describe.skipIf(!ready)("station device lifecycle e2e", () => {
       .where(eq(schema.stationPairingCodes.stationDeviceId, station.deviceId));
     expect(code!.usedAt).toEqual(device!.revokedAt);
   });
+
+  it("creates a handheld, keeps kind editable until pairing, then fixes it", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const defaulted = await agent
+      .post("/station-devices")
+      .send({ name: "Terminal", lineId: null })
+      .expect(201);
+    expect(defaulted.body.kind).toBe("station");
+
+    const created = await agent
+      .post("/station-devices")
+      .send({ name: "TSD 1", lineId: null, kind: "handheld" })
+      .expect(201);
+    expect(created.body.kind).toBe("handheld");
+
+    const flipped = await agent
+      .patch(`/station-devices/${created.body.id}`)
+      .send({ kind: "station" })
+      .expect(200);
+    expect(flipped.body.kind).toBe("station");
+
+    const paired = await createTestStationDevice(app!, agent, "Paired TSD", { kind: "handheld" });
+    await agent.patch(`/station-devices/${paired.deviceId}`).send({ kind: "station" }).expect(409);
+    const list = await agent.get("/station-devices").expect(200);
+    const row = list.body.items.find((item: { id: string }) => item.id === paired.deviceId);
+    expect(row.kind).toBe("handheld");
+  });
 });

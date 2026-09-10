@@ -17,6 +17,7 @@ const jobNames = [
   "station_windows_build",
   "signer_rust",
   "signer_windows_build",
+  "handheld_android",
 ];
 
 const signerOnly = {
@@ -31,6 +32,7 @@ const signerOnly = {
     station_windows_build: false,
     signer_rust: true,
     signer_windows_build: true,
+    handheld_android: false,
   },
 };
 
@@ -229,6 +231,15 @@ test("root toolchain and workflow changes select the complete workflow", () => {
   }
 });
 
+test("routes handheld app changes to the Android job only", () => {
+  const result = classifyChangedFiles([
+    "apps/handheld/app/src/main/AndroidManifest.xml",
+    "apps/handheld/gradle/libs.versions.toml",
+  ]);
+  assert.equal(result.full, false);
+  assert.deepEqual(enabledJobs(result), ["handheld_android"]);
+});
+
 test("multiple changed paths union their selected jobs", () => {
   const result = classifyChangedFiles([
     "apps/signer/src-tauri/tauri.conf.json",
@@ -271,6 +282,7 @@ test("CLI writes exact GitHub outputs for a NUL-delimited diff", () => {
       "station_windows_build=false",
       "signer_rust=true",
       "signer_windows_build=true",
+      "handheld_android=false",
       "",
     ].join("\n"),
   );

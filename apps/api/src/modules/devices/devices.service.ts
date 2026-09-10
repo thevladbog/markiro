@@ -28,6 +28,7 @@ export class DevicesService {
         .select({
           id: schema.stationDevices.id,
           name: schema.stationDevices.name,
+          kind: schema.stationDevices.kind,
           lineId: schema.stationDevices.lineId,
           lineName: schema.lines.name,
           apiKeyId: schema.stationDevices.apiKeyId,
@@ -79,6 +80,7 @@ export class DevicesService {
     station: {
       id: string;
       name: string;
+      kind: string;
       lineId: string | null;
       lineName: string | null;
       apiKeyId: string | null;
@@ -90,7 +92,7 @@ export class DevicesService {
     const status = stationDeviceLifecycle(station, now);
     return {
       id: station.id,
-      type: "station",
+      type: station.kind === "handheld" ? "handheld" : "station",
       name: station.name,
       place: { id: station.lineId, name: station.lineName },
       status,

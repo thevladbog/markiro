@@ -19,6 +19,7 @@ const heavyJobs = [
   ["station-windows-build", "station_windows_build"],
   ["signer-rust", "signer_rust"],
   ["signer-windows-build", "signer_windows_build"],
+  ["handheld-android", "handheld_android"],
 ];
 
 function stepByName(job, name) {
