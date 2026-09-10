@@ -1,50 +1,35 @@
 package app.markiro.handheld
 
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.cash.turbine.test
 import app.markiro.handheld.core.auth.OperatorRecord
 import app.markiro.handheld.core.network.RevocationBus
-import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.DeviceWipe
+import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.InMemoryCredentialStore
-import app.markiro.handheld.core.storage.OperatorDao
-import app.markiro.handheld.core.storage.OperatorEntity
 import app.markiro.handheld.feature.signin.SessionHolder
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import org.junit.runner.RunWith
 
+@RunWith(AndroidJUnit4::class)
 class AppShellViewModelTest {
     @get:Rule
     val main = MainDispatcherRule()
 
-    private val configFlow = MutableStateFlow<DeviceConfigEntity?>(null)
-    private val config = object : DeviceConfigDao {
-        override fun observe(): Flow<DeviceConfigEntity?> = configFlow
-        override suspend fun get() = configFlow.value
-        override suspend fun count() = if (configFlow.value == null) 0 else 1
-        override suspend fun upsert(config: DeviceConfigEntity) {
-            configFlow.value = config
-        }
-        override suspend fun clear() {
-            configFlow.value = null
-        }
-    }
-    private val operators = object : OperatorDao {
-        val rows = mutableListOf<OperatorEntity>()
-        override suspend fun all() = rows.toList()
-        override suspend fun insertAll(rows: List<OperatorEntity>) {
-            this.rows += rows
-        }
-        override suspend fun clear() = rows.clear()
-    }
+    private lateinit var db: HandheldDatabase
     private val credential = InMemoryCredentialStore()
     private val session = SessionHolder()
     private val revocation = RevocationBus()
@@ -61,22 +46,31 @@ class AppShellViewModelTest {
         pairedAt = 1L,
     )
 
-    private fun vm() = AppShellViewModel(config, session, revocation, DeviceWipe(config, operators, credential), idleMs = 5 * 60 * 1000L)
+    @Before
+    fun open() {
+        db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+    }
+
+    @After
+    fun close() = db.close()
+
+    private fun vm() = AppShellViewModel(db.deviceConfigDao(), session, revocation, DeviceWipe(db, credential), idleMs = 5 * 60 * 1000L)
 
     @Test
     fun startsOnPairingWithoutConfigAndOnSignInWithIt() = runTest {
+        // Room answers observe() from its own executor, so wait for the first value instead of advancing.
         val a = vm()
-        advanceUntilIdle()
-        assertEquals(StartDestination.PAIRING, a.start.value)
-        configFlow.value = paired
+        assertEquals(StartDestination.PAIRING, a.start.first { it != null })
+        db.deviceConfigDao().upsert(paired)
         val b = vm()
-        advanceUntilIdle()
-        assertEquals(StartDestination.SIGN_IN, b.start.value)
+        assertEquals(StartDestination.SIGN_IN, b.start.first { it != null })
     }
 
     @Test
     fun revocationWipesEverythingAndEmitsAnEvent() = runTest {
-        configFlow.value = paired
+        db.deviceConfigDao().upsert(paired)
         credential.write("mk_live_abc")
         session.signIn(anna)
         val shell = vm()
@@ -85,7 +79,7 @@ class AppShellViewModelTest {
             revocation.raise()
             assertEquals(ShellEvent.Revoked, awaitItem())
         }
-        assertNull(configFlow.value)
+        assertNull(db.deviceConfigDao().get())
         assertNull(credential.read())
         assertNull(session.state.value.operator)
     }

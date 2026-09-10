@@ -1,14 +1,21 @@
 package app.markiro.handheld.core.storage
 
+import androidx.room.withTransaction
+
 /** Brief 07: a revoked or unbound device drops its credential and cache and returns to pairing. */
-class DeviceWipe(
-    private val config: DeviceConfigDao,
-    private val operators: OperatorDao,
-    private val credential: CredentialStore,
-) {
+class DeviceWipe(private val db: HandheldDatabase, private val credential: CredentialStore) {
     suspend fun wipeAll() {
         credential.clear()
-        operators.clear()
-        config.clear()
+        db.withTransaction {
+            db.outboxDao().clear()
+            db.scanEventDao().clear()
+            db.codeDao().clear()
+            db.conflictDao().clear()
+            db.shiftCloseDao().clear()
+            db.shiftDao().clear()
+            db.metaDao().clear()
+            db.operatorDao().clear()
+            db.deviceConfigDao().clear()
+        }
     }
 }
