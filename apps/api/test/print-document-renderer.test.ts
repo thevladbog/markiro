@@ -59,6 +59,22 @@ const countPdfPages = (pdf: Buffer) =>
   (pdf.toString("latin1").match(/\/Type\s*\/Page\b/g) ?? []).length;
 
 describe("print document HTML renderer", () => {
+  it("renders signed offers with supplier images and no counterparty stamp placeholder", async () => {
+    const offer = {
+      ...baseInvoice,
+      kind: "offer" as const,
+      seller: { ...baseInvoice.seller, taxId: "234106228141" },
+    };
+    const html = renderPrintHtml(offer, { printVariant: "signed" });
+    expect(count(html, 'class="authorized-signature"')).toBe(1);
+    expect(count(html, 'class="legal-seal"')).toBe(1);
+    expect(renderPrintHtml(offer, { printVariant: "clean" })).toContain("МЕСТО ДЛЯ ПЕЧАТИ");
+    expect(html).not.toContain("МЕСТО ДЛЯ ПЕЧАТИ");
+    await expect(renderPrintPdf(offer, { printVariant: "signed" })).resolves.toBeInstanceOf(Buffer);
+    expect(() =>
+      renderPrintHtml({ ...offer, seller: baseInvoice.seller }, { printVariant: "signed" }),
+    ).toThrow("signed_print_seller_not_authorized");
+  });
   it("ships the bundled Cyrillic fonts used by PDF output", () => {
     for (const file of ["IBMPlexSans-Regular.ttf", "IBMPlexSans-SemiBold.ttf"]) {
       const path = join(process.cwd(), "src/modules/billing/assets", file);

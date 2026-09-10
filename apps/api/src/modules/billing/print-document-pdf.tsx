@@ -471,8 +471,9 @@ export async function renderPrintPdf(
   const pdf = await renderToBuffer(
     <Document
       title={`${documentKindLabel(model)} № ${model.number}`}
-      creationDate={model.issuedOrPublishedAt}
-      modificationDate={model.issuedOrPublishedAt}
+      {...(model.issuedOrPublishedAt
+        ? { creationDate: model.issuedOrPublishedAt, modificationDate: model.issuedOrPublishedAt }
+        : {})}
     >
       <Page size="A4" style={styles.page} wrap>
         <Header model={model} logo={logo} />
