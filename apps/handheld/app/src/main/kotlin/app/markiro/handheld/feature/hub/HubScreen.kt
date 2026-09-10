@@ -24,8 +24,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.markiro.handheld.R
 import app.markiro.handheld.core.design.Banner
 import app.markiro.handheld.core.design.IconAction
 import app.markiro.handheld.core.design.MarkiroSizes
@@ -34,9 +37,7 @@ import app.markiro.handheld.core.design.StatusItem
 import app.markiro.handheld.core.design.StatusStrip
 import app.markiro.handheld.core.design.Tile
 import app.markiro.handheld.core.design.Tone
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import app.markiro.handheld.core.util.TimeText
 
 @Composable
 fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit) {
@@ -45,13 +46,26 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit) {
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
         StatusStrip(
             listOf(
-                if (state.reachable) StatusItem(Icons.Outlined.Wifi, "Сеть") else StatusItem(Icons.Outlined.WifiOff, "Офлайн", Tone.Warn),
-                StatusItem(Icons.Outlined.Sync, "Очередь 0"),
-                StatusItem(Icons.Outlined.Print, "Принтер"),
-                StatusItem(Icons.Outlined.QrCodeScanner, state.scannerLabel.ifEmpty { "Сканер" }),
+                if (state.reachable) {
+                    StatusItem(Icons.Outlined.Wifi, stringResource(R.string.hub_network))
+                } else {
+                    StatusItem(Icons.Outlined.WifiOff, stringResource(R.string.hub_offline), Tone.Warn)
+                },
+                StatusItem(Icons.Outlined.Sync, stringResource(R.string.hub_queue, state.queue), if (state.stuck) Tone.Err else Tone.Neutral),
+                StatusItem(Icons.Outlined.Print, stringResource(R.string.hub_printer)),
+                StatusItem(Icons.Outlined.QrCodeScanner, state.scannerLabel.ifEmpty { stringResource(R.string.hub_scanner) }),
             ),
         )
-        if (!state.reachable) Banner("Работаем офлайн", Tone.Warn, Icons.Outlined.WifiOff)
+        if (state.stuck) {
+            Banner(stringResource(R.string.hub_sync_stuck), Tone.Err, Icons.Outlined.Sync)
+        } else if (!state.reachable) {
+            val text = if (state.queue > 0) {
+                stringResource(R.string.hub_offline_banner_queue, pluralStringResource(R.plurals.scans_queued, state.queue, state.queue))
+            } else {
+                stringResource(R.string.hub_offline_banner)
+            }
+            Banner(text, Tone.Warn, Icons.Outlined.WifiOff)
+        }
         Column(Modifier.padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
             Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -62,36 +76,49 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit) {
                         color = c.fg1,
                     )
                 }
-                IconAction(Icons.AutoMirrored.Outlined.Logout, "Выйти", onSignOut)
+                IconAction(Icons.AutoMirrored.Outlined.Logout, stringResource(R.string.hub_sign_out), onSignOut)
             }
             val stamp = state.countsAt?.takeIf { !state.reachable }
-                ?.let { " · данные на " + SimpleDateFormat("HH:mm", Locale.forLanguageTag("ru")).format(Date(it)) }
+                ?.let { " · " + stringResource(R.string.common_data_as_of, TimeText.hhmm(it)) }
                 .orEmpty()
             // Intrinsic height keeps both tiles of a row equal when one status wraps to two lines.
             val tile = Modifier.weight(1f).fillMaxHeight()
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-                Tile(Icons.Outlined.Factory, "Смена", shiftsLabel(state.shifts) + stamp, { onTile(HubTile.SHIFT) }, tile)
-                Tile(Icons.Outlined.Inventory2, "Инвентаризация", inventoriesLabel(state.inventories), { onTile(HubTile.INVENTORY) }, tile)
+                Tile(
+                    Icons.Outlined.Factory,
+                    stringResource(R.string.hub_tile_shift),
+                    state.continueShiftNumber?.let { stringResource(R.string.hub_shift_continue, it) } ?: (shiftsLabel(state.shifts) + stamp),
+                    { onTile(HubTile.SHIFT) },
+                    tile,
+                    statusTone = if (state.continueShiftNumber != null) Tone.Ok else Tone.Neutral,
+                )
+                Tile(Icons.Outlined.Inventory2, stringResource(R.string.hub_tile_inventory), inventoriesLabel(state.inventories), { onTile(HubTile.INVENTORY) }, tile)
             }
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-                Tile(Icons.Outlined.QrCodeScanner, "Проверка кода", "нажмите триггер", { onTile(HubTile.CHECK) }, tile)
-                Tile(Icons.Outlined.Settings, "Настройки", "принтер не настроен", { onTile(HubTile.SETTINGS) }, tile, statusTone = Tone.Warn)
+                Tile(Icons.Outlined.QrCodeScanner, stringResource(R.string.hub_tile_check), stringResource(R.string.hub_check_status), { onTile(HubTile.CHECK) }, tile)
+                Tile(
+                    Icons.Outlined.Settings,
+                    stringResource(R.string.hub_tile_settings),
+                    stringResource(R.string.hub_printer_not_set),
+                    { onTile(HubTile.SETTINGS) },
+                    tile,
+                    statusTone = Tone.Warn,
+                )
             }
         }
     }
 }
 
+@Composable
 internal fun shiftsLabel(count: Int?): String = when (count) {
-    null -> "нет данных"
-    0 -> "смен нет"
-    1 -> "1 доступна"
-    else -> "$count доступны"
+    null -> stringResource(R.string.common_no_data)
+    0 -> stringResource(R.string.hub_no_shifts)
+    else -> pluralStringResource(R.plurals.hub_shifts_available, count, count)
 }
 
+@Composable
 internal fun inventoriesLabel(count: Int?): String = when (count) {
-    null -> "нет данных"
-    0 -> "заданий нет"
-    1 -> "1 задание"
-    2, 3, 4 -> "$count задания"
-    else -> "$count заданий"
+    null -> stringResource(R.string.common_no_data)
+    0 -> stringResource(R.string.hub_no_tasks)
+    else -> pluralStringResource(R.plurals.hub_inventory_tasks, count, count)
 }

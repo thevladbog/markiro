@@ -19,10 +19,11 @@ import {
   ApiTags,
 } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
-import { RequirePermissions } from "../../authorization/access-policy";
+import { AllowStationOrPermissions, RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import {
   ApiCabinetAuth,
+  ApiCabinetOrStationAuth,
   ApiHttpErrors,
   ApiZodBody,
   ApiZodValidationError,
@@ -50,8 +51,9 @@ import { LinesService } from "./lines.service";
 
 @ApiTags("lines")
 @Controller("lines")
-// The station never calls this module. Cabinet authorization keeps a station
-// api-key out even though TenantGuard accepts it for tenant resolution.
+// Devices may only list lines (see listLines); cabinet authorization keeps a
+// station api-key out of every other route even though TenantGuard accepts it
+// for tenant resolution.
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
 @ApiCabinetAuth()
@@ -59,8 +61,13 @@ export class LinesController {
   constructor(private readonly linesService: LinesService) {}
 
   @Get()
-  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
-  @ApiOperation({ summary: "List production lines" })
+  // Devices read the list to browse shifts of other lines; every other route stays cabinet-only.
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "List production lines",
+    description: "Devices read the list to browse shifts of other lines.",
+  })
+  @ApiCabinetOrStationAuth()
   @ApiOkResponse({ schema: listLinesOpenApiSchema })
   @ApiHttpErrors(401, 403)
   async listLines(@Req() req: RequestWithTenant): Promise<ListLinesResponseDto> {

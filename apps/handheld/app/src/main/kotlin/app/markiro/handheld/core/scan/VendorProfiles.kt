@@ -1,5 +1,7 @@
 package app.markiro.handheld.core.scan
 
+import app.markiro.handheld.R
+
 /**
  * Intent-output settings of the built-in scanner services. The action and extra names come from the
  * vendors' documentation (Datalogic "Intent Wedge", Honeywell "Data Intent", Zebra "DataWedge intent
@@ -12,7 +14,8 @@ data class VendorProfile(
     val action: String,
     val dataExtra: String,
     val symbologyExtra: String,
-    val setupHint: String,
+    /** String resource with the device-side setup steps; `%1$s` is the intent action. */
+    val setupHintRes: Int,
     val manufacturers: List<String>,
 )
 
@@ -25,7 +28,7 @@ object VendorProfiles {
         action = "com.datalogic.decodewedge.decode_action",
         dataExtra = "com.datalogic.decode.intentwedge.barcode_string",
         symbologyExtra = "com.datalogic.decode.intentwedge.barcode_type",
-        setupHint = "Настройки → Сканер → Wedge → Intent Wedge: включить, действие как выше, доставка Broadcast.",
+        setupHintRes = R.string.vendor_hint_datalogic,
         manufacturers = listOf("datalogic"),
     )
     val HONEYWELL = VendorProfile(
@@ -34,7 +37,7 @@ object VendorProfiles {
         action = APP_ACTION,
         dataExtra = "data",
         symbologyExtra = "codeId",
-        setupHint = "Настройки → Honeywell Settings → Scanning → Internal Scanner → Data Processing Settings → Data Intent: включить, Action = $APP_ACTION.",
+        setupHintRes = R.string.vendor_hint_honeywell,
         manufacturers = listOf("honeywell"),
     )
     val ZEBRA = VendorProfile(
@@ -43,7 +46,7 @@ object VendorProfiles {
         action = APP_ACTION,
         dataExtra = "com.symbol.datawedge.data_string",
         symbologyExtra = "com.symbol.datawedge.label_type",
-        setupHint = "DataWedge → профиль для app.markiro.handheld → Intent output: включить, Intent action = $APP_ACTION, delivery Broadcast.",
+        setupHintRes = R.string.vendor_hint_zebra,
         manufacturers = listOf("zebra"),
     )
     val ALL = listOf(DATALOGIC, HONEYWELL, ZEBRA)

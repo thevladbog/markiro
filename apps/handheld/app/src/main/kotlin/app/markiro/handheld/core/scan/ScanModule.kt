@@ -1,6 +1,7 @@
 package app.markiro.handheld.core.scan
 
 import android.content.Context
+import app.markiro.handheld.core.storage.HandheldDatabase
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -22,4 +23,8 @@ object ScanModule {
 
     @Provides
     fun scanEvents(router: ScanRouter): ScanEvents = router
+
+    @Provides
+    @Singleton
+    fun scanRecorder(db: HandheldDatabase): ScanRecorder = ScanRecorder(db)
 }

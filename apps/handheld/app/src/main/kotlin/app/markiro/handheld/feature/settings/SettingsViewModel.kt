@@ -11,13 +11,18 @@ import app.markiro.handheld.core.scan.ScanPreferences
 import app.markiro.handheld.core.scan.ScanRouter
 import app.markiro.handheld.core.scan.ScanSourceKind
 import app.markiro.handheld.core.scan.VendorProfiles
+import app.markiro.handheld.core.signal.SignalKind
+import app.markiro.handheld.core.signal.Signaller
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.DeviceConfigEntity
+import app.markiro.handheld.core.storage.MetaStore
+import app.markiro.handheld.core.sync.SyncEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -29,6 +34,12 @@ data class SettingsUi(
     val lastScan: ScanEvent? = null,
     val debugScanEnabled: Boolean = BuildConfig.DEBUG_SCAN_SOURCE,
     val version: String = BuildConfig.VERSION_NAME,
+    val soundMuted: Boolean = false,
+    val soundVolume: Float = 1f,
+    val vibrationEnabled: Boolean = true,
+    val queue: Int = 0,
+    val lastSyncAt: Long? = null,
+    val installId: String = "",
 )
 
 @HiltViewModel
@@ -38,37 +49,64 @@ class SettingsViewModel @Inject constructor(
     scans: ScanEvents,
     private val app: AppPreferences,
     config: DeviceConfigDao,
+    private val signaller: Signaller,
+    sync: SyncEngine,
+    meta: MetaStore,
 ) : ViewModel() {
-    private val _state = MutableStateFlow(SettingsUi(scan.sourceKind, scan.profileId, app.theme, app.language))
+    private val _state = MutableStateFlow(
+        SettingsUi(
+            scan.sourceKind, scan.profileId, app.theme, app.language,
+            soundMuted = app.soundMuted, soundVolume = app.soundVolume, vibrationEnabled = app.vibrationEnabled,
+        ),
+    )
     val state: StateFlow<SettingsUi> = _state
     val config: StateFlow<DeviceConfigEntity?> = config.observe().stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     init {
-        viewModelScope.launch { scans.events.collect { event -> _state.value = _state.value.copy(lastScan = event) } }
+        viewModelScope.launch { scans.events.collect { event -> _state.update { it.copy(lastScan = event) } } }
+        viewModelScope.launch { sync.state.collect { s -> _state.update { it.copy(queue = s.pending, lastSyncAt = s.lastSuccessAt) } } }
+        viewModelScope.launch { val id = meta.installId(); _state.update { it.copy(installId = id) } }
     }
 
     fun setSource(kind: ScanSourceKind) {
         scan.sourceKind = kind
         router.configure()
-        _state.value = _state.value.copy(sourceKind = kind)
+        _state.update { it.copy(sourceKind = kind) }
     }
 
     fun setProfile(id: String) {
         scan.profileId = id
         router.configure()
-        _state.value = _state.value.copy(profileId = id)
+        _state.update { it.copy(profileId = id) }
     }
 
     fun setTheme(mode: ThemeMode) {
         app.theme = mode
-        _state.value = _state.value.copy(theme = mode)
+        _state.update { it.copy(theme = mode) }
     }
 
     fun setLanguage(tag: String) {
         app.language = tag
         AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(tag))
-        _state.value = _state.value.copy(language = tag)
+        _state.update { it.copy(language = tag) }
     }
+
+    fun toggleSound() {
+        app.soundMuted = !app.soundMuted
+        _state.update { it.copy(soundMuted = app.soundMuted) }
+    }
+
+    fun setVolume(volume: Float) {
+        app.soundVolume = volume
+        _state.update { it.copy(soundVolume = app.soundVolume) }
+    }
+
+    fun toggleVibration() {
+        app.vibrationEnabled = !app.vibrationEnabled
+        _state.update { it.copy(vibrationEnabled = app.vibrationEnabled) }
+    }
+
+    fun testSignal(kind: SignalKind) = signaller.play(kind)
 
     /** Hidden text field on the test-scan screen (debug builds): behaves like a scan. */
     fun submitDebugScan(text: String) {
