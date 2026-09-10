@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-10
 
-**Status:** Approved in brainstorming on 2026-09-10; implementation plan pending
+**Status:** Implemented on 2026-09-10 on branch `worktree-tsd-printing` (pull request pending)
 
 **Scope:** Fourth implementation slice of design brief 10
 (`docs/design-briefs/10-tsd-handheld.md`), after the foundation
@@ -252,3 +252,12 @@ timeout state.
   «не отвечает».
 - **Bluetooth on hardware.** Verifiable only on a real device. The pull request
   must say so plainly rather than implying emulator coverage.
+- **What a delivered send can claim.** Measured during the walk-through against a
+  printer that drops the link partway through a job: the bytes leave the device,
+  the kernel accepts the rest into its send buffer, and the app sees no error.
+  Over a raw printing port that is the ceiling, because neither language
+  acknowledges a job. A lost Bluetooth link does surface, because that stack fails
+  the write. Making delivery stronger would mean querying the printer again after
+  the job and calling silence unknown, which risks marking every good print unknown
+  on a printer that stays quiet while printing. That trade needs hardware to settle
+  and is deliberately left open rather than guessed at.
