@@ -17,4 +17,12 @@ object BoxModule {
     @Provides
     @Singleton
     fun ssccPool(db: HandheldDatabase): SsccPool = SsccPool(db)
+
+    /** A singleton for the same reason: one lock guarding one open box per shift. */
+    @Provides
+    @Singleton
+    fun boxRepository(db: HandheldDatabase): BoxRepository = BoxRepository(db)
+
+    @Provides
+    fun closeBox(db: HandheldDatabase, boxes: BoxRepository, pool: SsccPool): CloseBox = CloseBox(db, boxes, pool)
 }
