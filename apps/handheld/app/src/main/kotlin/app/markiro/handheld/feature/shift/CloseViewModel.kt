@@ -68,7 +68,7 @@ class CloseViewModel @Inject constructor(
             watcher.cancel()
             val row = db.shiftCloseDao().forShift(shiftId)
             val outcome = when (row?.state) {
-                null -> CloseOutcome.ACCEPTED
+                null, "accepted" -> CloseOutcome.ACCEPTED
                 "conflict" -> CloseOutcome.CONFLICT
                 else -> CloseOutcome.PENDING
             }

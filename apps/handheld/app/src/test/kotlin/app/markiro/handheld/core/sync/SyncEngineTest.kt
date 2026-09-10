@@ -128,6 +128,16 @@ class SyncEngineTest {
     }
 
     @Test
+    fun aPartialAckIsNotAcked() = runTest {
+        outbox("a")
+        outbox("b")
+        server.enqueue(ok(1))
+        assertFalse(engine().drainAll())
+        assertEquals(2, db.outboxDao().countNow())
+        assertNotNull(db.metaDao().get(MetaStore.SYNC_PENDING_CEILING))
+    }
+
+    @Test
     fun alreadyAppliedIsSuccess() = runTest {
         outbox("a")
         server.enqueue(MockResponse().setResponseCode(201).setBody("""{"applied":0,"alreadyApplied":true,"conflicts":[]}"""))
@@ -174,7 +184,8 @@ class SyncEngineTest {
         val body = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
         assertEquals("s2", body.getValue("shiftId").jsonPrimitive.content)
         assertEquals("null", body.getValue("reasonCode").toString())
-        assertNull(db.shiftCloseDao().forShift("s1"))
+        assertEquals("accepted", db.shiftCloseDao().forShift("s1")?.state)
+        assertTrue(db.shiftCloseDao().pending().none { it.shiftId == "s1" })
         assertEquals("conflict", db.shiftCloseDao().forShift("s2")?.state)
         assertEquals("multiple_devices", db.shiftCloseDao().forShift("s2")?.conflictCode)
     }

@@ -2,6 +2,7 @@ package app.markiro.handheld.feature.work
 
 import app.markiro.handheld.core.network.ParticipantDto
 import app.markiro.handheld.core.network.StationApi
+import kotlinx.coroutines.CancellationException
 
 data class TeamState(val participants: List<ParticipantDto>, val acceptedUnits: Int?, val at: Long)
 
@@ -11,8 +12,12 @@ fun interface TeamRefresher {
 }
 
 class ApiTeamRefresher(private val api: StationApi, private val clock: () -> Long = System::currentTimeMillis) : TeamRefresher {
-    override suspend fun refresh(shiftId: String): TeamState? = runCatching {
+    override suspend fun refresh(shiftId: String): TeamState? = try {
         val summary = api.summary(shiftId)
         TeamState(summary.participants, summary.output.acceptedUnits, clock())
-    }.getOrNull()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
 }

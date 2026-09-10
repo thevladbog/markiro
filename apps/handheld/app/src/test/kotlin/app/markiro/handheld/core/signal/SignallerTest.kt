@@ -6,6 +6,7 @@ import app.markiro.handheld.core.km.Verdict
 import app.markiro.handheld.feature.settings.AppPreferences
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -26,6 +27,14 @@ class SignallerTest {
     }
 
     private val prefs = AppPreferences(ApplicationProvider.getApplicationContext())
+
+    /** The preferences store is shared across tests in the same process; start every test from the defaults. */
+    @Before
+    fun resetFeedbackPreferences() {
+        prefs.soundMuted = false
+        prefs.soundVolume = 1f
+        prefs.vibrationEnabled = true
+    }
 
     @Test
     fun mapsVerdictsToTheStationTones() {

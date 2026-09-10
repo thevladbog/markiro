@@ -139,6 +139,9 @@ interface ShiftCloseDao {
     @Query("DELETE FROM shift_close_outbox WHERE eventId = :eventId")
     suspend fun delete(eventId: String)
 
+    @Query("UPDATE shift_close_outbox SET state = 'accepted', lastCheckedAt = :at WHERE eventId = :eventId")
+    suspend fun markAccepted(eventId: String, at: String)
+
     @Query("UPDATE shift_close_outbox SET state = 'conflict', conflictCode = :code, lastCheckedAt = :at WHERE eventId = :eventId")
     suspend fun markConflict(eventId: String, code: String, at: String)
 

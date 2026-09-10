@@ -8,6 +8,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.core.km.Verdict
+import app.markiro.handheld.core.network.ParticipantDto
 import app.markiro.handheld.core.storage.ScanEventEntity
 import app.markiro.handheld.core.sync.SyncState
 import app.markiro.handheld.feature.shift.ShiftEntityFixtures
@@ -45,5 +46,16 @@ class WorkScreenTest {
         compose.onNodeWithContentDescription("Ещё").performClick()
         compose.onNodeWithText("Закрыть смену").performClick()
         assertEquals(true, closed)
+    }
+
+    @Test
+    fun teamChipCountsParticipantsOtherThanTheSignedInOperator() {
+        val ivan = ParticipantDto("op-2", "Петров Иван", null, "2026-09-10T07:00:00.000Z", "2026-09-10T07:30:00.000Z", 2, 0)
+        // This operator's scans are still queued, so the summary lists only the teammate: the chip must still say +1.
+        val absent = ui.copy(team = TeamState(listOf(ivan), 2, 0L), operatorId = "op-1")
+        compose.setContent { MarkiroTheme { WorkScreen(absent, WorkCallbacks()) } }
+        compose.onNodeWithText("+1").assertIsDisplayed()
+        compose.onNodeWithText("+1").performClick()
+        compose.onNodeWithText("Петров Иван").assertIsDisplayed()
     }
 }

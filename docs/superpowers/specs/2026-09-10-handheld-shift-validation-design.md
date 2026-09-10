@@ -130,9 +130,11 @@ New entities, all wiped by `DeviceWipe`:
   card shows «агрегация: в следующем срезе» and is disabled.
 - Enter: `POST /shifts/:id/enter` then `GET /shifts/:id/bundle`; the mirror is
   upserted with product GTIN, plan, dates, close policy and
-  `bundle_fetched_at`; the roster from the bundle replaces the operator
-  mirror (same `RosterStore.replace`); `activeShiftId` and `entered_at` are
-  set; navigation goes to the work screen.
+  `bundle_fetched_at`; `bundle.operators` is ignored as on the station
+  (pairing and the roster refresh own the operator mirror); `activeShiftId`
+  and `entered_at` are set; navigation goes to the work screen. A list
+  refresh never reopens a shift this device has closed: `status = closed`
+  in the mirror wins over the server's `active` while the close is queued.
 - Errors: `409 STATION_UPDATE_REQUIRED` → blocking sheet about duplicate-DM
   printing; `409` closed shift → «Смена уже закрыта» and the list refreshes;
   network failure → if the mirror has the bundle, enter offline (no `/enter`
@@ -204,7 +206,10 @@ code: {codeHash, gtin14, serial} | null, boxId: null, operatorId }`;
   `x-station-capabilities: handheld-v1,subscription-state-v1,station-recovery-v1`
   (the existing `CapabilitiesInterceptor` value extended).
 - Response guard: JSON object with `applied: Int` and
-  `alreadyApplied: Boolean`, otherwise the attempt fails (nothing acked).
+  `alreadyApplied: Boolean`, and either `alreadyApplied` or
+  `applied == items.length` (the server applies a batch whole); otherwise
+  the attempt fails (nothing acked). Malformed `conflicts` entries are
+  skipped, not fatal, as on the station.
 - Commit order: record `conflicts[]` rows (each with a string
   `winningScannedAt` that parses) into `conflicts_mirror` (ignore on
   conflict) → delete `outbox` rows `id <= ceiling` → clear
@@ -244,7 +249,8 @@ code: {codeHash, gtin14, serial} | null, boxId: null, operatorId }`;
   with the engine nudged; `drainShiftCloses()` posts each pending row to
   `POST /station/shift-closures` with `{ eventId, shiftId, operatorId,
 plannedQtySnapshot, actualQty, closedBoxCount, reasonCode, closedAt }`;
-  `accepted` and `already_resolved` delete the row, `conflict` marks it
+  `accepted` and `already_resolved` mark the row `state = accepted` (it stays
+  as the idempotency marker for the shift), `conflict` marks it
   `state = conflict` with `conflictCode`. Network failures leave it pending
   and the summary still opens.
 - Summary: accepted, errors, duplicates, conflicts, per-terminal rows from
@@ -257,7 +263,8 @@ plannedQtySnapshot, actualQty, closedBoxCount, reasonCode, closedAt }`;
 - `TeamRefresher` calls `GET /shifts/:id/summary` on entering the work
   screen and every 60 s while it is visible and the device is reachable;
   the response is cached in memory with its `generatedAt`. The «+N» chip
-  shows `participants.size - 1` (never negative) and opens a bottom sheet:
+  counts participants whose `employeeId` is not the signed-in operator (the
+  operator's own scans may still be queued) and opens a bottom sheet:
   one row per participant with name, accepted scans and last activity;
   «данные на HH:MM» when older than the last minute. A 403 (device not yet
   a participant, e.g. entered offline) hides the chip until the next success.

@@ -8,12 +8,15 @@ import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.ShiftEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -46,15 +49,31 @@ sealed interface ShiftListEvent {
 }
 
 private const val REACHABLE_WINDOW_MS = 2 * 60 * 1000L
+private const val REACHABLE_TICK_MS = 30 * 1000L
 
 private data class Lists(val current: ShiftEntity?, val mine: List<ShiftEntity>, val config: DeviceConfigEntity?, val reachable: Boolean)
 
 @HiltViewModel
-class ShiftListViewModel @Inject constructor(
+class ShiftListViewModel(
     private val repository: ShiftRepository,
     private val config: DeviceConfigDao,
     reachability: ReachabilityTracker,
+    /** Re-evaluates the reachability window while nothing else changes; tests pass a single tick. */
+    tick: Flow<Unit>,
 ) : ViewModel() {
+    @Inject
+    constructor(repository: ShiftRepository, config: DeviceConfigDao, reachability: ReachabilityTracker) : this(
+        repository,
+        config,
+        reachability,
+        flow {
+            while (true) {
+                emit(Unit)
+                delay(REACHABLE_TICK_MS)
+            }
+        },
+    )
+
     private val now: () -> Long = System::currentTimeMillis
     private val loading = MutableStateFlow(true)
     private val others = MutableStateFlow<List<OtherLine>>(emptyList())
@@ -64,7 +83,7 @@ class ShiftListViewModel @Inject constructor(
     private val _events = MutableSharedFlow<ShiftListEvent>(extraBufferCapacity = 1)
     val events: SharedFlow<ShiftListEvent> = _events
 
-    private val lists = combine(repository.observeShifts(), config.observe(), reachability.lastSuccessAt) { shifts, cfg, lastOk ->
+    private val lists = combine(repository.observeShifts(), config.observe(), reachability.lastSuccessAt, tick) { shifts, cfg, lastOk, _ ->
         val open = shifts.filter { it.status != "closed" }
         val current = cfg?.activeShiftId?.let { id -> open.firstOrNull { it.id == id } }
         val mine = open.filter { it.id != current?.id && (it.lineId == cfg?.lineId || it.lineId == null) }

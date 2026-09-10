@@ -104,7 +104,8 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                     state.shift?.counterpartyName?.let { MarkiroChip(stringResource(R.string.shifts_tolling, it), Tone.Info) }
                 }
             }
-            val others = (state.team?.participants?.size ?: 1) - 1
+            // Participants are operators with server-side activity; this operator may be absent while their scans are still queued.
+            val others = state.team?.participants?.count { it.employeeId != state.operatorId } ?: 0
             if (others > 0) {
                 Box(Modifier.clip(RoundedCornerShape(MarkiroSizes.radius)).clickable { teamSheet = true }.padding(MarkiroSizes.sp2)) {
                     MarkiroChip(stringResource(R.string.work_team_chip, others), Tone.Accent)

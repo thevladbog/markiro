@@ -17,6 +17,7 @@ import app.markiro.handheld.core.network.ShiftDto
 import app.markiro.handheld.core.network.ShiftListResponse
 import app.markiro.handheld.core.network.ShiftSummaryDto
 import app.markiro.handheld.core.network.StationApi
+import app.markiro.handheld.core.network.ValidationPrintDto
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
@@ -65,13 +66,16 @@ class HubViewModelTest {
     @After
     fun tearDown() = db.close()
 
+    private fun dto(id: String, number: String, status: String) =
+        ShiftDto(id, number, status, mode = "validation", validationPrint = ValidationPrintDto("none"), productId = "p1", palletsEnabled = false)
+
     private fun api(fail: Boolean = false) = object : StationApi {
         override suspend fun identity(): IdentityResponse = throw UnsupportedOperationException()
         override suspend fun operators() = RosterResponse(emptyList())
         override suspend fun shifts(status: String?, lineId: String?): ShiftListResponse {
             if (fail) throw IOException("offline")
             return ShiftListResponse(
-                listOf(ShiftDto("s1", "SEP26-001", "active"), ShiftDto("s2", "SEP26-002", "planned"), ShiftDto("s3", "SEP26-003", "closed")),
+                listOf(dto("s1", "SEP26-001", "active"), dto("s2", "SEP26-002", "planned"), dto("s3", "SEP26-003", "closed")),
             )
         }
         override suspend fun inventoryTasks(): InventoryTaskListResponse {

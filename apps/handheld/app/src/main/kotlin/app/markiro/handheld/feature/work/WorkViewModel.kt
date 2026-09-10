@@ -17,6 +17,7 @@ import app.markiro.handheld.core.sync.SyncEngine
 import app.markiro.handheld.core.sync.SyncState
 import app.markiro.handheld.feature.shift.ShiftRepository
 import app.markiro.handheld.feature.signin.SessionHolder
+import app.markiro.handheld.feature.signin.SessionState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -48,6 +49,8 @@ data class WorkUi(
     val sync: SyncState,
     val reachable: Boolean,
     val team: TeamState?,
+    /** Signed-in operator; the team chip counts participants other than them. */
+    val operatorId: String? = null,
 )
 
 private const val REACHABLE_WINDOW_MS = 2 * 60 * 1000L
@@ -108,11 +111,13 @@ class WorkViewModel(
         sync.state,
         reachability.lastSuccessAt,
         teamState,
+        session.state,
     ) { values ->
         val shift = values[0] as ShiftEntity?
         val c = values[2] as Counters
         val teamNow = values[6] as TeamState?
         val lastOk = values[5] as Long?
+        val operator = (values[7] as SessionState).operator
         @Suppress("UNCHECKED_CAST")
         WorkUi(
             shift = shift,
@@ -126,6 +131,7 @@ class WorkViewModel(
             sync = values[4] as SyncState,
             reachable = lastOk != null && System.currentTimeMillis() - lastOk <= REACHABLE_WINDOW_MS,
             team = teamNow,
+            operatorId = operator?.operatorId,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, WorkUi(null, null, 0, null, 0, 0, 0, emptyList(), SyncState(), false, null))
 

@@ -7,9 +7,7 @@ import app.markiro.handheld.core.network.ShiftDto
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.network.UPDATE_REQUIRED_CODE
 import app.markiro.handheld.core.storage.HandheldDatabase
-import app.markiro.handheld.core.storage.RosterStore
 import app.markiro.handheld.core.storage.ShiftEntity
-import app.markiro.handheld.feature.pairing.toRecord
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.json.Json
 import retrofit2.HttpException
@@ -26,7 +24,8 @@ sealed interface EnterResult {
 fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
     id = id,
     number = number,
-    status = status,
+    // A shift closed on this device stays closed even while the close is still queued and the server lists it as active.
+    status = if (existing?.status == "closed") "closed" else status,
     mode = mode,
     productId = productId,
     productName = productName,
@@ -41,7 +40,7 @@ fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
     boxCapacity = boxCapacity,
     palletCapacity = palletCapacity,
     palletsEnabled = palletsEnabled,
-    validationPrintMode = validationPrint?.mode ?: "none",
+    validationPrintMode = validationPrint.mode,
     closePolicyKind = stationCloseAccess?.kind,
     closeOwnerDeviceId = stationCloseAccess?.ownerDeviceId,
     openedAt = openedAt,
@@ -55,7 +54,6 @@ fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
 class ShiftRepository(
     private val api: StationApi,
     private val db: HandheldDatabase,
-    private val roster: RosterStore,
     private val json: Json,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
@@ -100,8 +98,8 @@ class ShiftRepository(
                         leftAt = null,
                     ),
                 )
-                if (bundle.operators.isNotEmpty()) roster.replace(bundle.operators.map { it.toRecord() })
-                db.deviceConfigDao().get()?.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = shiftId, rosterFetchedAt = now)) }
+                // As on the station, `bundle.operators` is ignored: pairing and the roster refresh are the authoritative sources.
+                db.deviceConfigDao().get()?.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = shiftId)) }
             }
             EnterResult.Ok
         } catch (e: HttpException) {

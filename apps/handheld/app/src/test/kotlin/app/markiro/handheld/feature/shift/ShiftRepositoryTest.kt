@@ -7,7 +7,6 @@ import app.markiro.handheld.core.network.NetworkModule
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
-import app.markiro.handheld.core.storage.RosterStore
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
@@ -66,7 +65,7 @@ class ShiftRepositoryTest {
         db.close()
     }
 
-    private fun repo() = ShiftRepository(api, db, RosterStore(db.operatorDao()), NetworkModule.json()) { clock }
+    private fun repo() = ShiftRepository(api, db, NetworkModule.json()) { clock }
 
     @Test
     fun refreshStoresTheListAndDropsVanishedListOnlyRows() = runTest {
@@ -80,7 +79,7 @@ class ShiftRepositoryTest {
     }
 
     @Test
-    fun enterRecordsParticipationStoresTheBundleRosterAndActiveShift() = runTest {
+    fun enterRecordsParticipationStoresTheBundleAndActiveShiftButLeavesTheRosterAlone() = runTest {
         server.enqueue(MockResponse().setBody(activeShiftJson))
         server.enqueue(MockResponse().setBody(bundleJson))
         assertEquals(EnterResult.Ok, repo().enter("s1", null))
@@ -91,7 +90,16 @@ class ShiftRepositoryTest {
         assertEquals("active", shift?.status)
         assertNotNull(shift?.bundleFetchedAt)
         assertEquals("s1", db.deviceConfigDao().get()?.activeShiftId)
-        assertEquals("Иванова Анна", db.operatorDao().all().single().name)
+        // Pairing and the roster refresh own the operators mirror; the bundle's copy is ignored as on the station.
+        assertTrue(db.operatorDao().all().isEmpty())
+    }
+
+    @Test
+    fun refreshKeepsAShiftClosedOnThisDeviceClosed() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1").copy(status = "closed"))
+        server.enqueue(MockResponse().setBody("""{"items":[$activeShiftJson]}"""))
+        assertTrue(repo().refreshList())
+        assertEquals("closed", db.shiftDao().get("s1")?.status)
     }
 
     @Test

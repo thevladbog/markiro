@@ -131,6 +131,8 @@ class SyncEngine(
         val result = transport.post("/station/scans", body) as? TransportResult.Ok ?: return Step.FAILED
         if (result.code !in 200..299) return Step.FAILED
         val parsed = parseBatchResponse(result.body) ?: return Step.FAILED
+        // A fresh batch is applied whole (`applied == items.length`) or replayed (`alreadyApplied`); anything else is not this endpoint.
+        if (!parsed.alreadyApplied && parsed.applied != rows.size) return Step.FAILED
         val at = clock()
         db.withTransaction {
             db.conflictDao().insertIgnore(
@@ -172,7 +174,8 @@ class SyncEngine(
             if (result.code !in 200..299) return false
             val response = runCatching { json.decodeFromString(ShiftCloseResponse.serializer(), result.body) }.getOrNull() ?: return false
             when (response.outcome) {
-                "accepted", "already_resolved" -> db.shiftCloseDao().delete(row.eventId)
+                // The row stays as the idempotency marker: a second close of the same shift returns it instead of a new event.
+                "accepted", "already_resolved" -> db.shiftCloseDao().markAccepted(row.eventId, Iso.format(clock()))
                 "conflict" -> db.shiftCloseDao().markConflict(row.eventId, response.conflictCode ?: "multiple_devices", Iso.format(clock()))
                 else -> return false
             }
