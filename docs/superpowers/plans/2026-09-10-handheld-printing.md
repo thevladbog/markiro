@@ -18,7 +18,7 @@
 - `minSdk = 28`, `targetSdk = 35`, `compileSdk = 35`.
 - An unknown send outcome never resends by itself. Only a person who has looked at the printer resolves it.
 - Rasterized (non-ASCII) output is **not** byte-comparable to the station's. It is pinned on command framing, bitmap dimensions and placement only. Never assert glyph pixels.
-- **Rounding:** every millimetre-to-dot conversion must round ties toward positive infinity, matching JavaScript's `Math.round`. In Kotlin use `roundToInt()`. **Never `kotlin.math.round`**, which rounds ties to even and silently shifts coordinates. Coordinates may be negative, so this is not academic.
+- **Rounding:** every millimetre-to-dot conversion must round ties toward positive infinity, matching JavaScript's `Math.round`. Neither Kotlin built-in does this: `kotlin.math.round` takes ties to even, and `roundToInt` takes them away from zero, so they disagree on negative halves in opposite ways. Use `floor(value + 0.5).toInt()`. Coordinates may be negative, so this is not academic. Verified while implementing Task 2: `roundToInt` gives minus one for minus one half where JavaScript gives zero.
 - **The TSPL document contains raw binary** (the bitmap payload). Build documents as `ByteArray`, never as a `String` that is later encoded. Anything that UTF-8 encodes a byte above `0x7F` corrupts the bitmap.
 - Gate before every commit that touches `apps/handheld`: `./gradlew testDebugUnitTest lintDebug assembleDebug` from `apps/handheld` must pass with zero lint errors. This is what CI runs.
 - Commit after every task. Never squash tasks into one commit.
@@ -549,11 +549,24 @@ class LabelUnitsTest {
         assertEquals(464, mmToDots(58.0, 203))
         assertEquals(320, mmToDots(40.0, 203))
         assertEquals(2, mmToDots(0.25, 203))
-        // 0.0625 mm at 203 dpi is exactly 0.5 dots. JavaScript's Math.round gives 1, and so must this.
-        assertEquals(1, mmToDots(0.0625, 203))
-        // -0.0625 mm is exactly -0.5 dots, which rounds toward positive infinity, i.e. 0.
-        assertEquals(0, mmToDots(-0.0625, 203))
         assertEquals(-12, mmToDots(-1.5, 203))
+        assertEquals(-1, mmToDots(-0.1, 203))
+    }
+
+    @Test
+    fun tiesRoundTowardPositiveInfinityLikeJavaScript() {
+        // Pinned on the helper rather than through a millimetre conversion, because no round
+        // millimetre value lands exactly on half a dot once the floating-point division has run.
+        //
+        // Each of these disagrees with at least one of Kotlin's built-in choices: kotlin.math.round
+        // takes ties to even and would give 2 for 2.5 and -2 for -1.5, while roundToInt takes them
+        // away from zero and would give -1 for -0.5. JavaScript takes every tie upward.
+        assertEquals(1, roundLikeJs(0.5))
+        assertEquals(0, roundLikeJs(-0.5))
+        assertEquals(2, roundLikeJs(1.5))
+        assertEquals(-1, roundLikeJs(-1.5))
+        assertEquals(3, roundLikeJs(2.5))
+        assertEquals(-2, roundLikeJs(-2.5))
     }
 
     @Test
@@ -785,7 +798,7 @@ Create `apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/label/LabelU
 package app.markiro.handheld.core.label
 
 import app.markiro.handheld.core.km.KmCodec
-import kotlin.math.roundToInt
+import kotlin.math.floor
 
 private const val MM_PER_INCH = 25.4
 private const val POINTS_PER_INCH = 72.0
@@ -794,16 +807,24 @@ private const val POINTS_PER_INCH = 72.0
 const val QTY_UNIT_SUFFIX = "шт."
 
 /**
- * `round(mm * dpi / 25.4)`, matching `mmToDots` in packages/domain/src/labels/model.ts.
+ * Rounds the way JavaScript's `Math.round` does, which is what the emitters in
+ * packages/domain/src/labels were written against: a tie goes toward positive infinity, so a value
+ * of exactly minus one half becomes zero rather than minus one.
  *
- * `roundToInt` is required: it rounds ties toward positive infinity exactly as JavaScript's
- * `Math.round` does. `kotlin.math.round` rounds ties to even and would move coordinates by a dot.
- * Coordinates may be negative, so the tie direction is observable.
+ * Neither of Kotlin's obvious choices does this. `kotlin.math.round` takes ties to even, and
+ * `roundToInt` takes them away from zero, so both disagree on negative halves. Coordinates may be
+ * negative, so the difference is a dot in the wrong place rather than a curiosity.
  */
-fun mmToDots(mm: Double, dpi: Int): Int = (mm * dpi / MM_PER_INCH).roundToInt()
+private fun jsRound(value: Double): Int = floor(value + 0.5).toInt()
+
+/** `round(mm * dpi / 25.4)`, matching `mmToDots` in packages/domain/src/labels/model.ts. */
+fun mmToDots(mm: Double, dpi: Int): Int = jsRound(mm * dpi / MM_PER_INCH)
 
 /** `round(pt / 72 * dpi)`, matching `ptToDots` in the same module. */
-fun ptToDots(pt: Double, dpi: Int): Int = (pt / POINTS_PER_INCH * dpi).roundToInt()
+fun ptToDots(pt: Double, dpi: Int): Int = jsRound(pt / POINTS_PER_INCH * dpi)
+
+/** Exposed for the alignment offset, which rounds the same way. */
+internal fun roundLikeJs(value: Double): Int = jsRound(value)
 
 /** `pt / 72 * 25.4`, matching `ptToMm` in packages/domain/src/labels/wrap.ts. */
 fun ptToMm(pt: Double): Double = pt / POINTS_PER_INCH * MM_PER_INCH
