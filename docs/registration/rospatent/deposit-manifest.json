@@ -1,0 +1,99 @@
+{
+  "$comment": "Состав депонируемых материалов для заявки в Роспатент. Пути относительно корня репозитория; lines — включительный диапазон строк (1-based). Сборка: pnpm rospatent:deposit.",
+  "title": "Маркиро",
+  "holder": "Богатырев Владислав Сергеевич",
+  "authors": ["Богатырев Владислав Сергеевич"],
+  "version": "1.4.0",
+  "languages": ["TypeScript", "Rust", "Kotlin", "SQL"],
+  "maxPages": 55,
+  "files": [
+    { "path": "packages/domain/src/gs1/check-digit.ts", "comment": "контрольная цифра GS1" },
+    { "path": "packages/domain/src/gs1/gtin.ts", "comment": "нормализация и проверка GTIN" },
+    {
+      "path": "packages/domain/src/gs1/km.ts",
+      "comment": "разбор кода маркировки «Честного знака»"
+    },
+    {
+      "path": "packages/domain/src/gs1/sscc.ts",
+      "comment": "генерация и проверка SSCC для агрегации"
+    },
+    { "path": "packages/domain/src/scan/classify.ts", "comment": "классификация сканов" },
+    { "path": "packages/domain/src/scan/validate.ts", "comment": "проверка сканов на линии" },
+    {
+      "path": "packages/domain/src/barcodes/gs1-data-matrix.ts",
+      "comment": "кодирование GS1 DataMatrix"
+    },
+    {
+      "path": "packages/domain/src/labels/zpl.ts",
+      "lines": [1, 180],
+      "comment": "генерация ZPL для этикеток"
+    },
+    {
+      "path": "packages/domain/src/inventory/station-sync.ts",
+      "lines": [1, 200],
+      "comment": "синхронизация инвентаризации со станцией"
+    },
+    { "path": "packages/db/src/schema/codes.ts", "comment": "схема хранения кодов маркировки" },
+    { "path": "packages/db/src/schema/labels.ts", "comment": "схема шаблонов этикеток" },
+    {
+      "path": "apps/api/src/tenancy/tenant.guard.ts",
+      "comment": "изоляция арендаторов на границе API"
+    },
+    {
+      "path": "apps/api/src/authorization/authorization.guard.ts",
+      "comment": "проверка прав кабинета"
+    },
+    {
+      "path": "apps/api/src/authorization/authorization.service.ts",
+      "comment": "модель прав и ролей"
+    },
+    {
+      "path": "apps/api/src/modules/station-scans/station-scans.service.ts",
+      "lines": [1, 220],
+      "comment": "приём и разрешение сканов станции"
+    },
+    {
+      "path": "apps/api/src/modules/station-scans/conflict-resolution.ts",
+      "comment": "разрешение конфликтов offline-журналов"
+    },
+    {
+      "path": "apps/station/src/lib/sync.ts",
+      "lines": [1, 240],
+      "comment": "движок синхронизации линейной станции"
+    },
+    {
+      "path": "apps/station/src-tauri/src/printer.rs",
+      "lines": [1, 200],
+      "comment": "печать этикеток на станции"
+    },
+    {
+      "path": "apps/station/src-tauri/src/scanner.rs",
+      "lines": [1, 160],
+      "comment": "работа со сканером на станции"
+    },
+    {
+      "path": "apps/signer/signer-core/src/trueapi.rs",
+      "lines": [1, 200],
+      "comment": "аутентификация в True API «Честного знака»"
+    },
+    {
+      "path": "apps/signer/signer-core/src/signer_cades.rs",
+      "lines": [1, 150],
+      "comment": "подписание ГОСТ-ключом через CAdES"
+    },
+    { "path": "apps/kiosk/src/store/queue.ts", "comment": "offline-очередь киоска выбытия" },
+    {
+      "path": "apps/kiosk/src/sync/worker.ts",
+      "lines": [1, 200],
+      "comment": "фоновая синхронизация киоска"
+    },
+    {
+      "path": "apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/scan/Sources.kt",
+      "comment": "источники сканирования на ТСД"
+    },
+    {
+      "path": "apps/handheld/app/src/main/kotlin/app/markiro/handheld/core/scan/ScanRouter.kt",
+      "comment": "маршрутизация сканов на ТСД"
+    }
+  ]
+}

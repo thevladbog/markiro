@@ -55,3 +55,6 @@ apps/handheld/**/build/
 apps/handheld/.gradle/
 apps/handheld/local.properties
 apps/handheld/.kotlin/
+
+# Generated Rospatent deposit listing; sources and manifest stay tracked under docs/registration/.
+docs/registration/rospatent/build/

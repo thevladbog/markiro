@@ -2,7 +2,8 @@
 name = "signer-core"
 version = "0.1.0"
 edition = "2021"
-license = "Apache-2.0 OR MIT"
+license-file = "../../../LICENSE"
+publish = false
 description = "Chestny ZNAK signer agent core: cloud protocol, True API auth, GOST signing"
 
 [dependencies]
