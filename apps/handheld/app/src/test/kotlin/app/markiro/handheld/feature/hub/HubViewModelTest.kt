@@ -17,6 +17,7 @@ import app.markiro.handheld.core.network.LeaveInventoryResponse
 import app.markiro.handheld.core.network.LineListResponse
 import app.markiro.handheld.core.network.ResolveTaskRequest
 import app.markiro.handheld.core.network.ResolveTaskResponse
+import app.markiro.handheld.core.box.BoxRepository
 import app.markiro.handheld.core.network.NetworkModule
 import app.markiro.handheld.core.print.PrinterEntity
 import app.markiro.handheld.core.network.ReachabilityTracker
@@ -127,7 +128,7 @@ class HubViewModelTest {
         )
         return HubViewModel(
             api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(), db.printerDao(),
-            scannerLabel = { "встроенный" }, now = { clock }, tick = flowOf(Unit),
+            BoxRepository(db), scannerLabel = { "встроенный" }, now = { clock }, tick = flowOf(Unit),
         )
     }
 

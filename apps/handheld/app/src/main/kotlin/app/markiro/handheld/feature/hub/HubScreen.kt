@@ -66,6 +66,15 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit) {
             }
             Banner(text, Tone.Warn, Icons.Outlined.WifiOff)
         }
+        // Labels owed on boxes already closed and reported. Shown on the hub
+        // because the queue belongs to the device, not to any one shift.
+        if (state.unprintedLabels > 0) {
+            Banner(
+                pluralStringResource(R.plurals.work_labels_unprinted, state.unprintedLabels, state.unprintedLabels),
+                Tone.Warn,
+                Icons.Outlined.Print,
+            )
+        }
         Column(Modifier.padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
             Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {

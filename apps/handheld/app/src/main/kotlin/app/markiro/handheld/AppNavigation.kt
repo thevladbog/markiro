@@ -68,6 +68,12 @@ import app.markiro.handheld.feature.signin.SignInScreen
 import app.markiro.handheld.feature.signin.SignInViewModel
 import app.markiro.handheld.feature.work.ConflictsScreen
 import app.markiro.handheld.feature.work.ConflictsViewModel
+import app.markiro.handheld.feature.work.BoxCloseCallbacks
+import app.markiro.handheld.feature.work.BoxCloseScreen
+import app.markiro.handheld.feature.work.BoxCloseStep
+import app.markiro.handheld.feature.work.LabelQueueCallbacks
+import app.markiro.handheld.feature.work.LabelQueueScreen
+import app.markiro.handheld.feature.work.LabelQueueViewModel
 import app.markiro.handheld.feature.work.WorkCallbacks
 import app.markiro.handheld.feature.work.WorkScreen
 import app.markiro.handheld.feature.work.WorkViewModel
@@ -87,6 +93,7 @@ object Routes {
     const val WORK = "work/{shiftId}"
     const val CLOSE = "close/{shiftId}"
     const val CONFLICTS = "conflicts/{shiftId}"
+    const val LABEL_QUEUE = "label-queue"
     const val SOON = "soon/{tile}"
     const val INVENTORY = "inventory"
     const val INVENTORY_WORK = "inventory/{inventoryId}"
@@ -220,6 +227,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             composable(Routes.WORK) { entry ->
                 val vm: WorkViewModel = hiltViewModel()
                 val state by vm.state.collectAsStateWithLifecycle()
+                val closeStep by vm.closeStep.collectAsStateWithLifecycle()
                 val shiftId = entry.arguments?.getString("shiftId").orEmpty()
                 WorkScreen(
                     state,
@@ -230,6 +238,38 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         },
                         onClose = { nav.navigate(Routes.close(shiftId)) },
                         onConflicts = { nav.navigate(Routes.conflicts(shiftId)) },
+                        onCloseBoxEarly = vm::closeEarly,
+                        onLabelQueue = { nav.navigate(Routes.LABEL_QUEUE) },
+                    ),
+                )
+                // Drawn over the work screen rather than as a route of its own, so
+                // the fill grid underneath is not rebuilt between boxes.
+                if (closeStep != BoxCloseStep.Idle) {
+                    BoxCloseScreen(
+                        closeStep,
+                        BoxCloseCallbacks(
+                            onRetry = vm::retryPrint,
+                            onOtherPrinter = {
+                                vm.deferLabel()
+                                nav.navigate(Routes.PRINTER_GRAPH)
+                            },
+                            onDefer = vm::deferLabel,
+                            onConfirmPrinted = vm::confirmPrinted,
+                            onDismiss = vm::dismissClose,
+                        ),
+                    )
+                }
+            }
+            composable(Routes.LABEL_QUEUE) {
+                val vm: LabelQueueViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                LabelQueueScreen(
+                    state,
+                    LabelQueueCallbacks(
+                        onBack = { nav.popBackStack() },
+                        onPrintOne = vm::printOne,
+                        onPrintAll = vm::printAll,
+                        onResolveUnknown = vm::resolveUnknown,
                     ),
                 )
             }
