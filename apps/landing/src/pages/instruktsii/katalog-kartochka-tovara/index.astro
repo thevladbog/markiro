@@ -1,0 +1,32 @@
+---
+import catalogList from "@markiro/legal-documents/assets/instructions/mkr-ins-10/ru/catalog-list.png?url";
+import catalogFilters from "@markiro/legal-documents/assets/instructions/mkr-ins-10/ru/catalog-filters.png?url";
+import productNew from "@markiro/legal-documents/assets/instructions/mkr-ins-10/ru/product-new.png?url";
+import productGtinOwner from "@markiro/legal-documents/assets/instructions/mkr-ins-10/ru/product-gtin-owner.png?url";
+import productDraftBanner from "@markiro/legal-documents/assets/instructions/mkr-ins-10/ru/product-draft-banner.png?url";
+import productActive from "@markiro/legal-documents/assets/instructions/mkr-ins-10/ru/product-active.png?url";
+import productImage from "@markiro/legal-documents/assets/instructions/mkr-ins-10/ru/product-image.png?url";
+import productDefaults from "@markiro/legal-documents/assets/instructions/mkr-ins-10/ru/product-defaults.png?url";
+import productArchived from "@markiro/legal-documents/assets/instructions/mkr-ins-10/ru/product-archived.png?url";
+import catalogDelete from "@markiro/legal-documents/assets/instructions/mkr-ins-10/ru/catalog-delete.png?url";
+import candidatesPlaque from "@markiro/legal-documents/assets/instructions/mkr-ins-10/ru/candidates-plaque.png?url";
+
+import { getLegalDocumentPage } from "../../../content/legal-pages";
+import InstructionDocument from "../../../components/InstructionDocument.astro";
+
+const images = {
+  "catalog-list": catalogList,
+  "catalog-filters": catalogFilters,
+  "product-new": productNew,
+  "product-gtin-owner": productGtinOwner,
+  "product-draft-banner": productDraftBanner,
+  "product-active": productActive,
+  "product-image": productImage,
+  "product-defaults": productDefaults,
+  "product-archived": productArchived,
+  "catalog-delete": catalogDelete,
+  "candidates-plaque": candidatesPlaque,
+};
+---
+
+<InstructionDocument page={getLegalDocumentPage("MKR-INS-10", "ru")} images={images} />
