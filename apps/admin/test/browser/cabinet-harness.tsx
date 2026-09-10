@@ -1,6 +1,6 @@
 import "@markiro/ui/styles.css";
 import "../../src/global.css";
-import "../../src/i18n/index.js";
+import i18n from "../../src/i18n/index.js";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
@@ -30,12 +30,28 @@ import {
  * The screen under test comes from `?route=`; every spec passes it
  * explicitly, so the fallback below is only a safe landing page.
  */
+const params = new URLSearchParams(window.location.search);
+/**
+ * The cabinet evidence suites shoot the printed instructions in both
+ * locales from this one harness, so the session strings follow the
+ * requested language too: an English frame carrying a Cyrillic operator
+ * name in the header would document a screen nobody sees.
+ */
+const harnessLocale = params.get("locale") === "en" ? "en" : "ru";
 const session: SessionData = {
   session: { activeOrganizationId: "browser_org" },
-  user: { id: "browser_manager", email: "manager@example.test", name: "Игорь Волков" },
+  user: {
+    id: "browser_manager",
+    email: "manager@example.test",
+    name: harnessLocale === "ru" ? "Игорь Волков" : "Igor Volkov",
+  },
 };
 const organizations: OrganizationSummary[] = [
-  { id: "browser_org", name: "Марка Ко", slug: "marka-ko" },
+  {
+    id: "browser_org",
+    name: harnessLocale === "ru" ? "Марка Ко" : "Marka Co",
+    slug: "marka-ko",
+  },
 ];
 const authClient: AuthClientLike = {
   useSession: () => ({ data: session, isPending: false, error: null }),
@@ -53,7 +69,10 @@ const authClient: AuthClientLike = {
 
 const container = document.getElementById("root");
 if (!container) throw new Error("#root element not found");
-const initialEntry = new URLSearchParams(window.location.search).get("route") ?? "/";
+const initialEntry = params.get("route") ?? "/";
+// Before the first paint, so the shell never flashes the default language
+// and `<html lang>` is synced by the listener in src/i18n/index.ts.
+void i18n.changeLanguage(harnessLocale);
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 });

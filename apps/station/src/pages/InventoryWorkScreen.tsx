@@ -20,6 +20,7 @@ import {
   listInventoryBoxPrintAttempts,
   processNextInventoryRemoteReprint,
   readInventoryBoxPrintFacts,
+  readNextInventoryRemoteReprintRequest,
   readUnresolvedInventoryReprint,
   recoverInterruptedInventoryPrint,
   searchInventoryPrintedBoxesBySscc,
@@ -1220,8 +1221,23 @@ function RepackInventoryWorkScreen({
       return;
     remoteReprintBusy.current = true;
     void (async () => {
-      setPrintBusy(true);
+      let claimed = false;
       try {
+        // Look before blocking. This poll re-runs on every refresh -- so after
+        // every scan -- and `printBusy` disables the whole toolbar and pauses
+        // scanning. Raising it around a lookup that usually finds nothing made
+        // the operator's `Изменить`/`Исправления`/`Выйти из задания` presses
+        // droppable for the length of one mirror read on every scan. The guard
+        // now goes up only once there is a request to print, and still covers
+        // the print itself end to end.
+        const request = await readNextInventoryRemoteReprintRequest(exec, {
+          inventoryId: inventory.inventoryId,
+          snapshotId: inventory.snapshotId,
+          deviceId,
+        });
+        if (!request || !mounted.current) return;
+        claimed = true;
+        setPrintBusy(true);
         await queue.idle();
         const outcome = await processNextInventoryRemoteReprint({
           exec,
@@ -1245,7 +1261,7 @@ function RepackInventoryWorkScreen({
         if (mounted.current) setWriteFailed(true);
       } finally {
         remoteReprintBusy.current = false;
-        if (mounted.current) setPrintBusy(false);
+        if (claimed && mounted.current) setPrintBusy(false);
       }
     })();
   }, [

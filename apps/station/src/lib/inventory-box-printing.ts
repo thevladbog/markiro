@@ -482,15 +482,25 @@ export function attemptInventoryBoxPrint(
   );
 }
 
+export interface InventoryRemoteReprintRequest {
+  correctionId: string;
+  boxId: string;
+  requestedAt: string;
+}
+
 /**
- * Bridges one durable admin correction into the existing print attempt/outbox
- * pipeline. The correction id is the attempt id, so a crash after finalizing
- * the outcome but before completing the queue row cannot print twice.
+ * Reads the oldest reprint request this device still owes, without printing it.
+ *
+ * Split out so a caller can learn whether there is any work *before* it blocks
+ * anything on it: the work screen polls this after every refresh, and raising
+ * its print guard around an empty lookup would disable the operator's toolbar
+ * on every scan for as long as the read takes.
  */
-export async function processNextInventoryRemoteReprint(
-  input: ProcessNextInventoryRemoteReprintInput,
-): Promise<InventoryBoxPrintResult | null> {
-  const [request] = await input.exec.all<{
+export async function readNextInventoryRemoteReprintRequest(
+  exec: SqlExecutor,
+  scope: { inventoryId: string; snapshotId: string; deviceId: string },
+): Promise<InventoryRemoteReprintRequest | null> {
+  const [request] = await exec.all<{
     correction_id: string;
     box_id: string;
     requested_at: string;
@@ -501,8 +511,25 @@ export async function processNextInventoryRemoteReprint(
         AND completed_at IS NULL
       ORDER BY requested_at, correction_id
       LIMIT 1`,
-    [input.inventoryId, input.snapshotId, input.deviceId],
+    [scope.inventoryId, scope.snapshotId, scope.deviceId],
   );
+  if (!request) return null;
+  return {
+    correctionId: request.correction_id,
+    boxId: request.box_id,
+    requestedAt: request.requested_at,
+  };
+}
+
+/**
+ * Bridges one durable admin correction into the existing print attempt/outbox
+ * pipeline. The correction id is the attempt id, so a crash after finalizing
+ * the outcome but before completing the queue row cannot print twice.
+ */
+export async function processNextInventoryRemoteReprint(
+  input: ProcessNextInventoryRemoteReprintInput,
+): Promise<InventoryBoxPrintResult | null> {
+  const request = await readNextInventoryRemoteReprintRequest(input.exec, input);
   if (!request) return null;
   let completedAt = input.now();
   const result = await attemptInventoryBoxPrint({
@@ -512,8 +539,8 @@ export async function processNextInventoryRemoteReprint(
     snapshotId: input.snapshotId,
     deviceId: input.deviceId,
     operatorId: input.operatorId,
-    boxId: request.box_id,
-    attemptId: request.correction_id,
+    boxId: request.boxId,
+    attemptId: request.correctionId,
     eventId: input.createEventId(),
     attemptedAt: completedAt,
     completedAt: () => {
@@ -530,7 +557,7 @@ export async function processNextInventoryRemoteReprint(
         SET completed_at = ?
       WHERE inventory_id = ? AND snapshot_id = ? AND correction_id = ?
         AND owner_device_id = ? AND completed_at IS NULL`,
-    [completedAt, input.inventoryId, input.snapshotId, request.correction_id, input.deviceId],
+    [completedAt, input.inventoryId, input.snapshotId, request.correctionId, input.deviceId],
   );
   return result;
 }

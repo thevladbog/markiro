@@ -200,6 +200,12 @@ export function DisaggregationPage() {
         <div style={{ width: 180 }}>
           <DatePicker
             label={t("pages.disaggregation.filters.fromLabel")}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
             {...(from !== undefined ? { value: from } : {})}
             onValueChange={(value) => {
               setFrom(value);
@@ -210,6 +216,12 @@ export function DisaggregationPage() {
         <div style={{ width: 180 }}>
           <DatePicker
             label={t("pages.disaggregation.filters.toLabel")}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
             {...(to !== undefined ? { value: to } : {})}
             onValueChange={(value) => {
               setTo(value);

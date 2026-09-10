@@ -271,6 +271,12 @@ export function CodeSearchPage() {
         <div style={{ width: 180 }}>
           <DatePicker
             label={t("pages.codeSearch.filters.fromLabel")}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
             {...(from !== undefined ? { value: from } : {})}
             onValueChange={(value) => {
               setFrom(value);
@@ -281,6 +287,12 @@ export function CodeSearchPage() {
         <div style={{ width: 180 }}>
           <DatePicker
             label={t("pages.codeSearch.filters.toLabel")}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
             {...(to !== undefined ? { value: to } : {})}
             onValueChange={(value) => {
               setTo(value);
@@ -291,6 +303,12 @@ export function CodeSearchPage() {
         <div style={{ width: 180 }}>
           <DatePicker
             label={t("pages.codeSearch.filters.productionFromLabel")}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
             {...(productionFrom !== undefined ? { value: productionFrom } : {})}
             onValueChange={(value) => {
               setProductionFrom(value);
@@ -301,6 +319,12 @@ export function CodeSearchPage() {
         <div style={{ width: 180 }}>
           <DatePicker
             label={t("pages.codeSearch.filters.productionToLabel")}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
             {...(productionTo !== undefined ? { value: productionTo } : {})}
             onValueChange={(value) => {
               setProductionTo(value);
