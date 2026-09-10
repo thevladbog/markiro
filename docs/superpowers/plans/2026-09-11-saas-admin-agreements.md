@@ -42,6 +42,7 @@ object under a content-addressed key.
 ## File Structure
 
 **`packages/legal-documents`**
+
 - Modify `src/documents/tenant-agreement.ts` — export `buildTenantAgreement` instead of a frozen constant; owns the RU text and its fill points.
 - Create `src/documents/tenant-agreement-fields.ts` — `TenantAgreementFields`, `PartyRequisites`, the `field()` helper. Kept separate so the API can import the types without pulling the 1,500-line text module into its type graph.
 - Modify `src/index.ts` — re-export both.
@@ -51,18 +52,21 @@ object under a content-addressed key.
 - Modify `test/docx.test.ts` — add the published-bytes guard.
 
 **`packages/db`**
+
 - Create `src/schema/agreements.ts` — enum + two tables.
 - Modify `src/schema/index.ts` — re-export.
 - Create `migrations/0127_platform_agreements.sql` (number confirmed at generation time).
 - Create `test/agreements-schema.test.ts`.
 
 **`packages/platform-contracts`**
+
 - Modify `src/platform-auth.ts` — two capabilities + role map.
 - Create `src/agreements.ts` — requisites and endpoint schemas.
 - Modify `src/index.ts` — re-export.
 - Create `test/agreements.test.ts`.
 
 **`apps/api/src/modules/platform-agreements/`**
+
 - `platform-agreements.module.ts`, `platform-agreements.controller.ts`, `platform-agreements.service.ts` — CRUD, numbering, transitions, tenant linking.
 - `agreement-documents.service.ts` — render, store, presign, attachments. Split from the CRUD service because it is the only part that touches `ObjectStorageService` and `docx`.
 - `agreement-fields.ts` — maps a DB row to `TenantAgreementFields`. Pure, so it is unit-testable without a database.
@@ -70,6 +74,7 @@ object under a content-addressed key.
 - Tests under `apps/api/test/`.
 
 **`apps/saas-admin/src/pages/agreements/`**
+
 - `api.ts`, `AgreementsPage.tsx`, `CreateAgreementPage.tsx`, `AgreementDetailPage.tsx`, `AgreementRequisitesForm.tsx` (shared by create and detail), `AgreementDocumentsPanel.tsx`.
 - Modify `src/app.tsx`, `src/layout/AppShell.tsx`, `src/i18n/ru.json`, `src/i18n/en.json`.
 
@@ -78,6 +83,7 @@ object under a content-addressed key.
 ### Task 1: Template becomes a function of data
 
 **Files:**
+
 - Create: `packages/legal-documents/src/documents/tenant-agreement-fields.ts`
 - Modify: `packages/legal-documents/src/documents/tenant-agreement.ts`
 - Modify: `packages/legal-documents/src/index.ts`
@@ -87,6 +93,7 @@ object under a content-addressed key.
 - Test: `packages/legal-documents/test/docx.test.ts`
 
 **Interfaces:**
+
 - Consumes: `LegalDocumentLocaleContent`, `LegalLocale`, `LegalBlock` from `../types.js`; `renderLegalDocxDraft` from `../artifacts/docx.js`.
 - Produces: `buildTenantAgreement(fields: TenantAgreementFields, locale: LegalLocale): LegalDocumentLocaleContent`; types `TenantAgreementFields`, `PartyRequisites`, `PartyKind`; helper `agreementField(value, placeholder)`. Tasks 5 and 7 import all of these.
 
@@ -305,15 +312,15 @@ export function buildTenantAgreement(
 
 3. Apply these fill points, and no others:
 
-| Where | Was | Becomes |
-| --- | --- | --- |
-| section `storony`, table rows | `["Номер договора", "[номер]"]` | `["Номер договора", number]` |
-| same table | `["Место заключения", "г. [город]"]` | `["Место заключения", \`г. ${city}\`]` |
-| same table | `["Дата заключения", "[дата заключения]"]` | `["Дата заключения", conclusionDate]` |
-| section `storony`, preamble paragraph | literal with `[ИНН Исполнителя]`, `[ОГРНИП Исполнителя]`, `[полное наименование юридического лица / ИП]`, `[ИНН Заказчика]`, `[номер]`, `[должность, Ф. И. О., основание полномочий]` | template string using `preamble(contractor, customer, signatory)` (helper below) |
-| section `otvetstvennost`, п. 9.5 | `0,05 процента` and `10 процентов` | `agreementField(terms?.penaltyRatePercent, "0,05")` and `agreementField(terms?.penaltyCapPercent, "10")` |
-| section `dokumenty`, п. 11.3 | `[Арбитражного суда Краснодарского края / иного согласованного компетентного суда]` | `agreementField(terms?.disputeVenue, "[Арбитражного суда Краснодарского края / иного согласованного компетентного суда]")` |
-| section `rekvizity`, requisites table | the whole `rows` array | `requisitesRows(contractor, customer, signatory)` |
+| Where                                 | Was                                                                                                                                                                                   | Becomes                                                                                                                    |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| section `storony`, table rows         | `["Номер договора", "[номер]"]`                                                                                                                                                       | `["Номер договора", number]`                                                                                               |
+| same table                            | `["Место заключения", "г. [город]"]`                                                                                                                                                  | `["Место заключения", \`г. ${city}\`]`                                                                                     |
+| same table                            | `["Дата заключения", "[дата заключения]"]`                                                                                                                                            | `["Дата заключения", conclusionDate]`                                                                                      |
+| section `storony`, preamble paragraph | literal with `[ИНН Исполнителя]`, `[ОГРНИП Исполнителя]`, `[полное наименование юридического лица / ИП]`, `[ИНН Заказчика]`, `[номер]`, `[должность, Ф. И. О., основание полномочий]` | template string using `preamble(contractor, customer, signatory)` (helper below)                                           |
+| section `otvetstvennost`, п. 9.5      | `0,05 процента` and `10 процентов`                                                                                                                                                    | `agreementField(terms?.penaltyRatePercent, "0,05")` and `agreementField(terms?.penaltyCapPercent, "10")`                   |
+| section `dokumenty`, п. 11.3          | `[Арбитражного суда Краснодарского края / иного согласованного компетентного суда]`                                                                                                   | `agreementField(terms?.disputeVenue, "[Арбитражного суда Краснодарского края / иного согласованного компетентного суда]")` |
+| section `rekvizity`, requisites table | the whole `rows` array                                                                                                                                                                | `requisitesRows(contractor, customer, signatory)`                                                                          |
 
 4. Add these module-level helpers below the builder:
 
@@ -365,8 +372,14 @@ function requisitesRows(
   signatory: AgreementSignatory | undefined,
 ): readonly (readonly string[])[] {
   return [
-    [partyName(contractor, CONTRACTOR_DEFAULT_NAME), partyName(customer, "[полное наименование / Ф. И. О. ИП]")],
-    [`ИНН: ${agreementField(contractor?.inn, "[ИНН]")}`, `ИНН: ${agreementField(customer.inn, "[ИНН]")}`],
+    [
+      partyName(contractor, CONTRACTOR_DEFAULT_NAME),
+      partyName(customer, "[полное наименование / Ф. И. О. ИП]"),
+    ],
+    [
+      `ИНН: ${agreementField(contractor?.inn, "[ИНН]")}`,
+      `ИНН: ${agreementField(customer.inn, "[ИНН]")}`,
+    ],
     [`ОГРНИП: ${agreementField(contractor?.ogrn, "[ОГРНИП]")}`, registryCell(customer, "[номер]")],
     ["КПП: не применяется", kppCell(customer, "[для организации; для ИП — не применяется]")],
     [
@@ -385,7 +398,10 @@ function requisitesRows(
       `Банк: ${agreementField(contractor?.bankName, "[банк]")}`,
       `Банк: ${agreementField(customer.bankName, "[банк]")}`,
     ],
-    [`БИК: ${agreementField(contractor?.bic, "[БИК]")}`, `БИК: ${agreementField(customer.bic, "[БИК]")}`],
+    [
+      `БИК: ${agreementField(contractor?.bic, "[БИК]")}`,
+      `БИК: ${agreementField(customer.bic, "[БИК]")}`,
+    ],
     [
       `Р/с: ${agreementField(contractor?.settlementAccount, "[счёт]")}`,
       `Р/с: ${agreementField(customer.settlementAccount, "[счёт]")}`,
@@ -527,12 +543,14 @@ git commit -m "feat(legal): make the tenant agreement a function of its fields"
 ### Task 2: Database schema and migration
 
 **Files:**
+
 - Create: `packages/db/src/schema/agreements.ts`
 - Modify: `packages/db/src/schema/index.ts`
 - Create: `packages/db/migrations/0127_platform_agreements.sql` (confirm the next index in `migrations/meta/_journal.json`)
 - Test: `packages/db/test/agreements-schema.test.ts`
 
 **Interfaces:**
+
 - Consumes: `organization` from `./auth.js`, `platformUsers` from `./platform-auth.js`.
 - Produces: `platformAgreementStatus`, `platformAgreements`, `platformAgreementDocuments`, `platformAgreementDocumentKind`. Tasks 5–8 import these from `@markiro/db`.
 
@@ -680,10 +698,7 @@ export const platformAgreementDocuments = pgTable(
       columns: [table.uploadedByPlatformUserId],
       foreignColumns: [platformUsers.id],
     }).onDelete("restrict"),
-    check(
-      "platform_agreement_documents_checksum_format",
-      sql`${table.sha256} ~ '^[0-9a-f]{64}$'`,
-    ),
+    check("platform_agreement_documents_checksum_format", sql`${table.sha256} ~ '^[0-9a-f]{64}$'`),
     check("platform_agreement_documents_size_positive", sql`${table.byteSize} > 0`),
     check(
       "platform_agreement_documents_provenance",
@@ -725,11 +740,13 @@ git commit -m "feat(db): add platform agreements and their documents"
 ### Task 3: Platform capabilities
 
 **Files:**
+
 - Modify: `packages/platform-contracts/src/platform-auth.ts:19-61`
 - Test: `packages/platform-contracts/test/platform-auth.test.ts` (create if absent)
 - Modify: every fixture that builds a `platformPrincipal` — find them with the grep in Step 3.
 
 **Interfaces:**
+
 - Produces: capabilities `"agreements.read"` and `"agreements.write"` on `platformCapabilitySchema`. Tasks 5–8 pass them to `@RequirePlatformCapabilities`; Task 9 passes them to `hasCapability`.
 
 - [ ] **Step 1: Write the failing test**
@@ -739,10 +756,7 @@ Append to `packages/platform-contracts/test/platform-auth.test.ts`:
 ```ts
 import { describe, expect, it } from "vitest";
 
-import {
-  platformCapabilitiesForRole,
-  platformPrincipalSchema,
-} from "../src/platform-auth.js";
+import { platformCapabilitiesForRole, platformPrincipalSchema } from "../src/platform-auth.js";
 
 describe("agreement capabilities", () => {
   it("gives write access to platform_admin and accountant only", () => {
@@ -808,11 +822,13 @@ git commit -m "feat(platform): add agreements read and write capabilities"
 ### Task 4: Zod contracts for the agreements API
 
 **Files:**
+
 - Create: `packages/platform-contracts/src/agreements.ts`
 - Modify: `packages/platform-contracts/src/index.ts`
 - Test: `packages/platform-contracts/test/agreements.test.ts`
 
 **Interfaces:**
+
 - Consumes: `platformTimestampSchema`, `platformUuidSchema`, `platformTenantIdSchema` from `./primitives.js`.
 - Produces: `platformAgreementContracts` with `list`, `detail`, `create`, `update`, `transition`, `linkTenant`, `unlinkTenant`, `tenantCandidates`, `documents.list`, `documents.render`, `documents.download`, `attachments.upload`, `attachments.delete`; types `AgreementSummary`, `AgreementDetail`, `AgreementRequisitesInput`, `CreateAgreementInput`, `UpdateAgreementInput`, `AgreementStatus`. Tasks 5–11 import these.
 
@@ -849,7 +865,12 @@ describe("platformAgreementContracts", () => {
 
   it("rejects a ten-digit INN on a sole proprietor", () => {
     const result = platformAgreementContracts.create.body.safeParse({
-      counterparty: { ...LEGAL_ENTITY, kind: "sole_proprietor", inn: "7701234567", ogrnip: "312770000000001" },
+      counterparty: {
+        ...LEGAL_ENTITY,
+        kind: "sole_proprietor",
+        inn: "7701234567",
+        ogrnip: "312770000000001",
+      },
     });
     expect(result.success).toBe(false);
   });
@@ -863,9 +884,9 @@ describe("platformAgreementContracts", () => {
   });
 
   it("requires a termination reason only when terminating", () => {
-    expect(
-      platformAgreementContracts.transition.body.safeParse({ status: "sent" }).success,
-    ).toBe(true);
+    expect(platformAgreementContracts.transition.body.safeParse({ status: "sent" }).success).toBe(
+      true,
+    );
     expect(
       platformAgreementContracts.transition.body.safeParse({ status: "terminated" }).success,
     ).toBe(false);
@@ -891,15 +912,13 @@ Create `packages/platform-contracts/src/agreements.ts`:
 ```ts
 import { z } from "zod";
 
-import { platformTenantIdSchema, platformTimestampSchema, platformUuidSchema } from "./primitives.js";
+import {
+  platformTenantIdSchema,
+  platformTimestampSchema,
+  platformUuidSchema,
+} from "./primitives.js";
 
-export const agreementStatusSchema = z.enum([
-  "draft",
-  "in_review",
-  "sent",
-  "signed",
-  "terminated",
-]);
+export const agreementStatusSchema = z.enum(["draft", "in_review", "sent", "signed", "terminated"]);
 export type AgreementStatus = z.infer<typeof agreementStatusSchema>;
 
 const bankFields = {
@@ -1124,7 +1143,11 @@ export const platformAgreementContracts = {
         candidates: z
           .array(
             z
-              .object({ tenantId: platformTenantIdSchema, name: z.string(), inn: z.string().nullable() })
+              .object({
+                tenantId: platformTenantIdSchema,
+                name: z.string(),
+                inn: z.string().nullable(),
+              })
               .strict(),
           )
           .readonly(),
@@ -1159,7 +1182,11 @@ export const platformAgreementContracts = {
 Add to `packages/platform-contracts/src/index.ts`:
 
 ```ts
-export { agreementStatusSchema, agreementRequisitesSchema, platformAgreementContracts } from "./agreements.js";
+export {
+  agreementStatusSchema,
+  agreementRequisitesSchema,
+  platformAgreementContracts,
+} from "./agreements.js";
 export type {
   AgreementDetail,
   AgreementListQuery,
@@ -1188,6 +1215,7 @@ git commit -m "feat(platform-contracts): add the agreements API contracts"
 ### Task 5: API module — CRUD, numbering and transitions
 
 **Files:**
+
 - Create: `apps/api/src/modules/platform-agreements/platform-agreements.module.ts`
 - Create: `apps/api/src/modules/platform-agreements/platform-agreements.controller.ts`
 - Create: `apps/api/src/modules/platform-agreements/platform-agreements.service.ts`
@@ -1196,6 +1224,7 @@ git commit -m "feat(platform-contracts): add the agreements API contracts"
 - Test: `apps/api/test/platform-agreements.e2e-spec.ts`
 
 **Interfaces:**
+
 - Consumes: `platformAgreementContracts` (Task 4), `platformAgreements` (Task 2), `RequirePlatformCapabilities`, `RequestWithPlatformPrincipal`, `PlatformApiProtectedOk`, `PlatformApiProtectedCreated`, `parsePlatformResponse`, `ZodValidationPipe`.
 - Produces: `PlatformAgreementsService` with `list`, `detail`, `create`, `update`, `transition`, `linkTenant`, `unlinkTenant`, `tenantCandidates`, and the exported helpers `nextAgreementNumber(existing: readonly string[], year: number): string` and `isTransitionAllowed(from: AgreementStatus, to: AgreementStatus): boolean`. Tasks 6–8 and 11 rely on these names.
 
@@ -1254,7 +1283,12 @@ Expected: FAIL — the module does not exist.
 Create `apps/api/src/modules/platform-agreements/platform-agreements.service.ts`. Start with the helpers, which stay module-level exports so they are testable without Nest:
 
 ```ts
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import type { AgreementStatus } from "@markiro/platform-contracts";
 
 const NUMBER_PATTERN = /^МКР-(\d{4})-(\d{4})$/;
@@ -1453,11 +1487,13 @@ git commit -m "feat(api): add the platform agreements module"
 ### Task 6: Tenant linking and candidates by INN
 
 **Files:**
+
 - Modify: `apps/api/src/modules/platform-agreements/platform-agreements.service.ts`
 - Modify: `apps/api/src/modules/platform-agreements/platform-agreements.controller.ts`
 - Test: `apps/api/test/platform-agreements-tenant-link.e2e-spec.ts`
 
 **Interfaces:**
+
 - Consumes: `PlatformAgreementsService` (Task 5), `tenantBillingProfiles` from `@markiro/db`.
 - Produces: `linkTenant(principal, id, tenantId)`, `unlinkTenant(principal, id)`, `tenantCandidates(principal, id)` returning `{ tenantId, name, inn }[]`.
 
@@ -1520,6 +1556,7 @@ git commit -m "feat(api): link agreements to tenants with INN candidates"
 ### Task 7: Document rendering and storage
 
 **Files:**
+
 - Create: `apps/api/src/modules/platform-agreements/agreement-fields.ts`
 - Create: `apps/api/src/modules/platform-agreements/agreement-documents.service.ts`
 - Modify: `apps/api/src/modules/platform-agreements/platform-agreements.controller.ts`
@@ -1529,6 +1566,7 @@ git commit -m "feat(api): link agreements to tenants with INN candidates"
 - Test: `apps/api/test/platform-agreements-documents.e2e-spec.ts`
 
 **Interfaces:**
+
 - Consumes: `buildTenantAgreement`, `TenantAgreementFields` (Task 1); `renderLegalDocxDraft` from `@markiro/legal-documents/artifacts`; `ObjectStorageService` from `apps/api/src/modules/storage/object-storage.service`.
 - Produces: `toAgreementFields(row): TenantAgreementFields`; `AgreementDocumentsService` with `renderDraft(principal, id)`, `renderSigned(tx, agreement)`, `download(principal, id, documentId)`.
 
@@ -1546,9 +1584,17 @@ const ROW = {
   conclusionDate: "2026-09-11",
   city: "Краснодар",
   counterparty: { kind: "legal_entity", name: "ООО «Пример»", inn: "7701234567", kpp: "770101001" },
-  contractor: { kind: "sole_proprietor", name: "ИП Богатырев Владислав Сергеевич", inn: "231000000000" },
+  contractor: {
+    kind: "sole_proprietor",
+    name: "ИП Богатырев Владислав Сергеевич",
+    inn: "231000000000",
+  },
   terms: { disputeVenue: null, penaltyRatePercent: null, penaltyCapPercent: null },
-  signatory: { position: "Генеральный директор", fullName: "Иванов И. И.", authorityBasis: "Устав" },
+  signatory: {
+    position: "Генеральный директор",
+    fullName: "Иванов И. И.",
+    authorityBasis: "Устав",
+  },
 };
 
 describe("toAgreementFields", () => {
@@ -1582,8 +1628,7 @@ Expected: FAIL — module not found.
 
 ```ts
 const RENDERER_VERSION = "agreement-docx-v1";
-const DOCX_MEDIA_TYPE =
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 @Injectable()
 export class AgreementDocumentsService {
@@ -1670,11 +1715,13 @@ git commit -m "feat(api): render and store the filled agreement DOCX"
 ### Task 8: Attachments
 
 **Files:**
+
 - Modify: `apps/api/src/modules/platform-agreements/agreement-documents.service.ts`
 - Modify: `apps/api/src/modules/platform-agreements/platform-agreements.controller.ts`
 - Test: `apps/api/test/platform-agreements-attachments.e2e-spec.ts`
 
 **Interfaces:**
+
 - Produces: `uploadAttachment(principal, id, file)`, `deleteAttachment(principal, id, documentId)`.
 
 - [ ] **Step 1: Write the failing test**
@@ -1716,9 +1763,11 @@ function assertAllowedAttachment(mediaType: string, body: Buffer): void {
   const signature = ATTACHMENT_MEDIA_TYPES.get(mediaType);
   if (!signature) throw new BadRequestException("Unsupported attachment type");
   if (body.byteLength === 0) throw new BadRequestException("Empty attachment");
-  if (body.byteLength > MAX_ATTACHMENT_BYTES) throw new PayloadTooLargeException("Attachment too large");
+  if (body.byteLength > MAX_ATTACHMENT_BYTES)
+    throw new PayloadTooLargeException("Attachment too large");
   const matches = signature.every((byte, index) => body[index] === byte);
-  if (!matches) throw new BadRequestException("Attachment content does not match its declared type");
+  if (!matches)
+    throw new BadRequestException("Attachment content does not match its declared type");
 }
 ```
 
@@ -1751,6 +1800,7 @@ git commit -m "feat(api): accept signed-copy attachments on agreements"
 ### Task 9: saas-admin — API client, list page and navigation
 
 **Files:**
+
 - Create: `apps/saas-admin/src/pages/agreements/api.ts`
 - Create: `apps/saas-admin/src/pages/agreements/AgreementsPage.tsx`
 - Modify: `apps/saas-admin/src/app.tsx`
@@ -1759,6 +1809,7 @@ git commit -m "feat(api): accept signed-copy attachments on agreements"
 - Test: `apps/saas-admin/src/pages/agreements/AgreementsPage.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `platformApiFetch` from `../../api/client.js`; `platformAgreementContracts` (Task 4).
 - Produces: `listAgreements`, `getAgreement`, `createAgreement`, `updateAgreement`, `transitionAgreement`, `linkAgreementTenant`, `unlinkAgreementTenant`, `agreementTenantCandidates`, `renderAgreementDraft`, `downloadAgreementDocument`, `uploadAgreementAttachment`, `deleteAgreementAttachment`. Tasks 10 and 11 import all of these.
 
@@ -1880,11 +1931,13 @@ git commit -m "feat(saas-admin): add the agreements list and navigation entry"
 ### Task 10: saas-admin — create page with DaData
 
 **Files:**
+
 - Create: `apps/saas-admin/src/pages/agreements/AgreementRequisitesForm.tsx`
 - Create: `apps/saas-admin/src/pages/agreements/CreateAgreementPage.tsx`
 - Test: `apps/saas-admin/src/pages/agreements/AgreementRequisitesForm.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `OrganizationSuggestField`, `AddressSuggestField`, `BankSuggestField` from `../legal/`; `createAgreement` (Task 9).
 - Produces: `AgreementRequisitesForm` with props `{ value: AgreementRequisitesInput; onChange(next: AgreementRequisitesInput): void; disabled?: boolean }`. Task 11 renders the same component read-only.
 
@@ -1916,7 +1969,9 @@ const EMPTY = {
 describe("AgreementRequisitesForm", () => {
   it("keeps a manual edit after a suggestion filled the same field", () => {
     const onChange = vi.fn();
-    render(<AgreementRequisitesForm value={{ ...EMPTY, name: "ООО «Из DaData»" }} onChange={onChange} />);
+    render(
+      <AgreementRequisitesForm value={{ ...EMPTY, name: "ООО «Из DaData»" }} onChange={onChange} />,
+    );
     fireEvent.change(screen.getByLabelText("Наименование"), {
       target: { value: "ООО «Правленое вручную»" },
     });
@@ -1928,7 +1983,14 @@ describe("AgreementRequisitesForm", () => {
   it("hides КПП and ОГРН for a sole proprietor and shows ОГРНИП instead", () => {
     render(
       <AgreementRequisitesForm
-        value={{ ...EMPTY, kind: "sole_proprietor", inn: "770123456789", ogrnip: "312770000000001" } as never}
+        value={
+          {
+            ...EMPTY,
+            kind: "sole_proprietor",
+            inn: "770123456789",
+            ogrnip: "312770000000001",
+          } as never
+        }
         onChange={vi.fn()}
       />,
     );
@@ -1977,11 +2039,13 @@ git commit -m "feat(saas-admin): create agreements with DaData requisites"
 ### Task 11: saas-admin — detail page, transitions, documents
 
 **Files:**
+
 - Create: `apps/saas-admin/src/pages/agreements/AgreementDetailPage.tsx`
 - Create: `apps/saas-admin/src/pages/agreements/AgreementDocumentsPanel.tsx`
 - Test: `apps/saas-admin/src/pages/agreements/AgreementDetailPage.test.tsx`
 
 **Interfaces:**
+
 - Consumes: everything produced by Tasks 9 and 10.
 
 - [ ] **Step 1: Write the failing test**
@@ -2035,6 +2099,7 @@ git commit -m "feat(saas-admin): agreement detail, transitions and documents"
 ### Task 12: CI wiring, docs and final gates
 
 **Files:**
+
 - Modify: `tools/ci/affected.mjs`
 - Modify: `.github/workflows/ci.yml` if the new paths do not already map to the api and saas-admin jobs
 - Modify: `README.md` and `README.ru.md` if they enumerate saas-admin sections
