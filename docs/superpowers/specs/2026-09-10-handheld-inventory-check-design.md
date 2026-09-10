@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-10
 
-**Status:** Implemented on 2026-09-10 on branch `worktree-tsd-inventory` (pull request pending)
+**Status:** Implemented in https://github.com/thevladbog/markiro/pull/485 (2026-09-10)
 
 **Scope:** Third implementation slice of design brief 10
 (`docs/design-briefs/10-tsd-handheld.md`), on top of the foundation
