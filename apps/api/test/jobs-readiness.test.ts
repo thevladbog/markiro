@@ -19,6 +19,7 @@ import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-st
 import type { ChzExportRunnerService } from "../src/modules/chz-exports/chz-export-runner.service";
 import type { ChzCodeStatusIngestService } from "../src/modules/chz-code-statuses/chz-code-status-ingest.service";
 import type { ChzCodeStatusRefreshService } from "../src/modules/chz-code-statuses/chz-code-status-refresh.service";
+import type { PlatformReportRunnerService } from "../src/platform-reports/platform-report-runner.service";
 
 const pgBossMock = vi.hoisted(() => ({
   instances: [] as unknown[],
@@ -104,7 +105,10 @@ function fakeBoss(options: { workIds?: string[]; failWorkAt?: number } = {}) {
 
 function serviceWith(
   boss: ReturnType<typeof fakeBoss>,
-  options: { nationalCatalogSchemaSourceTenantId?: string } = {},
+  options: {
+    nationalCatalogSchemaSourceTenantId?: string;
+    platformReports?: PlatformReportRunnerService;
+  } = {},
 ) {
   pgBossMock.instances.push(boss);
   // `.orderBy().limit()` (shift export / inventory document reconciliation)
@@ -173,6 +177,8 @@ function serviceWith(
       undefined,
       undefined,
       options.nationalCatalogSchemaSourceTenantId,
+      undefined,
+      options.platformReports,
     ),
     subscriptionStatus,
     signerScheduler,
@@ -180,6 +186,50 @@ function serviceWith(
 }
 
 describe("PgBossService readiness", () => {
+  it("registers a scheduled report recovery worker and wakes it after committed intents", async () => {
+    const boss = fakeBoss({ workIds: [...WORKER_IDS, "report-worker", "report-repair"] });
+    const reportId = "81111111-1111-4111-8111-111111111111";
+    const run = vi.fn(async () => undefined);
+    const reconcile = vi.fn(async (dispatch: (id: string) => Promise<unknown>) => {
+      await dispatch(reportId);
+    });
+    const { service } = serviceWith(boss, {
+      platformReports: { reconcile, run } as unknown as PlatformReportRunnerService,
+    });
+    await service.onModuleInit();
+    try {
+      expect(boss.schedule).toHaveBeenCalledWith("platform-report-repair", "* * * * *");
+      expect(boss.send).toHaveBeenCalledWith("platform-report-repair", {});
+      await service.wakePlatformReports();
+      await expect(service.checkReady()).resolves.toBeUndefined();
+      const registration = boss.work.mock.calls.find(
+        ([name]) => name === "platform-report-repair",
+      ) as unknown as [string, () => Promise<void>];
+      await registration[1]();
+      expect(reconcile).toHaveBeenCalledOnce();
+      expect(run).not.toHaveBeenCalled();
+      expect(boss.createQueue).toHaveBeenCalledWith("platform-report-run", {
+        policy: "stately",
+        retryLimit: 3,
+        retryDelay: 60,
+        expireInSeconds: 600,
+      });
+      expect(boss.send).toHaveBeenCalledWith(
+        "platform-report-run",
+        { reportId },
+        {
+          singletonKey: reportId,
+        },
+      );
+      const worker = boss.work.mock.calls.find(
+        ([name]) => name === "platform-report-run",
+      ) as unknown as [string, (jobs: { data: { reportId: string } }[]) => Promise<void>];
+      await worker[1]([{ data: { reportId } }]);
+      expect(run).toHaveBeenCalledExactlyOnceWith(reportId);
+    } finally {
+      await service.onModuleDestroy();
+    }
+  });
   beforeEach(() => {
     pgBossMock.instances.length = 0;
   });

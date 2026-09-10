@@ -40,6 +40,7 @@ import { TenantOwnerActivationModule } from "./modules/tenant-owner-activation/t
 import { PlatformAuthModule } from "./platform-auth/platform-auth.module";
 import { PlatformCatalogModule } from "./modules/platform-catalog/platform-catalog.module";
 import { PlatformTenantsModule } from "./modules/platform-tenants/platform-tenants.module";
+import { PlatformReportsModule } from "./platform-reports/platform-reports.module";
 import { PlatformOffersModule } from "./modules/platform-offers/platform-offers.module";
 import { BillingProfilesModule } from "./modules/billing-profiles/billing-profiles.module";
 import { BillingAccountsModule } from "./modules/billing-accounts/billing-accounts.module";
@@ -94,6 +95,7 @@ export class AppModule {
               PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN),
               PlatformCatalogModule,
               PlatformTenantsModule.forRoot(env.ADMIN_ORIGIN),
+              PlatformReportsModule,
               PlatformOffersModule,
               BillingProfilesModule,
               BillingAccountsModule,
