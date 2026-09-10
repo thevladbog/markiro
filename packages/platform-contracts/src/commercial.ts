@@ -437,22 +437,31 @@ const paidOfferFields = {
   paidAt: responseTimestampSchema,
 };
 
-const draftOfferSchema = offerRecordCommonSchema
+export const offerStatusSchema = z.enum([
+  "draft",
+  "published",
+  "superseded",
+  "paid",
+  "cancelled",
+  "expired",
+]);
+
+export const draftOfferSchema = offerRecordCommonSchema
   .extend({ status: z.literal("draft"), ...unpublishedOfferFields })
   .strict();
-const publishedOfferSchema = offerRecordCommonSchema
+export const publishedOfferSchema = offerRecordCommonSchema
   .extend({ status: z.literal("published"), ...publishedOfferFields })
   .strict();
-const supersededOfferSchema = offerRecordCommonSchema
+export const supersededOfferSchema = offerRecordCommonSchema
   .extend({ status: z.literal("superseded"), ...publishedOfferFields })
   .strict();
-const paidOfferSchema = offerRecordCommonSchema
+export const paidOfferSchema = offerRecordCommonSchema
   .extend({ status: z.literal("paid"), ...paidOfferFields })
   .strict();
-const cancelledOfferSchema = offerRecordCommonSchema
+export const cancelledOfferSchema = offerRecordCommonSchema
   .extend({ status: z.literal("cancelled"), ...publishedOfferFields })
   .strict();
-const expiredOfferSchema = offerRecordCommonSchema
+export const expiredOfferSchema = offerRecordCommonSchema
   .extend({ status: z.literal("expired"), ...publishedOfferFields })
   .strict();
 
@@ -467,7 +476,7 @@ export const offerSchema = z.discriminatedUnion("status", [
 
 export const offerServiceRecordSchema = offerRecordCommonSchema
   .extend({
-    status: z.enum(["draft", "published", "superseded", "paid", "cancelled", "expired"]),
+    status: offerStatusSchema,
     number: z.string().min(1).nullable(),
     expiresAt: nullableServiceTimestampSchema,
     publishedAt: nullableServiceTimestampSchema,
@@ -1774,7 +1783,18 @@ export const platformCommercialContracts = {
     detail: { params: offerIdSchema, response: offerDetailSchema },
     create: { body: offerCreateSchema, response: draftOfferDetailSchema },
     revise: { params: offerIdSchema, body: offerReviseSchema, response: offerDetailSchema },
-    publish: { params: offerIdSchema, response: publishedOfferWithDocumentsSchema },
+    publish: {
+      params: offerIdSchema,
+      body: z
+        .object({
+          previewFingerprint: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/)
+            .optional(),
+        })
+        .strict(),
+      response: publishedOfferWithDocumentsSchema,
+    },
     cancel: { params: offerIdSchema, response: cancelledOfferDetailSchema },
     payment: {
       params: offerIdSchema,
@@ -1783,7 +1803,11 @@ export const platformCommercialContracts = {
     },
     documents: {
       list: { params: offerIdSchema, response: z.array(commercialDocumentListItemSchema) },
-      render: { params: offerIdSchema, response: commercialDocumentRenderResultSchema },
+      render: {
+        params: offerIdSchema,
+        body: printDocumentGenerationSchema,
+        response: commercialDocumentRenderResultSchema,
+      },
       download: {
         params: z.object({ offerId: offerIdSchema, documentId: documentIdSchema }).strict(),
         response: commercialDocumentDownloadSchema,

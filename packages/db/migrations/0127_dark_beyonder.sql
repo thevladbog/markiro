@@ -1,0 +1,4 @@
+ALTER TABLE "commercial_offer_documents" DROP CONSTRAINT "commercial_offer_documents_offer_revision_format_uq";--> statement-breakpoint
+ALTER TABLE "commercial_offer_documents" ADD COLUMN "print_variant" text DEFAULT 'clean' NOT NULL;--> statement-breakpoint
+ALTER TABLE "commercial_offer_documents" ADD CONSTRAINT "commercial_offer_documents_offer_revision_format_variant_uq" UNIQUE("offer_id","revision","format","print_variant");--> statement-breakpoint
+ALTER TABLE "commercial_offer_documents" ADD CONSTRAINT "commercial_offer_documents_print_variant_check" CHECK ("commercial_offer_documents"."print_variant" in ('clean', 'signed'));
