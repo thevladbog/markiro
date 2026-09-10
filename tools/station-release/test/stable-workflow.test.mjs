@@ -161,6 +161,31 @@ test("stable publication requires the repository owner, main, and the exact conf
   await assert.rejects(run({ GITHUB_REF: "refs/heads/feature" }));
 });
 
+test("the release tooling contract runs on the dispatch tree before the source swap", async () => {
+  const workflow = load(await source());
+  const steps = workflow.jobs.build.steps;
+  const accepted = workflowStep(workflow, "build", "Resolve and verify dual-origin accepted beta");
+  const contract = workflowStep(
+    workflow,
+    "build",
+    "Verify release tooling contract at the dispatch SHA",
+  );
+  const prepare = workflowStep(workflow, "build", "Prepare stable release source");
+  const build = workflowStep(workflow, "build", "Build and verify stable source");
+
+  // The contract suite ships with the dispatch SHA and reads docs/ and
+  // .github/workflows next to it; the candidate tree is the accepted beta's
+  // base, whose docs may predate the tests (stable 1.4.0 failed that way).
+  assert.equal(contract.if, "inputs.mode == 'publish'");
+  assert.ok(steps.indexOf(accepted) < steps.indexOf(contract));
+  assert.ok(steps.indexOf(contract) < steps.indexOf(prepare));
+  assert.match(contract.run, /test "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA"/);
+  assert.match(contract.run, /pnpm install --frozen-lockfile/);
+  assert.match(contract.run, /pnpm test:station-release:contract/);
+  assert.doesNotMatch(build.run, /test:station-release:contract/);
+  assert.doesNotMatch(prepare.run, /test:station-release:contract/);
+});
+
 test("normal stable modes validate the exact beta at both origins before rebuilding baseSha", async () => {
   const workflow = load(await source());
   const steps = workflow.jobs.build.steps;

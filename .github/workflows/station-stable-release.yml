@@ -267,6 +267,21 @@ jobs:
               "$version" "$tag" "$previous_stable_tag" "$first_beta_tag" >> "$output"
           done
 
+      - name: Verify release tooling contract at the dispatch SHA
+        if: inputs.mode == 'publish'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The contract suite (tools/station-release/test) ships with the
+          # dispatch SHA and reads docs/, .github/workflows and package.json
+          # next to it, so it must run on THIS checkout — the reviewed dispatch
+          # tree — before the next step swaps the working tree for the accepted
+          # beta's base, whose docs and workflows may predate the tests (stable
+          # 1.4.0, run 34428792139, failed exactly that way on beta.2).
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          pnpm install --frozen-lockfile
+          pnpm test:station-release:contract
+
       - name: Prepare stable release source
         id: stable-source
         if: inputs.mode == 'publish'
@@ -317,7 +332,10 @@ jobs:
           pnpm --filter @markiro/station typecheck
           pnpm --filter @markiro/station lint
           pnpm --filter @markiro/station build
-          pnpm test:station-release:contract
+          # The release tooling contract already ran on the dispatch tree
+          # ("Verify release tooling contract at the dispatch SHA"); here the
+          # working tree is the accepted beta's base, whose docs and workflows
+          # are older than the tests, so it deliberately does not run again.
           # Main CI executes the Rust tests on Linux and separately compiles the
           # Windows Tauri app. On Windows Server 2025 the Tauri test harness can
           # fail before main() with STATUS_ENTRYPOINT_NOT_FOUND, so this release
