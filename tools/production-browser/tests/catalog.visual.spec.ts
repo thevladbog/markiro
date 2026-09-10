@@ -130,8 +130,8 @@ const PRODUCT = {
   id: PRODUCT_ID,
   gtin14: "04600000000008",
   name: "Сироп «Клюква», 0.5 л",
-  productGroup: "Безалкогольные напитки",
-  chzProductGroupCode: 15,
+  productGroup: "Соковая продукция и безалкогольные напитки",
+  chzProductGroupCode: 23,
   boxCapacity: 12,
   palletCapacity: 48,
   unitPrice: "189.00",
@@ -197,8 +197,11 @@ const COUNTERPARTY = {
 };
 const PRODUCT_GROUPS = {
   items: [
-    { code: 15, alias: "beer", name: "Пиво, напитки на основе пива и слабоалкогольные напитки" },
-    { code: 3, alias: "milk", name: "Молочная продукция" },
+    // Codes, aliases and names copied from the real seed
+    // (packages/db/migrations/0099_chz_product_groups.sql) so the card and
+    // the list agree with the catalogue a cabinet actually shows.
+    { code: 23, alias: "softdrinks", name: "Соковая продукция и безалкогольные напитки" },
+    { code: 13, alias: "water", name: "Упакованная вода" },
   ],
 };
 const CANDIDATES = {
