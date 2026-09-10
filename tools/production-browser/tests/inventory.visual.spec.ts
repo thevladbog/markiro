@@ -18,7 +18,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
  */
 const SCREENSHOT_DIR = join(
   import.meta.dirname,
-  "../../../packages/legal-documents/assets/instructions/mkr-ins-06",
+  "../../../packages/legal-documents/assets/instructions/mkr-ins-06/ru",
 );
 function screenshotPath(name: string): string {
   return join(SCREENSHOT_DIR, `${name}.png`);
@@ -40,7 +40,7 @@ function screenshotPath(name: string): string {
  */
 const SCREENSHOT_DIR_07 = join(
   import.meta.dirname,
-  "../../../packages/legal-documents/assets/instructions/mkr-ins-07",
+  "../../../packages/legal-documents/assets/instructions/mkr-ins-07/ru",
 );
 function screenshotPath07(name: string): string {
   return join(SCREENSHOT_DIR_07, `${name}.png`);
