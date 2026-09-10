@@ -1,8 +1,11 @@
 package app.markiro.handheld.feature.shift
 
 import androidx.room.withTransaction
+import app.markiro.handheld.core.box.ServerRange
+import app.markiro.handheld.core.box.SsccPool
 import app.markiro.handheld.core.network.ErrorBody
 import app.markiro.handheld.core.network.LineDto
+import app.markiro.handheld.core.network.ShiftBundleDto
 import app.markiro.handheld.core.network.ShiftDto
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.network.UPDATE_REQUIRED_CODE
@@ -17,7 +20,6 @@ sealed interface EnterResult {
     data object Ok : EnterResult
     data object UpdateRequired : EnterResult
     data object Closed : EnterResult
-    data object AggregationUnsupported : EnterResult
     data object Unavailable : EnterResult
 }
 
@@ -55,6 +57,7 @@ class ShiftRepository(
     private val api: StationApi,
     private val db: HandheldDatabase,
     private val json: Json,
+    private val pool: SsccPool,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     fun observeShifts(): Flow<List<ShiftEntity>> = db.shiftDao().observeAll()
@@ -79,13 +82,13 @@ class ShiftRepository(
 
     suspend fun shiftsOfLine(lineId: String): List<ShiftDto> = api.shifts(lineId = lineId).items.filter { it.status != "closed" }
 
-    suspend fun enter(shiftId: String, fallback: ShiftDto?): EnterResult {
+    suspend fun enter(shiftId: String): EnterResult {
         val cached = db.shiftDao().get(shiftId)
-        if ((cached?.mode ?: fallback?.mode) == "aggregation") return EnterResult.AggregationUnsupported
         return try {
             val entered = api.enter(shiftId)
             val bundle = api.bundle(shiftId)
             val now = clock()
+            applySsccBlock(bundle)
             db.withTransaction {
                 db.shiftDao().upsert(
                     bundle.shift.toEntity(cached, now).copy(
@@ -93,6 +96,10 @@ class ShiftRepository(
                         productGtin14 = bundle.product.gtin14,
                         productName = bundle.product.name,
                         productPrintName = bundle.product.printName ?: bundle.shift.productPrintName,
+                        boxLabelTemplate = bundle.boxLabelTemplate?.spec?.toString(),
+                        shelfLifeDays = bundle.product.shelfLifeDays,
+                        egaisCode = bundle.product.egaisCode,
+                        ssccIssuerPrefix = bundle.sscc?.issuerPrefix,
                         bundleFetchedAt = now,
                         enteredAt = now,
                         leftAt = null,
@@ -116,6 +123,29 @@ class ShiftRepository(
                 EnterResult.Unavailable
             }
         }
+    }
+
+    /**
+     * Revoked blocks are dropped BEFORE the new one is applied. Burning picks
+     * the lowest `fromSerial` with room, so a revoked range left in place keeps
+     * winning over the replacement an admin just cut, and the reseeded number
+     * never reaches a label.
+     *
+     * Outside the shift transaction on purpose: the pool is device-wide, not
+     * this shift's, and it holds its own lock.
+     */
+    private suspend fun applySsccBlock(bundle: ShiftBundleDto) {
+        val block = bundle.sscc ?: return
+        pool.dropRanges(block.issuerPrefix, block.extensionDigit, bundle.ssccRevokedFrom)
+        pool.addRange(
+            ServerRange(
+                issuerPrefix = block.issuerPrefix,
+                extensionDigit = block.extensionDigit,
+                fromSerial = block.fromSerial,
+                toSerial = block.toSerial,
+                consumedThroughSerial = block.consumedThroughSerial,
+            ),
+        )
     }
 
     private suspend fun enterOffline(cached: ShiftEntity) {

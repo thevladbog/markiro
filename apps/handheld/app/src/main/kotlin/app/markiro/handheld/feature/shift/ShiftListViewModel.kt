@@ -161,7 +161,7 @@ class ShiftListViewModel(
     private fun enter(shiftId: String, fallback: ShiftDto?) {
         viewModelScope.launch {
             dialog.value = ShiftDialog.Entering
-            when (repository.enter(shiftId, fallback)) {
+            when (repository.enter(shiftId)) {
                 EnterResult.Ok -> {
                     dialog.value = null
                     _events.emit(ShiftListEvent.Entered(shiftId))
@@ -171,7 +171,6 @@ class ShiftListViewModel(
                     dialog.value = ShiftDialog.Closed
                     repository.refreshList()
                 }
-                EnterResult.AggregationUnsupported -> dialog.value = null
                 EnterResult.Unavailable -> dialog.value = ShiftDialog.Unavailable
             }
         }
