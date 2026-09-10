@@ -111,19 +111,25 @@ class PrinterViewModel(
     fun checkAndSave() {
         val form = _addForm.value
         val port = form.port.toIntOrNull() ?: WifiPrinterConnector.DEFAULT_PORT
-        val candidate = PrinterEntity(
-            id = UUID.randomUUID().toString(),
-            name = form.host.ifBlank { "printer" },
-            transport = form.transport.wire,
-            address = if (form.transport == TransportKind.WIFI) "${form.host}:$port" else form.host,
-            language = form.language.wire,
-            dpi = form.dpi,
-            selected = true,
-            lastStatus = null,
-            lastSeenAt = null,
-        )
+        val transportWire = form.transport.wire
+        val address = if (form.transport == TransportKind.WIFI) "${form.host}:$port" else form.host
         _addForm.update { it.copy(checking = true, error = null) }
         viewModelScope.launch {
+            // Adding the same address twice means the same printer, so its row is updated rather
+            // than duplicated. Without this a second press of the check button leaves two identical
+            // entries the operator cannot tell apart.
+            val existing = printers.findByAddress(transportWire, address)
+            val candidate = PrinterEntity(
+                id = existing?.id ?: UUID.randomUUID().toString(),
+                name = form.host.ifBlank { existing?.name ?: "printer" },
+                transport = transportWire,
+                address = address,
+                language = form.language.wire,
+                dpi = form.dpi,
+                selected = true,
+                lastStatus = null,
+                lastSeenAt = null,
+            )
             when (val status = transport.status(candidate)) {
                 is PrinterStatus.Ready -> {
                     printers.upsert(candidate.copy(lastStatus = "ready", lastSeenAt = clock()))

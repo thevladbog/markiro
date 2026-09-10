@@ -45,6 +45,10 @@ interface PrinterDao {
     @Query("SELECT * FROM printers WHERE selected = 1 LIMIT 1")
     fun observeSelected(): Flow<PrinterEntity?>
 
+    /** The same printer added twice is the same printer; its address is what identifies it. */
+    @Query("SELECT * FROM printers WHERE transport = :transport AND address = :address LIMIT 1")
+    suspend fun findByAddress(transport: String, address: String): PrinterEntity?
+
     @Upsert
     suspend fun upsert(printer: PrinterEntity)
 

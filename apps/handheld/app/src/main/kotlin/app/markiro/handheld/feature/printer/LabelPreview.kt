@@ -6,17 +6,20 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.dp
+import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.label.BarcodeSource
 import app.markiro.handheld.core.label.LabelElement
 import app.markiro.handheld.core.label.LabelField
@@ -34,7 +37,16 @@ import app.markiro.handheld.core.label.ptToMm
  */
 @Composable
 fun LabelPreview(spec: LabelSpec, data: Map<LabelField, String>, modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxWidth().height(120.dp).background(Color.White).padding(4.dp)) {
+    // The box takes the label's own proportions and clips. Sizing it by a fixed height instead lets
+    // the drawing run past the bottom edge and collide with whatever follows it on the screen.
+    Box(
+        modifier
+            .fillMaxWidth()
+            .aspectRatio((spec.widthMm / spec.heightMm).toFloat())
+            .clip(RoundedCornerShape(MarkiroSizes.radius))
+            .background(Color.White)
+            .padding(4.dp),
+    ) {
         Canvas(Modifier.fillMaxSize()) {
             val scale = size.width / spec.widthMm.toFloat()
             fun mm(value: Double) = value.toFloat() * scale

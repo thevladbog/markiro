@@ -11,8 +11,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.remember
+import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.navigation
 import androidx.navigation.compose.rememberNavController
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.feature.hub.HubScreen
@@ -74,6 +78,7 @@ object Routes {
     const val HUB = "hub"
     const val SETTINGS = "settings"
     const val SCANNER = "settings/scanner"
+    const val PRINTER_GRAPH = "settings/printer-graph"
     const val PRINTER = "settings/printer"
     const val PRINTER_ADD = "settings/printer/add"
     const val PRINTER_BLUETOOTH = "settings/printer/bluetooth"
@@ -305,7 +310,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     config,
                     onBack = { nav.popBackStack() },
                     onScanner = { nav.navigate(Routes.SCANNER) },
-                    onPrinter = { nav.navigate(Routes.PRINTER) },
+                    onPrinter = { nav.navigate(Routes.PRINTER_GRAPH) },
                     onTheme = vm::setTheme,
                     onLanguage = vm::setLanguage,
                     onToggleSound = vm::toggleSound,
@@ -314,93 +319,95 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     onTest = vm::testSignal,
                 )
             }
-            composable(Routes.PRINTER) {
-                val vm: PrinterViewModel = hiltViewModel()
-                val state by vm.state.collectAsStateWithLifecycle()
-                PrinterListScreen(
-                    state,
-                    PrinterListCallbacks(
-                        onBack = { nav.popBackStack() },
-                        onSelect = vm::select,
-                        onTest = {
-                            vm.printTest()
-                            nav.navigate(Routes.PRINTER_TEST)
-                        },
-                        onAdd = {
-                            vm.startAdd(TransportKind.WIFI)
-                            nav.navigate(Routes.PRINTER_ADD)
-                        },
-                    ),
-                )
-            }
-            composable(Routes.PRINTER_ADD) {
-                val vm: PrinterViewModel = hiltViewModel()
-                val form by vm.addForm.collectAsStateWithLifecycle()
-                // An unreachable printer gets its own screen; every other refusal stays on the form
-                // with the printer's own words.
-                if (form.error == NotReadyReason.UNREACHABLE) {
-                    PrinterErrorScreen(
-                        form.host,
-                        PrinterErrorCallbacks(
+            navigation(startDestination = Routes.PRINTER, route = Routes.PRINTER_GRAPH) {
+                composable(Routes.PRINTER) { entry ->
+                    val vm = printerViewModel(nav, entry)
+                    val state by vm.state.collectAsStateWithLifecycle()
+                    PrinterListScreen(
+                        state,
+                        PrinterListCallbacks(
                             onBack = { nav.popBackStack() },
-                            onRetry = vm::checkAndSave,
-                            onEdit = { vm.editHost(form.host) },
-                        ),
-                    )
-                } else {
-                    AddPrinterScreen(
-                        form,
-                        AddPrinterCallbacks(
-                            onBack = { nav.popBackStack() },
-                            onTransport = vm::startAdd,
-                            onHost = vm::editHost,
-                            onPort = vm::editPort,
-                            onLanguage = vm::setLanguage,
-                            onDpi = vm::setDpi,
-                            onCheck = vm::checkAndSave,
-                            onBluetooth = { nav.navigate(Routes.PRINTER_BLUETOOTH) },
+                            onSelect = vm::select,
+                            onTest = {
+                                vm.printTest()
+                                nav.navigate(Routes.PRINTER_TEST)
+                            },
+                            onAdd = {
+                                vm.startAdd(TransportKind.WIFI)
+                                nav.navigate(Routes.PRINTER_ADD)
+                            },
                         ),
                     )
                 }
-            }
-            composable(Routes.PRINTER_BLUETOOTH) {
-                val vm: PrinterViewModel = hiltViewModel()
-                val state by vm.state.collectAsStateWithLifecycle()
-                LaunchedEffect(Unit) { vm.loadPairedDevices() }
-                BluetoothPairScreen(
-                    state,
-                    BluetoothPairCallbacks(
-                        onBack = { nav.popBackStack() },
-                        onGrant = { vm.loadPairedDevices() },
-                        onSearchAgain = { vm.loadPairedDevices() },
-                        onPick = { device ->
-                            vm.pickPairedDevice(device)
-                            nav.popBackStack(Routes.PRINTER, inclusive = false)
-                        },
-                    ),
-                )
-            }
-            composable(Routes.PRINTER_TEST) {
-                val vm: PrinterViewModel = hiltViewModel()
-                val step by vm.testStep.collectAsStateWithLifecycle()
-                val state by vm.state.collectAsStateWithLifecycle()
-                val printer = state.selected
-                TestPrintScreen(
-                    step,
-                    printer?.let { PrinterLanguage.fromWire(it.language) } ?: PrinterLanguage.ZPL,
-                    printer?.dpi ?: 203,
-                    TestPrintCallbacks(
-                        onBack = {
-                            vm.dismissTest()
-                            nav.popBackStack()
-                        },
-                        onConfirm = {
-                            vm.confirmTestPrinted()
-                            nav.popBackStack()
-                        },
-                        onRetry = vm::retryTest,
-                    ),
-                )
+                composable(Routes.PRINTER_ADD) { entry ->
+                    val vm = printerViewModel(nav, entry)
+                    val form by vm.addForm.collectAsStateWithLifecycle()
+                    // An unreachable printer gets its own screen; every other refusal stays on the form
+                    // with the printer's own words.
+                    if (form.error == NotReadyReason.UNREACHABLE) {
+                        PrinterErrorScreen(
+                            form.host,
+                            PrinterErrorCallbacks(
+                                onBack = { nav.popBackStack() },
+                                onRetry = vm::checkAndSave,
+                                onEdit = { vm.editHost(form.host) },
+                            ),
+                        )
+                    } else {
+                        AddPrinterScreen(
+                            form,
+                            AddPrinterCallbacks(
+                                onBack = { nav.popBackStack() },
+                                onTransport = vm::startAdd,
+                                onHost = vm::editHost,
+                                onPort = vm::editPort,
+                                onLanguage = vm::setLanguage,
+                                onDpi = vm::setDpi,
+                                onCheck = vm::checkAndSave,
+                                onBluetooth = { nav.navigate(Routes.PRINTER_BLUETOOTH) },
+                            ),
+                        )
+                    }
+                }
+                composable(Routes.PRINTER_BLUETOOTH) { entry ->
+                    val vm = printerViewModel(nav, entry)
+                    val state by vm.state.collectAsStateWithLifecycle()
+                    LaunchedEffect(Unit) { vm.loadPairedDevices() }
+                    BluetoothPairScreen(
+                        state,
+                        BluetoothPairCallbacks(
+                            onBack = { nav.popBackStack() },
+                            onGrant = { vm.loadPairedDevices() },
+                            onSearchAgain = { vm.loadPairedDevices() },
+                            onPick = { device ->
+                                vm.pickPairedDevice(device)
+                                nav.popBackStack(Routes.PRINTER, inclusive = false)
+                            },
+                        ),
+                    )
+                }
+                composable(Routes.PRINTER_TEST) { entry ->
+                    val vm = printerViewModel(nav, entry)
+                    val step by vm.testStep.collectAsStateWithLifecycle()
+                    val state by vm.state.collectAsStateWithLifecycle()
+                    val printer = state.selected
+                    TestPrintScreen(
+                        step,
+                        printer?.let { PrinterLanguage.fromWire(it.language) } ?: PrinterLanguage.ZPL,
+                        printer?.dpi ?: 203,
+                        TestPrintCallbacks(
+                            onBack = {
+                                vm.dismissTest()
+                                nav.popBackStack()
+                            },
+                            onConfirm = {
+                                vm.confirmTestPrinted()
+                                nav.popBackStack()
+                            },
+                            onRetry = vm::retryTest,
+                        ),
+                    )
+                }
             }
             composable(Routes.SCANNER) {
                 val vm: SettingsViewModel = hiltViewModel()
@@ -422,4 +429,15 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
         }
     }
+}
+
+/**
+ * One view model for every printer destination. Each destination would otherwise get its own, so the
+ * screen that prints and the screen that shows the outcome would watch different state and the test
+ * print would appear to hang forever.
+ */
+@Composable
+private fun printerViewModel(nav: NavHostController, entry: NavBackStackEntry): PrinterViewModel {
+    val parent = remember(entry) { nav.getBackStackEntry(Routes.PRINTER_GRAPH) }
+    return hiltViewModel(parent)
 }

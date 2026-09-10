@@ -24,6 +24,17 @@ sealed interface PrinterStatus {
  * it. Unknown means the bytes may or may not have arrived, and nothing may resend on its own from
  * there: an automatic retry could put a second label on a box the server has already accepted. Only
  * a person who has looked at the printer resolves an unknown.
+ *
+ * What `Delivered` can honestly claim, measured against a printer that drops the link partway
+ * through a job: the bytes left this device. Over a raw printing port that is as far as it goes.
+ * Neither printer language acknowledges a job, and the kernel accepts a whole label into its send
+ * buffer whether or not the printer is still listening, so a peer that disappears mid-job is not
+ * always visible here. A lost Bluetooth link does surface, because that stack fails the write.
+ *
+ * This is why the operator confirms afterwards rather than being told the label printed. Making
+ * `Delivered` stronger would mean querying the printer again after the job and treating silence as
+ * unknown, which risks calling every good print unknown on a printer that stays quiet while
+ * printing. That trade needs real hardware to settle and is deliberately not guessed at here.
  */
 sealed interface SendOutcome {
     data object Delivered : SendOutcome
@@ -77,14 +88,32 @@ class StreamPrinterTransport(private val connectors: (PrinterEntity) -> PrinterC
         }
         try {
             connection.use {
-                it.output.write(document)
-                it.output.flush()
+                // Written in chunks rather than in one call. A single large write is copied into the
+                // kernel's send buffer and returns successfully even when the printer has already
+                // gone away, so the failure would never be seen. Flushing each chunk gives the reset
+                // from a departed peer somewhere to surface. Verified against a printer that drops
+                // the link partway through a job.
+                var offset = 0
+                while (offset < document.size) {
+                    val length = minOf(CHUNK_BYTES, document.size - offset)
+                    it.output.write(document, offset, length)
+                    it.output.flush()
+                    offset += length
+                }
             }
             SendOutcome.Delivered
         } catch (e: IOException) {
             // The connection was open, so some or all of the document may already be on the printer.
             SendOutcome.Unknown(e.message ?: "link lost")
         }
+    }
+
+    private companion object {
+        /**
+         * Small enough that a broken link is noticed partway through a label rather than after it,
+         * large enough not to turn one job into hundreds of writes.
+         */
+        const val CHUNK_BYTES = 512
     }
 }
 

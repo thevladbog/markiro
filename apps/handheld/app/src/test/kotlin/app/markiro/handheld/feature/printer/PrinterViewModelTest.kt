@@ -77,6 +77,15 @@ class PrinterViewModelTest {
     }
 
     @Test
+    fun addingTheSameAddressTwiceUpdatesTheSameRow() = runTest {
+        val model = vm()
+        saveSelected(model)
+        saveSelected(model)
+        assertEquals(1, db.printerDao().all().size)
+        assertEquals("192.168.1.40:9100", db.printerDao().selected()?.address)
+    }
+
+    @Test
     fun aPrinterThatIsNotReadySurfacesItsOwnReasonAndIsNotSaved() = runTest {
         val transport = FakeTransport(nextStatus = PrinterStatus.NotReady(NotReadyReason.NO_PAPER))
         val model = vm(transport)

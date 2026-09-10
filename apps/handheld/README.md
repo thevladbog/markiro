@@ -98,6 +98,13 @@ printed and we know it, unknown means the bytes may or may not have arrived. Not
 unknown on its own, because a retry could put a second label on a box the server already accepted.
 Only a person who has looked at the printer resolves it.
 
+Delivered means the bytes left the device, and over a raw printing port it cannot mean more. Neither
+printer language acknowledges a job, and the kernel accepts a whole label into its send buffer
+whether or not the printer is still listening, so a network printer that disappears mid-job is not
+always visible to the app. A lost Bluetooth link is, because that stack fails the write. This was
+measured against a printer that drops the link partway through, and it is why the operator confirms
+what came out rather than being told the label printed.
+
 The status query runs before every send. Neither printer language acknowledges a job afterwards, so
 without asking first the only failure this app could ever report is silence.
 

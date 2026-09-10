@@ -52,6 +52,17 @@ class PrinterTransportTest {
     }
 
     @Test
+    fun aLongDocumentIsWrittenInChunksSoABrokenLinkIsNoticed() = runTest {
+        // One large write is copied into the kernel's send buffer and succeeds even when the peer has
+        // gone, so the document is written a piece at a time and each piece is flushed.
+        val document = ByteArray(4096) { '^'.code.toByte() }
+        val connection = FakeConnection(byteArrayOf(), failAfter = 600)
+        val outcome = transport { connection }.send(printer("host:9100"), document)
+        assertTrue(outcome is SendOutcome.Unknown)
+        assertTrue(connection.written.size() in 1 until document.size)
+    }
+
+    @Test
     fun aConnectionThatNeverOpensIsRefused() = runTest {
         val outcome = transport { throw IOException("no route to host") }
             .send(printer("host:9100"), "^XA^XZ".toByteArray())
