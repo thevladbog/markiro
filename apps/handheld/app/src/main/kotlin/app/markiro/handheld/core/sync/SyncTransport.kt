@@ -27,4 +27,15 @@ class SyncTransport(private val client: OkHttpClient, private val baseUrl: () ->
             TransportResult.Failure(e)
         }
     }
+
+    suspend fun get(path: String): TransportResult = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder().url(baseUrl().trimEnd('/') + path).get().build()
+            client.newCall(request).execute().use { response ->
+                TransportResult.Ok(response.code, response.body?.string().orEmpty())
+            }
+        } catch (e: IOException) {
+            TransportResult.Failure(e)
+        }
+    }
 }
