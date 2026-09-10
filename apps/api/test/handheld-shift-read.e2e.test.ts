@@ -44,15 +44,13 @@ describe.skipIf(!ready)("handheld shift reads", () => {
     const agent = request.agent(app.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
     const productId = randomUUID();
-    await db
-      .insert(schema.products)
-      .values({
-        id: productId,
-        tenantId,
-        gtin14: "04600000000015",
-        name: "Вода",
-        status: "active",
-      });
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId,
+      gtin14: "04600000000015",
+      name: "Вода",
+      status: "active",
+    });
     const [line] = await db.insert(schema.lines).values({ tenantId, name: "Линия 2" }).returning();
     const [otherLine] = await db
       .insert(schema.lines)
