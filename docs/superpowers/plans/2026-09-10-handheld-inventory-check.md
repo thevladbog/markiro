@@ -18,7 +18,7 @@ Spec: `docs/superpowers/specs/2026-09-10-handheld-inventory-check-design.md`.
 - Batch size 100, code page size 200, progress page size 200, heartbeat 15 s, backoff 2 s → 60 s.
 - Capabilities header stays `handheld-v1,subscription-state-v1,station-recovery-v1`.
 - Tests: `./gradlew testDebugUnitTest lintDebug assembleDebug` from `apps/handheld`; run outside the sandbox (`dangerouslyDisableSandbox`). Use `/usr/bin/git`, never bare `git` (rtk hook). Complex shell goes into script files under `/tmp/claude/`.
-- The Write tool strips control characters: write `` escapes in source, never a literal GS.
+- The Write tool strips control characters: write `\u001d` escapes in source, never a literal GS.
 - Room migrations are hand-written SQL that must match the entity schema exactly (Room validates on open).
 
 ## File Structure
@@ -496,7 +496,7 @@ const GTIN = "04600000000015";
 const OTHER_GTIN = "04600682000013";
 const SSCC = "346006820000000014";
 const OTHER_SSCC = "346006820000000021";
-const GS = "";
+const GS = "\u001d";
 const DEVICE = "11111111-1111-4111-8111-111111111111";
 const OTHER_DEVICE = "22222222-2222-4222-8222-222222222222";
 
@@ -795,7 +795,7 @@ console.log(`wrote ${target}`);
 Run: `pnpm --filter @markiro/domain --config.verify-deps-before-run=false fixtures:inventory && pnpm --filter @markiro/domain --config.verify-deps-before-run=false test`
 Expected: JSON written; all domain tests pass (643 + 2).
 
-Inspect the JSON: `expected.kind` values present; a `batchDigest` entry whose `canonicalRaw` shows ``.
+Inspect the JSON: `expected.kind` values present; a `batchDigest` entry whose `canonicalRaw` shows `\u001d`.
 
 - [ ] **Step 6: Lint, prettier, commit**
 
@@ -2049,7 +2049,7 @@ class InventoryDigestsTest {
 
     @Test
     fun escapesLikeJsonStringify() {
-        assertEquals("\"a\\\"b\\\\c\\u001dd\\n\\u0000é\"", CanonicalJson.str("a\"b\\cd\n�é"))
+        assertEquals("\"a\\\"b\\\\c\\u001dd\\n\\u0000é\"", CanonicalJson.str("a\"b\\c\u001dd\n�é"))
         assertEquals("""{"a":1,"b":null,"c":[true,"x"]}""", CanonicalJson.obj("a" to CanonicalJson.num(1), "b" to CanonicalJson.NULL, "c" to CanonicalJson.arr(listOf(CanonicalJson.bool(true), CanonicalJson.str("x")))))
     }
 
@@ -2220,7 +2220,7 @@ object CanonicalJson {
                 '"' -> sb.append("\\\"")
                 '\\' -> sb.append("\\\\")
                 '\b' -> sb.append("\\b")
-                '' -> sb.append("\\f")
+                '\u000c' -> sb.append("\\f")
                 '\n' -> sb.append("\\n")
                 '\r' -> sb.append("\\r")
                 '\t' -> sb.append("\\t")
@@ -2505,7 +2505,7 @@ import org.junit.runner.RunWith
 class InventoryRecorderTest {
     private lateinit var db: HandheldDatabase
     private var clock = 1_757_500_000_000L
-    private val gs = ""
+    private val gs = "\u001d"
     private val sscc = "346006820000000014"
 
     private fun raw(serial: String, gtin: String = "04600000000015") = "01${gtin}21$serial${gs}93AbCd"
@@ -2952,7 +2952,7 @@ and call `val ctx = context(task, raw)` in `record`. Remove the first `context(t
 
 In the unknown-duplicate branch replace the awkward `"dev-local"` juggling with a single lookup at the top of `record`: `val deviceId = db.deviceConfigDao().get()?.deviceId ?: "dev-local"` and `winner = LocalClaim(first.codeHash ?: first.normalizedIdentity, first.eventId, deviceId, first.scannedAt)`; pass `deviceId` into `claim(...)` instead of re-reading it. `replay` uses the tail helpers; a replayed box has no child count (0), which only affects the status text.
 
-- [ ] **Step 5: Run** `./gradlew testDebugUnitTest --tests "app.markiro.handheld.core.inventory.InventoryRecorderTest" -q` → PASS. The event-JSON test pins the `` escaping of the GS inside `canonicalRaw`.
+- [ ] **Step 5: Run** `./gradlew testDebugUnitTest --tests "app.markiro.handheld.core.inventory.InventoryRecorderTest" -q` → PASS. The event-JSON test pins the `\u001d` escaping of the GS inside `canonicalRaw`.
 
 - [ ] **Step 6: Commit** `feat(handheld): inventory recorder — verdicts, box claims, active date guard, canonical event JSON`
 
