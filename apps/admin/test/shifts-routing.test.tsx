@@ -62,6 +62,7 @@ const SHIFT: ShiftDto = {
   lateDataAt: null,
   closeReason: null,
   createdAt: "2026-08-01T00:00:00.000Z",
+  output: { mode: "validation", acceptedUnits: 0 },
 };
 
 const PLANNING_CONFIG = {

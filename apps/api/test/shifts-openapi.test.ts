@@ -99,6 +99,7 @@ const shiftProperties = [
   "lateDataAt",
   "createdAt",
   "stationCloseAccess",
+  "output",
 ] as const;
 
 const requiredShiftProperties = shiftProperties.filter(
