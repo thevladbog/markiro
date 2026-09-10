@@ -1,5 +1,6 @@
 import { parseImportDiff, sourceEnvelopeSchema } from "./national-catalog-import-apply-state";
 import { overlayStoredImages } from "./national-catalog-image-state";
+import type { CatalogCategoryGroup } from "./national-catalog-product-group";
 import { randomUUID } from "node:crypto";
 import {
   ConflictException,
@@ -68,7 +69,7 @@ export class NationalCatalogImportPreviewService {
   constructor(
     private readonly repository: NationalCatalogImportRepository,
     private readonly sessions: NationalCatalogImportService,
-    private readonly client: Pick<NationalCatalogClient, "getFeedProductsByIds">,
+    private readonly client: Pick<NationalCatalogClient, "getFeedProductsByIds" | "listCategories">,
     private readonly coordinator: NationalCatalogRequestCoordinator,
     private readonly imagePreparation: { enabled: boolean; verifiedHosts: readonly string[] } = {
       enabled: false,
@@ -201,6 +202,7 @@ export class NationalCatalogImportPreviewService {
     const runId = randomUUID();
     let admitted = false;
     let result: NationalCatalogResult<NationalCatalogProductsResponse>;
+    let categoryGroups: CatalogCategoryGroup[] = [];
     try {
       result = await this.coordinator.run(
         { tenantId, environment: session.environment },
@@ -237,6 +239,38 @@ export class NationalCatalogImportPreviewService {
         },
         { attempt: cp.attempts },
       );
+      if (result.status === "ok" && result.value.products.some((card) => card.categories.length)) {
+        // A separate coordinated request accounts for both method quotas. Do not
+        // couple the basic group reference to an activated regulatory schema.
+        const categories = await this.coordinator.run(
+          { tenantId, environment: session.environment },
+          async ({ auth, ...options }) => {
+            const allowed = await this.repository.transaction(async (tx) => {
+              const currentSession = await this.repository.lock(tx, tenantId, sessionId);
+              const current = await this.lock(tx, tenantId, sessionId, preparationId);
+              const checkpoint = parsePreparationCheckpoint(current.checkpoint);
+              if (
+                checkpoint.stepId !== cp.stepId ||
+                checkpoint.runId !== runId ||
+                !checkpoint.enqueuePending
+              )
+                throw new CatalogRequestError("deferred", "step_changed");
+              return this.authorize(tx, currentSession, current, checkpoint);
+            });
+            if (!allowed) throw new CatalogRequestError("blocked", "access_changed");
+            options.signal.throwIfAborted();
+            return this.client.listCategories(auth, options);
+          },
+          { attempt: cp.attempts },
+        );
+        if (categories.status === "ok")
+          categoryGroups = categories.value.categories.map(({ id, active, gismtCodes }) => ({
+            id,
+            active,
+            gismtCodes,
+          }));
+        else result = categories;
+      }
     } catch (error) {
       if (!(error instanceof CatalogRequestError)) throw error;
       await this.repository.transaction(async (tx) => {
@@ -325,6 +359,7 @@ export class NationalCatalogImportPreviewService {
                   this.imagePreparation.enabled && this.imagePreparation.verifiedHosts.length > 0,
               },
               fetchedAt,
+              categoryGroups,
             );
             completed.push({ itemId: item.id, previewId: preview.id });
           } catch (error) {

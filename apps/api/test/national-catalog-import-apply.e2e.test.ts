@@ -115,7 +115,7 @@ describe("atomic National Catalog product application (real PostgreSQL services)
       raw: { good_id: 720679, good_name: "Из ЧЗ" },
     };
   });
-  async function preview(manualName?: string, optionId?: string) {
+  async function preview(manualName?: string, optionId?: string, groupCodes?: number[]) {
     return repository.transaction(async (tx) => {
       const session = await repository.lock(tx, actor.tenantId, sessionId);
       const [item] = await tx
@@ -128,12 +128,29 @@ describe("atomic National Catalog product application (real PostgreSQL services)
           ),
         );
       if (!item) throw new Error("fixture item");
-      return buildImportPreview(tx, session, item, source, {
-        requestId: randomUUID(),
-        itemIds: [itemId],
-        manualNames: manualName ? [{ itemId, name: manualName }] : [],
-        categoryChoices: optionId ? [{ itemId, optionId }] : [],
-      });
+      return buildImportPreview(
+        tx,
+        session,
+        item,
+        source,
+        {
+          requestId: randomUUID(),
+          itemIds: [itemId],
+          manualNames: manualName ? [{ itemId, name: manualName }] : [],
+          categoryChoices: optionId ? [{ itemId, optionId }] : [],
+        },
+        undefined,
+        new Date(),
+        groupCodes
+          ? [
+              {
+                id: 30064,
+                active: true,
+                gismtCodes: groupCodes,
+              },
+            ]
+          : [],
+      );
     });
   }
   function decision(p: ImportPreview, accept = false): ImportApply {
@@ -452,6 +469,101 @@ describe("atomic National Catalog product application (real PostgreSQL services)
       unitPrice: null,
       externalRef: null,
     });
+  });
+  it("creates a new product with the accepted ChZ group and retains its source evidence", async () => {
+    await db
+      .update(schema.nationalCatalogImportItems)
+      .set({ productId: null, match: "new" })
+      .where(eq(schema.nationalCatalogImportItems.id, itemId));
+    await db.delete(schema.products).where(eq(schema.products.id, existingId));
+    source.categories = [{ id: 30064, name: "Категория" }];
+    const p = await preview(undefined, undefined, [23]);
+    const result = await apply(decision(p, true));
+    expect(result.items[0]?.product).toBe("applied");
+    const productId = result.items[0]!.productId!;
+    const [created] = await db
+      .select()
+      .from(schema.products)
+      .where(eq(schema.products.id, productId));
+    expect(created).toMatchObject({ chzProductGroupCode: 23, status: "draft" });
+    const [audit] = await db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, actor.tenantId),
+          eq(schema.tenantAuditEvents.targetId, productId),
+          eq(schema.tenantAuditEvents.action, "national_catalog.link.confirmed"),
+        ),
+      );
+    expect(audit).toMatchObject({
+      actorUserId: actor.userId,
+      targetType: "product",
+      outcome: "success",
+      after: {
+        acceptedEntries: expect.arrayContaining([
+          expect.objectContaining({
+            target: "product_group",
+            currentValue: null,
+            proposedValue: 23,
+          }),
+        ]),
+      },
+    });
+  });
+  it("only fills an existing empty group after explicit acceptance and recalculates readiness", async () => {
+    source.categories = [{ id: 30064, name: "Категория" }];
+    const p = await preview(undefined, undefined, [23]);
+    const group = p.fields.find((field) => field.labelKey === "chz_product_group_code");
+    expect(group).toMatchObject({ applicable: true, selectedByDefault: false });
+    const body = decision(p);
+    body.decisions[0]!.acceptedEntryIds = [group!.id];
+    const result = await apply(body);
+    expect(result.items[0]?.product).toBe("applied");
+    expect(await product()).toMatchObject({
+      chzProductGroupCode: 23,
+      status: "active",
+      name: "Моё имя",
+    });
+    await service.resume(actor.tenantId, result.operationId);
+    expect(await service.read(actor.tenantId, sessionId, result.operationId)).toEqual(result);
+    expect(await links()).toHaveLength(1);
+  });
+  it("preserves an existing different product group during import", async () => {
+    await db
+      .update(schema.products)
+      .set({ chzProductGroupCode: 7 })
+      .where(eq(schema.products.id, existingId));
+    source.categories = [{ id: 30064, name: "Категория" }];
+    const p = await preview(undefined, undefined, [23]);
+    expect(p.fields.find((field) => field.labelKey === "chz_product_group_code")).toMatchObject({
+      applicable: false,
+      selectedByDefault: false,
+      reason: "product_group_change_separate",
+    });
+    await apply(decision(p, true));
+    expect(await product()).toMatchObject({ chzProductGroupCode: 7 });
+  });
+  it("does not save a declined product group when creating a product", async () => {
+    await db
+      .update(schema.nationalCatalogImportItems)
+      .set({ productId: null, match: "new" })
+      .where(eq(schema.nationalCatalogImportItems.id, itemId));
+    await db.delete(schema.products).where(eq(schema.products.id, existingId));
+    source.categories = [{ id: 30064, name: "Категория" }];
+    const p = await preview(undefined, undefined, [23]);
+    const body = decision(p, true);
+    const group = p.fields.find((field) => field.labelKey === "chz_product_group_code");
+    body.decisions[0]!.acceptedEntryIds = body.decisions[0]!.acceptedEntryIds.filter(
+      (id) => id !== group?.id,
+    );
+    const result = await apply(body);
+    expect(result.items[0]?.product).toBe("applied");
+    const [created] = await db
+      .select()
+      .from(schema.products)
+      .where(eq(schema.products.id, result.items[0]!.productId!));
+    expect(created?.chzProductGroupCode).toBeNull();
   });
   it("turns concurrent GTIN creation into a conflict rather than an update", async () => {
     await db

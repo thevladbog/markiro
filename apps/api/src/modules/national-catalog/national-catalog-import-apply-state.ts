@@ -1,4 +1,8 @@
 import { photoReviewSchema } from "./national-catalog-image-state";
+import {
+  catalogCategoryGroupSchema,
+  catalogProductGroupEntrySchema,
+} from "./national-catalog-product-group";
 import { productFieldEntrySchema } from "./national-catalog-product-fields";
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -20,6 +24,7 @@ import type { buildNationalCatalogImportEntries } from "./national-catalog-propo
 import { canonicalJsonHash } from "./national-catalog-products.service";
 
 const entrySchema = z.discriminatedUnion("target", [
+  catalogProductGroupEntrySchema,
   productFieldEntrySchema,
   z
     .object({
@@ -94,11 +99,13 @@ export function parseImportDiff(value: unknown): StoredImportDiff {
         ...field,
         ...(entry?.target === "name" || entry?.target === "category"
           ? { labelKey: entry.target }
-          : entry?.target === "product_field"
-            ? { labelKey: entry.targetField }
-            : entry?.target === "mapped" && entry.entry.target === "stable_field"
-              ? { labelKey: entry.entry.targetField }
-              : {}),
+          : entry?.target === "product_group"
+            ? { labelKey: "chz_product_group_code" }
+            : entry?.target === "product_field"
+              ? { labelKey: entry.targetField }
+              : entry?.target === "mapped" && entry.entry.target === "stable_field"
+                ? { labelKey: entry.entry.targetField }
+                : {}),
         requiresEntryIds: entry?.target === "mapped" ? entry.requiresEntryIds : [],
       };
     }),
@@ -119,6 +126,13 @@ export const sourceEnvelopeSchema = z
     cardId: z.string().min(1),
     boundGtin14: z.string().length(14),
     access: z.enum(["own", "provided"]).nullable(),
+    categoryGroups: z
+      .object({
+        sourceMethod: z.literal("categories"),
+        categories: z.array(catalogCategoryGroupSchema),
+      })
+      .strict()
+      .optional(),
     raw: z.record(z.string(), z.unknown()),
     normalized: z
       .object({

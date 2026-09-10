@@ -195,7 +195,14 @@ const importFieldSchema = z
     id: platformUuidSchema,
     label: z.string(),
     labelKey: z
-      .enum(["name", "category", "print_name", "shelf_life_days", "egais_code"])
+      .enum([
+        "name",
+        "category",
+        "print_name",
+        "shelf_life_days",
+        "egais_code",
+        "chz_product_group_code",
+      ])
       .optional(),
     before: z.string().nullable(),
     after: z.string().nullable(),

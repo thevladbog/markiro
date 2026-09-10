@@ -1,7 +1,6 @@
 import type { ImportResult as Result } from "@markiro/platform-contracts";
 import { Alert, Button } from "@markiro/ui";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
 export function ImportResult({
   result,
   canWrite,
@@ -9,6 +8,7 @@ export function ImportResult({
   retryBlocked,
   onRetry,
   onCancel,
+  onOpenProduct,
 }: {
   result: Result;
   canWrite: boolean;
@@ -16,6 +16,7 @@ export function ImportResult({
   retryBlocked: boolean;
   onRetry: (ids: string[]) => void;
   onCancel: () => void;
+  onOpenProduct: (productId: string) => void;
 }) {
   const { t } = useTranslation();
   const tr = (key: string) => t(`pages.catalog.import.${key}`);
@@ -38,7 +39,16 @@ export function ImportResult({
             {tr("product")}: {tr(`productOutcomes.${item.product}`)}
           </h3>
           {item.productId && (
-            <Link to={`/catalog/${item.productId}/edit`}>{tr("openProduct")}</Link>
+            <Button
+              variant="secondary"
+              disabled={busy || (running && item.image === "pending")}
+              onClick={() => item.productId && onOpenProduct(item.productId)}
+            >
+              {tr("openProduct")}
+            </Button>
+          )}
+          {item.productId && running && item.image === "pending" && (
+            <p role="status">{tr("waitForPhoto")}</p>
           )}
           {item.productReason && (
             <p>
