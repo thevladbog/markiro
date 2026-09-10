@@ -83,6 +83,17 @@ async function screenshotFullMain(page: Page, path: string): Promise<void> {
   await page.screenshot({ path, scale: "css", fullPage: true });
 }
 
+/**
+ * The card is one tall side panel, so a full-page capture of the photo
+ * section and of the defaults section would be the same picture twice. Each
+ * section is its own `<section aria-labelledby="product-form-*">`, so the
+ * steps that discuss one section get that section alone.
+ */
+async function screenshotSection(page: Page, sectionId: string, path: string): Promise<void> {
+  await settle(page);
+  await page.locator(`section[aria-labelledby="${sectionId}"]`).screenshot({ path, scale: "css" });
+}
+
 function json(route: Route, body: unknown) {
   return route.fulfill({
     status: 200,
@@ -117,7 +128,7 @@ const COUNTERPARTY_ID = "70000000-0000-4000-8000-000000000001";
 
 const PRODUCT = {
   id: PRODUCT_ID,
-  gtin14: "04600000000006",
+  gtin14: "04600000000008",
   name: "Сироп «Клюква», 0.5 л",
   productGroup: "Безалкогольные напитки",
   chzProductGroupCode: 15,
@@ -149,7 +160,7 @@ const PRODUCT = {
 const DRAFT_PRODUCT = {
   ...PRODUCT,
   id: DRAFT_PRODUCT_ID,
-  gtin14: "04600000000013",
+  gtin14: "04600000000015",
   name: "Сироп «Малина», 0.5 л",
   printName: "Сироп Малина 0.5",
   productGroup: null,
@@ -166,7 +177,7 @@ const DRAFT_PRODUCT = {
 const ARCHIVED_PRODUCT = {
   ...PRODUCT,
   id: ARCHIVED_PRODUCT_ID,
-  gtin14: "04600000000020",
+  gtin14: "04600000000022",
   name: "Сироп «Груша», 0.5 л",
   printName: "Сироп Груша 0.5",
   archived: true,
@@ -269,7 +280,7 @@ async function installApi(page: Page, scenario: Scenario) {
     }
     if (path === "/api/products/gtin-check") {
       return json(route, {
-        gtin14: "04600000000013",
+        gtin14: "04600000000015",
         owner: "counterparty",
         counterpartyId: COUNTERPARTY_ID,
         counterpartyName: COUNTERPARTY.name,
@@ -315,5 +326,84 @@ test("unmatched 1C products surface as a plaque above the list", async ({ page }
   await openHarness(page, "/catalog");
   await expect(page.getByRole("link", { name: "Перейти в очередь" })).toBeVisible();
   await screenshotFullMain(page, screenshotPath("candidates-plaque"));
+  expect(unexpected).toEqual([]);
+});
+
+test("deleting a product asks for confirmation", async ({ page }) => {
+  const unexpected = await installApi(page, "list");
+  await openHarness(page, "/catalog");
+  await page.getByRole("button", { name: "Удалить" }).first().click();
+  await expect(page.getByText("Удалить продукт?")).toBeVisible();
+  await screenshotFullMain(page, screenshotPath("catalog-delete"));
+  expect(unexpected).toEqual([]);
+});
+
+test("a new product card opens on the basics", async ({ page }) => {
+  const unexpected = await installApi(page, "productNew");
+  await openHarness(page, "/catalog/new");
+  await expect(page.getByText("Новый продукт")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Основное" })).toBeVisible();
+  await screenshotFullMain(page, screenshotPath("product-new"));
+  expect(unexpected).toEqual([]);
+});
+
+/**
+ * The owner lookup only fires for a checksum-valid GTIN (`isValidGtin`
+ * guards the effect in ProductForm), which is why every fixture GTIN in this
+ * suite carries a real GS1 check digit -- a made-up number would silently
+ * skip the request and produce a frame without the hint.
+ */
+test("a GTIN owned by a counterparty is named on the card", async ({ page }) => {
+  const unexpected = await installApi(page, "productNew");
+  await openHarness(page, "/catalog/new");
+  await page.getByLabel("ГТИН").fill("04600000000015");
+  await expect(page.getByText("Владелец ГТИН — ООО «Ягодный дом»")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Подставить контрагента" })).toBeVisible();
+  await screenshotFullMain(page, screenshotPath("product-gtin-owner"));
+  expect(unexpected).toEqual([]);
+});
+
+test("a draft card explains what is missing", async ({ page }) => {
+  const unexpected = await installApi(page, "productDraft");
+  await openHarness(page, `/catalog/${DRAFT_PRODUCT_ID}/edit`);
+  await expect(
+    page.getByText("Черновик — заполните группу и вместимости, чтобы запускать смены"),
+  ).toBeVisible();
+  await screenshotFullMain(page, screenshotPath("product-draft-banner"));
+  expect(unexpected).toEqual([]);
+});
+
+test("an active card carries the group and both capacities", async ({ page }) => {
+  const unexpected = await installApi(page, "productActive");
+  await openHarness(page, `/catalog/${PRODUCT_ID}/edit`);
+  await expect(page.getByRole("heading", { name: "Агрегация и цена" })).toBeVisible();
+  await expect(page.getByLabel("Вместимость короба, шт")).toHaveValue("12");
+  await expect(page.getByLabel("Вместимость поддона, шт")).toHaveValue("48");
+  await screenshotFullMain(page, screenshotPath("product-active"));
+  expect(unexpected).toEqual([]);
+});
+
+test("the photo section shows the stored image", async ({ page }) => {
+  const unexpected = await installApi(page, "productActive");
+  await openHarness(page, `/catalog/${PRODUCT_ID}/edit`);
+  await expect(page.getByRole("heading", { name: "Фотография" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Удалить фотографию" })).toBeVisible();
+  await screenshotSection(page, "product-form-image", screenshotPath("product-image"));
+  expect(unexpected).toEqual([]);
+});
+
+test("default values name the counterparty", async ({ page }) => {
+  const unexpected = await installApi(page, "productActive");
+  await openHarness(page, `/catalog/${PRODUCT_ID}/edit`);
+  await expect(page.getByRole("heading", { name: "Значения по умолчанию" })).toBeVisible();
+  await screenshotSection(page, "product-form-defaults", screenshotPath("product-defaults"));
+  expect(unexpected).toEqual([]);
+});
+
+test("a retired product carries the do-not-use flag", async ({ page }) => {
+  const unexpected = await installApi(page, "productActive");
+  await openHarness(page, `/catalog/${ARCHIVED_PRODUCT_ID}/edit`);
+  await expect(page.getByText("Не использовать")).toBeVisible();
+  await screenshotFullMain(page, screenshotPath("product-archived"));
   expect(unexpected).toEqual([]);
 });
