@@ -99,7 +99,8 @@ class InventoryWorkViewModelTest {
         advanceUntilIdle()
         scans.tryEmit(ScanEvent(raw("A1"), null, "debug", 0))
         advanceUntilIdle()
-        val ui = vm.state.first { it.progress.verified == 1 }
+        // The counters come from separate Room queries and land one at a time; wait for the whole picture.
+        val ui = vm.state.first { it.progress.verified == 1 && it.progress.thisTerminal == 1 && it.last != null }
         assertEquals(InventoryVerdict.EXPECTED, ui.last?.verdict)
         assertEquals(1, ui.progress.thisTerminal)
         assertEquals(3, ui.expectedCount)
