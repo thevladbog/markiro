@@ -167,11 +167,13 @@ for (const width of [390, 720, 1280]) {
       } finally {
         releaseSelectionRefresh?.();
       }
-      await dialog.getByRole("button", { name: "Сравнить выбранные товары" }).click();
+      await dialog.getByRole("button", { name: "Проверить выбранные товары" }).click();
       await expect(
-        dialog.getByRole("status").filter({ hasText: "Готовим сравнение" }),
+        dialog.getByRole("status").filter({ hasText: "Готовим товары к проверке" }),
       ).toBeVisible();
-      await expect(dialog.getByRole("button", { name: "Обновить сравнение" })).toHaveCount(0);
+      await expect(
+        dialog.getByRole("button", { name: "Обновить данные для проверки" }),
+      ).toHaveCount(0);
       await expect(dialog.getByLabel("Итог перед добавлением")).toHaveCount(0);
       await screenshot("preparing");
       prepared = true;

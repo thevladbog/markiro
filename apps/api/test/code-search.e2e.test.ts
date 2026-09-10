@@ -356,6 +356,23 @@ describe.skipIf(!ready)("code-search e2e", () => {
     expect(card.items).toHaveLength(2);
   });
 
+  it("returns the owning shift's saved human number and denies another tenant the box", async () => {
+    const box = (await agent.get(`/code-search?q=${SSCC1}`).expect(200)).body as { boxId: string };
+    const card = (await agent.get(`/code-search/boxes/${box.boxId}`).expect(200)).body as {
+      shiftId: string;
+      shiftNumber: string | null;
+    };
+    const shift = (await agent.get(`/shifts/${card.shiftId}`).expect(200)).body as {
+      number: string;
+    };
+    expect(shift.number).toMatch(/^[A-Z]{3}\d{2}-\d+/);
+    expect(card.shiftNumber).toBe(shift.number);
+
+    const other = request.agent(app!.getHttpServer());
+    await signUpAndActivate(other);
+    await other.get(`/code-search/boxes/${box.boxId}`).expect(404);
+  });
+
   it("404s the box card for an unknown boxId", async () => {
     await agent.get(`/code-search/boxes/${randomUUID()}`).expect(404);
   });
@@ -373,6 +390,26 @@ describe.skipIf(!ready)("code-search e2e", () => {
 
   it("404s the box report for an unknown boxId", async () => {
     await agent.get(`/code-search/boxes/${randomUUID()}/report`).expect(404);
+  });
+
+  it.each([
+    { timeZone: "Europe/Moscow", closed: "01.01.2026 03:00" },
+    { timeZone: "Asia/Vladivostok", closed: "01.01.2026 10:00" },
+  ])("renders the box report in requested $timeZone", async ({ timeZone, closed }) => {
+    const box = (await agent.get(`/code-search?q=${SSCC1}`).expect(200)).body as { boxId: string };
+    const report = await agent
+      .get(`/code-search/boxes/${box.boxId}/report`)
+      .query({ timeZone })
+      .expect(200);
+    expect(report.text).toContain(`закрыт ${closed}`);
+  });
+
+  it("rejects an invalid report timezone instead of failing during rendering", async () => {
+    const box = (await agent.get(`/code-search?q=${SSCC1}`).expect(200)).body as { boxId: string };
+    await agent
+      .get(`/code-search/boxes/${box.boxId}/report`)
+      .query({ timeZone: "Not/A_Time_Zone" })
+      .expect(400);
   });
 
   it("box card items carry the full raw KM including the crypto tail", async () => {

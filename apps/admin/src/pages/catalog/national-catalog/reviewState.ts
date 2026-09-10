@@ -42,6 +42,113 @@ export function currentChoice(
       }
     : stored;
 }
+
+/** Carry only the same reviewed values onto a newly prepared snapshot. */
+export function reconcileChoice(
+  preview: ImportPreview,
+  previous: ImportPreview,
+  choice: ReviewChoice,
+): ReviewChoice {
+  if (preview.id === previous.id) return currentChoice(preview, choice);
+  if (
+    preview.itemId !== previous.itemId ||
+    preview.productId !== previous.productId ||
+    preview.identity.cardId !== previous.identity.cardId ||
+    preview.identity.gtin14 !== previous.identity.gtin14 ||
+    preview.linkAction !== previous.linkAction
+  )
+    return {
+      ...initialChoice(preview),
+      decision: {
+        ...initialChoice(preview).decision,
+        acceptedEntryIds: [],
+        photo: { kind: "keep" },
+      },
+    };
+
+  const matched = new Map<string, string>();
+  for (const field of preview.fields) {
+    const candidates = previous.fields.filter(
+      (old) =>
+        old.labelKey === field.labelKey &&
+        old.label === field.label &&
+        old.before === field.before &&
+        old.after === field.after &&
+        old.source === field.source &&
+        old.applicable === field.applicable &&
+        old.reason === field.reason &&
+        (field.labelKey !== "category" ||
+          JSON.stringify(
+            previous.categoryOptions
+              .filter((o) => o.selected)
+              .map((o) => o.optionId)
+              .sort(),
+          ) ===
+            JSON.stringify(
+              preview.categoryOptions
+                .filter((o) => o.selected)
+                .map((o) => o.optionId)
+                .sort(),
+            )),
+    );
+    if (candidates.length === 1 && candidates[0]) matched.set(field.id, candidates[0].id);
+  }
+  const oldMatches = [...matched.values()];
+  for (const [newId, oldId] of matched) {
+    if (oldMatches.filter((id) => id === oldId).length > 1) matched.delete(newId);
+  }
+  // A changed or removed prerequisite invalidates every dependent choice.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const field of preview.fields) {
+      const old = previous.fields.find((f) => f.id === matched.get(field.id));
+      if (
+        old &&
+        (old.requiresEntryIds.length !== field.requiresEntryIds.length ||
+          field.requiresEntryIds.some(
+            (id) => !old.requiresEntryIds.includes(matched.get(id) ?? ""),
+          ))
+      ) {
+        matched.delete(field.id);
+        changed = true;
+      }
+    }
+  }
+  const photo = choice.decision.photo;
+  const available = (id: string) =>
+    preview.photos.some(
+      (p) =>
+        p.candidateId === id &&
+        p.state === "ready" &&
+        (p.reason === null || p.reason === "barcode_mismatch"),
+    );
+  return {
+    ...choice,
+    // A new snapshot does not expose the current link revision, so its
+    // replacement must be acknowledged again even if the target card matches.
+    replaceConfirmed: false,
+    photoExplicit: true,
+    loadedCandidateIds: choice.loadedCandidateIds.filter(available),
+    decision: {
+      previewId: preview.id,
+      linkAction: preview.linkAction,
+      acceptedEntryIds: preview.fields
+        .filter(
+          (f) => f.applicable && choice.decision.acceptedEntryIds.includes(matched.get(f.id) ?? ""),
+        )
+        .map((f) => f.id),
+      photo:
+        photo.kind === "candidate"
+          ? available(photo.candidateId)
+            ? photo
+            : { kind: "keep" }
+          : photo.reviewedCandidateId && available(photo.reviewedCandidateId)
+            ? photo
+            : { kind: "keep" },
+    },
+  };
+}
 export function keepPhoto(choice: ReviewChoice): ReviewChoice {
   const photo = choice.decision.photo;
   // Automatic image loads must not choose the source baseline. Retain only the

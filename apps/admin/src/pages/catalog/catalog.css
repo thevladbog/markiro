@@ -158,13 +158,49 @@
   border: 1px solid var(--line);
   border-radius: 8px;
 }
-.mk-nc-review > .mk-nc-review-item {
+.mk-nc-review-product > .mk-nc-review-item {
   display: grid;
   gap: var(--sp-3);
   margin: 0;
 }
-.mk-nc-review > .mk-nc-review-item > button {
+.mk-nc-review-product > .mk-nc-review-item > button {
   justify-self: start;
+}
+.mk-nc-review-product,
+.mk-nc-product-navigation {
+  min-width: 0;
+}
+.mk-nc-product-navigation {
+  display: grid;
+  gap: var(--sp-3);
+}
+.mk-nc-product-navigation__controls,
+.mk-nc-product-navigation__buttons {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.mk-nc-product-navigation__controls {
+  justify-content: space-between;
+}
+.mk-nc-product-tabs {
+  max-width: 100%;
+  overscroll-behavior-x: contain;
+}
+.mk-nc-product-tabs .mk-data-tabs__tab {
+  flex: 0 0 auto;
+  max-width: min(72vw, 320px);
+  padding-block: var(--sp-3);
+}
+.mk-nc-product-tabs .mk-data-tabs__tab > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mk-nc-review-product:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: 2px;
 }
 @media (max-width: 600px) {
   .mk-nc-filters {

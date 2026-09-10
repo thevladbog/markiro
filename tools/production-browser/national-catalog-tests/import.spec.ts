@@ -115,7 +115,7 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
   await page.getByRole("button", { name: "Загрузить мои товары" }).click();
   await page.getByRole("checkbox", { name: /4006381333931/ }).click();
   await expect(page.getByText("Выбрано: 1 из 100")).toBeVisible();
-  await page.getByRole("button", { name: "Сравнить выбранные товары" }).click();
+  await page.getByRole("button", { name: "Проверить выбранные товары" }).click();
   await expect(page.getByLabel("Название вручную")).toBeVisible();
   const evidence = resolve("../../docs/evidence/national-catalog-import");
   await mkdir(evidence, { recursive: true });
@@ -125,10 +125,10 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
       fullPage: true,
     });
   await page.getByRole("button", { name: "Применить выбранное" }).click();
-  await expect(page.getByText("Эта позиция требует нового сравнения.")).toBeVisible();
+  await expect(page.getByText("Эта позиция требует новой проверки.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Применить выбранное" })).toBeDisabled();
   expect(writes).toHaveLength(2);
-  await page.getByRole("button", { name: "Обновить сравнение" }).click();
+  await page.getByRole("button", { name: "Обновить данные для проверки" }).click();
   await expect(page.getByRole("button", { name: "Применить выбранное" })).toBeEnabled();
   await page.getByRole("button", { name: "Применить выбранное" }).click();
   await expect(page.getByText("Товар добавлен. Фото не загрузилось.")).toBeVisible();

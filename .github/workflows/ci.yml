@@ -239,7 +239,9 @@ jobs:
     needs: classify-changes
     if: needs.classify-changes.outputs.production_bundle == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Galleries, image builds and landing checks take ~20 minutes on slow runners.
+    # Leave time for migrations and the production/API-docs smoke checks as well.
+    timeout-minutes: 30
     env:
       COMPOSE_PROJECT_NAME: markiro-production
       MARKIRO_IMAGE_TAG: ${{ github.sha }}

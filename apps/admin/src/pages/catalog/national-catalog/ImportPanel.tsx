@@ -787,7 +787,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
           )}
         {preparation.data && showReview && (
           <ImportReview
-            key={preparation.data.preparation.id}
+            key={sessionId}
             sessionId={sessionId}
             data={preparation.data}
             products={catalog.products}

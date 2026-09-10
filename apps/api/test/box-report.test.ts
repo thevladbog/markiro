@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderBoxReportHtml, type BoxReportData } from "../src/modules/code-search/box-report";
+import { boxReportQuerySchema } from "../src/modules/code-search/dto";
 
 /**
  * GS (ASCII 0x1D) — the real KM segment separator byte (see kiosk-orders.e2e.test.ts
@@ -32,6 +33,55 @@ function fixture(overrides: Partial<BoxReportData> = {}): BoxReportData {
 }
 
 describe("renderBoxReportHtml", () => {
+  it("retains UTC for existing report URLs without a viewer timezone", () => {
+    expect(boxReportQuerySchema.parse({})).toEqual({ timeZone: "UTC" });
+    const html = renderBoxReportHtml(fixture({ openedAt: new Date("2026-09-09T21:58:00.000Z") }));
+    expect(html).toContain("открыт 09.09.2026 21:58");
+  });
+
+  it.each(["Not/A_Time_Zone", "", "<script>", ["UTC", "Europe/Moscow"]])(
+    "rejects invalid or repeated timezone values: %s",
+    (timeZone) => {
+      expect(boxReportQuerySchema.safeParse({ timeZone }).success).toBe(false);
+    },
+  );
+
+  it.each([
+    {
+      timeZone: "Europe/Moscow",
+      opened: "10.09.2026 00:58",
+      closed: "10.09.2026 01:08",
+      disassembled: "10.09.2026 02:08",
+    },
+    {
+      timeZone: "Asia/Vladivostok",
+      opened: "10.09.2026 07:58",
+      closed: "10.09.2026 08:08",
+      disassembled: "10.09.2026 09:08",
+    },
+    {
+      timeZone: "America/New_York",
+      opened: "09.09.2026 17:58",
+      closed: "09.09.2026 18:08",
+      disassembled: "09.09.2026 19:08",
+    },
+  ])(
+    "keeps every lifecycle timestamp in the viewer's $timeZone across midnight",
+    ({ timeZone, opened, closed, disassembled }) => {
+      const html = renderBoxReportHtml(
+        fixture({
+          openedAt: new Date("2026-09-09T21:58:00.000Z"),
+          closedAt: new Date("2026-09-09T22:08:00.000Z"),
+          disassembledAt: new Date("2026-09-09T23:08:00.000Z"),
+        }),
+        timeZone,
+      );
+      expect(html.split(`открыт ${opened}`)).toHaveLength(3);
+      expect(html).toContain(`закрыт ${closed}`);
+      expect(html).toContain(`расформирован ${disassembled}`);
+    },
+  );
+
   it("is a pure function of its input (no I/O): same fixture -> identical HTML", () => {
     expect(renderBoxReportHtml(fixture())).toBe(renderBoxReportHtml(fixture()));
   });

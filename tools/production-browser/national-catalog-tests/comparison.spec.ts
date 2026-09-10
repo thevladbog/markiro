@@ -191,7 +191,9 @@ for (const width of [390, 1280]) {
       // Capture the complete panel at an expanded height; interaction and bounds
       // above were already exercised at the normal 1000px viewport height.
       await page.setViewportSize({ width, height: width === 390 ? 1560 : 1280 });
-      await page.getByRole("heading", { name: "Сравнение", exact: true }).scrollIntoViewIfNeeded();
+      await page
+        .getByRole("heading", { name: "Проверка товаров", exact: true })
+        .scrollIntoViewIfNeeded();
       await page.screenshot({
         path: resolve(folder, `comparison-${width}-ru-${theme}.png`),
         fullPage: true,

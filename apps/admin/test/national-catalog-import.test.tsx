@@ -296,6 +296,55 @@ function mockServer() {
 const selectionRoute = `/catalog/import?sessionId=${id(1)}`;
 const reviewRoute = `${selectionRoute}&preparationId=${id(10)}`;
 const resultRoute = `${selectionRoute}&operationId=${id(20)}`;
+it("retains the active product and reviewed choices when the route receives a fresh preparation", async () => {
+  const server = mockServer();
+  const first = server.state.preparation.items[0]!;
+  first.productId = id(21);
+  const second = structuredClone(first);
+  second.id = id(50);
+  second.itemId = id(51);
+  second.identity.name = "Кефир";
+  second.fields[0]!.id = id(52);
+  server.state.preparation.items.push(second);
+  server.state.session.selectedItemIds = [first.itemId, second.itemId];
+  server.state.session.selected = 2;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith("/previews")) {
+        server.state.preparation = structuredClone(server.state.preparation);
+        server.state.preparation.preparation.id = id(60);
+        server.state.preparation.items[0]!.id = id(61);
+        server.state.preparation.items[0]!.fields[0]!.id = id(62);
+        server.state.preparation.items[1]!.id = id(63);
+        server.state.preparation.items[1]!.fields[0]!.id = id(64);
+      }
+      return server.fetchMock(url, init);
+    }),
+  );
+  const view = renderImport(reviewRoute);
+  await view.user.click(
+    await screen.findByRole("radio", { name: "Название товара — Предлагаемое значение" }),
+  );
+  await view.user.click(screen.getByRole("tab", { name: /Кефир/ }));
+  await view.user.click(screen.getByRole("button", { name: "Обновить данные для проверки" }));
+  await waitFor(() =>
+    expect(view.router.state.location.search).toContain(`preparationId=${id(60)}`),
+  );
+  expect(screen.getByRole("tab", { name: /Кефир/ }).getAttribute("aria-selected")).toBe("true");
+  await view.user.click(await screen.findByRole("button", { name: "Применить выбранное" }));
+  await waitFor(() => expect(server.applies).toHaveLength(1));
+  expect(server.applies[0]?.decisions).toEqual([
+    {
+      previewId: id(61),
+      acceptedEntryIds: [id(62)],
+      linkAction: "attach",
+      photo: { kind: "keep" },
+    },
+    { previewId: id(63), acceptedEntryIds: [], linkAction: "attach", photo: { kind: "keep" } },
+  ]);
+});
+
 it("does not poll idle photo alternatives when preparation is complete", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   try {
@@ -390,7 +439,7 @@ it("replays lost prepare response after unmount with identical body/requestId", 
   const server = mockServer();
   server.state.failPrepare = 1;
   let view = renderImport(selectionRoute);
-  await view.user.click(await screen.findByRole("button", { name: "Сравнить выбранные товары" }));
+  await view.user.click(await screen.findByRole("button", { name: "Проверить выбранные товары" }));
   await screen.findByText(
     "Ответ на предыдущий запрос не получен. Восстановите его результат перед новым действием.",
   );
@@ -588,7 +637,7 @@ it("preserves manual name, field toggles, explicit keep and replacement confirma
   expect((screen.getByLabelText("Название вручную") as HTMLInputElement).value).toBe(
     "Моё название",
   );
-  await user.click(screen.getByRole("button", { name: "Обновить сравнение" }));
+  await user.click(screen.getByRole("button", { name: "Обновить данные для проверки" }));
   expect(prepare).toHaveBeenCalledWith({
     manualNames: { [id(2)]: "Моё название" },
     categoryChoices: {},
@@ -729,7 +778,7 @@ it("allows blank draft name repair, caps manual override at200 and blocks apply 
   expect(screen.getByRole("button", { name: "Применить выбранное" }).hasAttribute("disabled")).toBe(
     true,
   );
-  await user.click(screen.getByRole("button", { name: "Обновить сравнение" }));
+  await user.click(screen.getByRole("button", { name: "Обновить данные для проверки" }));
   expect(prepare.mock.calls[0]?.[0].manualNames[id(2)]).toHaveLength(200);
 });
 it("blocks apply until explicit replacement and supports link-only preserving existing fields and photo", async () => {
@@ -768,10 +817,10 @@ it("does not silently reapply a409 stale comparison and refreshes with a new pre
   const view = renderImport(reviewRoute);
   await view.user.click(await screen.findByRole("button", { name: "Применить выбранное" }));
   await screen.findByText(
-    "Данные изменились. Проверьте позиции и обновите сравнение перед применением.",
+    "Данные изменились. Проверьте позиции и обновите данные для проверки перед применением.",
   );
   expect(server.applies).toHaveLength(1);
-  await view.user.click(screen.getByRole("button", { name: "Обновить сравнение" }));
+  await view.user.click(screen.getByRole("button", { name: "Обновить данные для проверки" }));
   await waitFor(() => expect(server.prepares).toHaveLength(1));
   expect(server.prepares[0]?.requestId).not.toBe(id(11));
 });
@@ -1117,26 +1166,27 @@ it.each([
     server.state.applyConflict = conflict;
     const view = renderImport(reviewRoute);
     await view.user.click(await screen.findByRole("button", { name: "Применить выбранное" }));
-    await screen.findByText("Сравнение устарело. Обновите его перед добавлением изменений.");
+    await screen.findByText("Данные проверки устарели. Обновите их перед добавлением изменений.");
     const known = "previewIds" in conflict && conflict.previewIds[0] === id(12);
     const firstGroup = screen.getByRole("group", { name: "04006381333931 · Молоко" });
+    expect(firstGroup.textContent?.includes("Эта позиция требует новой проверки.")).toBe(known);
+    await view.user.click(screen.getByRole("tab", { name: /Второй товар/ }));
     const secondGroup = screen.getByRole("group", { name: "04006381333931 · Второй товар" });
-    expect(firstGroup.textContent?.includes("Эта позиция требует нового сравнения.")).toBe(known);
-    expect(secondGroup.textContent?.includes("Эта позиция требует нового сравнения.")).toBe(false);
+    expect(secondGroup.textContent?.includes("Эта позиция требует новой проверки.")).toBe(false);
     expect(
       screen.getByRole("button", { name: "Применить выбранное" }).hasAttribute("disabled"),
     ).toBe(true);
     await view.user.click(screen.getByRole("button", { name: "Применить выбранное" }));
     expect(server.applies).toHaveLength(1);
     await view.user.click(screen.getByRole("button", { name: "Выбор товаров" }));
-    await view.user.click(screen.getByRole("button", { name: "Сравнение" }));
+    await view.user.click(screen.getByRole("button", { name: "Проверка товаров" }));
     expect(
       screen.getByRole("button", { name: "Применить выбранное" }).hasAttribute("disabled"),
     ).toBe(true);
     const savedRoute = view.router.state.location.pathname + view.router.state.location.search;
     view.unmount();
     const reopened = renderImport(savedRoute);
-    await screen.findByText("Сравнение устарело. Обновите его перед добавлением изменений.");
+    await screen.findByText("Данные проверки устарели. Обновите их перед добавлением изменений.");
     expect(
       screen.getByRole("button", { name: "Применить выбранное" }).hasAttribute("disabled"),
     ).toBe(true);
@@ -1146,13 +1196,13 @@ it.each([
       ...p,
       id: id(61 + index),
     }));
-    await reopened.user.click(screen.getByRole("button", { name: "Обновить сравнение" }));
+    await reopened.user.click(screen.getByRole("button", { name: "Обновить данные для проверки" }));
     await waitFor(() =>
       expect(reopened.router.state.location.search).toContain(`preparationId=${id(60)}`),
     );
     await waitFor(() =>
       expect(
-        screen.queryByText("Сравнение устарело. Обновите его перед добавлением изменений."),
+        screen.queryByText("Данные проверки устарели. Обновите их перед добавлением изменений."),
       ).toBeNull(),
     );
     await reopened.user.click(await screen.findByRole("button", { name: "Применить выбранное" }));
@@ -1182,7 +1232,7 @@ it("identifies a strictly rejected attempted preview after pending apply is reop
   await reopened.user.click(
     await screen.findByRole("button", { name: "Восстановить результат запроса" }),
   );
-  await screen.findByText("Эта позиция требует нового сравнения.");
+  await screen.findByText("Эта позиция требует новой проверки.");
   expect(server.applies[1]).toEqual(server.applies[0]);
   expect(screen.getByRole("button", { name: "Применить выбранное" }).hasAttribute("disabled")).toBe(
     true,
@@ -1414,13 +1464,13 @@ it.each(["unique", "missing", "ambiguous", "archived", "inaccessible", "incomple
     });
     if (kind === "unique") {
       await user.click(await screen.findByRole("button", { name: "Выбрать текущую карточку" }));
-      expect(await screen.findByText("Текущая карточка выбрана для сравнения.")).toBeDefined();
+      expect(await screen.findByText("Текущая карточка выбрана для проверки.")).toBeDefined();
       expect(writes[1]).toEqual({
         path: `/api/national-catalog/import-sessions/${id(1)}/selection`,
         body: { expectedRevision: 0, itemIds: [id(41)] },
       });
       expect(router.state.location.search).toContain("exactCardId=card-1");
-      await user.click(screen.getByRole("button", { name: "Сравнить выбранные товары" }));
+      await user.click(screen.getByRole("button", { name: "Проверить выбранные товары" }));
       expect(await screen.findByLabelText("Название вручную")).toBeDefined();
       expect(router.state.location.search).toContain(`preparationId=${id(10)}`);
       expect(router.state.location.search).toContain("exactCardId=card-1");
@@ -1434,8 +1484,8 @@ it.each(["unique", "missing", "ambiguous", "archived", "inaccessible", "incomple
           "Текущая карточка не найдена в доступной загрузке. Повторите загрузку из панели связи.",
         missing:
           "Текущая карточка не найдена в доступной загрузке. Повторите загрузку из панели связи.",
-        ambiguous: "Текущая карточка определена неоднозначно. Сравнение недоступно.",
-        archived: "Карточка ЧЗ в архиве. Сравнение и применение недоступны.",
+        ambiguous: "Текущая карточка определена неоднозначно. Проверка недоступна.",
+        archived: "Карточка ЧЗ в архиве. Проверка и применение недоступны.",
         incomplete:
           "Загрузка не завершена. Нельзя подтвердить текущую карточку. Повторите загрузку.",
       };
@@ -1468,7 +1518,7 @@ it("prevents comparison of an explicitly archived saved card", async () => {
   const button = await screen.findByRole("button", { name: "Сравнить карточку" });
   expect(button.hasAttribute("disabled")).toBe(true);
   expect(
-    await screen.findByText("Карточка ЧЗ в архиве. Сравнение и применение недоступны."),
+    await screen.findByText("Карточка ЧЗ в архиве. Проверка и применение недоступны."),
   ).toBeDefined();
   expect(writes).toEqual([]);
 });
@@ -1717,7 +1767,7 @@ it.each(["selection", "preparation"] as const)(
         items: [],
       };
       renderImport(reviewRoute);
-      await screen.findByRole("heading", { name: "Сравнение" });
+      await screen.findByRole("heading", { name: "Проверка товаров" });
       server.state.preparation = structuredClone(previewFixture);
       await screen.findByLabelText("Название вручную", {}, { timeout: 4000 });
     }
@@ -1764,10 +1814,11 @@ it.each(["ru", "en"] as const)(
       );
       expect(screen.queryByText("Untranslated backend owned label")).toBeNull();
       const user = userEvent.setup();
+      await user.click(screen.getAllByRole("tab")[2]!);
       await user.click(
-        screen.getAllByRole("radio", {
+        screen.getByRole("radio", {
           name: `${tr("fields.name")} — ${tr("proposedColumn")}`,
-        })[1]!,
+        }),
       );
       await user.click(screen.getByRole("checkbox", { name: tr("confirmReplace") }));
       expect(screen.getByLabelText(tr("confirmationSummary")).textContent).toBe(
@@ -1779,6 +1830,7 @@ it.each(["ru", "en"] as const)(
           photos: 0,
         }),
       );
+      await user.click(screen.getAllByRole("tab")[0]!);
       await user.click(
         screen.getAllByRole("radio", { name: `${tr("fields.name")} — ${tr("currentColumn")}` })[0]!,
       );
@@ -1916,10 +1968,10 @@ it.each(["queued", "loading", "partial"] as const)(
       />,
       { wrapper: MemoryRouter },
     );
-    expect(screen.getByRole("status").textContent).toContain("Готовим сравнение");
+    expect(screen.getByRole("status").textContent).toContain("Готовим товары к проверке");
     expect(screen.queryByLabelText("Итог перед добавлением")).toBeNull();
     expect(screen.queryByRole("button", { name: "Применить выбранное" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Обновить сравнение" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Обновить данные для проверки" })).toBeNull();
   },
 );
 
@@ -1951,7 +2003,7 @@ it.each(["failed", "blocked"] as const)(
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByRole("alert").textContent).toContain("Не удалось загрузить данные");
     expect(
-      screen.getByRole("button", { name: "Обновить сравнение" }).hasAttribute("disabled"),
+      screen.getByRole("button", { name: "Обновить данные для проверки" }).hasAttribute("disabled"),
     ).toBe(false);
     expect(screen.queryByRole("button", { name: "Применить выбранное" })).toBeNull();
   },

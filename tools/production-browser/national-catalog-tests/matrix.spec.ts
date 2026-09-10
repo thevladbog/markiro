@@ -232,8 +232,11 @@ for (const width of [390, 768, 1280, 1600])
         await page.keyboard.press("Escape");
         await expect(panel).toHaveCount(0);
         await page.goto(open(`/catalog/import?sessionId=${id(1)}&preparationId=${id(10)}`));
-        await expect(page.locator(".mk-nc-review-item")).toHaveCount(3);
-        for (const fieldset of await page.locator(".mk-nc-review-item").all()) {
+        await expect(page.getByRole("tab")).toHaveCount(3);
+        await expect(page.locator(".mk-nc-review-item")).toHaveCount(1);
+        for (const tab of await page.getByRole("tab").all()) {
+          await tab.click();
+          const fieldset = page.getByRole("tabpanel");
           await expect(
             fieldset.getByRole("img", { name: t.import.photoPreview, exact: true }),
           ).toHaveJSProperty("naturalWidth", 120);

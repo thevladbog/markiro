@@ -1,4 +1,8 @@
-import { BadRequestException, InternalServerErrorException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  InternalServerErrorException,
+} from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DomainError, normalizeToGtin14 } from "@markiro/domain";
@@ -65,6 +69,64 @@ export class ProductWriter {
         source: "manual",
       });
     }
+  }
+
+  /** Caller holds the product lock. Preserve alternate codes when choosing a new primary. */
+  async importPrimaryEgaisCode(
+    tx: ProductAuditTx,
+    tenantId: string,
+    productId: string,
+    code: string,
+    sourceRef: string,
+    observedAt: Date,
+  ): Promise<void> {
+    if (!/^\d{19}$/.test(code)) throw new BadRequestException({ code: "EGAIS_CODE_INVALID" });
+    const codes = await tx
+      .select({ code: schema.productEgaisCodes.code })
+      .from(schema.productEgaisCodes)
+      .where(
+        and(
+          eq(schema.productEgaisCodes.tenantId, tenantId),
+          eq(schema.productEgaisCodes.productId, productId),
+        ),
+      );
+    if (codes.length >= 20 && !codes.some((row) => row.code === code))
+      throw new ConflictException("product_changed");
+    const appliedAt = new Date();
+    await tx
+      .update(schema.productEgaisCodes)
+      .set({ isPrimary: false })
+      .where(
+        and(
+          eq(schema.productEgaisCodes.tenantId, tenantId),
+          eq(schema.productEgaisCodes.productId, productId),
+          eq(schema.productEgaisCodes.isPrimary, true),
+        ),
+      );
+    await tx
+      .insert(schema.productEgaisCodes)
+      .values({
+        tenantId,
+        productId,
+        code,
+        isPrimary: true,
+        source: "national_catalog",
+        sourceRef,
+        observedAt,
+        appliedAt,
+      })
+      .onConflictDoUpdate({
+        target: [
+          schema.productEgaisCodes.tenantId,
+          schema.productEgaisCodes.productId,
+          schema.productEgaisCodes.code,
+        ],
+        set: { isPrimary: true, source: "national_catalog", sourceRef, observedAt, appliedAt },
+      });
+    await tx
+      .update(schema.products)
+      .set({ egaisCode: code })
+      .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
   }
 
   normalizeOrThrow(gtin: string): string {

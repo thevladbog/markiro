@@ -1,4 +1,5 @@
 import { photoReviewSchema } from "./national-catalog-image-state";
+import { productFieldEntrySchema } from "./national-catalog-product-fields";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { productAttributeValueSchema } from "@markiro/domain";
@@ -19,6 +20,7 @@ import type { buildNationalCatalogImportEntries } from "./national-catalog-propo
 import { canonicalJsonHash } from "./national-catalog-products.service";
 
 const entrySchema = z.discriminatedUnion("target", [
+  productFieldEntrySchema,
   z
     .object({
       entryId: z.uuid(),
@@ -92,9 +94,11 @@ export function parseImportDiff(value: unknown): StoredImportDiff {
         ...field,
         ...(entry?.target === "name" || entry?.target === "category"
           ? { labelKey: entry.target }
-          : entry?.target === "mapped" && entry.entry.target === "stable_field"
-            ? { labelKey: entry.entry.targetField }
-            : {}),
+          : entry?.target === "product_field"
+            ? { labelKey: entry.targetField }
+            : entry?.target === "mapped" && entry.entry.target === "stable_field"
+              ? { labelKey: entry.entry.targetField }
+              : {}),
         requiresEntryIds: entry?.target === "mapped" ? entry.requiresEntryIds : [],
       };
     }),
@@ -126,7 +130,12 @@ export const sourceEnvelopeSchema = z
         categories: z.array(z.unknown()),
         attributes: z.array(
           z
-            .object({ id: z.number().int(), value: z.string(), gtin: z.string().nullable() })
+            .object({
+              id: z.number().int(),
+              name: z.string().optional(),
+              value: z.string(),
+              gtin: z.string().nullable(),
+            })
             .passthrough(),
         ),
         images: z.array(z.unknown()),
