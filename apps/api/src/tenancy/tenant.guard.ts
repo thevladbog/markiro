@@ -48,6 +48,8 @@ export interface RequestWithTenant extends Request {
   deviceId?: string;
   /** Assigned production line for a station principal; null means no default line. */
   deviceLineId?: string | null;
+  /** `station` or `handheld` (brief 10); only on the api-key path. */
+  deviceKind?: "station" | "handheld";
 }
 
 /**
@@ -112,7 +114,11 @@ export class TenantGuard implements CanActivate {
       // which physical device is calling. Tenant-scoped in the statement
       // itself, matching every other query in this codebase.
       const [device] = await this.db
-        .select({ id: schema.stationDevices.id, lineId: schema.stationDevices.lineId })
+        .select({
+          id: schema.stationDevices.id,
+          lineId: schema.stationDevices.lineId,
+          kind: schema.stationDevices.kind,
+        })
         .from(schema.stationDevices)
         .where(
           and(
@@ -128,6 +134,7 @@ export class TenantGuard implements CanActivate {
       if (!device) throw stationCredentialRevoked();
       req.deviceId = device.id;
       req.deviceLineId = device.lineId;
+      req.deviceKind = device.kind === "handheld" ? "handheld" : "station";
       await this.db
         .update(schema.stationDevices)
         .set({ lastSeenAt: new Date() })

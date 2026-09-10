@@ -1,6 +1,7 @@
 package app.markiro.handheld.core.sync
 
 import android.content.Context
+import app.markiro.handheld.core.inventory.InventorySyncEngine
 import app.markiro.handheld.core.network.ServerUrlProvider
 import app.markiro.handheld.core.network.Strict
 import app.markiro.handheld.core.storage.DeviceConfigDao
@@ -42,6 +43,9 @@ object SyncModule {
 
     @Provides
     @Singleton
-    fun connectivityNudger(@ApplicationContext context: Context, engine: SyncEngine): ConnectivityNudger =
-        ConnectivityNudger(context, engine)
+    fun connectivityNudger(@ApplicationContext context: Context, engine: SyncEngine, inventory: InventorySyncEngine): ConnectivityNudger =
+        ConnectivityNudger(context) {
+            engine.nudge()
+            inventory.nudge()
+        }
 }

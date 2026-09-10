@@ -55,6 +55,6 @@ class HubScreenTest {
         }
         compose.onNodeWithText("Работаем офлайн · 37 сканов в очереди").assertIsDisplayed()
         compose.onNodeWithText("продолжить SEP26-001").assertIsDisplayed()
-        compose.onNodeWithText("заданий нет").assertIsDisplayed()
+        compose.onNodeWithText("заданий нет · данные на", substring = true).assertIsDisplayed()
     }
 }

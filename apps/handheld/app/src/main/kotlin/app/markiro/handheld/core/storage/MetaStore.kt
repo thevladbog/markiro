@@ -20,5 +20,9 @@ class MetaStore(private val dao: MetaDao) {
         const val SYNC_PENDING_CEILING = "sync_pending_ceiling"
         const val SYNC_LAST_SUCCESS_AT = "sync_last_success_at"
         const val SYNC_LAST_DENIED = "sync_last_denied"
+        const val INVENTORY_LAST_SUCCESS_AT = "inventory_sync_last_success_at"
+
+        /** The pinned inventory batch of one task: re-sent byte for byte until acknowledged. */
+        fun inventoryPin(inventoryId: String) = "inventory_pending_batch:$inventoryId"
     }
 }

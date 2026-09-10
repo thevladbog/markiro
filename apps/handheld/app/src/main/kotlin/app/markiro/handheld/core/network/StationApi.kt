@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.network
 
+import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
@@ -17,8 +18,24 @@ interface StationApi {
     @GET("shifts")
     suspend fun shifts(@Query("status") status: String? = null, @Query("lineId") lineId: String? = null): ShiftListResponse
 
+    /** `scope=all` (handheld only) lists every running inventory, not just the device line. */
     @GET("station/inventory-tasks")
-    suspend fun inventoryTasks(): InventoryTaskListResponse
+    suspend fun inventoryTasks(@Query("scope") scope: String? = null): InventoryTaskListResponse
+
+    @POST("station/inventory-tasks/resolve-barcode")
+    suspend fun resolveInventoryBarcode(@Body body: ResolveTaskRequest): ResolveTaskResponse
+
+    @POST("station/inventories/{id}/join")
+    suspend fun joinInventory(@Path("id") id: String, @Body body: JoinInventoryRequest): InventoryManifestDto
+
+    @GET("station/inventories/{id}/bundle/manifest")
+    suspend fun inventoryManifest(@Path("id") id: String): InventoryManifestDto
+
+    @GET("station/inventories/{id}/bundle/codes")
+    suspend fun inventoryCodes(@Path("id") id: String, @Query("cursor") cursor: String?, @Query("limit") limit: Int): InventoryBundlePageDto
+
+    @POST("station/inventories/{id}/leave")
+    suspend fun leaveInventory(@Path("id") id: String, @Body body: LeaveInventoryRequest): LeaveInventoryResponse
 
     @POST("shifts/{id}/enter")
     suspend fun enter(@Path("id") id: String): ShiftDto

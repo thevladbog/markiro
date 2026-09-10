@@ -74,8 +74,19 @@ data class ShiftDto(
 @Serializable
 data class ShiftListResponse(val items: List<ShiftDto>)
 
+/** `GET /station/inventory-tasks` item; every field is sent by the server. */
 @Serializable
-data class InventoryTaskDto(val inventoryId: String, val inventoryNumber: String, val productName: String)
+data class InventoryTaskDto(
+    val inventoryId: String,
+    val inventoryNumber: String,
+    val productName: String,
+    val productPrintName: String? = null,
+    val mode: String,
+    val lineId: String,
+    val lineName: String,
+    val productionDateFrom: String,
+    val productionDateTo: String,
+)
 
 @Serializable
 data class InventoryTaskListResponse(val items: List<InventoryTaskDto>)

@@ -19,6 +19,15 @@ import app.markiro.handheld.feature.hub.HubScreen
 import app.markiro.handheld.feature.hub.HubTile
 import app.markiro.handheld.feature.hub.HubViewModel
 import app.markiro.handheld.feature.hub.RosterRefresher
+import app.markiro.handheld.feature.inventory.InventoryLeaveScreen
+import app.markiro.handheld.feature.inventory.InventoryLeaveViewModel
+import app.markiro.handheld.feature.inventory.InventoryListCallbacks
+import app.markiro.handheld.feature.inventory.InventoryListEvent
+import app.markiro.handheld.feature.inventory.InventoryListScreen
+import app.markiro.handheld.feature.inventory.InventoryListViewModel
+import app.markiro.handheld.feature.inventory.InventoryWorkCallbacks
+import app.markiro.handheld.feature.inventory.InventoryWorkScreen
+import app.markiro.handheld.feature.inventory.InventoryWorkViewModel
 import app.markiro.handheld.feature.pairing.PairingCallbacks
 import app.markiro.handheld.feature.pairing.PairingScreen
 import app.markiro.handheld.feature.pairing.PairingViewModel
@@ -56,6 +65,11 @@ object Routes {
     const val CLOSE = "close/{shiftId}"
     const val CONFLICTS = "conflicts/{shiftId}"
     const val SOON = "soon/{tile}"
+    const val INVENTORY = "inventory"
+    const val INVENTORY_WORK = "inventory/{inventoryId}"
+    const val INVENTORY_LEAVE = "inventory/{inventoryId}/leave"
+    fun inventoryWork(id: String) = "inventory/$id"
+    fun inventoryLeave(id: String) = "inventory/$id/leave"
     fun work(id: String) = "work/$id"
     fun close(id: String) = "close/$id"
     fun conflicts(id: String) = "conflicts/$id"
@@ -148,7 +162,8 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     onTile = { tile ->
                         when (tile) {
                             HubTile.SHIFT -> state.activeShiftId?.let { nav.navigate(Routes.work(it)) } ?: nav.navigate(Routes.SHIFTS)
-                            HubTile.INVENTORY, HubTile.CHECK -> nav.navigate(Routes.soon(tile))
+                            HubTile.INVENTORY -> state.activeInventoryId?.let { nav.navigate(Routes.inventoryWork(it)) } ?: nav.navigate(Routes.INVENTORY)
+                            HubTile.CHECK -> nav.navigate(Routes.soon(tile))
                             HubTile.SETTINGS -> nav.navigate(Routes.SETTINGS)
                         }
                     },
@@ -214,6 +229,55 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                 val rows by vm.rows.collectAsStateWithLifecycle()
                 ConflictsScreen(rows, onBack = { nav.popBackStack() })
             }
+            composable(Routes.INVENTORY) {
+                val vm: InventoryListViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                LaunchedEffect(Unit) {
+                    vm.events.collect { event ->
+                        when (event) {
+                            is InventoryListEvent.Entered -> nav.navigate(Routes.inventoryWork(event.inventoryId)) { popUpTo(Routes.HUB) }
+                        }
+                    }
+                }
+                InventoryListScreen(
+                    state,
+                    InventoryListCallbacks(
+                        onBack = { nav.popBackStack() },
+                        onContinue = vm::continueActive,
+                        onSelect = vm::select,
+                        onExpandOthers = vm::expandOthers,
+                        onConfirmOther = vm::confirmOther,
+                        onDismiss = vm::dismissDialog,
+                        onRetry = vm::retry,
+                        onRefresh = vm::refresh,
+                    ),
+                )
+            }
+            composable(Routes.INVENTORY_WORK) { entry ->
+                val vm: InventoryWorkViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                val id = entry.arguments?.getString("inventoryId").orEmpty()
+                InventoryWorkScreen(
+                    state,
+                    InventoryWorkCallbacks(
+                        onLeave = { nav.navigate(Routes.inventoryLeave(id)) },
+                        onToHub = { nav.navigate(Routes.HUB) { popUpTo(Routes.HUB) { inclusive = true } } },
+                        onApplyDate = vm::applyDateAndAccept,
+                        onAcceptAsIs = vm::acceptAsIs,
+                        onSkip = vm::skipHeld,
+                        onSetDate = vm::setDate,
+                    ),
+                )
+            }
+            composable(Routes.INVENTORY_LEAVE) {
+                val vm: InventoryLeaveViewModel = hiltViewModel()
+                val step by vm.step.collectAsStateWithLifecycle()
+                InventoryLeaveScreen(
+                    step,
+                    onDone = { nav.navigate(Routes.HUB) { popUpTo(Routes.HUB) { inclusive = true } } },
+                    onBack = { nav.popBackStack() },
+                )
+            }
             composable(Routes.SETTINGS) {
                 val vm: SettingsViewModel = hiltViewModel()
                 val state by vm.state.collectAsStateWithLifecycle()
@@ -245,7 +309,6 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             composable(Routes.SOON) { entry ->
                 val title = when (entry.arguments?.getString("tile")) {
                     HubTile.SHIFT.name -> R.string.hub_tile_shift
-                    HubTile.INVENTORY.name -> R.string.hub_tile_inventory
                     else -> R.string.hub_tile_check
                 }
                 ComingSoonScreen(stringResource(title), onBack = { nav.popBackStack() })

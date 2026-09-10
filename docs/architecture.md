@@ -17,7 +17,9 @@ apps/
   handheld/   Kotlin + Compose — Android app for industrial handheld terminals (ТСД);
               a station-kind device reusing the station credential and endpoints
               (validates codes offline with the station's rules and syncs scan batches
-              through the same /station/scans protocol)
+              through the same /station/scans protocol; inventory check runs the
+              station's inventory protocol — digest-checked snapshot bundle, event
+              batches with payloadDigest, progress feed — with a second sync engine)
   kiosk/      React 19 + Vite 8 + IndexedDB — offline-first self-service
               pickup kiosk (installable PWA), paired to the api by device token
   landing/    Astro 7 — marketing site

@@ -14,11 +14,23 @@ import androidx.room.RoomDatabase
         ConflictEntity::class,
         ShiftCloseEntity::class,
         MetaEntity::class,
+        InventoryTaskEntity::class,
+        InventorySnapshotCodeEntity::class,
+        InventoryTerminalStateEntity::class,
+        InventoryEventEntity::class,
+        InventoryResultEntity::class,
+        InventoryOutboxEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class HandheldDatabase : RoomDatabase() {
+    abstract fun inventoryTaskDao(): InventoryTaskDao
+    abstract fun inventorySnapshotCodeDao(): InventorySnapshotCodeDao
+    abstract fun inventoryTerminalStateDao(): InventoryTerminalStateDao
+    abstract fun inventoryEventDao(): InventoryEventDao
+    abstract fun inventoryResultDao(): InventoryResultDao
+    abstract fun inventoryOutboxDao(): InventoryOutboxDao
     abstract fun deviceConfigDao(): DeviceConfigDao
     abstract fun operatorDao(): OperatorDao
     abstract fun shiftDao(): ShiftDao
