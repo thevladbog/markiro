@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { test as base, expect } from "@playwright/test";
+import type { Route } from "@playwright/test";
 import type { PrintDocumentModel } from "../../../apps/api/src/modules/billing/print-document-model.js";
 import {
   commercialDocumentListItemSchema,
@@ -219,7 +220,7 @@ export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
   fixture: async ({ context, baseURL }, use) => {
     const fixture = makeFixture();
     const origin = new URL(baseURL!).origin;
-    await context.route("**/*", async (route) => {
+    const handleRoute = async (route: Route) => {
       const request = route.request();
       const url = new URL(request.url());
       if (url.origin !== origin) {
@@ -376,11 +377,20 @@ export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
         return;
       }
       await route.fulfill({ json, headers: { "Cache-Control": "no-store" } });
+    };
+    await context.route("**/*", async (route) => {
+      try {
+        await handleRoute(route);
+      } catch (error) {
+        fixture.unhandled.push(error instanceof Error ? error.message : String(error));
+        await route.abort();
+      }
     });
     await use(fixture);
     fixture.preview.release();
     fixture.publish.release();
     fixture.download.release();
+    await context.unrouteAll({ behavior: "wait" });
     expect(fixture.unhandled, "Every API/external request must be explicitly intercepted").toEqual(
       [],
     );

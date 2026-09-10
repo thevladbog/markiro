@@ -78,6 +78,7 @@ function install(
   {
     conflict = false,
     failPayment = false,
+    paymentStatuses = [] as number[],
     previewFailsAfterFirst = false,
     canWrite = true,
     failRevise = false,
@@ -87,6 +88,7 @@ function install(
   const calls: Array<{ path: string; method: string; body: unknown; key: string | null }> = [];
   let previews = 0;
   let workspaceReads = 0;
+  let payments = 0;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -159,7 +161,8 @@ function install(
         return jsonResponse(200, { ...data.offer, documents: { revision: 2, documents: [] } });
       }
       if (path.endsWith("/payment")) {
-        if (failPayment) return jsonResponse(503, { code: "payment_unavailable" });
+        const status = paymentStatuses[payments++] ?? (failPayment ? 503 : 200);
+        if (status !== 200) return jsonResponse(status, { code: "payment_unavailable" });
         return jsonResponse(200, { paymentId: ID, fulfilments: [] });
       }
       if (path.endsWith("/revise")) {
@@ -180,6 +183,108 @@ afterEach(() => {
 });
 
 describe("offers workspace", () => {
+  it("locks competing actions until the exact ambiguous payment attempt succeeds", async () => {
+    const data = workspace();
+    data.actions = { ...data.actions, pay: true, revise: true, cancel: true, createInvoice: true };
+    const calls = install(data, { paymentStatuses: [503, 200] });
+    const user = userEvent.setup();
+    const app = renderSaasApp({ initialEntry: `/offers/${ID}` });
+    await user.click(await screen.findByRole("button", { name: "Предпросмотр" }));
+    await screen.findByTitle("Предпросмотр предложения");
+    await user.click(screen.getByRole("button", { name: "Зарегистрировать оплату" }));
+    await user.type(screen.getByRole("textbox", { name: "Банковский референс" }), " ПП-718 ");
+    await user.click(screen.getByRole("button", { name: "Подтвердить оплату" }));
+    await screen.findByText(/^Повторить с теми же данными/);
+    await user.click(screen.getByRole("button", { name: "Закрыть" }));
+    for (const name of [
+      "Выпустить предложение",
+      "Создать следующую версию",
+      "Отменить предложение",
+    ]) {
+      const button = screen.getByRole("button", { name });
+      expect(button.hasAttribute("disabled")).toBe(true);
+      await user.click(button);
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+    }
+    expect(screen.queryByRole("link", { name: "Создать счёт" })).toBeNull();
+    const invoice = screen.getByRole("button", { name: "Создать счёт" });
+    expect(invoice.hasAttribute("disabled")).toBe(true);
+    await user.click(invoice);
+    expect(app.router.state.location.pathname).toBe(`/offers/${ID}`);
+    await user.click(screen.getByRole("button", { name: "Зарегистрировать оплату" }));
+    expect(
+      screen.getByRole("textbox", { name: "Банковский референс" }).hasAttribute("disabled"),
+    ).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Подтвердить оплату" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    const attempts = calls.filter((call) => call.path.endsWith("/payment"));
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]?.key).toBe(attempts[0]?.key);
+    expect(attempts[1]?.body).toEqual({
+      amount: "12500.50",
+      currency: "RUB",
+      bankReference: "ПП-718",
+    });
+    expect(
+      screen.getByRole("button", { name: "Создать следующую версию" }).hasAttribute("disabled"),
+    ).toBe(false);
+    expect(screen.getByRole("link", { name: "Создать счёт" })).toBeDefined();
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(2);
+  });
+
+  it("retains only the existing payment retry when refreshed workspace no longer offers payment", async () => {
+    const data = workspace();
+    data.actions = { ...data.actions, publish: false, pay: true, createInvoice: true };
+    const calls = install(data, { paymentStatuses: [503, 200] });
+    const user = userEvent.setup();
+    const app = renderSaasApp({ initialEntry: `/offers/${ID}` });
+    await user.click(await screen.findByRole("button", { name: "Зарегистрировать оплату" }));
+    await user.type(screen.getByRole("textbox", { name: "Банковский референс" }), "ПП-718");
+    await user.click(screen.getByRole("button", { name: "Подтвердить оплату" }));
+    await screen.findByText(/^Повторить с теми же данными/);
+    await user.click(screen.getByRole("button", { name: "Закрыть" }));
+    data.actions.pay = false;
+    data.offer.total = "25000.00";
+    await act(async () => {
+      await app.queryClient.invalidateQueries({
+        queryKey: ["platform", "offers", ID, "workspace"],
+      });
+    });
+    await user.click(screen.getByRole("button", { name: "Зарегистрировать оплату" }));
+    expect(within(screen.getByRole("alertdialog")).getByText(/12\s500,50/)).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Подтвердить оплату" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    const attempts = calls.filter((call) => call.path.endsWith("/payment"));
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]?.key).toBe(attempts[0]?.key);
+    expect(attempts[1]?.body).toEqual({
+      amount: "12500.50",
+      currency: "RUB",
+      bankReference: "ПП-718",
+    });
+    expect(screen.queryByRole("button", { name: "Зарегистрировать оплату" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Создать счёт" })).toBeDefined();
+  });
+
+  it("rejects an open confirmation when refreshed workspace revokes that action", async () => {
+    const data = workspace();
+    data.actions.revise = true;
+    const calls = install(data);
+    const user = userEvent.setup();
+    const app = renderSaasApp({ initialEntry: `/offers/${ID}` });
+    await user.click(await screen.findByRole("button", { name: "Создать следующую версию" }));
+    data.actions.revise = false;
+    await act(async () => {
+      await app.queryClient.invalidateQueries({
+        queryKey: ["platform", "offers", ID, "workspace"],
+      });
+    });
+    const confirm = screen.getByRole("button", { name: "Создать версию" });
+    await waitFor(() => expect(confirm.hasAttribute("disabled")).toBe(true));
+    await user.click(confirm);
+    expect(calls.some((call) => call.path.endsWith("/revise"))).toBe(false);
+  });
+
   it("sends the next Moscow midnight for the inclusive end date across a year rollover", async () => {
     const calls = install(workspace());
     const user = userEvent.setup();

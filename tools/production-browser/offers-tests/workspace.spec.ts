@@ -88,9 +88,7 @@ for (const width of [390, 1440]) {
         await customer.click();
         const searchCustomer = page.getByRole("searchbox");
         await searchCustomer.fill("Молочная");
-        await expect(
-          page.getByRole("option", { name: new RegExp(tenant.name.replace(/[()]/g, "\\$&")) }),
-        ).toBeVisible();
+        await expect(page.getByRole("option", { name: tenant.name })).toBeVisible();
         await searchCustomer.press("ArrowDown");
         await searchCustomer.press("Enter");
         await expect(customer).toContainText(tenant.name);

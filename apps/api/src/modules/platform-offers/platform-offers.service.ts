@@ -107,6 +107,9 @@ export class PlatformOffersService {
       if (family[0]?.id !== draft.id) {
         throw new ConflictException({ code: "offer_version_stale" });
       }
+      if (draft.expiresAt !== null && draft.expiresAt.getTime() <= Date.now()) {
+        throw new ConflictException({ code: "offer_expired" });
+      }
       const printInput = await resolveOfferPrintInput(tx, draft);
       if (previewFingerprint !== undefined && previewFingerprint !== printInput.fingerprint) {
         throw new ConflictException({ code: "offer_preview_changed" });
@@ -443,6 +446,9 @@ export class PlatformOffersService {
       if (offerPayment) throw new ConflictException({ code: "offer_already_paid" });
       if (offer.status !== "published" || offer.total !== input.amount)
         throw new ConflictException({ code: "offer_payment_invalid" });
+      if (offer.expiresAt !== null && offer.expiresAt.getTime() <= Date.now()) {
+        throw new ConflictException({ code: "offer_expired" });
+      }
       const [decision] = await tx
         .select()
         .from(schema.commercialOfferDecisions)

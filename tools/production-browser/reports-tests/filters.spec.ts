@@ -20,6 +20,7 @@ for (const width of [390, 1440]) {
     const firstId = "92111111-1111-4111-8111-111111111111";
     const secondId = "93111111-1111-4111-8111-111111111111";
     const requests: URL[] = [];
+    const unexpected: string[] = [];
     // Synthetic responses only: never connect this browser test to production.
     await context.route(
       (url) => url.pathname.startsWith("/api/"),
@@ -71,8 +72,8 @@ for (const width of [390, 1440]) {
             },
           });
         } else {
+          unexpected.push(`Unexpected fixture request: ${url.pathname}`);
           await route.abort();
-          throw new Error(`Unexpected fixture request: ${url.pathname}`);
         }
       },
     );
@@ -137,5 +138,7 @@ for (const width of [390, 1440]) {
     await expect(page.getByRole("combobox", { name: "Product", exact: true })).toContainText(
       "Кефир 3%",
     );
+    await context.unrouteAll({ behavior: "wait" });
+    expect(unexpected).toEqual([]);
   });
 }

@@ -37,8 +37,22 @@ export function OfferActions({
   const [paymentLocked, setPaymentLocked] = useState(false);
   const paymentAttempt = useRef<{ key: string; amount: string; reference: string } | null>(null);
   const revisionKey = useRef<string | null>(null);
+  // A refreshed workspace can forbid new payments after the first attempt committed.
+  // Keep the existing attempt available for an exact idempotent retry.
+  const actionAvailable = (selected: Action) =>
+    workspace.actions[selected] || (selected === "pay" && paymentLocked);
+  const actionBlocked = (selected: Action) =>
+    !actionAvailable(selected) ||
+    (paymentLocked && selected !== "pay") ||
+    (selected === "publish" && preview === null);
   const mutation = useMutation({
     mutationFn: async (selected: Action) => {
+      if (
+        actionBlocked(selected) ||
+        (paymentAttempt.current !== null && selected !== "pay") ||
+        (selected === "pay" && !paymentAttempt.current && !reference.trim())
+      )
+        throw new Error("Action unavailable");
       const id = workspace.offer.id;
       if (selected === "publish") {
         if (!preview) throw new Error("Preview required");
@@ -88,38 +102,42 @@ export function OfferActions({
         <Alert tone="error">{t(offerErrorKey(mutation.error))}</Alert>
       ) : null}
       <div className="offer-action-bar">
-        {(["publish", "pay", "revise", "cancel"] as const)
-          .filter((key) => workspace.actions[key])
-          .map((key) => (
-            <Button
-              key={key}
-              variant={
-                key === "publish"
-                  ? "primary"
-                  : key === "cancel"
-                    ? "destructive-outline"
-                    : "secondary"
-              }
-              disabled={mutation.isPending || (key === "publish" && preview === null)}
-              onClick={() => {
-                mutation.reset();
-                setAction(key);
-              }}
-            >
-              {t(`offerWorkspace.${key}`)}
-            </Button>
-          ))}
-        {workspace.actions.createInvoice ? (
-          <Link
-            to="/invoices/new"
-            state={
-              workspace.request
-                ? { sourceOfferId: workspace.offer.id, sourceRequestId: workspace.request.id }
-                : { sourceOfferId: workspace.offer.id, sourceKind: "offer-workspace" }
+        {(["publish", "pay", "revise", "cancel"] as const).filter(actionAvailable).map((key) => (
+          <Button
+            key={key}
+            variant={
+              key === "publish" ? "primary" : key === "cancel" ? "destructive-outline" : "secondary"
             }
+            disabled={mutation.isPending || actionBlocked(key)}
+            onClick={() => {
+              if (mutation.isPending || actionBlocked(key)) return;
+              mutation.reset();
+              setAction(key);
+            }}
           >
-            {t("offerWorkspace.createInvoice")}
-          </Link>
+            {t(`offerWorkspace.${key}`)}
+          </Button>
+        ))}
+        {workspace.actions.createInvoice ? (
+          mutation.isPending || paymentLocked ? (
+            <Button variant="secondary" disabled>
+              {t("offerWorkspace.createInvoice")}
+            </Button>
+          ) : (
+            <Link
+              to="/invoices/new"
+              onClick={(event) => {
+                if (mutation.isPending || paymentAttempt.current !== null) event.preventDefault();
+              }}
+              state={
+                workspace.request
+                  ? { sourceOfferId: workspace.offer.id, sourceRequestId: workspace.request.id }
+                  : { sourceOfferId: workspace.offer.id, sourceKind: "offer-workspace" }
+              }
+            >
+              {t("offerWorkspace.createInvoice")}
+            </Link>
+          )
         ) : null}
       </div>
       <ConfirmDialog
@@ -153,12 +171,12 @@ export function OfferActions({
         cancelLabel={t("offerWorkspace.close")}
         busy={mutation.isPending}
         confirmDisabled={
-          (action === "pay" && !reference.trim()) || (action === "publish" && !preview)
+          action === null || actionBlocked(action) || (action === "pay" && !reference.trim())
         }
         error={mutation.error ? t(offerErrorKey(mutation.error)) : undefined}
         tone={action === "cancel" ? "destructive" : "default"}
         onConfirm={() => {
-          if (action) mutation.mutate(action);
+          if (action && !mutation.isPending && !actionBlocked(action)) mutation.mutate(action);
         }}
         onCancel={() => setAction(null)}
       />

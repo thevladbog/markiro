@@ -227,6 +227,7 @@ export class OfferWorkspaceService {
     const isCurrentGeneration = currentGeneration?.id === offer.id;
     const isLatestRevision = latestRevision?.id === offer.id;
     const accepted = decision?.decision === "accepted";
+    const isUnexpired = offer.expiresAt === null || offer.expiresAt.getTime() > Date.now();
     const changesRequested = decision?.decision === "changes_requested";
     const sellerCanBeSigned = sellerTaxId === SIGNED_PRINT_SELLER_TAX_ID;
     const draftIsPublishable =
@@ -244,7 +245,12 @@ export class OfferWorkspaceService {
       documents,
       request: request ? { id: request.id, number: request.number, status: request.status } : null,
       actions: {
-        publish: canWrite && offer.status === "draft" && isLatestRevision && draftIsPublishable,
+        publish:
+          canWrite &&
+          offer.status === "draft" &&
+          isLatestRevision &&
+          draftIsPublishable &&
+          isUnexpired,
         cancel: canWrite && offer.status === "published" && isCurrentGeneration,
         revise:
           canWrite &&
@@ -252,13 +258,16 @@ export class OfferWorkspaceService {
           isCurrentGeneration &&
           changesRequested &&
           !revisions.some((revision) => revision.status === "draft"),
-        pay: canWrite && offer.status === "published" && isCurrentGeneration && accepted,
+        pay:
+          canWrite &&
+          offer.status === "published" &&
+          isCurrentGeneration &&
+          accepted &&
+          isUnexpired,
         createInvoice: canWrite && offer.status === "published" && isCurrentGeneration && accepted,
         addSignedVariant:
           canWrite &&
-          (offer.status === "paid" ||
-            (offer.status === "published" &&
-              (offer.expiresAt === null || offer.expiresAt.getTime() > Date.now()))) &&
+          (offer.status === "paid" || (offer.status === "published" && isUnexpired)) &&
           isCurrentGeneration &&
           sellerCanBeSigned,
       },

@@ -415,6 +415,48 @@ describe.skipIf(!databaseUrl)("offer registry and workspace on isolated Postgres
     },
   );
 
+  it.each([
+    { offset: -1, allowed: false },
+    { offset: 0, allowed: false },
+    { offset: 1, allowed: true },
+    { offset: null, allowed: true },
+  ] as const)(
+    "projects publish and pay eligibility at deadline offset $offset",
+    async ({ offset, allowed }) => {
+      const now = new Date("2026-09-11T12:00:00.000Z");
+      const id = randomUUID();
+      await connection.db.insert(schema.commercialOffers).values({
+        ...offerValues(id, randomUUID(), 1, "draft"),
+        expiresAt: offset === null ? null : new Date(now.getTime() + offset),
+      });
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(now);
+      try {
+        expect((await service.workspace(writer, id)).actions.publish).toBe(allowed);
+        await connection.db
+          .update(schema.commercialOffers)
+          .set({ status: "published" })
+          .where(eq(schema.commercialOffers.id, id));
+        await connection.db
+          .insert(schema.commercialOfferPrintSnapshots)
+          .values(snapshotValues(id, 1, "KP-ACTIONS-DEADLINE", "Deadline buyer"));
+        await connection.db.insert(schema.commercialOfferDecisions).values({
+          tenantId,
+          offerId: id,
+          decision: "accepted",
+          actorUserId: tenantUserId,
+          idempotencyKey: randomUUID(),
+        });
+        const result = await service.workspace(writer, id);
+        expect(result.actions.pay).toBe(allowed);
+        expect(result.actions.cancel).toBe(true);
+        expect(result.actions.createInvoice).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("uses current authoritative profiles and accounts only for a draft", async () => {
     const draft = await service.workspace(writer, draftOfferId);
     expect(draft.parties).toMatchObject({

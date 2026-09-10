@@ -2,8 +2,8 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Combobox } from "@markiro/ui";
 
-// Keep UTC explicit: supportedValuesOf returns named IANA zones, not UTC itself.
-const timezones = ["UTC", ...Intl.supportedValuesOf("timeZone")];
+// Keep UTC first, including on runtimes that also return it among supported zones.
+const timezones = [...new Set(["UTC", ...Intl.supportedValuesOf("timeZone")])];
 
 export function ReportTimezoneSelect({
   value,
