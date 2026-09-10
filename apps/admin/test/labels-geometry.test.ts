@@ -430,7 +430,7 @@ describe("Pattern helper determinism", () => {
   });
 });
 
-it("fits the duplicate's whole 24 mm symbol while preserving legacy native matrix geometry", async () => {
+it("fits the duplicate's whole 22 mm symbol while preserving legacy native matrix geometry", async () => {
   const { buildDuplicateLabelTemplate, sampleLabelData } = await import("@markiro/domain");
   const { fitSpecElements } = await import("../src/pages/labels/geometry.js");
   const spec = buildDuplicateLabelTemplate();
@@ -438,10 +438,10 @@ it("fits the duplicate's whole 24 mm symbol while preserving legacy native matri
   const code = spec.elements.find((element) => element.kind === "barcode");
   if (!code) throw new Error("Missing code element");
   expect(elementBoundsMm(code, data, { kmDataMatrix: "raster" })).toEqual({
-    x: 32,
-    y: 8,
-    w: 24,
-    h: 24,
+    x: 34,
+    y: 9,
+    w: 22,
+    h: 22,
   });
   expect(elementBoundsMm(code, data).w).toBeGreaterThan(spec.widthMm);
   expect(fitSpecElements(spec, data, { kmDataMatrix: "raster" })).toMatchObject({

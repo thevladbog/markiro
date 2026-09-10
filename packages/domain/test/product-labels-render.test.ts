@@ -53,7 +53,7 @@ describe("duplicate template eligibility", () => {
       expect(() => domain.assertDuplicateTemplate(spec)).not.toThrow();
       expect(
         spec.elements.filter((element) => element.kind === "barcode" && element.data === "km.code"),
-      ).toEqual([expect.objectContaining({ format: "datamatrix", xMm: 32, yMm: 8, sizeMm: 24 })]);
+      ).toEqual([expect.objectContaining({ format: "datamatrix", xMm: 34, yMm: 9, sizeMm: 22 })]);
       for (const field of ["product.printName", "date", "expiry", "product.egais", "km.code"]) {
         expect(spec.elements).toContainEqual(expect.objectContaining({ kind: "field", field }));
       }
@@ -66,6 +66,24 @@ describe("duplicate template eligibility", () => {
       );
     },
   );
+
+  it("offers distinct full-name and print-name presets with room for text beside the code", () => {
+    const templates = domain.buildDuplicateLabelTemplates();
+    expect(templates.map(({ name }) => name)).toEqual([
+      "Дубликат Data Matrix 58×40 [Полное наименование]",
+      "Дубликат Data Matrix 58×40 [Краткое наименование]",
+    ]);
+    for (const [index, template] of templates.entries()) {
+      const title = template.spec.elements.find((el) => el.id === "product");
+      expect(title).toMatchObject({
+        kind: "field",
+        field: index === 0 ? "product.name" : "product.printName",
+        xMm: 2,
+        maxWidthMm: 30,
+      });
+      expect(() => domain.assertDuplicateTemplate(template.spec)).not.toThrow();
+    }
+  });
 
   it.each<domain.LabelTemplateSpec>([
     { ...BASE, elements: [] },
@@ -129,7 +147,7 @@ describe("human-readable marking identity", () => {
     const textElements = spec.elements.filter((el) => el.kind === "field" || el.kind === "text");
     for (const el of textElements) {
       const bounds = domain.elementBoundsMm(el, data);
-      expect(bounds.x + bounds.w, el.id).toBeLessThanOrEqual(30);
+      expect(bounds.x + bounds.w, el.id).toBeLessThanOrEqual(32);
       expect(bounds.y + bounds.h, el.id).toBeLessThanOrEqual(38);
     }
     const groups = [
@@ -144,7 +162,7 @@ describe("human-readable marking identity", () => {
       expect(value.yMm, valueId).toBeGreaterThan(bounds.y + bounds.h);
     }
     const text = domain.labelFieldDisplayValue("km.code", data, "km_without_crypto");
-    const lines = domain.wrapTextToWidth(text, (s) => domain.estimatedTextWidthMm(s, 5), 28, 2);
+    const lines = domain.wrapTextToWidth(text, (s) => domain.estimatedTextWidthMm(s, 5), 30, 2);
     expect(lines.join("")).toBe(text);
   });
   const identity = '010460000000001521a(93)"^FNC1';

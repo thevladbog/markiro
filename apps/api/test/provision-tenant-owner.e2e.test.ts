@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { and, eq, inArray, like, or } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createDb, schema } from "@markiro/db";
-import { buildDuplicateLabelTemplate, DUPLICATE_LABEL_TEMPLATE_NAME } from "@markiro/domain";
+import { buildDuplicateLabelTemplate } from "@markiro/domain";
 import { MailCryptoService } from "../src/modules/mail/mail-crypto.service";
 import { MailDeliveryService } from "../src/modules/mail/mail-delivery.service";
 import { activationIdentifier } from "../src/modules/tenant-owner-activation/token";
@@ -330,13 +330,21 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .select({ id: schema.labelTemplates.id })
       .from(schema.labelTemplates)
       .where(eq(schema.labelTemplates.tenantId, result.tenantId));
-    expect(after).toHaveLength(17);
-    expect(templates.filter((t) => t.purpose === "product_duplicate")).toEqual([
-      expect.objectContaining({
-        name: DUPLICATE_LABEL_TEMPLATE_NAME,
-        spec: buildDuplicateLabelTemplate(),
-      }),
-    ]);
+    expect(after).toHaveLength(18);
+    const duplicates = templates.filter((t) => t.purpose === "product_duplicate");
+    expect(duplicates).toHaveLength(2);
+    expect(duplicates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "Дубликат Data Matrix 58×40 [Полное наименование]",
+          spec: buildDuplicateLabelTemplate(203, "product.name"),
+        }),
+        expect.objectContaining({
+          name: "Дубликат Data Matrix 58×40 [Краткое наименование]",
+          spec: buildDuplicateLabelTemplate(),
+        }),
+      ]),
+    );
   });
 
   it("renews an expired unused activation only when explicitly requested", async () => {

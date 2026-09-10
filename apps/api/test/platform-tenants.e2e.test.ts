@@ -8,7 +8,6 @@ import {
   buildDefaultLabelTemplates,
   buildDuplicateLabelTemplate,
   DEFAULT_BOX_LABEL_TEMPLATE_NAME,
-  DUPLICATE_LABEL_TEMPLATE_NAME,
 } from "@markiro/domain";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -378,7 +377,7 @@ describe.skipIf(!ready)("platform tenant management", () => {
     expect(policy).toEqual({ limitsEnabled: true });
   });
 
-  it("seeds the resolution-free stock set: one duplicate preset, all box presets and the box default", async () => {
+  it("seeds both duplicate name variants, all box presets and the box default", async () => {
     await ensureTenant();
     const templates = await setup.db
       .select()
@@ -388,14 +387,24 @@ describe.skipIf(!ready)("platform tenant management", () => {
     expect(
       boxes.map(({ name, spec }) => ({ name, spec })).sort((a, b) => a.name.localeCompare(b.name)),
     ).toEqual(buildDefaultLabelTemplates().sort((a, b) => a.name.localeCompare(b.name)));
-    expect(templates.filter((template) => template.purpose === "product_duplicate")).toEqual([
-      expect.objectContaining({
-        name: DUPLICATE_LABEL_TEMPLATE_NAME,
-        spec: buildDuplicateLabelTemplate(),
-        enabled: true,
-        chzProductGroupCodes: null,
-      }),
-    ]);
+    const duplicates = templates.filter((template) => template.purpose === "product_duplicate");
+    expect(duplicates).toHaveLength(2);
+    expect(duplicates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "Дубликат Data Matrix 58×40 [Полное наименование]",
+          spec: buildDuplicateLabelTemplate(203, "product.name"),
+          enabled: true,
+          chzProductGroupCodes: null,
+        }),
+        expect.objectContaining({
+          name: "Дубликат Data Matrix 58×40 [Краткое наименование]",
+          spec: buildDuplicateLabelTemplate(),
+          enabled: true,
+          chzProductGroupCodes: null,
+        }),
+      ]),
+    );
     const [profile] = await setup.db
       .select()
       .from(schema.orgProfiles)

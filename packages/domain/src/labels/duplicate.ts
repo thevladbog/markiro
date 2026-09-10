@@ -4,7 +4,19 @@ import type { LegacyStockLabelTemplate } from "./defaults.js";
 import { labelTemplateSpecSchema, mmToDots, type LabelTemplateSpec } from "./model.js";
 
 /** Stock-label typography and rules: readable fields left, full GS1 symbol right. */
-export function buildDuplicateLabelTemplate(dpi: 203 | 300 = 203): LabelTemplateSpec {
+export function buildDuplicateLabelTemplate(
+  dpi: 203 | 300 = 203,
+  nameField: "product.name" | "product.printName" = "product.printName",
+): LabelTemplateSpec {
+  return buildDuplicateLabelLayout(dpi, nameField, 30);
+}
+
+function buildDuplicateLabelLayout(
+  dpi: 203 | 300,
+  nameField: "product.name" | "product.printName",
+  textWidthMm: 28 | 30,
+): LabelTemplateSpec {
+  const codeSizeMm = 52 - textWidthMm;
   return {
     widthMm: 58,
     heightMm: 40,
@@ -16,13 +28,21 @@ export function buildDuplicateLabelTemplate(dpi: 203 | 300 = 203): LabelTemplate
         kind: "field",
         xMm: 2,
         yMm: 2,
-        field: "product.printName",
+        field: nameField,
         fontSizePt: 8,
         bold: true,
-        maxWidthMm: 28,
+        maxWidthMm: textWidthMm,
         maxLines: 3,
       },
-      { id: "sep-name", kind: "line", xMm: 2, yMm: 15.3, x2Mm: 30, y2Mm: 15.3, thicknessMm: 0.3 },
+      {
+        id: "sep-name",
+        kind: "line",
+        xMm: 2,
+        yMm: 15.3,
+        x2Mm: 2 + textWidthMm,
+        y2Mm: 15.3,
+        thicknessMm: 0.3,
+      },
       {
         id: "cap-date",
         kind: "text",
@@ -30,16 +50,16 @@ export function buildDuplicateLabelTemplate(dpi: 203 | 300 = 203): LabelTemplate
         yMm: 15.8,
         text: "Дата розлива:",
         fontSizePt: 5,
-        maxWidthMm: 14,
+        maxWidthMm: textWidthMm / 2,
       },
       {
         id: "cap-expiry",
         kind: "text",
-        xMm: 16.5,
+        xMm: 2.5 + textWidthMm / 2,
         yMm: 15.8,
         text: "Годен до:",
         fontSizePt: 5,
-        maxWidthMm: 13.5,
+        maxWidthMm: textWidthMm / 2 - 0.5,
       },
       {
         id: "date",
@@ -49,19 +69,27 @@ export function buildDuplicateLabelTemplate(dpi: 203 | 300 = 203): LabelTemplate
         field: "date",
         fontSizePt: 6,
         bold: true,
-        maxWidthMm: 14,
+        maxWidthMm: textWidthMm / 2,
       },
       {
         id: "expiry",
         kind: "field",
-        xMm: 16.5,
+        xMm: 2.5 + textWidthMm / 2,
         yMm: 18.8,
         field: "expiry",
         fontSizePt: 6,
         bold: true,
-        maxWidthMm: 13.5,
+        maxWidthMm: textWidthMm / 2 - 0.5,
       },
-      { id: "sep-dates", kind: "line", xMm: 2, yMm: 22.5, x2Mm: 30, y2Mm: 22.5, thicknessMm: 0.3 },
+      {
+        id: "sep-dates",
+        kind: "line",
+        xMm: 2,
+        yMm: 22.5,
+        x2Mm: 2 + textWidthMm,
+        y2Mm: 22.5,
+        thicknessMm: 0.3,
+      },
       {
         id: "cap-egais",
         kind: "text",
@@ -69,7 +97,7 @@ export function buildDuplicateLabelTemplate(dpi: 203 | 300 = 203): LabelTemplate
         yMm: 23,
         text: "Код ЕГАИС:",
         fontSizePt: 5,
-        maxWidthMm: 28,
+        maxWidthMm: textWidthMm,
       },
       {
         id: "egais",
@@ -79,7 +107,7 @@ export function buildDuplicateLabelTemplate(dpi: 203 | 300 = 203): LabelTemplate
         field: "product.egais",
         fontSizePt: 6,
         bold: true,
-        maxWidthMm: 28,
+        maxWidthMm: textWidthMm,
       },
       {
         id: "cap-marking",
@@ -88,7 +116,7 @@ export function buildDuplicateLabelTemplate(dpi: 203 | 300 = 203): LabelTemplate
         yMm: 29.5,
         text: "Код маркировки:",
         fontSizePt: 5,
-        maxWidthMm: 28,
+        maxWidthMm: textWidthMm,
       },
       {
         id: "marking",
@@ -98,32 +126,49 @@ export function buildDuplicateLabelTemplate(dpi: 203 | 300 = 203): LabelTemplate
         field: "km.code",
         textFormat: "km_without_crypto",
         fontSizePt: 5,
-        maxWidthMm: 28,
+        maxWidthMm: textWidthMm,
         maxLines: 2,
       },
-      { id: "sep-code", kind: "line", xMm: 31, yMm: 2, x2Mm: 31, y2Mm: 38, thicknessMm: 0.3 },
+      {
+        id: "sep-code",
+        kind: "line",
+        xMm: 3 + textWidthMm,
+        yMm: 2,
+        x2Mm: 3 + textWidthMm,
+        y2Mm: 38,
+        thicknessMm: 0.3,
+      },
       {
         id: "km",
         kind: "barcode",
-        xMm: 32,
-        yMm: 8,
+        xMm: 4 + textWidthMm,
+        yMm: (40 - codeSizeMm) / 2,
         format: "datamatrix",
         data: "km.code",
-        sizeMm: 24,
+        sizeMm: codeSizeMm,
       },
     ],
   };
 }
 
-/** The seed identity of the one stock duplicate preset (spec 2026-09-10). */
+/** Family name and the legacy seed identity retained by migration 0123. */
 export const DUPLICATE_LABEL_TEMPLATE_NAME = "Дубликат Data Matrix 58×40";
 
 /**
- * The stock duplicate preset new tenants get — one, authored at 203 dpi; the
- * station prints it at its own printer's resolution (`withPrinterDpi`).
+ * Full-name and short-name presets, authored at 203 dpi. The station renders
+ * either at its printer's resolution (`withPrinterDpi`).
  */
 export function buildDuplicateLabelTemplates(): { name: string; spec: LabelTemplateSpec }[] {
-  return [{ name: DUPLICATE_LABEL_TEMPLATE_NAME, spec: buildDuplicateLabelTemplate(203) }];
+  return [
+    {
+      name: `${DUPLICATE_LABEL_TEMPLATE_NAME} [Полное наименование]`,
+      spec: buildDuplicateLabelTemplate(203, "product.name"),
+    },
+    {
+      name: `${DUPLICATE_LABEL_TEMPLATE_NAME} [Краткое наименование]`,
+      spec: buildDuplicateLabelTemplate(203),
+    },
+  ];
 }
 
 /**
@@ -134,7 +179,7 @@ export function buildDuplicateLabelTemplates(): { name: string; spec: LabelTempl
 export function buildLegacyDuplicateLabelTemplates(): LegacyStockLabelTemplate[] {
   return ([203, 300] as const).map((dpi) => ({
     name: `Дубликат Data Matrix 58×40 (${dpi} dpi)`,
-    spec: buildDuplicateLabelTemplate(dpi),
+    spec: buildDuplicateLabelLayout(dpi, "product.printName", 28),
     renamedTo: dpi === 203 ? DUPLICATE_LABEL_TEMPLATE_NAME : null,
   }));
 }

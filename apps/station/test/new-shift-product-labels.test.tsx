@@ -11,6 +11,7 @@ beforeAll(async () => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 const client = createStationClient({
   machineId: "station",
@@ -84,7 +85,13 @@ async function setup(
         )
           verification = "none";
       }
-      return Response.json({ id: fixture.shiftId });
+      return Response.json({
+        id: fixture.shiftId,
+        productionDate:
+          typeof body === "object" && body !== null && "productionDate" in body
+            ? body.productionDate
+            : null,
+      });
     }
     if (path.endsWith("/open")) {
       openCalls += 1;
@@ -149,6 +156,9 @@ it.each(["required", "none"])(
       fireEvent.click(screen.getByLabelText("Require label verification"));
     fireEvent.click(screen.getByRole("button", { name: "Select a template" }));
     fireEvent.click(await screen.findByRole("button", { name: /Product label/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(screen.getByRole("button", { name: "Production date" })).toBeDefined();
+    expect(h.requests).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() =>
       expect(h.onStarted).toHaveBeenCalledWith(
@@ -180,6 +190,7 @@ it("does not create a printing shift with an unconfigured printer and offers set
   fireEvent.click(screen.getByLabelText("Print duplicate Data Matrix"));
   fireEvent.click(screen.getByRole("button", { name: "Select a template" }));
   fireEvent.click(await screen.findByRole("button", { name: /Product label/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
   fireEvent.click(screen.getByRole("button", { name: "Start" }));
   await screen.findByText(
     "Configure the printer and its resolution before starting duplicate printing.",
@@ -217,7 +228,7 @@ it("does not reopen a retired route when its template response arrives", async (
   expect(h.requests).toEqual([]);
 });
 
-async function selectDuplicateTemplate() {
+async function selectDuplicateTemplate({ apply = true } = {}) {
   await waitFor(() =>
     expect(screen.getByLabelText("Print duplicate Data Matrix").hasAttribute("disabled")).toBe(
       false,
@@ -226,7 +237,46 @@ async function selectDuplicateTemplate() {
   fireEvent.click(screen.getByLabelText("Print duplicate Data Matrix"));
   fireEvent.click(screen.getByRole("button", { name: "Select a template" }));
   fireEvent.click(await screen.findByRole("button", { name: /Product label/ }));
+  if (apply) fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 }
+
+it("returns to the production date without creating a shift and starts with the reviewed date", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-10T12:00:00.000Z"));
+  const h = await setup();
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  fireEvent.click(screen.getByRole("button", { name: "Production date" }));
+  fireEvent.click(screen.getByRole("button", { name: "September 8, 2026" }));
+  const selectedDate = screen.getByRole("button", { name: "Production date" }).textContent;
+  fireEvent.click(screen.getByRole("button", { name: "Label printing: No printing" }));
+  await selectDuplicateTemplate({ apply: false });
+  expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+  expect(screen.getByRole("button", { name: "Production date" }).textContent).toBe(selectedDate);
+  expect(
+    screen.getByRole("button", { name: "Label printing: Data Matrix duplicate" }),
+  ).toBeDefined();
+  expect(h.requests).toEqual([]);
+  expect(h.onStarted).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Production date" }));
+  fireEvent.click(screen.getByRole("button", { name: "September 9, 2026" }));
+  fireEvent.click(screen.getByRole("button", { name: "Start" }));
+  await waitFor(() => expect(h.onStarted).toHaveBeenCalledTimes(1));
+  expect(h.requests).toEqual([
+    {
+      path: "/shifts",
+      body: expect.objectContaining({
+        productionDate: "2026-09-09",
+        validationPrint: {
+          mode: "duplicate_dm",
+          templateId: h.fixture.policy.templateId,
+          verification: "required",
+        },
+      }),
+    },
+  ]);
+});
 
 it("reuses the known created shift when retrying a failed open", async () => {
   const h = await setup({ failOpenOnce: true });
@@ -283,9 +333,9 @@ it("starts duplicate printing on a 300 dpi printer with a template authored at 2
   expect(screen.queryByText(/printer resolution does not match/)).toBeNull();
 });
 
-it("keeps a template and optional verification when navigating back through settings", async () => {
+it("keeps draft settings between steps and restores applied settings when reopening", async () => {
   await setup();
-  await selectDuplicateTemplate();
+  await selectDuplicateTemplate({ apply: false });
   fireEvent.click(screen.getByRole("button", { name: "Back" }));
   await waitFor(() =>
     expect(screen.getByLabelText("Require label verification").hasAttribute("disabled")).toBe(
@@ -293,7 +343,11 @@ it("keeps a template and optional verification when navigating back through sett
     ),
   );
   fireEvent.click(screen.getByLabelText("Require label verification"));
-  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  fireEvent.click(screen.getByRole("button", { name: "Select a template" }));
+  expect(
+    (await screen.findByRole("button", { name: /Product label/ })).getAttribute("aria-pressed"),
+  ).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
   fireEvent.click(screen.getByRole("button", { name: "Label printing: Data Matrix duplicate" }));
   await waitFor(() =>
     expect(screen.getByLabelText("Require label verification").hasAttribute("disabled")).toBe(
@@ -308,6 +362,66 @@ it("keeps a template and optional verification when navigating back through sett
     (await screen.findByRole("button", { name: /Product label/ })).getAttribute("aria-pressed"),
   ).toBe("true");
 });
+
+it("discards disabled printing on Back and starts with the applied duplicate policy", async () => {
+  const h = await setup();
+  await selectDuplicateTemplate();
+  fireEvent.click(screen.getByRole("button", { name: "Label printing: Data Matrix duplicate" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Print duplicate Data Matrix").hasAttribute("disabled")).toBe(
+      false,
+    ),
+  );
+  fireEvent.click(screen.getByLabelText("Require label verification"));
+  fireEvent.click(screen.getByLabelText("Print duplicate Data Matrix"));
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+  expect(
+    screen.getByRole("button", { name: "Label printing: Data Matrix duplicate" }),
+  ).toBeDefined();
+  expect(h.requests).toEqual([]);
+  fireEvent.click(screen.getByRole("button", { name: "Start" }));
+  await waitFor(() => expect(h.onStarted).toHaveBeenCalledTimes(1));
+  expect(h.requests).toEqual([
+    {
+      path: "/shifts",
+      body: expect.objectContaining({
+        validationPrint: {
+          mode: "duplicate_dm",
+          templateId: h.fixture.policy.templateId,
+          verification: "required",
+        },
+      }),
+    },
+  ]);
+});
+
+it.each([false, true])(
+  "discards an unapplied duplicate policy and keeps explicit no-print=%s",
+  async (explicit) => {
+    const h = await setup({ returnNoPrint: true });
+    await waitFor(() =>
+      expect(screen.getByLabelText("Print duplicate Data Matrix").hasAttribute("disabled")).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: explicit ? "Apply" : "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Label printing: No printing" }));
+    await selectDuplicateTemplate({ apply: false });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Back" }).hasAttribute("disabled")).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("button", { name: "Label printing: No printing" })).toBeDefined();
+    expect(h.requests).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(h.onStarted).toHaveBeenCalledTimes(1));
+    expect(h.requests).toHaveLength(1);
+    if (explicit) expect(h.requests[0]?.body).toMatchObject({ validationPrint: { mode: "none" } });
+    else expect(h.requests[0]?.body).not.toHaveProperty("validationPrint");
+  },
+);
 
 it("drops a start after the credential generation is retired", async () => {
   let current = true;
@@ -349,15 +463,16 @@ it("restores the selected product and template after printer setup", async () =>
       onBack={() => undefined}
     />,
   );
-  expect(screen.getByRole("button", { name: /Product label/ }).getAttribute("aria-pressed")).toBe(
-    "true",
-  );
+  expect(screen.getByRole("button", { name: "Production date" })).toBeDefined();
+  expect(
+    screen.getByRole("button", { name: "Label printing: Data Matrix duplicate" }),
+  ).toBeDefined();
   fireEvent.click(screen.getByRole("button", { name: "Start" }));
   await waitFor(() => expect(h.onStarted).toHaveBeenCalledTimes(1));
   expect(h.requests).toHaveLength(1);
 });
 
-it("keeps Start disabled when no eligible templates are available", async () => {
+it("keeps Apply disabled when no eligible templates are available", async () => {
   const h = await setup({ empty: true });
   await waitFor(() =>
     expect(screen.getByLabelText("Print duplicate Data Matrix").hasAttribute("disabled")).toBe(
@@ -367,7 +482,7 @@ it("keeps Start disabled when no eligible templates are available", async () => 
   fireEvent.click(screen.getByLabelText("Print duplicate Data Matrix"));
   fireEvent.click(screen.getByRole("button", { name: "Select a template" }));
   await screen.findByText("No label templates in the admin panel. Create one and try again.");
-  expect(screen.getByRole("button", { name: "Start" }).hasAttribute("disabled")).toBe(true);
+  expect(screen.getByRole("button", { name: "Apply" }).hasAttribute("disabled")).toBe(true);
   expect(h.requests).toEqual([]);
 });
 
@@ -386,8 +501,9 @@ it("allows retry after losing the network before creating the shift", async () =
 it("does not enter a server printing policy when the operator selected no printing", async () => {
   const h = await setup();
   await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Start" }).hasAttribute("disabled")).toBe(false),
+    expect(screen.getByRole("button", { name: "Apply" }).hasAttribute("disabled")).toBe(false),
   );
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
   fireEvent.click(screen.getByRole("button", { name: "Start" }));
   await screen.findByText(
     "The server did not confirm printing settings. Open the shift from the list after checking its settings.",
@@ -404,6 +520,10 @@ it("sends an explicit no-print policy when printing is disabled in settings", as
   );
   fireEvent.click(screen.getByLabelText("Print duplicate Data Matrix"));
   fireEvent.click(screen.getByLabelText("Print duplicate Data Matrix"));
+  expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+  expect(screen.getByRole("button", { name: "Production date" })).toBeDefined();
+  expect(h.requests).toEqual([]);
   fireEvent.click(screen.getByRole("button", { name: "Start" }));
   await waitFor(() => expect(h.onStarted).toHaveBeenCalledTimes(1));
   expect(h.requests).toEqual([

@@ -196,17 +196,21 @@ for (const verification of ["required", "none", "off"])
   test(`operator creates a shift on station with ${verification} verification through real NewShift and mock API`, async ({
     page,
   }, info) => {
-    const templateId = "55555555-5555-4555-8555-555555555555";
     const shiftId = "11111111-1111-4111-8111-111111111111";
     const writes: unknown[] = [];
     const unexpected: string[] = [];
-    const { buildDuplicateLabelTemplate, productLabelValueDigest } =
+    const { buildDuplicateLabelTemplates, productLabelValueDigest } =
       await import("../../../packages/domain/dist/index.js");
-    const template = {
-      id: templateId,
-      name: "Дубликат 58×40",
-      spec: buildDuplicateLabelTemplate(),
-    };
+    const templates = buildDuplicateLabelTemplates().map((preset, index) => ({
+      ...preset,
+      id:
+        index === 0
+          ? "55555555-5555-4555-8555-555555555555"
+          : "77777777-7777-4777-8777-777777777777",
+    }));
+    const template = templates[verification === "none" ? 0 : 1];
+    if (!template) throw new Error("Missing stock name variant");
+    const templateId = template.id;
     await page.route(`${station}/__product_labels_api/**`, async (route) => {
       const path = new URL(route.request().url()).pathname.replace("/__product_labels_api", "");
       let body: unknown;
@@ -226,11 +230,17 @@ for (const verification of ["required", "none", "off"])
         body = { validationPrintProtocol: "validation-dm-duplicate-v1" };
       else if (path === "/shifts/product-label-templates")
         body = {
-          items: [{ id: templateId, name: template.name, widthMm: 58, heightMm: 40, dpi: 203 }],
+          items: templates.map(({ id, name, spec }) => ({
+            id,
+            name,
+            widthMm: spec.widthMm,
+            heightMm: spec.heightMm,
+            dpi: spec.dpi,
+          })),
         };
       else if (path === "/shifts") {
         writes.push(route.request().postDataJSON());
-        body = { id: shiftId };
+        body = { id: shiftId, productionDate: "2026-09-09" };
       } else if (path === `/shifts/${shiftId}/open`)
         body = {
           id: shiftId,
@@ -265,6 +275,7 @@ for (const verification of ["required", "none", "off"])
       });
     });
     await page.setViewportSize({ width: 1280, height: 800 });
+    await page.clock.setFixedTime(new Date("2026-09-10T12:00:00Z"));
     await page.goto(
       `${station}/test/browser/product-labels.html?id=${randomUUID()}&screen=newshift`,
     );
@@ -285,12 +296,28 @@ for (const verification of ["required", "none", "off"])
           .uncheck();
       await page.screenshot({ path: info.outputPath(`station-create-${verification}.png`) });
       await page.getByRole("button", { name: "Выбрать шаблон", exact: true }).click();
-      await page.getByRole("button", { name: /Дубликат 58×40/ }).click();
+      for (const preset of templates)
+        await expect(
+          page.getByRole("button", {
+            name: new RegExp(preset.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+          }),
+        ).toBeVisible();
+      await page.getByRole("button", { name: template.name, exact: false }).click();
       await page.screenshot({ path: info.outputPath(`station-template-${verification}.png`) });
+      await expect(page.getByRole("button", { name: "Начать", exact: true })).toHaveCount(0);
+      await page.getByRole("button", { name: "Применить", exact: true }).click();
     }
+    await expect(
+      page.getByRole("button", { name: "Дата производства", exact: true }),
+    ).toBeVisible();
+    expect(writes).toEqual([]);
+    await page.getByRole("button", { name: "Дата производства", exact: true }).click();
+    await page.getByRole("button", { name: /^9 сентября 2026/ }).click();
+    await page.screenshot({ path: info.outputPath(`station-date-review-${verification}.png`) });
     await page.getByRole("button", { name: "Начать", exact: true }).click();
     await expect(page.getByText("Смена открыта", { exact: true })).toBeVisible();
     expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ productionDate: "2026-09-09" });
     expect(writes[0]).toMatchObject(
       verification === "off"
         ? { mode: "validation" }

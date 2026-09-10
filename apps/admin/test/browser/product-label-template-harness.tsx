@@ -10,6 +10,7 @@ import { rasterizeText as adminRasterizeText } from "../../src/labels/rasterizer
 import { rasterizeText as stationRasterizeText } from "../../../station/src/lib/rasterizer.js";
 const params = new URLSearchParams(location.search);
 const dpi = params.get("dpi") === "300" ? 300 : 203;
+const nameField = params.get("name") === "full" ? "product.name" : "product.printName";
 const rasterizeText =
   params.get("rasterizer") === "station" ? stationRasterizeText : adminRasterizeText;
 const data = {
@@ -19,19 +20,19 @@ const data = {
   date: "08.09.2026",
   expiry: "08.10.2026",
 };
-const first = await rasterizeText(data["product.printName"], {
+const first = await rasterizeText(data[nameField], {
   fontFamily: "IBM Plex Sans",
   fontSizePx: ptToDots(8, dpi),
   bold: true,
-  maxWidthPx: mmToDots(28, dpi),
+  maxWidthPx: mmToDots(30, dpi),
   maxLines: 3,
 });
-await document.fonts.load(`700 ${ptToDots(8, dpi)}px IBM Plex Sans`, data["product.printName"]);
-const warmed = await rasterizeText(data["product.printName"], {
+await document.fonts.load(`700 ${ptToDots(8, dpi)}px IBM Plex Sans`, data[nameField]);
+const warmed = await rasterizeText(data[nameField], {
   fontFamily: "IBM Plex Sans",
   fontSizePx: ptToDots(8, dpi),
   bold: true,
-  maxWidthPx: mmToDots(28, dpi),
+  maxWidthPx: mmToDots(30, dpi),
   maxLines: 3,
 });
 document.documentElement.dataset.coldFontMatch = String(
@@ -43,7 +44,7 @@ if (!root) throw new Error("root missing");
 createRoot(root).render(
   <div style={{ padding: 40 }}>
     <PreviewPane
-      spec={buildDuplicateLabelTemplate(dpi)}
+      spec={buildDuplicateLabelTemplate(dpi, nameField)}
       purpose="product_duplicate"
       data={data}
       scale={12}

@@ -5,8 +5,10 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildDuplicateLabelTemplate } from "@markiro/domain";
+import { buildLegacyDuplicateLabelTemplates } from "@markiro/domain";
 
+const legacySpec = buildLegacyDuplicateLabelTemplates().find((row) => row.spec.dpi === 203)?.spec;
+if (!legacySpec) throw new Error("Missing historical duplicate preset");
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 const name203 = "Дубликат Data Matrix 58×40 (203 dpi)";
@@ -40,7 +42,7 @@ describe.skipIf(!databaseUrl)("duplicate preset resolution migration", () => {
         tenant,
       ]);
     }
-    const old203 = buildDuplicateLabelTemplate();
+    const old203 = legacySpec;
     const custom300 = { ...old203, dpi: 300, widthMm: 60 };
     const boxId = randomUUID();
     await pool.query(
