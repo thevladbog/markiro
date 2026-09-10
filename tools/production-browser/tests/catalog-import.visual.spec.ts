@@ -2,7 +2,10 @@ import { join } from "node:path";
 
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-import { catalogCapabilitiesSchema } from "../../../packages/platform-contracts/dist/index.js";
+import {
+  catalogCapabilitiesSchema,
+  importPrepareResponseSchema,
+} from "../../../packages/platform-contracts/dist/index.js";
 
 import {
   capabilitiesFixture,
@@ -111,6 +114,90 @@ const CAPABILITIES_UNAVAILABLE = catalogCapabilitiesSchema.parse({
   },
 });
 const SESSION_READY = { ...sessionFixture, state: "ready", complete: true, loaded: 1 };
+
+/** `noUncheckedIndexedAccess` is on; assert the shape the fixture promises. */
+function first<T>(values: readonly T[], what: string): T {
+  const [head] = values;
+  if (head === undefined) throw new Error(`the ${what} fixture must carry at least one entry`);
+  return head;
+}
+const BASE_ITEM = first(previewFixture.items, "preview item");
+
+/**
+ * The shared fixture carries a single field and no photos -- enough for a
+ * functional assertion, too thin for a printed page. This one shows the
+ * comparison the manager actually reviews: several fields, a photo candidate
+ * and a product group that the National Catalog can fill in.
+ */
+const PREVIEW_RICH = importPrepareResponseSchema.parse({
+  preparation: { ...previewFixture.preparation },
+  items: [
+    {
+      ...BASE_ITEM,
+      fields: [
+        {
+          ...first(BASE_ITEM.fields, "preview field"),
+          label: "Название товара",
+          labelKey: "name",
+          before: "Молоко 3,2%",
+          after: "Молоко питьевое пастеризованное 3,2%",
+        },
+        {
+          id: id(14),
+          label: "Наименование для печати",
+          labelKey: "print_name",
+          before: null,
+          after: "Молоко 3,2%",
+          applicable: true,
+          reason: null,
+          source: "national_catalog",
+          selectedByDefault: true,
+          requiresEntryIds: [],
+        },
+        {
+          id: id(15),
+          label: "Группа продукции",
+          labelKey: "chz_product_group_code",
+          before: null,
+          after: "Молочная продукция",
+          applicable: true,
+          reason: null,
+          source: "national_catalog",
+          selectedByDefault: true,
+          requiresEntryIds: [],
+        },
+      ],
+      photos: [
+        {
+          candidateId: id(30),
+          previewPath: "/photo/1",
+          state: "ready",
+          primary: true,
+          selectedByDefault: true,
+          reason: null,
+        },
+      ],
+    },
+  ],
+});
+
+/** The same position the cabinet refuses to apply: the group is ambiguous. */
+const RICH_ITEM = first(PREVIEW_RICH.items, "rich preview item");
+const PREVIEW_BLOCKED = importPrepareResponseSchema.parse({
+  preparation: { ...previewFixture.preparation },
+  items: [
+    {
+      ...RICH_ITEM,
+      fields: RICH_ITEM.fields.map((field) =>
+        field.labelKey === "chz_product_group_code"
+          ? { ...field, after: null, applicable: false, reason: "product_group_ambiguous" }
+          : field,
+      ),
+      canApply: false,
+      reason: "product_group_ambiguous",
+    },
+  ],
+});
 const RESULT_RUNNING = {
   ...resultFixture,
   state: "running",
@@ -118,7 +205,14 @@ const RESULT_RUNNING = {
 };
 
 type Scenario =
-  "unavailable" | "start" | "selection" | "review" | "result" | "resultPhoto" | "link";
+  | "unavailable"
+  | "start"
+  | "selection"
+  | "review"
+  | "reviewBlocked"
+  | "result"
+  | "resultPhoto"
+  | "link";
 
 async function installApi(page: Page, scenario: Scenario) {
   const unexpected: string[] = [];
@@ -153,7 +247,7 @@ async function installApi(page: Page, scenario: Scenario) {
       return json(route, { ...SESSION_READY, selected: 1, selectedItemIds: [id(2)], revision: 1 });
     }
     if (path.endsWith("/previews") || path.includes("/preparations/")) {
-      return json(route, previewFixture);
+      return json(route, scenario === "reviewBlocked" ? PREVIEW_BLOCKED : PREVIEW_RICH);
     }
     if (path.endsWith("/applies") || path.includes("/applies/")) {
       return json(route, scenario === "resultPhoto" ? RESULT_RUNNING : resultFixture);
@@ -187,5 +281,54 @@ test("the import panel offers both ways to load products", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Загрузить мои товары" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Найти по GTIN" })).toBeVisible();
   await screenshotFullMain(page, screenshotPath("import-start"));
+  expect(unexpected).toEqual([]);
+});
+
+/** Shared path into the selection step: load the organization's own cards. */
+async function openSelection(page: Page) {
+  await openRoute(page, "/catalog/import");
+  await page.getByRole("button", { name: "Загрузить мои товары" }).click();
+  await expect(page.getByRole("checkbox", { name: /4006381333931/ })).toBeVisible();
+}
+
+test("the selection step lists loaded cards with their match", async ({ page }) => {
+  const unexpected = await installApi(page, "selection");
+  await openSelection(page);
+  await screenshotFullMain(page, screenshotPath("import-selection"));
+  expect(unexpected).toEqual([]);
+});
+
+test("the review step compares current and proposed values", async ({ page }) => {
+  const unexpected = await installApi(page, "review");
+  await openSelection(page);
+  await page.getByRole("checkbox", { name: /4006381333931/ }).click();
+  await page.getByRole("button", { name: "Проверить выбранные товары" }).click();
+  await expect(page.getByLabel("Название вручную")).toBeVisible();
+  await screenshotFullMain(page, screenshotPath("import-review"));
+  expect(unexpected).toEqual([]);
+});
+
+test("a position the cabinet cannot apply says why", async ({ page }) => {
+  const unexpected = await installApi(page, "reviewBlocked");
+  await openSelection(page);
+  await page.getByRole("checkbox", { name: /4006381333931/ }).click();
+  await page.getByRole("button", { name: "Проверить выбранные товары" }).click();
+  await expect(page.getByLabel("Название вручную")).toBeVisible();
+  await screenshotFullMain(page, screenshotPath("import-review-blocked"));
+  expect(unexpected).toEqual([]);
+});
+
+test("the review step offers the National Catalog photo", async ({ page }) => {
+  const unexpected = await installApi(page, "review");
+  await openSelection(page);
+  await page.getByRole("checkbox", { name: /4006381333931/ }).click();
+  await page.getByRole("button", { name: "Проверить выбранные товары" }).click();
+  // `<fieldset><legend>Фото</legend>` -- take the section itself: the photo
+  // step is one block of a very tall panel, and a full-page capture would
+  // repeat the review frame.
+  const photos = page.getByRole("group", { name: "Фото" });
+  await expect(photos).toBeVisible();
+  await settle(page);
+  await photos.screenshot({ path: screenshotPath("import-photo"), scale: "css" });
   expect(unexpected).toEqual([]);
 });
