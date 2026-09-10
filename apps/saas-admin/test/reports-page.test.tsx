@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, cleanup, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { platformErrorSchema, platformReportSchema } from "@markiro/platform-contracts";
@@ -63,6 +63,12 @@ function installReportsApi({
   failFirstCreate = false,
   failDownload = false,
   listDelayMs = 0,
+  productOptions = undefined as
+    | ((query: URLSearchParams) => {
+        items: Array<{ id: string; name: string; tenantId: string }>;
+        nextOffset: number | null;
+      })
+    | undefined,
 } = {}) {
   const calls: Array<{ url: string; method: string; body?: unknown }> = [];
   let createCount = 0;
@@ -78,6 +84,10 @@ function installReportsApi({
       }
       if (url.includes("/api/platform/reports/options?")) {
         calls.push({ url, method });
+        const query = new URL(url, "https://test.invalid").searchParams;
+        if (query.get("kind") === "products" && productOptions) {
+          return jsonResponse(200, productOptions(query));
+        }
         return jsonResponse(200, {
           items: [
             { id: "91111111-1111-4111-8111-111111111111", name: "Line 1", tenantId: TENANT_ID },
@@ -201,10 +211,10 @@ describe("platform reports", () => {
   it("preserves explicitly selected dates when timezone changes", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-10T12:00:00Z"));
-    installReportsApi();
+    const calls = installReportsApi();
     const user = userEvent.setup();
     const view = renderSaasApp({ initialEntry: "/reports" });
-    await within(view.container).findByRole("checkbox", { name: /завод/i });
+    await user.click(await within(view.container).findByRole("checkbox", { name: /завод/i }));
     for (const name of ["Дата с", "Дата по"]) {
       await user.click(within(view.container).getByRole("button", { name }));
       await user.click(within(document.body).getByRole("button", { name: "Предыдущий месяц" }));
@@ -213,10 +223,92 @@ describe("platform reports", () => {
     const dates = view.container.querySelectorAll<HTMLInputElement>(
       'input[name="fromDate"], input[name="toDate"]',
     );
-    fireEvent.change(within(view.container).getByLabelText(/часовой пояс/i), {
-      target: { value: "America/New_York" },
-    });
+    await user.click(within(view.container).getByRole("combobox", { name: /часовой пояс/i }));
+    await user.type(within(document.body).getByRole("searchbox"), "New York");
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(
+      within(view.container).getByRole("combobox", { name: /часовой пояс/i }).textContent,
+    ).toContain("America/New_York");
     expect(Array.from(dates, (input) => input.value)).toEqual(["2026-08-25", "2026-08-25"]);
+    await user.click(within(view.container).getByRole("button", { name: /сформировать/i }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.body)?.body).toMatchObject({
+        timezone: "America/New_York",
+        fromDate: "2026-08-25",
+        toDate: "2026-08-25",
+      }),
+    );
+  });
+
+  it("searches remote products, appends matching pages and keeps the selected product after closing", async () => {
+    const productId = "92111111-1111-4111-8111-111111111111";
+    const calls = installReportsApi({
+      productOptions: (query) => ({
+        items:
+          query.get("search") === "Кефир"
+            ? [
+                {
+                  id:
+                    query.get("offset") === "0"
+                      ? "93111111-1111-4111-8111-111111111111"
+                      : productId,
+                  name: query.get("offset") === "0" ? "Кефир 1%" : "Кефир 3%",
+                  tenantId: TENANT_ID,
+                },
+              ]
+            : [],
+        nextOffset: query.get("search") === "Кефир" && query.get("offset") === "0" ? 50 : null,
+      }),
+    });
+    const user = userEvent.setup();
+    const view = renderSaasApp({ initialEntry: "/reports" });
+    await user.click(await within(view.container).findByRole("checkbox", { name: /завод/i }));
+    await selectOption(user, view.container, /линия/i, "Line 1");
+    const product = within(view.container).getByRole("combobox", { name: /продукт/i });
+    await user.click(product);
+    await user.type(
+      within(document.body).getByRole("searchbox", { name: /поиск продукции/i }),
+      "Кефир",
+    );
+    await within(document.body).findByRole("option", { name: "Кефир 1%" });
+    await user.click(
+      within(document.body).getByRole("button", { name: "Загрузить ещё продукцию" }),
+    );
+    await within(document.body).findByRole("option", { name: "Кефир 3%" });
+    expect(within(document.body).getByRole("option", { name: "Кефир 1%" })).toBeTruthy();
+    const request = calls.find((call) => {
+      const query = new URL(call.url, "https://test.invalid").searchParams;
+      return (
+        query.get("kind") === "products" &&
+        query.get("search") === "Кефир" &&
+        query.get("offset") === "50"
+      );
+    });
+    expect(new URL(request!.url, "https://test.invalid").searchParams.getAll("tenantIds")).toEqual([
+      TENANT_ID,
+    ]);
+    await user.click(within(document.body).getByRole("option", { name: "Кефир 3%" }));
+    expect(product.textContent).toContain("Кефир 3%");
+    await user.click(product);
+    expect((within(document.body).getByRole("searchbox") as HTMLInputElement).value).toBe("");
+    await user.keyboard("{Escape}");
+    expect(product.textContent).toContain("Кефир 3%");
+    await user.click(within(view.container).getByRole("button", { name: /сформировать/i }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.body)?.body).toMatchObject({
+        productId,
+        lineId: "91111111-1111-4111-8111-111111111111",
+      }),
+    );
+    await user.click(product);
+    await user.click(await within(document.body).findByRole("option", { name: "Любой" }));
+    await user.click(product);
+    expect(within(document.body).getAllByRole("option", { name: "Любой" })).toHaveLength(1);
+    await user.keyboard("{Escape}");
+    await user.click(within(view.container).getByRole("checkbox", { name: /завод/i }));
+    expect(
+      within(view.container).getByRole("combobox", { name: /продукт/i }).textContent,
+    ).not.toContain("Кефир 3%");
   });
 
   it("denies the route and hides navigation without reports.read", async () => {
@@ -322,7 +414,7 @@ describe("platform reports", () => {
     const user = userEvent.setup();
     const view = renderSaasApp({ initialEntry: "/reports" });
     await user.click(await within(view.container).findByRole("checkbox", { name: /завод/i }));
-    await user.type(within(view.container).getByLabelText(/поиск вариантов/i), "line");
+    await user.type(within(view.container).getByLabelText(/поиск линий и операторов/i), "line");
     await waitFor(() => expect(calls.some((call) => call.url.includes("search=line"))).toBe(true));
     await user.click(
       within(view.container).getAllByRole("button", { name: /следующие варианты/i })[0]!,

@@ -18,7 +18,7 @@ import {
   type TenantListItem,
 } from "../tenants/api.js";
 import { createInvoice } from "./api.js";
-import { getOffer } from "../offers/api.js";
+import { getOffer, getOfferWorkspace } from "../offers/api.js";
 import { sourceOfferDraft } from "./sourceOfferDraft.js";
 import { listOperatorBankAccounts } from "../settings/api.js";
 import { getBillingRequest } from "../billing-requests/api.js";
@@ -50,40 +50,77 @@ function InvoiceEditor() {
   const client = useQueryClient();
   const [search] = useSearchParams();
   const [mutationForbidden, setMutationForbidden] = useState(false);
+  const [verifiedEntryOfferId, setVerifiedEntryOfferId] = useState<string | null>(null);
   const requestedTenant = tenantIdSchema.safeParse(search.get("tenantId")).data;
   const rawSourceOfferId = (location.state as { sourceOfferId?: unknown } | null)?.sourceOfferId;
   const rawSourceRequestId = (location.state as { sourceRequestId?: unknown } | null)
     ?.sourceRequestId;
+  const directSource =
+    (location.state as { sourceKind?: unknown } | null)?.sourceKind === "offer-workspace";
   const createdInvoiceId = useRef<string | null>(null);
   const createAttempt = useRef<{ fingerprint: string; idempotencyKey: string } | null>(null);
   const sourceOfferId = z.uuid().safeParse(rawSourceOfferId).data;
   const sourceRequestId = z.uuid().safeParse(rawSourceRequestId).data;
   const hasSourceNavigation = rawSourceOfferId !== undefined || rawSourceRequestId !== undefined;
   const invalidSourceNavigation =
-    hasSourceNavigation && (sourceOfferId === undefined || sourceRequestId === undefined);
+    hasSourceNavigation &&
+    (sourceOfferId === undefined ||
+      (directSource ? rawSourceRequestId !== undefined : sourceRequestId === undefined));
+  const workspaceAuthority = useQuery({
+    queryKey: ["platform", "offers", sourceOfferId, "workspace"],
+    queryFn: () => getOfferWorkspace(sourceOfferId!),
+    enabled: directSource && sourceOfferId !== undefined && !invalidSourceNavigation,
+    refetchOnMount: "always",
+  });
   const requestAuthority = useQuery({
     queryKey: ["platform", "billing", "requests", sourceRequestId],
     queryFn: () => getBillingRequest(sourceRequestId!),
     enabled: sourceOfferId !== undefined && sourceRequestId !== undefined,
     refetchOnMount: "always",
   });
-  const authorityValid =
+  const requestValid =
     requestAuthority.isFetchedAfterMount &&
     !requestAuthority.isFetching &&
     requestAuthority.data?.offerAction?.canCreateInvoice === true &&
     requestAuthority.data.offerAction.offerId === sourceOfferId &&
     requestAuthority.data.offerAction.currentOfferId === sourceOfferId;
+  const freshWorkspaceAuthority =
+    directSource &&
+    workspaceAuthority.isFetchedAfterMount &&
+    workspaceAuthority.isSuccess &&
+    !workspaceAuthority.isFetching &&
+    workspaceAuthority.data?.actions.createInvoice === true &&
+    workspaceAuthority.data.offer.id === sourceOfferId &&
+    workspaceAuthority.data.request === null;
+  useEffect(() => {
+    if (freshWorkspaceAuthority && sourceOfferId) setVerifiedEntryOfferId(sourceOfferId);
+  }, [freshWorkspaceAuthority, sourceOfferId]);
+  const entryVerified = sourceOfferId !== undefined && verifiedEntryOfferId === sourceOfferId;
+  const workspaceValid =
+    directSource &&
+    (freshWorkspaceAuthority || entryVerified) &&
+    workspaceAuthority.data?.actions.createInvoice === true &&
+    workspaceAuthority.data.offer.id === sourceOfferId &&
+    workspaceAuthority.data.request === null;
+  const authorityValid = directSource ? workspaceValid : requestValid;
   const staleSourceNavigation =
-    sourceOfferId !== undefined &&
-    sourceRequestId !== undefined &&
-    requestAuthority.isFetchedAfterMount &&
-    !requestAuthority.isFetching &&
-    requestAuthority.isSuccess
-      ? !authorityValid
-      : false;
+    (directSource &&
+      workspaceAuthority.isFetchedAfterMount &&
+      !workspaceAuthority.isFetching &&
+      workspaceAuthority.isSuccess &&
+      !workspaceValid) ||
+    (sourceOfferId !== undefined &&
+      sourceRequestId !== undefined &&
+      requestAuthority.isFetchedAfterMount &&
+      !requestAuthority.isFetching &&
+      requestAuthority.isSuccess &&
+      !requestValid);
   const sourceOffer = useQuery({
     queryKey: ["platform", "offers", sourceOfferId],
-    queryFn: () => getOffer(sourceOfferId!),
+    queryFn: () =>
+      directSource && workspaceAuthority.data
+        ? Promise.resolve(workspaceAuthority.data.offer)
+        : getOffer(sourceOfferId!),
     enabled: sourceOfferId !== undefined && authorityValid,
   });
   useEffect(() => {
@@ -118,6 +155,17 @@ function InvoiceEditor() {
   });
   const create = useMutation({
     mutationFn: async (draft: DocumentDraft) => {
+      if (directSource) {
+        const refreshed = await workspaceAuthority.refetch();
+        if (
+          refreshed.isError ||
+          !refreshed.data?.actions.createInvoice ||
+          refreshed.data.offer.id !== sourceOfferId ||
+          refreshed.data.request !== null
+        ) {
+          throw new ApiRequestError(409, "Offer source unavailable", "invoice_source_unavailable");
+        }
+      }
       const refreshedCatalog = await catalog.refetch();
       if (refreshedCatalog.isError) {
         throw new ApiRequestError(503, "Catalog refresh failed", "catalog_refresh_failed");
@@ -186,6 +234,12 @@ function InvoiceEditor() {
     tenants.isPending ||
     catalog.isPending ||
     sellerAccounts.isPending ||
+    (directSource &&
+      sourceOfferId !== undefined &&
+      !invalidSourceNavigation &&
+      (workspaceAuthority.isPending ||
+        (!entryVerified && workspaceAuthority.isFetching) ||
+        !workspaceAuthority.isFetchedAfterMount)) ||
     (sourceOfferId !== undefined &&
       sourceRequestId !== undefined &&
       (requestAuthority.isPending || requestAuthority.isFetching)) ||
@@ -215,7 +269,10 @@ function InvoiceEditor() {
       </section>
     );
   }
-  if (requestAuthority.error instanceof ApiRequestError && requestAuthority.error.status === 403) {
+  if (
+    (requestAuthority.error instanceof ApiRequestError && requestAuthority.error.status === 403) ||
+    (workspaceAuthority.error instanceof ApiRequestError && workspaceAuthority.error.status === 403)
+  ) {
     return (
       <section className="catalog-page">
         <h1>{t("billingRequests.forbiddenTitle")}</h1>
@@ -226,6 +283,7 @@ function InvoiceEditor() {
   if (
     tenants.error ||
     sellerAccounts.error ||
+    (directSource && workspaceAuthority.error && !entryVerified) ||
     (catalog.error && !catalog.data) ||
     (sourceRequestId !== undefined && requestAuthority.error) ||
     (authorityValid && sourceOffer.error) ||
@@ -251,8 +309,11 @@ function InvoiceEditor() {
     pickerTenants.push(toTenantListItem(prefetchedTenant.data));
   }
   const initialDraft: DocumentDraft =
-    sourceOffer.data && sourceRequestId
-      ? sourceOfferDraft({ ...sourceOffer.data, sourceRequestId }, catalog.data?.items ?? [])
+    sourceOffer.data && (sourceRequestId || workspaceValid)
+      ? sourceOfferDraft(
+          { ...sourceOffer.data, ...(sourceRequestId ? { sourceRequestId } : {}) },
+          catalog.data?.items ?? [],
+        )
       : { tenantId: selectedTenantId ?? "", applicationMode: "automatic", date: "", lines: [] };
 
   return (

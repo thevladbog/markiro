@@ -82,6 +82,30 @@ function scanner() {
   };
 }
 
+/**
+ * Presses a repack toolbar button until its dialog is actually open.
+ *
+ * `Изменить` and `Исправления` are disabled while `printBusy` is raised, and
+ * every `refresh()` re-arms the remote-reprint poll that raises it for the
+ * length of one mirror read — so a background pass can still be in flight at
+ * the moment a scan assertion has just passed. `fireEvent.click` on a disabled
+ * button is dropped silently and the dialog stays shut: the following
+ * `findBy*` then times out on a loaded runner, and a `queryBy*(…).toBeNull()`
+ * would pass for the wrong reason. Both handlers only raise an open flag, so
+ * re-pressing is safe and is what an operator does with a control that did not
+ * react. Waiting on the dialog itself — not on a timer — keeps the press tied
+ * to the state the assertions are about.
+ */
+function openToolbarDialog(button: string, dialogTitle: string): Promise<HTMLElement> {
+  return waitFor(() => {
+    fireEvent.click(screen.getByRole("button", { name: button }));
+    return screen.getByRole("dialog", { name: dialogTitle });
+  });
+}
+
+const openCorrections = () => openToolbarDialog("Исправления", "Исправления");
+const openDateDialog = () => openToolbarDialog("Изменить", "Сменить дату производства");
+
 beforeAll(async () => i18n.changeLanguage("ru"));
 afterEach(cleanup);
 
@@ -137,8 +161,7 @@ describe("repack inventory work screen", () => {
     expect(screen.getByRole("button", { name: "Исправления" })).toBeDefined();
     await waitFor(() => expect(onScanQueueRegister).toHaveBeenCalledOnce());
 
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
-    await screen.findByRole("dialog");
+    await openDateDialog();
     expect(scan.active()).toBe(false);
     expect(scan.stops()).toBe(1);
     fireEvent.change(screen.getByLabelText("Дата производства"), {
@@ -170,7 +193,7 @@ describe("repack inventory work screen", () => {
       count: 2,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
+    await openCorrections();
     expect(await screen.findByRole("button", { name: "Убрать последнюю бутылку" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Закрыть неполный короб" })).toBeNull();
     failCorrection = true;
@@ -275,7 +298,7 @@ describe("repack inventory work screen", () => {
     });
 
     expect(screen.getByTestId("repack-count").textContent).toBe("1 / 20");
-    fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
+    await openCorrections();
     expect(await screen.findByRole("button", { name: "Убрать последнюю бутылку" })).toBeDefined();
   });
 
@@ -333,7 +356,7 @@ describe("repack inventory work screen", () => {
     );
 
     expect(await screen.findByText("Короб заблокирован из-за конфликта")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
+    await openCorrections();
     const resolve = await screen.findByRole("button", {
       name: "Очистить конфликт и продолжить",
     });
@@ -395,7 +418,7 @@ describe("repack inventory work screen", () => {
     );
 
     expect(await screen.findByText("Короб аннулирован администратором")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
+    await openCorrections();
     expect(screen.queryByRole("button", { name: "Очистить конфликт и продолжить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Убрать последнюю бутылку" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Очистить открытый короб" })).toBeNull();
@@ -473,7 +496,7 @@ describe("repack inventory work screen", () => {
     const printedSscc = String(
       db.prepare("SELECT new_sscc FROM inventory_repack_boxes_mirror").get()?.new_sscc,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
+    await openCorrections();
     await screen.findByLabelText("SSCC короба");
     await waitFor(() => expect(scan.active()).toBe(true));
     scan.emit(`(00)${printedSscc}`);
@@ -591,7 +614,7 @@ describe("repack inventory work screen", () => {
     await waitFor(() => expect(toolbar().getByText("21.08.2026")).toBeTruthy());
     expect(toolbar().queryByText("19.08.2026")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await openDateDialog();
     expect((screen.getByLabelText("Дата производства") as HTMLInputElement).value).toBe(
       "2026-08-21",
     );
@@ -965,7 +988,7 @@ describe("repack inventory work screen", () => {
     scan.emit(OLD_SSCC);
     await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await openDateDialog();
     fireEvent.change(screen.getByLabelText("Дата производства"), {
       target: { value: "2026-08-21" },
     });
@@ -1065,5 +1088,163 @@ describe("repack inventory work screen", () => {
     // MATCH can still be scanned normally afterward.
     scan.emit(match.raw);
     await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"));
+  });
+
+  it("keeps the toolbar usable while the reprint poll finds nothing to print", async () => {
+    const db = new DatabaseSync(":memory:");
+    const baseExec = makeExec(db);
+    // The poll re-runs on every refresh, so only the pass armed by the test is
+    // held open; the mount's own pass runs through untouched.
+    let hold: ReturnType<typeof deferred> | null = null;
+    let suspended = false;
+    const exec: SqlExecutor = {
+      run: (sql, params) => baseExec.run(sql, params),
+      all: async <T,>(sql: string, params?: unknown[]) => {
+        if (hold && /inventory_remote_reprint_requests/i.test(sql)) {
+          const gate = hold;
+          hold = null;
+          suspended = true;
+          await gate.promise;
+        }
+        return baseExec.all<T>(sql, params);
+      },
+    };
+    await applyMigrations(exec);
+    db.prepare(
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0043', ?)",
+    ).run(INVENTORY_ID, SNAPSHOT_ID);
+    db.prepare(
+      `INSERT INTO sscc_pool
+         (issuer_prefix, extension_digit, from_serial, to_serial, next_serial)
+       VALUES ('460068200', 0, 1, 100, 1)`,
+    ).run();
+    const scan = scanner();
+
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+        createEventId={() => crypto.randomUUID()}
+        now={() => "2026-08-25T10:00:01.000Z"}
+      />,
+    );
+    await waitFor(() => expect(scan.active()).toBe(true));
+
+    const gate = deferred();
+    hold = gate;
+    scan.emit(OLD_SSCC);
+    await waitFor(() => expect(suspended).toBe(true));
+
+    // Nothing is printing: the reprint queue is empty and this pass is still
+    // reading it. The operator keeps the whole toolbar — a press landing here
+    // must not be swallowed by a lookup that has no work to do.
+    for (const name of ["Изменить", "Исправления", "Выйти из задания"]) {
+      expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(false);
+    }
+    // Scanning is likewise never paused by an idle lookup.
+    expect(scan.active()).toBe(true);
+
+    gate.release();
+    await screen.findByText("Старый короб выбран");
+    for (const name of ["Изменить", "Исправления", "Выйти из задания"]) {
+      expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(false);
+    }
+  });
+
+  it("still blocks the toolbar while an admin reprint is actually printing", async () => {
+    const db = new DatabaseSync(":memory:");
+    const exec = makeExec(db);
+    await applyMigrations(exec);
+    const boxId = "17171717-1717-4717-8717-171717171717";
+    const correctionId = "18181818-1818-4818-8818-181818181818";
+    db.prepare(
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0043', ?)",
+    ).run(INVENTORY_ID, SNAPSHOT_ID);
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          open_repack_box_id, next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, '2026-08-19', NULL, 2, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+    db.prepare(
+      `INSERT INTO inventory_repack_boxes_mirror
+         (inventory_id, snapshot_id, box_id, opened_event_id, closed_event_id,
+          old_sscc_context, new_sscc, owner_device_id, capacity, production_date,
+          state, print_state, print_attempt_count, opened_at, closed_at, updated_at)
+       VALUES (?, ?, ?, '19191919-1919-4919-8919-191919191919',
+               '1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a', ?, '046006820000621515', ?, 20,
+               '2026-08-19', 'closed', 'pending', 0, '2026-08-25T09:00:00.000Z',
+               '2026-08-25T09:30:00.000Z', '2026-08-25T09:30:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, boxId, OLD_SSCC, DEVICE_ID);
+    db.prepare(
+      `INSERT INTO inventory_repack_items_mirror
+         (inventory_id, snapshot_id, item_id, source_event_id, box_id, code_hash,
+          position, production_date, added_at)
+       VALUES (?, ?, '1b1b1b1b-1b1b-4b1b-8b1b-1b1b1b1b1b1b',
+               '1c1c1c1c-1c1c-4c1c-8c1c-1c1c1c1c1c1c', ?, ?, 1,
+               '2026-08-19', '2026-08-25T09:01:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, boxId, "e".repeat(64));
+    // Reach `printed` the way the pipeline does: the claim trigger only accepts
+    // an initial attempt on a pending box, then flips it to `printing`.
+    db.prepare(
+      `INSERT INTO inventory_repack_print_attempts
+         (inventory_id, snapshot_id, attempt_id, box_id, kind, attempt_number,
+          state, attempted_at)
+       VALUES (?, ?, '1d1d1d1d-1d1d-4d1d-8d1d-1d1d1d1d1d1d', ?, 'initial', 1, 'printing',
+               '2026-08-25T09:30:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, boxId);
+    db.prepare(
+      `UPDATE inventory_repack_print_attempts
+          SET state = 'printed', completed_at = '2026-08-25T09:30:01.000Z',
+              event_id = '1e1e1e1e-1e1e-4e1e-8e1e-1e1e1e1e1e1e'
+        WHERE attempt_number = 1`,
+    ).run();
+    db.prepare(
+      `UPDATE inventory_repack_boxes_mirror
+          SET print_state = 'printed', print_attempt_count = 1,
+              printed_at = '2026-08-25T09:30:01.000Z'
+        WHERE box_id = ?`,
+    ).run(boxId);
+    db.prepare(
+      `INSERT INTO inventory_remote_reprint_requests
+         (inventory_id, snapshot_id, correction_id, box_id, owner_device_id, requested_at)
+       VALUES (?, ?, ?, ?, ?, '2026-08-25T10:02:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, correctionId, boxId, DEVICE_ID);
+    const scan = scanner();
+    const printing = deferred();
+    const print = vi.fn(() => printing.promise);
+
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+        printing={{ target: { kind: "usb", printer: "Zebra" }, language: "zpl", print }}
+        createEventId={() => crypto.randomUUID()}
+        now={() => "2026-08-25T10:03:00.000Z"}
+      />,
+    );
+
+    // The other half of the guard: a lookup that DID find work must still hold
+    // the toolbar shut for the whole print, hardware included.
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    for (const name of ["Изменить", "Исправления", "Выйти из задания"]) {
+      expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(true);
+    }
+
+    printing.release();
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Исправления" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    expect(db.prepare("SELECT completed_at FROM inventory_remote_reprint_requests").get()).toEqual({
+      completed_at: "2026-08-25T10:03:00.000Z",
+    });
   });
 });

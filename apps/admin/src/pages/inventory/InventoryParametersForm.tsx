@@ -178,15 +178,23 @@ export function InventoryParametersForm({
         ) : null}
         <div className="mk-inventory-form__dates">
           <DatePicker
-            placeholder={t("common.datePicker.placeholder")}
             label={t("pages.inventory.create.dateFrom")}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
             value={from}
             onValueChange={(value) => setFrom(value ?? "")}
             locale={i18n.language}
           />
           <DatePicker
-            placeholder={t("common.datePicker.placeholder")}
             label={t("pages.inventory.create.dateTo")}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
             value={to}
             onValueChange={(value) => setTo(value ?? "")}
             locale={i18n.language}

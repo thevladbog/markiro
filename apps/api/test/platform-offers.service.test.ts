@@ -8,6 +8,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createOfferSchema, type CreateOfferDto } from "../src/modules/platform-offers/dto";
 import type { OfferDocumentsService } from "../src/modules/platform-offers/offer-documents.service";
+import type { OfferWorkspaceService } from "../src/modules/platform-offers/offer-workspace.service";
+import type { OfferPreviewService } from "../src/modules/platform-offers/offer-preview.service";
 import { PlatformOffersController } from "../src/modules/platform-offers/platform-offers.controller";
 import { PlatformOffersService } from "../src/modules/platform-offers/platform-offers.service";
 import { BillingService } from "../src/modules/billing/billing.service";
@@ -227,7 +229,12 @@ describe("platform offer response boundary", () => {
         },
       ],
     } as unknown as PlatformOffersService;
-    const controller = new PlatformOffersController(service, {} as OfferDocumentsService);
+    const controller = new PlatformOffersController(
+      service,
+      {} as OfferDocumentsService,
+      {} as OfferWorkspaceService,
+      {} as OfferPreviewService,
+    );
     const request = {
       platformPrincipal: actor,
     } as unknown as Parameters<PlatformOffersController["list"]>[0];
@@ -241,7 +248,12 @@ describe("platform offer response boundary", () => {
         url: "https://objects.example.invalid/offers/offer.pdf?signature=redacted",
       })),
     } as unknown as OfferDocumentsService;
-    const controller = new PlatformOffersController({} as PlatformOffersService, documents);
+    const controller = new PlatformOffersController(
+      {} as PlatformOffersService,
+      documents,
+      {} as OfferWorkspaceService,
+      {} as OfferPreviewService,
+    );
 
     const failure = await controller
       .documentsDownload("41111111-1111-4111-8111-111111111111", "not-a-uuid")
@@ -355,7 +367,7 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
         revision: 4,
         status: "draft",
         total: "240.00",
-        expiresAt: new Date("2026-09-30T21:00:00.000Z"),
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         termsMarkdown: "## Immutable terms",
         createdByPlatformUserId: actorId,
       })
@@ -620,6 +632,20 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
     const secondDraft = await service.revise(revisionActor, first!.id, {
       idempotencyKey: randomUUID(),
     });
+    await connection.db.insert(schema.commercialOfferLines).values({
+      tenantId,
+      offerId: secondDraft.id,
+      position: 1,
+      kind: "service",
+      nameRu: "Услуга",
+      nameEn: "Service",
+      quantity: 1,
+      unit: "шт",
+      agreedUnitPrice: "100.00",
+      vatRate: null,
+      vatIncluded: true,
+      lineTotal: "100.00",
+    });
     await service.publish(revisionActor, secondDraft.id);
     await service.cancel(revisionActor, secondDraft.id);
 
@@ -733,6 +759,107 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
     }
   }, 15_000);
 
+  it.each([
+    { offset: -1, allowed: false },
+    { offset: 0, allowed: false },
+    { offset: 1, allowed: true },
+    { offset: null, allowed: true },
+  ] as const)(
+    "checks publication and payment at deadline offset $offset",
+    async ({ offset, allowed }) => {
+      const now = new Date("2026-09-11T12:00:00.000Z");
+      const expiresAt = offset === null ? null : new Date(now.getTime() + offset);
+      const draft = await service.create(revisionActor, {
+        tenantId,
+        expiresAt: expiresAt?.toISOString() ?? null,
+        lines: [{ ...inputLine, kind: "service", catalogVersionId: null, activationPolicy: null }],
+      });
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(now);
+      try {
+        if (allowed) {
+          await expect(service.publish(revisionActor, draft.id)).resolves.toMatchObject({
+            status: "published",
+          });
+        } else {
+          await expect(service.publish(revisionActor, draft.id)).rejects.toMatchObject({
+            response: { code: "offer_expired" },
+            status: 409,
+          });
+          await expect(
+            connection.db
+              .select()
+              .from(schema.commercialOffers)
+              .where(eq(schema.commercialOffers.id, draft.id)),
+          ).resolves.toEqual([expect.objectContaining({ status: "draft", number: null })]);
+          await expect(
+            connection.db
+              .select()
+              .from(schema.commercialOfferPrintSnapshots)
+              .where(eq(schema.commercialOfferPrintSnapshots.offerId, draft.id)),
+          ).resolves.toEqual([]);
+          // Issue before the deadline, then attempt a new payment at/after it.
+          vi.setSystemTime(new Date(now.getTime() - 1000));
+          await service.publish(revisionActor, draft.id);
+          vi.setSystemTime(now);
+        }
+        await connection.db.insert(schema.commercialOfferDecisions).values({
+          tenantId,
+          offerId: draft.id,
+          decision: "accepted",
+          actorUserId: tenantUserId,
+          idempotencyKey: randomUUID(),
+        });
+        const key = randomUUID();
+        const payment = {
+          amount: "120.00",
+          currency: "RUB" as const,
+          bankReference: `DEADLINE-${randomUUID()}`,
+        };
+        if (allowed) {
+          const paid = await service.pay(revisionActor, draft.id, key, payment);
+          expect(paid.fulfilments).toHaveLength(1);
+          vi.setSystemTime(new Date(now.getTime() + 1000));
+          await expect(service.pay(revisionActor, draft.id, key, payment)).resolves.toEqual({
+            paymentId: paid.paymentId,
+            fulfilments: [],
+          });
+          await expect(
+            connection.db
+              .select()
+              .from(schema.payments)
+              .where(eq(schema.payments.offerId, draft.id)),
+          ).resolves.toHaveLength(1);
+          await expect(
+            connection.db
+              .select()
+              .from(schema.offerLineFulfilments)
+              .where(eq(schema.offerLineFulfilments.paymentId, paid.paymentId)),
+          ).resolves.toHaveLength(1);
+        } else {
+          await expect(service.pay(revisionActor, draft.id, key, payment)).rejects.toMatchObject({
+            response: { code: "offer_expired" },
+            status: 409,
+          });
+          await expect(
+            connection.db
+              .select()
+              .from(schema.payments)
+              .where(eq(schema.payments.offerId, draft.id)),
+          ).resolves.toEqual([]);
+          await expect(
+            connection.db
+              .select()
+              .from(schema.commercialOffers)
+              .where(eq(schema.commercialOffers.id, draft.id)),
+          ).resolves.toEqual([expect.objectContaining({ status: "published" })]);
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("serializes global offer numbers and payment keys across tenants", async () => {
     const secondTenantId = await createOrganization(connection.db);
     const secondTenantUserId = `offer-global-tenant-${randomUUID()}`;
@@ -781,6 +908,22 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
         },
       ])
       .returning();
+    await connection.db.insert(schema.commercialOfferLines).values(
+      [firstDraft!, secondDraft!].map((offer) => ({
+        tenantId: offer.tenantId,
+        offerId: offer.id,
+        position: 1,
+        kind: "service" as const,
+        nameRu: "Услуга",
+        nameEn: "Service",
+        quantity: 1,
+        unit: "шт",
+        agreedUnitPrice: "100.00",
+        vatRate: null,
+        vatIncluded: true,
+        lineTotal: "100.00",
+      })),
+    );
     await connection.pool.query(`
       CREATE FUNCTION task6_offer_publish_delay() RETURNS trigger
       LANGUAGE plpgsql AS $$
