@@ -82,6 +82,30 @@ function scanner() {
   };
 }
 
+/**
+ * Presses a repack toolbar button until its dialog is actually open.
+ *
+ * `Изменить` and `Исправления` are disabled while `printBusy` is raised, and
+ * every `refresh()` re-arms the remote-reprint poll that raises it for the
+ * length of one mirror read — so a background pass can still be in flight at
+ * the moment a scan assertion has just passed. `fireEvent.click` on a disabled
+ * button is dropped silently and the dialog stays shut: the following
+ * `findBy*` then times out on a loaded runner, and a `queryBy*(…).toBeNull()`
+ * would pass for the wrong reason. Both handlers only raise an open flag, so
+ * re-pressing is safe and is what an operator does with a control that did not
+ * react. Waiting on the dialog itself — not on a timer — keeps the press tied
+ * to the state the assertions are about.
+ */
+function openToolbarDialog(button: string, dialogTitle: string): Promise<HTMLElement> {
+  return waitFor(() => {
+    fireEvent.click(screen.getByRole("button", { name: button }));
+    return screen.getByRole("dialog", { name: dialogTitle });
+  });
+}
+
+const openCorrections = () => openToolbarDialog("Исправления", "Исправления");
+const openDateDialog = () => openToolbarDialog("Изменить", "Сменить дату производства");
+
 beforeAll(async () => i18n.changeLanguage("ru"));
 afterEach(cleanup);
 
@@ -137,8 +161,7 @@ describe("repack inventory work screen", () => {
     expect(screen.getByRole("button", { name: "Исправления" })).toBeDefined();
     await waitFor(() => expect(onScanQueueRegister).toHaveBeenCalledOnce());
 
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
-    await screen.findByRole("dialog");
+    await openDateDialog();
     expect(scan.active()).toBe(false);
     expect(scan.stops()).toBe(1);
     fireEvent.change(screen.getByLabelText("Дата производства"), {
@@ -170,7 +193,7 @@ describe("repack inventory work screen", () => {
       count: 2,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
+    await openCorrections();
     expect(await screen.findByRole("button", { name: "Убрать последнюю бутылку" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Закрыть неполный короб" })).toBeNull();
     failCorrection = true;
@@ -275,7 +298,7 @@ describe("repack inventory work screen", () => {
     });
 
     expect(screen.getByTestId("repack-count").textContent).toBe("1 / 20");
-    fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
+    await openCorrections();
     expect(await screen.findByRole("button", { name: "Убрать последнюю бутылку" })).toBeDefined();
   });
 
@@ -333,7 +356,7 @@ describe("repack inventory work screen", () => {
     );
 
     expect(await screen.findByText("Короб заблокирован из-за конфликта")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
+    await openCorrections();
     const resolve = await screen.findByRole("button", {
       name: "Очистить конфликт и продолжить",
     });
@@ -395,7 +418,7 @@ describe("repack inventory work screen", () => {
     );
 
     expect(await screen.findByText("Короб аннулирован администратором")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
+    await openCorrections();
     expect(screen.queryByRole("button", { name: "Очистить конфликт и продолжить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Убрать последнюю бутылку" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Очистить открытый короб" })).toBeNull();
@@ -473,7 +496,7 @@ describe("repack inventory work screen", () => {
     const printedSscc = String(
       db.prepare("SELECT new_sscc FROM inventory_repack_boxes_mirror").get()?.new_sscc,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
+    await openCorrections();
     await screen.findByLabelText("SSCC короба");
     await waitFor(() => expect(scan.active()).toBe(true));
     scan.emit(`(00)${printedSscc}`);
@@ -591,7 +614,7 @@ describe("repack inventory work screen", () => {
     await waitFor(() => expect(toolbar().getByText("21.08.2026")).toBeTruthy());
     expect(toolbar().queryByText("19.08.2026")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await openDateDialog();
     expect((screen.getByLabelText("Дата производства") as HTMLInputElement).value).toBe(
       "2026-08-21",
     );
@@ -965,7 +988,7 @@ describe("repack inventory work screen", () => {
     scan.emit(OLD_SSCC);
     await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await openDateDialog();
     fireEvent.change(screen.getByLabelText("Дата производства"), {
       target: { value: "2026-08-21" },
     });
@@ -1066,4 +1089,5 @@ describe("repack inventory work screen", () => {
     scan.emit(match.raw);
     await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"));
   });
+
 });
