@@ -26,7 +26,7 @@ import { DevicePager } from "./DevicePager.js";
 import { useDevices, type DeviceDto, type DeviceStatus, type DeviceType } from "./api.js";
 
 const PAGE_SIZE = 8;
-const deviceTypes: readonly DeviceType[] = ["station", "kiosk"];
+const deviceTypes: readonly DeviceType[] = ["station", "kiosk", "handheld"];
 const deviceStatuses: readonly DeviceStatus[] = [
   "awaiting_pairing",
   "online",

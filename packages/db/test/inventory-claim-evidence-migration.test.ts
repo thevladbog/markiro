@@ -78,10 +78,12 @@ describe.skipIf(!databaseUrl)("inventory claim evidence migration", () => {
     ]);
     await db.insert(schema.lines).values({ id: lineId, tenantId, name: "Line" });
     await db.insert(schema.employees).values({ id: operatorId, tenantId, fullName: "Operator" });
-    await db.insert(schema.stationDevices).values([
-      { id: deviceAId, tenantId, name: "Station A", lineId },
-      { id: deviceBId, tenantId, name: "Station B", lineId },
-    ]);
+    // Raw SQL for the same reason as products: `schema.stationDevices` now lists
+    // `kind` (0124), which this migration-73 scratch DB does not have yet.
+    await pool.query(
+      `insert into station_devices (id, tenant_id, name, line_id) values ($1, $2, $3, $4), ($5, $6, $7, $8)`,
+      [deviceAId, tenantId, "Station A", lineId, deviceBId, tenantId, "Station B", lineId],
+    );
     // Keep this legacy fixture independent from columns added after migration
     // 73, just like the product insert above.
     await pool.query(

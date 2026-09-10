@@ -16,6 +16,7 @@ import {
   useUpdateKiosk,
   useUpdateStation,
   clearDevicePairingCodeMutations,
+  isStationLike,
   type DeviceDto,
   type DeviceType,
   type PairingCode,
@@ -78,7 +79,12 @@ export function DeviceDrawer({
 
   const types = useMemo(
     () => [
-      ...(allowStation ? [{ value: "station", label: t("pages.devices.type.station") }] : []),
+      ...(allowStation
+        ? [
+            { value: "station", label: t("pages.devices.type.station") },
+            { value: "handheld", label: t("pages.devices.type.handheld") },
+          ]
+        : []),
       ...(allowKiosk ? [{ value: "kiosk", label: t("pages.devices.type.kiosk") }] : []),
     ],
     [allowKiosk, allowStation, t],
@@ -116,10 +122,9 @@ export function DeviceDrawer({
       const generation = ++requestGeneration.current;
       setError(null);
       try {
-        const code =
-          target.type === "station"
-            ? await issueStation.mutateAsync(target.id)
-            : await issueKiosk.mutateAsync(target.id);
+        const code = isStationLike(target.type)
+          ? await issueStation.mutateAsync(target.id)
+          : await issueKiosk.mutateAsync(target.id);
         if (!mounted.current || generation !== requestGeneration.current) {
           clearDevicePairingCodeMutations(queryClient, target.type, target.id, code);
           return;
@@ -139,7 +144,7 @@ export function DeviceDrawer({
     setError(null);
     try {
       if (mode === "reassign" && device) {
-        if (device.type === "station") {
+        if (isStationLike(device.type)) {
           await updateStation.mutateAsync({ id: device.id, input: { lineId: place || null } });
         } else {
           await updateKiosk.mutateAsync({ id: device.id, input: { location: place || null } });
@@ -147,20 +152,22 @@ export function DeviceDrawer({
         onClose();
         return;
       }
-      const created =
-        type === "station"
-          ? await createStation.mutateAsync({ name, lineId: place || null })
-          : await createKiosk.mutateAsync({
-              name,
-              location: place || null,
-              dayLimitPerEmployee: 5,
-              showPrices: true,
-            });
-      const placeName =
-        type === "station"
-          ? (lines.data?.find((line) => line.id === place)?.name ?? null)
-          : place || null;
-      if (type === "station" || canIssueKiosk)
+      const created = isStationLike(type)
+        ? await createStation.mutateAsync({
+            name,
+            lineId: place || null,
+            kind: type === "handheld" ? "handheld" : "station",
+          })
+        : await createKiosk.mutateAsync({
+            name,
+            location: place || null,
+            dayLimitPerEmployee: 5,
+            showPrices: true,
+          });
+      const placeName = isStationLike(type)
+        ? (lines.data?.find((line) => line.id === place)?.name ?? null)
+        : place || null;
+      if (isStationLike(type) || canIssueKiosk)
         await issue({ id: created.id, type, name: created.name, placeName });
       else setError(t("pages.devices.drawer.createdWithoutCode"));
     } catch {
@@ -177,7 +184,7 @@ export function DeviceDrawer({
   const target = device
     ? { id: device.id, type: device.type, name: device.name, placeName: device.place.name }
     : null;
-  const canIssue = target?.type === "station" || canIssueKiosk;
+  const canIssue = (target !== null && isStationLike(target.type)) || canIssueKiosk;
   const isPending =
     createStation.isPending ||
     createKiosk.isPending ||
@@ -310,7 +317,7 @@ export function DeviceDrawer({
               />
             </>
           ) : null}
-          {type === "station" ? (
+          {isStationLike(type) ? (
             <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-2)" }}>
               <Select
                 label={t("pages.devices.lineLabel")}

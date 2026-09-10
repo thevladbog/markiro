@@ -455,6 +455,8 @@ export const stationDevices = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: tenantId(),
     name: text("name").notNull(),
+    /** `station` (line terminal) or `handheld` (TSD). Same credential and endpoints. */
+    kind: text("kind").notNull().default("station"),
     // References better-auth's apikey.id (text). Not a composite tenant FK:
     // apikey is a Better Auth-managed table without a (tenant_id, id) unique.
     apiKeyId: text("api_key_id"),
@@ -471,6 +473,7 @@ export const stationDevices = pgTable(
       columns: [t.tenantId, t.lineId],
       foreignColumns: [lines.tenantId, lines.id],
     }),
+    check("station_devices_kind_check", sql`${t.kind} in ('station', 'handheld')`),
   ],
 );
 

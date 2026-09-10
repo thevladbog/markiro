@@ -49,3 +49,9 @@ docs/design-briefs/screenshot-*.png
 
 # Disposable local/CI National Catalog browser traces and failure screenshots.
 /tools/production-browser/test-results/
+
+# Android handheld app build outputs and machine-local SDK paths.
+apps/handheld/**/build/
+apps/handheld/.gradle/
+apps/handheld/local.properties
+apps/handheld/.kotlin/

@@ -17,6 +17,7 @@ const jobPairs = [
   ["station_windows_build", "station-windows-build"],
   ["signer_rust", "signer-rust"],
   ["signer_windows_build", "signer-windows-build"],
+  ["handheld_android", "handheld-android"],
 ];
 
 function needsFixture({
