@@ -6,7 +6,9 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildDuplicateLabelTemplate, productLabelValueDigest } from "@markiro/domain";
+import { buildLegacyDuplicateLabelTemplates, productLabelValueDigest } from "@markiro/domain";
+const legacySpec = buildLegacyDuplicateLabelTemplates().find((row) => row.spec.dpi === 203)?.spec;
+if (!legacySpec) throw new Error("Missing historical duplicate preset");
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 const seedName = "Дубликат Data Matrix 58×40 (203 dpi)";
@@ -109,7 +111,7 @@ describe.skipIf(!databaseUrl)("duplicate label stock layout update", () => {
       expect(rows.rows.find((r) => r.id === e.id)).toEqual({
         id: e.id,
         enabled: e.enabled,
-        spec: index < 2 ? buildDuplicateLabelTemplate() : e.spec,
+        spec: index < 2 ? legacySpec : e.spec,
       });
     const saved = await pool.query("SELECT validation_print_snapshot FROM shifts WHERE id=$1", [
       shift,

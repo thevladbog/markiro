@@ -183,6 +183,7 @@
     "printNoneHint": "After sending to the printer, the next unit can be scanned.",
     "printCopyHint": "The full product code is copied to the outer packaging. The product quantity stays the same.",
     "selectProductTemplate": "Select a template",
+    "applyPrintSettings": "Apply",
     "productTemplateLabel": "Product label template",
     "printUnavailable": "Duplicate printing is not available for this station.",
     "printSettingsLoadFailed": "Could not load print settings. Check the connection and retry.",

@@ -9,8 +9,10 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 // The DB has no runtime dependency on domain. Compare the migration fixture with its public build.
-import { buildDuplicateLabelTemplate } from "@markiro/domain";
+import { buildLegacyDuplicateLabelTemplates } from "@markiro/domain";
 
+const legacySpec = buildLegacyDuplicateLabelTemplates().find((row) => row.spec.dpi === 203)?.spec;
+if (!legacySpec) throw new Error("Missing historical duplicate preset");
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 const hash = "a".repeat(64);
@@ -123,7 +125,7 @@ describe.skipIf(!databaseUrl)("product label migration", () => {
         {
           id: expect.any(String),
           purpose: "product_duplicate",
-          spec: buildDuplicateLabelTemplate(),
+          spec: legacySpec,
         },
       ]);
       const profiles = await pool.query(
@@ -153,7 +155,7 @@ describe.skipIf(!databaseUrl)("product label migration", () => {
     );
     expect(rows.rows).toEqual([
       { tenant_id: a.tenant, spec: { customDuplicate: true }, enabled: false },
-      { tenant_id: b.tenant, spec: buildDuplicateLabelTemplate(), enabled: true },
+      { tenant_id: b.tenant, spec: legacySpec, enabled: true },
     ]);
   });
 

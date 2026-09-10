@@ -1032,7 +1032,7 @@ it("builds a 58 by 40 product duplicate template when its purpose is selected", 
         kind: "barcode",
         data: "km.code",
         format: "datamatrix",
-        sizeMm: 24,
+        sizeMm: 22,
       }),
     ]),
   });
@@ -1122,18 +1122,18 @@ it.each([
     const text = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
     const dm = rasterizeGs1DataMatrix(
       labelPreviewData("product_duplicate")["km.code"],
-      mmToDots(24, dpi),
+      mmToDots(22, dpi),
     );
     expect(text).toContain(
       format === "zpl"
-        ? `^FO${mmToDots(32, dpi)},${mmToDots(8, dpi)}${buildGfaCommand(dm)}^FS`
-        : buildBitmapCommand(mmToDots(32, dpi), mmToDots(8, dpi), dm),
+        ? `^FO${mmToDots(34, dpi)},${mmToDots(9, dpi)}${buildGfaCommand(dm)}^FS`
+        : buildBitmapCommand(mmToDots(34, dpi), mmToDots(9, dpi), dm),
     );
     expect(text).not.toContain("^BX");
     expect(text).not.toContain("DMATRIX");
     expect(raster).toHaveBeenCalledWith(
       "Кега · демонстрационная этикетка",
-      expect.objectContaining({ maxWidthPx: mmToDots(28, dpi), maxLines: 3, bold: true }),
+      expect.objectContaining({ maxWidthPx: mmToDots(30, dpi), maxLines: 3, bold: true }),
     );
   },
 );
