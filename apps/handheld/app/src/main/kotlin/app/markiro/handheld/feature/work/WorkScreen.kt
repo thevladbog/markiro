@@ -158,7 +158,10 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                 stringResource(R.string.work_box_header, box.ordinal, box.filled, box.capacity),
                 Modifier.padding(top = MarkiroSizes.sp2),
             )
-            BoxFill(box.filled, box.capacity, Modifier.weight(0.4f).padding(MarkiroSizes.sp4))
+            // The grid is the main zone in aggregation, so it takes the larger share
+            // and the recent-scan feed gives way; the strip above already carries the
+            // last verdict.
+            BoxFill(box.filled, box.capacity, Modifier.weight(0.62f).padding(MarkiroSizes.sp4))
         } else {
             LastScanZone(state.last, Modifier.weight(0.4f))
         }
@@ -187,7 +190,7 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                 tone = if (state.errors + state.duplicates > 0) Tone.Warn else Tone.Neutral,
             )
         }
-        Column(Modifier.weight(0.6f).fillMaxWidth().padding(horizontal = MarkiroSizes.sp4)) {
+        Column(Modifier.weight(if (box != null) 0.38f else 0.6f).fillMaxWidth().padding(horizontal = MarkiroSizes.sp4)) {
             if (state.feed.isEmpty()) Text(stringResource(R.string.work_feed_empty), style = t.caption, color = c.fg3)
             state.feed.forEach { event ->
                 val verdict = Verdict.fromWire(event.verdict)

@@ -195,4 +195,19 @@ class BoxPrinterTest {
         assertEquals(PrintOutcome.Failed(PrintReason.BOX_OPEN), printer(transport).print("box-2"))
         assertNull(transport.sent)
     }
+
+    @Test
+    fun deferringKeepsWhyTheLastAttemptFailed() = runTest {
+        // Erasing it leaves the queue saying only that the label did not print,
+        // which is both less useful and untrue: the operator set it aside, and
+        // «Нет бумаги» is still the reason it is waiting.
+        val transport = FakeTransport(nextStatus = PrinterStatus.NotReady(NotReadyReason.NO_PAPER))
+        seedClosedBox()
+        val boxPrinter = printer(transport)
+        boxPrinter.print("box-1")
+        boxPrinter.defer("box-1")
+        val stored = db.boxDao().get("box-1")!!
+        assertEquals(BoxPrint.DEFERRED, stored.printState)
+        assertEquals(PrintReason.NO_PAPER, stored.printReason)
+    }
 }

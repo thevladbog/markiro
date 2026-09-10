@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.markiro.handheld.core.design.MarkiroSizes
@@ -54,41 +56,52 @@ fun gridRows(capacity: Int): Int =
 fun BoxFill(filled: Int, capacity: Int, modifier: Modifier = Modifier) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        if (showsGrid(capacity)) {
-            val columns = gridColumns(capacity)
-            Column(verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
-                repeat(gridRows(capacity)) { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
-                        repeat(columns) { column ->
-                            val index = row * columns + column
-                            if (index < capacity) Cell(index < filled, index == filled)
-                        }
+    BoxWithConstraints(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        if (!showsGrid(capacity)) {
+            Text("$filled / $capacity", style = t.counterLg, color = c.fg1, textAlign = TextAlign.Center)
+            return@BoxWithConstraints
+        }
+        val columns = gridColumns(capacity)
+        val rows = gridRows(capacity)
+        // The cell is sized from the space it is given rather than fixed, so the
+        // grid reads as the box it stands for instead of a small patch in the
+        // middle of an empty zone. The tighter of the two axes wins, so cells stay
+        // square, and the cap stops a two-unit box from becoming two huge slabs.
+        val cell = minOf(
+            (maxWidth - GAP * (columns - 1)) / columns,
+            (maxHeight - GAP * (rows - 1)) / rows,
+            MAX_CELL,
+        ).coerceAtLeast(MIN_CELL)
+        Column(verticalArrangement = Arrangement.spacedBy(GAP)) {
+            repeat(rows) { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(GAP)) {
+                    repeat(columns) { column ->
+                        val index = row * columns + column
+                        if (index < capacity) Cell(index < filled, index == filled, cell)
                     }
                 }
             }
-        } else {
-            Text(
-                "$filled / $capacity",
-                style = t.counterLg,
-                color = c.fg1,
-                textAlign = TextAlign.Center,
-            )
         }
     }
 }
 
+private val GAP = 6.dp
+private val MIN_CELL = 12.dp
+private val MAX_CELL = 88.dp
+
 /**
- * Filled, next, or empty. The next cell carries a border rather than only a
- * colour, so it stays visible to an operator who cannot tell the two apart.
+ * Filled, next, or empty.
+ *
+ * The next cell carries a border rather than only a colour, so an operator who
+ * cannot tell the two apart still sees where the box is up to.
  */
 @Composable
-private fun Cell(filled: Boolean, next: Boolean) {
+private fun Cell(filled: Boolean, next: Boolean, size: Dp) {
     val c = MarkiroTheme.colors
-    val shape = RoundedCornerShape(4.dp)
+    val shape = RoundedCornerShape(size / 5)
     Box(
         Modifier
-            .size(24.dp)
+            .size(size)
             .background(if (filled) c.tone(Tone.Ok).solid else c.surfacePanel, shape)
             .then(if (next) Modifier.border(2.dp, c.accent, shape) else Modifier),
     )

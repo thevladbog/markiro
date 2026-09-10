@@ -191,6 +191,10 @@ class WorkViewModel(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, WorkUi(null, null, 0, null, 0, 0, 0, emptyList(), SyncState(), false, null))
 
     init {
+        // An aggregation shift shows its box from the moment it opens. Waiting for
+        // the first scan means the operator meets the validation layout and the
+        // grid appears from nowhere.
+        viewModelScope.launch { showCurrentBox() }
         viewModelScope.launch { scans.events.collect { onScan(it.raw) } }
         viewModelScope.launch {
             teamTicks.collect { teamState.value = team.refresh(shiftId) ?: teamState.value }
@@ -225,6 +229,25 @@ class WorkViewModel(
         boxUi.value = BoxUi(boxes.ordinal(row), boxes.itemCount(boxId), capacity)
     }
 
+    /**
+     * The open box, or the one the next scan will open.
+     *
+     * Deliberately does not CREATE a row: opening the screen is not packing, and a
+     * box row created per visit would give the shift a trail of empty boxes and
+     * make the drawn number jump.
+     */
+    private suspend fun showCurrentBox() {
+        val shift = db.shiftDao().get(shiftId) ?: return
+        if (shift.mode != "aggregation") return
+        val capacity = shift.boxCapacity ?: 0
+        val open = db.boxDao().open(shiftId)
+        boxUi.value = if (open != null) {
+            BoxUi(boxes.ordinal(open), boxes.itemCount(open.boxId), capacity)
+        } else {
+            BoxUi(boxes.closedCount(shiftId) + 1, 0, capacity)
+        }
+    }
+
     /** «Закрыть короб досрочно», with the operator having seen the count inside. */
     fun closeEarly() {
         viewModelScope.launch {
@@ -243,7 +266,7 @@ class WorkViewModel(
                     itemCount = result.itemCount,
                 )
                 _closeStep.value = BoxCloseStep.Printing(closed)
-                boxUi.value = null
+                showCurrentBox()
                 _closeStep.value = attempt(closed)
                 // The closure is queued the moment the box closes, whatever the
                 // printer did: the label is a separate debt.

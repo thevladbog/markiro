@@ -72,8 +72,11 @@ fun LabelQueueScreen(state: LabelQueueUi, cb: LabelQueueCallbacks) {
                         )
                     }
                     val tone = if (item.skippedByPrintAll) Tone.Warn else Tone.Err
+                    // A label the operator set aside is not a failure, and saying so
+                    // would be untrue; the reason from the last attempt still stands.
                     Text(
-                        stringResource(printReasonLabel(item.reason.orEmpty())),
+                        item.reason?.let { stringResource(printReasonLabel(it)) }
+                            ?: stringResource(R.string.label_queue_deferred),
                         style = t.caption,
                         color = c.tone(tone).fg,
                     )

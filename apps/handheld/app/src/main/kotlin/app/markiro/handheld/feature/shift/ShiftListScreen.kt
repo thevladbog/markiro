@@ -76,12 +76,8 @@ private fun ShiftEntity.card(reachable: Boolean) = ShiftCard(
     lineName = lineName,
     tolling = counterpartyName,
     active = status == "active",
-    enabled = mode != "aggregation" && (bundleFetchedAt != null || reachable),
-    disabledReason = when {
-        mode == "aggregation" -> R.string.shifts_aggregation_later
-        bundleFetchedAt == null && !reachable -> R.string.shifts_needs_network
-        else -> null
-    },
+    enabled = bundleFetchedAt != null || reachable,
+    disabledReason = if (bundleFetchedAt == null && !reachable) R.string.shifts_needs_network else null,
 )
 
 private fun ShiftDto.card(reachable: Boolean, lineName: String) = ShiftCard(
@@ -93,12 +89,8 @@ private fun ShiftDto.card(reachable: Boolean, lineName: String) = ShiftCard(
     lineName = lineName,
     tolling = counterpartyName,
     active = status == "active",
-    enabled = mode != "aggregation" && reachable,
-    disabledReason = when {
-        mode == "aggregation" -> R.string.shifts_aggregation_later
-        !reachable -> R.string.shifts_needs_network
-        else -> null
-    },
+    enabled = reachable,
+    disabledReason = if (!reachable) R.string.shifts_needs_network else null,
 )
 
 @Composable

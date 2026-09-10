@@ -141,7 +141,6 @@
     <string name="shifts_loading">Loading shifts…</string>
     <string name="shifts_mode_validation">validation</string>
     <string name="shifts_mode_aggregation">+ aggregation</string>
-    <string name="shifts_aggregation_later">aggregation: in a later release</string>
     <string name="shifts_plan">plan %1$d</string>
     <string name="shifts_no_plan">no plan</string>
     <string name="shifts_tolling">for: %1$s</string>
@@ -378,5 +377,6 @@
     <string name="label_queue_print_all">Print all</string>
     <string name="label_queue_print_one">Retry</string>
     <string name="label_queue_unknown_skipped">Skipped: the result is unknown</string>
+    <string name="label_queue_deferred">Set aside</string>
     <string name="label_queue_resolve">The label printed</string>
 </resources>

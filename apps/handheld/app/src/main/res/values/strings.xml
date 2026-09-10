@@ -147,7 +147,6 @@
     <string name="shifts_loading">Загружаем смены…</string>
     <string name="shifts_mode_validation">валидация</string>
     <string name="shifts_mode_aggregation">+ агрегация</string>
-    <string name="shifts_aggregation_later">агрегация: в следующем срезе</string>
     <string name="shifts_plan">план %1$d</string>
     <string name="shifts_no_plan">без плана</string>
     <string name="shifts_tolling">для: %1$s</string>
@@ -390,5 +389,6 @@
     <string name="label_queue_print_all">Напечатать все</string>
     <string name="label_queue_print_one">Повторить</string>
     <string name="label_queue_unknown_skipped">Пропущено: результат неизвестен</string>
+    <string name="label_queue_deferred">Отложена</string>
     <string name="label_queue_resolve">Этикетка напечаталась</string>
 </resources>

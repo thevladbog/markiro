@@ -199,9 +199,9 @@ class WorkViewModelTest {
         advanceUntilIdle()
         scan("a")
         advanceUntilIdle()
-        val box = vm.state.first { it.box != null }.box!!
+        // The box is visible from entry, so this waits for the unit to land in it.
+        val box = vm.state.first { it.box?.filled == 1 }.box!!
         assertEquals(1, box.ordinal)
-        assertEquals(1, box.filled)
         assertEquals(20, box.capacity)
     }
 
@@ -322,5 +322,32 @@ class WorkViewModelTest {
         vm.deferLabel()
         assertEquals(BoxCloseStep.Idle, vm.closeStep.value)
         assertEquals(1, vm.state.first { it.unprintedLabels == 1 }.unprintedLabels)
+    }
+
+    @Test
+    fun anAggregationShiftShowsAnEmptyBoxBeforeTheFirstScan() = runTest {
+        // Otherwise the operator meets the validation layout on entry and the grid
+        // appears from nowhere on the first unit.
+        aggregating()
+        val vm = vm()
+        val box = vm.state.first { it.box != null }.box!!
+        assertEquals(1, box.ordinal)
+        assertEquals(0, box.filled)
+        assertEquals(20, box.capacity)
+        // And no row was created just by opening the screen.
+        assertEquals(0, db.boxDao().unacked(10).size)
+    }
+
+    @Test
+    fun theBoxAfterACloseShowsAsEmptyRatherThanVanishing() = runTest {
+        aggregating(capacity = 1)
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        vm.closeStep.first { it is BoxCloseStep.Printed }
+        val next = vm.state.first { it.box?.filled == 0 && it.box?.ordinal == 2 }.box!!
+        assertEquals(2, next.ordinal)
+        assertEquals(1, next.capacity)
     }
 }

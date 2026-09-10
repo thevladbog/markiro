@@ -133,7 +133,6 @@ class ShiftListViewModel(
     }
 
     fun select(shift: ShiftEntity) {
-        if (shift.mode == "aggregation") return
         if (shift.bundleFetchedAt == null && !state.value.reachable) {
             dialog.value = ShiftDialog.Unavailable
             return

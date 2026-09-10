@@ -116,8 +116,15 @@ class BoxPrinter(
     suspend fun resolveUnknownAsPrinted(boxId: String) =
         boxes.setPrintState(boxId, BoxPrint.PRINTED, null)
 
-    /** Set aside for later, so a dead printer does not stop the line. */
-    suspend fun defer(boxId: String) = boxes.setPrintState(boxId, BoxPrint.DEFERRED, null)
+    /**
+     * Set aside for later, so a dead printer does not stop the line.
+     *
+     * Keeps whatever reason the last attempt gave. Erasing it would leave the
+     * queue saying only that the label did not print, which is both less useful
+     * and untrue: the operator set it aside, and «Нет бумаги» is still why.
+     */
+    suspend fun defer(boxId: String) =
+        boxes.setPrintState(boxId, BoxPrint.DEFERRED, db.boxDao().get(boxId)?.printReason)
 
     private suspend fun fail(boxId: String, reason: String): PrintOutcome.Failed {
         boxes.setPrintState(boxId, BoxPrint.FAILED, reason)
