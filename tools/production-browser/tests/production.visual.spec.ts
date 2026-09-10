@@ -289,6 +289,10 @@ const PLANNED_SHIFT = {
   lateDataAt: null,
   closeReason: null,
   createdAt: "2026-08-30T05:40:00.000Z",
+  // Actual output so far, added to the list by #474: a planned shift has
+  // produced nothing yet, an active one is part-way, a closed one carries
+  // its final tally.
+  output: { mode: "aggregation", closedBoxes: 0, containedUnits: 0 },
 };
 const ACTIVE_SHIFT = {
   ...PLANNED_SHIFT,
@@ -299,6 +303,7 @@ const ACTIVE_SHIFT = {
   productionDate: "2026-08-30",
   openedAt: "2026-08-30T04:10:00.000Z",
   createdAt: "2026-08-29T14:00:00.000Z",
+  output: { mode: "aggregation", closedBoxes: 153, containedUnits: 1836 },
 };
 
 const STATION_DEVICE = {
@@ -331,6 +336,7 @@ const ACTIVE_SHIFT_09 = {
   productionDate: "2026-09-02",
   openedAt: "2026-09-02T04:10:00.000Z",
   createdAt: "2026-09-01T14:00:00.000Z",
+  output: { mode: "aggregation", closedBoxes: 96, containedUnits: 1152 },
 };
 const CLOSED_SHIFT = {
   ...ACTIVE_SHIFT_09,
@@ -343,6 +349,7 @@ const CLOSED_SHIFT = {
   closedAt: "2026-09-01T12:40:00.000Z",
   closeReason: "Смена завершена по плану",
   createdAt: "2026-08-31T14:00:00.000Z",
+  output: { mode: "aggregation", closedBoxes: 400, containedUnits: 4800 },
 };
 const LATE_SHIFT = {
   ...CLOSED_SHIFT,
