@@ -5,10 +5,13 @@ import app.markiro.handheld.core.auth.OperatorRecord
 import app.markiro.handheld.core.network.IdentityResponse
 import app.markiro.handheld.core.network.InventoryTaskDto
 import app.markiro.handheld.core.network.InventoryTaskListResponse
+import app.markiro.handheld.core.network.LineListResponse
 import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.network.RosterResponse
+import app.markiro.handheld.core.network.ShiftBundleDto
 import app.markiro.handheld.core.network.ShiftDto
 import app.markiro.handheld.core.network.ShiftListResponse
+import app.markiro.handheld.core.network.ShiftSummaryDto
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.DeviceConfigEntity
@@ -59,7 +62,7 @@ class HubViewModelTest {
     private fun api(fail: Boolean = false) = object : StationApi {
         override suspend fun identity(): IdentityResponse = throw UnsupportedOperationException()
         override suspend fun operators() = RosterResponse(emptyList())
-        override suspend fun shifts(status: String?): ShiftListResponse {
+        override suspend fun shifts(status: String?, lineId: String?): ShiftListResponse {
             if (fail) throw IOException("offline")
             return ShiftListResponse(
                 listOf(ShiftDto("s1", "SEP26-001", "active"), ShiftDto("s2", "SEP26-002", "planned"), ShiftDto("s3", "SEP26-003", "closed")),
@@ -69,6 +72,10 @@ class HubViewModelTest {
             if (fail) throw IOException("offline")
             return InventoryTaskListResponse(listOf(InventoryTaskDto("i1", "7", "Вода 0,5 л")))
         }
+        override suspend fun enter(id: String): ShiftDto = throw UnsupportedOperationException()
+        override suspend fun bundle(id: String): ShiftBundleDto = throw UnsupportedOperationException()
+        override suspend fun summary(id: String): ShiftSummaryDto = throw UnsupportedOperationException()
+        override suspend fun lines(): LineListResponse = throw UnsupportedOperationException()
     }
 
     @Test
