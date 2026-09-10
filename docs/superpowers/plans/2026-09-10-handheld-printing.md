@@ -168,7 +168,7 @@ function stubRasterizer(calls: RasterCall[]) {
       maxWidthPx: opts.maxWidthPx ?? null,
       maxLines: opts.maxLines ?? 1,
     });
-    const natural = Math.max(1, [...text].length) * Math.ceil(opts.fontSizePx * 0.5);
+    const natural = Math.max(1, Array.from(text).length) * Math.ceil(opts.fontSizePx * 0.5);
     const width = opts.maxWidthPx === undefined ? natural : Math.min(natural, opts.maxWidthPx);
     const height = Math.ceil(opts.fontSizePx * 1.5);
     const bytesPerRow = Math.ceil(width / 8);
@@ -348,20 +348,34 @@ function reduceZpl(document: string): string {
 }
 
 /**
- * TSPL carries the bitmap as raw bytes, so the document is split on newlines
- * and a BITMAP line keeps only its parameters. Splitting is safe here because
- * the payload is replaced wholesale: a 0x0A inside it would end the recorded
- * line early, which is why only the parameter prefix is kept.
+ * TSPL carries the bitmap as raw bytes, so this cannot split on newlines: a 0x0A inside
+ * the payload would look like a line ending and leave the rest of the image masquerading
+ * as its own command. The scanner reads an image command's parameters, computes the exact
+ * payload length from them, and skips that many bytes.
  */
 function reduceTspl(document: string): string[] {
   const out: string[] = [];
-  for (const line of document.split("\n")) {
-    if (line.startsWith("BITMAP ")) {
-      const params = line.slice("BITMAP ".length).split(",");
-      out.push(`BITMAP ${params.slice(0, 5).join(",")},<payload>`);
-    } else if (line !== "") {
-      out.push(line);
+  let index = 0;
+  while (index < document.length) {
+    if (document.startsWith("BITMAP ", index)) {
+      let commas = 0;
+      let cursor = index;
+      while (cursor < document.length && commas < 5) {
+        if (document[cursor] === ",") commas += 1;
+        cursor += 1;
+      }
+      const header = document.slice(index, cursor);
+      const params = header.slice("BITMAP ".length).split(",");
+      const payloadLength = Number(params[2]) * Number(params[3]);
+      out.push(`${header}<payload:${payloadLength}>`);
+      // Skip the payload and the newline that follows it.
+      index = cursor + payloadLength + 1;
+      continue;
     }
+    const end = document.indexOf("\n", index);
+    const line = end === -1 ? document.slice(index) : document.slice(index, end);
+    if (line !== "") out.push(line);
+    index = end === -1 ? document.length : end + 1;
   }
   return out;
 }
@@ -2239,13 +2253,31 @@ class LabelFixturesTest {
             "^GFA,${m.groupValues[1]},${m.groupValues[2]},${m.groupValues[3]},<hex:${m.groupValues[4].length}>"
         }
 
-    private fun reduceTspl(document: String): List<String> = document.split("\n").mapNotNull { line ->
-        when {
-            line.startsWith("BITMAP ") ->
-                "BITMAP " + line.removePrefix("BITMAP ").split(",").take(5).joinToString(",") + ",<payload>"
-            line.isEmpty() -> null
-            else -> line
+    /** Mirrors `reduceTspl` in the fixture builder: the payload is skipped by length, never by newline. */
+    private fun reduceTspl(document: String): List<String> {
+        val out = ArrayList<String>()
+        var index = 0
+        while (index < document.length) {
+            if (document.startsWith("BITMAP ", index)) {
+                var commas = 0
+                var cursor = index
+                while (cursor < document.length && commas < 5) {
+                    if (document[cursor] == ',') commas++
+                    cursor++
+                }
+                val header = document.substring(index, cursor)
+                val params = header.removePrefix("BITMAP ").split(",")
+                val payloadLength = params[2].toInt() * params[3].toInt()
+                out += "$header<payload:$payloadLength>"
+                index = cursor + payloadLength + 1
+                continue
+            }
+            val end = document.indexOf('\n', index)
+            val line = if (end == -1) document.substring(index) else document.substring(index, end)
+            if (line.isNotEmpty()) out += line
+            index = if (end == -1) document.length else end + 1
         }
+        return out
     }
 }
 ```
