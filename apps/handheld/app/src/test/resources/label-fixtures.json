@@ -1,0 +1,593 @@
+{
+  "byteIdentical": [
+    {
+      "name": "plain text and a field",
+      "spec": {
+        "widthMm": 58,
+        "heightMm": 40,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "text",
+            "id": "t1",
+            "xMm": 2,
+            "yMm": 2,
+            "text": "ACME Foods",
+            "fontSizePt": 12
+          },
+          {
+            "kind": "field",
+            "id": "f1",
+            "xMm": 2,
+            "yMm": 10,
+            "field": "product.gtin",
+            "fontSizePt": 10
+          }
+        ]
+      },
+      "data": {
+        "product.name": "Вода питьевая 0,5 л",
+        "product.printName": "Вода 0,5",
+        "product.gtin": "04600682000013",
+        "product.egais": "0101234567890123456",
+        "km.code": "010460068200001321abcDEF1234567",
+        "sscc": "346006820000000014",
+        "shift.no": "214",
+        "date": "23.07.2026",
+        "expiry": "19.01.2027",
+        "qty": "20",
+        "operator": "Smirnov A.",
+        "counterparty.name": "Zavod Partner"
+      },
+      "zpl": "^XA\n^PW464\n^LL320\n^FO16,16^A0N,34,34^FDACME Foods^FS\n^FO16,80^A0N,28,28^FD04600682000013^FS\n^XZ\n",
+      "tspl": "SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nTEXT 16,16,\"0\",0,12,12,\"ACME Foods\"\nTEXT 16,80,\"0\",0,10,10,\"04600682000013\"\nPRINT 1\n"
+    },
+    {
+      "name": "wrapped and aligned text",
+      "spec": {
+        "widthMm": 58,
+        "heightMm": 40,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "text",
+            "id": "t1",
+            "xMm": 2,
+            "yMm": 2,
+            "text": "Cold storage keep upright",
+            "fontSizePt": 9,
+            "maxWidthMm": 30,
+            "maxLines": 3,
+            "align": "center"
+          },
+          {
+            "kind": "text",
+            "id": "t2",
+            "xMm": 2,
+            "yMm": 20,
+            "text": "Right",
+            "fontSizePt": 9,
+            "maxWidthMm": 30,
+            "align": "right"
+          }
+        ]
+      },
+      "data": {
+        "product.name": "Вода питьевая 0,5 л",
+        "product.printName": "Вода 0,5",
+        "product.gtin": "04600682000013",
+        "product.egais": "0101234567890123456",
+        "km.code": "010460068200001321abcDEF1234567",
+        "sscc": "346006820000000014",
+        "shift.no": "214",
+        "date": "23.07.2026",
+        "expiry": "19.01.2027",
+        "qty": "20",
+        "operator": "Smirnov A.",
+        "counterparty.name": "Zavod Partner"
+      },
+      "zpl": "^XA\n^PW464\n^LL320\n^FO16,16^A0N,25,25^FB240,3,0,C,0^FDCold storage keep upright^FS\n^FO16,160^A0N,25,25^FB240,1,0,R,0^FDRight^FS\n^XZ\n",
+      "tspl": "SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nTEXT 18,16,\"0\",0,9,9,\"Cold storage keep\"\nTEXT 87,54,\"0\",0,9,9,\"upright\"\nTEXT 186,160,\"0\",0,9,9,\"Right\"\nPRINT 1\n"
+    },
+    {
+      "name": "sscc barcode with a module width",
+      "spec": {
+        "widthMm": 58,
+        "heightMm": 40,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "barcode",
+            "id": "b1",
+            "xMm": 4,
+            "yMm": 12,
+            "format": "code128",
+            "data": "sscc",
+            "sizeMm": 15,
+            "moduleWidthMm": 0.25
+          },
+          {
+            "kind": "field",
+            "id": "f1",
+            "xMm": 4,
+            "yMm": 30,
+            "field": "sscc",
+            "fontSizePt": 8
+          }
+        ]
+      },
+      "data": {
+        "product.name": "Вода питьевая 0,5 л",
+        "product.printName": "Вода 0,5",
+        "product.gtin": "04600682000013",
+        "product.egais": "0101234567890123456",
+        "km.code": "010460068200001321abcDEF1234567",
+        "sscc": "346006820000000014",
+        "shift.no": "214",
+        "date": "23.07.2026",
+        "expiry": "19.01.2027",
+        "qty": "20",
+        "operator": "Smirnov A.",
+        "counterparty.name": "Zavod Partner"
+      },
+      "zpl": "^XA\n^PW464\n^LL320\n^FO32,96^BY2^BCN,120,N,N,N^FD>;>800346006820000000014^FS\n^FO32,240^A0N,23,23^FD(00)346006820000000014^FS\n^XZ\n",
+      "tspl": "SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBARCODE 32,96,\"128\",120,0,0,2,2,\"!100346006820000000014\"\nTEXT 32,240,\"0\",0,8,8,\"(00)346006820000000014\"\nPRINT 1\n"
+    },
+    {
+      "name": "literal barcode without a module width",
+      "spec": {
+        "widthMm": 58,
+        "heightMm": 40,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "barcode",
+            "id": "b1",
+            "xMm": 4,
+            "yMm": 12,
+            "format": "code128",
+            "data": {
+              "literal": "ABC-123"
+            },
+            "sizeMm": 10
+          }
+        ]
+      },
+      "data": {
+        "product.name": "Вода питьевая 0,5 л",
+        "product.printName": "Вода 0,5",
+        "product.gtin": "04600682000013",
+        "product.egais": "0101234567890123456",
+        "km.code": "010460068200001321abcDEF1234567",
+        "sscc": "346006820000000014",
+        "shift.no": "214",
+        "date": "23.07.2026",
+        "expiry": "19.01.2027",
+        "qty": "20",
+        "operator": "Smirnov A.",
+        "counterparty.name": "Zavod Partner"
+      },
+      "zpl": "^XA\n^PW464\n^LL320\n^FO32,96^BCN,80,N,N,N^FDABC-123^FS\n^XZ\n",
+      "tspl": "SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBARCODE 32,96,\"128\",80,0,0,2,2,\"ABC-123\"\nPRINT 1\n"
+    },
+    {
+      "name": "lines and boxes including a reversed line",
+      "spec": {
+        "widthMm": 58,
+        "heightMm": 40,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "line",
+            "id": "l1",
+            "xMm": 0,
+            "yMm": 20,
+            "x2Mm": 58,
+            "y2Mm": 20,
+            "thicknessMm": 0.25
+          },
+          {
+            "kind": "line",
+            "id": "l2",
+            "xMm": 40,
+            "yMm": 30,
+            "x2Mm": 10,
+            "y2Mm": 30,
+            "thicknessMm": 0.5
+          },
+          {
+            "kind": "box",
+            "id": "x1",
+            "xMm": 0,
+            "yMm": 0,
+            "widthMm": 58,
+            "heightMm": 40,
+            "thicknessMm": 0.25
+          }
+        ]
+      },
+      "data": {
+        "product.name": "Вода питьевая 0,5 л",
+        "product.printName": "Вода 0,5",
+        "product.gtin": "04600682000013",
+        "product.egais": "0101234567890123456",
+        "km.code": "010460068200001321abcDEF1234567",
+        "sscc": "346006820000000014",
+        "shift.no": "214",
+        "date": "23.07.2026",
+        "expiry": "19.01.2027",
+        "qty": "20",
+        "operator": "Smirnov A.",
+        "counterparty.name": "Zavod Partner"
+      },
+      "zpl": "^XA\n^PW464\n^LL320\n^FO0,160^GB464,2,2^FS\n^FO80,240^GB240,4,4^FS\n^FO0,0^GB464,320,2^FS\n^XZ\n",
+      "tspl": "SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBAR 0,160,464,2\nBAR 80,240,240,4\nBOX 0,0,464,320,2\nPRINT 1\n"
+    },
+    {
+      "name": "negative and half millimetre coordinates at 300 dpi",
+      "spec": {
+        "widthMm": 58,
+        "heightMm": 40,
+        "dpi": 300,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "text",
+            "id": "t1",
+            "xMm": -1.5,
+            "yMm": 2.5,
+            "text": "Edge",
+            "fontSizePt": 8
+          },
+          {
+            "kind": "box",
+            "id": "x1",
+            "xMm": 0.5,
+            "yMm": 0.5,
+            "widthMm": 10.5,
+            "heightMm": 5.5,
+            "thicknessMm": 0.5
+          }
+        ]
+      },
+      "data": {
+        "product.name": "Вода питьевая 0,5 л",
+        "product.printName": "Вода 0,5",
+        "product.gtin": "04600682000013",
+        "product.egais": "0101234567890123456",
+        "km.code": "010460068200001321abcDEF1234567",
+        "sscc": "346006820000000014",
+        "shift.no": "214",
+        "date": "23.07.2026",
+        "expiry": "19.01.2027",
+        "qty": "20",
+        "operator": "Smirnov A.",
+        "counterparty.name": "Zavod Partner"
+      },
+      "zpl": "^XA\n^PW685\n^LL472\n^FO-18,30^A0N,33,33^FDEdge^FS\n^FO6,6^GB124,65,6^FS\n^XZ\n",
+      "tspl": "SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nTEXT -18,30,\"0\",0,8,8,\"Edge\"\nBOX 6,6,130,71,6\nPRINT 1\n"
+    },
+    {
+      "name": "text needing zpl hex escapes",
+      "spec": {
+        "widthMm": 58,
+        "heightMm": 40,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "text",
+            "id": "t1",
+            "xMm": 2,
+            "yMm": 2,
+            "text": "A^B~C_D",
+            "fontSizePt": 10
+          }
+        ]
+      },
+      "data": {
+        "product.name": "Вода питьевая 0,5 л",
+        "product.printName": "Вода 0,5",
+        "product.gtin": "04600682000013",
+        "product.egais": "0101234567890123456",
+        "km.code": "010460068200001321abcDEF1234567",
+        "sscc": "346006820000000014",
+        "shift.no": "214",
+        "date": "23.07.2026",
+        "expiry": "19.01.2027",
+        "qty": "20",
+        "operator": "Smirnov A.",
+        "counterparty.name": "Zavod Partner"
+      },
+      "zpl": "^XA\n^PW464\n^LL320\n^FO16,16^A0N,28,28^FH_^FDA_5EB_7EC_5FD^FS\n^XZ\n",
+      "tspl": "SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nTEXT 16,16,\"0\",0,10,10,\"A^B~C_D\"\nPRINT 1\n"
+    },
+    {
+      "name": "text needing tspl quote escapes",
+      "spec": {
+        "widthMm": 58,
+        "heightMm": 40,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "text",
+            "id": "t1",
+            "xMm": 2,
+            "yMm": 2,
+            "text": "Say \"hi\"",
+            "fontSizePt": 10
+          }
+        ]
+      },
+      "data": {
+        "product.name": "Вода питьевая 0,5 л",
+        "product.printName": "Вода 0,5",
+        "product.gtin": "04600682000013",
+        "product.egais": "0101234567890123456",
+        "km.code": "010460068200001321abcDEF1234567",
+        "sscc": "346006820000000014",
+        "shift.no": "214",
+        "date": "23.07.2026",
+        "expiry": "19.01.2027",
+        "qty": "20",
+        "operator": "Smirnov A.",
+        "counterparty.name": "Zavod Partner"
+      },
+      "zpl": "^XA\n^PW464\n^LL320\n^FO16,16^A0N,28,28^FDSay \"hi\"^FS\n^XZ\n",
+      "tspl": "SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nTEXT 16,16,\"0\",0,10,10,\"Say \"\"hi\"\"\"\nPRINT 1\n"
+    },
+    {
+      "name": "empty element list",
+      "spec": {
+        "widthMm": 58,
+        "heightMm": 40,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": []
+      },
+      "data": {
+        "product.name": "Вода питьевая 0,5 л",
+        "product.printName": "Вода 0,5",
+        "product.gtin": "04600682000013",
+        "product.egais": "0101234567890123456",
+        "km.code": "010460068200001321abcDEF1234567",
+        "sscc": "346006820000000014",
+        "shift.no": "214",
+        "date": "23.07.2026",
+        "expiry": "19.01.2027",
+        "qty": "20",
+        "operator": "Smirnov A.",
+        "counterparty.name": "Zavod Partner"
+      },
+      "zpl": "^XA\n^PW464\n^LL320\n^XZ\n",
+      "tspl": "SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nPRINT 1\n"
+    }
+  ],
+  "structural": [
+    {
+      "name": "cyrillic product name unbounded",
+      "spec": {
+        "widthMm": 58,
+        "heightMm": 40,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "field",
+            "id": "f1",
+            "xMm": 2,
+            "yMm": 2,
+            "field": "product.name",
+            "fontSizePt": 12
+          }
+        ]
+      },
+      "data": {
+        "product.name": "Вода питьевая 0,5 л",
+        "product.printName": "Вода 0,5",
+        "product.gtin": "04600682000013",
+        "product.egais": "0101234567890123456",
+        "km.code": "010460068200001321abcDEF1234567",
+        "sscc": "346006820000000014",
+        "shift.no": "214",
+        "date": "23.07.2026",
+        "expiry": "19.01.2027",
+        "qty": "20",
+        "operator": "Smirnov A.",
+        "counterparty.name": "Zavod Partner"
+      },
+      "rasterCalls": [
+        {
+          "text": "Вода питьевая 0,5 л",
+          "fontSizePx": 34,
+          "bold": false,
+          "maxWidthPx": null,
+          "maxLines": 1
+        }
+      ],
+      "zplShape": "^XA\n^PW464\n^LL320\n^FO16,16^GFA,2091,2091,41,<hex:4182>^FS\n^XZ\n",
+      "tsplShape": [
+        "SIZE 58 mm, 40 mm",
+        "GAP 2 mm, 0 mm",
+        "DIRECTION 1",
+        "CLS",
+        "BITMAP 16,16,41,51,0,<payload:2091>",
+        "PRINT 1"
+      ]
+    },
+    {
+      "name": "cyrillic product name centred in a box",
+      "spec": {
+        "widthMm": 58,
+        "heightMm": 40,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "field",
+            "id": "f1",
+            "xMm": 2,
+            "yMm": 2,
+            "field": "product.name",
+            "fontSizePt": 10,
+            "maxWidthMm": 40,
+            "maxLines": 2,
+            "align": "center"
+          }
+        ]
+      },
+      "data": {
+        "product.name": "Вода питьевая 0,5 л",
+        "product.printName": "Вода 0,5",
+        "product.gtin": "04600682000013",
+        "product.egais": "0101234567890123456",
+        "km.code": "010460068200001321abcDEF1234567",
+        "sscc": "346006820000000014",
+        "shift.no": "214",
+        "date": "23.07.2026",
+        "expiry": "19.01.2027",
+        "qty": "20",
+        "operator": "Smirnov A.",
+        "counterparty.name": "Zavod Partner"
+      },
+      "rasterCalls": [
+        {
+          "text": "Вода питьевая 0,5 л",
+          "fontSizePx": 28,
+          "bold": false,
+          "maxWidthPx": 320,
+          "maxLines": 2
+        }
+      ],
+      "zplShape": "^XA\n^PW464\n^LL320\n^FO43,16^GFA,1428,1428,34,<hex:2856>^FS\n^XZ\n",
+      "tsplShape": [
+        "SIZE 58 mm, 40 mm",
+        "GAP 2 mm, 0 mm",
+        "DIRECTION 1",
+        "CLS",
+        "BITMAP 43,16,34,42,0,<payload:1428>",
+        "PRINT 1"
+      ]
+    },
+    {
+      "name": "qty always rasterizes because of its unit suffix",
+      "spec": {
+        "widthMm": 58,
+        "heightMm": 40,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "field",
+            "id": "f1",
+            "xMm": 2,
+            "yMm": 20,
+            "field": "qty",
+            "fontSizePt": 9,
+            "bold": true
+          }
+        ]
+      },
+      "data": {
+        "product.name": "Вода питьевая 0,5 л",
+        "product.printName": "Вода 0,5",
+        "product.gtin": "04600682000013",
+        "product.egais": "0101234567890123456",
+        "km.code": "010460068200001321abcDEF1234567",
+        "sscc": "346006820000000014",
+        "shift.no": "214",
+        "date": "23.07.2026",
+        "expiry": "19.01.2027",
+        "qty": "20",
+        "operator": "Smirnov A.",
+        "counterparty.name": "Zavod Partner"
+      },
+      "rasterCalls": [
+        {
+          "text": "20 шт.",
+          "fontSizePx": 25,
+          "bold": true,
+          "maxWidthPx": null,
+          "maxLines": 1
+        }
+      ],
+      "zplShape": "^XA\n^PW464\n^LL320\n^FO16,160^GFA,380,380,10,<hex:760>^FS\n^XZ\n",
+      "tsplShape": [
+        "SIZE 58 mm, 40 mm",
+        "GAP 2 mm, 0 mm",
+        "DIRECTION 1",
+        "CLS",
+        "BITMAP 16,160,10,38,0,<payload:380>",
+        "PRINT 1"
+      ]
+    },
+    {
+      "name": "cyrillic beside an ascii barcode",
+      "spec": {
+        "widthMm": 58,
+        "heightMm": 40,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "kind": "field",
+            "id": "f1",
+            "xMm": 2,
+            "yMm": 2,
+            "field": "product.name",
+            "fontSizePt": 10
+          },
+          {
+            "kind": "barcode",
+            "id": "b1",
+            "xMm": 4,
+            "yMm": 12,
+            "format": "code128",
+            "data": "sscc",
+            "sizeMm": 15,
+            "moduleWidthMm": 0.25
+          }
+        ]
+      },
+      "data": {
+        "product.name": "Вода питьевая 0,5 л",
+        "product.printName": "Вода 0,5",
+        "product.gtin": "04600682000013",
+        "product.egais": "0101234567890123456",
+        "km.code": "010460068200001321abcDEF1234567",
+        "sscc": "346006820000000014",
+        "shift.no": "214",
+        "date": "23.07.2026",
+        "expiry": "19.01.2027",
+        "qty": "20",
+        "operator": "Smirnov A.",
+        "counterparty.name": "Zavod Partner"
+      },
+      "rasterCalls": [
+        {
+          "text": "Вода питьевая 0,5 л",
+          "fontSizePx": 28,
+          "bold": false,
+          "maxWidthPx": null,
+          "maxLines": 1
+        }
+      ],
+      "zplShape": "^XA\n^PW464\n^LL320\n^FO16,16^GFA,1428,1428,34,<hex:2856>^FS\n^FO32,96^BY2^BCN,120,N,N,N^FD>;>800346006820000000014^FS\n^XZ\n",
+      "tsplShape": [
+        "SIZE 58 mm, 40 mm",
+        "GAP 2 mm, 0 mm",
+        "DIRECTION 1",
+        "CLS",
+        "BITMAP 16,16,34,42,0,<payload:1428>",
+        "BARCODE 32,96,\"128\",120,0,0,2,2,\"!100346006820000000014\"",
+        "PRINT 1"
+      ]
+    }
+  ]
+}

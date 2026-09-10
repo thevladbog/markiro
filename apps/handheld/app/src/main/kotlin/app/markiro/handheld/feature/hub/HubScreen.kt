@@ -106,10 +106,10 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit) {
                 Tile(
                     Icons.Outlined.Settings,
                     stringResource(R.string.hub_tile_settings),
-                    stringResource(R.string.hub_printer_not_set),
+                    if (state.printerConfigured) "" else stringResource(R.string.hub_printer_not_set),
                     { onTile(HubTile.SETTINGS) },
                     tile,
-                    statusTone = Tone.Warn,
+                    statusTone = if (state.printerConfigured) Tone.Neutral else Tone.Warn,
                 )
             }
         }

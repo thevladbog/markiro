@@ -23,7 +23,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "fixtures:km": "pnpm run build && node scripts/export-km-fixtures.mjs",
-    "fixtures:inventory": "pnpm run build && node scripts/export-inventory-fixtures.mjs"
+    "fixtures:inventory": "pnpm run build && node scripts/export-inventory-fixtures.mjs",
+    "fixtures:labels": "pnpm run build && node scripts/export-label-fixtures.mjs"
   },
   "peerDependencies": {
     "zod": "4.4.3"

@@ -32,6 +32,11 @@ import org.junit.runner.RunWith
 import java.io.IOException
 import kotlin.time.Duration.Companion.seconds
 
+/**
+ * The event probes below carry a generous budget on purpose. Turbine's wait is wall clock, not
+ * virtual time, and joining a task does real work on Room's own threads, so a loaded machine can
+ * outrun a short budget. The budget is a guard against a hang, not an assertion about latency.
+ */
 @RunWith(AndroidJUnit4::class)
 class InventoryListViewModelTest {
     @get:Rule
@@ -111,7 +116,7 @@ class InventoryListViewModelTest {
         val repo = FakeRepo()
         val vm = vm(repo)
         vm.state.first { !it.loading }
-        vm.events.test(timeout = 10.seconds) {
+        vm.events.test(timeout = 60.seconds) {
             vm.select(own)
             assertEquals(InventoryListEvent.Entered("i1"), awaitItem())
         }
@@ -129,7 +134,7 @@ class InventoryListViewModelTest {
         assertTrue(repo.joins.isEmpty())
         vm.select(other)
         assertTrue(vm.state.first { it.dialog != null }.dialog is InventoryDialog.ConfirmOther)
-        vm.events.test(timeout = 10.seconds) {
+        vm.events.test(timeout = 60.seconds) {
             vm.confirmOther()
             assertEquals(InventoryListEvent.Entered("i2"), awaitItem())
         }

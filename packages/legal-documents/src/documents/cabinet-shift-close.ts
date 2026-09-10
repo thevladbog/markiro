@@ -190,7 +190,7 @@ export const CABINET_SHIFT_CLOSE_CONTENT = {
               {
                 term: "Смена ещё не закрыта",
                 detail:
-                  "«Смена должна быть закрыта перед формированием отчета.» Отчёты доступны только по закрытой смене: дождитесь закрытия оператором или закройте смену из кабинета (раздел 3).",
+                  "«Смена должна быть закрыта перед формированием отчета.» Отчёты доступны только по закрытой смене: дождитесь закрытия оператором или закройте смену из кабинета (раздел 5).",
               },
               {
                 term: "Коды не разложены по коробам",
@@ -269,6 +269,283 @@ export const CABINET_SHIFT_CLOSE_CONTENT = {
           {
             kind: "paragraph",
             text: "Если проблема не описана выше, обратитесь в поддержку Маркиро: hello@v-b.tech.",
+          },
+        ],
+      },
+    ],
+  },
+  en: {
+    locale: "en",
+    title: "Cabinet: monitoring, closing and shift reports",
+    summary:
+      "This is an informational translation. The matching Russian revision is authoritative. Manager's guide for the second half of a shift's life: watching production on the dashboard, closing a shift from the cabinet, data that arrives after the close, reports for GIS MT and the reasons they fail.",
+    sections: [
+      {
+        id: "purpose",
+        heading: "1. Purpose",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "This instruction covers the cabinet manager's work while a shift is running and after it ends: watching production, closing a shift from the cabinet, dealing with data that arrives after the close, and generating reports for GIS MT. Preparing and planning a shift are covered by MKR-INS-08; the operator opens the shift and runs the work cycle on the station — MKR-INS-01 and MKR-INS-02.",
+          },
+          {
+            kind: "paragraph",
+            text: "A shift goes through the states “Active” — production is under way — and “Closed” — production is over and the reports are available. Everything below concerns these two states; the “Planned” state is covered by MKR-INS-08.",
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "The screenshots use demo data. The numbers, quantities and names in your cabinet will differ. The wordmark in the sidebar keeps its Russian spelling: it is the Markiro logo, not a translated interface string.",
+          },
+        ],
+      },
+      {
+        id: "monitoring",
+        heading: "2. Watching production",
+        blocks: [
+          {
+            kind: "step",
+            title: "Start the day with the overview",
+            text: "The “Overview” section opens the “Production today” dashboard. At the top left is the “Production control” verdict: “Production is under control” means there are no active reasons to step in, and the cabinet says exactly that — “There are no active reasons for intervention.” Below are the counters for the day: “Validated individually”, “Closed boxes”, “Units in boxes”, “Active shifts”, and the “Shifts running now” panel lists the shifts under way with the output of each.",
+            image: {
+              id: "dashboard-under-control",
+              caption: "The dashboard: production is under control",
+            },
+          },
+          {
+            kind: "step",
+            title: "React to the “Needs attention” verdict",
+            text: "When there are reasons to step in, the verdict changes to “Needs attention” (and for serious problems to “Critical condition”), and the reasons themselves are listed next to it — in the screenshot that is “Late data affected 1 shift”. A reason is a link: it takes you to the affected section. The “Control signals” panel explains how far the current numbers can be trusted.",
+            image: {
+              id: "dashboard-attention",
+              caption: "The dashboard: the “Needs attention” verdict and its reason",
+            },
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "While shifts are still active, the day's summary is marked “Provisional data” and the signals show “Active shift: data may change” — the stations keep sending scans as the connection allows, and the counters grow. This is not a fault: the numbers become final once the shifts are closed. Production dynamics and rate are outside this document.",
+          },
+        ],
+      },
+      {
+        id: "panel",
+        heading: "3. The shift panel",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "Everything the cabinet knows about a shift, and every action on it, is gathered in one panel. The row in the list carries a single button, “Details” — that is what opens the panel.",
+          },
+          {
+            kind: "step",
+            title: "Open the shift panel",
+            text: "Press “Details” in the row. The panel opens on the right over the list and is titled with the shift number. “Shift output” comes first: for aggregation that is “Closed boxes” and “Codes in closed boxes”, for validation “Accepted codes”, and “Plan, units” always sits next to them. Below is “Shift parameters” with the dates, the line, the mode and the counterparty.",
+            image: {
+              id: "shifts-active",
+              caption: "An active shift's panel: output, employees and actions",
+            },
+            expected: "The panel is open and the metrics show the actual output so far.",
+          },
+          {
+            kind: "step",
+            title: "See who worked in the shift",
+            text: "The “Employees in this shift” block lists the operators with their activity and the “Accepted scans” and “Closed boxes” counters. If some of the operations arrived without an employee, the cabinet warns about it on a separate banner — “4 operations have no employee assigned.” in the screenshot above; that is usually what scans made before an operator signs in or after they sign out look like.",
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "If the statistics could not be loaded, the cabinet says so right inside the panel and offers “Retry”. The rest of the shift data and the actions stay available — a statistics failure does not stop you closing the shift.",
+          },
+        ],
+      },
+      {
+        id: "labels",
+        heading: "4. Label history",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "For a shift with Data Matrix duplicate printing enabled (setting it up is covered by MKR-INS-08), the panel gains a “Label history” section. It shows what happened to every printed label: a summary of the send attempts, verifications and reprints, and below it the attempts themselves with their time and state.",
+          },
+          {
+            kind: "step",
+            title: "Check the attempts that need work",
+            text: "The summary tiles — “Sent to printer”, “Verified labels”, “Unfinished jobs”, “Reprint attempts” — show where the shift stands. Records that need work stand out by their state: “Needs attention” instead of “Label verified”, meaning the verification is unfinished or the print was not confirmed. Expand an attempt to see its events. While such records remain, check with the line that every label has been applied.",
+            image: {
+              id: "shift-labels-history",
+              caption: "The label history of a shift with a duplicate",
+            },
+          },
+        ],
+      },
+      {
+        id: "closing",
+        heading: "5. Closing a shift",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "Normally the operator closes the shift from the station at the end of the work — this is covered by MKR-INS-02. Closing from the cabinet is the fallback: the station broke down, lost its connection, or the operator left without closing the shift.",
+          },
+          {
+            kind: "step",
+            title: "Close the shift from the cabinet",
+            text: "Open the shift with the “Details” button and find the “Shift actions” section at the bottom of the panel. The “Close shift” button is there only for an active shift: a planned one has “Delete” in its place, and a closed one has no “Shift actions” section at all.",
+          },
+          {
+            kind: "step",
+            title: "State a reason",
+            text: "In the “Close shift” dialog fill in “Close reason”. While the field holds fewer than three meaningful characters the confirmation button stays disabled — the cabinet will not accept a token entry such as a single full stop. The reason is stored with the shift and shown in the list under the “Closed” status.",
+            image: { id: "shift-close", caption: "Closing a shift with a mandatory reason" },
+            expected:
+              "The shift is in the list with the “Closed” status and the reason underneath.",
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Close a shift from the cabinet only when you are sure that production is really over. A station left inside a closed shift keeps working with the previous settings until the next sign-in, and its scans will arrive as data after the close (section 6).",
+          },
+        ],
+      },
+      {
+        id: "late-data",
+        heading: "6. Data after the close",
+        blocks: [
+          {
+            kind: "step",
+            title: "Watch for the badge in the list",
+            text: "If more scans reach the cabinet from the station after the shift was closed — for example, the station had no connection at the moment of closing — the cabinet marks the shift with the “Data after close” badge. The totals of such a shift have changed since the moment it was closed.",
+            image: { id: "shifts-late-badge", caption: "A shift with data after the close" },
+          },
+          {
+            kind: "paragraph",
+            text: "The badge on its own calls for no action — the data is already counted. What matters is different: reports generated before that data arrived are out of date. The cabinet marks such reports with the warning “Shift data changed — generate a new report” (section 8) — generate the report again and hand the fresh one to GIS MT.",
+          },
+        ],
+      },
+      {
+        id: "exports",
+        heading: "7. Reports for GIS MT",
+        blocks: [
+          {
+            kind: "step",
+            title: "Open the reports of a closed shift",
+            text: "Open the closed shift with the “Details” button: the panel gains a “Shift reports” section. For a shift that is not closed yet, its place is taken by the note “Reports can be requested and downloaded after the shift is closed.” The “Report format” block lists the formats from the approved server catalog. The server delivers that catalog with Russian labels, and the cabinet shows them exactly as they arrive whatever the interface language: “[TXT][Без коробов] Отчет смены” (shift report, TXT, without boxes), “[TXT][С коробами] Отчет смены” (TXT, with boxes), “[CSV][Без коробов] Отчет смены” (CSV, without boxes), “[CSV][С коробами] Отчет смены” (CSV, with boxes) and “[XML][ГИСМТ] Отчет об агрегации” (the GIS MT aggregation XML). Ticking “Split report into parts” adds a “Maximum lines per part” field — a whole number from 2 to 1,000,000 is allowed; without splitting the report comes out as a single file.",
+            image: {
+              id: "exports-catalog",
+              caption: "Choosing a report format and splitting it into parts",
+            },
+          },
+          {
+            kind: "step",
+            title: "Wait for it and download the parts",
+            text: "Press “Generate report” at the bottom of the panel. Every run is visible in the “Generated reports” block: its status (“Queued”, “Processing”, “Ready”, “Failed”), who it was “Created by”, the “Format” and the “Parameters” (“Not split” or “up to 1,000 lines per part”), and the resulting “Codes” and “Boxes”. A ready report lists its parts separately — “Part 1”, “Part 2” — with the number of lines, codes and boxes; each part has its own “Download” button. While a run is “Processing”, the section refreshes itself.",
+            image: {
+              id: "exports-history",
+              caption: "Generated reports: a ready one with parts and one still being generated",
+            },
+            expected: "Every part of the report has been downloaded.",
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "A download link is valid for a few minutes — if the download does not start, press “Download” again. Generation runs on the server: you can close the panel and come back later, the run will not be lost.",
+          },
+        ],
+      },
+      {
+        id: "export-errors",
+        heading: "8. Why a report is not generated",
+        blocks: [
+          {
+            kind: "step",
+            title: "Read the reason on the failed run",
+            text: "A run with the “Failed” status shows the reason in the cabinet's own words — in the screenshot that is “Not every shift code is assigned to a box.” — together with a “Retry” button. “Retry” is offered on every failed run: once the cause is gone, generation can be restarted with the same settings, without picking the format again.",
+            image: { id: "exports-failed", caption: "A failed report: the reason and the retry" },
+          },
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "The shift is not closed yet",
+                detail:
+                  "“The shift must be closed before generating a report.” Reports are available only for a closed shift: wait for the operator to close it, or close the shift from the cabinet (section 5).",
+              },
+              {
+                term: "Codes are not packed into boxes",
+                detail:
+                  "“Not every shift code is assigned to a box.” The formats with boxes require every code of the shift to sit in a box. Pack the remaining codes into boxes on the station, or generate “[TXT][Без коробов] Отчет смены” or “[CSV][Без коробов] Отчет смены” instead.",
+              },
+              {
+                term: "The organization INN is missing",
+                detail:
+                  "“Set the organization INN in the profile to generate the GIS MT report.” Fill the INN in the organization profile settings and generate the report again.",
+              },
+              {
+                term: "A box does not fit into a part",
+                detail:
+                  "“A box does not fit within the lines-per-part limit.” A box is never split across parts: raise “Maximum lines per part” above the size of the largest box, or turn splitting off.",
+              },
+              {
+                term: "An empty shift or a shift without a date",
+                detail:
+                  "“The shift has no codes to include in a report.” — there is nothing to report on. “The shift has no date.” — fill the shift date on its card (MKR-INS-08) and try again.",
+              },
+              {
+                term: "Broken shift data",
+                detail:
+                  "“One of the boxes has an invalid SSCC, so the report cannot be generated.” and “The shift contains a marking code that could not be parsed for the report.” — the data is damaged; this cannot be fixed from the reports panel, contact support.",
+              },
+              {
+                term: "A temporary failure",
+                detail:
+                  "“Could not generate the report. Try again.”, “Could not save the report. Try again.”, “Could not queue the report. Try again.” — infrastructure errors; press “Retry”, and if it happens again, contact support.",
+              },
+            ],
+          },
+          {
+            kind: "step",
+            title: "Refresh out-of-date reports",
+            text: "If data arrived after the report was generated (section 6), the ready report is marked with the warning “Shift data changed — generate a new report”. Files downloaded earlier do not update themselves — start a new run and hand that one to GIS MT.",
+            image: { id: "exports-stale", caption: "A report went out of date after late data" },
+          },
+        ],
+      },
+      {
+        id: "faq",
+        heading: "9. Frequent questions",
+        blocks: [
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "The dashboard numbers change on their own",
+                detail:
+                  "Shifts are active: the stations keep sending scans and the summary is marked “Provisional data”. The final numbers come after the shifts are closed.",
+              },
+              {
+                term: "The shift has no close button",
+                detail:
+                  "“Close shift” exists only for an active shift. A planned one can be edited or deleted (MKR-INS-08); a closed one can only be reported on.",
+              },
+              {
+                term: "You cannot find the report button",
+                detail:
+                  "“Generate report” appears for a shift with the “Closed” status. An active shift has no reports — close the shift first.",
+              },
+              {
+                term: "A report was ready and is now marked with a warning",
+                detail:
+                  "Data arrived from the station after it was generated — the shift is marked “Data after close” and the report is out of date. Generate a new one and use that.",
+              },
+              {
+                term: "A report part will not download",
+                detail:
+                  "The download link is short-lived. Press “Download” on the part you need once more and the cabinet will issue a fresh link.",
+              },
+            ],
+          },
+          {
+            kind: "paragraph",
+            text: "If your problem is not described above, contact Markiro support: hello@v-b.tech.",
           },
         ],
       },
