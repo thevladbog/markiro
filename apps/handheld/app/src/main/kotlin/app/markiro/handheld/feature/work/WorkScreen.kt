@@ -58,6 +58,8 @@ data class WorkCallbacks(
     val onLeave: () -> Unit = {},
     val onClose: () -> Unit = {},
     val onConflicts: () -> Unit = {},
+    val onCloseBoxEarly: () -> Unit = {},
+    val onLabelQueue: () -> Unit = {},
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -121,6 +123,15 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                             cb.onConflicts()
                         },
                     )
+                    if (state.box != null) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.work_close_box_early, state.box.filled)) },
+                            onClick = {
+                                menu = false
+                                cb.onCloseBoxEarly()
+                            },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.work_leave)) },
                         onClick = {
@@ -138,7 +149,30 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                 }
             }
         }
-        LastScanZone(state.last, Modifier.weight(0.4f))
+        val box = state.box
+        if (box != null) {
+            // Aggregation: the fill grid is what the operator reads, so the last
+            // scan collapses to one line above it.
+            LastScanStrip(state.last)
+            BoxHeader(
+                stringResource(R.string.work_box_header, box.ordinal, box.filled, box.capacity),
+                Modifier.padding(top = MarkiroSizes.sp2),
+            )
+            BoxFill(box.filled, box.capacity, Modifier.weight(0.4f).padding(MarkiroSizes.sp4))
+        } else {
+            LastScanZone(state.last, Modifier.weight(0.4f))
+        }
+        if (state.unprintedLabels > 0) {
+            Box(
+                Modifier.fillMaxWidth().clickable { cb.onLabelQueue() },
+            ) {
+                Banner(
+                    pluralStringResource(R.plurals.work_labels_unprinted, state.unprintedLabels, state.unprintedLabels),
+                    Tone.Warn,
+                    Icons.Outlined.Print,
+                )
+            }
+        }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp2),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -227,6 +261,33 @@ private fun LastScanZone(last: LastScan?, modifier: Modifier) {
             last.firstSeenAt?.let { seen ->
                 Text(stringResource(R.string.work_first_seen, Iso.parse(seen)?.let { TimeText.hhmm(it) } ?: seen), style = t.caption, color = c.fg2)
             }
+        }
+    }
+}
+
+/**
+ * The last scan, one line high.
+ *
+ * In aggregation the grid is what the operator reads, so the verdict keeps its
+ * colour and its word but gives up the main zone. The word is always there:
+ * colour alone must never be the only carrier of a verdict.
+ */
+@Composable
+private fun LastScanStrip(last: LastScan?) {
+    val c = MarkiroTheme.colors
+    val t = MarkiroTheme.type
+    val colors = last?.verdict?.verdictTone()?.let { c.tone(it) }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4).clip(RoundedCornerShape(MarkiroSizes.radius))
+            .background(colors?.bg ?: c.surfaceCard).padding(horizontal = MarkiroSizes.sp3, vertical = MarkiroSizes.sp2),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (last == null || colors == null) {
+            Text(stringResource(R.string.work_waiting), style = t.caption, color = c.fg3)
+        } else {
+            Text(stringResource(last.verdict.label()), style = t.strong.copy(fontSize = 16.sp), color = colors.fg)
+            Text(last.tail, style = t.code.copy(fontSize = 16.sp), color = c.fg1)
         }
     }
 }
