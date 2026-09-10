@@ -141,6 +141,25 @@ allowed to differ — a check digit that disagrees is a number the receiver reje
 day out is a claim about food the rest of the platform contradicts. The fixture records the timezone
 it was generated in, because one case exercises the local-date path.
 
+### Aggregation walk-through against the local API
+
+1. In the cabinet the shift needs four things a validation shift does not: mode
+   «агрегация», a box capacity, a box label template, and a counterparty with a GLN as
+   the SSCC issuer. Without the issuer the device can close no box at all, and says so.
+2. Enter the shift and send `boxCapacity` scans. The grid fills; the last unit closes the
+   box, prints, and the screen clears itself after about a second.
+3. What the stand-in printer captured should carry the bare 18-digit SSCC — the `(00)`
+   identifier belongs to the emitter — and «Годен до» exactly one day short of the
+   production date plus the shelf life.
+4. Failure paths worth walking, because each is a different next step for the operator:
+   remove the printer entirely (boxes still close, the queue fills, the hub says so);
+   answer the status query with out-of-paper (nothing is sent); kill the app mid-print
+   (`adb shell am force-stop app.markiro.handheld`) and reopen it — the box reads as
+   unknown and «Напечатать все» skips it.
+5. Exhausting the pool needs a small block: the box stays open and names the reason.
+   Closing the shift with a non-empty queue must succeed, and the queue must still be
+   there afterwards.
+
 ## Scanner sources
 
 Built-in vendor intent (Datalogic Intent Wedge, Honeywell Data Intent, Zebra DataWedge; the

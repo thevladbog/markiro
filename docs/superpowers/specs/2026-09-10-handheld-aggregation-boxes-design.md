@@ -2,7 +2,9 @@
 
 **Date:** 2026-09-10
 
-**Status:** Approved in brainstorming on 2026-09-10; implementation plan pending
+**Status:** Implemented on 2026-09-11 on branch `worktree-tsd-aggregation`.
+Automated gates green; the manual emulator walk-through is **not yet done** —
+see «Risks and open points».
 
 **Scope:** Fifth implementation slice of design brief 10
 (`docs/design-briefs/10-tsd-handheld.md`), after the foundation
@@ -284,6 +286,13 @@ more of.
 
 ## Risks and open points
 
+- **The manual emulator walk-through has not been run.** It needs a cabinet
+  stand with an aggregation shift that has a box capacity, a box template and a
+  counterparty with a GLN as its SSCC issuer, plus an emulator and a stand-in
+  printer. This is not a formality: in the printing slice the same step found
+  four defects no unit test caught, all of them in the seam between screens and
+  states, which is what this slice has more of. Until it runs, delivery can
+  claim the logic and not the flow.
 - **Bluetooth printing on hardware.** Still unverifiable on an emulator. The
   pull request must say so plainly rather than implying coverage.
 - **How the label looks on paper.** Only a printed label answers that, and
