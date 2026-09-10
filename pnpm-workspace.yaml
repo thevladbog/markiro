@@ -10,12 +10,18 @@ settings:
   # Do not silently add optional peer dependencies to production images.
   autoInstallPeers: false
 overrides:
-  # React Email's preview CLI pulls Next.js as tooling. Keep that transitive
-  # runtime on the first 16.x release patched for the App Router DoS and SSRF
-  # advisories GHSA-m99w-x7hq-7vfj, GHSA-6gpp-xcg3-4w24,
-  # GHSA-p9j2-gv94-2wf4, and GHSA-89xv-2m56-2m9x.
-  next: "16.2.11"
-  sharp: "0.35.3"
+  # React Email's preview CLI pulls Next.js as tooling. 16.3.3 also fixes
+  # GHSA-2xp9-vwfh-vxw4 (AVIF) and GHSA-p293-qw3h-jr36 (Windows RCE).
+  next: "16.3.3"
+  # GHSA-rgj7-g3m4-5g8c: patched libheif for every image-processing consumer.
+  sharp: "0.35.4"
+  # Nest pins multer exactly; updating our direct dependency alone leaves
+  # its upload interceptors on the vulnerable copy. Keep the override on 2.x.
+  "multer@2": "2.3.0"
+  # Express/body-parser/superagent and Astro retain older compatible copies
+  # in the lockfile. Cover their parser and SVG sanitizer advisories too.
+  "qs@6": "6.16.0"
+  "svgo@4": "4.1.0"
   postcss: "8.5.23"
   js-yaml: "5.2.2"
   undici: "7.29.0"
@@ -97,9 +103,4 @@ overrides:
   # `a${b,c}d{e,f}`, where 5.0.9 is the one that matches bash.
   "minimatch@3>brace-expansion": "5.0.9"
 patchedDependencies:
-  # Astro 7.1 still default-imports js-yaml. The security override above moves
-  # it to ESM-only js-yaml 5, which exposes named exports instead. Keep the
-  # patched import narrow rather than downgrading the security pin.
-  "@astrojs/internal-helpers@0.10.2": patches/@astrojs__internal-helpers@0.10.2.patch
-  astro@7.1.6: patches/astro@7.1.6.patch
   minimatch@3.1.5: patches/minimatch@3.1.5.patch
