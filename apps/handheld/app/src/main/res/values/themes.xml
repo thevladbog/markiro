@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Markiro" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">#131216</item>
+        <item name="android:statusBarColor">#131216</item>
+    </style>
+</resources>
