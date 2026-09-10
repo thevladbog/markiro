@@ -1,5 +1,7 @@
 package app.markiro.handheld.core.box
 
+import app.markiro.handheld.core.label.LabelRenderer
+import app.markiro.handheld.core.print.PrinterTransport
 import app.markiro.handheld.core.storage.HandheldDatabase
 import dagger.Module
 import dagger.Provides
@@ -25,4 +27,12 @@ object BoxModule {
 
     @Provides
     fun closeBox(db: HandheldDatabase, boxes: BoxRepository, pool: SsccPool): CloseBox = CloseBox(db, boxes, pool)
+
+    @Provides
+    fun boxPrinter(
+        db: HandheldDatabase,
+        boxes: BoxRepository,
+        renderer: LabelRenderer,
+        transport: PrinterTransport,
+    ): BoxPrinter = BoxPrinter(db, boxes, renderer, transport)
 }
