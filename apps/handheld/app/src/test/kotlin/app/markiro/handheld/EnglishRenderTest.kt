@@ -23,6 +23,18 @@ import app.markiro.handheld.feature.inventory.InventoryWorkCallbacks
 import app.markiro.handheld.feature.inventory.InventoryWorkScreen
 import app.markiro.handheld.feature.inventory.InventoryWorkUi
 import app.markiro.handheld.feature.inventory.LeaveStep
+import app.markiro.handheld.core.label.PrinterLanguage
+import app.markiro.handheld.core.print.NotReadyReason
+import app.markiro.handheld.core.print.PrinterEntity
+import app.markiro.handheld.feature.printer.AddPrinterCallbacks
+import app.markiro.handheld.feature.printer.AddPrinterForm
+import app.markiro.handheld.feature.printer.AddPrinterScreen
+import app.markiro.handheld.feature.printer.PrinterListCallbacks
+import app.markiro.handheld.feature.printer.PrinterListScreen
+import app.markiro.handheld.feature.printer.PrinterUi
+import app.markiro.handheld.feature.printer.TestPrintCallbacks
+import app.markiro.handheld.feature.printer.TestPrintScreen
+import app.markiro.handheld.feature.printer.TestPrintStep
 import app.markiro.handheld.feature.pairing.PairingCallbacks
 import app.markiro.handheld.feature.pairing.PairingScreen
 import app.markiro.handheld.feature.pairing.PairingUi
@@ -111,6 +123,43 @@ class EnglishRenderTest {
     @Test
     fun inventoryLeaveRendersInEnglish() {
         compose.setContent { MarkiroTheme { InventoryLeaveScreen(LeaveStep.Offline(3), onDone = {}, onBack = {}) } }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun printerListRendersInEnglish() {
+        val printer = PrinterEntity(
+            "p1", "Zebra ZD421", "wifi", "192.168.1.40:9100", "zpl", 203,
+            selected = true, lastStatus = "ready", lastSeenAt = 1L,
+        )
+        compose.setContent {
+            MarkiroTheme {
+                PrinterListScreen(PrinterUi(printers = listOf(printer), selected = printer), PrinterListCallbacks())
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun addPrinterRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                AddPrinterScreen(
+                    AddPrinterForm(host = "192.168.1.40", error = NotReadyReason.NO_PAPER),
+                    AddPrinterCallbacks(),
+                )
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun anUnknownPrintResultRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                TestPrintScreen(TestPrintStep.Unknown("link lost"), PrinterLanguage.ZPL, 203, TestPrintCallbacks())
+            }
+        }
         assertNoCyrillic()
     }
 }

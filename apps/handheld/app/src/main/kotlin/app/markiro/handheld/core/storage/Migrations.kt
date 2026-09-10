@@ -103,3 +103,14 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
         db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_inventory_outbox_eventId` ON `inventory_outbox` (`eventId`)")
     }
 }
+
+/** Version 3 (inventory check) → 4 (printing). Additive only; printers are new and nothing else moves. */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `printers` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `transport` TEXT NOT NULL, " +
+                "`address` TEXT NOT NULL, `language` TEXT NOT NULL, `dpi` INTEGER NOT NULL, `selected` INTEGER NOT NULL, " +
+                "`lastStatus` TEXT, `lastSeenAt` INTEGER, PRIMARY KEY(`id`))",
+        )
+    }
+}

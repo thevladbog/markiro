@@ -5,12 +5,13 @@ import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.markiro.handheld.core.print.PrinterEntity
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Opens a hand-made version-1 database; Room validates every table after `MIGRATION_1_2` and `MIGRATION_2_3` run. */
+/** Opens a hand-made version-1 database; Room validates every table after all three migrations run. */
 @RunWith(AndroidJUnit4::class)
 class MigrationTest {
     @Test
@@ -38,7 +39,7 @@ class MigrationTest {
             legacy.version = 1
         }
         val db = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .allowMainThreadQueries()
             .build()
         try {
@@ -54,6 +55,13 @@ class MigrationTest {
                 InventoryOutboxEntity(inventoryId = "i1", snapshotId = "snap", eventId = "e1", deviceSequence = 1, payloadJson = "{}", createdAt = "t"),
             )
             assertEquals(1, db.inventoryOutboxDao().head("i1", 10).size)
+            db.printerDao().upsert(
+                PrinterEntity(
+                    id = "p1", name = "Zebra ZD421", transport = "wifi", address = "192.168.1.40:9100",
+                    language = "zpl", dpi = 203, selected = true, lastStatus = null, lastSeenAt = null,
+                ),
+            )
+            assertEquals("p1", db.printerDao().selected()?.id)
         } finally {
             db.close()
             context.deleteDatabase(name)

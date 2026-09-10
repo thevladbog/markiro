@@ -15,6 +15,7 @@ import app.markiro.handheld.core.storage.InventoryOutboxEntity
 import app.markiro.handheld.core.storage.InventoryTerminalStateEntity
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.sync.SyncTransport
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -45,6 +46,13 @@ class InventorySyncEngineTest {
     private var clock = 1_757_500_000_000L
     private val snap = "22222222-2222-4222-8222-222222222222"
 
+    /**
+     * The engines below publish their state with an eagerly started flow, which keeps reading Room
+     * for as long as its scope lives. Left running past the database it reads, it throws into
+     * whichever test happens to run next, so the scope is owned here and cancelled before the close.
+     */
+    private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+
     @Before
     fun setUp() = runTest {
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java).allowMainThreadQueries().build()
@@ -61,6 +69,7 @@ class InventorySyncEngineTest {
 
     @After
     fun tearDown() {
+        engineScope.cancel()
         server.shutdown()
         db.close()
     }
@@ -69,7 +78,7 @@ class InventorySyncEngineTest {
         val client = OkHttpClient.Builder().addInterceptor(RevocationInterceptor(bus, Json { ignoreUnknownKeys = true })).build()
         return InventorySyncEngine(
             db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(client) { server.url("/").toString() }, NetworkModule.strictJson(),
-            CoroutineScope(SupervisorJob() + Dispatchers.Unconfined), clock = { clock },
+            engineScope, clock = { clock },
         )
     }
 
