@@ -76,6 +76,11 @@ export interface NewShiftDraft {
   createdPrintShift: CreatedPrintShift | null;
 }
 
+type PrintSettings = Pick<
+  NewShiftDraft,
+  "printEnabled" | "verificationRequired" | "productTemplateId"
+>;
+
 function currentLocalDate(now = new Date()): string {
   return [
     now.getFullYear(),
@@ -101,6 +106,12 @@ export function NewShift({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [product, setProduct] = useState<ResolvedProduct | null>(initialDraft?.product ?? null);
+  const [committedPrintSettings, setCommittedPrintSettings] = useState<PrintSettings>({
+    printEnabled: initialDraft?.printEnabled ?? false,
+    verificationRequired: initialDraft?.verificationRequired ?? true,
+    productTemplateId: initialDraft?.productTemplateId ?? null,
+  });
+  // These editable values are committed only by Apply, or discarded on Back.
   const [printEnabled, setPrintEnabled] = useState(initialDraft?.printEnabled ?? false);
   const [verificationRequired, setVerificationRequired] = useState(
     initialDraft?.verificationRequired ?? true,
@@ -167,6 +178,11 @@ export function NewShift({
         }
         if (!mounted.current || (isCurrent && !isCurrent())) return;
         setProduct(match);
+        setCommittedPrintSettings({
+          printEnabled: false,
+          verificationRequired: true,
+          productTemplateId: null,
+        });
         setPrintEnabled(false);
         setVerificationRequired(true);
         setProductTemplateId(null);
@@ -233,11 +249,18 @@ export function NewShift({
     }
   }
 
+  function restorePrintSettings() {
+    setPrintEnabled(committedPrintSettings.printEnabled);
+    setVerificationRequired(committedPrintSettings.verificationRequired);
+    setProductTemplateId(committedPrintSettings.productTemplateId);
+  }
+
   async function openPrintSettings() {
     if (!product || busy || operationBusy.current || (isCurrent && !isCurrent())) return;
     const operation = ++shiftEntryOperation.current;
     const current = () =>
       mounted.current && operation === shiftEntryOperation.current && (isCurrent?.() ?? true);
+    if (view === "found") restorePrintSettings();
     setView("validationPrint");
     setError(null);
     setPrinterError(false);
@@ -299,6 +322,7 @@ export function NewShift({
       return;
     }
     if (printEnabled && !productTemplateId) return;
+    setCommittedPrintSettings({ printEnabled, verificationRequired, productTemplateId });
     setPrintSettingsConfigured(true);
     setError(null);
     setPrinterError(false);
@@ -307,6 +331,7 @@ export function NewShift({
 
   async function start() {
     if (!product || busy || operationBusy.current || (isCurrent && !isCurrent())) return;
+    const { printEnabled, verificationRequired, productTemplateId } = committedPrintSettings;
     if (mode === "validation" && printEnabled && !productTemplateId) {
       await openProductTemplateStep();
       return;
@@ -352,6 +377,7 @@ export function NewShift({
         if (!selected) {
           setProductTemplates(latest.items);
           setProductTemplateId(null);
+          setCommittedPrintSettings((previous) => ({ ...previous, productTemplateId: null }));
           setError(t("shifts.productTemplateUnavailable"));
           return;
         }
@@ -507,6 +533,7 @@ export function NewShift({
               variant="secondary"
               disabled={busy}
               onClick={() => {
+                restorePrintSettings();
                 setError(null);
                 setView("found");
               }}
@@ -712,9 +739,7 @@ export function NewShift({
                   onSetup({
                     product,
                     productionDate,
-                    printEnabled,
-                    verificationRequired,
-                    productTemplateId,
+                    ...committedPrintSettings,
                     productTemplates,
                     createdPrintShift: createdPrintShift.current,
                   })
@@ -753,6 +778,11 @@ export function NewShift({
                 setMode("aggregation");
                 setPrintEnabled(false);
                 setProductTemplateId(null);
+                setCommittedPrintSettings((previous) => ({
+                  ...previous,
+                  printEnabled: false,
+                  productTemplateId: null,
+                }));
               }}
             >
               {t("shifts.modeAggregation")}
@@ -768,7 +798,11 @@ export function NewShift({
               data-testid="new-shift-print-settings"
             >
               {t("shifts.printSettingsEntry", {
-                mode: t(printEnabled ? "shifts.printDuplicateShort" : "shifts.printOff"),
+                mode: t(
+                  committedPrintSettings.printEnabled
+                    ? "shifts.printDuplicateShort"
+                    : "shifts.printOff",
+                ),
               })}
             </Button>
           ) : null}

@@ -333,7 +333,7 @@ it("starts duplicate printing on a 300 dpi printer with a template authored at 2
   expect(screen.queryByText(/printer resolution does not match/)).toBeNull();
 });
 
-it("keeps a template and optional verification when navigating back through settings", async () => {
+it("keeps draft settings between steps and restores applied settings when reopening", async () => {
   await setup();
   await selectDuplicateTemplate({ apply: false });
   fireEvent.click(screen.getByRole("button", { name: "Back" }));
@@ -343,7 +343,11 @@ it("keeps a template and optional verification when navigating back through sett
     ),
   );
   fireEvent.click(screen.getByLabelText("Require label verification"));
-  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  fireEvent.click(screen.getByRole("button", { name: "Select a template" }));
+  expect(
+    (await screen.findByRole("button", { name: /Product label/ })).getAttribute("aria-pressed"),
+  ).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
   fireEvent.click(screen.getByRole("button", { name: "Label printing: Data Matrix duplicate" }));
   await waitFor(() =>
     expect(screen.getByLabelText("Require label verification").hasAttribute("disabled")).toBe(
@@ -358,6 +362,66 @@ it("keeps a template and optional verification when navigating back through sett
     (await screen.findByRole("button", { name: /Product label/ })).getAttribute("aria-pressed"),
   ).toBe("true");
 });
+
+it("discards disabled printing on Back and starts with the applied duplicate policy", async () => {
+  const h = await setup();
+  await selectDuplicateTemplate();
+  fireEvent.click(screen.getByRole("button", { name: "Label printing: Data Matrix duplicate" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Print duplicate Data Matrix").hasAttribute("disabled")).toBe(
+      false,
+    ),
+  );
+  fireEvent.click(screen.getByLabelText("Require label verification"));
+  fireEvent.click(screen.getByLabelText("Print duplicate Data Matrix"));
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+  expect(
+    screen.getByRole("button", { name: "Label printing: Data Matrix duplicate" }),
+  ).toBeDefined();
+  expect(h.requests).toEqual([]);
+  fireEvent.click(screen.getByRole("button", { name: "Start" }));
+  await waitFor(() => expect(h.onStarted).toHaveBeenCalledTimes(1));
+  expect(h.requests).toEqual([
+    {
+      path: "/shifts",
+      body: expect.objectContaining({
+        validationPrint: {
+          mode: "duplicate_dm",
+          templateId: h.fixture.policy.templateId,
+          verification: "required",
+        },
+      }),
+    },
+  ]);
+});
+
+it.each([false, true])(
+  "discards an unapplied duplicate policy and keeps explicit no-print=%s",
+  async (explicit) => {
+    const h = await setup({ returnNoPrint: true });
+    await waitFor(() =>
+      expect(screen.getByLabelText("Print duplicate Data Matrix").hasAttribute("disabled")).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: explicit ? "Apply" : "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Label printing: No printing" }));
+    await selectDuplicateTemplate({ apply: false });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Back" }).hasAttribute("disabled")).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("button", { name: "Label printing: No printing" })).toBeDefined();
+    expect(h.requests).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(h.onStarted).toHaveBeenCalledTimes(1));
+    expect(h.requests).toHaveLength(1);
+    if (explicit) expect(h.requests[0]?.body).toMatchObject({ validationPrint: { mode: "none" } });
+    else expect(h.requests[0]?.body).not.toHaveProperty("validationPrint");
+  },
+);
 
 it("drops a start after the credential generation is retired", async () => {
   let current = true;
