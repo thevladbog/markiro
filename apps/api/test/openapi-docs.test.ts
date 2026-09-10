@@ -229,6 +229,7 @@ describe("self-hosted OpenAPI documentation", () => {
         "tenantId",
         "organizationName",
         "line",
+        "kind",
       ]);
       expectExactObjectFields(schema.properties!.subscription!, [
         "access",
