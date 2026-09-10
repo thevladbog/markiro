@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-10
 
-**Status:** Implemented on 2026-09-10 on branch `worktree-tsd-printing` (pull request pending)
+**Status:** Implemented in https://github.com/thevladbog/markiro/pull/491 (2026-09-10)
 
 **Scope:** Fourth implementation slice of design brief 10
 (`docs/design-briefs/10-tsd-handheld.md`), after the foundation
