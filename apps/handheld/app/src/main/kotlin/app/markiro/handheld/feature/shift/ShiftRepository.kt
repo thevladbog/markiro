@@ -50,6 +50,14 @@ fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
     bundleFetchedAt = existing?.bundleFetchedAt,
     enteredAt = existing?.enteredAt,
     leftAt = existing?.leftAt,
+    // Everything below comes from the BUNDLE, which the shift list does not carry.
+    // Rebuilding the row from a list refresh without them silently strips the SSCC
+    // issuer and the box template off a shift already entered, and boxes stop
+    // closing for a reason nothing on the screen connects to a list refresh.
+    boxLabelTemplate = existing?.boxLabelTemplate,
+    shelfLifeDays = existing?.shelfLifeDays,
+    egaisCode = existing?.egaisCode,
+    ssccIssuerPrefix = existing?.ssccIssuerPrefix,
 )
 
 /** Shift list cache, entry (server participation + bundle) and the local leave mark. */

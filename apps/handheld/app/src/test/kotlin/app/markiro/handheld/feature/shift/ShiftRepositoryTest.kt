@@ -160,4 +160,23 @@ class ShiftRepositoryTest {
         // in place would keep winning over the block the admin just cut.
         assertEquals(101L, pool.burn("468008990", 0))
     }
+
+    @Test
+    fun refreshingTheListKeepsWhatOnlyTheBundleCarries() = runTest {
+        // The list has no SSCC issuer and no box template. Rebuilding the row from
+        // it silently stripped both off a shift already entered, and boxes stopped
+        // closing with nothing on screen connecting that to a list refresh.
+        server.enqueue(MockResponse().setBody(aggregationShiftJson))
+        server.enqueue(MockResponse().setBody(aggregationBundleJson))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+
+        server.enqueue(MockResponse().setBody("""{"items":[$aggregationShiftJson]}"""))
+        assertTrue(repo().refreshList())
+
+        val shift = db.shiftDao().get("s1")!!
+        assertEquals("468008990", shift.ssccIssuerPrefix)
+        assertEquals(365, shift.shelfLifeDays)
+        assertNotNull(shift.boxLabelTemplate)
+        assertEquals("04600682000013", shift.productGtin14)
+    }
 }

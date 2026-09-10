@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.work
 
+import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -24,6 +25,7 @@ import app.markiro.handheld.feature.shift.ShiftRepository
 import app.markiro.handheld.feature.signin.SessionHolder
 import app.markiro.handheld.feature.signin.SessionState
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -195,7 +197,21 @@ class WorkViewModel(
         // the first scan means the operator meets the validation layout and the
         // grid appears from nowhere.
         viewModelScope.launch { showCurrentBox() }
-        viewModelScope.launch { scans.events.collect { onScan(it.raw) } }
+        // Each scan is handled inside its own guard. A failure on one -- a print
+        // that throws, a template that will not render -- must not take the
+        // collector down with it: the app would keep looking alive while silently
+        // recording nothing, which is the worst thing a scanner can do.
+        viewModelScope.launch {
+            scans.events.collect { event ->
+                try {
+                    onScan(event.raw)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e("markiro.work", "scan handling failed", e)
+                }
+            }
+        }
         viewModelScope.launch {
             teamTicks.collect { teamState.value = team.refresh(shiftId) ?: teamState.value }
         }
