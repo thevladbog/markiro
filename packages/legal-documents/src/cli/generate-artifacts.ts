@@ -936,6 +936,10 @@ function blockText(block: LegalBlock): string {
       return block.items.join(" ");
     case "definition-list":
       return block.items.map(({ term, detail }) => `${term}. ${detail}`).join(" ");
+    case "table":
+      return [block.columns.join(" "), ...block.rows.map((row) => row.join(" ")), block.caption]
+        .filter((part): part is string => Boolean(part))
+        .join(" ");
     case "step":
       return [block.title, block.text, block.image?.caption, block.expected]
         .filter((part): part is string => Boolean(part))

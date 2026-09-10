@@ -16,6 +16,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 import LandingFooter from "./LandingFooter.astro";
 import LandingHeader from "./LandingHeader.astro";
 import LegalArtifactControls from "./LegalArtifactControls.astro";
+import LegalTable from "./LegalTable.astro";
 
 interface Props {
   page: LegalDocumentPageDefinition;
@@ -36,6 +37,7 @@ const graph = buildLegalPageGraph(page.metadata, {
 });
 
 const renderDefinition = (block: Extract<LegalBlock, { kind: "definition-list" }>) => block.items;
+const tableLabel = page.locale === "ru" ? "Таблица" : "Table";
 ---
 
 <BaseLayout metadata={page.metadata} graph={graph}>
@@ -79,7 +81,7 @@ const renderDefinition = (block: Extract<LegalBlock, { kind: "definition-list" }
         {content.sections.map((section) => (
           <section id={section.id} aria-labelledby={`${section.id}-heading`}>
             <h2 id={`${section.id}-heading`}>{section.heading}</h2>
-            {section.blocks.map((block) => (
+            {section.blocks.map((block, blockIndex) => (
               <>
                 {block.kind === "paragraph" && <p>{block.text}</p>}
                 {block.kind === "ordered-list" && <ol>{block.items.map((item) => <li>{item}</li>)}</ol>}
@@ -93,6 +95,13 @@ const renderDefinition = (block: Extract<LegalBlock, { kind: "definition-list" }
                       </div>
                     ))}
                   </dl>
+                )}
+                {block.kind === "table" && (
+                  <LegalTable
+                    block={block}
+                    captionId={`${section.id}-table-${blockIndex}`}
+                    fallbackLabel={tableLabel}
+                  />
                 )}
               </>
             ))}
