@@ -2,7 +2,8 @@
 
 Native Android app for industrial handheld terminals. Design: `docs/design-briefs/10-tsd-handheld.md`;
 slices: `docs/superpowers/specs/2026-09-10-handheld-foundation-design.md` (pairing, sign-in, hub) and
-`docs/superpowers/specs/2026-09-10-handheld-shift-validation-design.md` (shifts, scans, sync, close).
+`docs/superpowers/specs/2026-09-10-handheld-shift-validation-design.md` (shifts, scans, sync, close) and
+`docs/superpowers/specs/2026-09-10-handheld-inventory-check-design.md` (inventory check).
 
 ## Build and test
 
@@ -48,6 +49,27 @@ The KM parser is verified against `app/src/test/resources/km-fixtures.json`, gen
 Both languages ship with every screen: `res/values/strings.xml` (Russian) and
 `res/values-en/strings.xml`; lint treats a missing translation as an error, and the
 Robolectric tests run under `ru-RU`.
+
+## Inventory walk-through against the local API
+
+1. In the cabinet create an inventory in `check` mode (a Chestny ZNAK export with a few codes),
+   start it, and pair the handheld on the same line.
+2. Hub → Инвентаризация → the task (or «Показать другие линии» for another line, confirmed on
+   screen). The snapshot downloads once; the download resumes after a restart.
+3. Scan units or an SSCC box label:
+
+       adb shell "am broadcast -a app.markiro.handheld.DEBUG_SCAN --es data '00346006820000000014'"
+
+   Verdicts: ПРИНЯТО, ДУБЛЬ (this or another terminal), ЗАЩИЩЁН, НЕ УЧАСТВУЕТ, РАСХОЖДЕНИЕ,
+   НЕВЕРНЫЙ КОД. The first scan adopts the code's production date; a later code with another
+   date opens the mismatch sheet.
+4. Events queue in `inventory_outbox` and go to `POST /station/inventories/:id/event-batches`;
+   other terminals' claims arrive through `GET …/progress` every 15 s.
+5. «Ещё» → «Выйти из задания» drains the queue and posts `leave`; the cabinet closes the inventory.
+
+The classifier and the batch digests are verified against
+`app/src/test/resources/inventory-fixtures.json`
+(`pnpm --filter @markiro/domain fixtures:inventory`).
 
 ## Scanner sources
 

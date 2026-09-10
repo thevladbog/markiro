@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-10
 
-**Status:** Approved in brainstorming on 2026-09-10; implementation plan pending
+**Status:** Implemented on 2026-09-10 on branch `worktree-tsd-inventory` (pull request pending)
 
 **Scope:** Third implementation slice of design brief 10
 (`docs/design-briefs/10-tsd-handheld.md`), on top of the foundation
@@ -168,7 +168,8 @@ Port of `recordInventoryScanInternal` for `check`:
   `DateMismatch(activeDate, codeDate | null, mixed)` and record nothing;
   `acceptMismatch = true` skips the guard. The date cannot leave the task's
   range: the sheet's picker is bounded, and the source date comes only from
-  `expected` rows that the manifest range already covers.
+  `expected` rows that the manifest range already covers. An `invalid` scan
+  creates no event, so it shows in the verdict zone only, not in the feed.
 - Step 4, in one transaction: allocate `deviceSequence` from
   `inventory_terminal_state` (upserting `operatorId`); insert the event with
   `activeProductionDate`; insert result rows (`ON CONFLICT DO NOTHING`) — one
@@ -267,9 +268,9 @@ Route `INVENTORY` (list) → `INVENTORY_WORK/{inventoryId}`; the hub tile
   учётную запись в кабинете»; `INVENTORY_DEVICE_LINE_REQUIRED` → «У ТСД нет
   линии: назначьте её в кабинете»; offline without an active snapshot →
   «Нужна сеть, чтобы загрузить снимок».
-- **Download** (`InventoryDownloadScreen`): «Загружаем снимок INV-0007»,
-  «12 400 из 41 160», linear progress; «Повторить» on error; «Отмена»
-  returns to the list keeping the staging.
+- **Download**: a dialog state of the list screen, «Загружаем снимок
+  INV-0007», «12 400 из 41 160», linear progress; «Повторить» on error;
+  «Отмена» returns to the list keeping the staging.
 - **Work** (`InventoryWorkScreen`): header «Вода» / «INV-0007», date chip
   «05.09.2026» (tap → date sheet); verdict zone with the same layout as the
   shift screen: `ПРИНЯТО` (+ «короб · принято 18 кодов» for a box),
