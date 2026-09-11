@@ -43,7 +43,7 @@ class MigrationTest {
             legacy.version = 1
         }
         val db = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .allowMainThreadQueries()
             .build()
         try {
@@ -150,6 +150,69 @@ class MigrationTest {
                 assertTrue(cursor.moveToFirst())
                 assertEquals(0, cursor.getInt(0))
             }
+        } finally {
+            helper.close()
+            context.deleteDatabase(name)
+        }
+    }
+
+    /**
+     * Same shape and same reason as the box migration above: seeded first, driven
+     * directly, because a database Room builds from the entities is already v6
+     * and the migration would never run at all.
+     */
+    @Test
+    fun theDuplicateMigrationLeavesShiftsIntactAndOpensTheTwoTables() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "migration-5-6-test.db"
+        context.deleteDatabase(name)
+        val file = context.getDatabasePath(name).also { it.parentFile?.mkdirs() }
+        SQLiteDatabase.openOrCreateDatabase(file, null).use { legacy ->
+            legacy.execSQL(
+                "CREATE TABLE `shift_mirror` (`id` TEXT NOT NULL, `number` TEXT NOT NULL, " +
+                    "`ssccIssuerPrefix` TEXT, PRIMARY KEY(`id`))",
+            )
+            legacy.execSQL("INSERT INTO shift_mirror VALUES ('s1','SEP26-001','468008990')")
+            legacy.version = 5
+        }
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(name).callback(
+                object : SupportSQLiteOpenHelper.Callback(5) {
+                    override fun onCreate(db: SupportSQLiteDatabase) = Unit
+                    override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                },
+            ).build(),
+        )
+        try {
+            val db = helper.writableDatabase
+            MIGRATION_5_6.migrate(db)
+            db.query("SELECT number, ssccIssuerPrefix, duplicateVerification, duplicateTemplate FROM shift_mirror").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("SEP26-001", cursor.getString(0))
+                // What the shift already had survives...
+                assertEquals("468008990", cursor.getString(1))
+                // ...and a shift that predates duplicate printing carries no policy.
+                assertTrue(cursor.isNull(2))
+                assertTrue(cursor.isNull(3))
+            }
+            db.execSQL(
+                "INSERT INTO product_label_jobs VALUES ('j1','s1','hash','raw','t','op','rev','dig','pay','AAEC','byt','zpl',203,1,'att',1," +
+                    "'prepared','none','not_required','prepared')",
+            )
+            db.execSQL("INSERT INTO product_label_events VALUES ('e1','j1',1,'prepared','{}','t',NULL,NULL)")
+            db.query("SELECT COUNT(*) FROM product_label_jobs").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1, cursor.getInt(0))
+            }
+            // The server refuses a gap in a job's sequence; the device must not be
+            // able to produce two events claiming the same place in one.
+            var duplicateRejected = false
+            try {
+                db.execSQL("INSERT INTO product_label_events VALUES ('e2','j1',1,'sending','{}','t',NULL,NULL)")
+            } catch (_: android.database.SQLException) {
+                duplicateRejected = true
+            }
+            assertTrue("a second event took sequence 1 of the same job", duplicateRejected)
         } finally {
             helper.close()
             context.deleteDatabase(name)
