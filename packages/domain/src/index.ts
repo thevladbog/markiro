@@ -96,10 +96,7 @@ export {
   buildPrintNameBoxLabelTemplates,
 } from "./labels/defaults.js";
 export type { DefaultLabelTemplate, LegacyStockLabelTemplate } from "./labels/defaults.js";
-export {
-  buildPalletLabelTemplates,
-  PALLET_LABEL_TEMPLATE_NAME,
-} from "./labels/pallet-defaults.js";
+export { buildPalletLabelTemplates, PALLET_LABEL_TEMPLATE_NAME } from "./labels/pallet-defaults.js";
 export type {
   LabelBarcodeElement,
   LabelBoxElement,

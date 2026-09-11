@@ -112,9 +112,10 @@ describe("stock pallet label template", () => {
     for (let i = 0; i < ordered.length - 1; i += 1) {
       const [, current] = ordered[i]!;
       const [nextY, next] = ordered[i + 1]!;
-      expect(current.bottom, `${current.ids.join(",")} into ${next.ids.join(",")}`).toBeLessThanOrEqual(
-        nextY + 1e-9,
-      );
+      expect(
+        current.bottom,
+        `${current.ids.join(",")} into ${next.ids.join(",")}`,
+      ).toBeLessThanOrEqual(nextY + 1e-9);
     }
   });
 

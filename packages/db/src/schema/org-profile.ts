@@ -111,5 +111,4 @@ export const orgPalletLabelTemplateDefaults = pgTable(
   ],
 );
 
-export type OrgPalletLabelTemplateDefaultRow =
-  typeof orgPalletLabelTemplateDefaults.$inferSelect;
+export type OrgPalletLabelTemplateDefaultRow = typeof orgPalletLabelTemplateDefaults.$inferSelect;

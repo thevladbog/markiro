@@ -61,16 +61,16 @@ Steps 3, 4 and 5 are independent of each other and may land in any order.
 
 ## Decisions
 
-| Question                             | Decision                                                                        |
-| ------------------------------------ | ------------------------------------------------------------------------------- |
-| How a box joins a pallet             | Automatically, at box close, onto the closing terminal's own open pallet        |
-| Who owns a pallet                    | One terminal. Two terminals in one shift build two pallets                      |
-| Unit of pallet capacity              | Boxes. The existing units-valued field is renamed and migrated                  |
-| Pallet label                         | Full symmetry with the box label: own purpose, own defaults, own shift field    |
-| Short pallet at shift close          | Closed by force, with a confirmation naming the box count, and printed          |
-| Server model                         | A sibling table of `boxes`, not a level column on `boxes`, not a string on it   |
-| Disassembling a pallet               | Retires the pallet; its boxes stay intact and keep their `pallet_id`            |
-| Pallet level in existing export ids  | No. New format ids; existing ones keep emitting exactly what they emit today    |
+| Question                            | Decision                                                                      |
+| ----------------------------------- | ----------------------------------------------------------------------------- |
+| How a box joins a pallet            | Automatically, at box close, onto the closing terminal's own open pallet      |
+| Who owns a pallet                   | One terminal. Two terminals in one shift build two pallets                    |
+| Unit of pallet capacity             | Boxes. The existing units-valued field is renamed and migrated                |
+| Pallet label                        | Full symmetry with the box label: own purpose, own defaults, own shift field  |
+| Short pallet at shift close         | Closed by force, with a confirmation naming the box count, and printed        |
+| Server model                        | A sibling table of `boxes`, not a level column on `boxes`, not a string on it |
+| Disassembling a pallet              | Retires the pallet; its boxes stay intact and keep their `pallet_id`          |
+| Pallet level in existing export ids | No. New format ids; existing ones keep emitting exactly what they emit today  |
 
 ### Why a terminal owns its pallet
 
@@ -147,20 +147,20 @@ field and still says what it means.
 A mirror of `boxes`, minus `registry_version` (the kiosk registry sells boxes;
 pallets are invisible to it):
 
-| Column                                        | Notes                                                      |
-| --------------------------------------------- | ---------------------------------------------------------- |
-| `id` uuid pk, `tenant_id`                     |                                                            |
-| `shift_id` uuid not null                      | composite FK `(tenant_id, shift_id)` → `shifts`            |
-| `terminal_id` text null                       |                                                            |
-| `device_pallet_id` text not null              | the device's own id, as `device_box_id` is for a box       |
-| `sscc` char(18) null                          | assigned at close only                                     |
-| `operator_id` uuid null                       | composite FK → `employees`, MATCH SIMPLE skips null        |
-| `opened_at` not null                          |                                                            |
-| `closed_at` null                              | device clock                                               |
-| `closure_received_at` null                    | server `now()`, written in the same statement as `sscc`    |
-| `print_verified_at`, `print_skipped_at`       | mutually exclusive, as on boxes                            |
-| `disassembled_at` null                        | retires the pallet; its SSCC is never reissued             |
-| `updated_at`                                  |                                                            |
+| Column                                  | Notes                                                   |
+| --------------------------------------- | ------------------------------------------------------- |
+| `id` uuid pk, `tenant_id`               |                                                         |
+| `shift_id` uuid not null                | composite FK `(tenant_id, shift_id)` → `shifts`         |
+| `terminal_id` text null                 |                                                         |
+| `device_pallet_id` text not null        | the device's own id, as `device_box_id` is for a box    |
+| `sscc` char(18) null                    | assigned at close only                                  |
+| `operator_id` uuid null                 | composite FK → `employees`, MATCH SIMPLE skips null     |
+| `opened_at` not null                    |                                                         |
+| `closed_at` null                        | device clock                                            |
+| `closure_received_at` null              | server `now()`, written in the same statement as `sscc` |
+| `print_verified_at`, `print_skipped_at` | mutually exclusive, as on boxes                         |
+| `disassembled_at` null                  | retires the pallet; its SSCC is never reissued          |
+| `updated_at`                            |                                                         |
 
 Constraints, named and reasoned as their box counterparts:
 
@@ -203,15 +203,15 @@ is NOT NULL with an FK and its `kind` payload CHECK already has three branches;
 making the column nullable to fit pallets would weaken a hot audit table for
 no gain.
 
-| Column                                              | Notes                                             |
-| --------------------------------------------------- | ------------------------------------------------- |
-| `id` uuid pk, `tenant_id`                           |                                                   |
-| `kind` text                                         | CHECK `in ('disassemble', 'reprint')`             |
-| `pallet_id` uuid not null                           | composite FK → `pallets`                          |
-| `shift_id`, `terminal_id`, `operator_id`            | as on `box_exceptions`                            |
-| `reason` text not null                              | both kinds require one, as box disassemble does   |
-| `disaggregation_document_id` uuid null              | set when the cabinet did it, not an operator      |
-| `occurred_at`, `recorded_at`                        |                                                   |
+| Column                                   | Notes                                           |
+| ---------------------------------------- | ----------------------------------------------- |
+| `id` uuid pk, `tenant_id`                |                                                 |
+| `kind` text                              | CHECK `in ('disassemble', 'reprint')`           |
+| `pallet_id` uuid not null                | composite FK → `pallets`                        |
+| `shift_id`, `terminal_id`, `operator_id` | as on `box_exceptions`                          |
+| `reason` text not null                   | both kinds require one, as box disassemble does |
+| `disaggregation_document_id` uuid null   | set when the cabinet did it, not an operator    |
+| `occurred_at`, `recorded_at`             |                                                 |
 
 The `disaggregation_document_id` FK is hand-spelled in the migration, not in
 the Drizzle definition, for the same import-cycle reason `box_exceptions`
@@ -296,14 +296,14 @@ box that filled it:
 
 ```ts
 {
-  palletId: string;        // device-local, max 64
-  shiftId: string;         // uuid
+  palletId: string; // device-local, max 64
+  shiftId: string; // uuid
   terminalId: string | null;
-  sscc: string;            // 18 digits
-  closedAt: string;        // datetime
+  sscc: string; // 18 digits
+  closedAt: string; // datetime
   operatorId: string | null;
-  printVerifiedAt: string | null;   // mutually exclusive with
-  printSkippedAt: string | null;    // printSkippedAt
+  printVerifiedAt: string | null; // mutually exclusive with
+  printSkippedAt: string | null; // printSkippedAt
 }
 ```
 
@@ -357,8 +357,18 @@ implied by acceptance of the batch, as it is for boxes.
 Mirrors `GET /boxes?shiftId=`, same guard set, same tenant scoping:
 
 ```ts
-{ id, sscc, terminalId, lineName, operatorId, boxCount, unitCount,
-  closedAt, disassembledAt, contentsChangedAfterClose }
+{
+  (id,
+    sscc,
+    terminalId,
+    lineName,
+    operatorId,
+    boxCount,
+    unitCount,
+    closedAt,
+    disassembledAt,
+    contentsChangedAfterClose);
+}
 ```
 
 ## 3. Station

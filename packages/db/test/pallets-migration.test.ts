@@ -82,10 +82,9 @@ describe.skipIf(!databaseUrl)("pallets migration", () => {
   });
 
   it("converts a capacity it can divide", async () => {
-    const { rows } = await pool.query(
-      "SELECT pallet_box_capacity FROM products WHERE id=$1",
-      [convertible],
-    );
+    const { rows } = await pool.query("SELECT pallet_box_capacity FROM products WHERE id=$1", [
+      convertible,
+    ]);
     // 240 units / 20 per box = 12 boxes.
     expect(rows).toEqual([{ pallet_box_capacity: 12 }]);
   });
@@ -98,10 +97,9 @@ describe.skipIf(!databaseUrl)("pallets migration", () => {
       // left under a "boxes" name would be a wrong value, not a preserved one.
       [belowOneBox, "below one box"],
     ] as const) {
-      const { rows } = await pool.query(
-        "SELECT pallet_box_capacity FROM products WHERE id=$1",
-        [id],
-      );
+      const { rows } = await pool.query("SELECT pallet_box_capacity FROM products WHERE id=$1", [
+        id,
+      ]);
       expect(rows, why).toEqual([{ pallet_box_capacity: null }]);
     }
   });
