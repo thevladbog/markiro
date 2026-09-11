@@ -15,6 +15,8 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type * as LegalDocuments from "@markiro/legal-documents";
+
 import { loadLegalArtifacts } from "./legal-artifacts";
 
 const publicRoot = fileURLToPath(new URL("../../public/", import.meta.url));
@@ -137,9 +139,7 @@ describe("loadLegalArtifacts", () => {
     // while the published release legitimately carries its English PDF.
     vi.resetModules();
     vi.doMock("@markiro/legal-documents", async () => {
-      const actual = await vi.importActual<typeof import("@markiro/legal-documents")>(
-        "@markiro/legal-documents",
-      );
+      const actual = await vi.importActual<typeof LegalDocuments>("@markiro/legal-documents");
       return {
         ...actual,
         legalReleaseLocales: (code: string) =>
