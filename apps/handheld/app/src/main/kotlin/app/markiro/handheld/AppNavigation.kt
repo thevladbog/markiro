@@ -51,7 +51,6 @@ import app.markiro.handheld.feature.printer.TestPrintCallbacks
 import app.markiro.handheld.feature.printer.TestPrintScreen
 import app.markiro.handheld.feature.printer.TransportKind
 import app.markiro.handheld.feature.settings.AppPreferences
-import app.markiro.handheld.feature.settings.ComingSoonScreen
 import app.markiro.handheld.feature.settings.ScannerSettingsScreen
 import app.markiro.handheld.feature.settings.SettingsScreen
 import app.markiro.handheld.feature.settings.SettingsViewModel
@@ -110,7 +109,6 @@ object Routes {
     const val EXCEPTIONS = "exceptions/{shiftId}"
     const val DISASSEMBLE = "exceptions/{shiftId}/disassemble"
     const val REPRINT = "exceptions/{shiftId}/reprint"
-    const val SOON = "soon/{tile}"
     const val INVENTORY = "inventory"
     const val INVENTORY_WORK = "inventory/{inventoryId}"
     const val INVENTORY_LEAVE = "inventory/{inventoryId}/leave"
@@ -122,7 +120,6 @@ object Routes {
     fun exceptions(id: String) = "exceptions/$id"
     fun disassemble(id: String) = "exceptions/$id/disassemble"
     fun reprintLabel(id: String) = "exceptions/$id/reprint"
-    fun soon(tile: HubTile) = "soon/${tile.name}"
 }
 
 @Composable
@@ -212,7 +209,6 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         when (tile) {
                             HubTile.SHIFT -> state.activeShiftId?.let { nav.navigate(Routes.work(it)) } ?: nav.navigate(Routes.SHIFTS)
                             HubTile.INVENTORY -> state.activeInventoryId?.let { nav.navigate(Routes.inventoryWork(it)) } ?: nav.navigate(Routes.INVENTORY)
-                            HubTile.CHECK -> nav.navigate(Routes.soon(tile))
                             HubTile.SETTINGS -> nav.navigate(Routes.SETTINGS)
                         }
                     },
@@ -559,13 +555,6 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     onProfile = vm::setProfile,
                     onDebugScan = vm::submitDebugScan,
                 )
-            }
-            composable(Routes.SOON) { entry ->
-                val title = when (entry.arguments?.getString("tile")) {
-                    HubTile.SHIFT.name -> R.string.hub_tile_shift
-                    else -> R.string.hub_tile_check
-                }
-                ComingSoonScreen(stringResource(title), onBack = { nav.popBackStack() })
             }
         }
     }

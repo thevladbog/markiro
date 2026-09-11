@@ -39,6 +39,21 @@ class HubScreenTest {
         assertEquals(HubTile.INVENTORY, opened)
     }
 
+    /**
+     * «Проверка кода» offered «нажмите триггер» and answered «в следующем срезе»
+     * on every tap. A tile is a promise; this one had nothing behind it.
+     */
+    @Test
+    fun thereIsNoTileForTheUnbuiltCodeCheck() {
+        compose.setContent {
+            MarkiroTheme {
+                HubScreen(HubUi("ООО «Родник»", "Иванова Анна", "Линия 2", shifts = 3, inventories = 1), onTile = {}, onSignOut = {})
+            }
+        }
+        compose.onNodeWithText("Проверка кода").assertDoesNotExist()
+        compose.onNodeWithText("Настройки").assertIsDisplayed()
+    }
+
     @Test
     fun offlineShowsTheQueueBannerAndTheContinueTile() {
         compose.setContent {

@@ -137,6 +137,38 @@ class ShiftRepositoryTest {
         assertEquals(EnterResult.Closed, repo().enter("s1"))
     }
 
+    /**
+     * Every conflict used to become «смена уже закрыта». An operator then stood
+     * in front of a shift the cabinet still lists as open, with nothing on
+     * screen naming the subscription that actually refused them.
+     */
+    @Test
+    fun aConflictCarryingACodeIsNotReportedAsAClosedShift() = runTest {
+        server.enqueue(MockResponse().setResponseCode(409).setBody("""{"code":"subscription_unmanaged","statusCode":409}"""))
+        assertEquals(EnterResult.Refused(EnterStep.ENTER, 409, "subscription_unmanaged"), repo().enter("s1"))
+    }
+
+    /** A refusal that is not a conflict at all was reported as «сервер недоступен». */
+    @Test
+    fun aForbiddenEntryNamesTheServersOwnCode() = runTest {
+        server.enqueue(MockResponse().setResponseCode(403).setBody("""{"code":"subscription_read_only","statusCode":403}"""))
+        assertEquals(EnterResult.Refused(EnterStep.ENTER, 403, "subscription_read_only"), repo().enter("s1"))
+    }
+
+    /**
+     * The device is a participant server-side but has no data to work with. That
+     * is a different fact from a closed shift, and the two were reported the
+     * same because one `catch` covered both calls.
+     */
+    @Test
+    fun aBundleRefusalIsReportedAgainstTheBundleAndEntersNothing() = runTest {
+        server.enqueue(MockResponse().setBody(activeShiftJson))
+        server.enqueue(MockResponse().setResponseCode(404).setBody("""{"message":"Shift product missing"}"""))
+        assertEquals(EnterResult.Refused(EnterStep.BUNDLE, 404, null), repo().enter("s1"))
+        assertNull(db.deviceConfigDao().get()?.activeShiftId)
+        assertNull(db.shiftDao().get("s1"))
+    }
+
     @Test
     fun offlineEntryWorksOnlyWithABundle() = runTest {
         server.shutdown()

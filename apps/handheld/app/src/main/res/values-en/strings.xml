@@ -5,6 +5,7 @@
     <string name="common_back">Back</string>
     <string name="common_cancel">Cancel</string>
     <string name="common_retry">Retry</string>
+    <string name="common_refresh">Refresh</string>
     <string name="common_continue">Continue</string>
     <string name="common_backspace">Erase</string>
     <string name="common_data_as_of">data as of %1$s</string>
@@ -58,9 +59,7 @@
     <string name="hub_sign_out">Sign out</string>
     <string name="hub_tile_shift">Shift</string>
     <string name="hub_tile_inventory">Inventory</string>
-    <string name="hub_tile_check">Code check</string>
     <string name="hub_tile_settings">Settings</string>
-    <string name="hub_check_status">press the trigger</string>
     <string name="hub_printer_not_set">printer not set up</string>
     <string name="hub_no_shifts">no shifts</string>
     <string name="hub_no_tasks">no tasks</string>
@@ -77,8 +76,6 @@
         <item quantity="one">%d scan queued</item>
         <item quantity="other">%d scans queued</item>
     </plurals>
-    <string name="soon_title">In a later release</string>
-    <string name="soon_text">This section arrives in one of the next releases.</string>
     <string name="scanner_source_builtin">built-in</string>
     <string name="scanner_source_wedge">keyboard wedge</string>
     <string name="scanner_source_debug">debug</string>
@@ -120,7 +117,7 @@
     <string name="scanner_sources">SCAN SOURCE</string>
     <string name="scanner_builtin_title">Built-in scanner</string>
     <string name="scanner_wedge_title">Keyboard wedge</string>
-    <string name="scanner_wedge_hint">universal fallback: the scanner types the code like a keyboard</string>
+    <string name="scanner_wedge_hint">universal fallback: the scanner types the code like a keyboard. Always on, even when the built-in scanner is selected</string>
     <string name="scanner_profiles">VENDOR PROFILE</string>
     <string name="scanner_action">action %1$s</string>
     <string name="scanner_test">TEST SCAN</string>
@@ -154,6 +151,11 @@
     <string name="shifts_update_required_text">It requires a capability this build does not have. Update the app, use a station, or change the shift policy in the cabinet.</string>
     <string name="shifts_closed_title">The shift is already closed</string>
     <string name="shifts_closed_text">The list has been refreshed.</string>
+    <string name="shifts_refused_title">The server refused</string>
+    <string name="shifts_refused_text">%1$s · HTTP %2$d · %3$s\n\nThe shift is not closed — this is something else. Show this line to an administrator.</string>
+    <string name="shifts_refused_step_enter">entering the shift</string>
+    <string name="shifts_refused_step_bundle">downloading the shift data</string>
+    <string name="shifts_refused_no_code">no code</string>
     <string name="shifts_status_planned">planned</string>
     <string name="shifts_status_active">active</string>
 

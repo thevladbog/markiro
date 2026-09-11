@@ -60,7 +60,7 @@ data class HubUi(
     val unprintedLabels: Int = 0,
 )
 
-enum class HubTile { SHIFT, INVENTORY, CHECK, SETTINGS }
+enum class HubTile { SHIFT, INVENTORY, SETTINGS }
 
 /** Reachable = an HTTP response within the last two minutes (the station's online threshold). */
 private const val REACHABLE_WINDOW_MS = 2 * 60 * 1000L
