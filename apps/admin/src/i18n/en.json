@@ -1525,7 +1525,7 @@
         "productGroupUnknownCode": "Code {{code}} (not in the directory)",
         "productGroupSearchLabel": "Search groups",
         "boxCapacityLabel": "Box capacity, units",
-        "palletCapacityLabel": "Pallet capacity, units",
+        "palletBoxCapacityLabel": "Boxes per pallet",
         "unitPriceLabel": "Price per unit, ₽",
         "egaisCodeLabel": "EGAIS code",
         "shelfLifeDaysLabel": "Shelf life, days",
@@ -2229,7 +2229,7 @@
         "boxLabelTemplateSearch": "Search templates",
         "boxCapacityLabel": "Box capacity, units",
         "palletsEnabledLabel": "Use pallets",
-        "palletCapacityLabel": "Pallet capacity, units",
+        "palletBoxCapacityLabel": "Boxes per pallet",
         "submitCreate": "Plan",
         "submitUpdate": "Save",
         "errors": {

@@ -260,7 +260,7 @@ describe.skipIf(!ready)("National Catalog actual cabinet HTTP authorization", ()
       name: "Foreign",
       gtin14: "04601234567893",
       boxCapacity: 1,
-      palletCapacity: 1,
+      palletBoxCapacity: 1,
       status: "active",
     });
     for (const route of routes(started.body.id as string, productId).filter(
@@ -357,7 +357,7 @@ describe.skipIf(!ready)("National Catalog actual cabinet HTTP authorization", ()
       name: "Freshness",
       gtin14: "04601234567893",
       boxCapacity: 1,
-      palletCapacity: 1,
+      palletBoxCapacity: 1,
       status: "active",
     });
     await db.insert(schema.nationalCatalogProductLinks).values({

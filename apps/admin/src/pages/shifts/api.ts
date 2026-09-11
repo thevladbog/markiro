@@ -45,7 +45,7 @@ export interface ShiftDto {
   plannedDate: string | null;
   productionDate: string | null;
   boxCapacity: number | null;
-  palletCapacity: number | null;
+  palletBoxCapacity: number | null;
   palletsEnabled: boolean;
   createdFrom: ShiftOrigin;
   openedAt: string | null;
@@ -58,7 +58,7 @@ export interface ShiftDto {
 }
 
 /**
- * `lineId`/`counterpartyId`/`boxCapacity`/`palletCapacity` are server-prefilled
+ * `lineId`/`counterpartyId`/`boxCapacity`/`palletBoxCapacity` are server-prefilled
  * from the product when omitted (`undefined`); an explicit `null` opts out of
  * the prefill for `counterpartyId`/capacities (see ShiftsService.createShift).
  */
@@ -74,7 +74,7 @@ export interface CreateShiftInput {
   plannedDate?: string | null;
   productionDate?: string | null;
   boxCapacity?: number | null;
-  palletCapacity?: number | null;
+  palletBoxCapacity?: number | null;
   palletsEnabled?: boolean;
 }
 

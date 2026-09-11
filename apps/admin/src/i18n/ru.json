@@ -1525,7 +1525,7 @@
         "productGroupUnknownCode": "Код {{code}} (нет в справочнике)",
         "productGroupSearchLabel": "Поиск группы",
         "boxCapacityLabel": "Вместимость короба, шт",
-        "palletCapacityLabel": "Вместимость поддона, шт",
+        "palletBoxCapacityLabel": "Коробов на паллете",
         "unitPriceLabel": "Цена за шт., ₽",
         "egaisCodeLabel": "Код ЕГАИС",
         "shelfLifeDaysLabel": "Срок годности, дней",
@@ -2229,7 +2229,7 @@
         "boxLabelTemplateSearch": "Поиск шаблона",
         "boxCapacityLabel": "Вместимость короба, шт",
         "palletsEnabledLabel": "Использовать паллеты",
-        "palletCapacityLabel": "Вместимость паллеты, шт",
+        "palletBoxCapacityLabel": "Коробов на паллете",
         "submitCreate": "Запланировать",
         "submitUpdate": "Сохранить",
         "errors": {

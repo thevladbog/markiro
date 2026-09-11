@@ -31,7 +31,7 @@ import { productImageUrl } from "./api.js";
  * (apps/api/src/modules/products/dto.ts): gtin non-empty (checksum-validated
  * here via `isValidGtin` -- the server does the authoritative normalize/
  * validate and reports GTIN_INVALID on mismatch), name 1..200,
- * boxCapacity/palletCapacity optional positive integers entered as text
+ * boxCapacity/palletBoxCapacity optional positive integers entered as text
  * (kept as strings in form state, parsed to number|null on submit by
  * `toCreateInput`). shelfLifeDays is also an optional positive integer, but
  * unlike box/pallet capacity the API bounds it (`z.number().int().min(1).
@@ -57,7 +57,7 @@ const productFormSchema = z.object({
     .trim()
     .optional()
     .refine((v) => !v || /^[1-9]\d*$/.test(v), "pages.catalog.form.errors.capacityInvalid"),
-  palletCapacity: z
+  palletBoxCapacity: z
     .string()
     .trim()
     .optional()
@@ -129,7 +129,7 @@ const EMPTY_VALUES: ProductFormValues = {
   printName: "",
   chzProductGroupCode: "",
   boxCapacity: "",
-  palletCapacity: "",
+  palletBoxCapacity: "",
   unitPrice: "",
   egaisCode: "",
   shelfLifeDays: "",
@@ -545,11 +545,11 @@ export function ProductForm({
             {...register("boxCapacity")}
           />
           <Input
-            label={t("pages.catalog.form.palletCapacityLabel")}
+            label={t("pages.catalog.form.palletBoxCapacityLabel")}
             mono
             inputMode="numeric"
-            {...errorProp(translateFieldError(t, errors.palletCapacity?.message))}
-            {...register("palletCapacity")}
+            {...errorProp(translateFieldError(t, errors.palletBoxCapacity?.message))}
+            {...register("palletBoxCapacity")}
           />
           <Input
             label={t("pages.catalog.form.unitPriceLabel")}
@@ -642,7 +642,7 @@ function toCreateInput(values: ProductFormValues, mode: "create" | "edit"): Crea
   const printName = values.printName?.trim();
   const chzProductGroupCode = values.chzProductGroupCode?.trim();
   const boxCapacity = values.boxCapacity?.trim();
-  const palletCapacity = values.palletCapacity?.trim();
+  const palletBoxCapacity = values.palletBoxCapacity?.trim();
   const unitPrice = values.unitPrice?.trim();
   const egaisCode = values.egaisCode?.trim();
   const shelfLifeDays = values.shelfLifeDays?.trim();
@@ -653,7 +653,7 @@ function toCreateInput(values: ProductFormValues, mode: "create" | "edit"): Crea
     printName: printName ? printName : null,
     chzProductGroupCode: chzProductGroupCode ? Number(chzProductGroupCode) : null,
     boxCapacity: boxCapacity ? Number(boxCapacity) : null,
-    palletCapacity: palletCapacity ? Number(palletCapacity) : null,
+    palletBoxCapacity: palletBoxCapacity ? Number(palletBoxCapacity) : null,
     unitPrice: unitPrice ? unitPrice.replace(",", ".") : null,
     egaisCode: egaisCode ? egaisCode : null,
     shelfLifeDays: shelfLifeDays ? Number(shelfLifeDays) : null,

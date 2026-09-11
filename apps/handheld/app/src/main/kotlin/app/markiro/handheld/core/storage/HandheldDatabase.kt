@@ -28,7 +28,7 @@ import app.markiro.handheld.core.print.PrinterEntity
         ProductLabelJobEntity::class,
         ProductLabelEventEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class HandheldDatabase : RoomDatabase() {

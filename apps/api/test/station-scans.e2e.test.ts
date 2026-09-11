@@ -98,7 +98,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         gtin: VALID_GTIN14,
         chzProductGroupCode: 8,
         boxCapacity: 10,
-        palletCapacity: 5,
+        palletBoxCapacity: 5,
       })
       .expect(201);
     return (product.body as { id: string }).id;
@@ -1860,7 +1860,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
             gtin: "04006382000009",
             chzProductGroupCode: 8,
             boxCapacity: 10,
-            palletCapacity: 5,
+            palletBoxCapacity: 5,
           })
           .expect(201);
         const shiftB = await openShift(agent, (productB.body as { id: string }).id);

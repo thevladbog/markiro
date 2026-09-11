@@ -30,7 +30,7 @@ const SHIFT = {
   plannedDate: "2026-08-13",
   productionDate: null,
   boxCapacity: null,
-  palletCapacity: null,
+  palletBoxCapacity: null,
   palletsEnabled: false,
   createdFrom: "admin",
   openedAt: "2026-08-13T08:00:00.000Z",

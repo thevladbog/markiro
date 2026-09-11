@@ -636,7 +636,7 @@ export async function buildImportPreview(
       initialProduct: {
         chzProductGroupCode: choice?.groupCode ?? null,
         boxCapacity: null,
-        palletCapacity: null,
+        palletBoxCapacity: null,
         status: "draft",
       },
     },

@@ -135,7 +135,7 @@ export const productFixture: ProductDto = {
   productGroup: null,
   chzProductGroupCode: null,
   boxCapacity: null,
-  palletCapacity: null,
+  palletBoxCapacity: null,
   unitPrice: null,
   printName: null,
   egaisCode: null,

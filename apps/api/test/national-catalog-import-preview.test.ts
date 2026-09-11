@@ -1009,7 +1009,12 @@ describe("immutable pre-product comparisons and durable preparation", () => {
         const p = await local();
         await db
           .update(schema.products)
-          .set({ chzProductGroupCode: 15, boxCapacity: 12, palletCapacity: 20, status: "active" })
+          .set({
+            chzProductGroupCode: 15,
+            boxCapacity: 12,
+            palletBoxCapacity: 20,
+            status: "active",
+          })
           .where(eq(schema.products.id, p.id));
         await db
           .update(schema.nationalCatalogImportItems)
@@ -1744,7 +1749,7 @@ describe("immutable pre-product comparisons and durable preparation", () => {
       initialProduct: {
         chzProductGroupCode: 23,
         boxCapacity: null,
-        palletCapacity: null,
+        palletBoxCapacity: null,
         status: "draft",
       },
     });

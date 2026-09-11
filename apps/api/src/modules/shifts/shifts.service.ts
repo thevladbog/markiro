@@ -145,7 +145,7 @@ const CURRENT_SHIFT_STORAGE_SELECTION = {
   productionDate: schema.shifts.productionDate,
   firstBoxClosureAt: schema.shifts.firstBoxClosureAt,
   boxCapacity: schema.shifts.boxCapacity,
-  palletCapacity: schema.shifts.palletCapacity,
+  palletBoxCapacity: schema.shifts.palletBoxCapacity,
   palletsEnabled: schema.shifts.palletsEnabled,
   createdFrom: schema.shifts.createdFrom,
   stationClosePolicy: schema.shifts.stationClosePolicy,
@@ -168,7 +168,7 @@ const CURRENT_PRODUCT_SELECTION = {
   chzProductGroupCode: schema.products.chzProductGroupCode,
   productGroupName: schema.chzProductGroups.name,
   boxCapacity: schema.products.boxCapacity,
-  palletCapacity: schema.products.palletCapacity,
+  palletBoxCapacity: schema.products.palletBoxCapacity,
   status: schema.products.status,
   archived: schema.products.archived,
   defaultCounterpartyId: schema.products.defaultCounterpartyId,
@@ -640,7 +640,7 @@ export class ShiftsService {
   }
 
   /**
-   * Create a shift. `boxCapacity`/`palletCapacity`/`counterpartyId` default
+   * Create a shift. `boxCapacity`/`palletBoxCapacity`/`counterpartyId` default
    * from the product when omitted (`undefined`); explicit null opts out.
    * Draft products are rejected outright (422).
    */
@@ -669,8 +669,8 @@ export class ShiftsService {
     }
 
     const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : product.boxCapacity;
-    const palletCapacity =
-      data.palletCapacity !== undefined ? data.palletCapacity : product.palletCapacity;
+    const palletBoxCapacity =
+      data.palletBoxCapacity !== undefined ? data.palletBoxCapacity : product.palletBoxCapacity;
     const counterpartyId =
       data.counterpartyId !== undefined ? data.counterpartyId : product.defaultCounterpartyId;
     const chzProductGroupCode = product.chzProductGroupCode ?? null;
@@ -687,7 +687,7 @@ export class ShiftsService {
     }
     const palletsEnabled = data.palletsEnabled ?? false;
 
-    this.assertCapacityRules(data.mode, boxCapacity, palletsEnabled, palletCapacity);
+    this.assertCapacityRules(data.mode, boxCapacity, palletsEnabled, palletBoxCapacity);
     this.assertBoxTemplateRule(data.mode, boxLabelTemplateId);
 
     const monthKey = shiftMonthKey(data.plannedDate ?? new Date().toISOString().slice(0, 10));
@@ -730,7 +730,7 @@ export class ShiftsService {
             plannedDate: data.plannedDate ?? null,
             productionDate: data.productionDate ?? null,
             boxCapacity: boxCapacity ?? null,
-            palletCapacity: palletCapacity ?? null,
+            palletBoxCapacity: palletBoxCapacity ?? null,
             palletsEnabled,
             createdFrom,
             numberMonthKey: monthKey,
@@ -778,7 +778,7 @@ export class ShiftsService {
     }
     if (
       preflightCurrent.status === "planned" &&
-      (data.palletsEnabled === true || data.palletCapacity !== undefined)
+      (data.palletsEnabled === true || data.palletBoxCapacity !== undefined)
     ) {
       await this.entitlements.assertFeatureAccess(tenantId, "pallets");
     }
@@ -984,12 +984,12 @@ export class ShiftsService {
         const productionDate =
           data.productionDate !== undefined ? data.productionDate : current.productionDate;
         const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : current.boxCapacity;
-        const palletCapacity =
-          data.palletCapacity !== undefined ? data.palletCapacity : current.palletCapacity;
+        const palletBoxCapacity =
+          data.palletBoxCapacity !== undefined ? data.palletBoxCapacity : current.palletBoxCapacity;
         const palletsEnabled =
           data.palletsEnabled !== undefined ? data.palletsEnabled : current.palletsEnabled;
 
-        this.assertCapacityRules(mode, boxCapacity, palletsEnabled, palletCapacity);
+        this.assertCapacityRules(mode, boxCapacity, palletsEnabled, palletBoxCapacity);
         this.assertBoxTemplateRule(mode, boxLabelTemplateId);
 
         const [updated] = await tx
@@ -1005,7 +1005,7 @@ export class ShiftsService {
             plannedDate,
             productionDate,
             boxCapacity,
-            palletCapacity,
+            palletBoxCapacity,
             palletsEnabled,
           })
           .where(
@@ -1279,7 +1279,7 @@ export class ShiftsService {
       name: productRow.name,
       productGroup: productRow.productGroupName,
       boxCapacity: productRow.boxCapacity,
-      palletCapacity: productRow.palletCapacity,
+      palletBoxCapacity: productRow.palletBoxCapacity,
       status: productRow.status,
       archived: productRow.archived,
       defaultCounterpartyId: productRow.defaultCounterpartyId,
@@ -1317,7 +1317,7 @@ export class ShiftsService {
       plannedDate: shift.plannedDate,
       productionDate: shift.productionDate,
       boxCapacity: shift.boxCapacity,
-      palletCapacity: shift.palletCapacity,
+      palletBoxCapacity: shift.palletBoxCapacity,
       palletsEnabled: shift.palletsEnabled,
       createdFrom: shift.createdFrom,
       openedAt: shift.openedAt,
@@ -1549,12 +1549,12 @@ export class ShiftsService {
     mode: ShiftMode,
     boxCapacity: number | null,
     palletsEnabled: boolean,
-    palletCapacity: number | null,
+    palletBoxCapacity: number | null,
   ): void {
     if (mode === "aggregation" && !boxCapacity) {
       throw new BadRequestException("Aggregation mode requires a box capacity");
     }
-    if (palletsEnabled && mode === "aggregation" && !palletCapacity) {
+    if (palletsEnabled && mode === "aggregation" && !palletBoxCapacity) {
       throw new BadRequestException("Pallet-enabled aggregation shifts require a pallet capacity");
     }
   }
@@ -1719,7 +1719,7 @@ export class ShiftsService {
       plannedDate: schema.shifts.plannedDate,
       productionDate: schema.shifts.productionDate,
       boxCapacity: schema.shifts.boxCapacity,
-      palletCapacity: schema.shifts.palletCapacity,
+      palletBoxCapacity: schema.shifts.palletBoxCapacity,
       palletsEnabled: schema.shifts.palletsEnabled,
       createdFrom: schema.shifts.createdFrom,
       openedAt: schema.shifts.openedAt,

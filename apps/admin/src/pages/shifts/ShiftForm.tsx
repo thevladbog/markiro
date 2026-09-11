@@ -34,7 +34,7 @@ const SHIFT_MODES = ["validation", "aggregation"] as const;
  * (apps/api/src/modules/shifts/dto.ts): productId required (only meaningful
  * on create -- the product can't change once a shift exists, since
  * `updateShiftSchema` has no `productId` field at all), mode is one of the
- * two enum values, plannedQty/boxCapacity/palletCapacity are optional
+ * two enum values, plannedQty/boxCapacity/palletBoxCapacity are optional
  * positive integers entered as text (kept as strings in form state, parsed
  * to number|null on submit by `toPayload`), plannedDate keeps its ISO
  * `YYYY-MM-DD` value (matching the server's
@@ -64,7 +64,7 @@ const shiftFormSchema = z.object({
     .trim()
     .optional()
     .refine((v) => !v || /^[1-9]\d*$/.test(v), "pages.shifts.form.errors.capacityInvalid"),
-  palletCapacity: z
+  palletBoxCapacity: z
     .string()
     .trim()
     .optional()
@@ -117,7 +117,7 @@ const EMPTY_VALUES: ShiftFormValues = {
   ssccIssuerCounterpartyId: "",
   boxLabelTemplateSelection: BOX_TEMPLATE_SELECTION.organization,
   boxCapacity: "",
-  palletCapacity: "",
+  palletBoxCapacity: "",
   palletsEnabled: false,
 };
 
@@ -255,8 +255,8 @@ export function ShiftForm({
     setValue("counterpartyId", product.defaultCounterpartyId ?? "");
     setValue("boxCapacity", product.boxCapacity !== null ? String(product.boxCapacity) : "");
     setValue(
-      "palletCapacity",
-      product.palletCapacity !== null ? String(product.palletCapacity) : "",
+      "palletBoxCapacity",
+      product.palletBoxCapacity !== null ? String(product.palletBoxCapacity) : "",
     );
   }, [formMode, productId, products, setValue]);
 
@@ -797,12 +797,12 @@ export function ShiftForm({
               />
               {palletsEnabled ? (
                 <Input
-                  label={t("pages.shifts.form.palletCapacityLabel")}
+                  label={t("pages.shifts.form.palletBoxCapacityLabel")}
                   mono
                   inputMode="numeric"
-                  {...errorProp(translateFieldError(t, errors.palletCapacity?.message))}
+                  {...errorProp(translateFieldError(t, errors.palletBoxCapacity?.message))}
                   disabled={activeEdit}
-                  {...register("palletCapacity")}
+                  {...register("palletBoxCapacity")}
                 />
               ) : null}
             </div>
@@ -836,7 +836,7 @@ export function ShiftForm({
  *   UUID. Create omits a missing value so validation shifts may use the API's
  *   absence semantics; edit always sends the selected snapshot, including an
  *   explicit null snapshot.
- * - `boxCapacity`/`palletCapacity`: once the aggregation
+ * - `boxCapacity`/`palletBoxCapacity`: once the aggregation
  *   fields are visible, whatever value is *shown* is always sent (never
  *   omitted, touched or not), because the user can see a concrete number in
  *   the input and expects that exact value to be saved. They're omitted only
@@ -883,7 +883,7 @@ function toPayload(
   const counterpartyId = values.counterpartyId?.trim();
   const ssccIssuerCounterpartyId = values.ssccIssuerCounterpartyId?.trim();
   const boxCapacity = values.boxCapacity?.trim();
-  const palletCapacity = values.palletCapacity?.trim();
+  const palletBoxCapacity = values.palletBoxCapacity?.trim();
 
   const payload: UpdateShiftInput = {
     mode: values.mode,
@@ -929,7 +929,7 @@ function toPayload(
     payload.boxCapacity = boxCapacity ? Number(boxCapacity) : null;
     payload.palletsEnabled = values.palletsEnabled;
     if (values.palletsEnabled) {
-      payload.palletCapacity = palletCapacity ? Number(palletCapacity) : null;
+      payload.palletBoxCapacity = palletBoxCapacity ? Number(palletBoxCapacity) : null;
     }
   }
 

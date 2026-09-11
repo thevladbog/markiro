@@ -32,7 +32,7 @@ const shiftFixture: ShiftDto = {
   plannedDate: "2026-08-14",
   productionDate: "2026-08-13",
   boxCapacity: 12,
-  palletCapacity: 48,
+  palletBoxCapacity: 48,
   palletsEnabled: false,
   createdFrom: "station",
   openedAt: null,

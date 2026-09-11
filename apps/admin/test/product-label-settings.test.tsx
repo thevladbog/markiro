@@ -13,7 +13,7 @@ const product: ProductDto = {
   productGroup: "Молочная продукция",
   chzProductGroupCode: 8,
   boxCapacity: 12,
-  palletCapacity: 48,
+  palletBoxCapacity: 48,
   unitPrice: null,
   egaisCode: null,
   shelfLifeDays: null,

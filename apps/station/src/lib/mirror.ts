@@ -38,7 +38,7 @@ export interface StationBundle {
     /** Current API sends date or null; pre-upgrade API omits the field. */
     productionDate?: string | null;
     boxCapacity: number | null;
-    palletCapacity: number | null;
+    palletBoxCapacity: number | null;
     palletsEnabled: boolean;
     openedAt: string | null;
     /** Human-readable shift number; absent from bundles served by pre-upgrade servers. */
@@ -50,7 +50,7 @@ export interface StationBundle {
     name: string;
     productGroup: string | null;
     boxCapacity: number | null;
-    palletCapacity: number | null;
+    palletBoxCapacity: number | null;
     status: string;
     defaultCounterpartyId: string | null;
     /** Rolling compatibility: current servers send null; older bundles may still carry an id. */
@@ -288,7 +288,7 @@ async function upsertBundleBody(
        id, status, mode, product_id, product_name, line_id, line_name,
        counterparty_id, counterparty_name, counterparty_gln,
        label_template_id, label_template_name, label_template_spec,
-       planned_qty, planned_date, production_date, box_capacity, pallet_capacity, pallets_enabled,
+       planned_qty, planned_date, production_date, box_capacity, pallet_box_capacity, pallets_enabled,
        opened_at, issuer_prefix, box_label_template_spec, number, validation_print_context
      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
@@ -306,7 +306,7 @@ async function upsertBundleBody(
        counterparty_gln=excluded.counterparty_gln, label_template_id=excluded.label_template_id,
        label_template_name=excluded.label_template_name, label_template_spec=excluded.label_template_spec,
        planned_qty=excluded.planned_qty, planned_date=excluded.planned_date,
-       box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
+       box_capacity=excluded.box_capacity, pallet_box_capacity=excluded.pallet_box_capacity,
        pallets_enabled=excluded.pallets_enabled, opened_at=excluded.opened_at,
        issuer_prefix=${preserveIssuerPrefix ? "shift_mirror.issuer_prefix" : "excluded.issuer_prefix"},
        box_label_template_spec=excluded.box_label_template_spec${numberUpdate}${productionDateUpdate}`,
@@ -328,7 +328,7 @@ async function upsertBundleBody(
       s.plannedDate,
       s.productionDate ?? null,
       s.boxCapacity,
-      s.palletCapacity,
+      s.palletBoxCapacity,
       b(s.palletsEnabled),
       s.openedAt,
       // Never a fallback: a validation-mode shift, or one the server could
@@ -361,13 +361,13 @@ async function upsertBundleBody(
        image_pointer_checksum=CASE WHEN excluded.image_checksum IS NULL THEN NULL ELSE product_mirror.image_pointer_checksum END`;
   await exec.run(
     `INSERT INTO product_mirror (
-       id, gtin14, name, print_name, product_group, box_capacity, pallet_capacity, status,
+       id, gtin14, name, print_name, product_group, box_capacity, pallet_box_capacity, status,
        default_counterparty_id, default_label_template_id, egais_code, shelf_life_days${imageColumns}
      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?${imageValues})
      ON CONFLICT(id) DO UPDATE SET
        gtin14=excluded.gtin14, name=excluded.name, print_name=excluded.print_name,
        product_group=excluded.product_group,
-       box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
+       box_capacity=excluded.box_capacity, pallet_box_capacity=excluded.pallet_box_capacity,
        status=excluded.status, default_counterparty_id=excluded.default_counterparty_id,
        default_label_template_id=excluded.default_label_template_id,
        egais_code=excluded.egais_code, shelf_life_days=excluded.shelf_life_days${imageUpdate}`,
@@ -378,7 +378,7 @@ async function upsertBundleBody(
       p.printName ?? null,
       p.productGroup,
       p.boxCapacity,
-      p.palletCapacity,
+      p.palletBoxCapacity,
       p.status,
       p.defaultCounterpartyId,
       p.defaultLabelTemplateId,

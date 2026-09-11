@@ -69,7 +69,7 @@ data class ShiftDto(
     val plannedDate: String? = null,
     val productionDate: String? = null,
     val boxCapacity: Int? = null,
-    val palletCapacity: Int? = null,
+    val palletBoxCapacity: Int? = null,
     val palletsEnabled: Boolean,
     val openedAt: String? = null,
     val closedAt: String? = null,

@@ -39,7 +39,7 @@ export interface ProductDto {
   productGroup: string | null;
   chzProductGroupCode: number | null;
   boxCapacity: number | null;
-  palletCapacity: number | null;
+  palletBoxCapacity: number | null;
   unitPrice: string | null;
   printName: string | null;
   egaisCode: string | null;
@@ -66,7 +66,7 @@ export interface ProductDto {
 
 /**
  * `status` is deliberately absent -- it's server-computed from
- * chzProductGroupCode/boxCapacity/palletCapacity (see ProductsService.computeStatus)
+ * chzProductGroupCode/boxCapacity/palletBoxCapacity (see ProductsService.computeStatus)
  * and must never be sent by the client.
  */
 export interface CreateProductInput {
@@ -75,7 +75,7 @@ export interface CreateProductInput {
   /** FK into `chz_product_groups`; null clears the product's group. */
   chzProductGroupCode?: number | null;
   boxCapacity?: number | null;
-  palletCapacity?: number | null;
+  palletBoxCapacity?: number | null;
   unitPrice?: string | null;
   printName?: string | null;
   egaisCode?: string | null;

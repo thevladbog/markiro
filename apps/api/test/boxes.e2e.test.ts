@@ -203,7 +203,7 @@ describe.skipIf(!ready)("boxes e2e", () => {
         gtin: VALID_GTIN14,
         chzProductGroupCode: 8,
         boxCapacity: 10,
-        palletCapacity: 5,
+        palletBoxCapacity: 5,
       })
       .expect(201);
     return (product.body as { id: string }).id;

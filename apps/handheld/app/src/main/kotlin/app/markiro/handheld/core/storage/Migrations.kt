@@ -170,3 +170,13 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_product_label_events_ackedAt` ON `product_label_events` (`ackedAt`)")
     }
 }
+
+/**
+ * Pallets (06d): boxes per pallet. Additive only -- `palletCapacity`'s old
+ * units-valued column is left in place and unread; see `ShiftEntities.kt`.
+ */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `shift_mirror` ADD COLUMN `palletBoxCapacity` INTEGER")
+    }
+}

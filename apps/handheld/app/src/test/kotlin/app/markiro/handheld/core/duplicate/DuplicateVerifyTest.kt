@@ -53,7 +53,7 @@ class DuplicateVerifyTest {
         productName = "Вода 0,5", productPrintName = "Вода", productGtin14 = "04600682000013",
         lineId = "l1", lineName = "Линия 2", counterpartyName = null, plannedQty = 100,
         plannedDate = "2026-09-11", productionDate = "2026-09-11", boxCapacity = null,
-        palletCapacity = null, palletsEnabled = false, validationPrintMode = "duplicate_dm",
+        palletBoxCapacity = null, palletsEnabled = false, validationPrintMode = "duplicate_dm",
         closePolicyKind = "admin_only", closeOwnerDeviceId = null, openedAt = "2026-09-11T06:00:00.000Z",
         listFetchedAt = 1L, bundleFetchedAt = 1L, shelfLifeDays = 365,
         duplicateVerification = verification, duplicateTemplate = template,

@@ -90,7 +90,7 @@ const shiftProperties = [
   "plannedDate",
   "productionDate",
   "boxCapacity",
-  "palletCapacity",
+  "palletBoxCapacity",
   "palletsEnabled",
   "createdFrom",
   "openedAt",
@@ -202,7 +202,7 @@ describe("shifts OpenAPI contract", () => {
         "plannedDate",
         "productionDate",
         "boxCapacity",
-        "palletCapacity",
+        "palletBoxCapacity",
         "palletsEnabled",
       ]);
       expectRequired(create, ["productId", "mode"]);
@@ -220,7 +220,7 @@ describe("shifts OpenAPI contract", () => {
         "plannedDate",
         "productionDate",
         "boxCapacity",
-        "palletCapacity",
+        "palletBoxCapacity",
         "palletsEnabled",
       ]);
       expectRequired(update, []);

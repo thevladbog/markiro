@@ -35,7 +35,7 @@ class ShiftRepositoryTest {
 
     private val shiftJson = """{"id":"s1","number":"SEP26-001","status":"planned","mode":"validation","validationPrint":{"mode":"none"},
         "productId":"p1","productName":"Вода","productPrintName":null,"lineId":"l1","lineName":"Линия 2","counterpartyName":null,
-        "plannedQty":100,"plannedDate":"2026-09-10","productionDate":null,"boxCapacity":null,"palletCapacity":null,"palletsEnabled":false,
+        "plannedQty":100,"plannedDate":"2026-09-10","productionDate":null,"boxCapacity":null,"palletBoxCapacity":null,"palletsEnabled":false,
         "openedAt":null,"closedAt":null,"stationCloseAccess":{"kind":"admin_only"}}"""
     private val activeShiftJson = shiftJson.replace("\"status\":\"planned\"", "\"status\":\"active\"")
     private val bundleJson = """{"shift":$activeShiftJson,

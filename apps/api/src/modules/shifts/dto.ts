@@ -54,7 +54,7 @@ const plannedDateSchema = civilDateSchema("plannedDate");
 const productionDateSchema = civilDateSchema("productionDate");
 
 /**
- * POST /shifts schema. `boxCapacity`/`palletCapacity`/`counterpartyId`
+ * POST /shifts schema. `boxCapacity`/`palletBoxCapacity`/`counterpartyId`
  * are server-prefilled from the product when omitted (`undefined`); an
  * explicit `null` opts out of the prefill (see ShiftsService.createShift).
  */
@@ -80,7 +80,7 @@ export const createShiftSchema = z.object({
   plannedDate: plannedDateSchema.nullable().optional(),
   productionDate: productionDateSchema.nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
-  palletCapacity: z.number().int().min(1).nullable().optional(),
+  palletBoxCapacity: z.number().int().min(1).nullable().optional(),
   palletsEnabled: z.boolean().optional(),
 });
 export type CreateShiftDto = z.infer<typeof createShiftSchema>;
@@ -101,7 +101,7 @@ export const updateShiftSchema = z.object({
   plannedDate: plannedDateSchema.nullable().optional(),
   productionDate: productionDateSchema.nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
-  palletCapacity: z.number().int().min(1).nullable().optional(),
+  palletBoxCapacity: z.number().int().min(1).nullable().optional(),
   palletsEnabled: z.boolean().optional(),
 });
 export type UpdateShiftDto = z.infer<typeof updateShiftSchema>;
@@ -152,7 +152,7 @@ export interface ShiftDto {
   plannedDate: string | null;
   productionDate: string | null;
   boxCapacity: number | null;
-  palletCapacity: number | null;
+  palletBoxCapacity: number | null;
   palletsEnabled: boolean;
   createdFrom: ShiftOrigin;
   openedAt: Date | null;
@@ -347,7 +347,7 @@ export const createShiftOpenApiSchema = {
     plannedDate: nullableDateOpenApiSchema,
     productionDate: productionDateOpenApiSchema,
     boxCapacity: nullablePositiveIntegerOpenApiSchema,
-    palletCapacity: nullablePositiveIntegerOpenApiSchema,
+    palletBoxCapacity: nullablePositiveIntegerOpenApiSchema,
     palletsEnabled: { type: "boolean" },
   },
 };
@@ -367,7 +367,7 @@ export const updateShiftOpenApiSchema = {
     plannedDate: nullableDateOpenApiSchema,
     productionDate: productionDateOpenApiSchema,
     boxCapacity: nullablePositiveIntegerOpenApiSchema,
-    palletCapacity: nullablePositiveIntegerOpenApiSchema,
+    palletBoxCapacity: nullablePositiveIntegerOpenApiSchema,
     palletsEnabled: { type: "boolean" },
   },
 };
@@ -496,7 +496,7 @@ const shiftRequiredFields = [
   "plannedDate",
   "productionDate",
   "boxCapacity",
-  "palletCapacity",
+  "palletBoxCapacity",
   "palletsEnabled",
   "createdFrom",
   "openedAt",
@@ -531,7 +531,7 @@ export const shiftOpenApiSchema = {
     plannedDate: nullableDateOpenApiSchema,
     productionDate: productionDateOpenApiSchema,
     boxCapacity: nullablePositiveIntegerOpenApiSchema,
-    palletCapacity: nullablePositiveIntegerOpenApiSchema,
+    palletBoxCapacity: nullablePositiveIntegerOpenApiSchema,
     palletsEnabled: { type: "boolean" },
     createdFrom: { type: "string", enum: ["admin", "station"] },
     openedAt: nullableDateTimeOpenApiSchema,
@@ -614,7 +614,7 @@ const stationBundleProductOpenApiSchema = {
     "name",
     "productGroup",
     "boxCapacity",
-    "palletCapacity",
+    "palletBoxCapacity",
     "status",
     "archived",
     "defaultCounterpartyId",
@@ -633,7 +633,7 @@ const stationBundleProductOpenApiSchema = {
     name: { type: "string" },
     productGroup: { type: "string", nullable: true },
     boxCapacity: nullablePositiveIntegerOpenApiSchema,
-    palletCapacity: nullablePositiveIntegerOpenApiSchema,
+    palletBoxCapacity: nullablePositiveIntegerOpenApiSchema,
     status: { type: "string", enum: ["draft", "active"] },
     archived: { type: "boolean" },
     defaultCounterpartyId: nullableUuidOpenApiSchema,

@@ -132,7 +132,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "No-pallet product",
       status: "active",
       boxCapacity: 10,
-      palletCapacity: 5,
+      palletBoxCapacity: 5,
     });
     await attachPlan(tenantId, { palletsEnabled: false });
 
@@ -142,7 +142,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         productId,
         mode: "aggregation",
         boxCapacity: 10,
-        palletCapacity: 5,
+        palletBoxCapacity: 5,
         palletsEnabled: true,
       })
       .expect(403);
@@ -246,7 +246,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "Recovery product",
       status: "active",
       boxCapacity: 10,
-      palletCapacity: 5,
+      palletBoxCapacity: 5,
     });
     const endsAt = new Date(Date.now() - 60_000);
     const eligibleShiftId = randomUUID();
@@ -314,7 +314,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "Other product",
       status: "active",
       boxCapacity: 10,
-      palletCapacity: 5,
+      palletBoxCapacity: 5,
     });
     await db.insert(schema.shifts).values({
       id: otherShiftId,
@@ -342,7 +342,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "Mixed recovery product",
       status: "active",
       boxCapacity: 10,
-      palletCapacity: 5,
+      palletBoxCapacity: 5,
     });
     const endsAt = new Date(Date.now() - 60_000);
     const eligibleShiftId = randomUUID();
@@ -381,7 +381,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "Foreign recovery product",
       status: "active",
       boxCapacity: 10,
-      palletCapacity: 5,
+      palletBoxCapacity: 5,
     });
     await db.insert(schema.shifts).values({
       id: foreignShiftId,

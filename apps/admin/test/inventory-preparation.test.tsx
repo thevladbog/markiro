@@ -227,7 +227,7 @@ function parameterDependency(url: string): Response | null {
           productGroup: "beer",
           chzProductGroupCode: 15,
           boxCapacity: 20,
-          palletCapacity: 60,
+          palletBoxCapacity: 60,
           unitPrice: null,
           printName: null,
           egaisCode: null,

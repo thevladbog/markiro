@@ -54,7 +54,7 @@ class LabelQueueViewModelTest {
                 id = "s1", number = "SEP26-003", status = "open", mode = "aggregation", productId = "p1",
                 productName = "Вода", productPrintName = null, productGtin14 = "04680089900000", lineId = null,
                 lineName = null, counterpartyName = null, plannedQty = null, plannedDate = null,
-                productionDate = "2026-09-10", boxCapacity = 20, palletCapacity = null, palletsEnabled = false,
+                productionDate = "2026-09-10", boxCapacity = 20, palletBoxCapacity = null, palletsEnabled = false,
                 validationPrintMode = "none", closePolicyKind = null, closeOwnerDeviceId = null, openedAt = null,
                 listFetchedAt = 1L, shelfLifeDays = 365, ssccIssuerPrefix = "468008990",
                 boxLabelTemplate = """{"widthMm":58,"heightMm":40,"dpi":203,"language":"zpl","elements":[

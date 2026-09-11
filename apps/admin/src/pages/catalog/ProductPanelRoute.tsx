@@ -93,8 +93,10 @@ function CreateProductPanel() {
             chzProductGroupCode: String(createdProduct.chzProductGroupCode ?? ""),
             boxCapacity:
               createdProduct.boxCapacity === null ? "" : String(createdProduct.boxCapacity),
-            palletCapacity:
-              createdProduct.palletCapacity === null ? "" : String(createdProduct.palletCapacity),
+            palletBoxCapacity:
+              createdProduct.palletBoxCapacity === null
+                ? ""
+                : String(createdProduct.palletBoxCapacity),
             unitPrice: createdProduct.unitPrice ?? "",
             egaisCode: createdProduct.egaisCode ?? "",
             shelfLifeDays:
@@ -184,7 +186,8 @@ function EditProductPanel() {
             printName: product.printName ?? "",
             chzProductGroupCode: String(product.chzProductGroupCode ?? ""),
             boxCapacity: product.boxCapacity === null ? "" : String(product.boxCapacity),
-            palletCapacity: product.palletCapacity === null ? "" : String(product.palletCapacity),
+            palletBoxCapacity:
+              product.palletBoxCapacity === null ? "" : String(product.palletBoxCapacity),
             unitPrice: product.unitPrice ?? "",
             egaisCode: product.egaisCode ?? "",
             shelfLifeDays: product.shelfLifeDays === null ? "" : String(product.shelfLifeDays),
@@ -204,7 +207,7 @@ function EditProductPanel() {
       product?.gtin14,
       product?.name,
       product?.printName,
-      product?.palletCapacity,
+      product?.palletBoxCapacity,
       product?.shelfLifeDays,
       product?.unitPrice,
     ],

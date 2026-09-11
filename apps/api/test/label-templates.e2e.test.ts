@@ -437,7 +437,7 @@ describe.skipIf(!ready)("label-templates e2e", () => {
       status: "active",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     const shiftId = randomUUID();
     await db.insert(schema.shifts).values({
