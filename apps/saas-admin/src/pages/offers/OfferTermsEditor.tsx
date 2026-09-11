@@ -18,9 +18,16 @@ export interface OfferTermsEditorProps {
   onChange: (markdown: string) => void;
   label: string;
   error?: string;
+  readOnly?: boolean;
 }
 
-export function OfferTermsEditor({ value, onChange, label, error }: OfferTermsEditorProps) {
+export function OfferTermsEditor({
+  value,
+  onChange,
+  label,
+  error,
+  readOnly = false,
+}: OfferTermsEditorProps) {
   const errorId = "offer-terms-error";
   const helpId = "offer-terms-help";
 
@@ -34,6 +41,7 @@ export function OfferTermsEditor({ value, onChange, label, error }: OfferTermsEd
       </div>
       <MDXEditor
         markdown={value ?? ""}
+        readOnly={readOnly}
         onChange={onChange}
         plugins={[
           headingsPlugin({ allowedHeadingLevels: [1, 2, 3] }),

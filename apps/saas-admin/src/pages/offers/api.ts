@@ -1,5 +1,7 @@
 import {
   platformCommercialV2Contracts,
+  platformOfferDraftContracts,
+  type OfferDraftUpdate,
   COMMERCIAL_VERSION_HEADER,
   type CreateOfferV2 as CreateOfferInput,
   platformCommercialContracts,
@@ -131,5 +133,15 @@ export function payOffer(id: string, amount: string, bankReference: string, key:
     method: "POST",
     headers: { "Idempotency-Key": key, [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
     body: JSON.stringify(validated),
+  });
+}
+
+export function updateOfferDraft(id: string, input: OfferDraftUpdate) {
+  const contract = platformOfferDraftContracts.update;
+  return platformApiFetch(`/offers/${contract.params.parse(id)}/draft`, {
+    method: "PATCH",
+    headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
+    body: JSON.stringify(contract.body.parse(input)),
+    responseSchema: contract.response,
   });
 }

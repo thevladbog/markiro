@@ -68,6 +68,9 @@ const AgreementDetailPage = lazy(() =>
 const OffersPage = lazy(() =>
   import("./pages/offers/OffersPage.js").then((module) => ({ default: module.OffersPage })),
 );
+const EditOfferPage = lazy(() =>
+  import("./pages/offers/EditOfferPage.js").then((module) => ({ default: module.EditOfferPage })),
+);
 const OfferDetailPage = lazy(() =>
   import("./pages/offers/OfferDetailPage.js").then((module) => ({
     default: module.OfferDetailPage,
@@ -174,6 +177,7 @@ export const appRoutes = createRoutesFromElements(
         <Route path="/agreements/:id" element={<AgreementDetailPage />} />
         <Route path="/offers" element={<OffersPage />} />
         <Route path="/offers/new" element={<CreateOfferPage />} />
+        <Route path="/offers/:offerId/edit" element={<EditOfferPage />} />
         <Route path="/offers/:offerId" element={<OfferDetailPage />} />
         <Route path="/billing-requests/:requestId/offers/new" element={<CreateOfferPage />} />
         <Route path="/invoices" element={<BillingPage />} />

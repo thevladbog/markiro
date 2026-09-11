@@ -285,6 +285,18 @@ function OfferRegistryPage() {
                     ),
                   },
                   {
+                    key: "actions",
+                    title: t("offers.actionsLabel"),
+                    render: (offer) => (
+                      <Link
+                        to={`/offers/${offer.id}`}
+                        state={{ returnTo: `/offers${location.search}` }}
+                      >
+                        {t("offerWorkspace.open")}
+                      </Link>
+                    ),
+                  },
+                  {
                     key: "expiresAt",
                     title: t("offerWorkspace.expiresAt"),
                     render: (offer) =>
