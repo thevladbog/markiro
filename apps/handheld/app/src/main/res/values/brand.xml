@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Straight from docs/brand: the icon sits a shade lighter than the splash. -->
+    <color name="markiro_icon_background">#17161A</color>
+    <color name="markiro_splash_background">#131216</color>
+</resources>
