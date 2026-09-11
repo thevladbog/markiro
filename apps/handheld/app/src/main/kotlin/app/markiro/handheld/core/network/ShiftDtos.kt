@@ -3,8 +3,22 @@ package app.markiro.handheld.core.network
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
+/** The duplicate template snapshot; `spec` is the label geometry the device renders from. */
 @Serializable
-data class ValidationPrintDto(val mode: String)
+data class DuplicateTemplateDto(val id: String, val name: String, val spec: JsonElement, val digest: String)
+
+/**
+ * `mode` is `none` or `duplicate_dm`. Everything else is present only in the
+ * second case: the server refuses to snapshot a duplicate policy without a
+ * template, so a `duplicate_dm` shift always carries all three.
+ */
+@Serializable
+data class ValidationPrintDto(
+    val mode: String,
+    val verification: String? = null,
+    val snapshot: DuplicateTemplateDto? = null,
+    val policyRevision: String? = null,
+)
 
 @Serializable
 data class StationCloseAccessDto(val kind: String, val ownerDeviceId: String? = null)

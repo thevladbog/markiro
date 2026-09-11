@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.markiro.handheld.R
@@ -163,7 +164,7 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
             // last verdict.
             BoxFill(box.filled, box.capacity, Modifier.weight(0.62f).padding(MarkiroSizes.sp4))
         } else {
-            LastScanZone(state.last, Modifier.weight(0.4f))
+            LastScanZone(state.last, state.duplicate, Modifier.weight(0.4f))
         }
         if (state.unprintedLabels > 0) {
             Box(
@@ -239,10 +240,12 @@ fun Verdict.verdictTone(): Tone = when (this) {
 }
 
 @Composable
-private fun LastScanZone(last: LastScan?, modifier: Modifier) {
+private fun LastScanZone(last: LastScan?, duplicate: DuplicateUi?, modifier: Modifier) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    val colors = last?.verdict?.verdictTone()?.let { c.tone(it) }
+    // A refusal is its own tone. Taking it from the verdict painted the zone
+    // GREEN, because a refused scan carries `Verdict.OK` -- it was never judged.
+    val colors = last?.let { c.tone(if (it.blocked) Tone.Warn else it.verdict.verdictTone()) }
     Column(
         modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4).clip(RoundedCornerShape(MarkiroSizes.radius))
             .background(colors?.bg ?: c.surfaceCard).padding(MarkiroSizes.sp4),
@@ -252,6 +255,9 @@ private fun LastScanZone(last: LastScan?, modifier: Modifier) {
         if (last == null || colors == null) {
             Icon(Icons.Outlined.QrCodeScanner, contentDescription = null, tint = c.fg3)
             Text(stringResource(R.string.work_waiting), style = t.strong, color = c.fg3)
+        } else if (last.blocked) {
+            Icon(Icons.Outlined.Print, contentDescription = null, tint = colors.fg)
+            Text(stringResource(R.string.duplicate_blocked), style = t.title, color = colors.fg, textAlign = TextAlign.Center)
         } else {
             val icon = when (last.verdict) {
                 Verdict.OK -> Icons.Outlined.CheckCircle
@@ -263,6 +269,26 @@ private fun LastScanZone(last: LastScan?, modifier: Modifier) {
             Text(last.tail, style = t.code, color = c.fg1)
             last.firstSeenAt?.let { seen ->
                 Text(stringResource(R.string.work_first_seen, Iso.parse(seen)?.let { TimeText.hhmm(it) } ?: seen), style = t.caption, color = c.fg2)
+            }
+        }
+        // The duplicate's progress lives here rather than over the screen: it
+        // prints on EVERY unit, so a full-screen state per scan would be
+        // unusable. «Отсканируйте наклейку» is the line an operator cannot
+        // guess -- without it they scan the next product, are told it is the
+        // wrong code, and have no idea why.
+        if (duplicate != null) {
+            val line = when {
+                duplicate.awaitingVerification -> R.string.duplicate_awaiting_verification
+                duplicate.printing -> R.string.duplicate_printing
+                else -> null
+            }
+            if (line != null) {
+                Text(
+                    stringResource(line),
+                    style = t.strong,
+                    color = if (duplicate.awaitingVerification) c.tone(Tone.Warn).fg else c.fg2,
+                    modifier = Modifier.padding(top = MarkiroSizes.sp2),
+                )
             }
         }
     }

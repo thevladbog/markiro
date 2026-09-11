@@ -10,6 +10,8 @@ import app.markiro.handheld.core.box.BoxPrinter
 import app.markiro.handheld.core.box.PrintReason
 import app.markiro.handheld.core.box.BoxRepository
 import app.markiro.handheld.core.box.CloseBox
+import app.markiro.handheld.core.duplicate.DuplicateJobs
+import app.markiro.handheld.core.duplicate.DuplicateReason
 import app.markiro.handheld.core.box.CloseResult
 import app.markiro.handheld.core.box.ServerRange
 import app.markiro.handheld.core.box.SsccPool
@@ -17,6 +19,7 @@ import app.markiro.handheld.core.km.Verdict
 import app.markiro.handheld.core.label.LabelRenderer
 import app.markiro.handheld.core.label.RasterResult
 import app.markiro.handheld.core.label.RasterizeText
+import app.markiro.handheld.core.print.NotReadyReason
 import app.markiro.handheld.core.print.PrinterEntity
 import app.markiro.handheld.core.print.PrinterStatus
 import app.markiro.handheld.core.print.PrinterTransport
@@ -114,11 +117,14 @@ class WorkViewModelTest {
         )
         val boxes = BoxRepository(db)
         val pool = SsccPool(db)
+        // `main.track` is #506's leak guard; the duplicate engine is this slice's
+        // own argument. Both belong.
         return main.track(
             WorkViewModel(
                 SavedStateHandle(mapOf("shiftId" to "s1")), db, ScanRecorder(db), ScanRouterAdapter(scans),
                 { kind -> played += kind }, engine, session, ReachabilityTracker(), team, null,
-                boxes, CloseBox(db, boxes, pool), BoxPrinter(db, boxes, LabelRenderer(rasterize), transport), flowOf(Unit),
+                boxes, CloseBox(db, boxes, pool), BoxPrinter(db, boxes, LabelRenderer(rasterize), transport),
+                DuplicateJobs(db, LabelRenderer(rasterize), transport), flowOf(Unit),
             ),
         )
     }
@@ -351,5 +357,140 @@ class WorkViewModelTest {
         val next = vm.state.first { it.box?.filled == 0 && it.box?.ordinal == 2 }.box!!
         assertEquals(2, next.ordinal)
         assertEquals(1, next.capacity)
+    }
+
+    /** A complete marking code: a duplicate needs the crypto tail to be reproducible. */
+    private fun duplicateRaw(serial: String) = "010460068200001321$serial${gs}93Zf8K"
+
+    private val duplicateTemplate = """
+        {"widthMm":30,"heightMm":20,"dpi":203,"language":"zpl","elements":[
+          {"kind":"barcode","id":"dm","xMm":2,"yMm":2,"format":"datamatrix","data":"km.code","sizeMm":16}
+        ]}
+    """.trimIndent()
+
+    private suspend fun duplicateShift(verification: String = "none") {
+        db.shiftDao().upsert(
+            ShiftEntityFixtures.bundled("s1").copy(
+                validationPrintMode = "duplicate_dm",
+                duplicateVerification = verification,
+                duplicateTemplate = duplicateTemplate,
+                duplicateTemplateDigest = "a".repeat(64),
+                duplicatePolicyRevision = "66666666-6666-4666-8666-666666666666",
+                shelfLifeDays = 365,
+                productionDate = "2026-09-11",
+            ),
+        )
+        db.printerDao().upsert(
+            PrinterEntity(
+                id = "p1", name = "Zebra", transport = "wifi", address = "10.0.0.1:9100",
+                language = "zpl", dpi = 203, selected = true, lastStatus = null, lastSeenAt = null,
+            ),
+        )
+    }
+
+    /** An accepted unit gets a label; the ordinary path takes over nothing. */
+    @Test
+    fun anAcceptedUnitInADuplicateShiftPrintsAndStaysQuiet() = runTest {
+        duplicateShift()
+        val vm = vm()
+        advanceUntilIdle()
+        scans.tryEmit(ScanEvent(duplicateRaw("AAA111"), null, "debug", 0))
+        advanceUntilIdle()
+        // Room answers on its own executor, so `advanceUntilIdle` returns while
+        // the job is still being written. The UI state is set before the send
+        // too, so the only honest signal is the event log: prepared, sending,
+        // sent -- three, and only once the send is over.
+        db.productLabelEventDao().observeUnackedCount().first { it == 3 }
+        assertEquals(DuplicateStep.Idle, vm.duplicateStep.value)
+        assertEquals(1, transport.sent)
+        // Nothing took over the screen: the ordinary path stays quiet.
+        assertEquals(false, vm.state.value.duplicate?.awaitingVerification)
+    }
+
+    /** The whole slice turns on this: the operator is holding a sticker. */
+    @Test
+    fun aSecondUnitIsRefusedWhileADuplicateAwaitsVerification() = runTest {
+        duplicateShift(verification = "required")
+        val vm = vm()
+        advanceUntilIdle()
+        scans.tryEmit(ScanEvent(duplicateRaw("AAA111"), null, "debug", 0))
+        advanceUntilIdle()
+        vm.state.first { it.duplicate?.awaitingVerification == true }
+
+        // A different unit, scanned while the first is awaiting its verification.
+        scans.tryEmit(ScanEvent(duplicateRaw("BBB222"), null, "debug", 0))
+        advanceUntilIdle()
+        // It is read as a verification of the OPEN job and rejected, never
+        // accepted as a new unit.
+        vm.duplicateStep.first { it is DuplicateStep.Rejected }
+        assertEquals(1, db.codeDao().countForShift("s1"))
+    }
+
+    /** Scanning the printed sticker back completes the unit. */
+    @Test
+    fun scanningTheStickerBackCompletesTheUnit() = runTest {
+        duplicateShift(verification = "required")
+        val vm = vm()
+        advanceUntilIdle()
+        val raw = duplicateRaw("AAA111")
+        scans.tryEmit(ScanEvent(raw, null, "debug", 0))
+        advanceUntilIdle()
+        vm.state.first { it.duplicate?.awaitingVerification == true }
+
+        scans.tryEmit(ScanEvent(raw, null, "debug", 0))
+        advanceUntilIdle()
+        vm.state.first { it.duplicate?.awaitingVerification == false }
+        assertEquals(DuplicateStep.Idle, vm.duplicateStep.value)
+        // And it did not count as a second unit.
+        assertEquals(1, db.codeDao().countForShift("s1"))
+    }
+
+    /**
+     * Found on the emulator: `_duplicateStep` lives in memory, so a job whose
+     * attempt failed was invisible after a restart -- and the next unit was then
+     * refused with nothing on screen explaining why.
+     */
+    @Test
+    fun anOutstandingJobsScreenComesBackAfterARestart() = runTest {
+        duplicateShift()
+        transport.nextStatus = PrinterStatus.NotReady(NotReadyReason.NO_PAPER)
+        val first = vm()
+        advanceUntilIdle()
+        scans.tryEmit(ScanEvent(duplicateRaw("AAA111"), null, "debug", 0))
+        advanceUntilIdle()
+        first.duplicateStep.first { it is DuplicateStep.Failed }
+
+        // A fresh view model over the same database is what a restart looks like.
+        val restarted = vm()
+        advanceUntilIdle()
+        val step = restarted.duplicateStep.first { it is DuplicateStep.Failed } as DuplicateStep.Failed
+        assertEquals(DuplicateReason.NO_PAPER, step.reason)
+    }
+
+    /**
+     * Also found on the emulator: the refusal reused `Verdict.INVALID`, so a
+     * perfectly good code read as «НЕВЕРНЫЙ КОД» when its only problem was that
+     * another unit's label was unresolved.
+     */
+    @Test
+    fun aRefusedScanIsNotReportedAsABadCode() = runTest {
+        duplicateShift(verification = "required")
+        val vm = vm()
+        advanceUntilIdle()
+        scans.tryEmit(ScanEvent(duplicateRaw("AAA111"), null, "debug", 0))
+        advanceUntilIdle()
+        db.productLabelEventDao().observeUnackedCount().first { it == 3 }
+
+        // While the first awaits verification, freeze it mid-print so the next
+        // scan is refused rather than read as a verification.
+        val job = checkNotNull(db.productLabelJobDao().openJob("s1"))
+        db.productLabelJobDao().update(job.copy(status = "sending", attemptState = "sending"))
+
+        scans.tryEmit(ScanEvent(duplicateRaw("BBB222"), null, "debug", 0))
+        advanceUntilIdle()
+        val last = vm.state.first { it.last?.blocked == true }.last
+        assertEquals(true, last?.blocked)
+        // Never judged, so never a verdict about the code itself.
+        assertEquals(1, db.codeDao().countForShift("s1"))
     }
 }
