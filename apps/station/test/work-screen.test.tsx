@@ -1695,13 +1695,16 @@ describe("WorkScreen box progress, closing and printing", () => {
       announceClose = resolve;
     });
     const exec: SqlExecutor = {
-      all: base.all,
-      async run(sql, params = []) {
+      run: base.run,
+      // Task 14 review, Finding 1: `closeBox`'s guarded UPDATE now carries
+      // its own `RETURNING`, so it runs through `all`, not `run` -- gate
+      // the same call the fix itself makes.
+      async all<T>(sql: string, params?: unknown[]): Promise<T[]> {
         if (sql.includes("SET sscc = ?, closed_at = ?")) {
           announceClose();
           await closeGate;
         }
-        await base.run(sql, params);
+        return base.all<T>(sql, params);
       },
     };
     const registry = createFloorWorkRegistry();

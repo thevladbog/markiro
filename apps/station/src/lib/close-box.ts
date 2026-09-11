@@ -2,7 +2,7 @@ import { buildSscc, DomainError } from "@markiro/domain";
 import { closeBox, currentBox } from "./boxes.js";
 import { closeCurrentPallet, type ClosePalletResult } from "./close-pallet.js";
 import type { SqlExecutor } from "./mirror.js";
-import { currentPallet, joinPallet, openPallet } from "./pallets.js";
+import { currentPallet, openPallet, type DevicePallet } from "./pallets.js";
 import { burnSerial } from "./sscc-pool.js";
 
 /**
@@ -54,7 +54,25 @@ export type CloseBoxResult =
    * rather than a silent `console.error` repeating on every retry until the
    * whole (invalid) block is exhausted.
    */
-  | { status: "invalid-serial" };
+  | { status: "invalid-serial" }
+  /**
+   * `closeBox`'s `closed_at IS NULL` guard matched nothing: another call
+   * already closed THIS box, with a different SSCC (and possibly a
+   * different pallet), between the `currentBox` read above and the UPDATE
+   * -- a genuine double close, mirroring `closeCurrentPallet`'s own
+   * `already-closed` status exactly (see its doc comment in
+   * `close-pallet.ts`). Two terminals can race this because the "current
+   * box" is scoped by shift only, not by terminal -- unlike a pallet. The
+   * serial burned by THIS losing call cannot be un-burned and never reached
+   * a stored record, so it is accepted as lost, the same trade
+   * `invalid-serial` already makes. If this call opened a fresh, still-empty
+   * pallet before losing the race (see `closeCurrentBox`), that pallet is
+   * left open: harmless, since `closeCurrentPallet` closes an empty pallet
+   * as `empty` without burning a serial, and the next box closed for this
+   * shift/terminal reuses it via `currentPallet` rather than opening a
+   * second one.
+   */
+  | { status: "already-closed" };
 
 export interface CloseBoxDeps {
   exec: SqlExecutor;
@@ -120,16 +138,25 @@ export async function closeCurrentBox(
     throw err;
   }
   const closedAt = new Date(deps.now ? deps.now() : Date.now()).toISOString();
-  await closeBox(deps.exec, box.boxId, sscc, closedAt, operatorId);
 
   // A box joins a pallet at CLOSE, never at open: an open box is not yet on
-  // any physical stack.
-  let pallet: ClosePalletResult | null = null;
+  // any physical stack. Resolved (or opened) HERE, before `closeBox`, so
+  // `pallet_id` lands in the SAME guarded UPDATE as `closed_at` -- see
+  // `closeBox`'s own doc comment for why closure and membership must commit
+  // as one fact (Task 14 review, Finding 1). This happens after the
+  // empty/no-serials/invalid-serial refusals above, all of which return
+  // before touching a pallet at all -- exactly as before this fix, so none
+  // of them can leave a freshly opened, empty pallet behind. `openPallet`
+  // is not wrapped in a try/catch here: `pallets_mirror_open_terminal_uk`
+  // still enforces one open pallet per shift/terminal, and a concurrent open
+  // racing this same terminal must still surface as a thrown error, not be
+  // silently swallowed.
+  let joiningPallet: DevicePallet | null = null;
   if (deps.palletBoxCapacity !== null) {
-    let open = await currentPallet(deps.exec, shiftId, deps.terminalId);
-    if (open === null) {
+    joiningPallet = await currentPallet(deps.exec, shiftId, deps.terminalId);
+    if (joiningPallet === null) {
       const palletId = await openPallet(deps.exec, shiftId, deps.terminalId, closedAt);
-      open = {
+      joiningPallet = {
         palletId,
         shiftId,
         terminalId: deps.terminalId,
@@ -137,8 +164,21 @@ export async function closeCurrentBox(
         boxCount: 0,
       };
     }
-    await joinPallet(deps.exec, box.boxId, open.palletId);
-    if (open.boxCount + 1 >= deps.palletBoxCapacity) {
+  }
+
+  const closed = await closeBox(
+    deps.exec,
+    box.boxId,
+    sscc,
+    closedAt,
+    operatorId,
+    joiningPallet?.palletId ?? null,
+  );
+  if (!closed) return { status: "already-closed" };
+
+  let pallet: ClosePalletResult | null = null;
+  if (joiningPallet !== null && deps.palletBoxCapacity !== null) {
+    if (joiningPallet.boxCount + 1 >= deps.palletBoxCapacity) {
       pallet = await closeCurrentPallet(deps, shiftId, operatorId);
       // `no-serials` leaves this same pallet open and over capacity. The next
       // box joins it rather than opening a second one nobody can number, and

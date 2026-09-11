@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   DomainError,
   MAX_PRODUCT_LABEL_EVENTS,
+  MAX_SYNC_BATCH_ID_CHARS,
   productLabelEventSchema,
   productLabelValueDigest,
 } from "@markiro/domain";
@@ -13,7 +14,7 @@ const ceilingSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER).n
 const pinSchema = z.strictObject({
   credentialOwnership: z.string().min(1),
   request: z.strictObject({
-    batchId: z.string().min(1).max(200),
+    batchId: z.string().min(1).max(MAX_SYNC_BATCH_ID_CHARS),
     // Existing channels retain their existing wire validation. The saved envelope is digest-bound.
     items: z.array(z.unknown()).max(100),
     boxes: z.array(z.unknown()).max(50),

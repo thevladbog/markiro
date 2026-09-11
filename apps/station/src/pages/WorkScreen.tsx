@@ -1064,6 +1064,14 @@ export function WorkScreen({
       }
 
       if (result.status === "empty") return;
+      // `already-closed`: a concurrent close already won the race for this
+      // exact box (see `CloseBoxResult`'s own doc comment in
+      // `close-box.ts`). By the time this call's guarded UPDATE ran, there
+      // was nothing left here for this device to do -- the winning close
+      // already owns whatever printing/recovery follows, so this mirrors
+      // `empty`'s silent no-op rather than surfacing an operator-facing
+      // error for something this device did not actually cause.
+      if (result.status === "already-closed") return;
       if (result.status === "no-serials") {
         setNoSerials(true);
         if (deferredSoundTimer.current) clearTimeout(deferredSoundTimer.current);
