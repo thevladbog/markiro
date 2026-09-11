@@ -107,7 +107,7 @@ describe("legal document registry", () => {
     expect(findLegalRelease("MKR-INS-09").effectiveDate).toBe("2026-09-10");
     expect(findLegalRelease("MKR-INS-10").effectiveDate).toBe("2026-09-10");
     expect(findLegalRelease("MKR-INS-11").effectiveDate).toBe("2026-09-11");
-    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(28);
+    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(30);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
     expect(findLegalRelease("MKR-PD-02", "2026.08/01")).toBe(LEGAL_RELEASES[1]);
   });
@@ -222,43 +222,26 @@ describe("legal document registry", () => {
     expect(legalReleaseLocales("MKR-INS-08")).toEqual(["ru", "en"]);
     expect(legalReleaseLocales("MKR-INS-09")).toEqual(["ru", "en"]);
     expect(legalDocumentKind("MKR-INS-11")).toBe("instruction");
-    expect(legalReleaseLocales("MKR-INS-10")).toEqual(["ru"]);
-    expect(legalReleaseLocales("MKR-INS-11")).toEqual(["ru"]);
+    expect(legalReleaseLocales("MKR-INS-10")).toEqual(["ru", "en"]);
+    expect(legalReleaseLocales("MKR-INS-11")).toEqual(["ru", "en"]);
   });
 
-  it("accepts a Russian-only cabinet instruction release and rejects Russian-only legal releases", () => {
-    // MKR-INS-06 is still outside INSTRUCTION_EN_PUBLISHED; the station
-    // instructions (01-05) now require paired en routes like legal documents.
-    const instructionRelease = {
-      code: "MKR-INS-10",
-      revision: "2026.09/02",
-      effectiveDate: "2026-09-02",
-      status: "draft",
-      operatorProfileId: "operator-2026-08-15",
-      routes: { ru: "/instruktsii/inventarizatsiya-podgotovka-chernovik/" },
-    } as unknown as LegalDocumentRelease;
-    expect(() => validateLegalRegistry([...cloneReleases(), instructionRelease])).not.toThrow();
-
+  it("requires paired routes for every published instruction and for legal releases", () => {
+    // With the catalog pair translated, every instruction is in
+    // INSTRUCTION_EN_PUBLISHED, so each one now carries the same paired-route
+    // obligation as a legal document. The set's other branch -- a Russian-only
+    // instruction -- has no code left to exercise it; the next instruction
+    // added will re-enter it, and `legalReleaseLocales` above pins what the
+    // set membership means either way.
     const ruOnlyLegal = cloneReleases();
     delete (ruOnlyLegal[0] as { routes: { en?: string } }).routes.en;
     expect(() => validateLegalRegistry(ruOnlyLegal)).toThrow(/must define routes exactly for/);
 
-    const ruOnlyStationInstruction = cloneReleases();
-    const stationRelease = ruOnlyStationInstruction.find(({ code }) => code === "MKR-INS-01");
-    delete (stationRelease as unknown as { routes: { en?: string } }).routes.en;
-    expect(() => validateLegalRegistry(ruOnlyStationInstruction)).toThrow(
-      /must define routes exactly for/,
-    );
-
-    const instructionWithEn = {
-      ...instructionRelease,
-      routes: {
-        ru: "/instruktsii/inventarizatsiya-podgotovka-chernovik/",
-        en: "/en/instructions/inventory-prep-draft/",
-      },
-    } as unknown as LegalDocumentRelease;
-    expect(() => validateLegalRegistry([...cloneReleases(), instructionWithEn])).toThrow(
-      /must define routes exactly for/,
-    );
+    for (const code of ["MKR-INS-01", "MKR-INS-10", "MKR-INS-11"] as const) {
+      const releases = cloneReleases();
+      const release = releases.find((entry) => entry.code === code);
+      delete (release as unknown as { routes: { en?: string } }).routes.en;
+      expect(() => validateLegalRegistry(releases)).toThrow(/must define routes exactly for/);
+    }
   });
 });
