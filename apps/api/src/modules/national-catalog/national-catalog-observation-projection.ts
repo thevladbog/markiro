@@ -12,6 +12,7 @@ import { mappingSchema } from "./national-catalog-import-preview-builder";
 import { buildNationalCatalogImportEntries } from "./national-catalog-proposal.service";
 import { canonicalJsonHash } from "./national-catalog-products.service";
 import type { CatalogValueProjection } from "./national-catalog-summary";
+import { nationalCatalogProductAttributeUnit } from "./national-catalog.types";
 import {
   catalogProductFieldForLabel,
   productFieldMappingSchema,
@@ -166,7 +167,11 @@ export function observeCatalogProjection(
               (a) =>
                 a.gtin === null || (isValidGtin(a.gtin) && normalizeToGtin14(a.gtin) === gtin14),
             )
-            .map((a) => ({ id: a.id, value: a.value, unit: null })),
+            .map((a) => ({
+              id: a.id,
+              value: a.value,
+              unit: nationalCatalogProductAttributeUnit(a),
+            })),
           sourceName: source.name,
           stableMappings: context.stableMappings,
           currentStableFields: new Map(),

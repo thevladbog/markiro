@@ -123,6 +123,29 @@ describe("buildNationalCatalogImportEntries", () => {
     expect(build("кг").ignored).toEqual([{ attributeId: "21", reason: "invalid_value" }]);
   });
 
+  it.each([" мл ", "мл\u00a0"])("rejects a non-exact provider unit %j", (unit) => {
+    const result = buildNationalCatalogImportEntries({
+      schemaVersionId,
+      definitions: [
+        {
+          id: "21",
+          label: "Объём",
+          valueType: "decimal",
+          multiplicity: "one",
+          unit: { canonical: "л", allowed: ["л", "мл"] },
+          requirementRules: [],
+          presetMode: "none",
+          presets: [],
+        },
+      ],
+      currentValues: new Map(),
+      sourceAttributes: [{ id: 21, value: "500", unit }],
+    });
+
+    expect(result.entries).toEqual([]);
+    expect(result.ignored).toEqual([{ attributeId: "21", reason: "invalid_value" }]);
+  });
+
   it("adds stable fields only through one reviewed, versioned mapping", () => {
     const result = buildNationalCatalogImportEntries({
       schemaVersionId,

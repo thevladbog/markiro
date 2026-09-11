@@ -137,6 +137,56 @@ describe("NationalCatalogProductsService", () => {
     );
   });
 
+  it("stores the exact product attr_value_type for the legacy proposal snapshot reader", async () => {
+    const unitCard = {
+      ...card(8),
+      attributes: [
+        {
+          id: 21,
+          name: "Объём",
+          value: "500",
+          valueId: null,
+          attributeValueId: null,
+          valueType: "мл",
+          groupId: null,
+          groupName: null,
+          locationId: null,
+          level: null,
+          gtin: null,
+          multiplier: null,
+        },
+      ],
+    };
+    const subject = service({
+      feed: {
+        status: "ok",
+        value: { products: [unitCard] },
+        etag: null,
+        contentHash: "feed",
+        usage: { total: null, method: null },
+      },
+    });
+
+    await subject.service.lookup(tenantId, productId);
+
+    expect(subject.repo.storeCards).toHaveBeenCalledWith(
+      tenantId,
+      productId,
+      gtin,
+      "feed_product",
+      [
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            normalized: expect.objectContaining({
+              attributes: [{ id: 21, value: "500", unit: "мл" }],
+            }),
+          }),
+        }),
+      ],
+      expect.any(Date),
+    );
+  });
+
   it.each(["not_found", "forbidden", "invalid_response", "unavailable"] as const)(
     "falls back to published cards when feed-product is %s",
     async (status) => {
