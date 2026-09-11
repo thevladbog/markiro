@@ -61,6 +61,10 @@ fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
     shelfLifeDays = existing?.shelfLifeDays,
     egaisCode = existing?.egaisCode,
     ssccIssuerPrefix = existing?.ssccIssuerPrefix,
+    duplicateVerification = existing?.duplicateVerification,
+    duplicateTemplate = existing?.duplicateTemplate,
+    duplicateTemplateDigest = existing?.duplicateTemplateDigest,
+    duplicatePolicyRevision = existing?.duplicatePolicyRevision,
 )
 
 /** Shift list cache, entry (server participation + bundle) and the local leave mark. */
@@ -111,6 +115,10 @@ class ShiftRepository(
                         shelfLifeDays = bundle.product.shelfLifeDays,
                         egaisCode = bundle.product.egaisCode,
                         ssccIssuerPrefix = bundle.sscc?.issuerPrefix,
+                        duplicateVerification = bundle.shift.validationPrint.verification,
+                        duplicateTemplate = bundle.shift.validationPrint.snapshot?.spec?.toString(),
+                        duplicateTemplateDigest = bundle.shift.validationPrint.snapshot?.digest,
+                        duplicatePolicyRevision = bundle.shift.validationPrint.policyRevision,
                         bundleFetchedAt = now,
                         enteredAt = now,
                         leftAt = null,

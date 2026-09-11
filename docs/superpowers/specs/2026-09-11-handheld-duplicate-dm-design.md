@@ -122,8 +122,12 @@ requirement rather than a server detail:
 - **`sequence` must be exactly `latestSequence + 1`** per job. Events are
   written and queued in order; a gap is rejected, so the outbox may not reorder
   them.
-- **A `verified` job is frozen.** No further event applies — `completed` is
-  terminal, and a reprint after it is impossible by construction.
+- **A `verified` attempt is frozen, but the job is not.** Nothing may be
+  appended to the attempt that was verified. A new `prepared` is still accepted,
+  because a verified label can be damaged or lost afterwards and reprinting it
+  is legitimate — and under `required` that reprint drops the outcome back to
+  `pending`, so the new sticker has to be scanned back in its turn. `completed`
+  is therefore a resting state, not a terminal one.
 - **A reprint replays the same bytes, and the domain enforces it**: a second
   `prepared` must carry the same `bytesDigest`, `language` and `dpi` as the
   first, a new `attemptId`, `attemptNo + 1` and a non-null reason. A job whose
@@ -333,7 +337,8 @@ server validates the same events.
   both a retry scan and a reprint remain available.
 - **Sequence is contiguous.** An event queued out of order is rejected rather
   than sent, so the outbox drains a job's events in order.
-- **A completed job is frozen** — no reprint, no further event.
+- **A verified attempt takes no further event of its own**, while the job still
+  takes a reprint — which under `required` must be verified again.
 - **A reprint replays the same bytes** and is refused while an attempt is
   `prepared` or `sending`.
 - **A quarantined receipt** does not read as a delivery.
@@ -356,6 +361,11 @@ the box ever had.
 
 - Pallets (server-side work, plan 06d), exceptions (slice C), ad-hoc shift
   creation.
+- **Reprinting a job that already completed.** The protocol accepts it and the
+  engine will too, but every reprint this device offers is reached from one of
+  the three attention screens. A label damaged an hour after it was verified has
+  no path here, because giving it one means a browsable list of past units,
+  which is its own screen and its own decision about how far back it reaches.
 - Aggregation shifts: duplicate printing is a validation-mode policy.
 - Any server change.
 

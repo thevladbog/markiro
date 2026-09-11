@@ -137,3 +137,36 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         db.execSQL("ALTER TABLE `shift_mirror` ADD COLUMN `ssccIssuerPrefix` TEXT")
     }
 }
+
+/** Duplicate printing: the shift's policy snapshot, its jobs and their events. */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `shift_mirror` ADD COLUMN `duplicateVerification` TEXT")
+        db.execSQL("ALTER TABLE `shift_mirror` ADD COLUMN `duplicateTemplate` TEXT")
+        db.execSQL("ALTER TABLE `shift_mirror` ADD COLUMN `duplicateTemplateDigest` TEXT")
+        db.execSQL("ALTER TABLE `shift_mirror` ADD COLUMN `duplicatePolicyRevision` TEXT")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `product_label_jobs` (`jobId` TEXT NOT NULL, `shiftId` TEXT NOT NULL, " +
+                "`codeHash` TEXT NOT NULL, `canonicalRaw` TEXT NOT NULL, `acceptedAt` TEXT NOT NULL, " +
+                "`operatorId` TEXT NOT NULL, `policyRevision` TEXT NOT NULL, `templateDigest` TEXT NOT NULL, " +
+                "`payloadDigest` TEXT NOT NULL, `bytesBase64` TEXT, `bytesDigest` TEXT NOT NULL, " +
+                "`language` TEXT NOT NULL, `dpi` INTEGER NOT NULL, `latestSequence` INTEGER NOT NULL, " +
+                "`attemptId` TEXT NOT NULL, `attemptNo` INTEGER NOT NULL, `attemptState` TEXT NOT NULL, " +
+                "`verification` TEXT NOT NULL, `verificationOutcome` TEXT NOT NULL, `status` TEXT NOT NULL, " +
+                "`lastFailure` TEXT, PRIMARY KEY(`jobId`))",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_product_label_jobs_shiftId_status` ON `product_label_jobs` (`shiftId`, `status`)",
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `product_label_events` (`eventId` TEXT NOT NULL, `jobId` TEXT NOT NULL, " +
+                "`sequence` INTEGER NOT NULL, `kind` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, " +
+                "`occurredAt` TEXT NOT NULL, `ackedAt` TEXT, `quarantineCode` TEXT, PRIMARY KEY(`eventId`))",
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `index_product_label_events_jobId_sequence` " +
+                "ON `product_label_events` (`jobId`, `sequence`)",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_product_label_events_ackedAt` ON `product_label_events` (`ackedAt`)")
+    }
+}

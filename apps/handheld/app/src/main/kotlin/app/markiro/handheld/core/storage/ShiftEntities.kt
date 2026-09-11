@@ -38,6 +38,12 @@ data class ShiftEntity(
     val egaisCode: String? = null,
     /** The 9-digit issuer prefix this shift's SSCC block was cut from. */
     val ssccIssuerPrefix: String? = null,
+    /** `none` or `required`; null when the shift prints no duplicate. */
+    val duplicateVerification: String? = null,
+    /** The duplicate template's spec as the bundle delivered it, and the digest that pins its revision. */
+    val duplicateTemplate: String? = null,
+    val duplicateTemplateDigest: String? = null,
+    val duplicatePolicyRevision: String? = null,
 )
 
 /** Accepted codes on this device, keyed by the KM hash device-wide (a code is one physical item). */
