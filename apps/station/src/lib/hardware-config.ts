@@ -9,9 +9,16 @@ export type PrinterLanguage = "zpl" | "tspl";
  * station (not the server) so the device configures and runs offline; the
  * hardware contract stays stateless and receives these values per call.
  */
+export interface SerialScannerConfig {
+  port: string;
+  baud: number;
+}
+
 export interface HardwareConfig {
-  /** null = no serial scanner; the keyboard wedge needs no configuration. */
-  scanner: { port: string; baud: number } | null;
+  /** Legacy first port, retained for existing settings and older Station builds. */
+  scanner: SerialScannerConfig | null;
+  /** Authoritative when present, including an empty list. Stored locally/offline. */
+  scanners?: SerialScannerConfig[];
   printer: PrintTarget | null;
   printerLanguage: PrinterLanguage;
   /** Absent in legacy settings; duplicate printing requires a known matching resolution. */
@@ -36,11 +43,37 @@ export const DEFAULT_HARDWARE_CONFIG: HardwareConfig = {
 
 const META_KEY = "hardware_config";
 
-function parseScanner(value: unknown): HardwareConfig["scanner"] {
+/** COM names are case insensitive; POSIX paths are not. */
+export function canonicalScannerPort(port: string): string {
+  const trimmed = port.trim();
+  return /^com[0-9]+$/i.test(trimmed) ? trimmed.toUpperCase() : trimmed;
+}
+
+function parseScanner(value: unknown): SerialScannerConfig | null {
   if (typeof value !== "object" || value === null) return null;
-  const { port, baud } = value as { port?: unknown; baud?: unknown };
-  if (typeof port !== "string" || port.length === 0) return null;
-  return { port, baud: typeof baud === "number" ? baud : 9600 };
+  const { port, baud = 9600 } = value as { port?: unknown; baud?: unknown };
+  if (typeof port !== "string" || !port.trim() || port.includes("\0")) return null;
+  if (typeof baud !== "number" || !Number.isInteger(baud) || baud < 1 || baud > 4294967295)
+    return null;
+  return { port: canonicalScannerPort(port), baud };
+}
+
+export function configuredScanners(
+  config: Pick<HardwareConfig, "scanner" | "scanners">,
+): SerialScannerConfig[] {
+  return config.scanners ?? (config.scanner ? [config.scanner] : []);
+}
+
+function parseScanners(values: unknown[]): SerialScannerConfig[] {
+  const scanners: SerialScannerConfig[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const scanner = parseScanner(value);
+    if (!scanner || seen.has(scanner.port)) continue;
+    scanners.push(scanner);
+    seen.add(scanner.port);
+  }
+  return scanners;
 }
 
 function parsePrinter(value: unknown): PrintTarget | null {
@@ -79,8 +112,10 @@ export async function loadHardwareConfig(exec: SqlExecutor): Promise<HardwareCon
     const raw = rows[0]?.value;
     if (!raw) return { ...DEFAULT_HARDWARE_CONFIG };
     const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const scanners = Array.isArray(parsed.scanners) ? parseScanners(parsed.scanners) : undefined;
     return {
-      scanner: parseScanner(parsed.scanner),
+      scanner: scanners ? (scanners[0] ?? null) : parseScanner(parsed.scanner),
+      ...(scanners ? { scanners } : {}),
       printer: parsePrinter(parsed.printer),
       printerLanguage: parsed.printerLanguage === "tspl" ? "tspl" : "zpl",
       printerDpi: parsed.printerDpi === 203 || parsed.printerDpi === 300 ? parsed.printerDpi : null,
@@ -95,6 +130,6 @@ export async function saveHardwareConfig(exec: SqlExecutor, config: HardwareConf
   await exec.run(
     `INSERT INTO station_meta (key, value) VALUES (?,?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [META_KEY, JSON.stringify(config)],
+    [META_KEY, JSON.stringify({ ...config, scanner: configuredScanners(config)[0] ?? null })],
   );
 }

@@ -3,9 +3,17 @@ import { useTranslation } from "react-i18next";
 import { Button, FullScreenDialog } from "@markiro/ui";
 import { sampleLabelData, type LabelTemplateSpec } from "@markiro/domain";
 import { playSignalTone, saveSoundSettings, type SoundSettings } from "../lib/signal-sound.js";
-import type { HardwareContract, PrintTarget, UsbPrinterInfo } from "../lib/hardware.js";
+import type {
+  HardwareContract,
+  PrintTarget,
+  UsbPrinterInfo,
+  ScannerConnection,
+} from "../lib/hardware.js";
 import {
   loadHardwareConfig,
+  configuredScanners,
+  canonicalScannerPort,
+  type SerialScannerConfig,
   saveHardwareConfig,
   type HardwareConfig,
   type PrinterLanguage,
@@ -14,7 +22,7 @@ import { renderLabelBytes } from "../lib/print-label.js";
 import { rasterizeText } from "../lib/rasterizer.js";
 import type { SqlExecutor } from "../lib/mirror.js";
 import { PrinterSetupPanel } from "../ui/setup/PrinterSetupPanel.js";
-import { ScannerSetupPanel } from "../ui/setup/ScannerSetupPanel.js";
+import { ScannerSetupPanel, type AdditionalScannerRow } from "../ui/setup/ScannerSetupPanel.js";
 import { SetupTabs, type SetupTabId } from "../ui/setup/SetupTabs.js";
 import { SoundSetupPanel } from "../ui/setup/SoundSetupPanel.js";
 import { makeSetupTestCode, type SetupCheckResult } from "../ui/setup/test-code.js";
@@ -72,6 +80,8 @@ export function WorkstationSetup({
   const [port, setPort] = useState("");
   const [storedPort, setStoredPort] = useState("");
   const [baud, setBaud] = useState(String(DEFAULT_BAUD));
+  const [additionalScanners, setAdditionalScanners] = useState<AdditionalScannerRow[]>([]);
+  const [scannerConnections, setScannerConnections] = useState<ScannerConnection[]>([]);
   // The check codes and their verdicts. Refs mirror the pieces the mount-only
   // scan subscription needs, so a scan is always judged against the code that
   // is on screen (or on the last printed label) at the moment it arrives.
@@ -120,11 +130,19 @@ export function WorkstationSetup({
   useEffect(() => {
     void loadHardwareConfig(exec)
       .then((config) => {
-        if (config.scanner) {
-          setPort(config.scanner.port);
-          setStoredPort(config.scanner.port);
-          setBaud(String(config.scanner.baud));
-        }
+        const savedScanners = configuredScanners(config);
+        const first = savedScanners[0];
+        setPort(first?.port ?? "");
+        setStoredPort(first?.port ?? "");
+        setBaud(String(first?.baud ?? DEFAULT_BAUD));
+        setAdditionalScanners(
+          savedScanners.slice(1).map((scanner) => ({
+            id: crypto.randomUUID(),
+            port: scanner.port,
+            storedPort: scanner.port,
+            baud: String(scanner.baud),
+          })),
+        );
         if (config.printer?.kind === "tcp") {
           setPrinterTransport("tcp");
           setPrinterHost(config.printer.host);
@@ -178,20 +196,55 @@ export function WorkstationSetup({
     };
   }, [hw, t]);
 
+  useEffect(() => {
+    let stopped = false;
+    let unsubscribe: (() => void) | null = null;
+    void hw
+      .onScannerConnections((connections) => {
+        if (!stopped) setScannerConnections(connections);
+      })
+      .then((stop) => {
+        if (stopped) stop();
+        else unsubscribe = stop;
+      })
+      .catch((caught: unknown) => {
+        if (!stopped) setError(caught instanceof Error ? caught.message : t("setup.failed"));
+      });
+    return () => {
+      stopped = true;
+      unsubscribe?.();
+    };
+  }, [hw, t]);
+
+  function buildScanners():
+    { ok: true; scanners: SerialScannerConfig[] } | { ok: false; error: string } {
+    const scanners: SerialScannerConfig[] = [];
+    const seen = new Set<string>();
+    for (const row of [{ port, baud }, ...additionalScanners]) {
+      if (row.port === "") continue;
+      const scannerPort = canonicalScannerPort(row.port);
+      const baudValue = parseBaud(row.baud);
+      if (!scannerPort || scannerPort.includes("\0") || baudValue === null)
+        return { ok: false, error: t("setup.invalidNumber") };
+      if (seen.has(scannerPort))
+        return { ok: false, error: t("setup.duplicateScannerPort", { port: scannerPort }) };
+      seen.add(scannerPort);
+      scanners.push({ port: scannerPort, baud: baudValue });
+    }
+    return { ok: true, scanners };
+  }
+
   async function openScanner() {
-    const baudValue = parseBaud(baud);
-    if (baudValue === null) {
-      setError(t("setup.invalidNumber"));
+    const result = buildScanners();
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
     setBusy(true);
     setError(null);
     setTestResult(null);
     try {
-      // Scanner session ownership stays atomic: retire the old session before
-      // opening the test selection, exactly as the runtime reconciliation does.
-      await hw.closeScanner();
-      await hw.openScanner(port, baudValue);
+      await hw.configureScanners(result.scanners);
       setTestResult({ tab: "scanner", text: t("setup.scannerConnected") });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("setup.failed"));
@@ -213,12 +266,9 @@ export function WorkstationSetup({
   }
 
   function buildConfig(): ConfigResult {
-    let scanner: HardwareConfig["scanner"] = null;
-    if (port !== "") {
-      const baudValue = parseBaud(baud);
-      if (baudValue === null) return { ok: false, error: t("setup.invalidNumber") };
-      scanner = { port, baud: baudValue };
-    }
+    const scannerResult = buildScanners();
+    if (!scannerResult.ok) return scannerResult;
+    const scanners = scannerResult.scanners;
 
     let printer: PrintTarget | null = null;
     if (printerTransport === "tcp") {
@@ -239,7 +289,8 @@ export function WorkstationSetup({
     return {
       ok: true,
       config: {
-        scanner,
+        scanner: scanners[0] ?? null,
+        scanners,
         printer,
         printerLanguage,
         printerDpi,
@@ -372,6 +423,22 @@ export function WorkstationSetup({
           port={port}
           storedPort={storedPort}
           baud={baud}
+          additionalScanners={additionalScanners}
+          connections={scannerConnections}
+          onAddScanner={() =>
+            setAdditionalScanners((rows) => [
+              ...rows,
+              { id: crypto.randomUUID(), port: "", storedPort: "", baud: String(DEFAULT_BAUD) },
+            ])
+          }
+          onRemoveScanner={(id) =>
+            setAdditionalScanners((rows) => rows.filter((row) => row.id !== id))
+          }
+          onAdditionalScannerChange={(id, patch) =>
+            setAdditionalScanners((rows) =>
+              rows.map((row) => (row.id === id ? { ...row, ...patch } : row)),
+            )
+          }
           disabled={loading}
           busy={busy}
           testCode={scannerTestCode}

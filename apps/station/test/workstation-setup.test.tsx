@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { saveHardwareConfig, type HardwareConfig } from "../src/lib/hardware-config.js";
-import type { HardwareContract, PrintTarget } from "../src/lib/hardware.js";
+import type { HardwareContract, PrintTarget, ScannerConnection } from "../src/lib/hardware.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { WorkstationSetup } from "../src/pages/WorkstationSetup.js";
 
@@ -35,9 +35,10 @@ function hardware(overrides: Partial<HardwareContract> = {}): HardwareContract {
   return {
     listScannerPorts: async () => ["COM3", "COM4"],
     listUsbPrinters: async () => [],
-    openScanner: async () => {},
+    configureScanners: async () => {},
     closeScanner: async () => {},
     onScan: async () => () => {},
+    onScannerConnections: async () => () => {},
     onScannerStatus: async () => () => {},
     print: async () => {},
     ...overrides,
@@ -703,7 +704,7 @@ describe("WorkstationSetup", () => {
 
     await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
     const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
-    expect(saved).toEqual({ ...stored, printerDpi: null });
+    expect(saved).toEqual({ ...stored, scanners: [stored.scanner], printerDpi: null });
   });
 
   it("renders the no-scanner option even when the discovered port list is empty (Finding 1)", async () => {
@@ -848,13 +849,13 @@ describe("WorkstationSetup", () => {
     expect(saved.scanner).toBeNull();
   });
 
-  it("closes the current scanner before opening another port", async () => {
+  it("reconciles the selected scanners without globally closing healthy readers", async () => {
     const calls: string[] = [];
     const hw = hardware({
       closeScanner: async () => {
         calls.push("close");
       },
-      openScanner: async () => {
+      configureScanners: async () => {
         calls.push("open");
       },
     });
@@ -872,7 +873,7 @@ describe("WorkstationSetup", () => {
 
     await chooseScannerPort("COM3");
     fireEvent.click(screen.getByRole("button", { name: "Connect scanner" }));
-    await waitFor(() => expect(calls).toEqual(["close", "open"]));
+    await waitFor(() => expect(calls).toEqual(["open"]));
   });
 
   it("rejects an out-of-range TCP printer port instead of persisting it (Finding 1)", async () => {
@@ -944,7 +945,7 @@ describe("WorkstationSetup", () => {
   it("disables Back while a scanner open is pending, and re-enables it once settled (Finding 2)", async () => {
     let resolveOpen: () => void = () => {};
     const hw = hardware({
-      openScanner: () =>
+      configureScanners: () =>
         new Promise<void>((resolve) => {
           resolveOpen = resolve;
         }),
@@ -1069,7 +1070,7 @@ describe("WorkstationSetup", () => {
 
     await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
     const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
-    expect(saved).toEqual({ ...stored, printerDpi: null });
+    expect(saved).toEqual({ ...stored, scanners: [stored.scanner], printerDpi: null });
   });
 
   it("rejects a baud of 0 instead of persisting it as a working scanner baud (PR12 round 2, Finding 1)", async () => {
@@ -1305,4 +1306,202 @@ describe("WorkstationSetup", () => {
     expect(screen.getByTestId("setup-result").className).toContain("workstation-setup__result");
     expect(screen.getByTestId("setup-footer").className).toContain("workstation-setup__footer");
   });
+});
+
+describe("multiple scanner setup", () => {
+  it("saves and reloads two ports with independent baud rates", async () => {
+    const exec = await storedHardwareExec({
+      scanner: { port: "COM3", baud: 9600 },
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    });
+    const onConfigChange = vi.fn();
+    const view = render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={onConfigChange}
+        onDone={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect((screen.getByRole("combobox", { name: "Port" }) as HTMLSelectElement).value).toBe(
+        "COM3",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add scanner" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Port 2" }), {
+      target: { value: "COM4" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Baud rate 2" }), {
+      target: { value: "115200" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() =>
+      expect(onConfigChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scanners: [
+            { port: "COM3", baud: 9600 },
+            { port: "COM4", baud: 115200 },
+          ],
+        }),
+      ),
+    );
+    view.unmount();
+    render(
+      <WorkstationSetup
+        hw={hardware()}
+        exec={exec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect((screen.getByRole("combobox", { name: "Port 2" }) as HTMLSelectElement).value).toBe(
+        "COM4",
+      ),
+    );
+    expect((screen.getByRole("textbox", { name: "Baud rate 2" }) as HTMLInputElement).value).toBe(
+      "115200",
+    );
+  });
+});
+
+it("connects both selected COM ports in one configuration request", async () => {
+  const configure = vi.fn(async () => {});
+  render(
+    <WorkstationSetup
+      hw={hardware({ configureScanners: configure })}
+      exec={noopExec}
+      sound={{ muted: false, volume: 1 }}
+      onSoundChange={() => {}}
+      onConfigChange={() => {}}
+      onDone={() => {}}
+    />,
+  );
+  await waitFor(() =>
+    expect((screen.getByRole("button", { name: "Done" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    ),
+  );
+  await chooseScannerPort("COM3");
+  fireEvent.click(screen.getByRole("button", { name: "Add scanner" }));
+  fireEvent.change(screen.getByRole("combobox", { name: "Port 2" }), { target: { value: "COM4" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Baud rate 2" }), {
+    target: { value: "115200" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Connect scanner" }));
+  await waitFor(() =>
+    expect(configure).toHaveBeenCalledWith([
+      { port: "COM3", baud: 9600 },
+      { port: "COM4", baud: 115200 },
+    ]),
+  );
+});
+
+it("rejects duplicate ports before connecting or saving", async () => {
+  const configure = vi.fn(async () => {});
+  const onConfigChange = vi.fn();
+  render(
+    <WorkstationSetup
+      hw={hardware({ configureScanners: configure })}
+      exec={noopExec}
+      sound={{ muted: false, volume: 1 }}
+      onSoundChange={() => {}}
+      onConfigChange={onConfigChange}
+      onDone={() => {}}
+    />,
+  );
+  await waitFor(() =>
+    expect((screen.getByRole("button", { name: "Done" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    ),
+  );
+  await chooseScannerPort("COM3");
+  fireEvent.click(screen.getByRole("button", { name: "Add scanner" }));
+  fireEvent.change(screen.getByRole("combobox", { name: "Port 2" }), { target: { value: "COM3" } });
+  fireEvent.click(screen.getByRole("button", { name: "Connect scanner" }));
+  expect(screen.getByRole("alert").textContent).toContain("COM3");
+  expect(configure).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  expect(onConfigChange).not.toHaveBeenCalled();
+});
+
+it("shows each port's connection state independently", async () => {
+  const exec = await storedHardwareExec({
+    scanner: null,
+    scanners: [
+      { port: "COM3", baud: 9600 },
+      { port: "COM4", baud: 115200 },
+    ],
+    printer: null,
+    printerLanguage: "zpl",
+    verifyPrintedLabel: false,
+  });
+  let publish: (connections: ScannerConnection[]) => void = () => {};
+  render(
+    <WorkstationSetup
+      hw={hardware({
+        onScannerConnections: async (listener) => {
+          publish = listener;
+          return () => {};
+        },
+      })}
+      exec={exec}
+      sound={{ muted: false, volume: 1 }}
+      onSoundChange={() => {}}
+      onConfigChange={() => {}}
+      onDone={() => {}}
+    />,
+  );
+  await screen.findByRole("combobox", { name: "Port 2" });
+  act(() =>
+    publish([
+      { port: "COM3", baud: 9600, status: "disconnected" },
+      { port: "COM4", baud: 115200, status: "connected" },
+    ]),
+  );
+  expect(screen.getByRole("status", { name: "Scanner COM3 status" }).textContent).toContain(
+    "reconnecting",
+  );
+  expect(screen.getByRole("status", { name: "Scanner COM4 status" }).textContent).toBe("Connected");
+});
+
+it("removes a saved secondary port without losing the remaining scanner", async () => {
+  const exec = await storedHardwareExec({
+    scanner: null,
+    scanners: [
+      { port: "COM3", baud: 9600 },
+      { port: "COM4", baud: 115200 },
+    ],
+    printer: null,
+    printerLanguage: "zpl",
+    verifyPrintedLabel: false,
+  });
+  const onConfigChange = vi.fn();
+  render(
+    <WorkstationSetup
+      hw={hardware()}
+      exec={exec}
+      sound={{ muted: false, volume: 1 }}
+      onSoundChange={() => {}}
+      onConfigChange={onConfigChange}
+      onDone={() => {}}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Remove scanner 2" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  await waitFor(() =>
+    expect(onConfigChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scanner: { port: "COM3", baud: 9600 },
+        scanners: [{ port: "COM3", baud: 9600 }],
+      }),
+    ),
+  );
 });

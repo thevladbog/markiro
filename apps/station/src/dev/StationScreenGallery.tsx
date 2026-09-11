@@ -2066,7 +2066,7 @@ function gallerySetupHardware(
   return {
     listScannerPorts: () => Promise.resolve(["DEMO-COM1", "DEMO-COM2"]),
     listUsbPrinters: () => Promise.resolve(usbPrinters),
-    openScanner: () => Promise.resolve(),
+    configureScanners: () => Promise.resolve(),
     closeScanner: () => Promise.resolve(),
     // Captured so the fixture can play a synthetic scan through the REAL
     // check path (same idea as `galleryPrintScanSource` below): the verdict
@@ -2080,6 +2080,7 @@ function gallerySetupHardware(
         if (scanListenerRef.current === listener) scanListenerRef.current = null;
       });
     },
+    onScannerConnections: () => Promise.resolve(() => undefined),
     onScannerStatus: () => Promise.resolve(() => undefined),
     print: () => Promise.resolve(),
   };
