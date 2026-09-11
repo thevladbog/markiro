@@ -15,11 +15,19 @@ import kotlin.math.sin
 
 enum class Wave { SINE, SQUARE, TRIANGLE }
 
-/** The station's three tones (signal-sound.ts) with a haptic pattern each. */
+/**
+ * The station's three tones (signal-sound.ts) with a haptic pattern each, plus
+ * the handheld's fourth: a full box.
+ *
+ * `BOX_DONE` sits a fifth above `OK` and pulses twice, so a box completing is
+ * never mistaken for one more accepted unit — the two land in the same second
+ * and the operator is usually looking at the line, not the screen.
+ */
 enum class SignalKind(val hz: Double, val millis: Int, val wave: Wave, val vibration: LongArray) {
     OK(880.0, 120, Wave.SINE, longArrayOf(0, 40)),
     DUPLICATE(440.0, 300, Wave.TRIANGLE, longArrayOf(0, 80, 80, 80)),
     ERROR(220.0, 450, Wave.SQUARE, longArrayOf(0, 150, 100, 150)),
+    BOX_DONE(1320.0, 90, Wave.SINE, longArrayOf(0, 40, 60, 40)),
 }
 
 interface TonePlayer {

@@ -84,6 +84,40 @@ class ScanRecorderTest {
     }
 
     @Test
+    fun anAcceptedScanCarriesItsBoxIntoTheCodeRowAndTheOutbox() = runTest {
+        val outcome = recorder().record(shift, "010460068200001321box", null, boxId = "box-1")
+        assertEquals(Verdict.OK, outcome.verdict)
+        assertEquals("box-1", db.codeDao().get(outcome.hash!!)?.boxId)
+        assertEquals("box-1", db.outboxDao().head(1).single().boxId)
+    }
+
+    @Test
+    fun aRejectedScanNeverJoinsABox() = runTest {
+        // A box counts what it actually holds, and the server refuses a boxId
+        // without an accepted code.
+        recorder().record(shift, "not-a-marking-code", null, boxId = "box-1")
+        assertNull(db.outboxDao().head(1).single().boxId)
+    }
+
+    @Test
+    fun aDuplicateNeverJoinsABoxEither() = runTest {
+        val r = recorder()
+        r.record(shift, "010460068200001321dup", null, boxId = "box-1")
+        val second = r.record(shift, "010460068200001321dup", null, boxId = "box-2")
+        assertEquals(Verdict.DUPLICATE, second.verdict)
+        // The code stays in the box that actually accepted it.
+        assertEquals("box-1", db.codeDao().get(second.hash!!)?.boxId)
+        assertNull(db.outboxDao().head(2).last().boxId)
+    }
+
+    @Test
+    fun aScanOutsideAnAggregationShiftCarriesNoBox() = runTest {
+        val outcome = recorder().record(shift, "010460068200001321plain", null)
+        assertNull(db.codeDao().get(outcome.hash!!)?.boxId)
+        assertNull(db.outboxDao().head(1).single().boxId)
+    }
+
+    @Test
     fun concurrentScansOfOneCodeAcceptExactlyOnce() = runTest {
         val r = recorder()
         val outcomes = (1..20).map { async { r.record(shift, "010460068200001321race", null) } }.awaitAll()

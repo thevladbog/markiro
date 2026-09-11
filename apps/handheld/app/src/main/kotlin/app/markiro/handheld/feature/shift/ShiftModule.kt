@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.shift
 
+import app.markiro.handheld.core.box.SsccPool
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.feature.work.ApiTeamRefresher
@@ -16,7 +17,8 @@ import javax.inject.Singleton
 object ShiftModule {
     @Provides
     @Singleton
-    fun shiftRepository(api: StationApi, db: HandheldDatabase, json: Json): ShiftRepository = ShiftRepository(api, db, json)
+    fun shiftRepository(api: StationApi, db: HandheldDatabase, json: Json, pool: SsccPool): ShiftRepository =
+        ShiftRepository(api, db, json, pool)
 
     @Provides
     fun teamRefresher(api: StationApi): TeamRefresher = ApiTeamRefresher(api)

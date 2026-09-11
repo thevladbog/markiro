@@ -6,7 +6,21 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.MainDispatcherRule
 import app.markiro.handheld.core.auth.OperatorRecord
+import app.markiro.handheld.core.box.BoxPrinter
+import app.markiro.handheld.core.box.PrintReason
+import app.markiro.handheld.core.box.BoxRepository
+import app.markiro.handheld.core.box.CloseBox
+import app.markiro.handheld.core.box.CloseResult
+import app.markiro.handheld.core.box.ServerRange
+import app.markiro.handheld.core.box.SsccPool
 import app.markiro.handheld.core.km.Verdict
+import app.markiro.handheld.core.label.LabelRenderer
+import app.markiro.handheld.core.label.RasterResult
+import app.markiro.handheld.core.label.RasterizeText
+import app.markiro.handheld.core.print.PrinterEntity
+import app.markiro.handheld.core.print.PrinterStatus
+import app.markiro.handheld.core.print.PrinterTransport
+import app.markiro.handheld.core.print.SendOutcome
 import app.markiro.handheld.core.network.NetworkModule
 import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.scan.ScanEvent
@@ -33,6 +47,8 @@ import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -48,6 +64,21 @@ class WorkViewModelTest {
     private val played = mutableListOf<SignalKind>()
     private val session = SessionHolder().apply { signIn(OperatorRecord("op-1", "Иванова Анна", "4127", "operator", "x", null, true)) }
     private val gs = "\u001d"
+    private val rasterize = RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) }
+
+    private class FakeTransport(
+        var nextStatus: PrinterStatus = PrinterStatus.Ready,
+        var outcome: SendOutcome = SendOutcome.Delivered,
+    ) : PrinterTransport {
+        var sent = 0
+        override suspend fun status(printer: PrinterEntity) = nextStatus
+        override suspend fun send(printer: PrinterEntity, document: ByteArray): SendOutcome {
+            sent++
+            return outcome
+        }
+    }
+
+    private val transport = FakeTransport()
 
     /**
      * The engines below publish their state with an eagerly started flow, which keeps reading Room
@@ -81,9 +112,12 @@ class WorkViewModelTest {
             db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), engineScope,
         )
+        val boxes = BoxRepository(db)
+        val pool = SsccPool(db)
         return WorkViewModel(
             SavedStateHandle(mapOf("shiftId" to "s1")), db, ScanRecorder(db), ScanRouterAdapter(scans),
-            { kind -> played += kind }, engine, session, ReachabilityTracker(), team, null, flowOf(Unit),
+            { kind -> played += kind }, engine, session, ReachabilityTracker(), team, null,
+            boxes, CloseBox(db, boxes, pool), BoxPrinter(db, boxes, LabelRenderer(rasterize), transport), flowOf(Unit),
         )
     }
 
@@ -131,5 +165,189 @@ class WorkViewModelTest {
         advanceUntilIdle()
         val s = vm.state.first { it.last?.verdict == Verdict.DUPLICATE }
         assertNotNull(s.last?.firstSeenAt)
+    }
+
+    /** An aggregation shift with a template, a printer and a serial block. */
+    private suspend fun aggregating(capacity: Int = 20, withPrinter: Boolean = true) {
+        db.shiftDao().upsert(
+            ShiftEntityFixtures.bundled("s1").copy(
+                mode = "aggregation",
+                boxCapacity = capacity,
+                productName = "Вода",
+                shelfLifeDays = 365,
+                ssccIssuerPrefix = "468008990",
+                boxLabelTemplate = """{"widthMm":58,"heightMm":40,"dpi":203,"language":"zpl","elements":[]}""",
+            ),
+        )
+        SsccPool(db).addRange(ServerRange("468008990", 0, 1, 100, null))
+        if (withPrinter) {
+            db.printerDao().upsert(
+                PrinterEntity(
+                    id = "p1", name = "Zebra", transport = "wifi", address = "127.0.0.1:9100",
+                    language = "zpl", dpi = 203, selected = true, lastStatus = null, lastSeenAt = null,
+                ),
+            )
+        }
+    }
+
+    private fun scan(serial: String) = scans.tryEmit(ScanEvent("010460068200001321$serial", null, "debug", 0))
+
+    @Test
+    fun aScanInAnAggregationShiftJoinsTheOpenBox() = runTest {
+        aggregating()
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        // The box is visible from entry, so this waits for the unit to land in it.
+        val box = vm.state.first { it.box?.filled == 1 }.box!!
+        assertEquals(1, box.ordinal)
+        assertEquals(20, box.capacity)
+    }
+
+    @Test
+    fun aValidationShiftHasNoBoxAndItsScansJoinNone() = runTest {
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        vm.state.first { it.last != null }
+        assertNull(vm.state.value.box)
+        assertNull(db.outboxDao().head(1).single().boxId)
+    }
+
+    @Test
+    fun theLastUnitClosesTheBoxWithItsOwnSignalAndPrints() = runTest {
+        aggregating(capacity = 2)
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        scan("b")
+        advanceUntilIdle()
+        val step = vm.closeStep.first { it is BoxCloseStep.Printed } as BoxCloseStep.Printed
+        assertEquals(2, step.box.itemCount)
+        assertEquals(1, step.box.ordinal)
+        // The box's own signal, so a full box is never heard as one more unit.
+        assertTrue(played.contains(SignalKind.BOX_DONE))
+        assertEquals(1, transport.sent)
+        assertEquals(step.box.sscc, db.boxDao().unacked(10).single().sscc)
+    }
+
+    @Test
+    fun aScanArrivingUnderTheCloseScreenIsIgnored() = runTest {
+        // The close is a full-screen state the operator is meant to read; a unit
+        // scanned under it belongs to the next box, not the one just closed.
+        aggregating(capacity = 1)
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        vm.closeStep.first { it is BoxCloseStep.Printed }
+        scan("b")
+        advanceUntilIdle()
+        assertEquals(1, db.codeDao().countForShift("s1"))
+    }
+
+    @Test
+    fun withNoPrinterTheBoxStillClosesAndTheLabelIsOwed() = runTest {
+        // A dead printer must not stop a line: the box is numbered and reported,
+        // and the label becomes a visible debt instead.
+        aggregating(capacity = 1, withPrinter = false)
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        val step = vm.closeStep.first { it is BoxCloseStep.Failed } as BoxCloseStep.Failed
+        assertEquals(PrintReason.PRINTER_UNCONFIGURED, step.reason)
+        assertNotNull(db.boxDao().unacked(10).single().sscc)
+        assertEquals(1, vm.state.first { it.unprintedLabels == 1 }.unprintedLabels)
+    }
+
+    @Test
+    fun aDryPoolLeavesTheBoxOpenAndSaysSo() = runTest {
+        db.shiftDao().upsert(
+            ShiftEntityFixtures.bundled("s1").copy(mode = "aggregation", boxCapacity = 1, ssccIssuerPrefix = "468008990"),
+        )
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        val step = vm.closeStep.first { it is BoxCloseStep.Refused } as BoxCloseStep.Refused
+        assertEquals(CloseResult.NoSerials, step.reason)
+        assertEquals(0, db.boxDao().unacked(10).size)
+    }
+
+    @Test
+    fun closingEarlyNumbersWhatIsActuallyInTheBox() = runTest {
+        aggregating(capacity = 20)
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        // Waited on the state rather than advanceUntilIdle: Room writes on its own
+        // executor, so the scheduler goes idle before the row exists.
+        vm.state.first { it.box?.filled == 1 }
+        scan("b")
+        vm.state.first { it.box?.filled == 2 }
+        vm.closeEarly()
+        val step = vm.closeStep.first { it is BoxCloseStep.Printed } as BoxCloseStep.Printed
+        assertEquals(2, step.box.itemCount)
+    }
+
+    @Test
+    fun anUnknownPrintNeverResendsOnItsOwn() = runTest {
+        aggregating(capacity = 1)
+        transport.outcome = SendOutcome.Unknown("link lost")
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        vm.closeStep.first { it is BoxCloseStep.Unknown }
+        assertEquals(1, transport.sent)
+        // Confirming resolves it without sending anything more.
+        vm.confirmPrinted()
+        assertEquals(BoxCloseStep.Idle, vm.closeStep.value)
+        assertEquals(1, transport.sent)
+        assertEquals(0, vm.state.first { it.unprintedLabels == 0 }.unprintedLabels)
+    }
+
+    @Test
+    fun deferringALabelKeepsTheBoxInTheQueue() = runTest {
+        aggregating(capacity = 1, withPrinter = false)
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        vm.closeStep.first { it is BoxCloseStep.Failed }
+        vm.deferLabel()
+        assertEquals(BoxCloseStep.Idle, vm.closeStep.value)
+        assertEquals(1, vm.state.first { it.unprintedLabels == 1 }.unprintedLabels)
+    }
+
+    @Test
+    fun anAggregationShiftShowsAnEmptyBoxBeforeTheFirstScan() = runTest {
+        // Otherwise the operator meets the validation layout on entry and the grid
+        // appears from nowhere on the first unit.
+        aggregating()
+        val vm = vm()
+        val box = vm.state.first { it.box != null }.box!!
+        assertEquals(1, box.ordinal)
+        assertEquals(0, box.filled)
+        assertEquals(20, box.capacity)
+        // And no row was created just by opening the screen.
+        assertEquals(0, db.boxDao().unacked(10).size)
+    }
+
+    @Test
+    fun theBoxAfterACloseShowsAsEmptyRatherThanVanishing() = runTest {
+        aggregating(capacity = 1)
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        vm.closeStep.first { it is BoxCloseStep.Printed }
+        val next = vm.state.first { it.box?.filled == 0 && it.box?.ordinal == 2 }.box!!
+        assertEquals(2, next.ordinal)
+        assertEquals(1, next.capacity)
     }
 }
