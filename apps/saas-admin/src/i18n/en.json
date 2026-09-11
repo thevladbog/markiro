@@ -1840,7 +1840,9 @@
       "attach": "Attach a file",
       "deleteAttachment": "Delete",
       "badAttachmentType": "Only PDF, DOCX, PNG and JPEG are accepted.",
-      "noDocuments": "No documents yet."
+      "noDocuments": "No documents yet.",
+      "staleDraft": "The agreement changed after this document was generated: the file no longer matches the record. Generate the printable form again before sending it.",
+      "staleBadge": "Out of date"
     }
   },
   "entitlements": {

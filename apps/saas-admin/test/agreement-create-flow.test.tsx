@@ -58,6 +58,54 @@ const CREATED = {
   },
 };
 
+const DETAIL_WITH_STALE_DRAFT = {
+  agreement: {
+    ...CREATED.agreement,
+    documents: [
+      {
+        id: "a1d4e0b2-1f3c-4d5e-8a6b-9c0d1e2f3a4b",
+        kind: "draft",
+        filename: "МКР-2026-0001-проект.docx",
+        mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        sha256: "a".repeat(64),
+        byteSize: 58_000,
+        stale: true,
+        createdAt: "2026-09-11T10:05:00.000Z",
+      },
+    ],
+  },
+};
+
+describe("an agreement whose draft no longer matches the record", () => {
+  it("warns before the download button and marks the file", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
+        if (path.includes("/api/platform/agreements/") && path.endsWith("/tenant-candidates")) {
+          return jsonResponse(200, { candidates: [] });
+        }
+        if (path.includes("/api/platform/agreements/")) {
+          return jsonResponse(200, DETAIL_WITH_STALE_DRAFT);
+        }
+        return jsonResponse(200, {});
+      }),
+    );
+
+    renderSaasApp({
+      initialEntry: `/agreements/${DETAIL_WITH_STALE_DRAFT.agreement.id}`,
+    });
+
+    // The page is lazy-loaded, so wait for it to mount before asserting.
+    await screen.findByText("МКР-2026-0001", {}, { timeout: 5_000 });
+    expect(
+      await screen.findByText(/файл больше не соответствует записи/i, {}, { timeout: 5_000 }),
+    ).toBeDefined();
+    expect(screen.getByText("Устарел")).toBeDefined();
+  });
+});
+
 describe("creating an agreement", () => {
   it("sends the chosen document form to the platform API", async () => {
     const bodies: unknown[] = [];

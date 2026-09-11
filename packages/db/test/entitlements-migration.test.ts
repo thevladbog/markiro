@@ -75,7 +75,7 @@ describe.skipIf(!databaseUrl)("P1 additive migrations and transactional revision
     await copyMigrationsThroughIndex({
       sourceFolder: migrationsFolder,
       targetFolder: legacyMigrations,
-      lastIncludedIndex: 130,
+      lastIncludedIndex: 131,
     });
     await migrate(drizzle(pool), { migrationsFolder: legacyMigrations });
     await pool.query(
@@ -125,7 +125,7 @@ describe.skipIf(!databaseUrl)("P1 additive migrations and transactional revision
       migrationsFolder,
       log: () => undefined,
     });
-    expect(applied.packaged).toContain("0131_entitlements_p1a");
+    expect(applied.packaged).toContain("0132_entitlements_p1a");
   }, 120_000);
   afterAll(async () => {
     await pool.end();

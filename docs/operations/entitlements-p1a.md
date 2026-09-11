@@ -181,7 +181,7 @@ Use the established protected deployment workflow if deployment is separately au
 
 1. Record the accepted source/artifact identities and back up the database with the existing
    operational procedure. Inventory affected platform and tenant clients.
-2. Apply additive `0131_entitlements_p1a.sql` after `0130_cynical_warstar.sql`. It retains legacy
+2. Apply additive `0132_entitlements_p1a.sql` after `0131_bitter_darkhawk.sql`. It retains legacy
    nullable values and historical records, adds source/preview/policy/observation storage, and
    increments terms and usage revisions in the same transaction as their owning writes.
 3. Deploy the compatible API before clients that request V3 or the V1 entitlement snapshot.
@@ -296,3 +296,12 @@ against the combined schema. The full chain applied successfully to a new dedica
 database. Post-merge checks passed 439 DB tests, 209 contract tests, 184 selected API tests,
 43 selected customer UI tests and 82 selected SaaS tests. These supplement the earlier full
 runs above; they do not replace or explain the retained customer full-suite timeout.
+
+While PR #515 was being opened, `main` advanced to `021452f2c` with
+`0131_bitter_darkhawk`. The branch subsequently retained that migration and moved P1A to
+`0132_entitlements_p1a`, again preserving its SQL and rebuilding the metadata chain. The
+operational order above names this final migration; the earlier counts describe the first
+publication check and remain part of its verification history.
+The full chain through `0132` applied to another dedicated test database; follow-up checks
+passed 23 schema/migration tests, 209 contract tests, 48 API tests and 36 SaaS tests without
+skips. These checks cover the new chain and the agreement/entitlement contract intersection.
