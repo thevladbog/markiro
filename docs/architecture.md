@@ -427,6 +427,17 @@ production access, CDN hosts and live recovery acceptance remain unverified.
 rollout boundaries; [delivery evidence](evidence/national-catalog-import/delivery-verification.md)
 records current local verification separately from external acceptance.
 
+Product cards render regulatory attributes from the profile's pinned schema definition.
+Production, code-ordering, circulation and EGAIS readiness remain separate. Category
+binding/change requires an explicit preview and confirmed value transfer; operational
+base fields and category attributes use separate saves. Background read failures preserve
+cached cards and unsaved drafts; a conflict reload fetches the current revision before
+an explicit discard. Read-only cabinet access opens the same product route in view mode.
+National Catalog numeric values retain the exact supported source unit across preview,
+apply, observation and reviewed baselines; missing or unsupported units are not inferred.
+[Catalog delivery evidence](evidence/catalog-category-readiness.md) records local checks
+and the remaining live schema/assortment acceptance for groups 23, 33 and 35.
+
 A confirmed link binds tenant, provider environment, card, canonical GTIN and revision.
 GTIN equality only offers a link. One card may expose several GTINs. New import
 requires owned/granted feed access, never public-card fallback. Canonical GTIN edits
