@@ -121,6 +121,19 @@ export function AgreementsPage() {
               ),
             },
             {
+              key: "documentForm",
+              title: t("agreements.columns.documentForm"),
+              mono: true,
+              // A badge, not a sentence: the column is narrow and the value is
+              // one of two.
+              render: (row) =>
+                t(
+                  row.documentForm === "ru_en"
+                    ? "agreements.documentForm.badgeRuEn"
+                    : "agreements.documentForm.badgeRu",
+                ),
+            },
+            {
               key: "conclusionDate",
               title: t("agreements.columns.conclusionDate"),
               mono: true,

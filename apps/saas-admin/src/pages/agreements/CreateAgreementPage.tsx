@@ -4,6 +4,9 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { Alert, Button, Field, Input, SectionHeader } from "@markiro/ui";
 
+import type { AgreementDocumentForm } from "@markiro/platform-contracts";
+
+import { AgreementDocumentFormField } from "./AgreementDocumentFormField.js";
 import { createAgreement } from "./api.js";
 import {
   AgreementRequisitesForm,
@@ -20,6 +23,7 @@ export function CreateAgreementPage() {
   const [number, setNumber] = useState("");
   const [conclusionDate, setConclusionDate] = useState("");
   const [city, setCity] = useState("");
+  const [documentForm, setDocumentForm] = useState<AgreementDocumentForm>("ru");
   const [position, setPosition] = useState("");
   const [fullName, setFullName] = useState("");
   const [authorityBasis, setAuthorityBasis] = useState("");
@@ -36,6 +40,7 @@ export function CreateAgreementPage() {
         ...(number.trim() === "" ? {} : { number: number.trim() }),
         ...(conclusionDate === "" ? {} : { conclusionDate }),
         ...(city.trim() === "" ? {} : { city: city.trim() }),
+        documentForm,
         counterparty: toRequisitesInput(counterparty) as never,
         signatory: {
           position: nullable(position),
@@ -152,6 +157,7 @@ export function CreateAgreementPage() {
             onChange={(event) => setCity(event.target.value)}
           />
         </Field>
+        <AgreementDocumentFormField value={documentForm} onChange={setDocumentForm} />
 
         {formError && <Alert tone="error">{formError}</Alert>}
 

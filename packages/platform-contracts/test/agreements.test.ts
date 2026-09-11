@@ -31,6 +31,22 @@ describe("platformAgreementContracts", () => {
     ).toBe(true);
   });
 
+  it("accepts both document forms and rejects anything else", () => {
+    const parsed = platformAgreementContracts.create.body.parse({
+      counterparty: LEGAL_ENTITY,
+      documentForm: "ru_en",
+    });
+    expect(parsed.documentForm).toBe("ru_en");
+    expect(
+      platformAgreementContracts.create.body.safeParse({
+        counterparty: LEGAL_ENTITY,
+        // A standalone English document is deliberately not a form: two
+        // originals under one agreement number cannot be told apart later.
+        documentForm: "en",
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects a ten-digit INN on a sole proprietor", () => {
     const result = platformAgreementContracts.create.body.safeParse({
       counterparty: {
