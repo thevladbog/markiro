@@ -1,0 +1,333 @@
+import { randomUUID } from "node:crypto";
+import express from "express";
+import { Test } from "@nestjs/testing";
+import type { INestApplication } from "@nestjs/common";
+import request from "supertest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { buildSscc, canonicalizeKm, kmHash } from "@markiro/domain";
+import { AppModule } from "../src/app.module";
+import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
+import { loadEnv } from "../src/env";
+import type { ScanItemDto } from "../src/modules/station-scans/dto";
+import { PALLET_EXTENSION_DIGIT, SsccService } from "../src/modules/sscc/sscc.service";
+import { createTestStationDevice, signUpAndActivate } from "./support/auth";
+import { listenOnLoopback } from "./support/listen-loopback";
+
+const ready = Boolean(
+  process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
+);
+
+/**
+ * Task 10 (06d): the per-shift pallet list in the cabinet (`GET /pallets`).
+ * Every `pallets`/`boxes`/`box_items` row is built through the same
+ * `/station/scans` ingest path Task 9's own suite exercises directly
+ * (station-scans-pallets.e2e.test.ts) -- there is no other way to create
+ * one -- so this file never touches the database directly.
+ *
+ * Unlike boxes.e2e.test.ts's shared, READ-ONLY fixtures, the tests below
+ * deliberately mutate ONE shared pallet in sequence -- displacing and
+ * removing items, then disassembling one of its two boxes -- because that is
+ * exactly the shape of the task brief's own three assertions (counts right
+ * after closing, then after an item exception, then after a box
+ * disassembly). Each `it` therefore depends on the previous one having run;
+ * they are ordered deliberately and are not safe to reorder or run in
+ * isolation.
+ */
+describe.skipIf(!ready)("pallets e2e", () => {
+  let app: INestApplication | undefined;
+  let setup: AuthSetup;
+
+  let agent: ReturnType<typeof request.agent>;
+  let stationKey: string;
+  let stationDeviceId: string;
+  let shiftId: string;
+  let operatorId: string;
+  let palletSscc: string;
+  /** box1: 20 items, none ever touched until the exception test below. */
+  const BOX1_ITEM_COUNT = 20;
+  /** box2: 15 items -- the brief's "short box". Disassembled in the last test. */
+  const BOX2_ITEM_COUNT = 15;
+  /** The exact code displaced by an earlier rival scan in the exception test. */
+  let displaceLabel: string;
+  let displaceScannedAt: string;
+  /** The exact code released by an operator "undo" in the exception test. */
+  let removeLabel: string;
+  let removeScannedAt: string;
+
+  const VALID_GTIN14 = "04006381333931";
+  // Nine digits, so `ssccSerialCapacity` leaves a seven-digit serial -- same
+  // fixture shape as station-scans-pallets.e2e.test.ts.
+  const ISSUER_PREFIX = "034600682";
+  const ITEM_BASE = Date.parse("2026-09-11T07:00:00.000Z");
+  const BOX_CLOSED_AT = "2026-09-11T07:30:00.000Z";
+  const PALLET_CLOSED_AT = "2026-09-11T08:00:00.000Z";
+
+  beforeAll(async () => {
+    const env = loadEnv();
+    setup = setupAuth(env);
+
+    const ref = await Test.createTestingModule({
+      imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
+    }).compile();
+
+    app = ref.createNestApplication({ bodyParser: false });
+    const server = app.getHttpAdapter().getInstance();
+    mountAuth(server, setup.auth);
+    server.use(express.json());
+    await app.init();
+    await listenOnLoopback(app);
+
+    agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const station = await createTestStationDevice(app!, agent, "Pallet line");
+    stationKey = station.apiKey;
+    stationDeviceId = station.deviceId;
+
+    const product = await agent
+      .post("/products")
+      .send({
+        name: "Cola",
+        gtin: VALID_GTIN14,
+        chzProductGroupCode: 8,
+        boxCapacity: 10,
+        palletBoxCapacity: 5,
+      })
+      .expect(201);
+    const productId = (product.body as { id: string }).id;
+
+    const shift = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    shiftId = (shift.body as { id: string }).id;
+    await agent.post(`/shifts/${shiftId}/open`).expect(200);
+
+    // `pallets.operator_id` carries a composite tenant FK to `employees`.
+    const employee = await agent.post("/employees").send({ fullName: "Operator One" }).expect(201);
+    operatorId = (employee.body as { id: string }).id;
+
+    // A real block from the pallet serial space, so the closure's sscc is a
+    // genuine one rather than a placeholder string the FK/constraints happen
+    // to accept.
+    const block = await app!
+      .get(SsccService)
+      .allocate(tenantId, ISSUER_PREFIX, PALLET_EXTENSION_DIGIT, stationDeviceId, 5);
+    palletSscc = buildSscc(PALLET_EXTENSION_DIGIT, ISSUER_PREFIX, block.fromSerial);
+
+    function item(label: string, boxId: string | null, scannedAt: string): ScanItemDto {
+      const raw = `01${VALID_GTIN14}21S-${label}`;
+      const km = canonicalizeKm(raw);
+      return {
+        shiftId,
+        terminalId: "t1",
+        raw,
+        verdict: "ok",
+        scannedAt,
+        code: { codeHash: kmHash(km), gtin14: km.gtin14, serial: km.serial },
+        boxId,
+        operatorId: null,
+      };
+    }
+
+    async function postBatch(body: Record<string, unknown>) {
+      return request(app!.getHttpServer())
+        .post("/station/scans")
+        .set("x-api-key", stationKey)
+        .send({ batchId: `pallet-e2e-${randomUUID()}`, items: [], ...body })
+        .expect(201);
+    }
+
+    const box1Items = Array.from({ length: BOX1_ITEM_COUNT }, (_, i) =>
+      item(`b1-${i}`, "b1", new Date(ITEM_BASE + i * 1000).toISOString()),
+    );
+    const box2Items = Array.from({ length: BOX2_ITEM_COUNT }, (_, i) =>
+      item(`b2-${i}`, "b2", new Date(ITEM_BASE + (100 + i) * 1000).toISOString()),
+    );
+    displaceLabel = "b1-0";
+    displaceScannedAt = box1Items[0]!.scannedAt;
+    removeLabel = "b1-1";
+    removeScannedAt = box1Items[1]!.scannedAt;
+
+    await postBatch({ items: box1Items });
+    await postBatch({ items: box2Items });
+    await postBatch({
+      boxes: [
+        {
+          boxId: "b1",
+          shiftId,
+          terminalId: "t1",
+          sscc: "123460682000000101",
+          closedAt: BOX_CLOSED_AT,
+          operatorId,
+          devicePalletId: "p1",
+        },
+        {
+          boxId: "b2",
+          shiftId,
+          terminalId: "t1",
+          sscc: "123460682000000102",
+          closedAt: BOX_CLOSED_AT,
+          operatorId,
+          devicePalletId: "p1",
+        },
+      ],
+    });
+    await postBatch({
+      pallets: [
+        {
+          palletId: "p1",
+          shiftId,
+          terminalId: "t1",
+          sscc: palletSscc,
+          closedAt: PALLET_CLOSED_AT,
+          operatorId,
+          printVerifiedAt: null,
+          printSkippedAt: null,
+        },
+      ],
+    });
+  });
+
+  afterAll(async () => {
+    await app?.close();
+  });
+
+  it("lists a shift's pallets with their box and unit counts", async () => {
+    const res = await agent.get(`/pallets?shiftId=${shiftId}`).expect(200);
+    expect(res.body.items).toHaveLength(1);
+    const pallet = res.body.items[0];
+    expect(pallet.sscc).toBe(`00${palletSscc}`);
+    expect(pallet.terminalId).toBe(stationDeviceId);
+    expect(pallet.operatorId).toBe(operatorId);
+    expect(pallet.boxCount).toBe(2);
+    expect(pallet.unitCount).toBe(BOX1_ITEM_COUNT + BOX2_ITEM_COUNT);
+    expect(pallet.closedAt).toBe(PALLET_CLOSED_AT);
+    expect(pallet.contentsChangedAfterClose).toBe(false);
+    expect(pallet.disassembledAt).toBeNull();
+  });
+
+  it("excludes displaced and operator-removed items from the unit count", async () => {
+    const displaceRaw = `01${VALID_GTIN14}21S-${displaceLabel}`;
+    const displaceKm = canonicalizeKm(displaceRaw);
+    // A rival scan of the SAME code, with an EARLIER scannedAt, posted after
+    // b1 already closed -- 06b's ownership race retroactively displaces the
+    // box's own item (see boxes.e2e.test.ts's identical "displacedShiftId"
+    // fixture). `boxId: null`: this scan does not itself join any box.
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", stationKey)
+      .send({
+        batchId: `pallet-e2e-${randomUUID()}`,
+        items: [
+          {
+            shiftId,
+            terminalId: "t2",
+            raw: displaceRaw,
+            verdict: "ok",
+            scannedAt: new Date(Date.parse(displaceScannedAt) - 60_000).toISOString(),
+            code: {
+              codeHash: kmHash(displaceKm),
+              gtin14: displaceKm.gtin14,
+              serial: displaceKm.serial,
+            },
+            boxId: null,
+            operatorId: null,
+          },
+        ],
+      })
+      .expect(201);
+
+    const removeRaw = `01${VALID_GTIN14}21S-${removeLabel}`;
+    const removeKm = canonicalizeKm(removeRaw);
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", stationKey)
+      .send({
+        batchId: `pallet-e2e-${randomUUID()}`,
+        items: [],
+        boxes: [],
+        exceptions: [
+          {
+            kind: "undo",
+            boxId: "b1",
+            codeHash: kmHash(removeKm),
+            targetScannedAt: removeScannedAt,
+            shiftId,
+            terminalId: "t1",
+            operatorId: null,
+            reason: null,
+            occurredAt: new Date().toISOString(),
+          },
+        ],
+      })
+      .expect(201);
+
+    const res = await agent.get(`/pallets?shiftId=${shiftId}`).expect(200);
+    const pallet = res.body.items[0];
+    expect(pallet.boxCount).toBe(2);
+    expect(pallet.unitCount).toBe(BOX1_ITEM_COUNT + BOX2_ITEM_COUNT - 2);
+  });
+
+  it("counts a disassembled box out of the pallet but flags the change", async () => {
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", stationKey)
+      .send({
+        batchId: `pallet-e2e-${randomUUID()}`,
+        items: [],
+        boxes: [],
+        exceptions: [
+          {
+            kind: "disassemble",
+            boxId: "b2",
+            codeHash: null,
+            shiftId,
+            terminalId: "t1",
+            operatorId: null,
+            reason: "переставлен на другой поддон",
+            occurredAt: new Date().toISOString(),
+          },
+        ],
+      })
+      .expect(201);
+
+    const res = await agent.get(`/pallets?shiftId=${shiftId}`).expect(200);
+    const pallet = res.body.items[0];
+    // Only b1 (20 items, minus the 2 excluded above) still counts; b2's 15
+    // items left with it.
+    expect(pallet.boxCount).toBe(1);
+    expect(pallet.unitCount).toBe(BOX1_ITEM_COUNT - 2);
+    expect(pallet.contentsChangedAfterClose).toBe(true);
+  });
+
+  it("rejects a station api-key", async () => {
+    await request(app!.getHttpServer())
+      .get(`/pallets?shiftId=${shiftId}`)
+      .set("x-api-key", stationKey)
+      .expect(403);
+  });
+
+  it("404s for a shift that does not belong to the caller's tenant", async () => {
+    const other = request.agent(app!.getHttpServer());
+    await signUpAndActivate(other);
+    const otherProduct = await other
+      .post("/products")
+      .send({
+        name: "Cola",
+        gtin: VALID_GTIN14,
+        chzProductGroupCode: 8,
+        boxCapacity: 10,
+        palletBoxCapacity: 5,
+      })
+      .expect(201);
+    const otherShift = await other
+      .post("/shifts")
+      .send({ productId: (otherProduct.body as { id: string }).id, mode: "validation" })
+      .expect(201);
+    const otherShiftId = (otherShift.body as { id: string }).id;
+    await other.post(`/shifts/${otherShiftId}/open`).expect(200);
+
+    await agent.get(`/pallets?shiftId=${otherShiftId}`).expect(404);
+  });
+
+  it("rejects a request without a shift", async () => {
+    await agent.get("/pallets").expect(400);
+  });
+});
