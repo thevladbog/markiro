@@ -29,6 +29,7 @@ import {
   agreementSignedObjectKey,
 } from "./agreement-object-key";
 import { toAgreementFields } from "./agreement-fields";
+import { agreementRenderDigest } from "./agreement-render-digest";
 import { parseRequisites, parseSignatory, parseTerms } from "./agreement-state";
 
 export const AGREEMENT_RENDERER_VERSION = "agreement-docx-v2";
@@ -110,6 +111,7 @@ export class AgreementDocumentsService {
         sha256,
         byteSize: bytes.byteLength,
         rendererVersion: AGREEMENT_RENDERER_VERSION,
+        sourceDigest: renderDigestOf(agreement),
         uploadedByPlatformUserId: null,
       };
       const [saved] = existing
@@ -136,7 +138,7 @@ export class AgreementDocumentsService {
       });
       return saved;
     });
-    return toDocument(row);
+    return toDocument(row, agreement);
   }
 
   /**
@@ -175,6 +177,7 @@ export class AgreementDocumentsService {
         sha256: rendered.sha256,
         byteSize: rendered.byteSize,
         rendererVersion: AGREEMENT_RENDERER_VERSION,
+        sourceDigest: renderDigestOf(agreement),
         uploadedByPlatformUserId: null,
       })
       .returning();
@@ -214,6 +217,7 @@ export class AgreementDocumentsService {
           sha256,
           byteSize: file.buffer.byteLength,
           rendererVersion: null,
+          sourceDigest: null,
           uploadedByPlatformUserId: actor.userId,
         })
         .returning();
@@ -233,7 +237,7 @@ export class AgreementDocumentsService {
       });
       return saved;
     });
-    return toDocument(row);
+    return toDocument(row, agreement);
   }
 
   async deleteAttachment(
@@ -343,7 +347,7 @@ function safeFilename(value: string): string {
   return trimmed;
 }
 
-function toDocument(row: AgreementDocumentRow): AgreementDocument {
+function toDocument(row: AgreementDocumentRow, agreement: AgreementRow): AgreementDocument {
   return {
     id: row.id,
     kind: row.kind,
@@ -351,8 +355,45 @@ function toDocument(row: AgreementDocumentRow): AgreementDocument {
     mediaType: row.mediaType,
     sha256: row.sha256,
     byteSize: row.byteSize,
+    stale: isAgreementDocumentStale(agreement, row),
     createdAt: row.createdAt.toISOString(),
   };
 }
 
 export { ConflictException };
+
+/**
+ * The fingerprint of the values a render consumed, written beside the stored
+ * document so a later read can tell whether the file still matches the record.
+ */
+export function renderDigestOf(agreement: AgreementRow): string {
+  return agreementRenderDigest({
+    number: agreement.number,
+    conclusionDate: agreement.conclusionDate,
+    city: agreement.city,
+    documentForm: agreement.documentForm,
+    counterparty: agreement.counterparty,
+    contractor: agreement.contractor,
+    terms: agreement.terms,
+  });
+}
+
+/**
+ * Whether a stored document still matches the agreement it was rendered from.
+ *
+ * An attachment is never stale: nothing rendered it. A rendered document
+ * written before the fingerprint column existed cannot be vouched for, so it
+ * reports stale rather than clean — "re-render before sending" is the safe
+ * advice for a file we cannot check.
+ *
+ * Deliberately not keyed on `rendererVersion`: a renderer upgrade does not
+ * mean the file contradicts the record, and flagging every document on every
+ * deployment would teach operators to ignore the flag.
+ */
+export function isAgreementDocumentStale(
+  agreement: AgreementRow,
+  document: AgreementDocumentRow,
+): boolean {
+  if (document.kind === "attachment") return false;
+  return document.sourceDigest !== renderDigestOf(agreement);
+}
