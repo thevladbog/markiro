@@ -1,7 +1,11 @@
-import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OfferWorkspaceV2 as OfferWorkspace } from "@markiro/platform-contracts";
+import i18n from "../src/i18n/index.js";
+import { ThemeProvider } from "@markiro/ui";
+import { MemoryRouter } from "react-router";
+import { OfferReadiness } from "../src/pages/offers/OfferReadiness.js";
 import {
   ACCOUNTANT_ME,
   TENANT_ID,
@@ -234,9 +238,10 @@ function install(
   );
   return calls;
 }
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.unstubAllGlobals();
+  await i18n.changeLanguage("ru");
 });
 
 describe("offers workspace", () => {
@@ -707,6 +712,52 @@ it("keeps blocked draft actions visible and provides an edit route", async () =>
   ).toBe(true);
   expect(screen.getByText(/Подтвердите реквизиты продавца/)).toBeDefined();
   expect(screen.getByText(/Не заполнены условия позиции/)).toBeDefined();
+});
+
+it.each([false, true])(
+  "shows corrective edit links only with write access: %s",
+  async (canWrite) => {
+    const data = workspace();
+    data.actions.publish = false;
+    data.offer.expiresAt = "2020-01-01T00:00:00.000Z";
+    data.parties.seller = { ...party, revision: 2 };
+    data.parties.sellerBankAccount = null;
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <OfferReadiness workspace={data} canWrite={canWrite} />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    await screen.findByText(i18n.t("offerWorkspace.expiredDraft"));
+    expect(screen.getByText(i18n.t("commercial.errors.commercial_review_stale"))).toBeDefined();
+    const correctiveLinks = within(screen.getByRole("alert")).getAllByRole("link");
+    expect(
+      correctiveLinks.filter((link) => link.getAttribute("href") === `/offers/${ID}/edit`),
+    ).toHaveLength(canWrite ? 2 : 0);
+    expect(
+      correctiveLinks.some((link) => link.getAttribute("href") === "/settings/organization"),
+    ).toBe(true);
+  },
+);
+
+it.each([
+  ["ru", ""],
+  ["en", ""],
+  ["ru", "/edit"],
+  ["en", "/edit"],
+])("localizes missing line warnings in %s on the offer route %s", async (language, suffix) => {
+  await i18n.changeLanguage(language);
+  const data = workspace();
+  data.actions.publish = false;
+  data.offer.lines = data.offer.lines.map((line) => ({ ...line, commercialTerms: null }));
+  install(data);
+  renderSaasApp({ initialEntry: `/offers/${ID}${suffix}` });
+  await screen.findByText(
+    i18n.t("offerWorkspace.lineTermsMissing", {
+      name: language === "en" ? "Line setup" : "Настройка линии",
+    }),
+  );
 });
 
 it("edits saved values without hydrating the current catalog and keeps input on conflict", async () => {

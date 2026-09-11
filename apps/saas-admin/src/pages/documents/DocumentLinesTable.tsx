@@ -205,7 +205,9 @@ export function DocumentLinesTable({
                   <td colSpan={6}>
                     {kind === "offer" && !line.commercialTerms ? (
                       <p className="field-error">
-                        {t("offerWorkspace.lineTermsMissing", { name: line.nameRu })}
+                        {t("offerWorkspace.lineTermsMissing", {
+                          name: i18n.language === "en" ? line.nameEn : line.nameRu,
+                        })}
                       </p>
                     ) : null}
                     <Textarea

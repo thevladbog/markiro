@@ -50,6 +50,7 @@ export function DocumentSummary({
         </dl>
       </div>
       <DatePicker
+        disabled={submitting}
         locale={i18n.language}
         placeholder={t("reports.calendar.placeholder")}
         clearLabel={t("reports.calendar.clear")}

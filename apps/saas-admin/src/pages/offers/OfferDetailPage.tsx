@@ -97,7 +97,7 @@ function OfferDetail({ offerId }: { offerId: string }) {
               <dd>{offerDate(offer.expiresAt, i18n.language) ?? t("offerWorkspace.noExpiry")}</dd>
             </div>
           </dl>
-          <OfferReadiness workspace={data} />
+          <OfferReadiness workspace={data} canWrite={canWrite} />
           {canWrite ? (
             <OfferActions
               workspace={data}
