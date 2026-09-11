@@ -12,6 +12,13 @@ import {
 } from "./conflict-resolution";
 import { insertFreshDisplacedMemberships, type MembershipRow } from "./box-membership";
 import { sortExceptions, type ExceptionDto } from "./box-exceptions";
+import {
+  applyPalletClosures,
+  applyPalletExceptions,
+  palletKey,
+  upsertPallets,
+  type PalletRef,
+} from "./pallet-ingest";
 import { SsccService } from "../sscc/sscc.service";
 import { advanceBoxRegistryVersion } from "../boxes/box-registry-version";
 import { lockTenantBoxRegistry } from "../boxes/box-registry-lock";
@@ -132,11 +139,20 @@ function canonicalJson(value: unknown): string {
 }
 
 function payloadDigest(body: SyncBatchDto): string {
-  // An absent/empty new channel must retain digests of pinned pre-feature batches.
-  const { productLabelEvents, ...legacy } = body;
-  return createHash("sha256")
-    .update(canonicalJson(productLabelEvents.length > 0 ? body : legacy))
-    .digest("hex");
+  // An absent/empty new channel must retain digests of pinned pre-feature
+  // batches. This is not cosmetic: a station that sent batch X before a
+  // channel existed retries that exact payload afterwards, and a digest that
+  // moved under it would answer `station_batch_mismatch` (409) forever --
+  // the drain retries a rejected batch indefinitely, so the device wedges.
+  // Each channel is folded in independently, so adding one never disturbs
+  // another's pinned digests. `canonicalJson` sorts keys, so the order in
+  // which they are re-attached here is irrelevant.
+  const { productLabelEvents, pallets, palletExceptions, ...legacy } = body;
+  const canonical: Record<string, unknown> = { ...legacy };
+  if (productLabelEvents.length > 0) canonical.productLabelEvents = productLabelEvents;
+  if (pallets.length > 0) canonical.pallets = pallets;
+  if (palletExceptions.length > 0) canonical.palletExceptions = palletExceptions;
+  return createHash("sha256").update(canonicalJson(canonical)).digest("hex");
 }
 
 @Injectable()
@@ -185,8 +201,13 @@ export class StationScansService {
    */
   async applyBatch(
     tenantId: string,
-    input: Omit<SyncBatchDto, "productLabelEvents"> & {
+    input: Omit<SyncBatchDto, "productLabelEvents" | "pallets" | "palletExceptions"> & {
       productLabelEvents?: SyncBatchDto["productLabelEvents"];
+      // Optional for the same reason `productLabelEvents` is: a caller
+      // constructed before 06d (and every pre-existing unit test) carries
+      // neither pallet channel.
+      pallets?: SyncBatchDto["pallets"];
+      palletExceptions?: SyncBatchDto["palletExceptions"];
     },
     authenticatedTerminalId: string,
   ): Promise<SyncBatchResponseDto> {
@@ -196,6 +217,20 @@ export class StationScansService {
       items: input.items.map((item) => ({ ...item, terminalId: authenticatedTerminalId })),
       boxes: input.boxes.map((box) => ({ ...box, terminalId: authenticatedTerminalId })),
       exceptions: input.exceptions.map((exception) => ({
+        ...exception,
+        terminalId: authenticatedTerminalId,
+      })),
+      // The wire `terminalId` is informational everywhere else in this batch,
+      // and it must be substituted HERE too, not just for consistency: a
+      // pallet is identified by (shift, terminal, devicePalletId), so a
+      // closure that kept a client-supplied terminal would key to a DIFFERENT
+      // pallet than the box closures that filled it -- two rows for one
+      // physical pallet, the closure landing on the empty one.
+      pallets: (input.pallets ?? []).map((pallet) => ({
+        ...pallet,
+        terminalId: authenticatedTerminalId,
+      })),
+      palletExceptions: (input.palletExceptions ?? []).map((exception) => ({
         ...exception,
         terminalId: authenticatedTerminalId,
       })),
@@ -338,6 +373,12 @@ export class StationScansService {
           ...body.boxes.map((box) => box.shiftId),
           ...body.exceptions.map((exception) => exception.shiftId),
           ...body.productLabelEvents.map((event) => event.shiftId),
+          // Locked in the SAME statement as every other shift this batch
+          // touches, not a second lock of their own: a pallet closure must
+          // not be able to race a shift close, and a second lock taken later
+          // would be a second point in the lock order to deadlock against.
+          ...body.pallets.map((pallet) => pallet.shiftId),
+          ...body.palletExceptions.map((exception) => exception.shiftId),
         ]),
       ].sort();
       // Cabinet production-date changes lock this same tenant-scoped shift
@@ -411,6 +452,27 @@ export class StationScansService {
         ];
         await this.quarantine(tx, tenantId, authenticatedTerminalId, digest, body, denied);
         const deniedKeys = new Set(denied.map((item) => `${item.recordKind}:${item.recordIndex}`));
+        // Pallet records are held to the SAME eligibility rule as the boxes
+        // they hold, but they cannot be quarantined alongside them:
+        // `station_sync_quarantine_record_kind_check` enumerates the four
+        // kinds that existed when it was written, so a pallet row would
+        // violate it and 500 the whole batch -- wedging the device on a
+        // retryable error, which is strictly worse than dropping the record.
+        // Widening that CHECK needs its own migration; until then a dropped
+        // pallet record is logged with enough detail to find it by hand.
+        const ineligiblePallets = body.pallets.filter((pallet) => !eligible(pallet.shiftId));
+        const ineligiblePalletExceptions = body.palletExceptions.filter(
+          (exception) => !eligible(exception.shiftId),
+        );
+        if (ineligiblePallets.length > 0 || ineligiblePalletExceptions.length > 0) {
+          this.logger.warn(
+            `Batch ${body.batchId} (tenant ${tenantId}, terminal ${authenticatedTerminalId}) ` +
+              `carries ${ineligiblePallets.length} pallet closure(s) and ` +
+              `${ineligiblePalletExceptions.length} pallet exception(s) for shifts outside the ` +
+              `read-only recovery window; dropped without a quarantine row (pallet record kinds ` +
+              `are not yet accepted by station_sync_quarantine)`,
+          );
+        }
         body = {
           ...body,
           items: body.items.filter((_item, index) => !deniedKeys.has(`item:${index}`)),
@@ -418,12 +480,23 @@ export class StationScansService {
           exceptions: body.exceptions.filter(
             (_exception, index) => !deniedKeys.has(`exception:${index}`),
           ),
+          pallets: body.pallets.filter((pallet) => eligible(pallet.shiftId)),
+          palletExceptions: body.palletExceptions.filter((exception) =>
+            eligible(exception.shiftId),
+          ),
         };
       } else if (
-        [...body.items, ...body.boxes, ...body.exceptions].some(
-          (record) => !shiftById.has(record.shiftId),
-        )
+        [
+          ...body.items,
+          ...body.boxes,
+          ...body.exceptions,
+          ...body.pallets,
+          ...body.palletExceptions,
+        ].some((record) => !shiftById.has(record.shiftId))
       ) {
+        // Tenant scoping lives in the `shiftById` query above: a shift from
+        // another tenant is absent from it exactly like one that does not
+        // exist, and the caller must not be able to tell those apart.
         throw new BadRequestException("Unknown shift in batch");
       }
 
@@ -1108,6 +1181,37 @@ export class StationScansService {
         }
       }
 
+      // Pallet pre-pass (Task 9, 06d): create every pallet this batch names,
+      // from box closures, pallet closures and pallet exceptions alike, so the
+      // box-closure UPDATE below can set `pallet_id` from a map instead of a
+      // per-box round trip -- a box's membership and its closure are ONE
+      // statement. Unconditional: a batch can carry pallet facts and no boxes
+      // at all, exactly as it can carry box closures and no items.
+      const palletRefs: PalletRef[] = [
+        ...body.boxes.flatMap((closure) =>
+          closure.devicePalletId === null
+            ? []
+            : [
+                {
+                  shiftId: closure.shiftId,
+                  terminalId: closure.terminalId,
+                  devicePalletId: closure.devicePalletId,
+                },
+              ],
+        ),
+        ...body.pallets.map((closure) => ({
+          shiftId: closure.shiftId,
+          terminalId: closure.terminalId,
+          devicePalletId: closure.palletId,
+        })),
+        ...body.palletExceptions.map((exception) => ({
+          shiftId: exception.shiftId,
+          terminalId: exception.terminalId,
+          devicePalletId: exception.palletId,
+        })),
+      ];
+      const palletsByKey = await upsertPallets(tx, tenantId, palletRefs);
+
       // Box closures (Task 10): applied regardless of whether this batch
       // carries any items -- a box can close well after its last item was
       // drained, in a batch of its own (see the DTO's `boxes` field). Matched
@@ -1184,6 +1288,18 @@ export class StationScansService {
               sscc: closure.sscc,
               closedAt: new Date(closure.closedAt),
               operatorId: closure.operatorId,
+              // The pallet this box stands on, written in the SAME statement
+              // as the closure (see boxes.palletId's own schema comment). The
+              // pre-pass above created every pallet this batch names, so the
+              // `?? null` is unreachable in practice; it is here because a
+              // map lookup is typed as possibly-missing, not because a named
+              // pallet can legitimately be absent.
+              palletId:
+                closure.devicePalletId === null
+                  ? null
+                  : (palletsByKey.get(
+                      palletKey(closure.shiftId, closure.terminalId, closure.devicePalletId),
+                    ) ?? null),
               // Server-assigned, at this SAME statement (Finding 7) -- see
               // the column's own doc comment in platform.ts for why
               // `contentsChangedAfterClose` must compare against this, never
@@ -1323,6 +1439,18 @@ export class StationScansService {
         }
       }
 
+      // Pallet closures, after the box closures above so a pallet closing in
+      // the same batch that filled it already owns its member boxes.
+      if (body.pallets.length > 0) {
+        await applyPalletClosures(tx, tenantId, body.pallets, palletsByKey, (sscc) =>
+          // `recordConsumedSerial` derives the extension digit from the SSCC
+          // itself (`parseSscc`), so a pallet serial finds the pallet block
+          // and a box serial the box block; there is no digit argument to
+          // pass. `tx` enlists it in the SAME transaction as the closure.
+          this.ssccService.recordConsumedSerial(tenantId, sscc, tx),
+        );
+      }
+
       // Exception facts (undo/clear/disassemble/reprint -- Task 4 wires up
       // "undo", Tasks 5-7 extend the same applyExceptions method with the
       // other three kinds). Applied LAST, after both items and box closures
@@ -1341,6 +1469,13 @@ export class StationScansService {
         );
       }
 
+      // Pallet exceptions last, alongside the box exceptions and for the same
+      // reason: an exception targeting a pallet closed in this very batch must
+      // find a row that already exists.
+      if (body.palletExceptions.length > 0) {
+        await applyPalletExceptions(tx, tenantId, body.palletExceptions, palletsByKey);
+      }
+
       // Any fact delivered after its shift closed is late data, not only a
       // scan item. Exception-only and closure-only batches must surface the
       // same cabinet badge as a delayed scan batch.
@@ -1349,6 +1484,8 @@ export class StationScansService {
           ...body.items.map((item) => item.shiftId),
           ...body.boxes.map((box) => box.shiftId),
           ...body.exceptions.map((exception) => exception.shiftId),
+          ...body.pallets.map((pallet) => pallet.shiftId),
+          ...body.palletExceptions.map((exception) => exception.shiftId),
         ]),
       ];
       if (touchedShiftIds.length > 0) {

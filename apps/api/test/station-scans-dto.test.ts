@@ -1,4 +1,8 @@
-import { canonicalizeKm, kmHash } from "@markiro/domain";
+import {
+  canonicalizeKm,
+  kmHash,
+  MAX_PALLET_CLOSURES_PER_SYNC_BATCH,
+} from "@markiro/domain";
 import { describe, expect, it } from "vitest";
 import { syncBatchSchema, syncBatchResponseOpenApiSchema } from "../src/modules/station-scans/dto";
 import { zodApiSchema } from "../src/lib/openapi";
@@ -117,6 +121,76 @@ describe("syncBatchSchema marking-code contract", () => {
           }),
         ],
       }).success,
+    ).toBe(false);
+  });
+
+  it("treats a pre-06d box closure as a box that is simply not on a pallet", () => {
+    const parsed = syncBatchSchema.parse({ ...body(), boxes: [closure()] });
+    expect(parsed.boxes[0]?.devicePalletId).toBeNull();
+    expect(parsed.pallets).toEqual([]);
+    expect(parsed.palletExceptions).toEqual([]);
+  });
+
+  it("caps both pallet channels at the constant the devices' drain loops share", () => {
+    const palletClosure = (n: number) => ({
+      palletId: `p${n}`,
+      shiftId: "11111111-1111-1111-8111-111111111111",
+      terminalId: "terminal-1",
+      sscc: "046012345600000016",
+      closedAt: "2026-09-11T10:00:00.000Z",
+      operatorId: null,
+    });
+    const atLimit = Array.from({ length: MAX_PALLET_CLOSURES_PER_SYNC_BATCH }, (_, i) =>
+      palletClosure(i),
+    );
+    expect(syncBatchSchema.safeParse({ ...body(), pallets: atLimit }).success).toBe(true);
+    expect(
+      syncBatchSchema.safeParse({ ...body(), pallets: [...atLimit, palletClosure(999)] }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a pallet closure that claims both verification outcomes", () => {
+    expect(
+      syncBatchSchema.safeParse({
+        ...body(),
+        pallets: [
+          {
+            palletId: "p1",
+            shiftId: "11111111-1111-1111-8111-111111111111",
+            terminalId: "terminal-1",
+            sscc: "046012345600000016",
+            closedAt: "2026-09-11T10:00:00.000Z",
+            operatorId: null,
+            printVerifiedAt: "2026-09-11T10:01:00.000Z",
+            printSkippedAt: "2026-09-11T10:01:01.000Z",
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires a reason on every pallet exception and refuses an unknown kind", () => {
+    const exception = (overrides: Record<string, unknown>) => ({
+      kind: "disassemble",
+      palletId: "p1",
+      shiftId: "11111111-1111-1111-8111-111111111111",
+      terminalId: "terminal-1",
+      operatorId: null,
+      reason: "повреждён поддон",
+      occurredAt: "2026-09-11T10:00:00.000Z",
+      ...overrides,
+    });
+    expect(syncBatchSchema.safeParse({ ...body(), palletExceptions: [exception({})] }).success).toBe(
+      true,
+    );
+    // «Закрыть паллету досрочно» is an ordinary close, never an exception.
+    expect(
+      syncBatchSchema.safeParse({ ...body(), palletExceptions: [exception({ kind: "close" })] })
+        .success,
+    ).toBe(false);
+    expect(
+      syncBatchSchema.safeParse({ ...body(), palletExceptions: [exception({ reason: "" })] })
+        .success,
     ).toBe(false);
   });
 

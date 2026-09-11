@@ -5,6 +5,7 @@ import {
   kmHash,
   MAX_BOX_CLOSURES_PER_SYNC_BATCH,
   MAX_KM_UTF8_BYTES,
+  MAX_PALLET_CLOSURES_PER_SYNC_BATCH,
   MAX_PRODUCT_LABEL_EVENTS,
   productLabelEventSchema,
   productLabelReceiptSchema,
@@ -106,6 +107,10 @@ const boxClosureSchema = z
     // Defaults preserve compatibility with older stations that omit outcomes.
     printVerifiedAt: z.string().datetime().nullable().default(null),
     printSkippedAt: z.string().datetime().nullable().default(null),
+    // Which pallet this box stands on, as the DEVICE names it. Defaulted for
+    // compatibility with a station that predates 06d: its box is simply not
+    // on a pallet, which is exactly what it means.
+    devicePalletId: z.string().min(1).max(64).nullable().default(null),
   })
   .superRefine((closure, ctx) => {
     if (closure.printVerifiedAt !== null && closure.printSkippedAt !== null) {
@@ -116,6 +121,47 @@ const boxClosureSchema = z
       });
     }
   });
+
+/**
+ * A pallet closing on the device. `palletId` is the DEVICE-local pallet id, not
+ * a server uuid, and is scoped by shift/terminal for exactly the reason
+ * `boxClosureSchema.boxId` is: the device-local string alone is not unique.
+ */
+const palletClosureSchema = z
+  .object({
+    palletId: z.string().min(1).max(64),
+    shiftId: z.string().uuid().toLowerCase(),
+    terminalId: z.string().nullable(),
+    sscc: z.string().regex(/^\d{18}$/),
+    closedAt: z.string().datetime(),
+    operatorId: z.string().uuid().toLowerCase().nullable(),
+    printVerifiedAt: z.string().datetime().nullable().default(null),
+    printSkippedAt: z.string().datetime().nullable().default(null),
+  })
+  .superRefine((closure, ctx) => {
+    if (closure.printVerifiedAt !== null && closure.printSkippedAt !== null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["printSkippedAt"],
+        message: "print verification outcomes are mutually exclusive",
+      });
+    }
+  });
+
+/**
+ * An operator exception against a closed pallet. Only two kinds exist:
+ * «закрыть паллету досрочно» is an ordinary close, not an exception.
+ */
+const palletExceptionSchema = z.object({
+  kind: z.enum(["disassemble", "reprint"]),
+  palletId: z.string().min(1).max(64),
+  shiftId: z.string().uuid().toLowerCase(),
+  terminalId: z.string().nullable(),
+  operatorId: z.string().uuid().toLowerCase().nullable(),
+  // Both kinds require one, exactly as box disassemble and reprint do.
+  reason: z.string().min(1).max(500),
+  occurredAt: z.string().datetime(),
+});
 
 export const syncBatchSchema = z.object({
   // Device-generated: "<machineId>:<per-installation id>:<highest outbox id
@@ -155,6 +201,22 @@ export const syncBatchSchema = z.object({
     // item delivery on that device forever (the drain retries a rejected
     // batch indefinitely rather than ever dropping data).
     .max(MAX_BOX_CLOSURES_PER_SYNC_BATCH)
+    .default([]),
+  // Pallet closures carried by this batch. Independent of `boxes` for the
+  // same reason box closures are independent of items: a pallet closes long
+  // after the box that filled it, in a batch that may carry neither.
+  pallets: z
+    .array(palletClosureSchema)
+    // Shared with both devices' drain loops. The two sides MUST agree -- see
+    // MAX_PALLET_CLOSURES_PER_SYNC_BATCH's own comment for what a mismatch
+    // wedges.
+    .max(MAX_PALLET_CLOSURES_PER_SYNC_BATCH)
+    .default([]),
+  // Pallet exceptions (disassemble/reprint). Bounded by the same constant: a
+  // batch cannot carry exceptions against more pallets than it could close.
+  palletExceptions: z
+    .array(palletExceptionSchema)
+    .max(MAX_PALLET_CLOSURES_PER_SYNC_BATCH)
     .default([]),
   // Operator exceptions carried by this batch (undo/clear/disassemble/
   // reprint) -- see box-exceptions.ts. Independent of `items`/`boxes` for

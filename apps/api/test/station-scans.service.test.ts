@@ -117,6 +117,10 @@ describe("StationScansService box registry versioning", () => {
             operatorId: null,
             printVerifiedAt: null,
             printSkippedAt: null,
+            // Explicitly "not on a pallet": the pallet pre-pass reads this
+            // field, and these fixtures bypass the zod default that supplies
+            // it at the HTTP boundary.
+            devicePalletId: null,
           },
         ],
         exceptions: [],
@@ -253,6 +257,10 @@ describe("StationScansService box registry versioning", () => {
             operatorId: null,
             printVerifiedAt: null,
             printSkippedAt: null,
+            // Explicitly "not on a pallet": the pallet pre-pass reads this
+            // field, and these fixtures bypass the zod default that supplies
+            // it at the HTTP boundary.
+            devicePalletId: null,
           },
           {
             boxId: "box-a",
@@ -263,6 +271,10 @@ describe("StationScansService box registry versioning", () => {
             operatorId: null,
             printVerifiedAt: null,
             printSkippedAt: null,
+            // Explicitly "not on a pallet": the pallet pre-pass reads this
+            // field, and these fixtures bypass the zod default that supplies
+            // it at the HTTP boundary.
+            devicePalletId: null,
           },
           {
             boxId: "box-c",
@@ -273,6 +285,10 @@ describe("StationScansService box registry versioning", () => {
             operatorId: null,
             printVerifiedAt: null,
             printSkippedAt: null,
+            // Explicitly "not on a pallet": the pallet pre-pass reads this
+            // field, and these fixtures bypass the zod default that supplies
+            // it at the HTTP boundary.
+            devicePalletId: null,
           },
         ],
         exceptions: [],
