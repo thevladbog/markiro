@@ -38,6 +38,40 @@ async function shot(page: Page, info: TestInfo, name: string) {
   await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: true });
 }
 
+for (const missing of ["line terms", "seller tax policy"] as const) {
+  test(`preview does not enable issuance with missing ${missing}`, async ({ page, fixture }) => {
+    if (missing === "line terms") {
+      fixture.workspace.offer.lines = fixture.workspace.offer.lines.map((line) => ({
+        ...line,
+        commercialTerms: null,
+      }));
+    } else {
+      const seller = fixture.workspace.parties.seller;
+      if (!seller) throw new Error("The offer fixture must include a seller");
+      seller.taxPolicy = null;
+    }
+    // Even a successful preview and server action flag cannot bypass the local blocker.
+    fixture.preview.release();
+    await page.goto(`/offers/${ID}`);
+    const issue = page.getByRole("button", { name: "Выпустить предложение", exact: true });
+    await expect(issue).toBeDisabled();
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Перед выпуском предложения" }),
+    ).toContainText(
+      missing === "line terms"
+        ? "Не заполнены условия позиции «Настройка производственной линии»"
+        : "Настройте налоговую политику продавца перед публикацией.",
+    );
+    await page.getByRole("button", { name: "Предпросмотр", exact: true }).click();
+    await expect(page.getByTitle("Предпросмотр предложения", { exact: true })).toHaveAttribute(
+      "srcdoc",
+      previewHtml,
+    );
+    await expect(issue).toBeDisabled();
+    expect(fixture.calls.some((call) => call.method === "POST")).toBe(false);
+  });
+}
+
 for (const theme of ["light", "dark"] as const) {
   test(`unfiltered multi-status desktop registry ${theme}`, async ({ page, fixture }, info) => {
     await page.setViewportSize({ width: 1440, height: 1100 });
