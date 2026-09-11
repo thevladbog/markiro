@@ -172,6 +172,7 @@ export type { ParsedPhc } from "./crypto/phc.js";
 export {
   MAX_BOX_CLOSURES_PER_SYNC_BATCH,
   MAX_PALLET_CLOSURES_PER_SYNC_BATCH,
+  MAX_SYNC_BATCH_ID_CHARS,
 } from "./sync/limits.js";
 export {
   isShiftCloseReasonCode,

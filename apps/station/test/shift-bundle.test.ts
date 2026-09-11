@@ -490,6 +490,115 @@ describe("mirrorShiftBundle", () => {
     expect(await burnSerial(exec, "460123456", 0)).toBe(11);
   });
 
+  // 06d: the pallet stream is a second, independent block under extension
+  // digit 1. Without it the local pool is dry and `closeCurrentPallet` can
+  // never number a pallet, however many boxes are stacked on it.
+  it("adds the pallet block under its own extension digit", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    const get = vi.fn().mockResolvedValue({
+      ...bundle,
+      sscc: {
+        issuerPrefix: "460123456",
+        extensionDigit: 0,
+        fromSerial: 1,
+        toSerial: 999,
+        consumedThroughSerial: null,
+      },
+      palletSscc: {
+        issuerPrefix: "460123456",
+        extensionDigit: 1,
+        fromSerial: 5000,
+        toSerial: 5099,
+        consumedThroughSerial: null,
+      },
+    });
+
+    await mirrorShiftBundle({ get }, exec, "s1");
+
+    expect(await burnSerial(exec, "460123456", 1)).toBe(5000);
+    // The box stream is untouched by the pallet block.
+    expect(await burnSerial(exec, "460123456", 0)).toBe(1);
+  });
+
+  it("drops revoked pallet ranges before adding the replacement pallet block", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await addRange(exec, {
+      issuerPrefix: "460123456",
+      extensionDigit: 1,
+      fromSerial: 1,
+      toSerial: 2000,
+      consumedThroughSerial: 10,
+    });
+    const get = vi.fn().mockResolvedValue({
+      ...bundle,
+      palletSscc: {
+        issuerPrefix: "460123456",
+        extensionDigit: 1,
+        fromSerial: 5000,
+        toSerial: 6999,
+        consumedThroughSerial: null,
+      },
+      palletSsccRevokedFrom: [1],
+    });
+
+    await mirrorShiftBundle({ get }, exec, "s1");
+
+    // `burnSerial` drains by `ORDER BY from_serial`, so a revoked lower range
+    // left in place would keep winning and the reseeded number would never
+    // reach a pallet label.
+    expect(await burnSerial(exec, "460123456", 1)).toBe(5000);
+  });
+
+  it("never drops the pallet range the same bundle is telling it to use", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    const get = vi.fn().mockResolvedValue({
+      ...bundle,
+      palletSscc: {
+        issuerPrefix: "460123456",
+        extensionDigit: 1,
+        fromSerial: 2000,
+        toSerial: 3999,
+        consumedThroughSerial: null,
+      },
+      palletSsccRevokedFrom: [2000],
+    });
+
+    await mirrorShiftBundle({ get }, exec, "s1");
+    expect(await burnSerial(exec, "460123456", 1)).toBe(2000);
+
+    // The operator restarts before the pallets reach ingest, so the server
+    // still reports nothing consumed -- the local cursor must survive.
+    await mirrorShiftBundle({ get }, exec, "s1");
+    expect(await burnSerial(exec, "460123456", 1)).toBe(2001);
+  });
+
+  it("leaves the pallet pool alone for a reference-only bundle", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await addRange(exec, {
+      issuerPrefix: "460123456",
+      extensionDigit: 1,
+      fromSerial: 1,
+      toSerial: 2000,
+      consumedThroughSerial: 10,
+    });
+    const get = vi.fn().mockResolvedValue({
+      ...bundle,
+      sscc: null,
+      palletSscc: null,
+      palletSsccRevokedFrom: [1],
+    });
+
+    // A recovery bundle carries no device allocation at all; it must never
+    // erase durable allocation state while repairing a template.
+    await refreshShiftBundleForRecovery({ get }, exec, "s1");
+
+    expect(await burnSerial(exec, "460123456", 1)).toBe(11);
+  });
+
   it("never drops the range the same bundle is telling it to use (final review, finding 1)", async () => {
     const exec = nodeExecutor();
     await applyMigrations(exec);

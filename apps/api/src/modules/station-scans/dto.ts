@@ -7,6 +7,7 @@ import {
   MAX_KM_UTF8_BYTES,
   MAX_PALLET_CLOSURES_PER_SYNC_BATCH,
   MAX_PRODUCT_LABEL_EVENTS,
+  MAX_SYNC_BATCH_ID_CHARS,
   productLabelEventSchema,
   productLabelReceiptSchema,
   type ProductLabelReceipt,
@@ -174,7 +175,13 @@ export const syncBatchSchema = z.object({
   // local database is recreated, so a device that lost just its local
   // database (but kept its enrollment) cannot collide with a key already
   // recorded for the database it replaced.
-  batchId: z.string().min(1).max(200),
+  // Bounded by the shared `MAX_SYNC_BATCH_ID_CHARS` rather than a literal:
+  // the station folds every channel's identity into this key, so its length
+  // grows with what a batch may carry, and an over-long key is the same
+  // permanent wedge an over-sized payload is (see that constant's own
+  // comment). The station folds an over-long key into a bounded digest, which
+  // only works while both sides read the bound from one place.
+  batchId: z.string().min(1).max(MAX_SYNC_BATCH_ID_CHARS),
   // Kept equal to the station drain size so the largest client-generated
   // payload remains below the API's JSON body ceiling.
   items: z.array(scanItemSchema).max(100),

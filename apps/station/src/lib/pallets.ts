@@ -242,6 +242,84 @@ export async function reprintPallet(
   await insertPalletException(exec, "reprint", input);
 }
 
+/** One queued pallet exception fact, shaped as the server's sync ingest expects it. */
+export interface PendingPalletException extends ReasonedPalletActionInput {
+  id: number;
+  kind: "disassemble" | "reprint";
+}
+
+/**
+ * The oldest `limit` queued pallet exceptions, in insertion order -- the exact
+ * counterpart of `box-exceptions-mirror.ts`'s `readExceptions`, including its
+ * `ceilingId` retry-safety contract: a retry re-reads the EXACT row range a
+ * still-unacknowledged batch already chose, instead of a fresh
+ * `ORDER BY id LIMIT` read that could grow to include facts queued since.
+ *
+ * No `acked_at` flag or content signature is needed, for the same reason the
+ * box channel needs none: a pallet exception row is a pure fact, written once
+ * by `insertPalletException` and never updated in place afterward, so a plain
+ * monotonic id ceiling is enough to make a retry stable.
+ */
+export async function readPalletExceptions(
+  exec: SqlExecutor,
+  limit: number,
+  ceilingId?: number | null,
+): Promise<PendingPalletException[]> {
+  const columns = `id, kind, pallet_id, shift_id, terminal_id, operator_id, reason, occurred_at`;
+  const rows =
+    ceilingId != null
+      ? await exec.all<PalletExceptionRow>(
+          `SELECT ${columns} FROM pallet_exceptions_mirror WHERE id <= ? ORDER BY id LIMIT ?`,
+          [ceilingId, limit],
+        )
+      : await exec.all<PalletExceptionRow>(
+          `SELECT ${columns} FROM pallet_exceptions_mirror ORDER BY id LIMIT ?`,
+          [limit],
+        );
+  return rows.map((row) => ({
+    id: row.id,
+    kind: row.kind === "disassemble" ? "disassemble" : "reprint",
+    palletId: row.pallet_id,
+    shiftId: row.shift_id,
+    terminalId: row.terminal_id,
+    operatorId: row.operator_id,
+    reason: row.reason,
+    occurredAt: row.occurred_at,
+  }));
+}
+
+interface PalletExceptionRow {
+  id: number;
+  kind: string;
+  pallet_id: string;
+  shift_id: string;
+  terminal_id: string | null;
+  operator_id: string | null;
+  reason: string;
+  occurred_at: string;
+}
+
+/**
+ * Drops everything up to and including `id` -- one statement, the only atomic
+ * unit available on the device (see `outbox.ts`'s `ackThrough`). Called only
+ * after the server has confirmed the batch, so a crash before it resends.
+ */
+export async function ackPalletExceptionsThrough(exec: SqlExecutor, id: number): Promise<void> {
+  await exec.run("DELETE FROM pallet_exceptions_mirror WHERE id <= ?", [id]);
+}
+
+export async function palletExceptionDepth(exec: SqlExecutor): Promise<number> {
+  const rows = await exec.all<{ n: number }>("SELECT COUNT(*) AS n FROM pallet_exceptions_mirror");
+  return rows[0]?.n ?? 0;
+}
+
+export async function oldestPalletExceptionAt(exec: SqlExecutor): Promise<string | null> {
+  const rows = await exec.all<{ occurred_at: string }>(
+    "SELECT occurred_at FROM pallet_exceptions_mirror ORDER BY id LIMIT 1",
+  );
+  return rows[0]?.occurred_at ?? null;
+}
+
 /**
  * Returns the oldest unresolved label for this shift AND terminal, or null
  * if none is pending -- the pallet equivalent of `boxes.ts`'s

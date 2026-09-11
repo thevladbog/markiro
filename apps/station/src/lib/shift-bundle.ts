@@ -115,6 +115,34 @@ async function mirrorShiftBundleBody(
     }
     await addRange(exec, block);
   }
+  // The pallet stream (extension digit 1) is a second, fully independent
+  // block, applied through the exact same revoke-then-add path and for the
+  // same reasons -- including the "never delete the range this same bundle
+  // names" guard, which matters identically here: a deleted pool row takes
+  // the local cursor with it, and `addRange` would rebuild it from the
+  // server's `consumedThroughSerial`, still null while this device's printed
+  // PALLETS sit unsent in the mirror. A duplicate pallet SSCC is exactly as
+  // unrecoverable as a duplicate box one.
+  //
+  // Scoped to the digit the pallet block itself names, never the box block's:
+  // `dropRanges` keys on (issuer_prefix, extension_digit, from_serial), so
+  // crossing the two would let a pallet revocation delete a box range that
+  // merely shares a `from_serial`.
+  const palletBlock = bundle.palletSscc;
+  if (mirrorSsccRange && palletBlock) {
+    const palletRevokedFrom = bundle.palletSsccRevokedFrom?.filter(
+      (fromSerial) => fromSerial !== palletBlock.fromSerial,
+    );
+    if (palletRevokedFrom?.length) {
+      await dropRanges(
+        exec,
+        palletBlock.issuerPrefix,
+        palletBlock.extensionDigit,
+        palletRevokedFrom,
+      );
+    }
+    await addRange(exec, palletBlock);
+  }
   if (generation?.sealed || !isEntryCurrent()) return false;
   if (mirrorSsccRange) {
     await upsertBundle(exec, bundle);

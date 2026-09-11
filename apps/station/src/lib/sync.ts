@@ -1,7 +1,9 @@
 import { purgeCompletedProductLabelJobs } from "./product-labels/retention.js";
 import {
   MAX_BOX_CLOSURES_PER_SYNC_BATCH,
+  MAX_PALLET_CLOSURES_PER_SYNC_BATCH,
   MAX_PRODUCT_LABEL_EVENTS,
+  MAX_SYNC_BATCH_ID_CHARS,
   productLabelValueDigest,
   type ProductLabelRejectionCode,
 } from "@markiro/domain";
@@ -51,8 +53,15 @@ import {
   readPendingShiftCloses,
   type PendingShiftClose,
 } from "./shift-close.js";
+import {
+  ackPalletExceptionsThrough,
+  oldestPalletExceptionAt,
+  palletExceptionDepth,
+  readPalletExceptions,
+  type PendingPalletException,
+} from "./pallets.js";
 
-export { MAX_BOX_CLOSURES_PER_SYNC_BATCH };
+export { MAX_BOX_CLOSURES_PER_SYNC_BATCH, MAX_PALLET_CLOSURES_PER_SYNC_BATCH };
 
 /** Scans per request. Small enough to survive a flaky link and to retry cheaply. */
 export const BATCH_SIZE = 100;
@@ -174,8 +183,16 @@ interface CodeReleaseResponse {
   nextCursor?: string;
 }
 
+/**
+ * `pallet` and `pallet_exception` are carried here, not only server-side:
+ * `isDeniedStationRecord` FILTERS kinds it does not recognize, so a device
+ * that never learned these two would silently discard the quarantine notice
+ * for a pallet the server refused -- while still acknowledging (and deleting)
+ * the rows that produced it. The operator would never learn that a physically
+ * labelled pallet never landed.
+ */
 interface DeniedStationRecord {
-  recordKind: "item" | "box" | "exception" | "product_label_event";
+  recordKind: "item" | "box" | "exception" | "product_label_event" | "pallet" | "pallet_exception";
   recordIndex: number;
   shiftId: string;
   code: ProductLabelRejectionCode | "legacy_unbound_replay";
@@ -307,7 +324,9 @@ function isDeniedStationRecord(value: unknown): value is DeniedStationRecord {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
   return (
-    ["item", "box", "exception", "product_label_event"].includes(String(record.recordKind)) &&
+    ["item", "box", "exception", "product_label_event", "pallet", "pallet_exception"].includes(
+      String(record.recordKind),
+    ) &&
     Number.isInteger(record.recordIndex) &&
     Number(record.recordIndex) >= 0 &&
     typeof record.shiftId === "string" &&
@@ -419,6 +438,14 @@ interface BoxClosureRow {
    */
   printVerifiedAt: string | null;
   printSkippedAt: string | null;
+  /**
+   * The pallet this box stands on, as the DEVICE names it (`boxes_mirror`'s
+   * own `pallet_id`, written by `joinPallet`), or null for a box on a
+   * pallet-less shift. The server resolves it into a real pallet row in the
+   * SAME statement that applies the closure -- see `devicePalletId` in the
+   * API's `boxClosureSchema`.
+   */
+  devicePalletId: string | null;
   /** SQLite's own rowid -- see `readClosedUnackedBoxes`'s doc comment. */
   rowid: number;
 }
@@ -460,40 +487,19 @@ async function readClosedUnackedBoxes(
   limit: number,
   ceilingRowid?: number | null,
 ): Promise<BoxClosureRow[]> {
+  const columns = `SELECT rowid, box_id, shift_id, terminal_id, sscc, closed_at, closed_by,
+                  print_verified_at, print_skipped_at, pallet_id
+             FROM boxes_mirror`;
   const rows =
     ceilingRowid != null
-      ? await exec.all<{
-          box_id: string;
-          shift_id: string;
-          terminal_id: string | null;
-          sscc: string;
-          closed_at: string;
-          closed_by: string | null;
-          print_verified_at: string | null;
-          print_skipped_at: string | null;
-          rowid: number;
-        }>(
-          `SELECT rowid, box_id, shift_id, terminal_id, sscc, closed_at, closed_by,
-                  print_verified_at, print_skipped_at
-             FROM boxes_mirror
+      ? await exec.all<BoxClosureSqlRow>(
+          `${columns}
             WHERE closed_at IS NOT NULL AND acked_at IS NULL AND rowid <= ?
             ORDER BY rowid LIMIT ?`,
           [ceilingRowid, limit],
         )
-      : await exec.all<{
-          box_id: string;
-          shift_id: string;
-          terminal_id: string | null;
-          sscc: string;
-          closed_at: string;
-          closed_by: string | null;
-          print_verified_at: string | null;
-          print_skipped_at: string | null;
-          rowid: number;
-        }>(
-          `SELECT rowid, box_id, shift_id, terminal_id, sscc, closed_at, closed_by,
-                  print_verified_at, print_skipped_at
-             FROM boxes_mirror
+      : await exec.all<BoxClosureSqlRow>(
+          `${columns}
             WHERE closed_at IS NOT NULL AND acked_at IS NULL
             ORDER BY rowid LIMIT ?`,
           [limit],
@@ -507,8 +513,22 @@ async function readClosedUnackedBoxes(
     operatorId: r.closed_by,
     printVerifiedAt: r.print_verified_at,
     printSkippedAt: r.print_skipped_at,
+    devicePalletId: r.pallet_id,
     rowid: r.rowid,
   }));
+}
+
+interface BoxClosureSqlRow {
+  box_id: string;
+  shift_id: string;
+  terminal_id: string | null;
+  sscc: string;
+  closed_at: string;
+  closed_by: string | null;
+  print_verified_at: string | null;
+  print_skipped_at: string | null;
+  pallet_id: string | null;
+  rowid: number;
 }
 
 function toBoxPayload(boxes: BoxClosureRow[]) {
@@ -521,6 +541,122 @@ function toBoxPayload(boxes: BoxClosureRow[]) {
     operatorId: b.operatorId,
     printVerifiedAt: b.printVerifiedAt,
     printSkippedAt: b.printSkippedAt,
+    devicePalletId: b.devicePalletId,
+  }));
+}
+
+/** A closed-but-unreported pallet, read off this device's own `pallets_mirror` row. */
+interface PalletClosureRow {
+  palletId: string;
+  shiftId: string;
+  terminalId: string | null;
+  sscc: string;
+  closedAt: string;
+  operatorId: string | null;
+  printVerifiedAt: string | null;
+  printSkippedAt: string | null;
+  /** SQLite's own rowid -- see `readClosedUnackedPallets`'s doc comment. */
+  rowid: number;
+}
+
+/**
+ * Every pallet this device has closed but not yet had acknowledged, oldest
+ * first -- `readClosedUnackedBoxes`'s exact counterpart, and every word of
+ * that function's doc comment applies here with `MAX_PALLET_CLOSURES_PER_SYNC_
+ * BATCH` (the API's own `syncBatchSchema.pallets.max()`) in place of the box
+ * limit: a device that closes more pallets offline than one batch may carry
+ * must never assemble a payload the server rejects outright, because the drain
+ * treats every error as retryable and would resend that identical oversized
+ * payload forever, wedging pallets, boxes AND item delivery together.
+ *
+ * `sscc IS NOT NULL` is in the match, unlike the box read: `closePallet` writes
+ * `sscc` and `closed_at` in one guarded UPDATE, so the two cannot disagree
+ * today -- but the server's `palletClosureSchema` requires an 18-digit `sscc`,
+ * and a row that somehow reached `closed_at` without one would 400 the whole
+ * batch on every retry. Skipping it costs one unreportable pallet; carrying it
+ * costs the device its entire delivery.
+ *
+ * `disassembled_at IS NULL` is NOT in the match, deliberately: a pallet that
+ * was closed, labelled, and then retired still has to reach the server as a
+ * closure, or the exception that retires it names a pallet the server was
+ * never told about (its `pallet_exception_disassemble_local` trigger marks the
+ * mirror row locally the instant the fact is queued, long before either
+ * reaches the server). The server's own pre-pass creates a pallet from either
+ * record, so the two arrive in whatever order the batches carry them.
+ *
+ * Reports `shiftId`/`terminalId` straight off the pallet's OWN row for the
+ * same reason the box read does: this engine drains the whole device and has
+ * no notion of a "current" shift or terminal.
+ */
+async function readClosedUnackedPallets(
+  exec: SqlExecutor,
+  limit: number,
+  ceilingRowid?: number | null,
+): Promise<PalletClosureRow[]> {
+  const columns = `SELECT rowid, pallet_id, shift_id, terminal_id, sscc, closed_at, closed_by,
+                  print_verified_at, print_skipped_at
+             FROM pallets_mirror`;
+  const rows =
+    ceilingRowid != null
+      ? await exec.all<PalletClosureSqlRow>(
+          `${columns}
+            WHERE closed_at IS NOT NULL AND sscc IS NOT NULL AND acked_at IS NULL AND rowid <= ?
+            ORDER BY rowid LIMIT ?`,
+          [ceilingRowid, limit],
+        )
+      : await exec.all<PalletClosureSqlRow>(
+          `${columns}
+            WHERE closed_at IS NOT NULL AND sscc IS NOT NULL AND acked_at IS NULL
+            ORDER BY rowid LIMIT ?`,
+          [limit],
+        );
+  return rows.map((r) => ({
+    palletId: r.pallet_id,
+    shiftId: r.shift_id,
+    terminalId: r.terminal_id,
+    sscc: r.sscc,
+    closedAt: r.closed_at,
+    operatorId: r.closed_by,
+    printVerifiedAt: r.print_verified_at,
+    printSkippedAt: r.print_skipped_at,
+    rowid: r.rowid,
+  }));
+}
+
+interface PalletClosureSqlRow {
+  pallet_id: string;
+  shift_id: string;
+  terminal_id: string | null;
+  sscc: string;
+  closed_at: string;
+  closed_by: string | null;
+  print_verified_at: string | null;
+  print_skipped_at: string | null;
+  rowid: number;
+}
+
+function toPalletPayload(pallets: PalletClosureRow[]) {
+  return pallets.map((p) => ({
+    palletId: p.palletId,
+    shiftId: p.shiftId,
+    terminalId: p.terminalId,
+    sscc: p.sscc,
+    closedAt: p.closedAt,
+    operatorId: p.operatorId,
+    printVerifiedAt: p.printVerifiedAt,
+    printSkippedAt: p.printSkippedAt,
+  }));
+}
+
+function toPalletExceptionPayload(exceptions: PendingPalletException[]) {
+  return exceptions.map((exception) => ({
+    kind: exception.kind,
+    palletId: exception.palletId,
+    shiftId: exception.shiftId,
+    terminalId: exception.terminalId,
+    operatorId: exception.operatorId,
+    reason: exception.reason,
+    occurredAt: exception.occurredAt,
   }));
 }
 
@@ -589,6 +725,60 @@ async function ackBoxes(
 }
 
 /**
+ * `boxSetSignature`'s exact counterpart for pallet closures, folded into
+ * `batchId` beside it so a retry's key changes whenever the pallet SET being
+ * sent changes -- either because a pallet was added (the ceiling rowid grows)
+ * or because an already-included pallet's print-verification outcome resolved.
+ *
+ * This is what stops the failure the handheld already hit in its box form: the
+ * server claims batch ids in `sync_batches` and short-circuits an
+ * already-claimed one with `alreadyApplied` BEFORE its pallet loop
+ * (`station-scans.service.ts`), so a retry whose pallet set silently grew
+ * under an unchanged key would never have the new closure applied server-side
+ * -- while `ackPallets` below marks it acknowledged anyway, losing a
+ * physically labelled pallet for good.
+ *
+ * One character per pallet -- `u`nresolved, `v`erified, `s`kipped -- keeps
+ * this well inside the batch id's budget at
+ * `MAX_PALLET_CLOSURES_PER_SYNC_BATCH` pallets, and each pallet transitions
+ * its character at most once (an outcome is terminal), so it cannot cycle back
+ * to a signature already used for a genuinely different set.
+ */
+function palletSetSignature(pallets: PalletClosureRow[]): string {
+  const ceiling = pallets[pallets.length - 1]!.rowid;
+  const outcomes = pallets
+    .map((p) => (p.printVerifiedAt !== null ? "v" : p.printSkippedAt !== null ? "s" : "u"))
+    .join("");
+  return `${ceiling}:${outcomes}`;
+}
+
+/**
+ * Marks each of these pallets acknowledged, CONDITIONALLY, exactly as
+ * `ackBoxes` does and for the same reason: a print-verification outcome can
+ * resolve AFTER a closure has been read into an in-flight payload but BEFORE
+ * that payload's response is acknowledged. Gating each UPDATE on the outcome
+ * values captured at payload-build time makes this ack a no-op for a row that
+ * changed in that window, so the next drain resends it carrying the resolved
+ * outcome instead of the ack permanently closing the window on it.
+ *
+ * `IS`, not `=`: SQLite's `=` is never true against NULL, so a pallet whose
+ * outcome was -- and still is -- unresolved would never match its own WHERE.
+ */
+async function ackPallets(
+  exec: SqlExecutor,
+  pallets: Array<Pick<PalletClosureRow, "palletId" | "printVerifiedAt" | "printSkippedAt">>,
+  ackedAt: string,
+): Promise<void> {
+  for (const pallet of pallets) {
+    await exec.run(
+      `UPDATE pallets_mirror SET acked_at = ?
+       WHERE pallet_id = ? AND print_verified_at IS ? AND print_skipped_at IS ?`,
+      [ackedAt, pallet.palletId, pallet.printVerifiedAt, pallet.printSkippedAt],
+    );
+  }
+}
+
+/**
  * The issuer prefix this device's local pool is keyed under, or null if it
  * has never received a box range at all. A device holds at most one in
  * practice (`StationBundle.sscc` hands down a single prefix), so the lowest
@@ -627,8 +817,45 @@ const CEILING_META_KEY = "sync_pending_ceiling";
  */
 const BOX_CEILING_META_KEY = "sync_pending_box_ceiling";
 const EXCEPTION_CEILING_META_KEY = "sync_pending_exception_ceiling";
+/**
+ * `BOX_CEILING_META_KEY`'s counterpart for pallet closures, and
+ * `EXCEPTION_CEILING_META_KEY`'s for pallet exception facts. Both exist for
+ * the reason spelled out above: a channel without its own pinned ceiling
+ * silently grows its row set under a batch id the server has already claimed,
+ * and the ack that follows deletes work the server never applied.
+ */
+const PALLET_CEILING_META_KEY = "sync_pending_pallet_ceiling";
+const PALLET_EXCEPTION_CEILING_META_KEY = "sync_pending_pallet_exception_ceiling";
 const BATCH_ID_META_KEY = "sync_pending_batch_id";
 const RECOVERY_DENIED_META_KEY = "sync_last_recovery_denied";
+
+/**
+ * The batch id actually posted: the assembled key, or a deterministic digest
+ * of it once it would exceed what the server's `syncBatchSchema.batchId`
+ * accepts (`MAX_SYNC_BATCH_ID_CHARS`).
+ *
+ * The assembled form folds one signature per channel into the key so a retry
+ * changes exactly when the SET being sent changes -- which makes its length
+ * grow with what a batch may carry. With two UUID identity components
+ * (`machineId` and the install id), `MAX_BOX_CLOSURES_PER_SYNC_BATCH` box
+ * outcome characters, `MAX_PALLET_CLOSURES_PER_SYNC_BATCH` pallet ones and
+ * both exception ceilings, a device whose row ids have grown over its
+ * lifetime overflows that bound. An over-long key is not a cosmetic problem:
+ * the server rejects it with a 400, and the drain -- which treats every error
+ * as retryable and never drops data -- resends the identical key forever,
+ * wedging every channel on that device.
+ *
+ * Folding it down preserves both properties the key has to have: the digest
+ * is a pure function of the assembled key, so a retry of the same set
+ * produces the same id, and two genuinely different sets keep different ids.
+ * The `sync:` prefix keeps a folded key from ever colliding with a plain one
+ * or with the `product-label:` form. Keys under the bound are returned
+ * untouched, so this changes nothing for an ordinary batch.
+ */
+function boundedBatchId(batchId: string): string {
+  if (batchId.length <= MAX_SYNC_BATCH_ID_CHARS) return batchId;
+  return `sync:${productLabelValueDigest(batchId)}`;
+}
 
 async function loadPersistedValue(exec: SqlExecutor, key: string): Promise<string | null> {
   const rows = await exec.all<{ value: string | null }>(
@@ -779,6 +1006,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   let pendingProductLabelCeiling: number | null = null;
   let productLabelCeilingLoaded = false;
   let exceptionCeilingLoaded = false;
+  // `pendingBoxCeiling`/`pendingExceptionCeiling`'s counterparts for the two
+  // pallet channels. A pallet carries a serial that is already on a physical
+  // label, so letting its set grow under an in-flight key is the most
+  // expensive version of this bug in the whole drain.
+  let pendingPalletCeiling: number | null = null;
+  let palletCeilingLoaded = false;
+  let pendingPalletExceptionCeiling: number | null = null;
+  let palletExceptionCeilingLoaded = false;
   let pendingBatchId: string | null = null;
   let batchIdLoaded = false;
   // Resolved once per engine instance and cached: the install id never
@@ -814,6 +1049,40 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       exceptionCeilingLoaded = true;
     }
     return pendingExceptionCeiling;
+  }
+
+  /**
+   * `ensurePendingBoxCeiling`'s counterpart for `pendingPalletCeiling`, with
+   * the upgrade guard `ensurePendingProductLabelCeiling` already carries: a
+   * batch pinned by a station that predates this channel has a persisted
+   * `sync_pending_batch_id` and no pallet ceiling at all. Seeding `0` -- an
+   * explicitly EMPTY channel -- is what stops the first post-upgrade retry of
+   * that batch from reading fresh pallet closures into an identity the server
+   * has already claimed, acknowledging them against an `alreadyApplied` the
+   * server decided before it ever looked at `pallets[]`.
+   */
+  async function ensurePendingPalletCeiling(): Promise<number | null> {
+    if (!palletCeilingLoaded) {
+      pendingPalletCeiling = await loadPersistedCeiling(deps.exec, PALLET_CEILING_META_KEY);
+      if (pendingPalletCeiling === null && (await ensurePendingBatchId()) !== null)
+        pendingPalletCeiling = 0;
+      palletCeilingLoaded = true;
+    }
+    return pendingPalletCeiling;
+  }
+
+  /** `ensurePendingPalletCeiling`'s counterpart for pallet exception facts. */
+  async function ensurePendingPalletExceptionCeiling(): Promise<number | null> {
+    if (!palletExceptionCeilingLoaded) {
+      pendingPalletExceptionCeiling = await loadPersistedCeiling(
+        deps.exec,
+        PALLET_EXCEPTION_CEILING_META_KEY,
+      );
+      if (pendingPalletExceptionCeiling === null && (await ensurePendingBatchId()) !== null)
+        pendingPalletExceptionCeiling = 0;
+      palletExceptionCeilingLoaded = true;
+    }
+    return pendingPalletExceptionCeiling;
   }
 
   async function ensurePendingBatchId(): Promise<string | null> {
@@ -863,9 +1132,17 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     const labels = owner
       ? await productLabelPendingStats(deps.exec, owner)
       : { count: 0, oldest: null };
-    const [scanPending, exceptionPending, closePending, boxPendingRows] = await Promise.all([
+    const [
+      scanPending,
+      exceptionPending,
+      palletExceptionPending,
+      closePending,
+      boxPendingRows,
+      palletPendingRows,
+    ] = await Promise.all([
       outboxDepth(deps.exec),
       exceptionDepth(deps.exec),
+      palletExceptionDepth(deps.exec),
       deps.exec.all<{ n: number; oldest: string | null }>(
         "SELECT COUNT(*) AS n, MIN(closed_at) AS oldest FROM shift_close_outbox WHERE state = 'pending'",
       ),
@@ -873,10 +1150,25 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         `SELECT COUNT(*) AS n, MIN(closed_at) AS oldest
            FROM boxes_mirror WHERE closed_at IS NOT NULL AND acked_at IS NULL`,
       ),
+      // Same shape as the box query, and matched to `readClosedUnackedPallets`
+      // so the operator's pending count never includes a row the drain would
+      // not actually send.
+      deps.exec.all<{ n: number; oldest: string | null }>(
+        `SELECT COUNT(*) AS n, MIN(closed_at) AS oldest
+           FROM pallets_mirror
+          WHERE closed_at IS NOT NULL AND sscc IS NOT NULL AND acked_at IS NULL`,
+      ),
     ]);
     const boxPending = boxPendingRows[0]?.n ?? 0;
+    const palletPending = palletPendingRows[0]?.n ?? 0;
     const pending =
-      scanPending + exceptionPending + (closePending[0]?.n ?? 0) + boxPending + labels.count;
+      scanPending +
+      exceptionPending +
+      palletExceptionPending +
+      (closePending[0]?.n ?? 0) +
+      boxPending +
+      palletPending +
+      labels.count;
     // Nothing queued is never "stuck", however long the link has been down.
     let stuck = false;
     if (pending > 0) {
@@ -887,17 +1179,20 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       // later `now()` from that same source. The oldest queued scan's age,
       // by contrast, is always measured against `Date.now()`: `scanned_at`
       // is a wall-clock ISO timestamp, never relative to the injected clock.
-      const [oldestScan, oldestException] = await Promise.all([
+      const [oldestScan, oldestException, oldestPalletException] = await Promise.all([
         oldestQueuedAt(deps.exec),
         oldestExceptionAt(deps.exec),
+        oldestPalletExceptionAt(deps.exec),
       ]);
       const oldest =
         [
           oldestScan,
           oldestException,
+          oldestPalletException,
           labels.oldest,
           closePending[0]?.oldest ?? null,
           boxPendingRows[0]?.oldest ?? null,
+          palletPendingRows[0]?.oldest ?? null,
         ]
           .filter((value): value is string => value !== null)
           .sort()[0] ?? null;
@@ -984,6 +1279,27 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         let exceptions = labelPin
           ? []
           : await readExceptions(deps.exec, BATCH_SIZE, exceptionCeiling);
+        // Pallets ride along on the same terms as boxes: pinned to their own
+        // ceiling so a retry re-reads the exact set its key was computed from,
+        // and capped at the API's own `syncBatchSchema.pallets.max()`. A
+        // product-label pin owns the whole request envelope, so nothing new
+        // may join it -- the same reason `boxes`/`exceptions` empty out above.
+        const palletCeiling = await ensurePendingPalletCeiling();
+        let pallets = labelPin
+          ? []
+          : await readClosedUnackedPallets(
+              deps.exec,
+              MAX_PALLET_CLOSURES_PER_SYNC_BATCH,
+              palletCeiling,
+            );
+        const palletExceptionCeiling = await ensurePendingPalletExceptionCeiling();
+        let palletExceptions = labelPin
+          ? []
+          : await readPalletExceptions(
+              deps.exec,
+              MAX_PALLET_CLOSURES_PER_SYNC_BATCH,
+              palletExceptionCeiling,
+            );
         const labelCeiling = await ensurePendingProductLabelCeiling();
 
         if (pauseInvalidated() || credentialGeneration.sealed) break;
@@ -1028,17 +1344,35 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           readLease.release();
         }
         let labelEvents = labelPin?.request.productLabelEvents ?? labelRows.map((row) => row.event);
+        // A batch carrying product-label events is posted from the FROZEN
+        // envelope `saveProductLabelBatchPin` stores, and that envelope has no
+        // pallet channels at all. Anything read into `pallets`/
+        // `palletExceptions` here would therefore be acknowledged on the
+        // strength of a response to a payload that never contained it --
+        // exactly the loss the pinned ceilings exist to prevent. Dropping them
+        // from THIS batch delays nothing in practice: duplicate-DM printing is
+        // a validation-mode shift, which allocates no box or pallet serials at
+        // all, and the drain loop's next iteration picks these rows up as soon
+        // as the label batch acks.
+        if (labelEvents.length > 0) {
+          pallets = [];
+          palletExceptions = [];
+        }
         if (pauseInvalidated() || credentialGeneration.sealed) break;
         if (
           batch.length === 0 &&
           boxes.length === 0 &&
           exceptions.length === 0 &&
+          pallets.length === 0 &&
+          palletExceptions.length === 0 &&
           labelEvents.length === 0
         ) {
           if (
             ceiling !== null ||
             boxCeiling !== null ||
             exceptionCeiling !== null ||
+            palletCeiling !== null ||
+            palletExceptionCeiling !== null ||
             labelCeiling !== null ||
             pendingBatchId !== null
           ) {
@@ -1057,11 +1391,15 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               pendingCeiling = null;
               pendingBoxCeiling = null;
               pendingExceptionCeiling = null;
+              pendingPalletCeiling = null;
+              pendingPalletExceptionCeiling = null;
               pendingProductLabelCeiling = null;
               pendingBatchId = null;
               await clearPersistedCeiling(deps.exec, CEILING_META_KEY);
               await clearPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
               await clearPersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY);
+              await clearPersistedCeiling(deps.exec, PALLET_CEILING_META_KEY);
+              await clearPersistedCeiling(deps.exec, PALLET_EXCEPTION_CEILING_META_KEY);
               await clearPersistedCeiling(deps.exec, PRODUCT_LABEL_CEILING_KEY);
               await clearPersistedCeiling(deps.exec, BATCH_ID_META_KEY);
             } finally {
@@ -1081,6 +1419,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         let newExceptionCeiling = labelPin
           ? labelPin.exceptionCeiling
           : (exceptions.at(-1)?.id ?? null);
+        // Null here still pins an explicitly EMPTY channel below (`?? 0`),
+        // which is what stops a crash from letting fresh pallet rows join an
+        // already-persisted batch identity on the next attempt.
+        const newPalletCeiling = pallets.at(-1)?.rowid ?? null;
+        const newPalletExceptionCeiling = palletExceptions.at(-1)?.id ?? null;
         let ackBoxRows: Array<Pick<BoxClosureRow, "boxId" | "printVerifiedAt" | "printSkippedAt">> =
           labelPin?.boxes ?? boxes;
         let newLabelCeiling = labelPin?.labelCeiling ?? labelRows.at(-1)?.id ?? null;
@@ -1101,6 +1444,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             pendingCeiling = maxId ?? 0;
             pendingBoxCeiling = newBoxCeiling ?? 0;
             pendingExceptionCeiling = newExceptionCeiling ?? 0;
+            pendingPalletCeiling = newPalletCeiling ?? 0;
+            pendingPalletExceptionCeiling = newPalletExceptionCeiling ?? 0;
             pendingProductLabelCeiling = newLabelCeiling ?? 0;
             await savePersistedCeiling(deps.exec, CEILING_META_KEY, pendingCeiling);
             await savePersistedCeiling(deps.exec, BOX_CEILING_META_KEY, pendingBoxCeiling);
@@ -1108,6 +1453,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               deps.exec,
               EXCEPTION_CEILING_META_KEY,
               pendingExceptionCeiling,
+            );
+            await savePersistedCeiling(deps.exec, PALLET_CEILING_META_KEY, pendingPalletCeiling);
+            await savePersistedCeiling(
+              deps.exec,
+              PALLET_EXCEPTION_CEILING_META_KEY,
+              pendingPalletExceptionCeiling,
             );
             await savePersistedCeiling(
               deps.exec,
@@ -1136,13 +1487,23 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             const boxSuffix = boxes.length > 0 ? `:box:${boxSetSignature(boxes)}` : "";
             const exceptionSuffix =
               newExceptionCeiling !== null ? `:exception:${newExceptionCeiling}` : "";
+            // Both pallet channels join the key on exactly the terms the box
+            // channels do -- see `palletSetSignature`'s own doc comment for
+            // the closure the server would otherwise silently swallow, and
+            // `PALLET_EXCEPTION_CEILING_META_KEY` for the exception half.
+            const palletSuffix = pallets.length > 0 ? `:pallet:${palletSetSignature(pallets)}` : "";
+            const palletExceptionSuffix =
+              newPalletExceptionCeiling !== null
+                ? `:pallet-exception:${newPalletExceptionCeiling}`
+                : "";
+            const channelSuffix = `${boxSuffix}${exceptionSuffix}${palletSuffix}${palletExceptionSuffix}`;
             const generatedBatchId =
               labelEvents.length > 0
                 ? `product-label:${productLabelValueDigest({ machineId: deps.machineId, instId, maxId, boxSuffix, exceptionSuffix, labels: productLabelSetSignature(labelEvents) })}`
                 : maxId !== null
-                  ? `${deps.machineId}:${instId}:${maxId}${boxSuffix}${exceptionSuffix}`
-                  : `${deps.machineId}:${instId}${boxSuffix}${exceptionSuffix}`;
-            batchId = (await ensurePendingBatchId()) ?? generatedBatchId;
+                  ? `${deps.machineId}:${instId}:${maxId}${channelSuffix}`
+                  : `${deps.machineId}:${instId}${channelSuffix}`;
+            batchId = (await ensurePendingBatchId()) ?? boundedBatchId(generatedBatchId);
             if (pendingBatchId === null) {
               pendingBatchId = batchId;
               await savePersistedValue(deps.exec, BATCH_ID_META_KEY, batchId);
@@ -1191,6 +1552,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               items: toPayload(batch),
               boxes: toBoxPayload(boxes),
               exceptions: toExceptionPayload(exceptions),
+              pallets: toPalletPayload(pallets),
+              palletExceptions: toPalletExceptionPayload(palletExceptions),
               serialsLeft,
             },
           );
@@ -1341,6 +1704,19 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               await ackExceptionsThrough(deps.exec, newExceptionCeiling);
               if (!commitIsCurrent()) break drainLoop;
             }
+            if (pallets.length > 0) {
+              // `pallets` itself -- not just the ids -- so each row's ack is
+              // gated on the print-verification fields actually read into THIS
+              // payload; see `ackPallets`'s own doc comment.
+              if (!commitIsCurrent()) break drainLoop;
+              await ackPallets(deps.exec, pallets, new Date(now()).toISOString());
+              if (!commitIsCurrent()) break drainLoop;
+            }
+            if (newPalletExceptionCeiling !== null) {
+              if (!commitIsCurrent()) break drainLoop;
+              await ackPalletExceptionsThrough(deps.exec, newPalletExceptionCeiling);
+              if (!commitIsCurrent()) break drainLoop;
+            }
             if (labelReceipt && owner) {
               await ackProductLabelEvents(deps.exec, owner, labelEvents, labelReceipt);
               if (!commitIsCurrent()) break drainLoop;
@@ -1366,11 +1742,21 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               await clearPersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY);
               if (!commitIsCurrent()) break drainLoop;
             }
+            if (pendingPalletCeiling !== null) {
+              await clearPersistedCeiling(deps.exec, PALLET_CEILING_META_KEY);
+              if (!commitIsCurrent()) break drainLoop;
+            }
+            if (pendingPalletExceptionCeiling !== null) {
+              await clearPersistedCeiling(deps.exec, PALLET_EXCEPTION_CEILING_META_KEY);
+              if (!commitIsCurrent()) break drainLoop;
+            }
             if (pendingProductLabelCeiling !== null)
               await clearPersistedCeiling(deps.exec, PRODUCT_LABEL_CEILING_KEY);
             pendingCeiling = null;
             pendingBoxCeiling = null;
             pendingExceptionCeiling = null;
+            pendingPalletCeiling = null;
+            pendingPalletExceptionCeiling = null;
             pendingProductLabelCeiling = null;
             if (owner && commitIsCurrent()) {
               try {

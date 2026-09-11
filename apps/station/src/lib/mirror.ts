@@ -69,6 +69,18 @@ export interface StationBundle {
    * may use for box printing.
    */
   boxLabelTemplate: { id: string; name: string; spec: unknown } | null;
+  /**
+   * The PALLET label's own template, resolved from the shift's own snapshot.
+   * Independent of `boxLabelTemplate` in exactly the way that one is
+   * independent of the retired `labelTemplate` slot: a device handed null here
+   * cannot render a pallet label and must say so rather than printing a box
+   * label, or an empty one, on a pallet.
+   *
+   * Optional for rolling compatibility, the same way `ssccRevokedFrom` is: a
+   * pre-06d server, or a bundle cached before this field existed, simply has
+   * no pallet template.
+   */
+  palletLabelTemplate?: { id: string; name: string; spec: unknown } | null;
   counterpartyGln: string | null;
   operators: OperatorMirrorRecord[];
   /**
@@ -98,6 +110,28 @@ export interface StationBundle {
    * before it, simply revokes nothing.
    */
   ssccRevokedFrom?: number[];
+  /**
+   * This device's PALLET serial block (extension digit 1), the direct
+   * counterpart of `sscc` above and subject to the same rules -- original
+   * bounds on every fetch, `consumedThroughSerial` carrying the server's own
+   * cursor. Non-null only for a shift with pallets enabled.
+   *
+   * The two streams must never share one pool row: `sscc-pool.ts` keys on
+   * (issuerPrefix, extensionDigit, fromSerial) precisely so the same number
+   * cannot land on both a box and the pallet it stands on.
+   *
+   * Optional for the same rolling-compatibility reason as
+   * `palletLabelTemplate`.
+   */
+  palletSscc?: {
+    issuerPrefix: string;
+    extensionDigit: number;
+    fromSerial: number;
+    toSerial: number;
+    consumedThroughSerial: number | null;
+  } | null;
+  /** `ssccRevokedFrom` for the pallet stream; absent or `[]` revokes nothing. */
+  palletSsccRevokedFrom?: number[];
 }
 
 export interface StationProductImageDescriptor {
@@ -122,6 +156,20 @@ export interface ShiftMirrorRow {
   boxLabelTemplateSpec: string | null;
   /** The shift's box capacity (Task 13 review, Finding 1) -- null disables auto-close. */
   boxCapacity: number | null;
+  /**
+   * The pallet label's own template spec, independent of both the box spec and
+   * the retained legacy item spec. Null when the shift configures no pallet
+   * template -- never a fallback to either of the others.
+   */
+  palletLabelTemplateSpec: string | null;
+  /**
+   * How many BOXES fill a pallet (`shift_mirror.pallet_box_capacity`), the
+   * single signal `closeCurrentBox` uses to decide whether a closed box joins
+   * a pallet at all. Null means the shift has no pallets. Not to be confused
+   * with the dead units-valued `pallet_capacity` column, which this file no
+   * longer writes and nothing reads.
+   */
+  palletBoxCapacity: number | null;
   /**
    * This device's 9-digit GS1 issuer prefix for box SSCCs
    * (`StationBundle.sscc.issuerPrefix`), mirrored onto `shift_mirror` at
@@ -289,8 +337,9 @@ async function upsertBundleBody(
        counterparty_id, counterparty_name, counterparty_gln,
        label_template_id, label_template_name, label_template_spec,
        planned_qty, planned_date, production_date, box_capacity, pallet_box_capacity, pallets_enabled,
-       opened_at, issuer_prefix, box_label_template_spec, number, validation_print_context
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       opened_at, issuer_prefix, box_label_template_spec, pallet_label_template_spec,
+       number, validation_print_context
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
        status=CASE
          WHEN shift_mirror.status='closed' OR EXISTS (
@@ -309,7 +358,8 @@ async function upsertBundleBody(
        box_capacity=excluded.box_capacity, pallet_box_capacity=excluded.pallet_box_capacity,
        pallets_enabled=excluded.pallets_enabled, opened_at=excluded.opened_at,
        issuer_prefix=${preserveIssuerPrefix ? "shift_mirror.issuer_prefix" : "excluded.issuer_prefix"},
-       box_label_template_spec=excluded.box_label_template_spec${numberUpdate}${productionDateUpdate}`,
+       box_label_template_spec=excluded.box_label_template_spec,
+       pallet_label_template_spec=excluded.pallet_label_template_spec${numberUpdate}${productionDateUpdate}`,
     [
       s.id,
       s.status,
@@ -339,6 +389,12 @@ async function upsertBundleBody(
       // The box label's OWN template spec (Finding 3) -- never a fallback to
       // `bundle.labelTemplate`'s spec, even when this is null.
       bundle.boxLabelTemplate ? JSON.stringify(bundle.boxLabelTemplate.spec) : null,
+      // The pallet label's OWN template spec, on the same terms. A server that
+      // omits the field entirely (pre-06d, or a replayed older cached bundle)
+      // mirrors null, exactly as an explicit null does: a stale pallet spec
+      // left behind would have the station offering a pallet label for a shift
+      // that no longer has one.
+      bundle.palletLabelTemplate ? JSON.stringify(bundle.palletLabelTemplate.spec) : null,
       // Insert value only; whether the UPDATE branch touches `number` is
       // decided by `numberUpdate` above.
       s.number ?? null,
@@ -600,12 +656,15 @@ export async function readShiftMirror(
     counterparty_gln: string | null;
     label_template_spec: string | null;
     box_capacity: number | null;
+    pallet_box_capacity: number | null;
     issuer_prefix: string | null;
     box_label_template_spec: string | null;
+    pallet_label_template_spec: string | null;
     validation_print_context: string | null;
   }>(
-    `SELECT id, status, mode, counterparty_gln, label_template_spec, box_capacity, issuer_prefix,
-            box_label_template_spec, validation_print_context
+    `SELECT id, status, mode, counterparty_gln, label_template_spec, box_capacity,
+            pallet_box_capacity, issuer_prefix,
+            box_label_template_spec, pallet_label_template_spec, validation_print_context
      FROM shift_mirror WHERE id = ?`,
     [id],
   );
@@ -619,8 +678,10 @@ export async function readShiftMirror(
     counterpartyGln: r.counterparty_gln,
     labelTemplateSpec: r.label_template_spec,
     boxCapacity: r.box_capacity ?? null,
+    palletBoxCapacity: r.pallet_box_capacity ?? null,
     issuerPrefix: r.issuer_prefix ?? null,
     boxLabelTemplateSpec: r.box_label_template_spec ?? null,
+    palletLabelTemplateSpec: r.pallet_label_template_spec ?? null,
   };
 }
 

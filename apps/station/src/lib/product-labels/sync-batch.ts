@@ -84,12 +84,18 @@ export async function saveProductLabelBatchPin(
 
 /** One statement retires the envelope and its legacy/new identities after every channel ACK succeeds. */
 export async function clearProductLabelBatchPin(exec: SqlExecutor): Promise<void> {
-  await exec.run("DELETE FROM station_meta WHERE key IN (?,?,?,?,?,?)", [
+  await exec.run("DELETE FROM station_meta WHERE key IN (?,?,?,?,?,?,?,?)", [
     PRODUCT_LABEL_BATCH_KEY,
     PRODUCT_LABEL_CEILING_KEY,
     "sync_pending_batch_id",
     "sync_pending_ceiling",
     "sync_pending_box_ceiling",
     "sync_pending_exception_ceiling",
+    // A label batch never carries pallet facts (see the drain's own comment),
+    // but it still pins both channels explicitly empty, so both identities
+    // have to retire with the envelope or the next batch inherits a ceiling
+    // that can only ever exclude rows.
+    "sync_pending_pallet_ceiling",
+    "sync_pending_pallet_exception_ceiling",
   ]);
 }

@@ -425,6 +425,54 @@ describe("mirror", () => {
     expect(shift?.issuerPrefix).toBe("460123456");
   });
 
+  // 06d: a device that cannot read back the pallet template renders no pallet
+  // label at all, and one that cannot read back the capacity never closes a
+  // pallet, so both have to survive the round trip the box pair already does.
+  it("round-trips the pallet label template and box capacity", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    const palletLabelTemplate = {
+      id: "plt1",
+      name: "Pallet T",
+      spec: { widthMm: 100, heightMm: 150, dpi: 203, language: "zpl", elements: [] },
+    };
+    await upsertBundle(exec, {
+      ...bundle,
+      shift: { ...bundle.shift, mode: "aggregation", palletsEnabled: true, palletBoxCapacity: 48 },
+      palletLabelTemplate,
+    });
+
+    const shift = await readShiftMirror(exec, "s1");
+    expect(shift?.palletBoxCapacity).toBe(48);
+    expect(JSON.parse(shift!.palletLabelTemplateSpec!)).toMatchObject({ language: "zpl" });
+    // The box template is independent: a pallet template must never stand in
+    // for it, nor the other way round.
+    expect(shift?.boxLabelTemplateSpec).toBeNull();
+    expect(
+      await exec.all("SELECT pallet_box_capacity FROM product_mirror WHERE id = ?", ["p1"]),
+    ).toEqual([{ pallet_box_capacity: 48 }]);
+  });
+
+  it("clears a pallet template the server no longer sends", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await upsertBundle(exec, {
+      ...bundle,
+      palletLabelTemplate: {
+        id: "plt1",
+        name: "Pallet T",
+        spec: { widthMm: 100, heightMm: 150, dpi: 203, language: "zpl", elements: [] },
+      },
+    });
+    expect((await readShiftMirror(exec, "s1"))?.palletLabelTemplateSpec).not.toBeNull();
+
+    // Pallets switched off on the shift: the stale spec must not linger, or
+    // the station would keep offering a pallet label for a shift without one.
+    await upsertBundle(exec, { ...bundle, palletLabelTemplate: null });
+
+    expect((await readShiftMirror(exec, "s1"))?.palletLabelTemplateSpec).toBeNull();
+  });
+
   // The validation-mode counterpart: `bundle.sscc` is null, and the stored
   // value must be null too -- never an invented fallback prefix.
   it("stores a null issuerPrefix for a validation-mode bundle (no sscc block)", async () => {
