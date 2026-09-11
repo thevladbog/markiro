@@ -2,7 +2,10 @@
 
 **Date:** 2026-09-11
 
-**Status:** Approved in brainstorming on 2026-09-11; implementation plan pending
+**Status:** Approved in brainstorming on 2026-09-11. Ships in two parts: the
+DataMatrix encoder first
+([plan](../plans/2026-09-11-handheld-datamatrix-encoder.md)), then the duplicate
+flow this document describes. See "Prerequisite" below for why.
 
 **Scope:** Sixth implementation slice of design brief 10
 (`docs/design-briefs/10-tsd-handheld.md`), after the foundation
@@ -52,6 +55,36 @@ same protocol.
 | One job at a time  | A scan arriving while a job is unresolved is refused by name                                                     | The operator has a sticker in hand. Accepting the next unit first would leave two labels and no way to tell which belongs to which                                            |
 | Full-screen states | Only `failed_before_send`, `delivery_unknown` and a rejected verification                                        | A duplicate prints on **every** unit, not every twentieth. A full-screen state per scan would be unusable                                                                     |
 | Unknown delivery   | Resolved by scanning the printed sticker, under either policy; a reprint is the fallback                         | The domain accepts `verified` from `delivery_unknown` even when verification is `none`, and that answers the operator's real question: did a label come out?                  |
+
+## Prerequisite: the device cannot draw a Data Matrix
+
+Found while planning, after this design was approved, and large enough to ship
+on its own.
+
+Both handheld emitters refuse every barcode format except `code128`
+(`ZplEmitter.kt:116`, `TsplEmitter.kt:126`). A box label needs no Data Matrix,
+so none was ported. A duplicate is nothing but a Data Matrix.
+
+The station prints it as a **raster** rather than a native printer command, and
+that is not incidental: TSPL's own `DMATRIX` has no way to carry the FNC1 flag,
+so a natively printed symbol would be a plain Data Matrix rather than a GS1 one
+— a wrong code on a product. ZPL's `^BXN` does carry FNC1, but a duplicate
+template's `sizeMm` is the whole symbol square, and converting that to a module
+size requires knowing the symbol's dimensions, which requires encoding it. Both
+roads lead to the same place: the handheld needs a real ECC200 encoder.
+
+The raster path itself is already there — `convertToMonochrome`,
+`bitmapToZplHex`, `buildGfaCommand`, `buildBitmapCommand`. Only "marking code →
+module grid" is missing. ZXing supplies the parts that are identical for every
+Data Matrix and easy to get subtly wrong (the symbol-size table, Reed–Solomon,
+module placement); the GS1 codeword framing — FNC1 first, FNC1 for every AI
+separator — is ours, because no library provides it.
+
+That encoder is **not byte-pinned to `packages/domain`**, which encodes through
+bwip-js. Nothing ever compares one device's label bytes with another's: the
+server stores a digest of each device's own bytes, and verification compares the
+scanned payload. The contract is that the printed symbol decodes to the right
+GS1 payload, proved by decoding it.
 
 ## Why no server work
 
