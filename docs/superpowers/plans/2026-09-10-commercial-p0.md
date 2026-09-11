@@ -331,3 +331,14 @@ before final documentation. Bounded integration review found no actionable issue
 browser/PDF evidence remains separate; this conflict resolution does not claim new browser,
 provider, Windows/native or physical acceptance. See the acceptance map for verification limits
 and the ignored `.superpowers/sdd/2026-09-11-pr503-conflicts/` directory for exact local records.
+
+The strict up-to-date branch requirement then required a clean merge of main `c0a2ced05`
+(instruction MKR-INS-11). All 34 incoming paths match upstream exactly, and the entire P0 diff
+remained byte-identical before this final documentation record. Legal-documents, Landing and
+Station lint/typecheck/build/test were rerun successfully; current combined package totals are
+766 passing files and 9,007 passed tests, with the same four API skips. API typecheck and 61
+focused document tests, browser-tool typecheck, 547/547 production-bundle contracts and full
+workspace formatting passed. Artifact verification passed for all 32 immutable published files
+using the installed pinned LibreOffice and veraPDF; its initial missing-runtime configuration
+failure is retained. All 4,099 frozen tracked files matched before this documentation update.
+No browser or hardware acceptance was added by these checks.
