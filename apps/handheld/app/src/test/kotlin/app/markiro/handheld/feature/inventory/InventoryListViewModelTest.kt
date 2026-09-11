@@ -99,7 +99,27 @@ class InventoryListViewModelTest {
     @After
     fun tearDown() = db.close()
 
-    private fun vm(repo: FakeRepo = FakeRepo()) = InventoryListViewModel(repo, db.deviceConfigDao(), session, reachability, ScanRouterAdapter(scans))
+    private fun vm(repo: FakeRepo = FakeRepo()) = main.track(
+        InventoryListViewModel(repo, db.deviceConfigDao(), session, reachability, ScanRouterAdapter(scans)),
+    )
+
+
+    /**
+     * The device's line is read when the task is chosen, not kept in a field filled
+     * by an observer that runs on Room's threads. A tap landing before that observer
+     * delivered used to compare against `null`, ask «это другая линия?» about the
+     * operator's own task, and never join -- which is also why this suite hung.
+     */
+    @Test
+    fun ownTaskJoinsEvenWhenChosenBeforeAnythingIsObserved() = runTest {
+        val repo = FakeRepo()
+        val vm = vm(repo)
+        vm.events.test(timeout = 60.seconds) {
+            vm.select(own)
+            assertEquals(InventoryListEvent.Entered("i1"), awaitItem())
+        }
+        assertEquals(listOf(Triple("i1", false, null)), repo.joins)
+    }
 
     @Test
     fun listsOwnLineThenOthersOnRequest() = runTest {

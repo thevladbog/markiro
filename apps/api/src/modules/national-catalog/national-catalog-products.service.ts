@@ -11,7 +11,11 @@ import { and, desc, eq, isNotNull, notInArray } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
 import type { ChzTokenService } from "../chz-exports/chz-token.service";
 import type { NationalCatalogClient } from "./national-catalog.client";
-import type { NationalCatalogProduct, NationalCatalogResult } from "./national-catalog.types";
+import {
+  nationalCatalogProductAttributeUnit,
+  type NationalCatalogProduct,
+  type NationalCatalogResult,
+} from "./national-catalog.types";
 
 export type NationalCatalogCardReadMethod = "feed_product" | "product";
 
@@ -420,7 +424,7 @@ export class NationalCatalogProductsService {
             attributes: card.attributes.map((attribute) => ({
               id: attribute.id,
               value: attribute.value,
-              unit: attribute.valueType,
+              unit: nationalCatalogProductAttributeUnit(attribute),
             })),
           },
         },

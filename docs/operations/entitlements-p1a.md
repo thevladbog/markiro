@@ -181,7 +181,7 @@ Use the established protected deployment workflow if deployment is separately au
 
 1. Record the accepted source/artifact identities and back up the database with the existing
    operational procedure. Inventory affected platform and tenant clients.
-2. Apply additive `0130_entitlements_p1a.sql` after `0129_commercial_terms.sql`. It retains legacy
+2. Apply additive `0131_entitlements_p1a.sql` after `0130_cynical_warstar.sql`. It retains legacy
    nullable values and historical records, adds source/preview/policy/observation storage, and
    increments terms and usage revisions in the same transaction as their owning writes.
 3. Deploy the compatible API before clients that request V3 or the V1 entitlement snapshot.
@@ -288,3 +288,11 @@ No production, native-device, Windows, scanner/printer or real provider result i
 local DB and mocked-provider tests. P1B device allocation, P1C offline grants and P1D customer
 rollout remain separate. The maximum duration for offline new work is still unapproved and is
 not inferred from a tariff or this preview TTL.
+
+Before PR publication, the branch integrated `main` at `00e1716ca`. Its existing
+`0130_cynical_warstar` migration and metadata were retained; the unpublished P1A migration
+became `0131_entitlements_p1a`, preserving the reviewed SQL bytes and regenerating its snapshot
+against the combined schema. The full chain applied successfully to a new dedicated test
+database. Post-merge checks passed 439 DB tests, 209 contract tests, 184 selected API tests,
+43 selected customer UI tests and 82 selected SaaS tests. These supplement the earlier full
+runs above; they do not replace or explain the retained customer full-suite timeout.

@@ -4,7 +4,7 @@
 Результаты проверок и оставшиеся ограничения записаны в
 [операционном руководстве](../../operations/entitlements-p1a.md#acceptance-evidence).
 Полный workspace-прогон не зелёный: сохраняется таймаут неизменённого теста клиентской
-админки. Изменения не опубликованы, ограничения для клиентов не включены.
+админки. Production rollout не выполнен, ограничения для клиентов не включены.
 База: `39d36fd88107313aadd99f29092b5a24bf8f0626`.
 Требования: [MKR-FR-COMMERCIAL-002 v1.2](2026-09-10-catalog-entitlements-functional-requirements.md).
 Предшественник: [Commercial P0](2026-09-10-commercial-p0-design.md), merged PR #503.

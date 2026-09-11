@@ -32,7 +32,7 @@ class InventoryLeaveViewModelTest {
     }
 
     private fun vm(gateway: Gateway, drained: Boolean) =
-        InventoryLeaveViewModel(SavedStateHandle(mapOf("inventoryId" to "i1")), gateway, drain = { drained })
+        main.track(InventoryLeaveViewModel(SavedStateHandle(mapOf("inventoryId" to "i1")), gateway, drain = { drained }))
 
     @Test
     fun drainsThenLeaves() = runTest {

@@ -233,7 +233,10 @@ describe("atomic National Catalog product application (real PostgreSQL services)
       .orderBy(schema.nationalCatalogProductLinks.confirmedAt);
   }
 
-  async function category() {
+  async function category(numeric?: {
+    sourceUnit: string | null;
+    allowedUnits: readonly string[];
+  }) {
     const id = randomUUID();
     const categoryId = String(parseInt(id.slice(0, 8), 16));
     const scopeKey = `apply-${id}`;
@@ -251,10 +254,12 @@ describe("atomic National Catalog product application (real PostgreSQL services)
         attributes: [
           {
             id: "20",
-            label: "Цвет",
-            valueType: "string",
+            label: numeric ? "Объём" : "Цвет",
+            valueType: numeric ? "decimal" : "string",
             multiplicity: "one",
-            unit: null,
+            unit: numeric
+              ? { canonical: numeric.allowedUnits[0]!, allowed: [...numeric.allowedUnits] }
+              : null,
             requirementRules: [],
             presetMode: "none",
             presets: [],
@@ -278,11 +283,11 @@ describe("atomic National Catalog product application (real PostgreSQL services)
     source.attributes = [
       {
         id: 20,
-        name: "Цвет",
-        value: "Синий",
+        name: numeric ? "Объём" : "Цвет",
+        value: numeric ? "500" : "Синий",
         valueId: null,
         attributeValueId: null,
-        valueType: null,
+        valueType: numeric?.sourceUnit ?? null,
         groupId: null,
         groupName: null,
         locationId: null,
@@ -742,6 +747,35 @@ describe("atomic National Catalog product application (real PostgreSQL services)
       sourceRef: `national-catalog-snapshot:${link?.reviewedSnapshotId}`,
     });
   });
+  it("imports the exact supported provider unit and retains it in the reviewed baseline", async () => {
+    const c = await category({ sourceUnit: "мл", allowedUnits: ["л", "мл"] });
+    const result = await apply(decision(c.preview, true));
+    expect(result.items[0]).toMatchObject({ product: "applied", productReason: null });
+    const [attribute] = await db
+      .select()
+      .from(schema.productRegulatoryAttributeValues)
+      .where(eq(schema.productRegulatoryAttributeValues.productId, existingId));
+    const [link] = await links();
+    expect(attribute?.value).toEqual({ type: "decimal", value: "500", unit: "мл" });
+    expect(link?.reviewedProjection).toMatchObject({
+      values: {
+        [`attribute:${c.id}:20`]: { type: "decimal", value: "500", unit: "мл" },
+      },
+    });
+  });
+
+  it.each([null, "кг"])(
+    "does not import an absent or unsupported provider unit %j",
+    async (unit) => {
+      const c = await category({ sourceUnit: unit, allowedUnits: ["л", "мл"] });
+      expect(c.preview.fields).toContainEqual(
+        expect.objectContaining({ label: "Объём", applicable: false }),
+      );
+      expect(c.preview.fields).not.toContainEqual(
+        expect.objectContaining({ label: "Объём", applicable: true }),
+      );
+    },
+  );
   async function existingAttribute() {
     const c = await category();
     await db

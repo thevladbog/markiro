@@ -5,8 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
 
 import { ThemeProvider } from "@markiro/ui";
-import { AGREEMENT_TRANSITIONS } from "@markiro/platform-contracts";
+import { AGREEMENT_TRANSITIONS, type AgreementDocumentForm } from "@markiro/platform-contracts";
 
+import { AgreementDocumentFormField } from "../src/pages/agreements/AgreementDocumentFormField";
 import {
   AgreementRequisitesForm,
   EMPTY_REQUISITES,
@@ -63,6 +64,37 @@ describe("AgreementRequisitesForm", () => {
     expect((screen.getByLabelText("ИНН") as HTMLInputElement).disabled).toBe(true);
     // A signed agreement must not offer a DaData lookup that could refill it.
     expect(screen.queryByLabelText("Поиск организации")).toBeNull();
+  });
+});
+
+describe("AgreementDocumentFormField", () => {
+  function renderField(value: AgreementDocumentForm, disabled = false) {
+    const onChange = vi.fn();
+    render(
+      <ThemeProvider defaultTheme="light">
+        <AgreementDocumentFormField value={value} onChange={onChange} disabled={disabled} />
+      </ThemeProvider>,
+    );
+    return onChange;
+  }
+
+  it("offers the Russian and the bilingual form", () => {
+    renderField("ru");
+    const field = screen.getByLabelText("Форма документа");
+    expect(field).toBeDefined();
+    expect(screen.getByText("Двуязычная (рус./англ.)")).toBeDefined();
+  });
+
+  it("reports the chosen form", async () => {
+    const onChange = renderField("ru");
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText("Форма документа"), "ru_en");
+    expect(onChange).toHaveBeenCalledWith("ru_en");
+  });
+
+  it("is disabled once the agreement is no longer editable", () => {
+    renderField("ru_en", true);
+    expect((screen.getByLabelText("Форма документа") as HTMLSelectElement).disabled).toBe(true);
   });
 });
 

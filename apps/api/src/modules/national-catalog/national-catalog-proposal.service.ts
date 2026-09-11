@@ -195,9 +195,17 @@ function sourceValue(
       break;
     case "decimal": {
       const units = [...new Set(sources.map((source) => source.unit))];
+      const unit = units[0];
+      const exactUnitAllowed =
+        definition.unit === null
+          ? unit === null
+          : unit !== null && unit !== undefined && definition.unit.allowed.includes(unit);
       candidate =
-        first !== undefined && /^-?\d+(\.\d+)?$/.test(first) && units.length === 1
-          ? { type: "decimal", value: first, unit: units[0] ?? null }
+        first !== undefined &&
+        /^-?\d+(\.\d+)?$/.test(first) &&
+        units.length === 1 &&
+        exactUnitAllowed
+          ? { type: "decimal", value: first, unit }
           : null;
       break;
     }

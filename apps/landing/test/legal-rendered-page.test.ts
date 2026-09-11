@@ -117,6 +117,8 @@ describe("rendered legal pages", () => {
               "MKR-INS-07",
               "MKR-INS-08",
               "MKR-INS-09",
+              "MKR-INS-10",
+              "MKR-INS-11",
             ];
       expect(codes).toEqual(expectedCodes);
     }
@@ -187,8 +189,10 @@ describe("rendered legal pages", () => {
   it("lists all localized immutable artifacts in each registry", () => {
     for (const route of ["/legal/", "/en/legal/"] as const) {
       const document = documents.get(route);
-      const pdfCount = route === "/legal/" ? 15 : 13;
-      const shaCount = route === "/legal/" ? 17 : 15;
+      // Both registries list the same artifacts now that every instruction
+      // is bilingual.
+      const pdfCount = 15;
+      const shaCount = 17;
       expect(document?.querySelectorAll('a[download$=".pdf"]')).toHaveLength(pdfCount);
       expect(document?.querySelectorAll('a[download$=".docx"]')).toHaveLength(2);
       expect(document?.querySelectorAll("[data-artifact-sha256]")).toHaveLength(shaCount);

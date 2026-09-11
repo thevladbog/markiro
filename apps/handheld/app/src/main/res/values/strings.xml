@@ -155,8 +155,8 @@
     <string name="shifts_join_other_text">%1$s · %2$s. Ваша линия: %3$s.</string>
     <string name="shifts_enter">Войти</string>
     <string name="shifts_entering">Входим в смену…</string>
-    <string name="shifts_update_required_title">Смена требует печати дубликата Data Matrix</string>
-    <string name="shifts_update_required_text">На ТСД печать дубликатов пока недоступна. Используйте станцию или измените политику смены в кабинете.</string>
+    <string name="shifts_update_required_title">Смене нужна более новая версия ТСД</string>
+    <string name="shifts_update_required_text">Эта смена требует возможности, которой нет в установленной версии. Обновите приложение, используйте станцию или измените политику смены в кабинете.</string>
     <string name="shifts_closed_title">Смена уже закрыта</string>
     <string name="shifts_closed_text">Список обновлён.</string>
     <string name="shifts_status_planned">запланирована</string>
@@ -391,4 +391,30 @@
     <string name="label_queue_unknown_skipped">Пропущено: результат неизвестен</string>
     <string name="label_queue_deferred">Отложена</string>
     <string name="label_queue_resolve">Этикетка напечаталась</string>
+
+    <!-- Печать дубликата Data Matrix -->
+    <string name="duplicate_failed_title">Дубликат не напечатан</string>
+    <string name="duplicate_unknown_title">Неизвестно, вышел ли дубликат</string>
+    <string name="duplicate_unknown_scan_hint">Посмотрите на принтер. Если этикетка вышла — отсканируйте её, и единица будет закрыта.</string>
+    <string name="duplicate_unknown_cause">Причина: %1$s</string>
+    <string name="duplicate_rejected_title">Сверка не прошла</string>
+    <string name="duplicate_rejected_mismatch">Это код другой единицы. Отсканируйте наклейку, которая только что вышла.</string>
+    <string name="duplicate_rejected_invalid">Код не читается. Попробуйте ещё раз или перепечатайте.</string>
+    <string name="duplicate_retry">Повторить печать</string>
+    <string name="duplicate_scan_again">Сканировать ещё раз</string>
+    <string name="duplicate_dismiss">Закрыть</string>
+    <string name="duplicate_reprint_not_printed">Перепечатать: не напечаталась</string>
+    <string name="duplicate_reprint_damaged">Перепечатать: испорчена</string>
+    <string name="duplicate_reprint_lost">Перепечатать: потеряна</string>
+    <string name="duplicate_reason_printer_changed">Принтер сменился после подготовки этикетки</string>
+    <string name="duplicate_reason_code_incomplete">В коде нет криптохвоста — дубликат сделать нельзя</string>
+    <string name="duplicate_reason_bytes_gone">Смена закрыта, перепечатать нечем</string>
+    <string name="duplicate_reason_attempt_in_flight">Печать ещё идёт</string>
+    <string name="duplicate_reason_policy_incomplete">В смене нет снимка шаблона — обновите её в кабинете</string>
+    <string name="duplicate_unprepared_hint">Единица принята и уйдёт на сервер. Этикетку напечатайте после того, как устраните причину.</string>
+    <string name="duplicate_printing">Печатаем дубликат…</string>
+    <string name="duplicate_awaiting_verification">Отсканируйте наклейку, которая вышла</string>
+    <string name="duplicate_busy">Идёт печать дубликата</string>
+    <string name="duplicate_blocked">Сначала разберитесь с дубликатом</string>
+    <string name="work_close_duplicates_outstanding">Нерешённых дубликатов: %1$d. Смена закроется, события уйдут на сервер.</string>
 </resources>

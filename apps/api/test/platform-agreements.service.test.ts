@@ -240,6 +240,43 @@ describe.skipIf(!databaseUrl)("platform agreements on isolated Postgres", () => 
     expect(xml).toContain("Краснодар");
   });
 
+  it("renders the bilingual form when the record asks for it", async () => {
+    const { agreement } = await service.create(actor, {
+      counterparty: COUNTERPARTY,
+      city: "Краснодар",
+      documentForm: "ru_en",
+    });
+    expect(agreement.documentForm).toBe("ru_en");
+    const row = await service.requireAgreement(agreement.id);
+    const document = await documents.renderDraft(actor, row);
+    expect(document.filename).toContain("_ru-en");
+
+    const bytes = stored.get(`agreements/${agreement.id}/draft.docx`);
+    const { unzipSync } = await import("fflate");
+    const xml = new TextDecoder().decode(unzipSync(new Uint8Array(bytes!))["word/document.xml"]!);
+    // Both columns carry the number; the Russian accounting form appears once.
+    expect(xml.split(agreement.number).length - 1).toBeGreaterThanOrEqual(2);
+    expect(xml.split("Форма счёта на оплату").length - 1).toBe(1);
+  });
+
+  it("defaults to the Russian form and names the file without a suffix", async () => {
+    const { agreement } = await service.create(actor, { counterparty: COUNTERPARTY });
+    expect(agreement.documentForm).toBe("ru");
+    const row = await service.requireAgreement(agreement.id);
+    const document = await documents.renderDraft(actor, row);
+    expect(document.filename).not.toContain("_ru-en");
+  });
+
+  it("replaces the generated document when the form changes", async () => {
+    const { agreement } = await service.create(actor, { counterparty: COUNTERPARTY });
+    const before = await documents.renderDraft(actor, await service.requireAgreement(agreement.id));
+    await service.update(actor, agreement.id, { documentForm: "ru_en" });
+    const after = await documents.renderDraft(actor, await service.requireAgreement(agreement.id));
+    // One agreement, one draft original: the row is reused, the bytes are not.
+    expect(after.id).toBe(before.id);
+    expect(after.sha256).not.toBe(before.sha256);
+  });
+
   it("requires a reason to terminate and records it", async () => {
     const { agreement } = await service.create(actor, { counterparty: COUNTERPARTY });
     await service.transition(actor, agreement.id, "sent", undefined);

@@ -133,7 +133,7 @@ for (const width of [390, 768, 1280, 1600])
           await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
         });
         const open = (route: string) =>
-          `/test/browser/national-catalog-harness.html?lang=${lang}&route=${encodeURIComponent(route)}`;
+          `/test/browser/national-catalog-harness.html?locale=${lang}&route=${encodeURIComponent(route)}`;
         await page.goto(open("/catalog"));
         await expect(page.locator("html")).toHaveAttribute("lang", lang);
         await expect(page.locator("html")).toHaveAttribute("data-theme", theme);

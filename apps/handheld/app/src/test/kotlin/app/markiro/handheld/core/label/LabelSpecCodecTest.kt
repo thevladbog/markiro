@@ -106,4 +106,16 @@ class LabelSpecCodecTest {
         val thrown = assertThrows(LabelRenderException::class.java) { LabelSpecCodec.parse(spec(noData)) }
         assertEquals("label spec is missing barcode data", thrown.message)
     }
+
+    /**
+     * A template is text in SQLite; a truncated one used to throw a
+     * serialization error straight past the `LabelRenderException` its callers
+     * catch, so «Шаблон повреждён» became a crash instead of a refusal.
+     */
+    @Test
+    fun malformedJsonIsARenderFailureRatherThanACrash() {
+        for (broken in listOf("{", "", "[]", "\"text\"", "not json at all")) {
+            assertThrows(LabelRenderException::class.java) { LabelSpecCodec.parse(broken) }
+        }
+    }
 }

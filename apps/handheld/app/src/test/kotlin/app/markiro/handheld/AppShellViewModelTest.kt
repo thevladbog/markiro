@@ -56,7 +56,9 @@ class AppShellViewModelTest {
     @After
     fun close() = db.close()
 
-    private fun vm() = AppShellViewModel(db.deviceConfigDao(), session, revocation, DeviceWipe(db, credential), idleMs = 5 * 60 * 1000L)
+    private fun vm() = main.track(
+        AppShellViewModel(db.deviceConfigDao(), session, revocation, DeviceWipe(db, credential), idleMs = 5 * 60 * 1000L),
+    )
 
     @Test
     fun startsOnPairingWithoutConfigAndOnSignInWithIt() = runTest {
