@@ -72,8 +72,7 @@ describe("renderLegalDocxBilingual", () => {
     expect(documentXml).toContain("w:pageBreakBefore");
   });
 
-  it.skip("renders a bilingual heading on both sides", () => {
-    // Unskipped by Task 12, once appendix 9 is translated.
+  it("renders a bilingual heading on both sides", () => {
     expect(documentXml).toContain("Приложение № 9");
     expect(documentXml).toContain("Appendix No. 9");
   });

@@ -133,6 +133,31 @@ describe("bilingual agreement", () => {
     );
   });
 
+  it("translates appendices 9 and 10 and leaves the accounting forms Russian", () => {
+    const byId = new Map(
+      buildTenantAgreement(FILLED, "en").sections.map((section) => [section.id, section]),
+    );
+    expect(byId.get("prilozhenie-9")?.heading).toBe(
+      "Appendix No. 9. Contacts and electronic interaction",
+    );
+    expect(byId.get("prilozhenie-10")?.heading).toBe(
+      "Appendix No. 10. Form of confirmation of data transfer and deletion",
+    );
+    for (const id of AGREEMENT_MONOLINGUAL_SECTION_IDS) {
+      expect(byId.get(id)?.heading).toMatch(/^Приложение № /);
+    }
+  });
+
+  it("leaves nothing but the four accounting forms untranslated", () => {
+    // The blank template, not the filled one: a Cyrillic agreement number
+    // substituted into a heading is data, not untranslated text.
+    const en = buildTenantAgreement(BLANK, "en");
+    const stillRussian = en.sections
+      .filter((section) => /[А-Яа-я]/.test(section.heading))
+      .map((section) => section.id);
+    expect(stillRussian.sort()).toEqual([...AGREEMENT_MONOLINGUAL_SECTION_IDS].sort());
+  });
+
   it("throws when a section is missing from one side", () => {
     const en = buildTenantAgreement(FILLED, "en");
     expect(() =>

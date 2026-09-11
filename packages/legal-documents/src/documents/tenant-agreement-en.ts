@@ -32,6 +32,15 @@ const PROCESSING_SIGNATURES = {
   rows: SIGNATURE_ROWS,
 } as const satisfies LegalBlock;
 
+const TRANSFER_SIGNATURES = {
+  kind: "table",
+  columns: [
+    "Contractor — confirms the actions performed",
+    "Customer — confirms receipt / acknowledgement",
+  ],
+  rows: SIGNATURE_ROWS,
+} as const satisfies LegalBlock;
+
 function partyName(party: PartyRequisites | undefined, placeholder: string): string {
   return agreementField(party?.name, placeholder);
 }
@@ -1236,6 +1245,210 @@ function appendixThreeFourSections(fields: TenantAgreementFields): readonly Agre
   ];
 }
 
+function appendixNineTenSections(fields: TenantAgreementFields): readonly AgreementSection[] {
+  const number = agreementField(fields.number, "[number]");
+  const conclusionDate = agreementDate(fields.conclusionDate, "[date of conclusion]");
+
+  return [
+    {
+      id: "prilozhenie-9",
+      heading: "Appendix No. 9. Contacts and electronic interaction",
+      startsPage: true,
+      blocks: [
+        {
+          kind: "paragraph",
+          text: `To agreement No. ${number} of ${conclusionDate}.`,
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-9-litsa",
+      heading: "Appendix No. 9 · 1. Authorised persons and channels",
+      blocks: [
+        {
+          kind: "table",
+          columns: ["Party and person", "Authority", "Personal channel / identifier"],
+          columnRatios: [1.2, 1.8, 1.2],
+          rows: [
+            [
+              "Contractor: Vladislav Sergeevich Bogatyrev",
+              "Signing of contractual and primary documents; technical approvals.",
+              "hello@v-b.tech; +7 934 355-14-90; EDM ID [ID / not connected].",
+            ],
+            [
+              "Customer: [full name, position]",
+              "[agreement, orders, statements; basis of authority; monetary limit].",
+              "[individual e-mail, telephone, EDM ID].",
+            ],
+            [
+              "Customer: [administrator's full name]",
+              "Technical tasks and access. Financial obligations only where the authority is stated expressly.",
+              "[individual e-mail / account].",
+            ],
+            [
+              "Contacts for data incidents",
+              "[responsible persons and a backup channel].",
+              "[e-mail and telephone].",
+            ],
+          ],
+        },
+        {
+          kind: "paragraph",
+          text: "9-A.1. The basic method of signature is paper with handwritten signatures or electronic document management with an enhanced qualified electronic signature. The Agreement itself, the original Appendix No. 9 and any change of bank details or signatories are executed by those methods unless the Parties have separately agreed another reliable identification procedure.",
+        },
+        {
+          kind: "paragraph",
+          text: "9-A.2. Technical correspondence is permitted through the channels listed. A cabinet administrator does not acquire the right to enter into transactions merely by virtue of a technical role. The list of signatories and their authority is checked before a signature is accepted; a shared departmental mailbox without an identified signatory is not used for a simple electronic signature.",
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-9-pep",
+      heading: "Appendix No. 9 · 2. Enabling the simple electronic signature by e-mail",
+      blocks: [
+        {
+          kind: "callout",
+          tone: "warning",
+          text: "By default the simple electronic signature is NOT ENABLED. Simple electronic signature mode: [not enabled / enabled]. Permitted documents: [list]. Monetary limit for a single obligation: [amount] RUB. If the mode, the signatory, the individual address or the limit is undefined, the simple electronic signature does not apply. The limit does not restrict the validity of an enhanced qualified electronic signature where the corresponding authority exists.",
+        },
+        {
+          kind: "paragraph",
+          text: "9-A.3. Where the mode is enabled, the Parties recognise the simple electronic signature described below as equivalent to a handwritten signature for the selected documents. The key of the simple electronic signature consists of the confidential means of access to the individual mailbox of the person named. The user must protect that access and must not pass it to anyone else; two-factor authentication is used where technically possible.",
+        },
+        {
+          kind: "paragraph",
+          text: "9-A.4. The signatory sends, from the agreed individual address, a message with the unaltered document file and the text: “I sign [type, number, date, version of the document, name of the attached file] on behalf of [Party]. [Full name, position, basis of authority]”. For a bilateral document the other Party confirms the same version in the same way. A brief “OK”, a forwarded message or an automatic reply is not a signature.",
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-9-dokazatelstva",
+      heading: "Appendix No. 9 · 3. Verification and evidence",
+      blocks: [
+        {
+          kind: "paragraph",
+          text: "9-B.1. The signatory is identified by the combination of the approved individual address, the particulars of the person contained in the message, that person's authority and the link between the message and the exact unaltered attachment. The recipient checks the address and the technical indicators of the sender and compares the file with the agreed version. Where the authenticity or the authority is in doubt, the document is confirmed by an enhanced qualified electronic signature or on paper before the disputed obligation is performed.",
+        },
+        {
+          kind: "paragraph",
+          text: "9-B.2. The Parties retain the original e-mail message with its technical headers, the attached file and the other Party's confirmation; that set constitutes the evidence of the simple electronic signature. Altering the attachment creates a new version that must be signed again. Where only scanned copies are exchanged, the paper original is kept by the signing Party and produced on a reasoned request.",
+        },
+        {
+          kind: "paragraph",
+          text: "9-B.3. Automatically inserting an image of the other Party's signature into an invoice or a statement is not permitted. The system may record the fact of signature and its source, but must not create a signature that does not exist. The date of drawing up, the date of performance and the date of signature are stored separately where they differ.",
+        },
+        {
+          kind: "paragraph",
+          text: "9-B.4. A Party gives notice of a loss of access, a compromised key, a signatory's departure or a revocation of authority without undue delay through the confirmed backup channel. Once such notice is received, new simple electronic signatures from that person are no longer accepted until the arrangement is agreed afresh. A notice of change arriving only from the compromised mailbox is not sufficient confirmation of a new address.",
+        },
+        {
+          kind: "paragraph",
+          text: "9-B.5. For notices and claims, confirmation of delivery is assessed under the terms of the Agreement. Placing a file in the cabinet counts as delivery only where that method has been agreed in advance, the addressee is identified and confirmation is available. Technical logs are not treated as conclusive evidence in advance.",
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-9-svedeniya",
+      heading: "Appendix No. 9 · 4. Additional particulars",
+      blocks: [
+        {
+          kind: "table",
+          columns: ["Condition", "To be completed"],
+          columnRatios: [1, 2.4],
+          rows: [
+            [
+              "Electronic document management operator and identifiers",
+              "[Party, operator, ID; or paper document flow]",
+            ],
+            [
+              "Documents permitted with a simple electronic signature",
+              "[for example orders, assignments, statements; or the simple electronic signature is not enabled]",
+            ],
+            [
+              "Address for invoices and receipts",
+              "[e-mail of the accounts department/authorised person]",
+            ],
+            [
+              "Backup confirmation channel",
+              "[telephone / enhanced qualified electronic signature / in-person delivery]",
+            ],
+            ["Date the agreed authority takes effect", "[date]"],
+          ],
+        },
+        {
+          kind: "paragraph",
+          text: "Any change to the terms of this appendix is made by a signed document. It has no retroactive effect on messages already received and does not validate the signature of a person who in fact had no authority.",
+        },
+        SIGNATURES,
+      ],
+    },
+    {
+      id: "prilozhenie-10",
+      heading: "Appendix No. 10. Form of confirmation of data transfer and deletion",
+      startsPage: true,
+      blocks: [
+        {
+          kind: "paragraph",
+          text: `CONFIRMATION No. [number] of [date of drawing up]. Agreement No. ${number}; instruction No. [number]; cabinet [tenant ID]. Ground: [end of the order / the Customer's written instruction No. ...]. Contractor: Sole Proprietor Vladislav Sergeevich Bogatyrev. Customer: [name, TIN].`,
+        },
+        {
+          kind: "table",
+          columns: ["A. Data transfer — after the transfer has taken place", "Actual value"],
+          columnRatios: [1, 2.4],
+          rows: [
+            [
+              "Composition and period of the data",
+              "[objects, reports, period; information excluded and the ground]",
+            ],
+            [
+              "Format and identifiers",
+              "[formats, file names, size; checksums where available]",
+            ],
+            [
+              "When and how delivered",
+              "[date, secure channel; recipient; how long the link remains accessible]",
+            ],
+            ["Confirmation of receipt", "[date and method of confirmation / not yet received]"],
+          ],
+        },
+        {
+          kind: "table",
+          columns: [
+            "B. Deletion — completed separately, after it has been carried out",
+            "Actual value",
+          ],
+          columnRatios: [1, 2.4],
+          rows: [
+            [
+              "Ground and scope of deletion",
+              "[instruction, categories of data and systems]",
+            ],
+            ["Principal stores", "[what was deleted; date; method of verification]"],
+            [
+              "Copies / engaged processors",
+              "[date of deletion, confirmation; or blocking, the reason, the lawful ground and the final deadline]",
+            ],
+            [
+              "Particular information retained",
+              "[none / list, lawful ground, access and retention period]",
+            ],
+            [
+              "Information remaining with the Customer",
+              "Local copies on the Customer's devices are deleted or retained by the Customer on its own lawful grounds.",
+            ],
+          ],
+        },
+        {
+          kind: "callout",
+          tone: "warning",
+          text: "A section that has not been carried out is marked “Not performed as at the date of this document” and is not signed as performed. Receiving an export does not mean deletion has occurred; deletion does not mean the Customer has received the file. For deletion, a new document or a signed supplement is drawn up after it has actually been completed.",
+        },
+        TRANSFER_SIGNATURES,
+      ],
+    },
+  ];
+}
+
 /**
  * The English sections of the standard Markiro client agreement.
  *
@@ -1257,6 +1470,7 @@ export function buildEnAgreementSections(
       ...bodySections(fields),
       ...appendixOneTwoSections(fields),
       ...appendixThreeFourSections(fields),
+      ...appendixNineTenSections(fields),
     ].map((section) => [
       section.id,
       section,
