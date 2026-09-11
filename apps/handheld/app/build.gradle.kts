@@ -23,9 +23,25 @@ val signingProperties = Properties().apply {
 }
 
 fun signingValue(property: String, variable: String): String? =
-    signingProperties.getProperty(property) ?: System.getenv(variable)
+    (signingProperties.getProperty(property) ?: System.getenv(variable))?.takeIf { it.isNotBlank() }
 
-val releaseStoreFile = signingValue("storeFile", "MARKIRO_HANDHELD_STORE_FILE")
+/**
+ * All four or none.
+ *
+ * Half the material is a misconfiguration -- a secret that failed to reach the
+ * runner, a typo in one variable -- and acting on it gets an opaque failure out
+ * of the signing plugin. Falling back to the unsigned artifact keeps the
+ * behaviour predictable, and the release workflow refuses an unsigned APK
+ * outright, so a lost secret still cannot pass for a release.
+ */
+val releaseSigning: Map<String, String>? = listOf(
+    "storeFile" to "MARKIRO_HANDHELD_STORE_FILE",
+    "storePassword" to "MARKIRO_HANDHELD_STORE_PASSWORD",
+    "keyAlias" to "MARKIRO_HANDHELD_KEY_ALIAS",
+    "keyPassword" to "MARKIRO_HANDHELD_KEY_PASSWORD",
+).associate { (property, variable) -> property to signingValue(property, variable) }
+    .takeIf { values -> values.values.none { it == null } }
+    ?.mapValues { (_, value) -> checkNotNull(value) }
 
 android {
     namespace = "app.markiro.handheld"
@@ -48,11 +64,11 @@ android {
 
     signingConfigs {
         create("release") {
-            if (releaseStoreFile != null) {
-                storeFile = file(releaseStoreFile)
-                storePassword = signingValue("storePassword", "MARKIRO_HANDHELD_STORE_PASSWORD")
-                keyAlias = signingValue("keyAlias", "MARKIRO_HANDHELD_KEY_ALIAS")
-                keyPassword = signingValue("keyPassword", "MARKIRO_HANDHELD_KEY_PASSWORD")
+            releaseSigning?.let { material ->
+                storeFile = file(material.getValue("storeFile"))
+                storePassword = material.getValue("storePassword")
+                keyAlias = material.getValue("keyAlias")
+                keyPassword = material.getValue("keyPassword")
             }
         }
     }
@@ -65,7 +81,7 @@ android {
         release {
             // Unsigned when the material is absent, which is what a checkout
             // without the key should produce -- not a build that fails.
-            signingConfig = if (releaseStoreFile != null) signingConfigs.getByName("release") else null
+            signingConfig = if (releaseSigning != null) signingConfigs.getByName("release") else null
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

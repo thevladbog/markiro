@@ -49,7 +49,12 @@ jobs:
           # A store rejects a malformed name and silently orders by the code, so
           # both are checked before any signing material is touched.
           printf '%s' "$VERSION_NAME" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
-          printf '%s' "$VERSION_CODE" | grep -Eq '^[1-9][0-9]*$'
+          # `versionCode` is an Android int. Without the bound the value passes
+          # here and only fails inside Gradle -- by which time the key has
+          # already been written to the runner.  Ten digits at most keeps the
+          # comparison below inside shell arithmetic.
+          printf '%s' "$VERSION_CODE" | grep -Eq '^[1-9][0-9]{0,9}$'
+          test "$VERSION_CODE" -le 2147483647
 
   release:
     if: github.ref == 'refs/heads/main'
