@@ -47,7 +47,7 @@ export class PlatformAgreementsController {
 
   @Get()
   @ApiOperation({ summary: "List client agreements" })
-  @PlatformApiProtectedOk({ response: contracts.list.response })
+  @PlatformApiProtectedOk({ response: contracts.list.response, query: contracts.list.query })
   @RequirePlatformCapabilities("agreements.read")
   async list(@Query(new ZodValidationPipe(contracts.list.query)) query: ListQuery) {
     return parsePlatformResponse(contracts.list.response, await this.agreements.list(query));

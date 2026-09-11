@@ -98,8 +98,19 @@ export function AgreementDetailPage() {
   const nextStatuses: readonly AgreementStatus[] = AGREEMENT_TRANSITIONS[detail.status];
 
   const openDocument = async (documentId: string) => {
-    const { url } = await downloadAgreementDocument(id, documentId);
-    window.open(url, "_blank", "noopener,noreferrer");
+    // Opened synchronously from the click: a popup blocker refuses a
+    // window.open that happens after an await. `noopener` would make the
+    // call return null, so the handle is kept and its opener cleared.
+    const tab = window.open("", "_blank");
+    if (tab) tab.opener = null;
+    try {
+      const { url } = await downloadAgreementDocument(id, documentId);
+      if (tab) tab.location.replace(url);
+      else window.location.assign(url);
+    } catch (error) {
+      tab?.close();
+      throw error;
+    }
   };
 
   return (
@@ -171,10 +182,13 @@ export function AgreementDetailPage() {
       )}
 
       <h3>{t("agreements.sections.counterparty")}</h3>
+      {/* Read-only until an update workflow exists: an enabled control whose
+          onChange is discarded silently loses the operator's edit. Editing
+          happens through the create form today. */}
       <AgreementRequisitesForm
         value={fromRequisites(detail.counterparty)}
         onChange={() => undefined}
-        disabled={!detail.editable}
+        disabled
       />
 
       <h3>{t("agreements.sections.documents")}</h3>

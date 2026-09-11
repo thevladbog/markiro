@@ -45,10 +45,10 @@ export function toAgreementFields(source: AgreementFieldSource): TenantAgreement
     ...(source.conclusionDate === null ? {} : { conclusionDate: source.conclusionDate }),
     ...(source.city === null ? {} : { city: source.city }),
     customer: toPartyRequisites(source.counterparty),
-    contractor: {
-      ...toPartyRequisites(source.contractor),
-      taxRegime: "НПД",
-    },
+    // The operator profile carries no tax-regime field, so nothing is
+    // asserted here; the template's own default decides what prints, in one
+    // place rather than two.
+    contractor: toPartyRequisites(source.contractor),
     signatory: source.signatory,
     terms: source.terms,
   };

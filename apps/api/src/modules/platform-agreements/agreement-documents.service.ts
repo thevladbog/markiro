@@ -47,6 +47,12 @@ const ATTACHMENT_SIGNATURES = new Map<string, readonly number[]>([
 type AgreementRow = typeof schema.platformAgreements.$inferSelect;
 type AgreementDocumentRow = typeof schema.platformAgreementDocuments.$inferSelect;
 
+export interface SignedRender {
+  readonly objectKey: string;
+  readonly sha256: string;
+  readonly byteSize: number;
+}
+
 export function assertAllowedAttachment(mediaType: string, body: Buffer): void {
   const signature = ATTACHMENT_SIGNATURES.get(mediaType);
   if (!signature) throw new BadRequestException("Unsupported attachment type");
@@ -132,15 +138,26 @@ export class AgreementDocumentsService {
    * the object-key constraint is unique, so a re-render of identical bytes
    * conflicts rather than silently replacing a signed artifact.
    */
-  async renderSigned(
-    tx: Pick<Db, "insert">,
-    agreement: AgreementRow,
-  ): Promise<{ document: AgreementDocumentRow; sha256: string }> {
+  /**
+   * Renders and uploads outside any transaction: object-store round trips
+   * must not hold a database transaction open. The key is content-addressed
+   * and its column is unique, so a repeated render conflicts rather than
+   * silently replacing a signed artifact. A render whose transaction later
+   * rolls back leaves a collectable object, never a dangling row.
+   */
+  async renderSignedObject(agreement: AgreementRow): Promise<SignedRender> {
     const bytes = await this.render(agreement, "ДОГОВОР");
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     const objectKey = agreementSignedObjectKey(agreement.id, sha256);
     await this.storage.putVerified(objectKey, bytes, DOCX_MEDIA_TYPE, sha256);
+    return { objectKey, sha256, byteSize: bytes.byteLength };
+  }
 
+  async recordSignedDocument(
+    tx: Pick<Db, "insert">,
+    agreement: AgreementRow,
+    rendered: SignedRender,
+  ): Promise<AgreementDocumentRow> {
     const [saved] = await tx
       .insert(schema.platformAgreementDocuments)
       .values({
@@ -148,15 +165,15 @@ export class AgreementDocumentsService {
         kind: "generated",
         filename: `${agreement.number}.docx`,
         mediaType: DOCX_MEDIA_TYPE,
-        objectKey,
-        sha256,
-        byteSize: bytes.byteLength,
+        objectKey: rendered.objectKey,
+        sha256: rendered.sha256,
+        byteSize: rendered.byteSize,
         rendererVersion: AGREEMENT_RENDERER_VERSION,
         uploadedByPlatformUserId: null,
       })
       .returning();
     if (!saved) throw new Error("Signed agreement document was not stored");
-    return { document: saved, sha256 };
+    return saved;
   }
 
   async download(agreementId: string, documentId: string): Promise<{ url: string }> {
@@ -222,7 +239,6 @@ export class AgreementDocumentsService {
     if (document.kind !== "attachment") {
       throw new BadRequestException("Only an uploaded attachment can be deleted");
     }
-    await this.storage.deleteConfirmed(document.objectKey);
     await this.db.transaction(async (tx) => {
       await tx
         .delete(schema.platformAgreementDocuments)
@@ -241,6 +257,10 @@ export class AgreementDocumentsService {
         requestId: null,
       });
     });
+    // Only after the row is gone: a failed object delete leaves collectable
+    // storage garbage, whereas the reverse order leaves a row pointing at an
+    // object that no longer exists.
+    await this.storage.deleteConfirmed(document.objectKey);
     return { deleted: true };
   }
 

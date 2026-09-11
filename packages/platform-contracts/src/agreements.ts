@@ -219,7 +219,12 @@ const transitionBody = z
 const listQuery = z
   .object({
     status: agreementStatusSchema.optional(),
-    withoutTenant: z.coerce.boolean().optional(),
+    // Not z.coerce.boolean(): that maps every non-empty string to true, so
+    // ?withoutTenant=false would filter as if it were true.
+    withoutTenant: z
+      .union([z.boolean(), z.literal("true"), z.literal("false")])
+      .transform((value) => value === true || value === "true")
+      .optional(),
     search: z.string().trim().min(1).max(200).optional(),
   })
   .strict();

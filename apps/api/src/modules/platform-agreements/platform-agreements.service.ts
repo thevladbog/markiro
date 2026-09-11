@@ -122,43 +122,55 @@ export class PlatformAgreementsService {
     const existing = await this.requireAgreement(id);
     this.assertEditable(existing);
 
-    const row = await this.db.transaction(async (tx) => {
-      const terms = input.terms ?? parseTerms(existing.terms);
-      const signatory = input.signatory ?? parseSignatory(existing.terms);
-      const [updated] = await tx
-        .update(schema.platformAgreements)
-        .set({
-          ...(input.number === undefined ? {} : { number: input.number }),
-          ...(input.conclusionDate === undefined ? {} : { conclusionDate: input.conclusionDate }),
-          ...(input.city === undefined ? {} : { city: input.city }),
-          ...(input.counterparty === undefined
-            ? {}
-            : {
-                counterparty: input.counterparty,
-                counterpartyInn: input.counterparty.inn ?? null,
-              }),
-          terms: buildStoredTerms(terms, signatory),
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.platformAgreements.id, id))
-        .returning();
-      if (!updated) throw new NotFoundException("Agreement not found");
+    const run = async () =>
+      this.db.transaction(async (tx) => {
+        const terms = input.terms ?? parseTerms(existing.terms);
+        const signatory = input.signatory ?? parseSignatory(existing.terms);
+        const [updated] = await tx
+          .update(schema.platformAgreements)
+          .set({
+            ...(input.number === undefined ? {} : { number: input.number }),
+            ...(input.conclusionDate === undefined ? {} : { conclusionDate: input.conclusionDate }),
+            ...(input.city === undefined ? {} : { city: input.city }),
+            ...(input.counterparty === undefined
+              ? {}
+              : {
+                  counterparty: input.counterparty,
+                  counterpartyInn: input.counterparty.inn ?? null,
+                }),
+            terms: buildStoredTerms(terms, signatory),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.platformAgreements.id, id))
+          .returning();
+        if (!updated) throw new NotFoundException("Agreement not found");
 
-      await this.audit.record(tx, {
-        actorPlatformUserId: actor.userId,
-        actorRole: actor.role,
-        action: "platform.agreement.updated",
-        outcome: "success",
-        tenantId: updated.tenantId,
-        targetType: "platform_agreement",
-        targetId: updated.id,
-        reason: null,
-        before: { number: existing.number },
-        after: { number: updated.number },
-        requestId: null,
+        await this.audit.record(tx, {
+          actorPlatformUserId: actor.userId,
+          actorRole: actor.role,
+          action: "platform.agreement.updated",
+          outcome: "success",
+          tenantId: updated.tenantId,
+          targetType: "platform_agreement",
+          targetId: updated.id,
+          reason: null,
+          before: { number: existing.number },
+          after: { number: updated.number },
+          requestId: null,
+        });
+        return updated;
       });
-      return updated;
-    });
+
+    let row;
+    try {
+      row = await run();
+    } catch (error) {
+      // Same rule as create: the constraint decides who owns a number.
+      if (isUniqueViolation(error, NUMBER_CONSTRAINT)) {
+        throw new ConflictException("Agreement number is already taken");
+      }
+      throw error;
+    }
     return { agreement: await this.withDocuments(row) };
   }
 
@@ -171,6 +183,10 @@ export class PlatformAgreementsService {
     const existing = await this.requireAgreement(id);
     const from = existing.status;
     this.assertTransition(from, target);
+
+    // Rendering and uploading happen first: the transaction below must not
+    // stay open across object-store round trips.
+    const rendered = target === "signed" ? await this.documents.renderSignedObject(existing) : null;
 
     const row = await this.db.transaction(async (tx) => {
       const now = new Date();
@@ -195,8 +211,19 @@ export class PlatformAgreementsService {
           ? { terminatedAt: now, terminationReason: terminationReason ?? null }
           : {};
 
-      if (target === "signed") {
-        await this.documents.renderSigned(tx, existing);
+      // Re-read under a row lock: the status may have moved while the
+      // document was rendered and uploaded.
+      const [current] = await tx
+        .select({ status: schema.platformAgreements.status })
+        .from(schema.platformAgreements)
+        .where(eq(schema.platformAgreements.id, id))
+        .for("update");
+      if (!current) throw new NotFoundException("Agreement not found");
+      if (current.status !== from) {
+        throw new ConflictException("Agreement status changed while the document was rendered");
+      }
+      if (rendered) {
+        await this.documents.recordSignedDocument(tx, existing, rendered);
       }
 
       const [updated] = await tx
