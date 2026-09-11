@@ -91,6 +91,7 @@
     <string name="theme_light">Light</string>
     <string name="theme_system">System</string>
     <string name="settings_about">ABOUT THIS DEVICE</string>
+    <string name="settings_vendor">Vendor</string>
     <string name="settings_name">Name</string>
     <string name="settings_server">Server</string>
     <string name="settings_version">Version</string>

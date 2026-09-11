@@ -117,6 +117,7 @@ fun SettingsScreen(
             InfoRow(stringResource(R.string.settings_name), listOfNotNull(config?.deviceName, config?.lineName).joinToString(" · "))
             InfoRow(stringResource(R.string.settings_server), config?.serverUrl.orEmpty().removePrefix("https://"))
             InfoRow(stringResource(R.string.settings_version), state.version)
+            InfoRow(stringResource(R.string.settings_vendor), stringResource(R.string.settings_vendor_value))
             InfoRow(
                 stringResource(R.string.settings_sync),
                 state.lastSyncAt?.let { stringResource(R.string.settings_sync_value, state.queue, TimeText.hhmm(it)) }

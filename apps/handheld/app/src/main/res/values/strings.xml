@@ -97,6 +97,9 @@
     <string name="theme_light">Светлая</string>
     <string name="theme_system">Как в системе</string>
     <string name="settings_about">ОБ УСТРОЙСТВЕ</string>
+    <string name="settings_vendor">Производитель</string>
+    <!-- A company domain, not copy: the same in every locale. -->
+    <string name="settings_vendor_value" translatable="false">v-b.tech</string>
     <string name="settings_name">Имя</string>
     <string name="settings_server">Сервер</string>
     <string name="settings_version">Версия</string>
