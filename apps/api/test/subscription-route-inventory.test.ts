@@ -489,6 +489,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "PlatformOffersController.create": platform(
     "platform billing offer creation is guarded by platform capabilities",
   ),
+  "PlatformOffersController.updateDraft": platform(
+    "platform billing draft editing is guarded by the isolated platform billing.write capability",
+  ),
   "PlatformBillingRequestsController.comment": platform(
     "platform billing request comments are guarded by platform billing capabilities",
   ),

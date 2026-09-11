@@ -6,6 +6,7 @@ import {
   Headers,
   HttpCode,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -13,6 +14,8 @@ import {
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import {
   platformCommercialContracts,
+  platformOfferDraftContracts,
+  type OfferDraftUpdate,
   platformCommercialV2Contracts,
   platformOfferWorkspaceContracts,
   platformOfferWorkspaceV2Contracts,
@@ -138,6 +141,21 @@ export class PlatformOffersController {
       platformCommercialContracts.offers.detail.response,
       platformCommercialV2Contracts.offers.detail.response,
       await this.offers.detail(req.platformPrincipal!, id),
+    );
+  }
+
+  @Patch(":id/draft")
+  @ApiOperation({ summary: "Update a saved commercial offer draft" })
+  @PlatformApiProtectedOk(platformOfferDraftContracts.update)
+  @RequirePlatformCapabilities("billing.write")
+  async updateDraft(
+    @Req() req: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
+    @Body(new ZodValidationPipe(platformOfferDraftContracts.update.body)) body: OfferDraftUpdate,
+  ) {
+    return parsePlatformResponse(
+      platformOfferDraftContracts.update.response,
+      await this.offers.updateDraft(req.platformPrincipal!, id, body, commercialVersion(req)),
     );
   }
 

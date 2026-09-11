@@ -29,6 +29,7 @@ type Transaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
 export async function resolveOfferPrintInput(
   tx: Transaction,
   draft: typeof schema.commercialOffers.$inferSelect,
+  purpose: "preview" | "issue" = "issue",
 ) {
   const details = await resolveCommercialBillingDetails(
     tx,
@@ -46,7 +47,7 @@ export async function resolveOfferPrintInput(
     )
     .orderBy(asc(schema.commercialOfferLines.position))
     .for("share");
-  await validateCommercialIssuance(tx, lines);
+  if (purpose === "issue") await validateCommercialIssuance(tx, lines);
   const totals = calculateSavedOfferAmounts(lines, draft.total);
   if (lines.some((line, index) => line.lineTotal !== totals.lines[index]?.lineTotal))
     throw new ConflictException({ code: "commercial_source_review_required" });
@@ -110,7 +111,7 @@ export class OfferPreviewService {
         .limit(1);
       if (!draft || draft.status !== "draft")
         throw new ConflictException({ code: "offer_not_draft" });
-      const { snapshot, fingerprint } = await resolveOfferPrintInput(tx, draft);
+      const { snapshot, fingerprint } = await resolveOfferPrintInput(tx, draft, "preview");
       const model = toOfferPrintModel({
         ...snapshot,
         number: "",
