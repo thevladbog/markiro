@@ -1,4 +1,5 @@
 import type { LegalDocumentLocaleContent, LegalLocale } from "../types.js";
+import { buildEnAgreementSections } from "./tenant-agreement-en.js";
 import type { TenantAgreementFields } from "./tenant-agreement-fields.js";
 import { buildRuAgreementSections } from "./tenant-agreement-ru.js";
 
@@ -12,8 +13,15 @@ export function buildTenantAgreement(
   fields: TenantAgreementFields,
   locale: LegalLocale,
 ): LegalDocumentLocaleContent {
-  if (locale !== "ru") {
-    throw new Error("English tenant agreement is not available in this revision");
+  if (locale === "en") {
+    return {
+      locale: "en",
+      title:
+        "Agreement on granting the right to use the Markiro computer program, access to the service and performance of services and works",
+      summary:
+        "Draft of the standard Markiro agreement with a customer that is a legal entity or a sole proprietor: a simple (non-exclusive) licence, access to server-side functionality, and services and works under separate assignments. The agreement is not concluded until the bracketed fields are completed and the parties have executed it in an agreed manner.",
+      sections: buildEnAgreementSections(fields),
+    };
   }
   return {
     locale: "ru",
