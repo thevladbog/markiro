@@ -14,6 +14,7 @@ function vatRateBps(value: string | null): number | null {
 export function sourceOfferDraft(
   source: Pick<OfferDetail, "tenantId" | "sellerBankAccountId" | "lines"> & {
     id?: string;
+    total?: string;
     sourceRequestId?: string;
   },
   catalog: readonly CatalogVersionDto[],
@@ -21,42 +22,38 @@ export function sourceOfferDraft(
   const lines: DocumentLineDraft[] = source.lines.map((line) => {
     const version = catalog.find((candidate) => candidate.id === line.catalogVersionId);
     const sourceVatRateBps = vatRateBps(line.vatRate);
-    const catalogBacked =
-      version !== undefined &&
-      version.kind === line.kind &&
-      version.nameRu === line.nameRu &&
-      version.nameEn === line.nameEn &&
-      version.unit === line.unit &&
-      (version.unitPrice ?? null) === (line.catalogUnitPrice ?? null) &&
-      (version.vatRateBps ?? null) === sourceVatRateBps &&
-      (version.vatIncluded ?? false) === line.vatIncluded;
     return {
       id: `offer-line-${line.id}`,
-      kind: catalogBacked ? line.kind : "custom",
-      catalogVersionId: catalogBacked ? line.catalogVersionId : null,
-      catalogItemCode: catalogBacked ? version.catalogItemCode : "",
-      version: catalogBacked ? version.version : 0,
+      kind: line.kind === "service" && !line.catalogVersionId ? "custom" : line.kind,
+      catalogVersionId: line.catalogVersionId,
+      catalogItemCode: version?.catalogItemCode ?? "",
+      version: version?.version ?? 0,
       nameRu: line.nameRu,
       nameEn: line.nameEn,
       descriptionRu: line.descriptionRu ?? null,
       descriptionEn: line.descriptionEn ?? null,
       quantity: line.quantity,
       unit: line.unit,
-      catalogUnitPrice: catalogBacked
-        ? (version.unitPrice ?? null)
-        : (line.catalogUnitPrice ?? null),
+      catalogUnitPrice: line.catalogUnitPrice ?? null,
+      commercialTerms: line.commercialTerms,
       agreedUnitPrice: line.agreedUnitPrice,
       vatRateBps: sourceVatRateBps,
       vatIncluded: line.vatIncluded,
-      activationPolicy: catalogBacked
-        ? line.activationPolicy === "immediately"
-          ? "immediate"
-          : line.activationPolicy
-        : null,
+      activationPolicy:
+        line.kind === "plan"
+          ? line.activationPolicy === "after_current"
+            ? "after_current"
+            : "immediate"
+          : line.kind === "addon"
+            ? line.commercialTerms?.activationRule === "after_current"
+              ? "after_current"
+              : "immediate"
+            : null,
     };
   });
   return {
     tenantId: source.tenantId,
+    ...(source.total !== undefined ? { sourceTotal: source.total } : {}),
     ...(source.id !== undefined ? { sourceOfferId: source.id } : {}),
     ...(source.sourceRequestId !== undefined ? { sourceRequestId: source.sourceRequestId } : {}),
     ...(source.sellerBankAccountId !== undefined

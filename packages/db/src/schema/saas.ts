@@ -1,3 +1,4 @@
+import { commercialLineTermsCheck, commercialPeriodCheck } from "./commercial-checks.js";
 import { sql } from "drizzle-orm";
 import {
   boolean,
@@ -118,6 +119,10 @@ export const catalogItemVersions = pgTable(
     kind: catalogItemKind("kind").notNull(),
     version: integer("version").notNull(),
     status: catalogVersionStatus("status").notNull().default("draft"),
+    documentNameRu: text("document_name_ru"),
+    documentNameEn: text("document_name_en"),
+    subject: text("subject").$type<"software_license" | "service" | "development_work">(),
+    sellerPolicyRevision: integer("seller_policy_revision"),
     nameRu: text("name_ru").notNull(),
     nameEn: text("name_en").notNull(),
     descriptionRu: text("description_ru"),
@@ -143,6 +148,10 @@ export const catalogItemVersions = pgTable(
       columns: [table.catalogItemId, table.kind],
       foreignColumns: [catalogItems.id, catalogItems.kind],
     }),
+    check(
+      "catalog_item_versions_commercial_metadata_check",
+      sql`(${table.documentNameRu} is null or length(btrim(${table.documentNameRu})) between 1 and 300) and (${table.documentNameEn} is null or length(btrim(${table.documentNameEn})) between 1 and 300) and (${table.sellerPolicyRevision} is null or ${table.sellerPolicyRevision} > 0) and (${table.subject} is null or (${table.kind} in ('plan','addon') and ${table.subject} = 'software_license') or (${table.kind} = 'service' and ${table.subject} in ('service','development_work')))`,
+    ),
     check("catalog_item_versions_version_positive", sql`${table.version} > 0`),
     check("catalog_item_versions_unit_price_nonnegative", sql`${table.unitPrice} >= 0`),
     check(
@@ -188,19 +197,19 @@ export const planEntitlements = pgTable(
     check("plan_entitlements_kind_check", sql`${table.catalogKind} = 'plan'`),
     check(
       "plan_entitlements_max_lines_positive",
-      sql`${table.maxLines} is null or ${table.maxLines} > 0`,
+      sql`${table.maxLines} is null or ${table.maxLines} >= 0`,
     ),
     check(
       "plan_entitlements_max_stations_positive",
-      sql`${table.maxStations} is null or ${table.maxStations} > 0`,
+      sql`${table.maxStations} is null or ${table.maxStations} >= 0`,
     ),
     check(
       "plan_entitlements_max_kiosks_positive",
-      sql`${table.maxKiosks} is null or ${table.maxKiosks} > 0`,
+      sql`${table.maxKiosks} is null or ${table.maxKiosks} >= 0`,
     ),
     check(
       "plan_entitlements_max_cabinet_users_positive",
-      sql`${table.maxCabinetUsers} is null or ${table.maxCabinetUsers} > 0`,
+      sql`${table.maxCabinetUsers} is null or ${table.maxCabinetUsers} >= 0`,
     ),
     check(
       "plan_entitlements_demo_duration_positive",
@@ -397,6 +406,7 @@ export const commercialOfferDocuments = pgTable(
 export const commercialOfferLines = pgTable(
   "commercial_offer_lines",
   {
+    commercialTerms: jsonb("commercial_terms"),
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: text("tenant_id").notNull(),
     offerId: uuid("offer_id").notNull(),
@@ -419,6 +429,10 @@ export const commercialOfferLines = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check(
+      "commercial_offer_lines_commercial_terms_check",
+      commercialLineTermsCheck(table.commercialTerms, table.kind, table.quantity),
+    ),
     unique("commercial_offer_lines_tenant_id_uq").on(table.tenantId, table.id),
     unique("commercial_offer_lines_offer_position_uq").on(table.offerId, table.position),
     foreignKey({
@@ -458,6 +472,7 @@ export const commercialOfferLines = pgTable(
 export const tenantSubscriptions = pgTable(
   "tenant_subscriptions",
   {
+    commercialPeriod: jsonb("commercial_period"),
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: text("tenant_id")
       .notNull()
@@ -475,6 +490,10 @@ export const tenantSubscriptions = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check(
+      "tenant_subscriptions_commercial_period_check",
+      commercialPeriodCheck(table.commercialPeriod),
+    ),
     unique("tenant_subscriptions_tenant_id_uq").on(table.tenantId, table.id),
     uniqueIndex("tenant_subscriptions_one_current_uq")
       .on(table.tenantId)
@@ -515,6 +534,7 @@ export const tenantSubscriptions = pgTable(
 export const subscriptionAddons = pgTable(
   "subscription_addons",
   {
+    commercialPeriod: jsonb("commercial_period"),
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: text("tenant_id").notNull(),
     subscriptionId: uuid("subscription_id").notNull(),
@@ -532,6 +552,10 @@ export const subscriptionAddons = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check(
+      "subscription_addons_commercial_period_check",
+      commercialPeriodCheck(table.commercialPeriod),
+    ),
     unique("subscription_addons_tenant_id_uq").on(table.tenantId, table.id),
     uniqueIndex("subscription_addons_invoice_line_uq")
       .on(table.tenantId, table.sourceInvoiceLineId)

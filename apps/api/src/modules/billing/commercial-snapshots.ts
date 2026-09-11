@@ -101,6 +101,7 @@ export function billingProfileSnapshot(profile: OperatorProfile | TenantProfile)
     postalAddress: profile.postalAddress,
     contact: profile.contact,
     revision: profile.revision,
+    ...("taxPolicy" in profile ? { taxPolicy: profile.taxPolicy } : {}),
     confirmedAt: profile.confirmedAt,
   };
 }

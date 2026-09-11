@@ -2,23 +2,29 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   currentBillingProfileInputSchema,
-  currentOperatorBillingProfileInputSchema,
+  operatorBillingProfileInputV2Schema,
+  type SellerTaxPolicy,
+  type OperatorBillingProfileV2,
   type BillingProfile,
   type BillingProfileInput,
   type DadataAddressSuggestion,
   type DadataOrganizationSuggestion,
-  type OperatorBillingProfileInput,
+  type OperatorBillingProfileInputV2 as OperatorBillingProfileInput,
 } from "@markiro/platform-contracts";
 import { Alert, Button, Checkbox, Input, Select } from "@markiro/ui";
 
 import { AddressSuggestField } from "./AddressSuggestField.js";
 import { OrganizationSuggestField } from "./OrganizationSuggestField.js";
 
-type Profile = BillingProfile;
+type Profile = BillingProfile | OperatorBillingProfileV2;
 type ProfileInput = BillingProfileInput | OperatorBillingProfileInput;
 
 interface Draft {
   kind: BillingProfileInput["kind"];
+  taxMode: "unconfigured" | "npd" | "without_vat" | "vat";
+  taxRates: string;
+  taxDefault: string;
+  taxIncluded: boolean;
   fullName: string;
   displayName: string;
   inn: string;
@@ -100,6 +106,7 @@ export function LegalProfileForm({
       className="legal-profile-form"
       onSubmit={(event) => {
         event.preventDefault();
+        if (busy) return;
         setError(null);
         setSaved(false);
         if (!confirmed) {
@@ -109,7 +116,10 @@ export function LegalProfileForm({
         const input = toInput(draft);
         const parsed =
           scope === "operator"
-            ? currentOperatorBillingProfileInputSchema.safeParse(input)
+            ? operatorBillingProfileInputV2Schema.safeParse({
+                ...input,
+                taxPolicy: taxPolicyFromDraft(draft),
+              })
             : currentBillingProfileInputSchema.safeParse(input);
         if (!parsed.success) {
           setError(t("legal.validation.invalid"));
@@ -270,6 +280,45 @@ export function LegalProfileForm({
         </div>
       </fieldset>
 
+      {scope === "operator" ? (
+        <fieldset disabled={!canWrite || busy}>
+          <legend>{t("commercial.seller.title")}</legend>
+          {draft.taxMode === "unconfigured" ? (
+            <Alert tone="warn">{t("catalog.policyRequired")}</Alert>
+          ) : null}
+          <Select
+            native
+            label={t("commercial.seller.title")}
+            value={draft.taxMode}
+            onValueChange={(taxMode) => patch({ taxMode })}
+            options={(["unconfigured", "npd", "without_vat", "vat"] as const).map((value) => ({
+              value,
+              label: t(`commercial.seller.${value}`),
+            }))}
+          />
+          {draft.taxMode === "vat" ? (
+            <div className="legal-form-grid legal-form-grid--two">
+              <Input
+                label={t("commercial.seller.rates")}
+                value={draft.taxRates}
+                onChange={(event) => patch({ taxRates: event.target.value })}
+              />
+              <Input
+                label={t("commercial.seller.defaultRate")}
+                inputMode="decimal"
+                value={draft.taxDefault}
+                onChange={(event) => patch({ taxDefault: event.target.value })}
+              />
+              <Checkbox
+                label={t("catalog.vat.includedHint")}
+                checked={draft.taxIncluded}
+                onCheckedChange={(taxIncluded) => patch({ taxIncluded })}
+              />
+            </div>
+          ) : null}
+        </fieldset>
+      ) : null}
+
       <div className="legal-profile-confirmation">
         <Checkbox
           label={t("legal.confirmation")}
@@ -301,7 +350,20 @@ export function LegalProfileForm({
 }
 
 function draftFromProfile(profile: Profile | null, _scope: "operator" | "tenant"): Draft {
+  const policy = profile && "taxPolicy" in profile ? profile.taxPolicy : null;
   return {
+    taxMode:
+      policy?.kind === "vat"
+        ? "vat"
+        : policy?.kind === "without_vat"
+          ? policy.regime === "npd"
+            ? "npd"
+            : "without_vat"
+          : "unconfigured",
+    taxRates:
+      policy?.kind === "vat" ? policy.allowedRatesBps.map((rate) => rate / 100).join("; ") : "",
+    taxDefault: policy?.kind === "vat" ? String(policy.defaultRateBps / 100) : "",
+    taxIncluded: policy?.kind === "vat" ? policy.defaultIncluded : false,
     kind: profile?.kind ?? "legal_entity",
     fullName: profile?.fullName ?? "",
     displayName: profile?.displayName ?? "",
@@ -373,4 +435,21 @@ function digits(value: string, max: number): string {
 
 function nullable(value: string): string | null {
   return value.trim() || null;
+}
+
+function taxPolicyFromDraft(draft: Draft): SellerTaxPolicy | null {
+  if (draft.taxMode === "unconfigured") return null;
+  if (draft.taxMode !== "vat")
+    return { kind: "without_vat", regime: draft.taxMode === "npd" ? "npd" : "other" };
+  const rate = (text: string) =>
+    /^(?:100(?:[.,]0{1,2})?|\d{1,2}(?:[.,]\d{1,2})?)$/.test(text.trim())
+      ? Math.round(Number(text.trim().replace(",", ".")) * 100)
+      : NaN;
+  return {
+    kind: "vat",
+    regime: "other",
+    allowedRatesBps: draft.taxRates.split(";").map(rate),
+    defaultRateBps: rate(draft.taxDefault),
+    defaultIncluded: draft.taxIncluded,
+  };
 }

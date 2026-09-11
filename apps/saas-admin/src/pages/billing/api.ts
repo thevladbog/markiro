@@ -1,11 +1,13 @@
 import {
-  platformCommercialContracts,
+  platformCommercialV2Contracts,
+  COMMERCIAL_VERSION_HEADER,
+  COMMERCIAL_VERSION,
   type ApplyInvoiceInput,
   type BillingPayment,
-  type CreateInvoiceInput,
+  type CreateInvoiceV2 as CreateInvoiceInput,
   type Invoice,
   type InvoiceApplicationResult,
-  type InvoiceDetail,
+  type InvoiceDetailV2 as InvoiceDetail,
   type ManualPaymentInput,
   type PrintDocumentVariant,
 } from "@markiro/platform-contracts";
@@ -17,49 +19,55 @@ export type RecordInvoicePaymentInput = ManualPaymentInput;
 
 export function listInvoices() {
   return platformApiFetch("/invoices", {
-    responseSchema: platformCommercialContracts.invoices.list.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.invoices.list.response,
   });
 }
 
 export function createInvoice(input: CreateInvoiceInput) {
-  const validated = platformCommercialContracts.invoices.create.body.parse(input);
+  const validated = platformCommercialV2Contracts.invoices.create.body.parse(input);
   return platformApiFetch("/invoices", {
-    responseSchema: platformCommercialContracts.invoices.create.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.invoices.create.response,
     method: "POST",
     body: JSON.stringify(validated),
   });
 }
 
 export function issueInvoice(id: string, printVariant: PrintDocumentVariant = "clean") {
-  const validatedId = platformCommercialContracts.invoices.issue.params.parse(id);
-  const body = platformCommercialContracts.invoices.issue.body.parse({ printVariant });
+  const validatedId = platformCommercialV2Contracts.invoices.issue.params.parse(id);
+  const body = platformCommercialV2Contracts.invoices.issue.body.parse({ printVariant });
   return platformApiFetch(`/invoices/${validatedId}/issue`, {
-    responseSchema: platformCommercialContracts.invoices.issue.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.invoices.issue.response,
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
 export function getInvoice(id: string) {
-  const validatedId = platformCommercialContracts.invoices.detail.params.parse(id);
+  const validatedId = platformCommercialV2Contracts.invoices.detail.params.parse(id);
   return platformApiFetch(`/invoices/${validatedId}`, {
-    responseSchema: platformCommercialContracts.invoices.detail.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.invoices.detail.response,
   });
 }
 
 export function cancelInvoice(id: string) {
-  const validatedId = platformCommercialContracts.invoices.cancel.params.parse(id);
+  const validatedId = platformCommercialV2Contracts.invoices.cancel.params.parse(id);
   return platformApiFetch(`/invoices/${validatedId}/cancel`, {
-    responseSchema: platformCommercialContracts.invoices.cancel.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.invoices.cancel.response,
     method: "POST",
     body: "{}",
   });
 }
 
 export function deleteInvoiceDraft(id: string) {
-  const validatedId = platformCommercialContracts.invoices.delete.params.parse(id);
+  const validatedId = platformCommercialV2Contracts.invoices.delete.params.parse(id);
   return platformApiFetch(`/invoices/${validatedId}`, {
-    responseSchema: platformCommercialContracts.invoices.delete.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.invoices.delete.response,
     method: "DELETE",
   });
 }
@@ -68,10 +76,11 @@ export function recordInvoicePayment(
   id: string,
   input: RecordInvoicePaymentInput,
 ): Promise<BillingPayment> {
-  const validatedId = platformCommercialContracts.payments.manual.params.parse(id);
-  const validated = platformCommercialContracts.payments.manual.body.parse(input);
+  const validatedId = platformCommercialV2Contracts.payments.manual.params.parse(id);
+  const validated = platformCommercialV2Contracts.payments.manual.body.parse(input);
   return platformApiFetch(`/payments/invoices/${validatedId}`, {
-    responseSchema: platformCommercialContracts.payments.manual.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.payments.manual.response,
     method: "POST",
     body: JSON.stringify(validated),
   });
@@ -81,34 +90,37 @@ export function applyInvoice(
   id: string,
   input: ApplyInvoiceInput,
 ): Promise<InvoiceApplicationResult> {
-  const validatedId = platformCommercialContracts.invoices.apply.params.parse(id);
-  const validated = platformCommercialContracts.invoices.apply.body.parse(input);
+  const validatedId = platformCommercialV2Contracts.invoices.apply.params.parse(id);
+  const validated = platformCommercialV2Contracts.invoices.apply.body.parse(input);
   return platformApiFetch(`/invoices/${validatedId}/apply`, {
-    responseSchema: platformCommercialContracts.invoices.apply.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.invoices.apply.response,
     method: "POST",
     body: JSON.stringify(validated),
   });
 }
 
 export function renderInvoice(id: string, printVariant: PrintDocumentVariant = "clean") {
-  const validatedId = platformCommercialContracts.invoices.documents.render.params.parse(id);
-  const body = platformCommercialContracts.invoices.documents.render.body.parse({ printVariant });
+  const validatedId = platformCommercialV2Contracts.invoices.documents.render.params.parse(id);
+  const body = platformCommercialV2Contracts.invoices.documents.render.body.parse({ printVariant });
   return platformApiFetch(`/invoices/${validatedId}/documents`, {
-    responseSchema: platformCommercialContracts.invoices.documents.render.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.invoices.documents.render.response,
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
 export function getInvoiceDocumentDownload(invoiceId: string, documentId: string) {
-  const validated = platformCommercialContracts.invoices.documents.download.params.parse({
+  const validated = platformCommercialV2Contracts.invoices.documents.download.params.parse({
     invoiceId,
     documentId,
   });
   return platformApiFetch(
     `/invoices/${validated.invoiceId}/documents/${validated.documentId}/download`,
     {
-      responseSchema: platformCommercialContracts.invoices.documents.download.response,
+      headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+      responseSchema: platformCommercialV2Contracts.invoices.documents.download.response,
     },
   );
 }

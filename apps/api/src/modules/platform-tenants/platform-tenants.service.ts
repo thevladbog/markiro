@@ -1,16 +1,18 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, count, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   platformTenantContracts,
+  platformTenantV2Contracts,
+  type TenantDetailV2,
   type AddonAssignmentResult,
   type CreateTenantResult,
   type PlanAssignmentResult,
   type RenewTenantActivationResult,
-  type TenantDetailResult,
   type TenantListResult,
   type TenantSubscriptionStatus,
 } from "@markiro/platform-contracts";
+import { assertLegacyCommercialRepresentation } from "../../platform-http/commercial-version";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { sanitizeSupportAuditMetadata } from "../../platform-auth/platform-audit.service";
@@ -146,7 +148,7 @@ export class PlatformTenantsService {
     });
   }
 
-  async get(actor: PlatformPrincipal, tenantId: string): Promise<TenantDetailResult> {
+  async get(actor: PlatformPrincipal, tenantId: string): Promise<TenantDetailV2> {
     const [tenant] = await this.db
       .select()
       .from(schema.organization)
@@ -305,7 +307,7 @@ export class PlatformTenantsService {
     );
     const scrub =
       actor.role === "support" ? sanitizeSupportAuditMetadata : (value: unknown) => value;
-    return platformTenantContracts.detail.response.parse({
+    return platformTenantV2Contracts.detail.response.parse({
       tenant: {
         id: tenant.id,
         name: tenant.name,
@@ -385,7 +387,17 @@ export class PlatformTenantsService {
     actor: PlatformPrincipal,
     tenantId: string,
     input: AssignPlanDto,
+    legacy = false,
   ): Promise<PlanAssignmentResult> {
+    if (legacy) {
+      const version = await this.requireCatalogVersion(input.catalogVersionId);
+      // Reject the captured draft before a concurrent publication can bypass the legacy check.
+      if (version.status !== "published") {
+        throw new ConflictException({ code: "published_catalog_version_required" });
+      }
+      // Published terms are immutable; lifecycle still rechecks assignability under its locks.
+      assertLegacyCommercialRepresentation(await this.catalogVersionDto(version, true));
+    }
     return platformTenantContracts.assignPlan.response.parse(
       await this.subscriptions.assignPlan(actor, tenantId, input),
     );
@@ -405,6 +417,7 @@ export class PlatformTenantsService {
     const version = await this.requireCatalogVersion(subscription.planVersionId);
     return {
       ...subscriptionSnapshot(subscription),
+      commercialPeriod: subscription.commercialPeriod,
       planVersion: await this.catalogVersionDto(version, includeFinancial),
     };
   }
@@ -415,6 +428,7 @@ export class PlatformTenantsService {
   ) {
     const version = await this.requireCatalogVersion(addon.addonVersionId);
     return {
+      commercialPeriod: addon.commercialPeriod,
       id: addon.id,
       subscriptionId: addon.subscriptionId,
       addonVersionId: addon.addonVersionId,
@@ -444,6 +458,10 @@ export class PlatformTenantsService {
       .where(eq(schema.catalogItems.id, version.catalogItemId))
       .limit(1);
     const dto = {
+      documentNameRu: version.documentNameRu,
+      documentNameEn: version.documentNameEn,
+      subject: version.subject,
+      sellerPolicyRevision: version.sellerPolicyRevision,
       id: version.id,
       catalogItemId: version.catalogItemId,
       catalogItemCode: item?.code ?? null,
@@ -468,7 +486,21 @@ export class PlatformTenantsService {
         .select()
         .from(schema.planEntitlements)
         .where(eq(schema.planEntitlements.catalogVersionId, version.id));
-      return { ...dto, entitlements: entitlements ?? null };
+      return {
+        ...dto,
+        entitlements: entitlements
+          ? {
+              maxLines: entitlements.maxLines,
+              maxStations: entitlements.maxStations,
+              maxKiosks: entitlements.maxKiosks,
+              maxCabinetUsers: entitlements.maxCabinetUsers,
+              labelEditorEnabled: entitlements.labelEditorEnabled,
+              publicApiEnabled: entitlements.publicApiEnabled,
+              palletsEnabled: entitlements.palletsEnabled,
+              demoDurationDays: entitlements.demoDurationDays,
+            }
+          : null,
+      };
     }
     const effects = await this.db
       .select({

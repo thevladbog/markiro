@@ -1,7 +1,8 @@
 import type {
-  CatalogVersion,
-  CreateInvoiceInput as SharedCreateInvoiceInput,
-  CreateOfferInput as SharedCreateOfferInput,
+  CatalogVersionV2 as CatalogVersion,
+  CommercialLineTerms,
+  CreateInvoiceV2 as SharedCreateInvoiceInput,
+  CreateOfferV2 as SharedCreateOfferInput,
 } from "@markiro/platform-contracts";
 
 export type DocumentKind = "invoice" | "offer";
@@ -17,6 +18,7 @@ export interface DocumentLineDraft {
   nameEn: string;
   descriptionRu?: string | null;
   descriptionEn?: string | null;
+  commercialTerms?: CommercialLineTerms | null;
   quantity: number;
   unit: string;
   catalogUnitPrice?: string | null;
@@ -30,6 +32,7 @@ export interface DocumentLineDraft {
 export interface DocumentDraft {
   tenantId: string;
   sourceOfferId?: string;
+  sourceTotal?: string;
   sourceRequestId?: string;
   sellerBankAccountId?: string | null;
   applicationMode: "manual" | "automatic";

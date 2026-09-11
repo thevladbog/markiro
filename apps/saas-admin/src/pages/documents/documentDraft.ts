@@ -1,3 +1,4 @@
+import { isCommercialPlanSequenceValid } from "@markiro/platform-contracts";
 import type { CatalogVersionDto } from "../catalog/api.js";
 import type {
   ActivationPolicy,
@@ -64,8 +65,21 @@ export function createLineFromCatalog(version: CatalogVersionDto, id: string): D
     catalogVersionId: version.id,
     catalogItemCode: version.catalogItemCode,
     version: version.version,
-    nameRu: version.nameRu,
-    nameEn: version.nameEn,
+    commercialTerms:
+      version.documentNameRu && version.subject && version.sellerPolicyRevision
+        ? {
+            version: 1,
+            subject: version.subject,
+            documentNameRu: version.documentNameRu,
+            documentNameEn: version.documentNameEn,
+            sellerPolicyRevision: version.sellerPolicyRevision,
+            billingPeriod: version.billingPeriod,
+            billingTimezone: version.kind === "service" ? null : "Europe/Moscow",
+            activationRule: version.kind === "service" ? null : "on_application",
+          }
+        : null,
+    nameRu: version.documentNameRu ?? version.nameRu,
+    nameEn: version.documentNameEn ?? version.nameEn,
     descriptionRu: version.descriptionRu,
     descriptionEn: version.descriptionEn,
     quantity: 1,
@@ -94,7 +108,7 @@ export function documentDraftReducer(
       if (!action.separate && existingIndex !== -1) {
         return updateLine(draft, existingIndex, (line) => ({
           ...line,
-          quantity: line.quantity + 1,
+          quantity: line.kind === "plan" ? 1 : line.quantity + 1,
         }));
       }
       if (draft.lines.length >= MAX_LINES) return draft;
@@ -107,7 +121,10 @@ export function documentDraftReducer(
       };
     }
     case "line.quantityChanged":
-      return updateLineById(draft, action.id, (line) => ({ ...line, quantity: action.quantity }));
+      return updateLineById(draft, action.id, (line) => ({
+        ...line,
+        quantity: line.kind === "plan" ? 1 : action.quantity,
+      }));
     case "line.priceChanged":
       return updateLineById(draft, action.id, (line) => ({
         ...line,
@@ -132,7 +149,17 @@ export function documentDraftReducer(
       return updateLineById(draft, action.id, (line) =>
         line.kind === "service" || line.kind === "custom"
           ? line
-          : { ...line, activationPolicy: action.policy },
+          : {
+              ...line,
+              activationPolicy: action.policy,
+              commercialTerms: line.commercialTerms
+                ? {
+                    ...line.commercialTerms,
+                    activationRule:
+                      action.policy === "after_current" ? "after_current" : "on_application",
+                  }
+                : null,
+            },
       );
     case "line.moved": {
       const index = draft.lines.findIndex((line) => line.id === action.id);
@@ -151,8 +178,13 @@ export function documentDraftReducer(
   }
 }
 
+type DocumentMoneyLine = Pick<
+  DocumentLineDraft,
+  "quantity" | "agreedUnitPrice" | "vatRateBps" | "vatIncluded"
+>;
+
 export function calculateDocumentTotals(
-  lines: readonly DocumentLineDraft[],
+  lines: readonly DocumentMoneyLine[],
   kind?: DocumentKind,
 ): {
   subtotal: string;
@@ -161,15 +193,15 @@ export function calculateDocumentTotals(
 };
 export function calculateDocumentTotals(
   kind: DocumentKind,
-  lines: readonly DocumentLineDraft[],
+  lines: readonly DocumentMoneyLine[],
 ): {
   subtotal: string;
   vatTotal: string;
   total: string;
 };
 export function calculateDocumentTotals(
-  linesOrKind: readonly DocumentLineDraft[] | DocumentKind,
-  kindOrLines: DocumentKind | readonly DocumentLineDraft[] = "invoice",
+  linesOrKind: readonly DocumentMoneyLine[] | DocumentKind,
+  kindOrLines: DocumentKind | readonly DocumentMoneyLine[] = "invoice",
 ): {
   subtotal: string;
   vatTotal: string;
@@ -177,7 +209,7 @@ export function calculateDocumentTotals(
 } {
   const kind = typeof linesOrKind === "string" ? linesOrKind : (kindOrLines as DocumentKind);
   const lines =
-    typeof linesOrKind === "string" ? (kindOrLines as readonly DocumentLineDraft[]) : linesOrKind;
+    typeof linesOrKind === "string" ? (kindOrLines as readonly DocumentMoneyLine[]) : linesOrKind;
   let subtotal = 0n;
   let vatTotal = 0n;
   let total = 0n;
@@ -194,7 +226,7 @@ export function calculateDocumentTotals(
           ? gross
           : gross + (gross * rate) / 10_000n;
     const vat = line.vatIncluded
-      ? (gross * rate) / (10_000n + rate)
+      ? (gross * rate + (kind === "offer" ? (10_000n + rate) / 2n : 0n)) / (10_000n + rate)
       : kind === "offer"
         ? lineTotal - gross
         : (gross * rate) / 10_000n;
@@ -220,9 +252,13 @@ export function validateDocumentDraft(
   if (!draft.tenantId.trim()) errors.tenantId = "tenant_required";
   if (draft.lines.length === 0) errors.lines = "at_least_one_line_required";
   if (draft.lines.length > MAX_LINES) errors.lines = "too_many_lines";
+  if (!isCommercialPlanSequenceValid(draft.lines))
+    errors.lines = "commercial_plan_sequence_invalid";
 
   for (const line of draft.lines) {
     const prefix = `lines.${line.id}`;
+    if (line.kind === "plan" && line.quantity !== 1)
+      errors[`${prefix}.quantity`] = "commercial_plan_quantity_invalid";
     if (!Number.isInteger(line.quantity) || line.quantity < 1)
       errors[`${prefix}.quantity`] = "quantity_must_be_positive_integer";
     if (!MONEY_PATTERN.test(line.agreedUnitPrice))
@@ -258,7 +294,7 @@ export function toInvoiceCreateInput(draft: DocumentDraft): CreateInvoiceInput {
       : {}),
     dueDate: optionalDate(draft.date),
     applicationMode: draft.applicationMode,
-    lines: draft.lines.map(toInvoiceLine),
+    lines: draft.lines.map((line) => toInvoiceLine(line, Boolean(draft.sourceOfferId))),
   };
 }
 
@@ -275,18 +311,23 @@ export function toOfferCreateInput(draft: DocumentDraft): CreateOfferInput {
   return termsMarkdown ? { ...input, termsMarkdown } : input;
 }
 
-function toInvoiceLine(line: DocumentLineDraft): CreateInvoiceLineInput {
+function toInvoiceLine(line: DocumentLineDraft, frozen = false): CreateInvoiceLineInput {
   const activationPolicy = requiredActivationPolicy("invoice", line);
   const result: CreateInvoiceLineInput = {
+    ...(line.commercialTerms
+      ? { commercialTerms: line.commercialTerms }
+      : frozen
+        ? {}
+        : { commercialTerms: null }),
     kind: line.kind,
     catalogVersionId: line.catalogVersionId,
     nameRu: line.nameRu,
     nameEn: line.nameEn,
-    ...(optionalDescription(line.descriptionRu) !== undefined
-      ? { descriptionRu: optionalDescription(line.descriptionRu) }
+    ...((frozen ? line.descriptionRu : optionalDescription(line.descriptionRu)) !== undefined
+      ? { descriptionRu: frozen ? line.descriptionRu : optionalDescription(line.descriptionRu) }
       : {}),
-    ...(optionalDescription(line.descriptionEn) !== undefined
-      ? { descriptionEn: optionalDescription(line.descriptionEn) }
+    ...((frozen ? line.descriptionEn : optionalDescription(line.descriptionEn)) !== undefined
+      ? { descriptionEn: frozen ? line.descriptionEn : optionalDescription(line.descriptionEn) }
       : {}),
     quantity: line.quantity,
     unit: line.unit,
@@ -295,7 +336,7 @@ function toInvoiceLine(line: DocumentLineDraft): CreateInvoiceLineInput {
     vatIncluded: line.vatIncluded,
     activationPolicy,
   };
-  return line.kind === "custom" && line.catalogUnitPrice !== undefined
+  return (frozen || line.kind === "custom") && line.catalogUnitPrice !== undefined
     ? { ...result, catalogUnitPrice: line.catalogUnitPrice }
     : result;
 }
@@ -305,6 +346,7 @@ function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
   const activationPolicy = requiredActivationPolicy("offer", line);
   if (line.kind === "service") {
     return {
+      commercialTerms: line.commercialTerms ?? null,
       kind: line.kind,
       catalogVersionId: line.catalogVersionId,
       nameRu: line.nameRu,
@@ -326,6 +368,7 @@ function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
   }
 
   return {
+    commercialTerms: line.commercialTerms ?? null,
     kind: line.kind,
     catalogVersionId: line.catalogVersionId,
     nameRu: line.nameRu,

@@ -1,3 +1,4 @@
+import { commercialErrorKey } from "../documents/commercialError.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, SectionHeader, Spinner } from "@markiro/ui";
 import { useRef, useState } from "react";
@@ -350,7 +351,7 @@ function OfferEditor({ forbidden, onForbidden }: { forbidden: boolean; onForbidd
                 create.error instanceof ApiRequestError &&
                 create.error.code === "catalog_version_stale"
                   ? t("documents.errors.catalogVersionStale")
-                  : t("documents.errors.createOffer"),
+                  : t(commercialErrorKey(create.error, "documents.errors.createOffer")),
             }
           : {})}
         onSubmit={async (draft) => {

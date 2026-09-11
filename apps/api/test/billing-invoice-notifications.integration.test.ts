@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createDb, schema, type Db } from "@markiro/db";
-import type { CreateInvoiceDto } from "@markiro/platform-contracts";
+import type { CreateInvoiceV2 as CreateInvoiceDto } from "@markiro/platform-contracts";
 import { and, eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -69,6 +69,7 @@ describe.skipIf(!databaseUrl)("invoice notifications on isolated Postgres", () =
     });
     await connection.db.insert(schema.operatorBillingProfiles).values({
       ...profileValues(actorId, "Markiro Operator", "7707083893", "773601001", "1027700132195"),
+      taxPolicy: { kind: "without_vat", regime: "other" },
     });
     await connection.db.insert(schema.tenantBillingProfiles).values({
       tenantId,
@@ -205,6 +206,16 @@ function invoiceInput(tenantId: string): CreateInvoiceDto {
         vatRateBps: null,
         vatIncluded: false,
         activationPolicy: null,
+        commercialTerms: {
+          version: 1,
+          subject: "service",
+          documentNameRu: "Разовая услуга",
+          documentNameEn: "One-time service",
+          sellerPolicyRevision: 1,
+          billingPeriod: null,
+          billingTimezone: null,
+          activationRule: null,
+        },
       },
     ],
   };

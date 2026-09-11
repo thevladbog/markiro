@@ -91,7 +91,16 @@ describe.skipIf(!databaseUrl)("offer previews and immutable variants on isolated
       confirmedAt: new Date("2026-09-01T00:00:00Z"),
       createdByPlatformUserId: actor.userId,
     };
-    await db.insert(schema.operatorBillingProfiles).values(party);
+    await db.insert(schema.operatorBillingProfiles).values({
+      ...party,
+      taxPolicy: {
+        kind: "vat",
+        regime: "other",
+        allowedRatesBps: [0, 2000],
+        defaultRateBps: 2000,
+        defaultIncluded: false,
+      },
+    });
     await db
       .insert(schema.tenantBillingProfiles)
       .values({ ...party, tenantId, fullName: "Saved buyer", inn: "7710140679" });
@@ -128,6 +137,16 @@ describe.skipIf(!databaseUrl)("offer previews and immutable variants on isolated
           vatIncluded: false,
           priceOverrideReason: null,
           activationPolicy: null,
+          commercialTerms: {
+            version: 1,
+            subject: "service",
+            documentNameRu: "Actual <line>",
+            documentNameEn: "Line",
+            sellerPolicyRevision: 1,
+            billingPeriod: null,
+            billingTimezone: null,
+            activationRule: null,
+          },
         },
       ],
     });
@@ -137,6 +156,103 @@ describe.skipIf(!databaseUrl)("offer previews and immutable variants on isolated
       .where(eq(schema.commercialOffers.id, offer.id));
     return offer.id;
   }
+
+  it("refuses preview and publication of inconsistent frozen totals without repairing the stored line", async () => {
+    const id = await draft();
+    await db
+      .update(schema.commercialOfferLines)
+      .set({ lineTotal: "100.00" })
+      .where(eq(schema.commercialOfferLines.offerId, id));
+    for (const run of [() => preview.preview(actor, id), () => offers.publish(actor, id)]) {
+      await expect(run()).rejects.toMatchObject({
+        response: { code: "commercial_source_review_required" },
+      });
+    }
+    const [line] = await db
+      .select()
+      .from(schema.commercialOfferLines)
+      .where(eq(schema.commercialOfferLines.offerId, id));
+    expect(line?.lineTotal).toBe("100.00");
+    expect((await offers.detail(actor, id)).status).toBe("draft");
+  });
+
+  it("requires current reviewed commercial terms in both preview and publication", async () => {
+    const id = await draft();
+    await db
+      .update(schema.commercialOfferLines)
+      .set({ commercialTerms: null })
+      .where(eq(schema.commercialOfferLines.offerId, id));
+    for (const run of [() => preview.preview(actor, id), () => offers.publish(actor, id)]) {
+      await expect(run()).rejects.toMatchObject({
+        response: { code: "commercial_terms_review_required" },
+      });
+    }
+  });
+
+  it.each([
+    { price: "0.03", included: true, rate: "20.00", subtotal: "0.02", vat: "0.01", total: "0.03" },
+    { price: "0.03", included: false, rate: "20.00", subtotal: "0.03", vat: "0.01", total: "0.04" },
+    {
+      price: "100.00",
+      included: false,
+      rate: "0.00",
+      subtotal: "100.00",
+      vat: "0.00",
+      total: "100.00",
+    },
+  ])(
+    "keeps preview and issued snapshot exact for $price included=$included rate=$rate",
+    async ({ price, included, rate, subtotal, vat, total }) => {
+      const id = await draft();
+      await db
+        .update(schema.commercialOffers)
+        .set({ total })
+        .where(eq(schema.commercialOffers.id, id));
+      await db
+        .update(schema.commercialOfferLines)
+        .set({ agreedUnitPrice: price, vatRate: rate, vatIncluded: included, lineTotal: total })
+        .where(eq(schema.commercialOfferLines.offerId, id));
+      const reviewed = await preview.preview(actor, id);
+      expect(reviewed.html).toContain(total.replace(".", ","));
+      await offers.publish(actor, id, reviewed.fingerprint);
+      const [snapshot] = await db
+        .select()
+        .from(schema.commercialOfferPrintSnapshots)
+        .where(eq(schema.commercialOfferPrintSnapshots.offerId, id));
+      expect(snapshot).toMatchObject({
+        subtotal,
+        vatTotal: vat,
+        total,
+        linesSnapshot: [
+          {
+            lineSubtotal: subtotal,
+            lineVat: vat,
+            lineTotal: total,
+            commercialTerms: { subject: "service" },
+          },
+        ],
+      });
+    },
+  );
+
+  it("requires a new review after seller policy revision changes", async () => {
+    const id = await draft();
+    const reviewed = await preview.preview(actor, id);
+    await db.update(schema.operatorBillingProfiles).set({ revision: 2 });
+    try {
+      for (const run of [
+        () => preview.preview(actor, id),
+        () => offers.publish(actor, id, reviewed.fingerprint),
+      ]) {
+        await expect(run()).rejects.toMatchObject({
+          response: { code: "commercial_review_stale" },
+        });
+      }
+      expect((await offers.detail(actor, id)).status).toBe("draft");
+    } finally {
+      await db.update(schema.operatorBillingProfiles).set({ revision: 1 });
+    }
+  });
 
   it("previews actual saved input without issuing anything and refuses changed inputs before publication", async () => {
     const id = await draft();
@@ -195,7 +311,13 @@ describe.skipIf(!databaseUrl)("offer previews and immutable variants on isolated
       total: "120.00",
       revision: 5,
     });
-    expect(snapshot?.linesSnapshot).toMatchObject([{ lineTotal: "120.00" }]);
+    expect(snapshot?.linesSnapshot).toMatchObject([
+      { lineSubtotal: "100.00", lineVat: "20.00", lineTotal: "120.00" },
+    ]);
+    expect((await workspace.workspace(actor, id)).parties.seller).toMatchObject({
+      fullName: "Saved seller",
+      taxPolicy: { kind: "vat", allowedRatesBps: [0, 2000] },
+    });
   });
 
   it("reports missing requisites and denies read without capability", async () => {

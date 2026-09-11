@@ -7,9 +7,15 @@ import {
   amountInWords,
   documentBarcodeValue,
   paymentQrPayload,
+  paymentPurpose,
 } from "../src/modules/billing/print-document-layout";
 import { formatOfferTermsText, renderPrintPdf } from "../src/modules/billing/print-document-pdf";
-import type { PrintDocumentModel, PrintLine } from "../src/modules/billing/print-document-model";
+import {
+  toInvoicePrintModel,
+  toOfferPrintModel,
+  type PrintDocumentModel,
+  type PrintLine,
+} from "../src/modules/billing/print-document-model";
 
 const baseLine: PrintLine = {
   position: 1,
@@ -59,6 +65,98 @@ const countPdfPages = (pdf: Buffer) =>
   (pdf.toString("latin1").match(/\/Type\s*\/Page\b/g) ?? []).length;
 
 describe("print document HTML renderer", () => {
+  it.each([
+    ["year", "год"],
+    ["month", "мес."],
+  ] as const)(
+    "prints structured %s units in Russian for invoices and offers, retaining legacy text",
+    (billingPeriod, printedUnit) => {
+      const commercialTerms = {
+        version: 1 as const,
+        subject: "software_license" as const,
+        documentNameRu: "Лицензия",
+        documentNameEn: null,
+        sellerPolicyRevision: 1,
+        billingPeriod,
+        billingTimezone: "Europe/Moscow" as const,
+        activationRule: "on_application" as const,
+      };
+      const sourceLine = {
+        position: 1,
+        nameRu: "Лицензия",
+        unit: billingPeriod,
+        quantity: 1,
+        agreedUnitPrice: "12000.00",
+        vatIncluded: false,
+        lineTotal: "12000.00",
+        commercialTerms,
+      };
+      const legacyLine = {
+        position: 2,
+        nameRu: "Историческая строка",
+        unit: "month (legacy)",
+        quantity: 1,
+        agreedUnitPrice: "0.00",
+        vatIncluded: false,
+        lineTotal: "0.00",
+      };
+      const input = {
+        number: "184",
+        status: "issued",
+        issueDate: new Date("2026-09-10T09:00:00Z"),
+        dueDate: null,
+        sellerSnapshot: baseInvoice.seller,
+        buyerSnapshot: baseInvoice.buyer,
+        subtotal: "12000.00",
+        vatTotal: "0.00",
+        total: "12000.00",
+        lines: [sourceLine, legacyLine],
+      };
+      const before = JSON.stringify(input);
+      const models = [
+        toInvoicePrintModel(input),
+        toOfferPrintModel({
+          ...input,
+          publishedAt: input.issueDate,
+          expiresAt: null,
+          linesSnapshot: input.lines,
+          termsHtml: null,
+        }),
+      ];
+      for (const model of models) {
+        expect(model.lines.map((line) => line.unit)).toEqual([printedUnit, "month (legacy)"]);
+        expect(renderPrintHtml(model)).toContain(`>${printedUnit}</td>`);
+        expect(renderPrintHtml(model)).toContain("month (legacy)");
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    },
+  );
+
+  it("distinguishes frozen zero-rated VAT from without VAT in totals and payment QR", () => {
+    const commercialTerms = {
+      version: 1,
+      subject: "software_license",
+      documentNameRu: "Лицензия",
+      documentNameEn: null,
+      sellerPolicyRevision: 1,
+      billingPeriod: "month",
+      billingTimezone: "Europe/Moscow",
+      activationRule: "on_application",
+    } as const;
+    const zero = { ...baseInvoice, lines: [{ ...baseLine, vatRate: "0.00", commercialTerms }] };
+    const exempt = {
+      ...baseInvoice,
+      lines: [{ ...baseLine, vatRate: null, vatIncluded: false, commercialTerms }],
+    };
+    expect(paymentPurpose(zero)).toContain("НДС 0%");
+    expect(paymentPurpose(zero)).not.toContain("Без НДС");
+    expect(paymentQrPayload(zero)).toContain("НДС 0%");
+    expect(renderPrintHtml(zero)).toContain("НДС 0%");
+    expect(paymentPurpose(exempt)).toContain("Без НДС");
+    expect(renderPrintHtml(exempt)).toContain("Без НДС");
+    expect(paymentPurpose(baseInvoice)).toContain("Без НДС");
+  });
+
   it("renders signed offers with supplier images and no counterparty stamp placeholder", async () => {
     const offer = {
       ...baseInvoice,

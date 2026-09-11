@@ -8,6 +8,10 @@ const catalogVersion = {
   id: "11111111-1111-4111-8111-111111111111",
   catalogItemId: "21111111-1111-4111-8111-111111111111",
   catalogItemCode: "plan-basic",
+  documentNameRu: null,
+  documentNameEn: null,
+  subject: null,
+  sellerPolicyRevision: null,
   kind: "plan",
   version: 3,
   status: "published",
@@ -36,6 +40,78 @@ const catalogVersion = {
 } satisfies CatalogVersionDto;
 
 describe("sourceOfferDraft", () => {
+  it("preserves exact source text and maps legacy service and frozen addon intent to invoice representation", () => {
+    const commercialTerms = {
+      version: 1 as const,
+      subject: "software_license" as const,
+      documentNameRu: "Лицензия",
+      documentNameEn: null,
+      sellerPolicyRevision: 2,
+      billingPeriod: "year" as const,
+      billingTimezone: "Europe/Moscow" as const,
+      activationRule: "after_current" as const,
+    };
+    const common = {
+      id: "41111111-1111-4111-8111-111111111111",
+      tenantId: "31111111-1111-4111-8111-111111111111",
+      offerId: "51111111-1111-4111-8111-111111111111",
+      position: 1,
+      nameRu: "Лицензия",
+      nameEn: "License",
+      descriptionRu: "  Frozen text  ",
+      descriptionEn: null,
+      quantity: 2,
+      unit: "year",
+      catalogUnitPrice: null,
+      agreedUnitPrice: "0.03",
+      priceOverrideReason: null,
+      vatRate: "20.00",
+      vatIncluded: true,
+      lineTotal: "0.06",
+      createdAt: "2026-08-21T10:00:00.000Z",
+    };
+    const draft = sourceOfferDraft(
+      {
+        id: common.offerId,
+        tenantId: common.tenantId,
+        lines: [
+          {
+            ...common,
+            kind: "addon",
+            catalogVersionId: catalogVersion.id,
+            activationPolicy: null,
+            commercialTerms,
+          },
+          {
+            ...common,
+            id: "61111111-1111-4111-8111-111111111111",
+            position: 2,
+            kind: "service",
+            catalogVersionId: null,
+            activationPolicy: null,
+            commercialTerms: null,
+          },
+        ],
+      },
+      [],
+    );
+    const input = toInvoiceCreateInput(draft);
+    expect(input.lines[0]).toMatchObject({
+      kind: "addon",
+      quantity: 2,
+      descriptionRu: "  Frozen text  ",
+      activationPolicy: "after_current",
+      commercialTerms,
+    });
+    expect(input.lines[1]).toMatchObject({
+      kind: "custom",
+      catalogVersionId: null,
+      descriptionRu: "  Frozen text  ",
+      activationPolicy: null,
+    });
+    expect(input.lines[1]).not.toHaveProperty("commercialTerms");
+  });
+
   it("preserves the accepted offer and request provenance through invoice draft edits", () => {
     const offerId = "51111111-1111-4111-8111-111111111111";
     const requestId = "61111111-1111-4111-8111-111111111111";
@@ -50,6 +126,7 @@ describe("sourceOfferDraft", () => {
             tenantId: "31111111-1111-4111-8111-111111111111",
             offerId,
             position: 1,
+            commercialTerms: null,
             kind: "plan",
             catalogVersionId: catalogVersion.id,
             nameRu: catalogVersion.nameRu,
@@ -63,7 +140,7 @@ describe("sourceOfferDraft", () => {
             priceOverrideReason: null,
             vatRate: "20.00",
             vatIncluded: true,
-            activationPolicy: "immediately",
+            activationPolicy: "immediately" as const,
             lineTotal: catalogVersion.unitPrice,
             createdAt: "2026-08-21T10:00:00.000Z",
           },
@@ -107,6 +184,7 @@ describe("sourceOfferDraft", () => {
             tenantId: "31111111-1111-4111-8111-111111111111",
             offerId: "51111111-1111-4111-8111-111111111111",
             position: 1,
+            commercialTerms: null,
             kind: "plan",
             catalogVersionId: catalogVersion.id,
             nameRu: catalogVersion.nameRu,
@@ -120,7 +198,7 @@ describe("sourceOfferDraft", () => {
             priceOverrideReason: null,
             vatRate: "20.00",
             vatIncluded: true,
-            activationPolicy: "immediately",
+            activationPolicy: "immediately" as const,
             lineTotal: catalogVersion.unitPrice,
             createdAt: "2026-08-21T10:00:00.000Z",
           },
@@ -136,7 +214,7 @@ describe("sourceOfferDraft", () => {
     });
   });
 
-  it("converts an agreed catalog snapshot into a literal custom invoice line", () => {
+  it("preserves frozen catalog kind and reference when current catalog differs", () => {
     const draft = sourceOfferDraft(
       {
         tenantId: "31111111-1111-4111-8111-111111111111",
@@ -146,6 +224,7 @@ describe("sourceOfferDraft", () => {
             tenantId: "31111111-1111-4111-8111-111111111111",
             offerId: "51111111-1111-4111-8111-111111111111",
             position: 1,
+            commercialTerms: null,
             kind: "plan",
             catalogVersionId: catalogVersion.id,
             nameRu: "Согласованный тариф",
@@ -159,7 +238,7 @@ describe("sourceOfferDraft", () => {
             priceOverrideReason: "Пилот",
             vatRate: null,
             vatIncluded: false,
-            activationPolicy: "immediately",
+            activationPolicy: "immediately" as const,
             lineTotal: "99.00",
             createdAt: "2026-08-21T10:00:00.000Z",
           },
@@ -170,8 +249,8 @@ describe("sourceOfferDraft", () => {
 
     expect(draft.lines).toEqual([
       expect.objectContaining({
-        kind: "custom",
-        catalogVersionId: null,
+        kind: "plan",
+        catalogVersionId: catalogVersion.id,
         nameRu: "Согласованный тариф",
         descriptionRu: "Особые условия",
         catalogUnitPrice: "120.00",
