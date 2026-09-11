@@ -4,7 +4,7 @@ import { ConflictException, type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type PlatformRole } from "@markiro/db";
-import type { CatalogVersionCreate } from "@markiro/platform-contracts";
+import type { CatalogVersionCreateV2 as CatalogVersionCreate } from "@markiro/platform-contracts";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AppModule } from "../src/app.module";
@@ -12,6 +12,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { corsDelegate } from "../src/cors";
 import { loadEnv } from "../src/env";
 import { PlatformCatalogController } from "../src/modules/platform-catalog/platform-catalog.controller";
+import { BillingProfilesService } from "../src/modules/billing-profiles/billing-profiles.service";
 import { PlatformCatalogService } from "../src/modules/platform-catalog/platform-catalog.service";
 import {
   mountPlatformAuth,
@@ -168,10 +169,19 @@ describe.skipIf(!ready)("platform catalog", () => {
       })
       .expect(200);
     cookie = requiredSetCookie(verified);
-    return { agent: request.agent(app!.getHttpServer()).set("Cookie", cookie), userId };
+    return {
+      agent: request
+        .agent(app!.getHttpServer())
+        .set("Cookie", cookie)
+        .set("X-Markiro-Commercial-Version", "2"),
+      userId,
+    };
   }
 
   const basicPlan: CatalogVersionCreate = {
+    documentNameRu: "Право использования Маркиро",
+    documentNameEn: "Markiro license",
+    subject: "software_license",
     nameRu: "Базовый",
     nameEn: "Basic",
     unit: "month",
@@ -220,6 +230,23 @@ describe.skipIf(!ready)("platform catalog", () => {
     const createdAdmin = await createPlatformAgent("platform_admin");
     admin = createdAdmin.agent;
     adminId = createdAdmin.userId;
+    await ref.get(BillingProfilesService).setOperator(principal(), {
+      kind: "self_employed",
+      fullName: "Test seller",
+      displayName: "Seller",
+      inn: "123456789012",
+      legalAddressRaw: "Москва",
+      actualAddress: { sameAsLegal: true },
+      postalAddress: { sameAsLegal: true },
+      contact: { name: null, email: null, phone: null },
+      taxPolicy: {
+        kind: "vat",
+        regime: "other",
+        allowedRatesBps: [2000],
+        defaultRateBps: 2000,
+        defaultIncluded: true,
+      },
+    });
     const createdAccountant = await createPlatformAgent("accountant");
     accountant = createdAccountant.agent;
     accountantId = createdAccountant.userId;
@@ -253,6 +280,15 @@ describe.skipIf(!ready)("platform catalog", () => {
       capabilities: ["catalog.read", "catalog.write"],
       twoFactorReady: true,
     };
+  }
+
+  async function publishHttp(path: string) {
+    const review = await accountant.post(`${path}/review`).send({}).expect(200);
+    return accountant.post(`${path}/publish`).send(review.body.identity).expect(200);
+  }
+  async function publishCatalog(code: string, id: string) {
+    const review = await catalog.review(principal(), code, id);
+    return catalog.publish(principal(), code, id, review.identity);
   }
 
   async function installBarriers(): Promise<void> {
@@ -364,7 +400,7 @@ describe.skipIf(!ready)("platform catalog", () => {
     const versionPath = `/platform/catalog/items/plan-basic/versions/${draft.body.id}`;
     expect(draft.body.unitPrice).toBe("15000.00");
     expect(draft.body.vatRateBps).toBe(2000);
-    expect(await accountant.post(`${versionPath}/publish`).send({})).toHaveProperty("status", 200);
+    expect(await publishHttp(versionPath)).toHaveProperty("status", 200);
     const immutable = await accountant.patch(versionPath).send({ unitPrice: "1.00" }).expect(409);
     expect(immutable.body).toEqual(expect.objectContaining({ code: "catalog_version_immutable" }));
     const redacted = await support.get(versionPath).expect(200);
@@ -395,6 +431,57 @@ describe.skipIf(!ready)("platform catalog", () => {
     });
   });
 
+  it("negotiates zero quotas, rejects legacy mutations before writing, and protects review routes", async () => {
+    const code = `zero-${randomUUID()}`;
+    const path = `/platform/catalog/items/${code}/versions`;
+    const input = { ...basicPlan, plan: { ...basicPlan.plan, maxLines: 0 } };
+    const created = await admin.post(path).send(input).expect(201);
+    const versionPath = `${path}/${created.body.id}`;
+    const legacyRead = await admin
+      .get(versionPath)
+      .unset("X-Markiro-Commercial-Version")
+      .expect(409);
+    expect(legacyRead.body.code).toBe("client_update_required");
+    const legacySave = await admin
+      .patch(versionPath)
+      .unset("X-Markiro-Commercial-Version")
+      .send({ nameRu: "must not persist" })
+      .expect(409);
+    expect(legacySave.body.code).toBe("client_update_required");
+    const read = await admin.get(versionPath).expect(200);
+    expect(read.body.nameRu).toBe(basicPlan.nameRu);
+    expect(read.body.plan.maxLines).toBe(0);
+    const publish = await admin
+      .post(`${versionPath}/publish`)
+      .unset("X-Markiro-Commercial-Version")
+      .send({})
+      .expect(409);
+    expect(publish.body.code).toBe("client_update_required");
+    const [stored] = await setup.db
+      .select()
+      .from(schema.catalogItemVersions)
+      .where(eq(schema.catalogItemVersions.id, created.body.id));
+    expect(stored?.status).toBe("draft");
+    expect(
+      await setup.db
+        .select()
+        .from(schema.platformAuditEvents)
+        .where(eq(schema.platformAuditEvents.targetId, created.body.id)),
+    ).toEqual([]);
+    await support.post(`${versionPath}/review`).send({}).expect(403);
+    await request(app!.getHttpServer()).get("/platform/catalog/editor-context").expect(401);
+    await admin.get(versionPath).set("X-Markiro-Commercial-Version", "3").expect(400);
+    const preflight = await request(app!.getHttpServer())
+      .options(path)
+      .set("Origin", env.SAAS_ADMIN_ORIGIN)
+      .set("Access-Control-Request-Method", "POST")
+      .set("Access-Control-Request-Headers", "content-type,x-markiro-commercial-version")
+      .expect(204);
+    expect(preflight.headers["access-control-allow-headers"]).toContain(
+      "x-markiro-commercial-version",
+    );
+  });
+
   it("accepts only the entitlement shape for each catalog kind", async () => {
     await admin
       .post(`/platform/catalog/items/invalid-${randomUUID()}/versions`)
@@ -422,6 +509,7 @@ describe.skipIf(!ready)("platform catalog", () => {
       .post(`/platform/catalog/items/service-${randomUUID()}/versions`)
       .send({
         ...basicPlan,
+        subject: "service",
         nameRu: "Внедрение",
         nameEn: "Implementation",
         unit: "project",
@@ -544,7 +632,7 @@ describe.skipIf(!ready)("platform catalog", () => {
       .send(basicPlan)
       .expect(201);
     const versionPath = `/platform/catalog/items/${draft.body.catalogItemCode}/versions/${draft.body.id}`;
-    await accountant.post(`${versionPath}/publish`).send({}).expect(200);
+    await publishHttp(versionPath);
     await admin
       .post(`/platform/catalog/items/${draft.body.catalogItemCode}/archive`)
       .send({})
@@ -560,7 +648,7 @@ describe.skipIf(!ready)("platform catalog", () => {
       .send(basicPlan)
       .expect(201);
     const replacementPath = `/platform/catalog/items/${replacement.body.catalogItemCode}/versions/${replacement.body.id}`;
-    await accountant.post(`${replacementPath}/publish`).send({}).expect(200);
+    await publishHttp(replacementPath);
     await admin
       .patch("/platform/settings/demo-plan")
       .send({ catalogVersionId: replacement.body.id })
@@ -593,13 +681,13 @@ describe.skipIf(!ready)("platform catalog", () => {
       `plan-race-initial-${randomUUID()}`,
       basicPlan,
     );
-    await catalog.publish(principal(), initial.catalogItemCode, initial.id);
+    await publishCatalog(initial.catalogItemCode, initial.id);
     const candidate = await catalog.createVersion(
       principal(),
       `plan-race-candidate-${randomUUID()}`,
       basicPlan,
     );
-    await catalog.publish(principal(), candidate.catalogItemCode, candidate.id);
+    await publishCatalog(candidate.catalogItemCode, candidate.id);
     await catalog.setDefaultDemo(principal(), { catalogVersionId: initial.id });
 
     const release = await holdBarrier("setting");
@@ -630,13 +718,13 @@ describe.skipIf(!ready)("platform catalog", () => {
       `plan-inversion-initial-${randomUUID()}`,
       basicPlan,
     );
-    await catalog.publish(principal(), initial.catalogItemCode, initial.id);
+    await publishCatalog(initial.catalogItemCode, initial.id);
     const candidate = await catalog.createVersion(
       principal(),
       `plan-inversion-candidate-${randomUUID()}`,
       basicPlan,
     );
-    await catalog.publish(principal(), candidate.catalogItemCode, candidate.id);
+    await publishCatalog(candidate.catalogItemCode, candidate.id);
     await catalog.setDefaultDemo(principal(), { catalogVersionId: initial.id });
 
     type CatalogInternals = {
@@ -691,7 +779,7 @@ describe.skipIf(!ready)("platform catalog", () => {
   it("does not create a new version after an archive has acquired the item lock", async () => {
     const code = `plan-archive-race-${randomUUID()}`;
     const published = await catalog.createVersion(principal(), code, basicPlan);
-    await catalog.publish(principal(), code, published.id);
+    await publishCatalog(code, published.id);
     await catalog.retire(principal(), code, published.id);
 
     const release = await holdBarrier("item");
@@ -740,7 +828,7 @@ describe.skipIf(!ready)("platform catalog", () => {
       basicPlan,
     );
     for (const version of [first, second, third]) {
-      await catalog.publish(principal(), version.catalogItemCode, version.id);
+      await publishCatalog(version.catalogItemCode, version.id);
     }
     await catalog.setDefaultDemo(principal(), { catalogVersionId: first.id });
 

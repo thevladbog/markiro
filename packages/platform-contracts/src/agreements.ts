@@ -117,11 +117,20 @@ export const agreementTermsSchema = z
   })
   .strict();
 
+/**
+ * Russian-only or the two-column Russian/English form. There is deliberately
+ * no standalone `en`: the stored document is the copy that gets signed, and
+ * two originals under one agreement number cannot be told apart afterwards.
+ */
+export const agreementDocumentFormSchema = z.enum(["ru", "ru_en"]);
+export type AgreementDocumentForm = z.infer<typeof agreementDocumentFormSchema>;
+
 const agreementSummarySchema = z
   .object({
     id: platformUuidSchema,
     number: z.string(),
     status: agreementStatusSchema,
+    documentForm: agreementDocumentFormSchema,
     counterpartyName: z.string(),
     counterpartyInn: z.string().nullable(),
     conclusionDate: z.string().nullable(),
@@ -170,6 +179,7 @@ const createBody = z
       .regex(/^\d{4}-\d{2}-\d{2}$/)
       .optional(),
     city: z.string().trim().min(1).max(200).optional(),
+    documentForm: agreementDocumentFormSchema.optional(),
     counterparty: agreementRequisitesSchema,
     signatory: agreementSignatorySchema.optional(),
     terms: agreementTermsSchema.optional(),
@@ -186,6 +196,7 @@ const updateBody = z
       .nullable()
       .optional(),
     city: z.string().trim().min(1).max(200).nullable().optional(),
+    documentForm: agreementDocumentFormSchema.optional(),
     counterparty: agreementRequisitesSchema.optional(),
     signatory: agreementSignatorySchema.optional(),
     terms: agreementTermsSchema.optional(),

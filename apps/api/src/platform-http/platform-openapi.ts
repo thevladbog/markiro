@@ -1,13 +1,14 @@
 import { applyDecorators } from "@nestjs/common";
 import {
   ApiBody,
+  ApiHeader,
   ApiResponse,
   ApiSecurity,
   ApiQuery,
   type DocumentBuilder,
   type SchemaObject,
 } from "@nestjs/swagger";
-import { platformErrorSchema } from "@markiro/platform-contracts";
+import { COMMERCIAL_VERSION_HEADER, platformErrorSchema } from "@markiro/platform-contracts";
 import { z, type ZodType } from "zod";
 
 export const PLATFORM_SESSION_SECURITY = "platformSession";
@@ -17,6 +18,7 @@ const PUBLIC_ERROR_STATUSES = [400, 401, 404, 409, 422, 429, 500] as const;
 
 interface PlatformOpenApiOptions {
   response: ZodType;
+  commercialV2?: { response: ZodType; body?: ZodType };
   body?: ZodType;
   query?: ZodType;
   errors?: ReadonlyArray<{ status: number; schema: ZodType }>;
@@ -60,14 +62,44 @@ function platformOperation(
   protectedRoute: boolean,
 ): MethodDecorator {
   const decorators: MethodDecorator[] = [
-    ApiResponse({ status: successStatus, schema: platformOpenApiSchema(options.response) }),
+    ApiResponse({
+      status: successStatus,
+      schema: options.commercialV2
+        ? {
+            anyOf: [
+              platformOpenApiSchema(options.response),
+              platformOpenApiSchema(options.commercialV2.response),
+            ],
+          }
+        : platformOpenApiSchema(options.response),
+    }),
     ...platformErrorResponses(protectedRoute),
     ...(options.errors ?? []).map(({ status, schema }) =>
       ApiResponse({ status, schema: platformOpenApiSchema(schema) }),
     ),
   ];
-  if (options.body) {
-    decorators.push(ApiBody({ schema: platformOpenApiSchema(options.body) }));
+  if (options.commercialV2)
+    decorators.push(
+      ApiHeader({
+        name: COMMERCIAL_VERSION_HEADER,
+        required: false,
+        schema: { type: "string", enum: ["2"] },
+        description:
+          "Opt into commercial V2. Omission selects the legacy representation; unsupported legacy values return client_update_required.",
+      }),
+    );
+  if (options.body || options.commercialV2?.body) {
+    const bodies = [options.body, options.commercialV2?.body].filter(
+      (body): body is ZodType => body !== undefined,
+    );
+    decorators.push(
+      ApiBody({
+        schema:
+          bodies.length === 1
+            ? platformOpenApiSchema(bodies[0]!)
+            : { anyOf: bodies.map(platformOpenApiSchema) },
+      }),
+    );
   }
   if (options.query) {
     const querySchema = platformOpenApiSchema(options.query);

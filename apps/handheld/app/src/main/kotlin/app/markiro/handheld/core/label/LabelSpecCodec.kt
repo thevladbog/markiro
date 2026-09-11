@@ -15,7 +15,23 @@ import kotlinx.serialization.json.jsonObject
  * the aggregation slice feeds it the shift bundle's box template.
  */
 object LabelSpecCodec {
-    fun parse(json: String): LabelSpec = spec(Json.parseToJsonElement(json).jsonObject)
+    /**
+     * Every way a stored template can be unusable surfaces as one exception.
+     *
+     * The JSON itself is a caller's problem too: templates live as text in
+     * SQLite, and a truncated one threw a serialization error straight past the
+     * `LabelRenderException` its callers catch, turning a named «Шаблон
+     * повреждён» into a crash.
+     */
+    fun parse(json: String): LabelSpec {
+        val root = try {
+            Json.parseToJsonElement(json)
+        } catch (e: kotlinx.serialization.SerializationException) {
+            throw LabelRenderException("label spec is not valid JSON: ${e.message}")
+        }
+        if (root !is JsonObject) throw LabelRenderException("label spec is not a JSON object")
+        return spec(root)
+    }
 
     fun spec(o: JsonObject): LabelSpec = LabelSpec(
         widthMm = o.num("widthMm"),

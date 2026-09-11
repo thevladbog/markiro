@@ -1,3 +1,4 @@
+import { assertCommercialPlanSequence } from "./commercial-line-terms";
 import {
   BadRequestException,
   ConflictException,
@@ -7,7 +8,9 @@ import {
 } from "@nestjs/common";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import { commercialLineTermsSchema } from "@markiro/platform-contracts";
 import type { InvoiceApplicationResultSource as InvoiceApplicationResult } from "@markiro/platform-contracts";
+import { lockInvoiceCommercialOrigin, validateInvoiceSaleOrigin } from "./commercial-sale-origin";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
@@ -132,6 +135,7 @@ export class BillingApplicationService {
   }
 
   private async requirePaidInvoice(tx: BillingTransaction, invoiceId: string): Promise<Invoice> {
+    await lockInvoiceCommercialOrigin(tx, invoiceId);
     await tx.execute(sql`select id from invoices where id = ${invoiceId} for update`);
     const [invoice] = await tx
       .select()
@@ -153,6 +157,7 @@ export class BillingApplicationService {
     source: "manual" | "payment",
     reason: string,
   ): Promise<InvoiceApplicationResult> {
+    const operationAt = new Date();
     const results: InvoiceApplicationResult["results"] = [];
     for (const line of lines) {
       const selection = selections.get(line.id);
@@ -182,14 +187,17 @@ export class BillingApplicationService {
       const attempt = previous ? previous.attempt + (previous.status === "failed" ? 1 : 0) : 1;
       const activationPolicy = resolveActivationPolicy(line, selection);
       try {
-        const result = await this.applyLine(
-          tx,
-          principal,
-          invoice,
-          payment,
-          line,
-          activationPolicy,
-          reason,
+        const result = await tx.transaction((lineTx) =>
+          this.applyLine(
+            lineTx,
+            principal,
+            invoice,
+            payment,
+            line,
+            activationPolicy,
+            reason,
+            operationAt,
+          ),
         );
         await this.writeApplicationEvent(tx, {
           previous,
@@ -336,43 +344,33 @@ export class BillingApplicationService {
     line: InvoiceLine,
     activationPolicy: ActivationPolicy | undefined,
     reason: string,
+    operationAt: Date,
   ): Promise<unknown> {
-    if (line.kind === "plan") {
+    await validateInvoiceSaleOrigin(tx, invoice);
+    const completeLines = await tx
+      .select()
+      .from(schema.invoiceLines)
+      .where(
+        and(
+          eq(schema.invoiceLines.tenantId, invoice.tenantId),
+          eq(schema.invoiceLines.invoiceId, invoice.id),
+        ),
+      )
+      .orderBy(schema.invoiceLines.position);
+    assertCommercialPlanSequence(completeLines, true);
+    if (line.kind === "plan" || line.kind === "addon") {
       if (!line.catalogVersionId) throw new ConflictException({ code: "catalog_version_missing" });
       if (!activationPolicy) throw new ConflictException({ code: "activation_policy_required" });
-      return this.lifecycle.assignPaidInvoicePlan(tx, principal, invoice.tenantId, {
-        catalogVersionId: line.catalogVersionId,
-        activationPolicy,
+      return this.lifecycle.applyPaidLicense(tx, principal, invoice.tenantId, {
+        line: {
+          kind: line.kind,
+          catalogVersionId: line.catalogVersionId,
+          quantity: line.quantity,
+          commercialTerms: line.commercialTerms,
+        },
+        origin: { kind: "invoice", invoiceLineId: line.id, paymentId: payment.id },
+        operationAt,
         reason,
-        sourceInvoiceLineId: line.id,
-      });
-    }
-    if (line.kind === "addon") {
-      if (!line.catalogVersionId) throw new ConflictException({ code: "catalog_version_missing" });
-      if (!activationPolicy) throw new ConflictException({ code: "activation_policy_required" });
-      const targetStatuses =
-        activationPolicy === "after_current"
-          ? (["scheduled"] as const)
-          : (["active", "trial", "pending_activation"] as const);
-      const [target] = await tx
-        .select({ id: schema.tenantSubscriptions.id })
-        .from(schema.tenantSubscriptions)
-        .where(
-          and(
-            eq(schema.tenantSubscriptions.tenantId, invoice.tenantId),
-            inArray(schema.tenantSubscriptions.status, targetStatuses),
-          ),
-        )
-        .orderBy(desc(schema.tenantSubscriptions.updatedAt))
-        .limit(1);
-      if (!target) throw new ConflictException({ code: "subscription_target_missing" });
-      return this.lifecycle.assignPaidInvoiceAddon(tx, principal, invoice.tenantId, {
-        catalogVersionId: line.catalogVersionId,
-        expectedSubscriptionId: target.id,
-        quantity: line.quantity,
-        activationPolicy,
-        reason,
-        sourceInvoiceLineId: line.id,
       });
     }
     if (line.kind === "service") {
@@ -452,6 +450,15 @@ function resolveActivationPolicy(
       throw new BadRequestException({ code: "invoice_application_policy_not_allowed" });
     }
     return undefined;
+  }
+  const terms = commercialLineTermsSchema.safeParse(line.commercialTerms);
+  if (
+    terms.success &&
+    selection.activationPolicy &&
+    selection.activationPolicy !==
+      (terms.data.activationRule === "after_current" ? "after_current" : "immediate")
+  ) {
+    throw new BadRequestException({ code: "invoice_activation_policy_frozen" });
   }
   if (line.activationPolicy === "manual") {
     if (!selection.activationPolicy) {

@@ -86,6 +86,7 @@ const issuedDetail = {
       tenantId: TENANT_ID,
       invoiceId: INVOICE_ID,
       position: 1,
+      commercialTerms: null,
       kind: "plan",
       catalogVersionId: "11111111-1111-4111-8111-111111111111",
       catalogKind: "plan",
@@ -317,6 +318,46 @@ function installApi({
 }
 
 describe("invoice commercial lifecycle", () => {
+  it("localizes a structured annual invoice unit while retaining legacy literal units", async () => {
+    installApi();
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        if (String(input).endsWith(`/api/platform/invoices/${INVOICE_ID}`))
+          return jsonResponse(200, {
+            ...issuedDetail,
+            lines: [
+              {
+                ...issuedDetail.lines[0],
+                unit: "year",
+                commercialTerms: {
+                  version: 1,
+                  subject: "software_license",
+                  documentNameRu: "Лицензия",
+                  documentNameEn: null,
+                  sellerPolicyRevision: 2,
+                  billingPeriod: "year",
+                  billingTimezone: "Europe/Moscow",
+                  activationRule: "on_application",
+                },
+              },
+              {
+                ...issuedDetail.lines[0],
+                id: "93111111-1111-4111-8111-111111111111",
+                position: 2,
+                unit: "legacy-unit",
+              },
+            ],
+          });
+        return originalFetch(input, init);
+      }),
+    );
+    renderSaasApp({ initialEntry: `/invoices/${INVOICE_ID}` });
+    expect(await screen.findByText("plan · 1 Год")).toBeDefined();
+    expect(screen.getByText("plan · 1 legacy-unit")).toBeDefined();
+  });
+
   it("rejects a malformed invoice success body at the browser boundary", async () => {
     vi.stubGlobal(
       "fetch",

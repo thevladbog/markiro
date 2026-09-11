@@ -1,4 +1,4 @@
-import type { OfferPreview, OfferWorkspace } from "@markiro/platform-contracts";
+import type { OfferPreview, OfferWorkspaceV2 as OfferWorkspace } from "@markiro/platform-contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, ConfirmDialog, Input } from "@markiro/ui";
 import { useRef, useState } from "react";

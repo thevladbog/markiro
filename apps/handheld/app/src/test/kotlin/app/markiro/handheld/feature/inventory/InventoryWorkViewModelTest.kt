@@ -98,9 +98,11 @@ class InventoryWorkViewModelTest {
             db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" }, NetworkModule.strictJson(),
             engineScope,
         )
-        return InventoryWorkViewModel(
-            SavedStateHandle(mapOf("inventoryId" to "i1")), db, InventoryRecorder(db), ScanRouterAdapter(scans), { played += it }, engine, session,
-            ReachabilityTracker(),
+        return main.track(
+            InventoryWorkViewModel(
+                SavedStateHandle(mapOf("inventoryId" to "i1")), db, InventoryRecorder(db), ScanRouterAdapter(scans), { played += it }, engine,
+                session, ReachabilityTracker(),
+            ),
         )
     }
 

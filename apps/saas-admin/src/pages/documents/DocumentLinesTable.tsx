@@ -48,7 +48,7 @@ export function DocumentLinesTable({
   onMove: (line: DocumentLineDraft, direction: -1 | 1) => void;
   onRemove: (line: DocumentLineDraft) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   return (
     <div
@@ -78,14 +78,25 @@ export function DocumentLinesTable({
               <Fragment key={line.id}>
                 <tr className="document-lines-table__row">
                   <th scope="row">
-                    <strong>{line.nameRu}</strong>
+                    <strong>{i18n.language === "en" ? line.nameEn : line.nameRu}</strong>
+                    {line.commercialTerms?.billingPeriod ? (
+                      <p>
+                        {t(`catalog.units.${line.commercialTerms.billingPeriod}`)} ·{" "}
+                        {t(`commercial.activation.${line.commercialTerms.activationRule}`)}
+                      </p>
+                    ) : null}
                     <span>
-                      {line.catalogItemCode} · v{line.version} · {line.unit}
+                      {line.catalogItemCode} · v{line.version} ·{" "}
+                      {line.commercialTerms?.subject === "software_license" &&
+                      line.commercialTerms.billingPeriod
+                        ? t(`catalog.units.${line.commercialTerms.billingPeriod}`)
+                        : line.unit}
                     </span>
                   </th>
                   <td>
                     <Input
                       aria-label={t("documents.quantityFor", { name: line.nameRu })}
+                      disabled={line.kind === "plan" || Boolean(draft.sourceOfferId)}
                       value={String(line.quantity)}
                       inputMode="numeric"
                       {...(errors[`${prefix}.quantity`]
@@ -97,6 +108,7 @@ export function DocumentLinesTable({
                   <td>
                     <Input
                       aria-label={t("documents.priceFor", { name: line.nameRu })}
+                      disabled={Boolean(draft.sourceOfferId)}
                       value={line.agreedUnitPrice}
                       inputMode="decimal"
                       mono
@@ -109,6 +121,7 @@ export function DocumentLinesTable({
                     {kind === "offer" ? (
                       <Input
                         label={t("documents.priceOverrideReasonFor", { name: line.nameRu })}
+                        disabled={Boolean(draft.sourceOfferId)}
                         value={line.priceOverrideReason ?? ""}
                         onChange={(event) => onPriceOverrideReasonChange(line, event.target.value)}
                       />
@@ -124,6 +137,7 @@ export function DocumentLinesTable({
                           value: option.value,
                           label: t(option.labelKey),
                         }))}
+                        disabled={Boolean(draft.sourceOfferId)}
                         value={line.vatIncluded ? "included" : "excluded"}
                         onValueChange={(value) => onVatIncludedChange(line, value === "included")}
                       />
@@ -135,6 +149,7 @@ export function DocumentLinesTable({
                     ) : (
                       <Select<NonNullable<DocumentLineDraft["activationPolicy"]>>
                         aria-label={t("documents.policyFor", { name: line.nameRu })}
+                        disabled={Boolean(draft.sourceOfferId)}
                         options={policies.map((policy) => ({
                           value: policy,
                           label: t(policyLabelKey(policy)),
@@ -156,7 +171,7 @@ export function DocumentLinesTable({
                         variant="secondary"
                         className="document-line__action"
                         aria-label={t("documents.moveUp", { name: line.nameRu })}
-                        disabled={index === 0}
+                        disabled={Boolean(draft.sourceOfferId) || index === 0}
                         onClick={() => onMove(line, -1)}
                       >
                         ↑
@@ -166,7 +181,7 @@ export function DocumentLinesTable({
                         variant="secondary"
                         className="document-line__action"
                         aria-label={t("documents.moveDown", { name: line.nameRu })}
-                        disabled={index === draft.lines.length - 1}
+                        disabled={Boolean(draft.sourceOfferId) || index === draft.lines.length - 1}
                         onClick={() => onMove(line, 1)}
                       >
                         ↓
@@ -176,6 +191,7 @@ export function DocumentLinesTable({
                         variant="destructive"
                         className="document-line__action"
                         aria-label={t("documents.remove", { name: line.nameRu })}
+                        disabled={Boolean(draft.sourceOfferId)}
                         onClick={() => onRemove(line)}
                       >
                         ×
@@ -187,6 +203,7 @@ export function DocumentLinesTable({
                   <td colSpan={6}>
                     <Textarea
                       label={t("documents.commentFor", { name: line.nameRu })}
+                      disabled={Boolean(draft.sourceOfferId)}
                       value={line.descriptionRu ?? ""}
                       rows={2}
                       maxLength={10_000}

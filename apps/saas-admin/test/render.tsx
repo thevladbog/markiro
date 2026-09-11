@@ -1,3 +1,4 @@
+import type { SellerTaxPolicy } from "@markiro/platform-contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -177,6 +178,10 @@ export const DRAFT_PLAN = {
   id: "11111111-1111-4111-8111-111111111111",
   catalogItemId: "21111111-1111-4111-8111-111111111111",
   catalogItemCode: "plan-basic",
+  documentNameRu: null,
+  documentNameEn: null,
+  subject: null,
+  sellerPolicyRevision: null,
   kind: "plan",
   version: 2,
   status: "draft",
@@ -217,6 +222,10 @@ export const ADDON = {
   id: "41111111-1111-4111-8111-111111111111",
   catalogItemId: "51111111-1111-4111-8111-111111111111",
   catalogItemCode: "addon-station",
+  documentNameRu: null,
+  documentNameEn: null,
+  subject: null,
+  sellerPolicyRevision: null,
   kind: "addon",
   version: 1,
   status: "published",
@@ -239,6 +248,10 @@ export const SERVICE = {
   id: "61111111-1111-4111-8111-111111111111",
   catalogItemId: "71111111-1111-4111-8111-111111111111",
   catalogItemCode: "service-implementation",
+  documentNameRu: null,
+  documentNameEn: null,
+  subject: null,
+  sellerPolicyRevision: null,
   kind: "service",
   version: 1,
   status: "published",
@@ -291,6 +304,15 @@ export function installCatalogApi({
   createResponses = [],
   archiveStatuses = [],
   catalogStatus = 200,
+  stalePublishPrice,
+  stalePublishPeriod,
+  taxPolicy = {
+    kind: "vat",
+    regime: "other",
+    allowedRatesBps: [0, 2000, 2200, 1234],
+    defaultRateBps: 2200,
+    defaultIncluded: true,
+  },
 }: {
   me?: PlatformPrincipal;
   items?: CatalogVersionDto[];
@@ -300,12 +322,16 @@ export function installCatalogApi({
   createResponses?: CatalogResponse[];
   archiveStatuses?: number[];
   catalogStatus?: number;
+  stalePublishPrice?: string;
+  stalePublishPeriod?: "month" | "year";
+  taxPolicy?: SellerTaxPolicy | null;
 } = {}) {
   let catalog: CatalogVersionDto[] = items.map((item) => structuredClone(item));
   let demoId = defaultDemoId;
   const patchCalls: CatalogPatchCall[] = [];
   const createCalls: CatalogCreateCall[] = [];
   let createSequence = 0;
+  let reviewRevision = "2026-09-10T10:00:00.000Z";
 
   vi.stubGlobal(
     "fetch",
@@ -334,6 +360,27 @@ export function installCatalogApi({
         demoId = body.catalogVersionId;
         return jsonResponse(200, { catalogVersionId: demoId });
       }
+      if (url.endsWith("/catalog/editor-context"))
+        return jsonResponse(200, {
+          sellerPolicyRevision: 1,
+          taxPolicy,
+          taxDefaults:
+            taxPolicy?.kind === "vat"
+              ? { vatRateBps: taxPolicy.defaultRateBps, vatIncluded: taxPolicy.defaultIncluded }
+              : taxPolicy
+                ? { vatRateBps: null, vatIncluded: false }
+                : null,
+          canWrite: true,
+        });
+      if (url.endsWith("/review"))
+        return jsonResponse(200, {
+          identity: {
+            catalogVersionId: url.split("/").at(-2),
+            draftUpdatedAt: reviewRevision,
+            sellerPolicyRevision: 1,
+          },
+          errors: [],
+        });
       const createMatch = url.match(/\/api\/platform\/catalog\/items\/([^/]+)\/versions$/);
       if (createMatch && init.method === "POST") {
         const response = createResponses.shift() ?? 201;
@@ -376,7 +423,28 @@ export function installCatalogApi({
       const match = url.match(
         /\/api\/platform\/catalog\/items\/([^/]+)\/versions\/([^/]+)(\/publish)?$/,
       );
+      if (match && !match[3] && (!init.method || init.method === "GET"))
+        return jsonResponse(
+          200,
+          catalog.find((item) => item.id === match[2]),
+        );
       if (match?.[3] === "/publish" && init.method === "POST") {
+        if (stalePublishPrice) {
+          catalog = catalog.map((item) => {
+            if (item.id !== match[2]) return item;
+            if (item.kind !== "service" && stalePublishPeriod)
+              return {
+                ...item,
+                unitPrice: stalePublishPrice,
+                billingPeriod: stalePublishPeriod,
+                unit: stalePublishPeriod,
+              };
+            return { ...item, unitPrice: stalePublishPrice };
+          });
+          stalePublishPrice = undefined;
+          reviewRevision = "2026-09-10T11:00:00.000Z";
+          return jsonResponse(409, { code: "commercial_review_stale" });
+        }
         catalog = catalog.map((item) =>
           item.id === match[2]
             ? { ...item, status: "published", publishedAt: "2026-08-09T09:00:00.000Z" }
@@ -420,6 +488,10 @@ const SCHEDULED_PLAN = {
   id: "91111111-1111-4111-8111-111111111111",
   catalogItemId: "a1111111-1111-4111-8111-111111111111",
   catalogItemCode: "plan-production",
+  documentNameRu: null,
+  documentNameEn: null,
+  subject: null,
+  sellerPolicyRevision: null,
   version: 3,
   nameRu: "Производственный",
   nameEn: "Production",
@@ -480,6 +552,7 @@ export const TENANT_DETAIL = {
     terminalAt: "2026-08-09T08:01:00.000Z",
   },
   currentSubscription: {
+    commercialPeriod: null,
     id: "b1111111-1111-4111-8111-111111111111",
     tenantId: TENANT_ID,
     planVersionId: PUBLISHED_PLAN.id,
@@ -494,6 +567,10 @@ export const TENANT_DETAIL = {
       id: PUBLISHED_PLAN.id,
       catalogItemId: PUBLISHED_PLAN.catalogItemId,
       catalogItemCode: "plan-basic",
+      documentNameRu: null,
+      documentNameEn: null,
+      subject: null,
+      sellerPolicyRevision: null,
       kind: "plan",
       version: 1,
       status: "published",
@@ -506,8 +583,6 @@ export const TENANT_DETAIL = {
       vatRateBps: 2000,
       vatIncluded: true,
       entitlements: {
-        catalogVersionId: PUBLISHED_PLAN.id,
-        catalogKind: "plan",
         maxLines: 2,
         maxStations: 3,
         maxKiosks: 1,
@@ -520,6 +595,7 @@ export const TENANT_DETAIL = {
     },
   },
   scheduledSubscription: {
+    commercialPeriod: null,
     id: "d1111111-1111-4111-8111-111111111111",
     tenantId: TENANT_ID,
     planVersionId: SCHEDULED_PLAN.id,
@@ -534,6 +610,10 @@ export const TENANT_DETAIL = {
       id: SCHEDULED_PLAN.id,
       catalogItemId: SCHEDULED_PLAN.catalogItemId,
       catalogItemCode: "plan-production",
+      documentNameRu: null,
+      documentNameEn: null,
+      subject: null,
+      sellerPolicyRevision: null,
       kind: "plan",
       version: 3,
       status: "published",
@@ -546,8 +626,6 @@ export const TENANT_DETAIL = {
       vatRateBps: 2000,
       vatIncluded: true,
       entitlements: {
-        catalogVersionId: SCHEDULED_PLAN.id,
-        catalogKind: "plan",
         maxLines: 10,
         maxStations: 12,
         maxKiosks: 4,
@@ -562,6 +640,7 @@ export const TENANT_DETAIL = {
   activeAddons: [
     {
       id: "e1111111-1111-4111-8111-111111111111",
+      commercialPeriod: null,
       subscriptionId: "b1111111-1111-4111-8111-111111111111",
       addonVersionId: ADDON.id,
       quantity: 1,
@@ -573,6 +652,10 @@ export const TENANT_DETAIL = {
         id: ADDON.id,
         catalogItemId: ADDON.catalogItemId,
         catalogItemCode: "addon-station",
+        documentNameRu: null,
+        documentNameEn: null,
+        subject: null,
+        sellerPolicyRevision: null,
         kind: "addon",
         version: 1,
         status: "published",
@@ -591,6 +674,7 @@ export const TENANT_DETAIL = {
   scheduledAddons: [
     {
       id: "f1111111-1111-4111-8111-111111111111",
+      commercialPeriod: null,
       subscriptionId: "d1111111-1111-4111-8111-111111111111",
       addonVersionId: ADDON.id,
       quantity: 2,
@@ -602,6 +686,10 @@ export const TENANT_DETAIL = {
         id: ADDON.id,
         catalogItemId: ADDON.catalogItemId,
         catalogItemCode: "addon-station",
+        documentNameRu: null,
+        documentNameEn: null,
+        subject: null,
+        sellerPolicyRevision: null,
         kind: "addon",
         version: 1,
         status: "published",
@@ -621,6 +709,7 @@ export const TENANT_DETAIL = {
   events: [
     {
       id: "12111111-1111-4111-8111-111111111111",
+      commercialPeriod: null,
       subscriptionId: "d1111111-1111-4111-8111-111111111111",
       eventKind: "plan.scheduled",
       effectiveAt: TEST_SUBSCRIPTION_TRANSITION_AT,
@@ -632,6 +721,7 @@ export const TENANT_DETAIL = {
     },
     {
       id: "13111111-1111-4111-8111-111111111111",
+      commercialPeriod: null,
       subscriptionId: "b1111111-1111-4111-8111-111111111111",
       eventKind: "demo.activated",
       effectiveAt: "2026-08-10T08:00:00.000Z",
@@ -770,6 +860,7 @@ export function installTenantApi({
         return jsonResponse(201, {
           id: "15111111-1111-4111-8111-111111111111",
           tenantId: TENANT_ID,
+          commercialPeriod: null,
           subscriptionId:
             body.activationPolicy === "after_current"
               ? "d1111111-1111-4111-8111-111111111111"

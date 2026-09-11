@@ -378,6 +378,7 @@
     "createInvoice": "Create invoice from offer",
     "publish": "Publish",
     "bankReference": "Bank reference",
+    "payError": "Could not record payment. Check the offer status and try again.",
     "pay": "Record payment",
     "empty": "No offers yet",
     "loadError": "Could not load offers",
@@ -889,7 +890,7 @@
     "policyFor": "Activation policy for {{name}}",
     "noPolicy": "Not required",
     "policies": {
-      "immediate": "Immediately",
+      "immediate": "When payment is applied",
       "after_current": "After current",
       "manual": "Manually"
     },
@@ -929,7 +930,10 @@
       "vat_rate_must_be_between_0_and_10000": "Invalid VAT rate",
       "service_activation_policy_must_be_null": "A service has no activation policy",
       "activation_policy_required": "Choose an activation policy",
-      "activation_policy_unsupported": "Activation policy is unavailable"
+      "activation_policy_unsupported": "Activation policy is unavailable",
+      "commercial_plan_sequence_invalid": "Use one plan or two in order: on payment application, then after the current term.",
+      "commercial_plan_sequence_review_required": "Review the plan sequence. Apply the first line before its renewal; another line of this sale cannot replace a purchased term.",
+      "commercial_plan_quantity_invalid": "A plan quantity must be 1."
     }
   },
   "reports": {
@@ -1232,6 +1236,13 @@
     }
   },
   "catalog": {
+    "payable": {
+      "price": "Price",
+      "vat": "VAT",
+      "total": "Payable",
+      "invoice": "Invoice",
+      "offer": "Offer"
+    },
     "title": "Catalog",
     "description": "Plan, add-on, and service versions used in commercial documents.",
     "actionsLabel": "Catalog actions",
@@ -1318,7 +1329,9 @@
       "option": "VAT {{rate}}%",
       "customRate": "Custom rate",
       "included": "VAT {{rate}}% included in price",
-      "includedHint": "VAT is included in the entered price"
+      "includedHint": "VAT is included in the entered price",
+      "unavailable": "{{rate}} — unavailable under current policy",
+      "excluded": "VAT {{rate}}% excluded"
     },
     "effectNames": {
       "lines": "Lines",
@@ -1338,7 +1351,8 @@
       "integer32": "Enter an integer from 1 to 2147483647",
       "descriptionTooLong": "Use no more than 2000 characters",
       "effectRequired": "Add at least one effect",
-      "effectDuplicate": "Each effect type can be added only once"
+      "effectDuplicate": "Each effect type can be added only once",
+      "quota": "Enter a positive whole quantity."
     },
     "form": {
       "identity": "Version parameters",
@@ -1371,7 +1385,11 @@
       "addEffect": "Add effect",
       "removeEffect": "Remove effect {{index}}",
       "remove": "Remove",
-      "serviceNotice": "A service does not change quotas and is activated once."
+      "serviceNotice": "A service does not change quotas and is activated once.",
+      "period": "License period",
+      "documentNameRu": "Document name (RU)",
+      "documentNameEn": "Document name (EN)",
+      "subject": "Commercial subject"
     },
     "save": "Save draft",
     "saved": "Draft saved",
@@ -1390,7 +1408,17 @@
     "defaultUpdated": "Version selected for new demos",
     "defaultConflict": "The demo plan changed. Refresh the catalog.",
     "defaultError": "Could not select the demo plan.",
-    "mutationStatus": "Version operation status"
+    "mutationStatus": "Version operation status",
+    "quota": {
+      "mode": "{{label}}: mode",
+      "none": "None",
+      "limited": "Limited",
+      "unlimited": "Unlimited",
+      "required": "Enter quantity"
+    },
+    "policyRequired": "Configure the seller tax policy before publishing.",
+    "reviewError": "Review subject, document names and tax terms.",
+    "reviewStale": "Terms changed. Review the refreshed terms and confirm again."
   },
   "tenants": {
     "title": "Tenants",
@@ -1648,6 +1676,46 @@
       "assignment_failed": "Could not save the assignment"
     }
   },
+  "commercial": {
+    "subject": {
+      "software_license": "Software license",
+      "service": "Service",
+      "development_work": "Development work"
+    },
+    "seller": {
+      "title": "Seller tax policy",
+      "unconfigured": "Not configured",
+      "npd": "NPD — without VAT",
+      "without_vat": "Other regime — without VAT",
+      "vat": "VAT",
+      "rates": "Allowed VAT rates, % (separate with ;)",
+      "defaultRate": "Default rate, %"
+    },
+    "activation": {
+      "on_application": "From application of confirmed payment",
+      "after_current": "After the current term ends"
+    },
+    "sourceFrozen": "Accepted offer terms are preserved. The invoice includes all original lines unchanged.",
+    "purchasedPeriod": "Purchased period",
+    "errors": {
+      "commercial_review_stale": "Seller policy changed. Review the new terms and create a new document; saved terms remain unchanged.",
+      "commercial_terms_review_required": "Review the commercial terms and create a new catalog version.",
+      "seller_tax_policy_unconfigured": "Configure the seller tax policy before publishing.",
+      "seller_tax_policy_violation": "VAT conflicts with current seller policy. Review the terms.",
+      "commercial_source_review_required": "The source document requires review. Its terms and amounts remain unchanged.",
+      "offer_invoice_lines_mismatch": "The invoice must preserve all accepted offer terms.",
+      "offer_not_accepted": "The customer has not accepted this offer yet. Payment can be recorded after acceptance.",
+      "offer_invoice_exists": "This offer already has an invoice.",
+      "commercial_sale_already_fulfilled": "This sale has already been applied.",
+      "commercial_plan_sequence_invalid": "Use one plan or two in order: on payment application, then after the current term.",
+      "commercial_plan_sequence_review_required": "Review the plan sequence. Apply the first line before its renewal; another line of this sale cannot replace a purchased term.",
+      "commercial_plan_quantity_invalid": "A plan quantity must be 1.",
+      "commercial_amount_out_of_range": "A line, tax or document amount exceeds the supported limit. Reduce the price or quantity.",
+      "commercial_line_terms_invalid": "Review the commercial subject and license period.",
+      "commercial_subject_required": "Select the commercial subject.",
+      "document_name_required": "Enter the document name."
+    }
+  },
   "agreements": {
     "title": "Agreements",
     "description": "Registry of client agreements: requisites, statuses and printable forms.",
@@ -1661,6 +1729,7 @@
       "counterparty": "Counterparty",
       "inn": "INN",
       "status": "Status",
+      "documentForm": "Form",
       "conclusionDate": "Concluded",
       "tenant": "Tenant",
       "documentKind": "Kind",
@@ -1692,6 +1761,13 @@
       "sole_proprietor": "Sole proprietor",
       "self_employed": "Self-employed",
       "individual": "Individual"
+    },
+    "documentForm": {
+      "label": "Document form",
+      "ru": "Russian",
+      "ru_en": "Bilingual (RU/EN)",
+      "badgeRu": "RU",
+      "badgeRuEn": "RU + EN"
     },
     "sections": {
       "counterparty": "Counterparty",

@@ -19,7 +19,7 @@ import {
   type PlatformBillingRequestLinkDto,
   type PlatformBillingRequestLinkTargetQueryDto,
   type PlatformBillingRequestListQueryDto,
-  type PlatformBillingRequestOfferCreateDto,
+  type CreateOfferV2,
   type PlatformBillingRequestStatusMutationDto,
 } from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
@@ -411,7 +411,7 @@ export class PlatformBillingRequestsService {
   async createOffer(
     actor: PlatformPrincipal,
     requestId: string,
-    input: PlatformBillingRequestOfferCreateDto,
+    input: Omit<CreateOfferV2, "tenantId"> & { idempotencyKey: string },
   ) {
     const canonicalRequestId = canonicalBillingUuid(requestId);
     const located = await this.locate(canonicalRequestId);

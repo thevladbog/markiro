@@ -1,3 +1,4 @@
+import { commercialErrorKey } from "../documents/commercialError.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, SectionHeader, Spinner } from "@markiro/ui";
 import { useEffect, useRef, useState } from "react";
@@ -176,6 +177,7 @@ function InvoiceEditor() {
           .map((version) => version.id),
       );
       if (
+        !draft.sourceOfferId &&
         draft.lines.some(
           (line) => line.catalogVersionId !== null && !publishedIds.has(line.catalogVersionId),
         )
@@ -332,7 +334,7 @@ function InvoiceEditor() {
               create.error instanceof ApiRequestError &&
               create.error.code === "catalog_version_stale"
                 ? t("documents.errors.catalogVersionStale")
-                : t("documents.errors.createInvoice"),
+                : t(commercialErrorKey(create.error, "documents.errors.createInvoice")),
           }
         : {})}
       onSubmit={async (draft) => {

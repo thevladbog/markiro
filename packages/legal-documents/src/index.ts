@@ -34,9 +34,14 @@ export type {
 // The API renders agreements at runtime and resolves with node10, which
 // cannot see subpath exports, so the draft renderer lives on the root entry.
 // The registry-bound renderLegalDocx and artifactFileName stay off it.
-export { renderLegalDocxDraft } from "./artifacts/docx.js";
-export type { LegalDocxAssets, LegalDocxDraft } from "./artifacts/docx.js";
+export { renderLegalDocxBilingual, renderLegalDocxDraft } from "./artifacts/docx.js";
+export type { LegalDocxAssets, LegalDocxBilingual, LegalDocxDraft } from "./artifacts/docx.js";
 export { buildTenantAgreement } from "./documents/tenant-agreement.js";
+export {
+  AGREEMENT_MONOLINGUAL_SECTION_IDS,
+  pairLocaleContent,
+} from "./documents/tenant-agreement-bilingual.js";
+export type { BilingualContent, BilingualSection } from "./documents/tenant-agreement-bilingual.js";
 export { TENANT_AGREEMENT_PASSPORT_CONTENT } from "./documents/tenant-agreement-passport.js";
 export {
   agreementDate,

@@ -36,6 +36,7 @@ support or production-device acceptance.
 ```bash
 pnpm --filter @markiro/domain fixtures:km
 pnpm --filter @markiro/domain fixtures:inventory
+pnpm --filter @markiro/domain fixtures:product-labels
 ```
 
 Use only the generator relevant to the changed contract. Review generated changes

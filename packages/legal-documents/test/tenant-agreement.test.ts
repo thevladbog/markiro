@@ -92,9 +92,17 @@ describe("buildTenantAgreement", () => {
     expect(text).toContain("[Старт / Цех / Производство / индивидуальный]");
   });
 
-  it("rejects the English locale until the translation lands", () => {
-    expect(() => buildTenantAgreement({ customer: ORG_CUSTOMER }, "en")).toThrow(
-      /English tenant agreement is not available/,
+  it("states that the Russian text prevails and that the forms stay Russian", () => {
+    const text = flatten({ customer: ORG_CUSTOMER });
+    expect(text).toContain("преимущественную силу имеет русский текст");
+    expect(text).toContain("Приложениях № 5–8");
+  });
+
+  it("builds an English tree of the same shape", () => {
+    const en = buildTenantAgreement({ customer: ORG_CUSTOMER }, "en");
+    expect(en.locale).toBe("en");
+    expect(en.sections).toHaveLength(
+      buildTenantAgreement({ customer: ORG_CUSTOMER }, "ru").sections.length,
     );
   });
 });

@@ -286,6 +286,33 @@ describe.skipIf(!ready)("platform tenant management", () => {
     }
   });
 
+  it("returns truthful zero quotas only in the negotiated tenant detail", async () => {
+    const zeroPlan = await createPublishedPlan({
+      code: `zero-${randomUUID()}`,
+      price: "10.00",
+      demoDurationDays: null,
+      maxLines: 0,
+    });
+    const target = await createActiveTenant("zero-quota");
+    await admin
+      .post(`/platform/tenants/${target}/subscription/plan`)
+      .set("X-Markiro-Commercial-Version", "2")
+      .send({
+        catalogVersionId: zeroPlan,
+        activationPolicy: "immediate",
+        reason: "zero quota fixture",
+      })
+      .expect(201);
+    const v2 = await admin
+      .get(`/platform/tenants/${target}`)
+      .set("X-Markiro-Commercial-Version", "2")
+      .expect(200);
+    expect(v2.body.currentSubscription.planVersion.entitlements.maxLines).toBe(0);
+    expect(v2.body.currentSubscription.commercialPeriod).toBeNull();
+    const legacy = await admin.get(`/platform/tenants/${target}`).expect(409);
+    expect(legacy.body.code).toBe("client_update_required");
+  });
+
   async function ensureTenant(): Promise<void> {
     if (tenantId) return;
     tenantSlug = `platform-tenant-${randomUUID()}`;

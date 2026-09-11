@@ -1,3 +1,4 @@
+import { assertCommercialMoneyRange } from "./commercial-money-range";
 import { randomUUID } from "node:crypto";
 import {
   BadRequestException,
@@ -10,12 +11,24 @@ import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   platformCommercialContracts,
+  platformCommercialV2Contracts,
   type InvoiceCreateServiceResultSource,
   type InvoiceDeleteResult,
   type InvoiceListServiceRecordSource,
   type InvoiceServiceDetailSource,
   type InvoiceServiceRecordSource,
 } from "@markiro/platform-contracts";
+import {
+  assertOfferInvoiceAvailable,
+  sourceOfferInvoiceLines,
+  sourceOfferAmounts,
+} from "./commercial-sale-origin";
+import {
+  freezeCommercialLineTerms,
+  validateCommercialIssuance,
+  assertCommercialPlanSequence,
+} from "./commercial-line-terms";
+import { lockSellerPolicy } from "../billing-profiles/billing-profiles.service";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
@@ -58,7 +71,7 @@ export class BillingService {
     principal: PlatformPrincipal,
     input: CreateInvoiceDto,
   ): Promise<InvoiceCreateServiceResultSource> {
-    const normalizedInput = platformCommercialContracts.invoices.create.body.parse(input);
+    const normalizedInput = platformCommercialV2Contracts.invoices.create.body.parse(input);
     return this.db.transaction(async (tx) => {
       const canonicalSourceRequestId =
         "sourceRequestId" in normalizedInput
@@ -122,6 +135,28 @@ export class BillingService {
           sourceOfferFamilyId,
         );
       }
+      const sourceLines = sourceOfferId
+        ? await tx
+            .select()
+            .from(schema.commercialOfferLines)
+            .where(
+              and(
+                eq(schema.commercialOfferLines.tenantId, normalizedInput.tenantId),
+                eq(schema.commercialOfferLines.offerId, sourceOfferId),
+              ),
+            )
+            .orderBy(schema.commercialOfferLines.position)
+        : null;
+      if (sourceOfferId)
+        await assertOfferInvoiceAvailable(tx, normalizedInput.tenantId, sourceOfferId);
+      const invoiceLines = sourceLines
+        ? sourceOfferInvoiceLines(sourceLines, normalizedInput.lines)
+        : normalizedInput.lines;
+      assertCommercialPlanSequence(invoiceLines);
+      const sourceAmounts =
+        sourceOfferId && sourceLines
+          ? await sourceOfferAmounts(tx, normalizedInput.tenantId, sourceOfferId, sourceLines)
+          : null;
       const normalizedInvoiceSuffix = sql<string>`coalesce(
         nullif(
           ltrim(regexp_replace(${schema.invoices.number}, '^(MRK-)?INV-', ''), '0'),
@@ -221,29 +256,33 @@ export class BillingService {
       let subtotal = 0n;
       let vatTotal = 0n;
       let total = 0n;
-      for (const [index, line] of normalizedInput.lines.entries()) {
-        const catalog = line.catalogVersionId
-          ? await tx
-              .select()
-              .from(schema.catalogItemVersions)
-              .where(
-                and(
-                  eq(schema.catalogItemVersions.id, line.catalogVersionId),
-                  eq(schema.catalogItemVersions.status, "published"),
-                ),
-              )
-              .limit(1)
-          : [];
+      for (const [index, line] of invoiceLines.entries()) {
+        const sourceLine = sourceLines?.[index];
+        const catalog =
+          !sourceLine && line.catalogVersionId
+            ? await tx
+                .select()
+                .from(schema.catalogItemVersions)
+                .where(
+                  and(
+                    eq(schema.catalogItemVersions.id, line.catalogVersionId),
+                    eq(schema.catalogItemVersions.status, "published"),
+                  ),
+                )
+                .limit(1)
+            : [];
         const version = catalog[0];
-        if (line.kind !== "custom" && (!version || version.kind !== line.kind)) {
+        if (!sourceLine && line.kind !== "custom" && (!version || version.kind !== line.kind)) {
           throw new BadRequestException({ code: "invoice_catalog_version_invalid" });
         }
         if (line.kind === "custom" && line.catalogVersionId) {
           throw new BadRequestException({ code: "invoice_custom_catalog_reference" });
         }
-        const nameRu = version?.nameRu ?? line.nameRu;
-        const nameEn = version?.nameEn ?? line.nameEn;
-        const unit = version?.unit ?? line.unit;
+        const resolvedTerms = sourceLine ? null : freezeCommercialLineTerms(version, line);
+        const commercialTerms = sourceLine ? sourceLine.commercialTerms : resolvedTerms;
+        const nameRu = resolvedTerms?.documentNameRu ?? version?.nameRu ?? line.nameRu;
+        const nameEn = resolvedTerms?.documentNameEn ?? version?.nameEn ?? line.nameEn;
+        const unit = resolvedTerms?.billingPeriod ?? version?.unit ?? line.unit;
         if (!nameRu || !nameEn || !unit)
           throw new BadRequestException({ code: "invoice_line_name_required" });
         const vatRateBps =
@@ -254,21 +293,43 @@ export class BillingService {
               : null;
         const rate = BigInt(vatRateBps ?? 0);
         const lineGross = cents(line.agreedUnitPrice) * BigInt(line.quantity);
-        const lineVat = line.vatIncluded
-          ? (lineGross * rate) / (10_000n + rate)
-          : (lineGross * rate) / 10_000n;
-        const lineSubtotal = line.vatIncluded ? lineGross - lineVat : lineGross;
-        const lineTotal = line.vatIncluded ? lineGross : lineGross + lineVat;
+        const frozenAmount = sourceAmounts?.lines[index];
+        const lineVat = frozenAmount
+          ? cents(frozenAmount.lineVat)
+          : line.vatIncluded
+            ? (lineGross * rate) / (10_000n + rate)
+            : (lineGross * rate) / 10_000n;
+        const lineSubtotal = frozenAmount
+          ? cents(frozenAmount.lineSubtotal)
+          : line.vatIncluded
+            ? lineGross - lineVat
+            : lineGross;
+        const lineTotal = frozenAmount
+          ? cents(frozenAmount.lineTotal)
+          : line.vatIncluded
+            ? lineGross
+            : lineGross + lineVat;
         subtotal += lineSubtotal;
         vatTotal += lineVat;
         total += lineTotal;
+
+        assertCommercialMoneyRange(
+          lineGross,
+          lineSubtotal,
+          lineVat,
+          lineTotal,
+          subtotal,
+          vatTotal,
+          total,
+        );
         await tx.insert(schema.invoiceLines).values({
           tenantId: normalizedInput.tenantId,
           invoiceId: invoice.id,
           position: index + 1,
+          commercialTerms,
           kind: line.kind,
-          catalogVersionId: version?.id ?? null,
-          catalogKind: version?.kind ?? null,
+          catalogVersionId: sourceLine?.catalogVersionId ?? version?.id ?? null,
+          catalogKind: sourceLine?.catalogVersionId ? sourceLine.kind : (version?.kind ?? null),
           nameRu,
           nameEn,
           descriptionRu:
@@ -296,7 +357,11 @@ export class BillingService {
       }
       const [updated] = await tx
         .update(schema.invoices)
-        .set({ subtotal: money(subtotal), vatTotal: money(vatTotal), total: money(total) })
+        .set({
+          subtotal: sourceAmounts?.subtotal ?? money(subtotal),
+          vatTotal: sourceAmounts?.vatTotal ?? money(vatTotal),
+          total: sourceAmounts?.total ?? money(total),
+        })
         .where(eq(schema.invoices.id, invoice.id))
         .returning();
       if (!updated) throw new BadRequestException({ code: "invoice_create_failed" });
@@ -425,6 +490,7 @@ export class BillingService {
   async issue(principal: PlatformPrincipal, id: string): Promise<InvoiceServiceRecordSource> {
     const canonicalInvoiceId = canonicalBillingUuid(id);
     return this.db.transaction(async (tx) => {
+      await lockSellerPolicy(tx);
       const [located] = await tx
         .select({ tenantId: schema.invoices.tenantId })
         .from(schema.invoices)
@@ -452,11 +518,16 @@ export class BillingService {
         .limit(1);
       if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
       if (invoice.status !== "draft") throw new ConflictException({ code: "invoice_not_draft" });
+      const frozenLines = await tx
+        .select()
+        .from(schema.invoiceLines)
+        .where(eq(schema.invoiceLines.invoiceId, invoice.id));
       const { seller, buyer, sellerAccount, buyerAccount } = await resolveCommercialBillingDetails(
         tx,
         invoice.tenantId,
         invoice.sellerBankAccountId,
       );
+      await validateCommercialIssuance(tx, frozenLines);
       const now = new Date();
       const [updated] = await tx
         .update(schema.invoices)

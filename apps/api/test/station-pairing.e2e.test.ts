@@ -714,8 +714,20 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     expect(live).toEqual([{ id: deviceId }]);
   });
 
-  it("rotates an active station key so only the replacement can reach station routes", async () => {
+  it("rotates an active station key without extending a trial so only the replacement can reach station routes", async () => {
     await manageCurrentTenant(1);
+    await db
+      .update(schema.tenantSubscriptions)
+      .set({ status: "trial" })
+      .where(eq(schema.tenantSubscriptions.tenantId, tenantId));
+    const trialBefore = await db
+      .select()
+      .from(schema.tenantSubscriptions)
+      .where(eq(schema.tenantSubscriptions.tenantId, tenantId));
+    const eventsBefore = await db
+      .select()
+      .from(schema.subscriptionEvents)
+      .where(eq(schema.subscriptionEvents.tenantId, tenantId));
     const firstCode = await agent
       .post(`/station-devices/${deviceId}/pairing-code`)
       .send({})
@@ -762,6 +774,18 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       .from(schema.apikey)
       .where(and(eq(schema.apikey.referenceId, tenantId), eq(schema.apikey.configId, "station")));
     expect(keys).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(schema.tenantSubscriptions)
+        .where(eq(schema.tenantSubscriptions.tenantId, tenantId)),
+    ).toEqual(trialBefore);
+    expect(
+      await db
+        .select()
+        .from(schema.subscriptionEvents)
+        .where(eq(schema.subscriptionEvents.tenantId, tenantId)),
+    ).toEqual(eventsBefore);
   });
 
   it("deletes a losing candidate with the persisted fallback when direct deletion fails", async () => {
