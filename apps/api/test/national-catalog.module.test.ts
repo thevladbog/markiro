@@ -1,3 +1,8 @@
+import { NationalCatalogImportService } from "../src/modules/national-catalog/national-catalog-import.service";
+import { NationalCatalogImportPreviewService } from "../src/modules/national-catalog/national-catalog-import-preview.service";
+import { NationalCatalogImportApplyService } from "../src/modules/national-catalog/national-catalog-import-apply.service";
+import { NationalCatalogImageService } from "../src/modules/national-catalog/national-catalog-image.service";
+import { EntitlementAdmissionService } from "../src/subscriptions/entitlement-admission.service";
 import { describe, expect, it } from "vitest";
 import { Test } from "@nestjs/testing";
 import { PgBossService } from "../src/jobs/jobs.module";
@@ -55,6 +60,35 @@ describe("NationalCatalogModule wiring", () => {
     });
   });
 
+  it("passes the global admission facade into every concrete factory adapter", () => {
+    const module = NationalCatalogModule.forRoot({
+      NATIONAL_CATALOG_REQUEST_TIMEOUT_MS: 15_000,
+    } as Env);
+    const admission = { observe: () => {}, capture: () => {} };
+    for (const owner of [
+      NationalCatalogProductsService,
+      NationalCatalogProposalService,
+      NationalCatalogImportService,
+      NationalCatalogImportPreviewService,
+      NationalCatalogImportApplyService,
+      NationalCatalogImageService,
+      NationalCatalogLinkRefreshService,
+    ]) {
+      const provider = module.providers?.find(
+        (entry) => typeof entry === "object" && "provide" in entry && entry.provide === owner,
+      );
+      if (!provider || typeof provider !== "object" || !("useFactory" in provider))
+        throw new Error("factory missing");
+      expect(provider.inject).toContain(EntitlementAdmissionService);
+      const instance: unknown = provider.useFactory(
+        ...(provider.inject ?? []).map((token) =>
+          token === EntitlementAdmissionService ? admission : {},
+        ),
+      );
+      expect(instance).toHaveProperty("admission", admission);
+    }
+  });
+
   it("compiles the import graph with explicit global authorization, entitlement, storage and queue dependencies", async () => {
     const ref = await Test.createTestingModule({
       imports: [
@@ -65,6 +99,7 @@ describe("NationalCatalogModule wiring", () => {
             DB,
             AuthorizationService,
             EntitlementsService,
+            EntitlementAdmissionService,
             ObjectStorageService,
             PgBossService,
           ].map((provide) => ({ provide, useValue: {} })),
@@ -72,6 +107,7 @@ describe("NationalCatalogModule wiring", () => {
             DB,
             AuthorizationService,
             EntitlementsService,
+            EntitlementAdmissionService,
             ObjectStorageService,
             PgBossService,
           ],

@@ -7,8 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
 import {
-  platformCatalogV2Contracts,
-  type CatalogVersionV2 as CatalogVersion,
+  platformCatalogV3Contracts,
+  type CatalogVersionV3 as CatalogVersion,
   type OperatorBankAccount,
 } from "@markiro/platform-contracts";
 
@@ -41,6 +41,7 @@ const plan = {
   documentNameEn: null,
   subject: null,
   sellerPolicyRevision: null,
+  lifecyclePolicyId: null,
   kind: "plan",
   version: 3,
   status: "published",
@@ -64,6 +65,10 @@ const plan = {
     labelEditorEnabled: false,
     publicApiEnabled: false,
     palletsEnabled: false,
+    chzIntegrationEnabled: null,
+    inventoryEnabled: null,
+    commerceMlEnabled: null,
+    handheldEnabled: null,
     demoDurationDays: null,
   },
 } satisfies CatalogVersion;
@@ -274,7 +279,7 @@ describe("DocumentComposer", () => {
     void _unitPrice;
     void _vatRateBps;
     void _vatIncluded;
-    const parsed = platformCatalogV2Contracts.list.response.parse({ items: [redacted] });
+    const parsed = platformCatalogV3Contracts.list.response.parse({ items: [redacted] });
 
     expect(parsed.items[0]?.descriptionRu).toBeNull();
     expect(parsed.items[0]).not.toHaveProperty("unitPrice");

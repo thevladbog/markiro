@@ -1,3 +1,5 @@
+import { planEntitlementsV3Schema } from "@markiro/platform-contracts";
+import { CatalogP1Fields, UNKNOWN_P1_FEATURES, type P1DraftFeatures } from "./CatalogP1Fields.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -68,6 +70,8 @@ export function CatalogCreatePanel({
   const [labelEditorEnabled, setLabelEditorEnabled] = useState(false);
   const [publicApiEnabled, setPublicApiEnabled] = useState(false);
   const [palletsEnabled, setPalletsEnabled] = useState(false);
+  const [p1Features, setP1Features] = useState<P1DraftFeatures>(UNKNOWN_P1_FEATURES);
+  const [lifecyclePolicyId, setLifecyclePolicyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -94,7 +98,9 @@ export function CatalogCreatePanel({
         demoDurationDays ||
         labelEditorEnabled ||
         publicApiEnabled ||
-        palletsEnabled,
+        palletsEnabled ||
+        lifecyclePolicyId ||
+        Object.values(p1Features).some((value) => value !== null),
       ),
     );
   }, [
@@ -120,12 +126,15 @@ export function CatalogCreatePanel({
     labelEditorEnabled,
     publicApiEnabled,
     palletsEnabled,
+    p1Features,
+    lifecyclePolicyId,
     onDirtyChange,
   ]);
 
   const create = useMutation({
     mutationFn: () => {
       const base = {
+        lifecyclePolicyId,
         documentNameRu: documentNameRu.trim() || null,
         documentNameEn: documentNameEn.trim() || null,
         sellerPolicyRevision: context.data?.sellerPolicyRevision || null,
@@ -145,7 +154,11 @@ export function CatalogCreatePanel({
               billingMode: "recurring",
               subject: "software_license",
               billingPeriod: unit === "year" ? "year" : "month",
-              plan: {
+              plan: planEntitlementsV3Schema.parse({
+                chzIntegrationEnabled: p1Features.chzIntegration,
+                inventoryEnabled: p1Features.inventory,
+                commerceMlEnabled: p1Features.commerceMl,
+                handheldEnabled: p1Features.handheld,
                 maxLines: lines ? Number(lines) : null,
                 maxStations: stations ? Number(stations) : null,
                 maxKiosks: kiosks ? Number(kiosks) : null,
@@ -154,7 +167,7 @@ export function CatalogCreatePanel({
                 labelEditorEnabled,
                 publicApiEnabled,
                 palletsEnabled,
-              },
+              }),
             }
           : kind === "addon"
             ? {
@@ -215,6 +228,10 @@ export function CatalogCreatePanel({
           }
           if (!code.trim() || !nameRu.trim() || !nameEn.trim() || !unit.trim()) {
             setError(t("catalog.createRequired"));
+            return;
+          }
+          if (kind === "plan" && Object.values(p1Features).some((value) => value === null)) {
+            setError(t("entitlements.mappingRequired"));
             return;
           }
           try {
@@ -404,6 +421,16 @@ export function CatalogCreatePanel({
         </fieldset>
         {context.isError ? <Alert tone="error">{t("catalog.reviewError")}</Alert> : null}
         {error ? <Alert tone="error">{error}</Alert> : null}
+        <CatalogP1Fields
+          values={kind === "plan" ? p1Features : null}
+          policyId={lifecyclePolicyId}
+          policies={context.data?.lifecyclePolicies ?? []}
+          onFeatureChange={(key, value) =>
+            setP1Features((current) => ({ ...current, [key]: value }))
+          }
+          onPolicyChange={setLifecyclePolicyId}
+          disabled={create.isPending}
+        />
         <div className="form-actions">
           <Button
             type="submit"

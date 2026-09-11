@@ -1,3 +1,4 @@
+import { entitlementLifecyclePolicies } from "./entitlements.js";
 import { commercialLineTermsCheck, commercialPeriodCheck } from "./commercial-checks.js";
 import { sql } from "drizzle-orm";
 import {
@@ -28,6 +29,10 @@ export const SAAS_ENTITLEMENT_KEYS = [
   "labelEditor",
   "publicApi",
   "pallets",
+  "chzIntegration",
+  "inventory",
+  "commerceMl",
+  "handheld",
 ] as const;
 export type SaasEntitlementKey = (typeof SAAS_ENTITLEMENT_KEYS)[number];
 
@@ -123,6 +128,9 @@ export const catalogItemVersions = pgTable(
     documentNameEn: text("document_name_en"),
     subject: text("subject").$type<"software_license" | "service" | "development_work">(),
     sellerPolicyRevision: integer("seller_policy_revision"),
+    lifecyclePolicyId: uuid("lifecycle_policy_id").references(
+      () => entitlementLifecyclePolicies.id,
+    ),
     nameRu: text("name_ru").notNull(),
     nameEn: text("name_en").notNull(),
     descriptionRu: text("description_ru"),
@@ -186,6 +194,10 @@ export const planEntitlements = pgTable(
     labelEditorEnabled: boolean("label_editor_enabled").notNull().default(false),
     publicApiEnabled: boolean("public_api_enabled").notNull().default(false),
     palletsEnabled: boolean("pallets_enabled").notNull().default(false),
+    chzIntegrationEnabled: boolean("chz_integration_enabled"),
+    inventoryEnabled: boolean("inventory_enabled"),
+    commerceMlEnabled: boolean("commerce_ml_enabled"),
+    handheldEnabled: boolean("handheld_enabled"),
     demoDurationDays: integer("demo_duration_days"),
   },
   (table) => [
@@ -242,8 +254,8 @@ export const addonEntitlements = pgTable(
     ),
     check(
       "addon_entitlements_key_shape_check",
-      sql`(${table.entitlementKey} in ('lines', 'stations', 'kiosks', 'cabinetUsers') and ${table.quotaIncrement} is not null)
-        or (${table.entitlementKey} in ('labelEditor', 'publicApi', 'pallets') and ${table.quotaIncrement} is null and ${table.featureEnabled} = true)`,
+      sql`(${table.entitlementKey}::text in ('lines', 'stations', 'kiosks', 'cabinetUsers') and ${table.quotaIncrement} is not null)
+        or (${table.entitlementKey}::text in ('labelEditor', 'publicApi', 'pallets', 'chzIntegration', 'inventory', 'commerceMl', 'handheld') and ${table.quotaIncrement} is null and ${table.featureEnabled} = true)`,
     ),
   ],
 );

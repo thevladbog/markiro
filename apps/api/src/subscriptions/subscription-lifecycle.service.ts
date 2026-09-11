@@ -1,3 +1,5 @@
+import { assertCatalogCommercialCompatibility } from "../platform-http/commercial-catalog-compatibility";
+import type { CommercialVersion } from "../platform-http/commercial-version";
 import { assertCommercialPlanSequence } from "../modules/billing/commercial-line-terms";
 import {
   BadRequestException,
@@ -32,6 +34,7 @@ export type PaidLicenseOrigin =
   | { kind: "invoice"; invoiceLineId: string; paymentId: string }
   | { kind: "offer"; offerLineId: string; paymentId: string };
 type AssignmentContext = {
+  commercialVersion?: CommercialVersion;
   subscriptionSource: "manual" | "paid_invoice_line" | "paid_offer_line";
   sourceOfferLineId?: string;
   paid?: { terms: CommercialLineTerms; operationAt: Date; origin: PaidLicenseOrigin };
@@ -227,10 +230,12 @@ export class SubscriptionLifecycleService {
     actor: PlatformPrincipal,
     tenantId: string,
     input: AssignPlanDto,
+    commercialVersion: CommercialVersion = 2,
   ): Promise<SubscriptionRow> {
     assertPlatformAdmin(actor);
     return this.db.transaction((tx) =>
       this.assignPlanInTransaction(tx, actor, tenantId, input, {
+        commercialVersion,
         subscriptionSource: "manual",
         sourceInvoiceLineId: null,
         eventSource: "platform_manual",
@@ -345,6 +350,8 @@ export class SubscriptionLifecycleService {
     );
 
     const lockedTimeline = await lockAndFindTimelineSubscriptions(tx, tenantId);
+    if (context.commercialVersion !== undefined)
+      await assertCatalogCommercialCompatibility(tx, candidate.id, context.commercialVersion);
     const expiredCurrent = isEndedSubscription(lockedTimeline.current, operationAt)
       ? lockedTimeline.current
       : undefined;
@@ -553,10 +560,12 @@ export class SubscriptionLifecycleService {
     actor: PlatformPrincipal,
     tenantId: string,
     input: AssignAddonDto,
+    commercialVersion: CommercialVersion = 2,
   ): Promise<typeof schema.subscriptionAddons.$inferSelect> {
     assertPlatformAdmin(actor);
     return this.db.transaction((tx) =>
       this.assignAddonInTransaction(tx, actor, tenantId, input, {
+        commercialVersion,
         subscriptionSource: "manual",
         sourceInvoiceLineId: null,
         eventSource: "platform_manual",
@@ -582,6 +591,8 @@ export class SubscriptionLifecycleService {
       "addon",
       Boolean(context.paid),
     );
+    if (context.commercialVersion !== undefined)
+      await assertCatalogCommercialCompatibility(tx, candidate.id, context.commercialVersion);
     const effects = await tx
       .select()
       .from(schema.addonEntitlements)

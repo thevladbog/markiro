@@ -3875,3 +3875,25 @@ textarea {
     overflow-wrap: anywhere;
   }
 }
+
+.entitlement-preview-comparison {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  margin-block: var(--sp-4);
+}
+
+.entitlement-preview-comparison th,
+.entitlement-preview-comparison td {
+  padding: var(--sp-2);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.entitlement-preview-comparison caption {
+  text-align: left;
+  font: var(--text-h3);
+  margin-bottom: var(--sp-2);
+}

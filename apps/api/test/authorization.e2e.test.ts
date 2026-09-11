@@ -1,3 +1,4 @@
+import { createManagedSubscription } from "./support/subscription-fixtures";
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
@@ -89,6 +90,33 @@ describe.skipIf(!ready)("cabinet authorization e2e", () => {
     expect(rows).toHaveLength(1);
     return rows[0]!;
   }
+
+  it("returns only the current cabinet tenant safe entitlement snapshot", async () => {
+    const { agent, organizationId } = await activeOrganizationFixture();
+    const other = await activeOrganizationFixture();
+    await createManagedSubscription(db, {
+      tenantId: organizationId,
+      startsAt: new Date(Date.now() - 60000),
+      endsAt: new Date(Date.now() - 1000),
+    });
+    const response = await agent
+      .get(`/access/entitlements?tenantId=${other.organizationId}`)
+      .expect(200);
+    expect(response.body).toMatchObject({
+      version: 1,
+      tenantId: organizationId,
+      current: { access: "read_only" },
+      readiness: { mode: "shadow" },
+    });
+    expect(response.body).not.toHaveProperty("sourceDetails");
+    expect(response.body).not.toHaveProperty("input");
+
+    await db.delete(schema.member).where(eq(schema.member.organizationId, organizationId));
+    await agent.get("/access/entitlements").expect(403);
+  });
+  it("requires a cabinet session for entitlement reads", async () => {
+    await request(app!.getHttpServer()).get("/access/entitlements").expect(401);
+  });
 
   it("rejects GET /access/me without a session", async () => {
     await request(app!.getHttpServer()).get("/access/me").expect(401);

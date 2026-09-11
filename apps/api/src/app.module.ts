@@ -1,3 +1,4 @@
+import { PlatformEntitlementsModule } from "./subscriptions/platform-entitlements.module";
 import { Module, type DynamicModule } from "@nestjs/common";
 import { AuthModule } from "./auth/auth.module";
 import type { AuthSetup } from "./auth/auth.setup";
@@ -95,6 +96,7 @@ export class AppModule {
           ? [
               PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN),
               PlatformCatalogModule,
+              PlatformEntitlementsModule,
               PlatformTenantsModule.forRoot(env.ADMIN_ORIGIN),
               PlatformReportsModule,
               PlatformAgreementsModule,

@@ -13,7 +13,7 @@ import {
 import {
   commercialBody,
   commercialResponse,
-  isCommercialV2,
+  commercialVersion,
 } from "../../platform-http/commercial-version";
 import { parsePlatformResponse } from "../../platform-http/platform-response";
 import { ZodValidationPipe } from "../../zod.pipe";
@@ -65,7 +65,7 @@ export class BillingController {
     @Req() req?: RequestWithPlatformPrincipal,
   ) {
     return commercialResponse(
-      isCommercialV2(req ?? {}),
+      commercialVersion(req ?? {}),
       platformCommercialContracts.invoices.detail.response,
       platformCommercialV2Contracts.invoices.detail.response,
       await this.billing.get(id),
@@ -86,11 +86,12 @@ export class BillingController {
       await this.billing.create(
         req.platformPrincipal!,
         commercialBody(
-          isCommercialV2(req)
+          commercialVersion(req) >= 2
             ? platformCommercialV2Contracts.invoices.create.body
             : platformCommercialContracts.invoices.create.body,
           body,
         ),
+        commercialVersion(req),
       ),
     );
   }

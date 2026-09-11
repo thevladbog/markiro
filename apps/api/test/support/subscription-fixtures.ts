@@ -28,6 +28,7 @@ export async function createPublishedPlan(
     labelEditorEnabled?: boolean;
     publicApiEnabled?: boolean;
     palletsEnabled?: boolean;
+    lifecyclePolicyId?: string;
   },
 ): Promise<string> {
   const itemId = randomUUID();
@@ -50,6 +51,7 @@ export async function createPublishedPlan(
     billingMode: "recurring",
     billingPeriod: "month",
     unitPrice: "1000.00",
+    lifecyclePolicyId: input.lifecyclePolicyId,
     vatRate: "20.00",
     vatIncluded: true,
   });
@@ -74,7 +76,16 @@ export async function createPublishedAddon(
   db: Db,
   effects: Array<
     | { entitlementKey: "lines" | "stations" | "kiosks" | "cabinetUsers"; increment: number }
-    | { entitlementKey: "labelEditor" | "publicApi" | "pallets" }
+    | {
+        entitlementKey:
+          | "labelEditor"
+          | "publicApi"
+          | "pallets"
+          | "chzIntegration"
+          | "inventory"
+          | "commerceMl"
+          | "handheld";
+      }
   >,
 ): Promise<string> {
   const itemId = randomUUID();

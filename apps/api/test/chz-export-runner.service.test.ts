@@ -1,3 +1,11 @@
+import { AuthorizationService } from "../src/authorization/authorization.service";
+import { EntitlementsService } from "../src/subscriptions/entitlements.service";
+import {
+  admissionScopeDigest,
+  EntitlementAdmissionService,
+} from "../src/subscriptions/entitlement-admission.service";
+import { ChzExportsService } from "../src/modules/chz-exports/chz-exports.service";
+import type { PgBossService } from "../src/jobs/jobs.module";
 import { randomBytes, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createDb, schema, type Db } from "@markiro/db";
@@ -173,6 +181,13 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
       email: `${randomUUID()}@example.invalid`,
       emailVerified: false,
     });
+    await db.insert(schema.member).values({
+      id: randomUUID(),
+      organizationId: tenantId,
+      userId: orderedByUserId,
+      role: "owner",
+      createdAt: new Date(),
+    });
     await db.insert(schema.orgProfiles).values({ tenantId, inn: "7707083893" });
     await db.insert(schema.products).values({
       id: productId,
@@ -246,13 +261,19 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
     );
   });
 
-  function runnerWith(client: TrueApiClient): ChzExportRunnerService {
+  function runnerWith(
+    client: TrueApiClient,
+    mode: "managed_only" | "all" = "managed_only",
+  ): ChzExportRunnerService {
     return new ChzExportRunnerService(
       db,
       tokens as unknown as ChzTokenService,
       client,
       { importEvidence } as unknown as InventoriesService,
       journal as unknown as JournalService,
+      new AuthorizationService(db),
+      new EntitlementsService(db, mode),
+      new EntitlementAdmissionService(db, new EntitlementsService(db, mode)),
     );
   }
 
@@ -294,6 +315,383 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
           : eq(schema.chzExportRuns.inventoryId, id),
       );
   }
+
+  describe.each(["adoption", "previous-create", "claim-lock"] as const)(
+    "current context after %s wait",
+    (wait) => {
+      it.each(["unsupported", "missing-group", "missing-profile", "eligible"] as const)(
+        "checks %s context before spending fresh create budget and preserves known recovery",
+        async (edit) => {
+          await seedRuns({
+            state: "queued",
+            claimedAtFor: (status) =>
+              wait === "adoption" && status === "EMITTED"
+                ? new Date(Date.now() - STALE_CLAIM)
+                : null,
+          });
+          await db
+            .update(schema.chzExportRuns)
+            .set({
+              state: "ordered",
+              dispenserTaskId: "known-task",
+              orderedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(schema.chzExportRuns.inventoryId, inventoryId),
+                eq(schema.chzExportRuns.status, "RETIRED"),
+              ),
+            );
+          const { client, calls } = fakeClient({
+            existingTasks: [{ taskId: "adopted-task", status: "PREPARATION", createdAt: null }],
+          });
+          // Every polled task finishes, proving the checked group survives through download.
+          vi.spyOn(client, "listDispenserResults").mockImplementation(
+            async (_auth, productGroupCode, taskIds) => {
+              calls.push({ op: "listDispenserResults", productGroupCode, taskIds });
+              return {
+                status: "ok",
+                value: taskIds.map((taskId) => ({
+                  taskId,
+                  resultId: `result-${taskId}`,
+                  status: "SUCCESS",
+                })),
+              };
+            },
+          );
+          let release = () => {};
+          const barrier = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          let started = () => {};
+          const begun = new Promise<void>((resolve) => {
+            started = resolve;
+          });
+          let firstStatus: string | null = null;
+          if (wait === "adoption") {
+            const list = vi.mocked(client.listDispenserTasks).getMockImplementation();
+            if (!list) throw new Error("list fixture missing");
+            vi.spyOn(client, "listDispenserTasks").mockImplementation(async (...args) => {
+              started();
+              await barrier;
+              return list(...args);
+            });
+          } else if (wait === "previous-create") {
+            const create = vi.mocked(client.createDispenserTask).getMockImplementation();
+            if (!create) throw new Error("create fixture missing");
+            vi.spyOn(client, "createDispenserTask").mockImplementation(async (auth, input) => {
+              if (firstStatus === null) {
+                firstStatus = input.chzStatus;
+                started();
+                await barrier;
+              }
+              return create(auth, input);
+            });
+          }
+          const blocker = wait === "claim-lock" ? await connection.pool.connect() : null;
+          if (blocker) {
+            await blocker.query("BEGIN");
+            await blocker.query(
+              "SELECT id FROM chz_export_runs WHERE inventory_id=$1 AND status='EMITTED' FOR UPDATE",
+              [inventoryId],
+            );
+          }
+          const execution = runnerWith(client).run(tenantId, inventoryId, {
+            retryCount: 0,
+            retryLimit: 3,
+          });
+          let editedAt: Date;
+          try {
+            if (blocker) {
+              const backend = await blocker.query<{ pid: number }>(
+                "SELECT pg_backend_pid() AS pid",
+              );
+              await vi.waitFor(async () => {
+                const waiting = await connection.pool.query(
+                  "SELECT pid FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid)) AND wait_event_type='Lock'",
+                  [backend.rows[0]?.pid],
+                );
+                expect(waiting.rowCount).toBe(1);
+              });
+            } else await begun;
+            await db.transaction(async (tx) => {
+              await tx
+                .update(schema.products)
+                .set({
+                  chzProductGroupCode:
+                    edit === "unsupported" ? 25 : edit === "missing-group" ? null : 10,
+                  gtin14: "04600000000022",
+                })
+                .where(eq(schema.products.id, productId));
+              await tx
+                .update(schema.orgProfiles)
+                .set({ inn: edit === "missing-profile" ? "" : "7736050003" })
+                .where(eq(schema.orgProfiles.tenantId, tenantId));
+            });
+            editedAt = new Date();
+          } finally {
+            if (blocker) {
+              await blocker.query("ROLLBACK");
+              blocker.release();
+            }
+            release();
+            await execution;
+          }
+          const requests = vi
+            .mocked(client.createDispenserTask)
+            .mock.calls.map(([, input]) => input);
+          const freshRequests = requests.filter((input) => input.chzStatus !== firstStatus);
+          const rows = await runsFor(inventoryId);
+          const freshRuns = rows.filter(
+            (row) =>
+              row.status !== "RETIRED" &&
+              row.status !== firstStatus &&
+              !(wait === "adoption" && row.status === "EMITTED"),
+          );
+          expect(rows.find((row) => row.status === "RETIRED")).toMatchObject({
+            state: "imported",
+            attempts: 0,
+          });
+          if (wait === "adoption")
+            expect(rows.find((row) => row.status === "EMITTED")).toMatchObject({
+              state: "imported",
+              dispenserTaskId: "adopted-task",
+            });
+          const observations = await db
+            .select()
+            .from(schema.entitlementShadowObservations)
+            .where(eq(schema.entitlementShadowObservations.tenantId, tenantId));
+          if (edit !== "eligible") {
+            expect(freshRequests).toEqual([]);
+            expect(
+              freshRuns.every(
+                (row) =>
+                  row.state === "failed" &&
+                  row.attempts === 0 &&
+                  row.claimedAt === null &&
+                  row.errorCode ===
+                    (edit === "unsupported"
+                      ? "CHZ_ACTION_ACCESS_DENIED"
+                      : "CHZ_ORDER_CONTEXT_MISSING"),
+              ),
+            ).toBe(true);
+            expect(observations).toHaveLength(wait === "previous-create" ? 1 : 0);
+          } else {
+            expect(freshRequests).toHaveLength(freshRuns.length);
+            for (const input of freshRequests) {
+              expect(input).toMatchObject({
+                participantInn: "7736050003",
+                productGroupCode: 10,
+                gtins: ["04600000000022"],
+              });
+              const row = freshRuns.find((run) => run.status === input.chzStatus);
+              if (!row) throw new Error("fresh run missing");
+              expect(row).toMatchObject({ state: "imported", attempts: 1 });
+              const observation = observations.find(
+                (item) =>
+                  item.resourceScope.digest ===
+                  admissionScopeDigest({
+                    inventoryId,
+                    runId: row.id,
+                    status: row.status,
+                    context: {
+                      participantInn: input.participantInn,
+                      productGroupCode: input.productGroupCode,
+                      gtins: input.gtins,
+                    },
+                  }),
+              );
+              expect(observation).toMatchObject({
+                fencedAttempt: row.attempts,
+                actorId: orderedByUserId,
+                resourceScope: {
+                  attemptIdentity: admissionScopeDigest(
+                    `${row.id}:${row.claimedAt?.toISOString()}`,
+                  ),
+                  runtime: { enabled: true },
+                },
+              });
+              const runtime = observation?.resourceScope.runtime as { observedAt: string };
+              expect(Date.parse(runtime.observedAt)).toBeGreaterThanOrEqual(editedAt.getTime());
+              expect(
+                calls.find(
+                  (call) =>
+                    call.op === "listDispenserResults" &&
+                    call.taskIds?.includes(row.dispenserTaskId ?? ""),
+                )?.productGroupCode,
+              ).toBe(10);
+              expect(
+                calls.find((call) => call.op === "download" && call.resultId === row.resultId)
+                  ?.productGroupCode,
+              ).toBe(10);
+            }
+          }
+          expect(
+            calls.find(
+              (call) => call.op === "listDispenserResults" && call.taskIds?.includes("known-task"),
+            )?.productGroupCode,
+          ).toBe(PRODUCT_GROUP_CODE);
+          expect(
+            calls.find((call) => call.op === "download" && call.resultId === "result-known-task")
+              ?.productGroupCode,
+          ).toBe(PRODUCT_GROUP_CODE);
+        },
+      );
+    },
+  );
+
+  it("denies a revoked creator without consuming create attempts, while known polling proceeds", async () => {
+    await seedRuns({ state: "ordered" });
+    const [queued] = await runsFor(inventoryId);
+    if (!queued) throw new Error("fixture missing");
+    await db
+      .update(schema.chzExportRuns)
+      .set({ state: "queued", dispenserTaskId: null, orderedAt: null })
+      .where(eq(schema.chzExportRuns.id, queued.id));
+    await db.delete(schema.member).where(eq(schema.member.userId, orderedByUserId));
+    const { client, calls } = fakeClient();
+    await runnerWith(client).run(tenantId, inventoryId, { retryCount: 0, retryLimit: 3 });
+    expect(calls.filter((c) => c.op === "createDispenserTask")).toHaveLength(0);
+    expect(calls.some((c) => c.op === "listDispenserResults")).toBe(true);
+    expect((await runsFor(inventoryId, queued.status))[0]).toMatchObject({
+      state: "failed",
+      errorCode: "CHZ_ACTION_ACCESS_DENIED",
+      attempts: 0,
+      claimedAt: null,
+    });
+    await db.insert(schema.member).values({
+      id: randomUUID(),
+      organizationId: tenantId,
+      userId: orderedByUserId,
+      role: "owner",
+      createdAt: new Date(),
+    });
+    const exports = new ChzExportsService(
+      db,
+      { ...tokens, hasUsableToken: vi.fn().mockResolvedValue(true) } as unknown as ChzTokenService,
+      { enqueueChzExportOrder: vi.fn() } as unknown as PgBossService,
+    );
+    await exports.retry(tenantId, orderedByUserId, inventoryId, queued.status);
+    await runnerWith(client).run(tenantId, inventoryId, { retryCount: 0, retryLimit: 3 });
+    expect((await runsFor(inventoryId, queued.status))[0]).toMatchObject({
+      state: "ordered",
+      attempts: 1,
+    });
+  });
+
+  it("keeps all-mode subscription denial authoritative without consuming create budget", async () => {
+    await seedRuns({ state: "queued" });
+    const { client, calls } = fakeClient();
+    await runnerWith(client, "all").run(tenantId, inventoryId, { retryCount: 0, retryLimit: 3 });
+    expect(calls).toEqual([]);
+    expect(
+      (await runsFor(inventoryId)).every(
+        (run) =>
+          run.state === "failed" &&
+          run.errorCode === "CHZ_ACTION_ACCESS_DENIED" &&
+          run.attempts === 0,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not fail another worker's live final-budget claim", async () => {
+    await seedRuns({ state: "queued", attemptsFor: () => 9 });
+    const { client } = fakeClient();
+    let release: () => void = () => {};
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started: () => void = () => {};
+    const begun = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let blockedStatus: string | null = null;
+    vi.spyOn(client, "createDispenserTask").mockImplementation(async (_auth, input) => {
+      if (!blockedStatus) {
+        blockedStatus = input.chzStatus;
+        started();
+        await barrier;
+      }
+      return { status: "ok", value: { taskId: `task-${input.chzStatus}` } };
+    });
+    const first = runnerWith(client).run(tenantId, inventoryId, { retryCount: 0, retryLimit: 3 });
+    await begun;
+    try {
+      await runnerWith(client).run(tenantId, inventoryId, { retryCount: 0, retryLimit: 3 });
+      const live = (await runsFor(inventoryId)).find((run) => run.status === blockedStatus);
+      expect(live).toMatchObject({ state: "queued", attempts: 10, errorCode: null });
+    } finally {
+      release();
+      await first;
+    }
+    expect(
+      (await runsFor(inventoryId)).every((run) => run.state === "ordered" && run.attempts === 10),
+    ).toBe(true);
+  });
+
+  it("fences a late create response and its success journal behind the actual attempt", async () => {
+    await seedRuns({
+      state: "queued",
+      claimedAtFor: (status) => (status === "EMITTED" ? new Date(Date.now() - STALE_CLAIM) : null),
+    });
+    const { client, calls } = fakeClient();
+    vi.spyOn(client, "listDispenserTasks").mockImplementation(async () => {
+      await db
+        .update(schema.products)
+        .set({ chzProductGroupCode: 10 })
+        .where(eq(schema.products.id, productId));
+      return { status: "ok", value: [] };
+    });
+    let replacedId: string | null = null;
+    vi.spyOn(client, "createDispenserTask").mockImplementation(async (_auth, input) => {
+      const run = (await runsFor(inventoryId)).find((row) => row.status === input.chzStatus);
+      if (!run) throw new Error("fixture missing");
+      if (!replacedId) {
+        replacedId = run.id;
+        await db
+          .update(schema.chzExportRuns)
+          .set({
+            attempts: run.attempts + 1,
+            claimedAt: new Date(Date.now() + 1),
+            state: "ordered",
+            dispenserTaskId: "winning-task",
+            orderedAt: new Date(),
+          })
+          .where(eq(schema.chzExportRuns.id, run.id));
+      }
+      return { status: "ok", value: { taskId: `task-${input.chzStatus}` } };
+    });
+    await runnerWith(client).run(tenantId, inventoryId, { retryCount: 0, retryLimit: 3 });
+    const [winner] = await db
+      .select()
+      .from(schema.chzExportRuns)
+      .where(eq(schema.chzExportRuns.id, replacedId!));
+    expect(winner).toMatchObject({ attempts: 2, dispenserTaskId: "winning-task" });
+    expect(vi.mocked(client.createDispenserTask).mock.calls[0]?.[1].productGroupCode).toBe(10);
+    expect(
+      calls.find(
+        (call) => call.op === "listDispenserResults" && call.taskIds?.includes("winning-task"),
+      )?.productGroupCode,
+    ).toBe(PRODUCT_GROUP_CODE);
+    expect(
+      calls.find(
+        (call) => call.op === "listDispenserResults" && call.taskIds?.includes("task-INTRODUCED"),
+      )?.productGroupCode,
+    ).toBe(10);
+    const observations = await db
+      .select()
+      .from(schema.entitlementShadowObservations)
+      .where(eq(schema.entitlementShadowObservations.tenantId, tenantId));
+    expect(observations).toHaveLength(INVENTORY_CHZ_STATUSES.length);
+    expect(observations.every((row) => row.fencedAttempt === 1)).toBe(true);
+    expect(
+      journal.append.mock.calls.filter(
+        ([entry]) =>
+          entry.details?.status === winner?.status &&
+          entry.message === "Заказан отчёт Честного Знака",
+      ),
+    ).toHaveLength(0);
+  });
 
   it("creates a task per queued run and moves it to ordered", async () => {
     await seedRuns({ state: "queued" });
@@ -632,6 +1030,19 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
       ).toHaveLength(1);
     }
     expect(rows.map((row) => row.attempts)).toEqual(rows.map(() => 1));
+    const observations = await db
+      .select()
+      .from(schema.entitlementShadowObservations)
+      .where(eq(schema.entitlementShadowObservations.tenantId, tenantId));
+    expect(observations).toHaveLength(INVENTORY_CHZ_STATUSES.length);
+    expect(
+      observations.every(
+        (row) =>
+          row.operationId === "chz.export.create.v1" &&
+          row.fencedAttempt === 1 &&
+          row.actorId === orderedByUserId,
+      ),
+    ).toBe(true);
   });
 
   it("reconciles a lost create response against the task list rather than re-creating", async () => {

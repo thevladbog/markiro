@@ -1,13 +1,17 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Query, Req } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
-import { platformTenantContracts, platformTenantV2Contracts } from "@markiro/platform-contracts";
+import {
+  platformTenantContracts,
+  platformTenantV2Contracts,
+  platformTenantV3Contracts,
+} from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
 import {
   PlatformApiProtectedCreated,
   PlatformApiProtectedOk,
 } from "../../platform-http/platform-openapi";
-import { commercialResponse, isCommercialV2 } from "../../platform-http/commercial-version";
+import { commercialResponse, commercialVersion } from "../../platform-http/commercial-version";
 import { parsePlatformResponse } from "../../platform-http/platform-response";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -64,6 +68,7 @@ export class PlatformTenantsController {
   @PlatformApiProtectedOk({
     response: platformTenantContracts.detail.response,
     commercialV2: platformTenantV2Contracts.detail,
+    commercialV3: platformTenantV3Contracts.detail,
   })
   @RequirePlatformCapabilities("tenants.read")
   async get(
@@ -71,10 +76,11 @@ export class PlatformTenantsController {
     @Param("id", new ZodValidationPipe(tenantReferenceSchema)) id: string,
   ) {
     return commercialResponse(
-      isCommercialV2(request),
+      commercialVersion(request),
       platformTenantContracts.detail.response,
       platformTenantV2Contracts.detail.response,
       await this.tenants.get(request.platformPrincipal!, id),
+      platformTenantV3Contracts.detail.response,
     );
   }
 
@@ -111,7 +117,12 @@ export class PlatformTenantsController {
   ) {
     return parsePlatformResponse(
       platformTenantContracts.assignPlan.response,
-      await this.tenants.assignPlan(request.platformPrincipal!, id, body, !isCommercialV2(request)),
+      await this.tenants.assignPlan(
+        request.platformPrincipal!,
+        id,
+        body,
+        commercialVersion(request),
+      ),
     );
   }
 
@@ -120,6 +131,8 @@ export class PlatformTenantsController {
   @PlatformApiProtectedCreated({
     body: platformTenantContracts.assignAddon.body,
     response: platformTenantContracts.assignAddon.response,
+    commercialV2: platformTenantV2Contracts.assignAddon,
+    commercialV3: platformTenantV3Contracts.assignAddon,
   })
   @RequirePlatformCapabilities("tenants.write", "billing.write")
   async assignAddon(
@@ -129,7 +142,12 @@ export class PlatformTenantsController {
   ) {
     return parsePlatformResponse(
       platformTenantContracts.assignAddon.response,
-      await this.tenants.assignAddon(request.platformPrincipal!, id, body),
+      await this.tenants.assignAddon(
+        request.platformPrincipal!,
+        id,
+        body,
+        commercialVersion(request),
+      ),
     );
   }
 }

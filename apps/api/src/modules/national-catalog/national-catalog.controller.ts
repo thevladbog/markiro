@@ -57,7 +57,7 @@ export class NationalCatalogController {
   @ApiHttpErrors(401, 403, 404)
   @ApiCabinetAuth()
   lookup(@Req() request: RequestWithTenant, @Param("id", new ParseUUIDPipe()) productId: string) {
-    return this.products.lookup(request.tenantId!, productId);
+    return this.products.lookup(request.tenantId!, productId, request.userId);
   }
 
   @Post("import-previews")

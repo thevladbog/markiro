@@ -1,3 +1,9 @@
+import { ENTITLEMENT_FEATURE_KEYS } from "@markiro/platform-contracts";
+import {
+  planEntitlementsV3Schema,
+  commercialReviewIdentityV3Schema,
+} from "@markiro/platform-contracts";
+import { CatalogP1Fields } from "./CatalogP1Fields.js";
 import { CatalogPayablePreview } from "./CatalogPayablePreview.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -26,7 +32,7 @@ import {
   type CatalogVersionPatch,
   type PlanEntitlements,
 } from "./api.js";
-import type { CatalogPublicationReview } from "@markiro/platform-contracts";
+import type { CatalogPublicationReviewV3 as CatalogPublicationReview } from "@markiro/platform-contracts";
 import { CatalogQuotaField } from "./CatalogQuotaField.js";
 import { CatalogUnitField } from "./CatalogUnitField.js";
 import { CatalogVatField, formatVat } from "./CatalogVatField.js";
@@ -59,6 +65,11 @@ interface CatalogFormValues {
   labelEditorEnabled: boolean;
   publicApiEnabled: boolean;
   palletsEnabled: boolean;
+  chzIntegration: boolean | null;
+  inventory: boolean | null;
+  commerceMl: boolean | null;
+  handheld: boolean | null;
+  lifecyclePolicyId: string | null;
   addonEffects: EditableAddonEffect[];
 }
 
@@ -70,6 +81,10 @@ const EFFECT_KEYS = [
   "labelEditor",
   "publicApi",
   "pallets",
+  "chzIntegration",
+  "inventory",
+  "commerceMl",
+  "handheld",
 ] as const satisfies readonly AddonEffect["key"][];
 
 const QUOTA_EFFECT_KEYS = new Set<AddonEffect["key"]>([
@@ -124,6 +139,11 @@ const catalogFormSchema = z
     labelEditorEnabled: z.boolean(),
     publicApiEnabled: z.boolean(),
     palletsEnabled: z.boolean(),
+    chzIntegration: z.boolean().nullable(),
+    inventory: z.boolean().nullable(),
+    commerceMl: z.boolean().nullable(),
+    handheld: z.boolean().nullable(),
+    lifecyclePolicyId: z.string().nullable(),
     addonEffects: z
       .array(
         z.object({
@@ -132,13 +152,17 @@ const catalogFormSchema = z
           value: z.string(),
         }),
       )
-      .max(7),
+      .max(11),
   })
   .superRefine((values, context) => {
     if (values.financialVisible && !MONEY_PATTERN.test(values.unitPrice)) {
       context.addIssue({ code: "custom", path: ["unitPrice"], message: "money" });
     }
     if (values.kind === "plan") {
+      for (const key of ["chzIntegration", "inventory", "commerceMl", "handheld"] as const) {
+        if (values[key] === null)
+          context.addIssue({ code: "custom", path: [key], message: "p1Mapping" });
+      }
       for (const field of [
         "maxLines",
         "maxStations",
@@ -224,6 +248,11 @@ function formDefaults(item: CatalogVersionDto): CatalogFormValues {
     labelEditorEnabled: item.plan?.labelEditorEnabled ?? false,
     publicApiEnabled: item.plan?.publicApiEnabled ?? false,
     palletsEnabled: item.plan?.palletsEnabled ?? false,
+    chzIntegration: item.plan?.chzIntegrationEnabled ?? null,
+    inventory: item.plan?.inventoryEnabled ?? null,
+    commerceMl: item.plan?.commerceMlEnabled ?? null,
+    handheld: item.plan?.handheldEnabled ?? null,
+    lifecyclePolicyId: item.lifecyclePolicyId,
     addonEffects:
       savedAddonEffects.length > 0
         ? savedAddonEffects
@@ -233,6 +262,7 @@ function formDefaults(item: CatalogVersionDto): CatalogFormValues {
 
 function patchForKind(item: CatalogVersionDto, values: CatalogFormValues): CatalogVersionPatch {
   const common: CatalogVersionPatch = {
+    lifecyclePolicyId: values.lifecyclePolicyId,
     documentNameRu: values.documentNameRu.trim() || null,
     documentNameEn: values.documentNameEn.trim() || null,
     subject: values.subject,
@@ -249,7 +279,11 @@ function patchForKind(item: CatalogVersionDto, values: CatalogFormValues): Catal
     common.vatIncluded = values.vatRateBps !== null && values.vatIncluded;
   }
   if (item.kind === "plan") {
-    const plan: PlanEntitlements = {
+    const plan: PlanEntitlements = planEntitlementsV3Schema.parse({
+      chzIntegrationEnabled: values.chzIntegration,
+      inventoryEnabled: values.inventory,
+      commerceMlEnabled: values.commerceMl,
+      handheldEnabled: values.handheld,
       maxLines: numericOrNull(values.maxLines),
       maxStations: numericOrNull(values.maxStations),
       maxKiosks: numericOrNull(values.maxKiosks),
@@ -258,7 +292,7 @@ function patchForKind(item: CatalogVersionDto, values: CatalogFormValues): Catal
       labelEditorEnabled: values.labelEditorEnabled,
       publicApiEnabled: values.publicApiEnabled,
       palletsEnabled: values.palletsEnabled,
-    };
+    });
     return { ...common, plan };
   }
   if (item.kind === "addon") {
@@ -269,7 +303,14 @@ function patchForKind(item: CatalogVersionDto, values: CatalogFormValues): Catal
             quotaIncrement: Number(effect.value),
           }
         : {
-            key: effect.key as "labelEditor" | "publicApi" | "pallets",
+            key: effect.key as
+              | "labelEditor"
+              | "publicApi"
+              | "pallets"
+              | "chzIntegration"
+              | "inventory"
+              | "commerceMl"
+              | "handheld",
             featureEnabled: true,
           },
     );
@@ -410,7 +451,11 @@ export function CatalogVersionPanel({
   const publish = useMutation({
     mutationFn: () => {
       if (!review || review.errors.length) throw new Error("commercial_review_invalid");
-      return publishCatalogVersion(item.catalogItemCode, item.id, review.identity);
+      return publishCatalogVersion(
+        item.catalogItemCode,
+        item.id,
+        commercialReviewIdentityV3Schema.parse(review.identity),
+      );
     },
     onError: async (error) => {
       if (error instanceof ApiRequestError && error.code === "commercial_review_stale") {
@@ -569,6 +614,25 @@ export function CatalogVersionPanel({
             >
               <input type="hidden" {...form.register("kind")} />
               <input type="hidden" {...form.register("financialVisible")} />
+              <CatalogP1Fields
+                values={
+                  item.kind === "plan"
+                    ? {
+                        chzIntegration: form.watch("chzIntegration"),
+                        inventory: form.watch("inventory"),
+                        commerceMl: form.watch("commerceMl"),
+                        handheld: form.watch("handheld"),
+                      }
+                    : null
+                }
+                policyId={form.watch("lifecyclePolicyId")}
+                policies={context.data?.lifecyclePolicies ?? []}
+                onFeatureChange={(key, value) => form.setValue(key, value, { shouldDirty: true })}
+                onPolicyChange={(value) =>
+                  form.setValue("lifecyclePolicyId", value, { shouldDirty: true })
+                }
+                disabled={save.isPending || prepareReview.isPending || publish.isPending}
+              />
               <fieldset disabled={save.isPending || prepareReview.isPending || publish.isPending}>
                 <legend>{t("catalog.form.identity")}</legend>
                 <div className="form-grid form-grid--two">
@@ -777,7 +841,21 @@ export function CatalogVersionPanel({
                 <Button
                   type="button"
                   variant="secondary"
-                  disabled={save.isPending || prepareReview.isPending || !context.data?.taxPolicy}
+                  disabled={
+                    save.isPending ||
+                    prepareReview.isPending ||
+                    !context.data?.taxPolicy ||
+                    !context.data.lifecyclePolicies.some(
+                      (policy) => policy.id === form.watch("lifecyclePolicyId"),
+                    ) ||
+                    (item.kind === "plan" &&
+                      [
+                        form.watch("chzIntegration"),
+                        form.watch("inventory"),
+                        form.watch("commerceMl"),
+                        form.watch("handheld"),
+                      ].some((value) => value === null))
+                  }
                   loading={prepareReview.isPending}
                   onClick={() => {
                     void form.handleSubmit(() => {
@@ -872,6 +950,18 @@ export function CatalogVersionPanel({
               </li>
             ))}
           </ol>
+          {!canEdit && item.plan ? (
+            <ul>
+              {ENTITLEMENT_FEATURE_KEYS.map((key) => (
+                <li key={key}>
+                  {t(`entitlements.features.${key}`)}:{" "}
+                  {t(
+                    `entitlements.${item.plan?.[`${key}Enabled`] === null ? "unknown" : item.plan?.[`${key}Enabled`] ? "enabled" : "disabled"}`,
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {item.kind === "plan" && item.status === "published" && item.plan?.demoDurationDays ? (
             isDefaultDemo ? (
               <StatusChip status="ok" label={t("catalog.defaultDemo")} />

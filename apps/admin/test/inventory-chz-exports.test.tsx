@@ -451,3 +451,26 @@ it("invalidates the inventory detail query when the very first poll already carr
   // response `useChzExportState` ever saw (`previous === undefined`).
   await waitFor(() => expect(detailFetchCount).toBeGreaterThanOrEqual(2));
 });
+
+it.each(["ru", "en"])(
+  "translates CHZ_ACTION_ACCESS_DENIED with access restoration guidance in %s",
+  async (language) => {
+    await i18n.changeLanguage(language);
+    stubChzExports({
+      available: true,
+      blockedBy: [],
+      runs: [
+        run("RETIRED", "failed", { errorCode: "CHZ_ACTION_ACCESS_DENIED", errorMessage: null }),
+      ],
+    });
+    renderPreparation();
+    expect(
+      await screen.findByText(
+        language === "ru"
+          ? "Доступ к созданию выгрузки изменился. Восстановите права и доступ по подписке, затем повторите."
+          : "Export creation access has changed. Restore your permissions and subscription access, then retry.",
+      ),
+    ).toBeDefined();
+    expect(screen.queryByText(/Код ошибки: CHZ_ACTION_ACCESS_DENIED/)).toBeNull();
+  },
+);

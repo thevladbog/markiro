@@ -134,6 +134,13 @@ describe.skipIf(!databaseUrl)("commercial terms additive migration", () => {
         "document_name_en",
         "subject",
         "seller_policy_revision",
+        "lifecycle_policy_id",
+      ],
+      plan_entitlements: [
+        "chz_integration_enabled",
+        "inventory_enabled",
+        "commerce_ml_enabled",
+        "handheld_enabled",
       ],
       commercial_offer_lines: ["commercial_terms"],
       tenant_subscriptions: ["commercial_period"],

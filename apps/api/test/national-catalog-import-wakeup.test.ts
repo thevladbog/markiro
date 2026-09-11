@@ -1,3 +1,6 @@
+import { EntitlementsService } from "../src/subscriptions/entitlements.service";
+import { EntitlementSourcesService } from "../src/subscriptions/entitlement-sources.service";
+import { projectEntitlements } from "../src/subscriptions/entitlement-projection";
 import { Test } from "@nestjs/testing";
 import { describe, expect, it, vi } from "vitest";
 import type { Response } from "express";
@@ -152,6 +155,38 @@ describe("National Catalog request queue wake", () => {
         );
         expect(module.get(PgBossService)).toBeInstanceOf(PgBossService);
         expect(module.get(NationalCatalogJobsService)).toBeInstanceOf(NationalCatalogJobsService);
+        expect(module.get(EntitlementSourcesService)).toBeInstanceOf(EntitlementSourcesService);
+        const capabilities = module.get(NationalCatalogCapabilitiesService);
+        const observed = {
+          observedAt: new Date().toISOString(),
+          chz: "ready" as const,
+          nationalCatalog: "not_ready" as const,
+        };
+        const observation = vi
+          .spyOn(capabilities, "observeEntitlementConnectivity")
+          .mockResolvedValue(observed);
+        const snapshot = projectEntitlements({
+          current: {
+            tenantId: "tenant",
+            access: "unmanaged",
+            subscription: null,
+            quotas: { lines: null, stations: null, kiosks: null, cabinetUsers: null },
+            features: { labelEditor: true, publicApi: true, pallets: true },
+          },
+          usage: { lines: 0, stations: 0, kiosks: 0, cabinetUsers: 0 },
+          sources: [],
+          at: new Date(),
+          enforcementMode: "managed_only",
+          revision: "0",
+          usageRevision: "0",
+          boundaries: [],
+          readinessReasons: [],
+        });
+        expect(
+          (await module.get(EntitlementsService).observeConnectivity(snapshot)).connectivity,
+        ).toEqual(observed);
+        expect(observation).toHaveBeenCalledExactlyOnceWith("tenant");
+        observation.mockRestore();
         expect(query).not.toHaveBeenCalled();
       } finally {
         await module.close();
