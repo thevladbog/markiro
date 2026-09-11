@@ -68,8 +68,8 @@ export function legalDocumentKind(code: LegalDocumentCode): LegalDocumentKind {
 }
 
 // Instructions publish English incrementally: a code joins this set once its
-// translated content, English frames and landing page all exist. The cabinet
-// instructions (06-09) are the next planned tranche.
+// translated content, English frames and landing page all exist. With the
+// catalog pair (10-11) the whole series is bilingual.
 const INSTRUCTION_EN_PUBLISHED: ReadonlySet<LegalDocumentCode> = new Set([
   "MKR-INS-01",
   "MKR-INS-02",
@@ -80,6 +80,8 @@ const INSTRUCTION_EN_PUBLISHED: ReadonlySet<LegalDocumentCode> = new Set([
   "MKR-INS-07",
   "MKR-INS-08",
   "MKR-INS-09",
+  "MKR-INS-10",
+  "MKR-INS-11",
 ]);
 
 export function legalReleaseLocales(code: LegalDocumentCode): readonly LegalLocale[] {
@@ -237,7 +239,10 @@ export const LEGAL_RELEASES = [
     effectiveDate: "2026-09-10",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
-    routes: { ru: "/instruktsii/katalog-kartochka-tovara/" },
+    routes: {
+      ru: "/instruktsii/katalog-kartochka-tovara/",
+      en: "/en/instructions/product-catalog-card/",
+    },
   },
   {
     code: "MKR-INS-11",
@@ -245,7 +250,10 @@ export const LEGAL_RELEASES = [
     effectiveDate: "2026-09-11",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
-    routes: { ru: "/instruktsii/katalog-zagruzka-iz-nk/" },
+    routes: {
+      ru: "/instruktsii/katalog-zagruzka-iz-nk/",
+      en: "/en/instructions/national-catalog-import/",
+    },
   },
 ] as const satisfies readonly LegalDocumentRelease[];
 

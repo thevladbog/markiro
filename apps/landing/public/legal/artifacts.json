@@ -411,11 +411,43 @@
     "code": "MKR-INS-10",
     "revision": "2026.09/01",
     "effectiveDate": "2026-09-10",
+    "locale": "en",
+    "kind": "pdfa-2b",
+    "fileName": "markiro_mkr-ins-10_2026.09-01_en.pdf",
+    "bytes": 1074350,
+    "sha256": "b5ea0f81e9205aa0da622c9dac46e6f1ba2220fea4d772385d7d510920b39e3c",
+    "mediaType": "application/pdf",
+    "generator": {
+      "docx": "9.7.1",
+      "libreOffice": "26.2.5",
+      "veraPdf": "1.30.2"
+    }
+  },
+  {
+    "code": "MKR-INS-10",
+    "revision": "2026.09/01",
+    "effectiveDate": "2026-09-10",
     "locale": "ru",
     "kind": "pdfa-2b",
     "fileName": "markiro_mkr-ins-10_2026.09-01_ru.pdf",
     "bytes": 1177338,
     "sha256": "021a2002c333177eb6d85bc7d369b7a5ba9aac33854f71780127692c6e539660",
+    "mediaType": "application/pdf",
+    "generator": {
+      "docx": "9.7.1",
+      "libreOffice": "26.2.5",
+      "veraPdf": "1.30.2"
+    }
+  },
+  {
+    "code": "MKR-INS-11",
+    "revision": "2026.09/01",
+    "effectiveDate": "2026-09-11",
+    "locale": "en",
+    "kind": "pdfa-2b",
+    "fileName": "markiro_mkr-ins-11_2026.09-01_en.pdf",
+    "bytes": 840966,
+    "sha256": "b308927f9ca9be7344c22c4e3ba0d5dae03087cf32a673a139233c92b21ec49b",
     "mediaType": "application/pdf",
     "generator": {
       "docx": "9.7.1",

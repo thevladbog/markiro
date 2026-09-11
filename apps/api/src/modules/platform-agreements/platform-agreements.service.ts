@@ -15,7 +15,7 @@ import {
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
-import { AgreementDocumentsService } from "./agreement-documents.service";
+import { AgreementDocumentsService, isAgreementDocumentStale } from "./agreement-documents.service";
 import { nextAgreementNumber } from "./agreement-numbering";
 import {
   buildStoredTerms,
@@ -502,6 +502,7 @@ function toDetail(row: AgreementRow, documents: readonly AgreementDocumentRow[])
       mediaType: document.mediaType,
       sha256: document.sha256,
       byteSize: document.byteSize,
+      stale: isAgreementDocumentStale(row, document),
       createdAt: document.createdAt.toISOString(),
     })),
   };

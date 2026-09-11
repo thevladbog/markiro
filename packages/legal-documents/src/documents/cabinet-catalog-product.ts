@@ -264,4 +264,267 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
       },
     ],
   },
+  en: {
+    locale: "en",
+    title: "Cabinet: the product catalog and the product card",
+    summary:
+      "This is an informational translation. The matching Russian revision is authoritative. Manager's guide: adding a product to the catalog, completing its card so it reaches the active status, adding a photo, and retiring a product.",
+    sections: [
+      {
+        id: "purpose",
+        heading: "1. Purpose",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "The product catalog is the organization's product directory. A product card decides what is printed on the label and what can be picked when a shift is planned: until the card is complete the product stays a draft and no shift can run on it. This instruction is for a cabinet manager; importing products from the National Catalog is covered by a separate instruction.",
+          },
+          {
+            kind: "unordered-list",
+            items: [
+              "The product group is needed by the station and by label-template selection.",
+              "Box and pallet capacities decide how many units go into a package during aggregation.",
+              "“Print name” is the short name that goes on the label instead of a long full name.",
+            ],
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "The screenshots were taken on demonstration data. Product names, GTINs and counterparties will differ in your cabinet.",
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "The Chestny Znak product-group directory is maintained in Russian and the cabinet shows its names as received, so group names stay Russian on an English screen. Everything else on these screens follows the interface language.",
+          },
+        ],
+      },
+      {
+        id: "list",
+        heading: "2. Product list",
+        blocks: [
+          {
+            kind: "step",
+            title: "Open the “Catalog” section",
+            text: "In the cabinet side menu pick “Catalog” under “Reference data”. The table shows GTIN, photo, name, group, per-box capacity, the card status and Chestny Znak information; the “Actions” column holds “Edit” and “Delete”.",
+            image: {
+              id: "catalog-list",
+              caption: "Product catalog: three products in different statuses",
+            },
+          },
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "Active",
+                detail:
+                  "The card is complete: the product can be picked when planning a shift and during a stock count.",
+              },
+              {
+                term: "Draft",
+                detail:
+                  "The card is missing the product group or a capacity. The product is visible in the catalog but unavailable in a shift.",
+              },
+              {
+                term: "Not in use",
+                detail:
+                  "The product was retired by hand with the “Do not use” checkbox (section 7).",
+              },
+            ],
+          },
+          {
+            kind: "step",
+            title: "Find the product you need",
+            text: "The “Search” field takes a name or a GTIN. The “Status” list filters by card status, “CHZ status” by the state of the card in Chestny Znak, and “Per page” sets the page size. The number of products found is printed under the filters.",
+            image: {
+              id: "catalog-filters",
+              caption: "The “Status” filter: only drafts are left in the list",
+            },
+            expected: "Only products with the chosen status remain in the table.",
+          },
+        ],
+      },
+      {
+        id: "create",
+        heading: "3. A new product: the basics",
+        blocks: [
+          {
+            kind: "step",
+            title: "Create the card",
+            text: "Press “Add product”. The “New product” panel opens with four sections: “Basic”, “Aggregation and price”, “Product photo” and “Defaults”.",
+            image: { id: "product-new", caption: "A new product card: the “Basic” section" },
+          },
+          {
+            kind: "step",
+            title: "Enter the GTIN and the names",
+            text: "“GTIN” is the product code; the cabinet checks its check digit immediately and answers a wrong one with “Invalid GTIN (check digit mismatch)”. “Name” is the full name used in the cabinet and in reports. Fill in “Print name” when the full name is too long for a label: “Short name for the station and label. Blank — the full name is used.”",
+          },
+          {
+            kind: "step",
+            title: "Check who owns the GTIN",
+            text: "For a valid GTIN the cabinet shows who it is registered to: “GTIN owner — …”. If that is a counterparty — for example when you bottle under someone else's brand — the “Apply counterparty” button writes it straight into the defaults. The warning “GTIN owner could not be determined — double check the code before saving.” means the code was found neither behind you nor behind a known counterparty.",
+            image: {
+              id: "product-gtin-owner",
+              caption: "The GTIN is registered to a counterparty",
+            },
+          },
+        ],
+      },
+      {
+        id: "activate",
+        heading: "4. Reaching the active status",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "The cabinet computes the card status itself; it is never set by hand. Until the product group and both capacities are filled in, the card stays a draft.",
+          },
+          {
+            kind: "step",
+            title: "Fill in what is missing",
+            text: "A draft carries the banner “Draft — fill in the group and capacities to run shifts” at the top of the card. Pick “Product group” from the Chestny Znak directory and set “Box capacity, units” and “Pallet capacity, units” as whole numbers above zero.",
+            image: {
+              id: "product-draft-banner",
+              caption: "A draft: the group and the capacities are empty",
+            },
+          },
+          {
+            kind: "step",
+            title: "Save the card",
+            text: "Press “Save”. The remaining fields of “Aggregation and price” — “Price per unit, ₽”, “EGAIS code” and “Shelf life, days” — are optional and do not affect the status.",
+            image: {
+              id: "product-active",
+              caption: "A complete card: the group and both capacities are in place",
+            },
+            expected:
+              "The product reached the “Active” status in the list and became available when planning a shift.",
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "If a product cannot be found in the shift form, check its status in the catalog: a draft and a product marked “Do not use” are both unavailable in the product picker.",
+          },
+        ],
+      },
+      {
+        id: "image",
+        heading: "5. Photo",
+        blocks: [
+          {
+            kind: "step",
+            title: "Add a product photo",
+            text: "In the “Product photo” section drag a file onto “Drop a file or click” or pick it by hand. The limits are printed beside it: “JPEG, PNG, or WebP up to 5 MB”. The uploaded picture is visible in the catalog list and helps an operator not to confuse products; “Remove photo” takes it away.",
+            image: { id: "product-image", caption: "The “Product photo” section with an upload" },
+            expected: "A thumbnail appeared in the “Photo” column of the catalog list.",
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "Until a picture is uploaded the card shows “No photo added” and the list prints a dash in the “Photo” column. A photo does not affect the card status.",
+          },
+        ],
+      },
+      {
+        id: "defaults",
+        heading: "6. Default values",
+        blocks: [
+          {
+            kind: "step",
+            title: "Name the default counterparty",
+            text: "“Default counterparty” is substituted into a shift when the product is bottled for another organization. The field is optional: leave “None selected” when the product is always your own.",
+            image: { id: "product-defaults", caption: "Defaults: a counterparty is filled in" },
+          },
+        ],
+      },
+      {
+        id: "retire",
+        heading: "7. Retiring a product",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "A product that is no longer made is retired with a checkbox rather than deleted: the history of shifts and stock counts has to stay.",
+          },
+          {
+            kind: "step",
+            title: "Tick “Do not use”",
+            text: "Open the card and tick “Do not use” in the “Basic” section. The hint under the checkbox spells out the consequences: “The product cannot be selected on kiosks, in shifts, or in integrations. It stays available for inventory and in history, and its GTIN can be reused in a new card.”",
+            image: { id: "product-archived", caption: "The card of a retired product" },
+            expected: "The product got the “Not in use” status in the list.",
+          },
+          {
+            kind: "step",
+            title: "Delete only cards created by mistake",
+            text: "The “Delete” button in a list row asks for confirmation: “Delete product?”, warning that the product “will be permanently deleted”. Delete only a card that was created by mistake and has not been used in production yet.",
+            image: { id: "catalog-delete", caption: "Confirming a product deletion" },
+          },
+          {
+            kind: "callout",
+            tone: "warning",
+            text: "Deletion cannot be undone. If shifts or stock counts already ran on the product, use “Do not use” instead — otherwise the documents are left without their product.",
+          },
+        ],
+      },
+      {
+        id: "external",
+        heading: "8. Products from external sources",
+        blocks: [
+          {
+            kind: "paragraph",
+            text: "Besides being entered by hand, a product reaches the catalog along two other paths, each with its own entry point.",
+          },
+          {
+            kind: "step",
+            title: "The 1C exchange",
+            text: "When the exchange delivers products that are not matched to the catalog yet, a plaque appears above the list: “New items arrived in the exchange (…) — check the unmatched queue.” The “Go to the queue” link opens the “Integrations” section, where a candidate is linked to a catalog card. The plaque and the linking are available to employees with integration rights.",
+            image: {
+              id: "candidates-plaque",
+              caption: "The plaque for unmatched products from the exchange",
+            },
+          },
+          {
+            kind: "paragraph",
+            text: "The “Add from National Catalog” button in the section header creates cards from Chestny Znak data — that path is covered by the separate instruction on importing from the National Catalog.",
+          },
+        ],
+      },
+      {
+        id: "troubleshooting",
+        heading: "9. Common questions",
+        blocks: [
+          {
+            kind: "definition-list",
+            items: [
+              {
+                term: "The cabinet rejects the GTIN",
+                detail:
+                  "The message “Invalid GTIN (check digit mismatch)” points at the code itself, not at your rights: check the digits against the packaging or the supplier's documents.",
+              },
+              {
+                term: "The product is missing when planning a shift",
+                detail:
+                  "Check its status in the catalog: a draft stays unavailable until the group and the capacities are filled in, and a product marked “Do not use” is hidden from the picker on purpose.",
+              },
+              {
+                term: "The GTIN owner could not be determined",
+                detail:
+                  "The code was found neither behind your organization nor behind a counterparty. Check it before saving: someone else's GTIN in a card leads to codes being rejected on the line.",
+              },
+              {
+                term: "The GTIN of a retired product is needed again",
+                detail:
+                  "After “Do not use” that GTIN can be entered in a new card — the old one stays in history.",
+              },
+              {
+                term: "The “Chestny ZNAK” column is empty",
+                detail:
+                  "The card is not linked to the National Catalog, or the information has not arrived yet. Linking is covered by the instruction on importing from the National Catalog.",
+              },
+            ],
+          },
+          {
+            kind: "paragraph",
+            text: "If your problem is not described above, contact your organization's administrator or Markiro support: hello@v-b.tech.",
+          },
+        ],
+      },
+    ],
+  },
 } as const satisfies LegalDocumentSource["content"];
