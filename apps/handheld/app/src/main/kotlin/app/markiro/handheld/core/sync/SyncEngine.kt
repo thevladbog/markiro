@@ -21,6 +21,7 @@ import app.markiro.handheld.core.storage.ShiftCloseEntity
 import app.markiro.handheld.core.util.Iso
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -64,28 +65,28 @@ class SyncEngine(
     private val lastSuccess = MutableStateFlow<Long?>(null)
     private val now = MutableStateFlow(clock())
 
+    /**
+     * Everything this device still owes the server.
+     *
+     * A box closure is queued work too, and so is a product-label event.
+     * Counting only scans showed «Очередь 0» while a closure sat unsent, and a
+     * queue that had stopped moving would never read as stuck.
+     *
+     * Summed in its own flow so the state below stays a FOUR-argument combine:
+     * the vararg overload infers one element type across every flow, which for
+     * a mix of `Int`, `Long?` and `Long` collapses to an intersection and costs
+     * an unchecked cast per value.
+     */
+    private val pending: Flow<Int> = combine(
+        db.outboxDao().count(),
+        db.boxDao().observeUnackedCount(),
+        db.productLabelEventDao().observeUnackedCount(),
+    ) { scans, boxes, labels -> scans + boxes + labels }
+
     val state: StateFlow<SyncState> =
-        combine(
-            db.outboxDao().count(),
-            // A box closure is queued work too. Counting only scans showed
-            // «Очередь 0» while a closure sat unsent, and a queue that has
-            // stopped moving would never read as stuck.
-            db.boxDao().observeUnackedCount(),
-            // So is a product-label event, for the same reason.
-            db.productLabelEventDao().observeUnackedCount(),
-            db.conflictDao().count(),
-            lastSuccess,
-            now,
-        ) { values ->
-            val scans = values[0] as Int
-            val boxes = values[1] as Int
-            val labels = values[2] as Int
-            val conflicts = values[3] as Int
-            val last = values[4] as Long?
-            val at = values[5] as Long
-            val pending = scans + boxes + labels
+        combine(pending, db.conflictDao().count(), lastSuccess, now) { owed, conflicts, last, at ->
             val since = last ?: startedAt
-            SyncState(pending = pending, lastSuccessAt = last, stuck = pending > 0 && at - since > STUCK_AFTER_MS, conflicts = conflicts)
+            SyncState(pending = owed, lastSuccessAt = last, stuck = owed > 0 && at - since > STUCK_AFTER_MS, conflicts = conflicts)
         }.stateIn(scope, SharingStarted.Eagerly, SyncState())
 
     fun start() {
@@ -214,6 +215,10 @@ class SyncEngine(
             db.metaDao().remove(MetaStore.SYNC_PENDING_LABEL_COUNT)
             parsed.denied?.let { db.metaDao().put(MetaEntity(MetaStore.SYNC_LAST_DENIED, it)) }
             db.metaDao().put(MetaEntity(MetaStore.SYNC_LAST_SUCCESS_AT, at.toString()))
+            // A completed job the server has fully answered is dead weight, and
+            // its bytes are the bulk of it. Waiting for shift close means a long
+            // shift carries every label it ever printed.
+            db.productLabelJobDao().purgeSettledEverywhere()
         }
         lastSuccess.value = at
         return Step.SENT
@@ -226,9 +231,22 @@ class SyncEngine(
         meta.remove(MetaStore.SYNC_PENDING_LABEL_COUNT)
     }
 
-    /** Short and stable: one set always signs the same, a different set never does. */
-    private fun idSignature(ids: List<String>): String =
-        if (ids.isEmpty()) "0" else "${ids.size}-${ids.joinToString(",").hashCode().toUInt().toString(16)}"
+    /**
+     * Short and stable: one set always signs the same, a different set never
+     * does.
+     *
+     * SHA-256 rather than `String.hashCode`, which is 32 bits: a collision there
+     * means two different sets share a batch id, the server answers
+     * `alreadyApplied` to the second, and those records are lost without a trace.
+     * Each id is length-delimited so no two lists can concatenate alike.
+     */
+    private fun idSignature(ids: List<String>): String {
+        if (ids.isEmpty()) return "0"
+        val joined = ids.joinToString("") { "${it.length}:$it" }
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(joined.toByteArray(Charsets.UTF_8))
+        return "${ids.size}-" + digest.take(8).joinToString("") { "%02x".format(it) }
+    }
 
     private fun BoxEntity.toClosure(deviceId: String) = BoxClosureDto(
         boxId = boxId,
@@ -262,16 +280,28 @@ class SyncEngine(
         return BatchResponse(applied, alreadyApplied, conflicts, denied, parseReceipt(obj))
     }
 
+    /**
+     * Every access is a safe cast.
+     *
+     * `jsonObject`, `jsonArray` and `jsonPrimitive` THROW on the wrong kind, and
+     * nothing above this catches: the throw would leave `drainOnce` and unwind
+     * the sync loop itself, which never restarts. A captive portal answering
+     * 200 with a differently shaped body is exactly the case the rest of this
+     * parser is already shaped against.
+     */
     private fun parseReceipt(obj: kotlinx.serialization.json.JsonObject): ProductLabelReceipt? {
-        val receipt = obj["productLabelReceipt"]?.takeIf { it !is JsonNull }?.jsonObject ?: return null
-        val accepted = receipt["acceptedEventIds"]?.jsonArray.orEmpty()
-            .mapNotNull { it.jsonPrimitive.takeIf { p -> p.isString }?.content }
-        val quarantined = receipt["quarantined"]?.jsonArray.orEmpty().mapNotNull { record ->
-            val o = runCatching { record.jsonObject }.getOrNull() ?: return@mapNotNull null
-            val id = o["eventId"]?.jsonPrimitive?.takeIf { it.isString }?.content ?: return@mapNotNull null
-            val code = o["code"]?.jsonPrimitive?.takeIf { it.isString }?.content ?: return@mapNotNull null
-            id to code
-        }
+        val receipt = obj["productLabelReceipt"] as? kotlinx.serialization.json.JsonObject ?: return null
+        val accepted = (receipt["acceptedEventIds"] as? kotlinx.serialization.json.JsonArray).orEmpty()
+            .mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+        val quarantined = (receipt["quarantined"] as? kotlinx.serialization.json.JsonArray).orEmpty()
+            .mapNotNull { record ->
+                val o = record as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+                val id = (o["eventId"] as? kotlinx.serialization.json.JsonPrimitive)
+                    ?.takeIf { it.isString }?.content ?: return@mapNotNull null
+                val code = (o["code"] as? kotlinx.serialization.json.JsonPrimitive)
+                    ?.takeIf { it.isString }?.content ?: return@mapNotNull null
+                id to code
+            }
         return ProductLabelReceipt(accepted, quarantined)
     }
 

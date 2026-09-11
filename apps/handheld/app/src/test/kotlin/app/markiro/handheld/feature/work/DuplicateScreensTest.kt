@@ -116,4 +116,20 @@ class DuplicateScreensTest {
             assertEquals("$reason falls through to the generic label", false, duplicateReasonLabel(reason) == generic)
         }
     }
+
+    /**
+     * A refusal before any job exists has nothing to retry or reprint; offering
+     * either gave the operator buttons that silently did nothing.
+     */
+    @Test
+    fun aRefusalWithNoJobOffersNoActionThatCannotWork() {
+        show(DuplicateStep.Failed(null, DuplicateReason.PRINTER_UNCONFIGURED))
+        compose.onNodeWithText("Принтер не настроен").assertIsDisplayed()
+        compose.onNodeWithText("Повторить печать").assertDoesNotExist()
+        compose.onNodeWithText("Перепечатать: испорчена").assertDoesNotExist()
+        // And it says what did happen to the unit.
+        compose.onNodeWithText(
+            "Единица принята и уйдёт на сервер. Этикетку напечатайте после того, как устраните причину.",
+        ).assertIsDisplayed()
+    }
 }

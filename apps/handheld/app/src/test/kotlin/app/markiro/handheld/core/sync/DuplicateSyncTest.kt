@@ -228,4 +228,47 @@ class DuplicateSyncTest {
         // the flow is collected rather than at the moment it is built.
         assertEquals(2, engine().state.first { it.pending > 0 }.pending)
     }
+
+    /**
+     * `jsonObject` and friends THROW on the wrong kind, and nothing above this
+     * catches: the throw would unwind the sync loop, which never restarts. A
+     * captive portal answering 200 with another shape must be survivable.
+     */
+    @Test
+    fun aReceiptOfTheWrongShapeIsIgnoredRatherThanFatal() = runTest {
+        event("e1", 1)
+        server.enqueue(
+            MockResponse().setResponseCode(201).setBody(
+                """{"applied":0,"alreadyApplied":false,"conflicts":[],""" +
+                    """"productLabelReceipt":{"protocol":"x","acceptedEventIds":"not-an-array","quarantined":[1,null,{"eventId":2}]}}""",
+            ),
+        )
+        server.enqueue(ok(0, receipt(accepted = listOf("e1"))))
+        assertTrue(engine().drainAll())
+        // Nothing was acknowledged from the broken receipt, and the loop lived.
+        assertEquals(emptyList<String>(), db.productLabelEventDao().unacked(10).map { it.eventId })
+        assertEquals(2, server.requestCount)
+    }
+
+    /** A batch id must change with its event set, or the second one is answered `alreadyApplied` and lost. */
+    @Test
+    fun differentEventSetsOfTheSameSizeSignDifferently() = runTest {
+        event("e1", 1)
+        server.enqueue(MockResponse().setResponseCode(503))
+        engine().drainAll()
+        val first = Json.parseToJsonElement(server.takeRequest().body.readUtf8())
+            .jsonObject.getValue("batchId").jsonPrimitive.content
+
+        db.productLabelEventDao().markAcked(listOf("e1"), "2026-09-11T09:00:00.000Z")
+        db.metaDao().remove(MetaStore.SYNC_PENDING_BATCH_ID)
+        db.metaDao().remove(MetaStore.SYNC_PENDING_CEILING)
+        db.metaDao().remove(MetaStore.SYNC_PENDING_LABEL_COUNT)
+        event("e2", 2)
+        server.enqueue(MockResponse().setResponseCode(503))
+        engine().drainAll()
+        val second = Json.parseToJsonElement(server.takeRequest().body.readUtf8())
+            .jsonObject.getValue("batchId").jsonPrimitive.content
+
+        assertTrue("$first == $second", first != second)
+    }
 }

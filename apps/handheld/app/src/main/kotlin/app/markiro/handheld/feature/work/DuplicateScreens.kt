@@ -35,8 +35,15 @@ import app.markiro.handheld.core.duplicate.ReprintReason
 sealed interface DuplicateStep {
     data object Idle : DuplicateStep
 
-    /** Nothing was printed and we know why. */
-    data class Failed(val jobId: String, val reason: String) : DuplicateStep
+    /**
+     * Nothing was printed and we know why.
+     *
+     * `jobId` is null when the refusal came BEFORE a job existed -- the unit was
+     * accepted, but preparation never got as far as a row. There is nothing to
+     * retry or reprint then, and offering either gave the operator buttons that
+     * silently did nothing.
+     */
+    data class Failed(val jobId: String?, val reason: String) : DuplicateStep
 
     /** The bytes may or may not have reached the printer. */
     data class Unknown(val jobId: String, val cause: String) : DuplicateStep
@@ -73,6 +80,7 @@ fun duplicateReasonLabel(reason: String): Int = when (reason) {
     DuplicateReason.CODE_INCOMPLETE -> R.string.duplicate_reason_code_incomplete
     DuplicateReason.BYTES_GONE -> R.string.duplicate_reason_bytes_gone
     DuplicateReason.ATTEMPT_IN_FLIGHT -> R.string.duplicate_reason_attempt_in_flight
+    DuplicateReason.POLICY_INCOMPLETE -> R.string.duplicate_reason_policy_incomplete
     else -> R.string.print_reason_other
 }
 
@@ -99,8 +107,17 @@ fun DuplicateScreen(step: DuplicateStep, cb: DuplicateCallbacks) {
                     modifier = Modifier.padding(top = MarkiroSizes.sp2),
                 )
                 Spacer(Modifier.padding(MarkiroSizes.sp2))
-                PrimaryButton(stringResource(R.string.duplicate_retry), cb.onRetry)
-                ReprintReasons(cb)
+                if (step.jobId != null) {
+                    PrimaryButton(stringResource(R.string.duplicate_retry), cb.onRetry)
+                    ReprintReasons(cb)
+                } else {
+                    Text(
+                        stringResource(R.string.duplicate_unprepared_hint),
+                        style = t.strong,
+                        color = c.fg2,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
 
             is DuplicateStep.Unknown -> {

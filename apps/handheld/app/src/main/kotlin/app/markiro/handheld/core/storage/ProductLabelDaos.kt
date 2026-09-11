@@ -3,6 +3,7 @@ package app.markiro.handheld.core.storage
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
@@ -40,16 +41,50 @@ interface ProductLabelJobDao {
     suspend fun dropBytesForShift(shiftId: String)
 
     /**
-     * Retention, step two: the row goes once the server holds every one of its
-     * events. A quarantined event counts as settled -- the server will never
-     * take it, so waiting for it would keep the row forever.
+     * Retention, step two: a completed job goes once the server holds every one
+     * of its events, and its events go with it.
+     *
+     * A quarantined event counts as settled -- the server will never take it, so
+     * waiting would keep the row forever. Deleting the job without its events
+     * leaves them orphaned, which is unbounded growth in the very table
+     * retention exists to bound.
      */
+    @Transaction
+    suspend fun purgeSettled(shiftId: String) {
+        val jobIds = settledJobIds(shiftId)
+        if (jobIds.isEmpty()) return
+        deleteEventsOf(jobIds)
+        deleteJobs(jobIds)
+    }
+
     @Query(
-        "DELETE FROM product_label_jobs WHERE shiftId = :shiftId AND status = 'completed' AND NOT EXISTS (" +
+        "SELECT jobId FROM product_label_jobs WHERE shiftId = :shiftId AND status = 'completed' AND NOT EXISTS (" +
             "SELECT 1 FROM product_label_events WHERE product_label_events.jobId = product_label_jobs.jobId " +
             "AND ackedAt IS NULL AND quarantineCode IS NULL)",
     )
-    suspend fun purgeSettled(shiftId: String)
+    suspend fun settledJobIds(shiftId: String): List<String>
+
+    /** Every completed, fully-answered job on the device, whatever shift it belongs to. */
+    @Transaction
+    suspend fun purgeSettledEverywhere() {
+        val jobIds = settledJobIdsEverywhere()
+        if (jobIds.isEmpty()) return
+        deleteEventsOf(jobIds)
+        deleteJobs(jobIds)
+    }
+
+    @Query(
+        "SELECT jobId FROM product_label_jobs WHERE status = 'completed' AND NOT EXISTS (" +
+            "SELECT 1 FROM product_label_events WHERE product_label_events.jobId = product_label_jobs.jobId " +
+            "AND ackedAt IS NULL AND quarantineCode IS NULL)",
+    )
+    suspend fun settledJobIdsEverywhere(): List<String>
+
+    @Query("DELETE FROM product_label_events WHERE jobId IN (:jobIds)")
+    suspend fun deleteEventsOf(jobIds: List<String>)
+
+    @Query("DELETE FROM product_label_jobs WHERE jobId IN (:jobIds)")
+    suspend fun deleteJobs(jobIds: List<String>)
 
     /** What the close screen warns about; it never blocks on them. */
     @Query("SELECT COUNT(*) FROM product_label_jobs WHERE shiftId = :shiftId AND status <> 'completed'")
@@ -68,14 +103,19 @@ interface ProductLabelEventDao {
     suspend fun insert(event: ProductLabelEventEntity)
 
     /**
-     * Oldest first across every job, and within a job strictly by sequence: the
-     * server refuses a gap, so the order is the contract rather than a
-     * preference. `occurredAt` alone is not enough -- two events of one job can
-     * land in the same millisecond.
+     * Grouped by job and strictly by sequence within one, so a limited batch is
+     * always a PREFIX of each job's events.
+     *
+     * Deliberately not ordered by `occurredAt`: a device clock that steps
+     * backwards -- an NTP correction mid-shift -- would then put event 2 ahead
+     * of event 1, and a batch cut by the limit could carry the second without
+     * the first. The server refuses a gap, so that whole job would be
+     * quarantined. Order across jobs does not matter: each carries its own
+     * sequence.
      */
     @Query(
         "SELECT * FROM product_label_events WHERE ackedAt IS NULL AND quarantineCode IS NULL " +
-            "ORDER BY occurredAt, jobId, sequence LIMIT :limit",
+            "ORDER BY jobId, sequence LIMIT :limit",
     )
     suspend fun unacked(limit: Int): List<ProductLabelEventEntity>
 

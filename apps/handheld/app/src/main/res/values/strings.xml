@@ -155,8 +155,8 @@
     <string name="shifts_join_other_text">%1$s · %2$s. Ваша линия: %3$s.</string>
     <string name="shifts_enter">Войти</string>
     <string name="shifts_entering">Входим в смену…</string>
-    <string name="shifts_update_required_title">Смена требует печати дубликата Data Matrix</string>
-    <string name="shifts_update_required_text">На ТСД печать дубликатов пока недоступна. Используйте станцию или измените политику смены в кабинете.</string>
+    <string name="shifts_update_required_title">Смене нужна более новая версия ТСД</string>
+    <string name="shifts_update_required_text">Эта смена требует возможности, которой нет в установленной версии. Обновите приложение, используйте станцию или измените политику смены в кабинете.</string>
     <string name="shifts_closed_title">Смена уже закрыта</string>
     <string name="shifts_closed_text">Список обновлён.</string>
     <string name="shifts_status_planned">запланирована</string>
@@ -410,6 +410,8 @@
     <string name="duplicate_reason_code_incomplete">В коде нет криптохвоста — дубликат сделать нельзя</string>
     <string name="duplicate_reason_bytes_gone">Смена закрыта, перепечатать нечем</string>
     <string name="duplicate_reason_attempt_in_flight">Печать ещё идёт</string>
+    <string name="duplicate_reason_policy_incomplete">В смене нет снимка шаблона — обновите её в кабинете</string>
+    <string name="duplicate_unprepared_hint">Единица принята и уйдёт на сервер. Этикетку напечатайте после того, как устраните причину.</string>
     <string name="duplicate_printing">Печатаем дубликат…</string>
     <string name="duplicate_awaiting_verification">Отсканируйте наклейку, которая вышла</string>
     <string name="duplicate_busy">Идёт печать дубликата</string>

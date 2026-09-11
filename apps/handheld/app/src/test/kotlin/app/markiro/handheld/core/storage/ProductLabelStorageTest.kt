@@ -168,4 +168,41 @@ class ProductLabelStorageTest {
         assertNull(db.productLabelJobDao().get("j1"))
         assertEquals(emptyList<String>(), db.productLabelEventDao().bySequence("j1").map { it.eventId })
     }
+
+    /**
+     * A device clock that steps backwards would otherwise put event 2 ahead of
+     * event 1, and a batch cut by the limit would carry the second without the
+     * first -- which the server refuses as a sequence gap.
+     */
+    @Test
+    fun aLimitedBatchIsAPrefixEvenWhenTheClockWentBackwards() = runTest {
+        db.productLabelJobDao().insert(job("j1"))
+        db.productLabelEventDao().insert(event("e1", "j1", 1, occurredAt = "2026-09-11T08:00:09.000Z"))
+        db.productLabelEventDao().insert(event("e2", "j1", 2, occurredAt = "2026-09-11T08:00:05.000Z"))
+        db.productLabelEventDao().insert(event("e3", "j1", 3, occurredAt = "2026-09-11T08:00:01.000Z"))
+        assertEquals(listOf("e1", "e2"), db.productLabelEventDao().unacked(2).map { it.eventId })
+    }
+
+    /** A purged job must not leave its events behind: that is the table retention exists to bound. */
+    @Test
+    fun purgingTakesAJobsEventsWithIt() = runTest {
+        db.productLabelJobDao().insert(job("j1", status = "completed"))
+        db.productLabelEventDao().insert(event("e1", "j1", 1).copy(ackedAt = "2026-09-11T09:00:00.000Z"))
+        db.productLabelEventDao().insert(event("e2", "j1", 2).copy(quarantineCode = "policy_mismatch"))
+        db.productLabelJobDao().purgeSettled("s1")
+        assertNull(db.productLabelJobDao().get("j1"))
+        assertEquals(emptyList<String>(), db.productLabelEventDao().bySequence("j1").map { it.eventId })
+    }
+
+    /** The sync path purges across shifts, so a long shift does not carry every label it printed. */
+    @Test
+    fun purgingEverywhereIgnoresTheShiftButKeepsWhatIsOwed() = runTest {
+        db.productLabelJobDao().insert(job("j1", status = "completed").copy(shiftId = "s2"))
+        db.productLabelJobDao().insert(job("j2", status = "completed"))
+        db.productLabelEventDao().insert(event("e1", "j1", 1).copy(ackedAt = "2026-09-11T09:00:00.000Z"))
+        db.productLabelEventDao().insert(event("e2", "j2", 1))
+        db.productLabelJobDao().purgeSettledEverywhere()
+        assertNull(db.productLabelJobDao().get("j1"))
+        assertNotNull(db.productLabelJobDao().get("j2"))
+    }
 }

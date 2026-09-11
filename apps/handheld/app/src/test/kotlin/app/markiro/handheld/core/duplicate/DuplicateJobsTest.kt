@@ -338,4 +338,20 @@ class DuplicateJobsTest {
         assertEquals(ACCEPTED_AT, job.acceptedAt)
         assertTrue(db.productLabelEventDao().bySequence(jobId).single().payloadJson.contains("\"acceptedAt\":\"$ACCEPTED_AT\""))
     }
+
+    /**
+     * A shift row carrying the mode but not the snapshot used to reach
+     * `checkNotNull` inside the scan collector, which swallows what it throws:
+     * no label, no refusal, nothing on screen.
+     */
+    @Test
+    fun aShiftMissingItsPolicySnapshotIsRefusedNotThrown() = runTest {
+        val broken = shift().copy(duplicatePolicyRevision = null)
+        assertEquals(DuplicateReason.POLICY_INCOMPLETE, jobs().preflight(broken))
+        val outcome = jobs().accept(broken, RAW, "c".repeat(64), "55555555-5555-4555-8555-555555555555", null, ACCEPTED_AT)
+        assertEquals(DuplicateReason.POLICY_INCOMPLETE, (outcome as DuplicateOutcome.Refused).reason)
+
+        val noDigest = shift().copy(duplicateTemplateDigest = null)
+        assertEquals(DuplicateReason.POLICY_INCOMPLETE, jobs().preflight(noDigest))
+    }
 }

@@ -45,6 +45,9 @@ object DuplicateReason {
 
     /** Retention dropped the prepared bytes at shift close; there is nothing to replay. */
     const val BYTES_GONE = "bytes_gone"
+
+    /** The shift row carries a duplicate mode but not the snapshot every event must quote. */
+    const val POLICY_INCOMPLETE = "policy_incomplete"
     const val NO_PAPER = PrintReason.NO_PAPER
     const val HEAD_OPEN = PrintReason.HEAD_OPEN
     const val UNREACHABLE = PrintReason.UNREACHABLE
@@ -99,6 +102,13 @@ class DuplicateJobs(
     suspend fun preflight(shift: ShiftEntity): String? {
         db.printerDao().selected() ?: return DuplicateReason.PRINTER_UNCONFIGURED
         val template = shift.duplicateTemplate ?: return DuplicateReason.TEMPLATE_MISSING
+        // Every event quotes the policy revision and the template digest. A row
+        // missing either cannot produce one, and finding that out inside the
+        // scan collector meant an exception it swallows: no label, no refusal,
+        // nothing on screen.
+        if (shift.duplicatePolicyRevision == null || shift.duplicateTemplateDigest == null) {
+            return DuplicateReason.POLICY_INCOMPLETE
+        }
         return try {
             LabelSpecCodec.parse(template)
             null
@@ -157,6 +167,11 @@ class DuplicateJobs(
         } catch (_: LabelRenderException) {
             return DuplicateOutcome.Refused(DuplicateReason.TEMPLATE_INVALID)
         }
+        val policyRevision = shift.duplicatePolicyRevision
+        val templateDigest = shift.duplicateTemplateDigest
+        if (policyRevision == null || templateDigest == null) {
+            return DuplicateOutcome.Refused(DuplicateReason.POLICY_INCOMPLETE)
+        }
 
         val fields = try {
             duplicateLabelFields(shift, canonicalRaw, acceptedAt, operatorName)
@@ -179,8 +194,8 @@ class DuplicateJobs(
             shiftId = shift.id,
             codeHash = codeHash,
             acceptedAt = acceptedAt,
-            policyRevision = checkNotNull(shift.duplicatePolicyRevision) { "shift ${shift.id} has no policy revision" },
-            templateDigest = checkNotNull(shift.duplicateTemplateDigest) { "shift ${shift.id} has no template digest" },
+            policyRevision = policyRevision,
+            templateDigest = templateDigest,
             payloadDigest = duplicatePayloadDigest(canonicalRaw),
             operatorId = operatorId,
             occurredAt = acceptedAt,

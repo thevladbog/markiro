@@ -514,7 +514,10 @@ class WorkViewModel(
         val hash = app.markiro.handheld.core.km.KmCodec.hash(app.markiro.handheld.core.km.KmCodec.canonicalize(raw))
         when (val prepared = duplicates.accept(shift, raw, hash, operator?.operatorId.orEmpty(), operator?.name, scannedAt)) {
             is DuplicateOutcome.Refused -> {
-                _duplicateStep.value = DuplicateStep.Failed("", prepared.reason)
+                // No job exists, so there is nothing to retry or reprint. The
+                // unit itself is already accepted and queued -- only its label
+                // is missing.
+                _duplicateStep.value = DuplicateStep.Failed(null, prepared.reason)
                 refreshDuplicate()
                 return
             }
@@ -539,7 +542,7 @@ class WorkViewModel(
 
     /** An explicit second send, chosen by a person who has looked at the printer. */
     fun retryDuplicate() {
-        val jobId = _duplicateStep.value.jobId()?.takeIf { it.isNotEmpty() } ?: return
+        val jobId = _duplicateStep.value.jobId() ?: return
         viewModelScope.launch {
             _duplicateStep.value = DuplicateStep.Idle
             when (val sent = duplicates.send(jobId)) {
@@ -553,7 +556,7 @@ class WorkViewModel(
     }
 
     fun reprintDuplicate(reason: String) {
-        val jobId = _duplicateStep.value.jobId()?.takeIf { it.isNotEmpty() } ?: return
+        val jobId = _duplicateStep.value.jobId() ?: return
         viewModelScope.launch {
             when (val outcome = duplicates.reprint(jobId, reason)) {
                 is DuplicateOutcome.Refused -> _duplicateStep.value = DuplicateStep.Failed(jobId, outcome.reason)

@@ -243,7 +243,9 @@ fun Verdict.verdictTone(): Tone = when (this) {
 private fun LastScanZone(last: LastScan?, duplicate: DuplicateUi?, modifier: Modifier) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    val colors = last?.verdict?.verdictTone()?.let { c.tone(it) }
+    // A refusal is its own tone. Taking it from the verdict painted the zone
+    // GREEN, because a refused scan carries `Verdict.OK` -- it was never judged.
+    val colors = last?.let { c.tone(if (it.blocked) Tone.Warn else it.verdict.verdictTone()) }
     Column(
         modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4).clip(RoundedCornerShape(MarkiroSizes.radius))
             .background(colors?.bg ?: c.surfaceCard).padding(MarkiroSizes.sp4),
@@ -254,9 +256,8 @@ private fun LastScanZone(last: LastScan?, duplicate: DuplicateUi?, modifier: Mod
             Icon(Icons.Outlined.QrCodeScanner, contentDescription = null, tint = c.fg3)
             Text(stringResource(R.string.work_waiting), style = t.strong, color = c.fg3)
         } else if (last.blocked) {
-            // A refusal, not a verdict: the code was never judged.
-            Icon(Icons.Outlined.Print, contentDescription = null, tint = c.tone(Tone.Warn).fg)
-            Text(stringResource(R.string.duplicate_blocked), style = t.title, color = c.tone(Tone.Warn).fg, textAlign = TextAlign.Center)
+            Icon(Icons.Outlined.Print, contentDescription = null, tint = colors.fg)
+            Text(stringResource(R.string.duplicate_blocked), style = t.title, color = colors.fg, textAlign = TextAlign.Center)
         } else {
             val icon = when (last.verdict) {
                 Verdict.OK -> Icons.Outlined.CheckCircle
