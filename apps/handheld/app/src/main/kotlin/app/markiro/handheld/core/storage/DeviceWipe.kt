@@ -8,6 +8,8 @@ class DeviceWipe(private val db: HandheldDatabase, private val credential: Crede
         credential.clear()
         db.withTransaction {
             db.printerDao().clear()
+            db.boxDao().clear()
+            db.ssccPoolDao().clear()
             db.outboxDao().clear()
             db.scanEventDao().clear()
             db.codeDao().clear()

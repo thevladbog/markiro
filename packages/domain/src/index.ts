@@ -57,6 +57,13 @@ export type {
 export { formatLabelDate, LABEL_DATE_FORMAT } from "./labels/date.js";
 export { addCalendarDays, shelfLifeExpiryDate } from "./labels/shelf-life.js";
 export {
+  boxLabelFields,
+  effectiveProductionIsoDate,
+  expiryIsoDate,
+  localIsoDate,
+} from "./labels/box-label.js";
+export type { BoxLabelInput } from "./labels/box-label.js";
+export {
   code128ModuleCount,
   CODE128_FNC1_MODULES,
   CODE128_FRAME_MODULES,

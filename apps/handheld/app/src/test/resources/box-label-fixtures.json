@@ -1,0 +1,435 @@
+{
+  "sscc": [
+    {
+      "extensionDigit": 0,
+      "gs1Prefix": "468008990",
+      "serial": 0,
+      "sscc": "046800899000000000",
+      "error": null
+    },
+    {
+      "extensionDigit": 0,
+      "gs1Prefix": "468008990",
+      "serial": 1,
+      "sscc": "046800899000000017",
+      "error": null
+    },
+    {
+      "extensionDigit": 0,
+      "gs1Prefix": "468008990",
+      "serial": 4242,
+      "sscc": "046800899000042420",
+      "error": null
+    },
+    {
+      "extensionDigit": 0,
+      "gs1Prefix": "468008990",
+      "serial": 9999999,
+      "sscc": "046800899099999995",
+      "error": null
+    },
+    {
+      "extensionDigit": 1,
+      "gs1Prefix": "468008990",
+      "serial": 7,
+      "sscc": "146800899000000076",
+      "error": null
+    },
+    {
+      "extensionDigit": 0,
+      "gs1Prefix": "4600000",
+      "serial": 123456789,
+      "sscc": "046000001234567893",
+      "error": null
+    },
+    {
+      "extensionDigit": 0,
+      "gs1Prefix": "4600",
+      "serial": 0,
+      "sscc": "046000000000000008",
+      "error": null
+    },
+    {
+      "extensionDigit": 0,
+      "gs1Prefix": "468008990",
+      "serial": 10000000,
+      "sscc": null,
+      "error": "SSCC_RANGE"
+    },
+    {
+      "extensionDigit": 0,
+      "gs1Prefix": "468008990",
+      "serial": -1,
+      "sscc": null,
+      "error": "SSCC_RANGE"
+    },
+    {
+      "extensionDigit": 10,
+      "gs1Prefix": "468008990",
+      "serial": 5,
+      "sscc": null,
+      "error": "SSCC_PREFIX"
+    },
+    {
+      "extensionDigit": 0,
+      "gs1Prefix": "460",
+      "serial": 0,
+      "sscc": null,
+      "error": "SSCC_PREFIX"
+    }
+  ],
+  "fields": [
+    {
+      "name": "declared production date",
+      "timeZone": "UTC",
+      "input": {
+        "sscc": "046800899000000000",
+        "itemCount": 20,
+        "productName": "Вода питьевая негазированная 0,5 л",
+        "productPrintName": "Вода 0,5 л",
+        "gtin14": "04680089900000",
+        "egaisCode": null,
+        "operatorName": "Иванов И.",
+        "counterpartyName": "ООО «Завод»",
+        "shiftNumber": "SEP26-003",
+        "shelfLifeDays": 365,
+        "productionDate": "2026-09-10",
+        "closedAt": "2026-09-10T08:00:00.000Z"
+      },
+      "fields": {
+        "product.name": "Вода питьевая негазированная 0,5 л",
+        "product.printName": "Вода 0,5 л",
+        "product.gtin": "04680089900000",
+        "product.egais": "",
+        "km.code": "",
+        "sscc": "046800899000000000",
+        "shift.no": "SEP26-003",
+        "date": "10.09.2026",
+        "expiry": "09.09.2027",
+        "qty": "20",
+        "operator": "Иванов И.",
+        "counterparty.name": "ООО «Завод»"
+      }
+    },
+    {
+      "name": "close date stands in for an undeclared production date",
+      "timeZone": "UTC",
+      "input": {
+        "sscc": "046800899000000000",
+        "itemCount": 20,
+        "productName": "Вода питьевая негазированная 0,5 л",
+        "productPrintName": "Вода 0,5 л",
+        "gtin14": "04680089900000",
+        "egaisCode": null,
+        "operatorName": "Иванов И.",
+        "counterpartyName": "ООО «Завод»",
+        "shiftNumber": "SEP26-003",
+        "shelfLifeDays": 365,
+        "productionDate": null,
+        "closedAt": "2026-09-10T21:30:00.000Z"
+      },
+      "fields": {
+        "product.name": "Вода питьевая негазированная 0,5 л",
+        "product.printName": "Вода 0,5 л",
+        "product.gtin": "04680089900000",
+        "product.egais": "",
+        "km.code": "",
+        "sscc": "046800899000000000",
+        "shift.no": "SEP26-003",
+        "date": "10.09.2026",
+        "expiry": "09.09.2027",
+        "qty": "20",
+        "operator": "Иванов И.",
+        "counterparty.name": "ООО «Завод»"
+      }
+    },
+    {
+      "name": "one-day shelf life expires on the production day",
+      "timeZone": "UTC",
+      "input": {
+        "sscc": "046800899000000000",
+        "itemCount": 20,
+        "productName": "Вода питьевая негазированная 0,5 л",
+        "productPrintName": "Вода 0,5 л",
+        "gtin14": "04680089900000",
+        "egaisCode": null,
+        "operatorName": "Иванов И.",
+        "counterpartyName": "ООО «Завод»",
+        "shiftNumber": "SEP26-003",
+        "shelfLifeDays": 1,
+        "productionDate": "2026-09-10",
+        "closedAt": "2026-09-10T08:00:00.000Z"
+      },
+      "fields": {
+        "product.name": "Вода питьевая негазированная 0,5 л",
+        "product.printName": "Вода 0,5 л",
+        "product.gtin": "04680089900000",
+        "product.egais": "",
+        "km.code": "",
+        "sscc": "046800899000000000",
+        "shift.no": "SEP26-003",
+        "date": "10.09.2026",
+        "expiry": "10.09.2026",
+        "qty": "20",
+        "operator": "Иванов И.",
+        "counterparty.name": "ООО «Завод»"
+      }
+    },
+    {
+      "name": "leap day",
+      "timeZone": "UTC",
+      "input": {
+        "sscc": "046800899000000000",
+        "itemCount": 20,
+        "productName": "Вода питьевая негазированная 0,5 л",
+        "productPrintName": "Вода 0,5 л",
+        "gtin14": "04680089900000",
+        "egaisCode": null,
+        "operatorName": "Иванов И.",
+        "counterpartyName": "ООО «Завод»",
+        "shiftNumber": "SEP26-003",
+        "shelfLifeDays": 366,
+        "productionDate": "2028-02-29",
+        "closedAt": "2028-02-29T08:00:00.000Z"
+      },
+      "fields": {
+        "product.name": "Вода питьевая негазированная 0,5 л",
+        "product.printName": "Вода 0,5 л",
+        "product.gtin": "04680089900000",
+        "product.egais": "",
+        "km.code": "",
+        "sscc": "046800899000000000",
+        "shift.no": "SEP26-003",
+        "date": "29.02.2028",
+        "expiry": "28.02.2029",
+        "qty": "20",
+        "operator": "Иванов И.",
+        "counterparty.name": "ООО «Завод»"
+      }
+    },
+    {
+      "name": "crossing a year boundary",
+      "timeZone": "UTC",
+      "input": {
+        "sscc": "046800899000000000",
+        "itemCount": 20,
+        "productName": "Вода питьевая негазированная 0,5 л",
+        "productPrintName": "Вода 0,5 л",
+        "gtin14": "04680089900000",
+        "egaisCode": null,
+        "operatorName": "Иванов И.",
+        "counterpartyName": "ООО «Завод»",
+        "shiftNumber": "SEP26-003",
+        "shelfLifeDays": 30,
+        "productionDate": "2026-12-31",
+        "closedAt": "2026-12-31T08:00:00.000Z"
+      },
+      "fields": {
+        "product.name": "Вода питьевая негазированная 0,5 л",
+        "product.printName": "Вода 0,5 л",
+        "product.gtin": "04680089900000",
+        "product.egais": "",
+        "km.code": "",
+        "sscc": "046800899000000000",
+        "shift.no": "SEP26-003",
+        "date": "31.12.2026",
+        "expiry": "29.01.2027",
+        "qty": "20",
+        "operator": "Иванов И.",
+        "counterparty.name": "ООО «Завод»"
+      }
+    },
+    {
+      "name": "no shelf life leaves the expiry empty",
+      "timeZone": "UTC",
+      "input": {
+        "sscc": "046800899000000000",
+        "itemCount": 20,
+        "productName": "Вода питьевая негазированная 0,5 л",
+        "productPrintName": "Вода 0,5 л",
+        "gtin14": "04680089900000",
+        "egaisCode": null,
+        "operatorName": "Иванов И.",
+        "counterpartyName": "ООО «Завод»",
+        "shiftNumber": "SEP26-003",
+        "shelfLifeDays": null,
+        "productionDate": "2026-09-10",
+        "closedAt": "2026-09-10T08:00:00.000Z"
+      },
+      "fields": {
+        "product.name": "Вода питьевая негазированная 0,5 л",
+        "product.printName": "Вода 0,5 л",
+        "product.gtin": "04680089900000",
+        "product.egais": "",
+        "km.code": "",
+        "sscc": "046800899000000000",
+        "shift.no": "SEP26-003",
+        "date": "10.09.2026",
+        "expiry": "",
+        "qty": "20",
+        "operator": "Иванов И.",
+        "counterparty.name": "ООО «Завод»"
+      }
+    },
+    {
+      "name": "an impossible declared date yields empty dates",
+      "timeZone": "UTC",
+      "input": {
+        "sscc": "046800899000000000",
+        "itemCount": 20,
+        "productName": "Вода питьевая негазированная 0,5 л",
+        "productPrintName": "Вода 0,5 л",
+        "gtin14": "04680089900000",
+        "egaisCode": null,
+        "operatorName": "Иванов И.",
+        "counterpartyName": "ООО «Завод»",
+        "shiftNumber": "SEP26-003",
+        "shelfLifeDays": 365,
+        "productionDate": "2026-02-30",
+        "closedAt": "2026-09-10T08:00:00.000Z"
+      },
+      "fields": {
+        "product.name": "Вода питьевая негазированная 0,5 л",
+        "product.printName": "Вода 0,5 л",
+        "product.gtin": "04680089900000",
+        "product.egais": "",
+        "km.code": "",
+        "sscc": "046800899000000000",
+        "shift.no": "SEP26-003",
+        "date": "",
+        "expiry": "",
+        "qty": "20",
+        "operator": "Иванов И.",
+        "counterparty.name": "ООО «Завод»"
+      }
+    },
+    {
+      "name": "no print name falls back to the full name",
+      "timeZone": "UTC",
+      "input": {
+        "sscc": "046800899000000000",
+        "itemCount": 20,
+        "productName": "Вода питьевая негазированная 0,5 л",
+        "productPrintName": null,
+        "gtin14": "04680089900000",
+        "egaisCode": null,
+        "operatorName": "Иванов И.",
+        "counterpartyName": "ООО «Завод»",
+        "shiftNumber": "SEP26-003",
+        "shelfLifeDays": 365,
+        "productionDate": "2026-09-10",
+        "closedAt": "2026-09-10T08:00:00.000Z"
+      },
+      "fields": {
+        "product.name": "Вода питьевая негазированная 0,5 л",
+        "product.printName": "Вода питьевая негазированная 0,5 л",
+        "product.gtin": "04680089900000",
+        "product.egais": "",
+        "km.code": "",
+        "sscc": "046800899000000000",
+        "shift.no": "SEP26-003",
+        "date": "10.09.2026",
+        "expiry": "09.09.2027",
+        "qty": "20",
+        "operator": "Иванов И.",
+        "counterparty.name": "ООО «Завод»"
+      }
+    },
+    {
+      "name": "absent optionals become empty strings",
+      "timeZone": "UTC",
+      "input": {
+        "sscc": "046800899000000000",
+        "itemCount": 20,
+        "productName": "Вода питьевая негазированная 0,5 л",
+        "productPrintName": "Вода 0,5 л",
+        "gtin14": "04680089900000",
+        "egaisCode": null,
+        "operatorName": null,
+        "counterpartyName": null,
+        "shiftNumber": null,
+        "shelfLifeDays": 365,
+        "productionDate": "2026-09-10",
+        "closedAt": "2026-09-10T08:00:00.000Z"
+      },
+      "fields": {
+        "product.name": "Вода питьевая негазированная 0,5 л",
+        "product.printName": "Вода 0,5 л",
+        "product.gtin": "04680089900000",
+        "product.egais": "",
+        "km.code": "",
+        "sscc": "046800899000000000",
+        "shift.no": "",
+        "date": "10.09.2026",
+        "expiry": "09.09.2027",
+        "qty": "20",
+        "operator": "",
+        "counterparty.name": ""
+      }
+    },
+    {
+      "name": "a single unit still prints its count",
+      "timeZone": "UTC",
+      "input": {
+        "sscc": "046800899000000000",
+        "itemCount": 1,
+        "productName": "Вода питьевая негазированная 0,5 л",
+        "productPrintName": "Вода 0,5 л",
+        "gtin14": "04680089900000",
+        "egaisCode": null,
+        "operatorName": "Иванов И.",
+        "counterpartyName": "ООО «Завод»",
+        "shiftNumber": "SEP26-003",
+        "shelfLifeDays": 365,
+        "productionDate": "2026-09-10",
+        "closedAt": "2026-09-10T08:00:00.000Z"
+      },
+      "fields": {
+        "product.name": "Вода питьевая негазированная 0,5 л",
+        "product.printName": "Вода 0,5 л",
+        "product.gtin": "04680089900000",
+        "product.egais": "",
+        "km.code": "",
+        "sscc": "046800899000000000",
+        "shift.no": "SEP26-003",
+        "date": "10.09.2026",
+        "expiry": "09.09.2027",
+        "qty": "1",
+        "operator": "Иванов И.",
+        "counterparty.name": "ООО «Завод»"
+      }
+    },
+    {
+      "name": "an undeclared production date takes the device's local day, not UTC's",
+      "timeZone": "Europe/Moscow",
+      "input": {
+        "sscc": "046800899000000000",
+        "itemCount": 20,
+        "productName": "Вода питьевая негазированная 0,5 л",
+        "productPrintName": "Вода 0,5 л",
+        "gtin14": "04680089900000",
+        "egaisCode": null,
+        "operatorName": "Иванов И.",
+        "counterpartyName": "ООО «Завод»",
+        "shiftNumber": "SEP26-003",
+        "shelfLifeDays": 365,
+        "productionDate": null,
+        "closedAt": "2026-09-10T21:30:00.000Z"
+      },
+      "fields": {
+        "product.name": "Вода питьевая негазированная 0,5 л",
+        "product.printName": "Вода 0,5 л",
+        "product.gtin": "04680089900000",
+        "product.egais": "",
+        "km.code": "",
+        "sscc": "046800899000000000",
+        "shift.no": "SEP26-003",
+        "date": "11.09.2026",
+        "expiry": "10.09.2027",
+        "qty": "20",
+        "operator": "Иванов И.",
+        "counterparty.name": "ООО «Завод»"
+      }
+    }
+  ]
+}

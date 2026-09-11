@@ -108,6 +108,58 @@ what came out rather than being told the label printed.
 The status query runs before every send. Neither printer language acknowledges a job afterwards, so
 without asking first the only failure this app could ever report is silence.
 
+## Aggregation
+
+An aggregation shift fills boxes. Units scanned into the open box are stamped with its device-local
+`boxId`, which travels to the server as `items[].boxId`; the box's closure travels in the same batch
+as `boxes[]`. There is no server change and no second protocol: the handheld is a peer terminal of a
+shift the station already knows how to be.
+
+**A serial is burned at close, never at open.** A box closed empty by mistake, and a box abandoned at
+shift end, then cost nothing. Serials come from `sscc_pool`, this device's own block from the shift
+bundle, refilled by fetching the bundle again — the server hands out a new block once the old one is
+fully consumed. A dry pool leaves the box **open** and says so: an SSCC is the box's identity rather
+than an attachment, so unlike a label it cannot be deferred.
+
+**A box closes without a printer.** It is numbered, reported, and its label goes to the queue, which
+is visible on the hub and in the shift header. A dead printer must not stop a line, and the boxes are
+already on the server; the physical label is a debt the operator can see and settle. The queue
+belongs to the device rather than to a shift, so it survives leaving one and closing one, and
+«Напечатать все» skips anything whose last attempt is `unknown` — a bulk retry there could put a
+second label on a box the server has accepted. A print the app died inside is read as `unknown` at
+startup, never resumed.
+
+`closedAt` is persisted on the box row and is the label's date source. A reprint the next morning
+must carry the same «Дата производства» and «Годен до» as the first attempt, or one SSCC ends up on
+two labels that disagree about expiry. Labels are re-rendered on every attempt rather than stored as
+bytes, because «Другой принтер» may speak a different language at a different resolution.
+
+`buildSscc` and the label's calendar arithmetic are pinned to `packages/domain` by a second fixture
+set: `pnpm --filter @markiro/domain fixtures:box-labels` writes
+`app/src/test/resources/box-label-fixtures.json`. Unlike the emitter fixtures, none of this is
+allowed to differ — a check digit that disagrees is a number the receiver rejects, and an expiry a
+day out is a claim about food the rest of the platform contradicts. The fixture records the timezone
+it was generated in, because one case exercises the local-date path.
+
+### Aggregation walk-through against the local API
+
+1. In the cabinet the shift needs four things a validation shift does not: mode
+   «агрегация», a box capacity, a box label template, and a counterparty with a GLN as
+   the SSCC issuer. Without the issuer the device can close no box at all, and says so.
+2. Enter the shift and send `boxCapacity` scans. The grid fills; the last unit closes the
+   box, prints, and the screen clears itself after about a second.
+3. What the stand-in printer captured should carry the bare 18-digit SSCC — the `(00)`
+   identifier belongs to the emitter — and «Годен до» exactly one day short of the
+   production date plus the shelf life.
+4. Failure paths worth walking, because each is a different next step for the operator:
+   remove the printer entirely (boxes still close, the queue fills, the hub says so);
+   answer the status query with out-of-paper (nothing is sent); kill the app mid-print
+   (`adb shell am force-stop app.markiro.handheld`) and reopen it — the box reads as
+   unknown and «Напечатать все» skips it.
+5. Exhausting the pool needs a small block: the box stays open and names the reason.
+   Closing the shift with a non-empty queue must succeed, and the queue must still be
+   there afterwards.
+
 ## Scanner sources
 
 Built-in vendor intent (Datalogic Intent Wedge, Honeywell Data Intent, Zebra DataWedge; the
