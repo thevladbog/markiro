@@ -3493,6 +3493,48 @@ export const STATION_MIGRATIONS: string[] = [
        OR NEW.planned_qty_snapshot IS NOT (SELECT planned_qty FROM shift_mirror WHERE id=NEW.shift_id)
        THEN RAISE(ABORT,'PRODUCT_LABEL_CLOSE_CHANGED') END;
    END;`,
+
+  // ---- 06d pallets ----
+  //
+  // `print_state` defaults to 'pending' rather than boxes_mirror's 'legacy':
+  // that value exists there only for rows that predate print recovery, and
+  // this table has no such history.
+  `CREATE TABLE IF NOT EXISTS pallets_mirror (
+     pallet_id TEXT PRIMARY KEY,
+     shift_id TEXT NOT NULL,
+     terminal_id TEXT,
+     sscc TEXT,
+     opened_at TEXT NOT NULL,
+     closed_at TEXT,
+     closed_by TEXT,
+     acked_at TEXT,
+     print_verified_at TEXT,
+     print_skipped_at TEXT,
+     disassembled_at TEXT,
+     print_state TEXT NOT NULL DEFAULT 'pending',
+     print_error_code TEXT
+   );`,
+  `CREATE INDEX IF NOT EXISTS pallets_mirror_shift_idx ON pallets_mirror (shift_id, closed_at);`,
+  // ALTER, never a changed CREATE TABLE: installed stations already have
+  // these tables, so `IF NOT EXISTS` would skip the new columns silently and
+  // a device in the field would never gain them.
+  `ALTER TABLE boxes_mirror ADD COLUMN pallet_id TEXT;`,
+  `ALTER TABLE shift_mirror ADD COLUMN pallet_box_capacity INTEGER;`,
+  `ALTER TABLE shift_mirror ADD COLUMN pallet_label_template_spec TEXT;`,
+  `ALTER TABLE product_mirror ADD COLUMN pallet_box_capacity INTEGER;`,
+  // Pure facts, never updated after insert, so a monotonic id ceiling is
+  // enough for ack tracking — the same shape and reasoning as
+  // box_exceptions_mirror.
+  `CREATE TABLE IF NOT EXISTS pallet_exceptions_mirror (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     kind TEXT NOT NULL,
+     pallet_id TEXT NOT NULL,
+     shift_id TEXT NOT NULL,
+     terminal_id TEXT,
+     operator_id TEXT,
+     reason TEXT NOT NULL,
+     occurred_at TEXT NOT NULL
+   );`,
 ];
 
 export interface StationMigrationEntry {

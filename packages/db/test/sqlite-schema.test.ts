@@ -2400,3 +2400,86 @@ describe("inventory receipt trigger admission", () => {
     ).toEqual({ progress_cursor: null, progress_result_revision: 0 });
   });
 });
+
+describe("pallet mirror", () => {
+  it("creates the pallet mirror with its print-recovery columns", () => {
+    const db = migratedDb();
+    const columns = (
+      db.prepare("PRAGMA table_info(pallets_mirror)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    expect(columns).toEqual(
+      expect.arrayContaining([
+        "pallet_id",
+        "shift_id",
+        "terminal_id",
+        "sscc",
+        "opened_at",
+        "closed_at",
+        "closed_by",
+        "acked_at",
+        "print_verified_at",
+        "print_skipped_at",
+        "disassembled_at",
+        "print_state",
+        "print_error_code",
+      ]),
+    );
+  });
+
+  it("links a box to its pallet", () => {
+    const db = migratedDb();
+    const columns = (
+      db.prepare("PRAGMA table_info(boxes_mirror)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    expect(columns).toContain("pallet_id");
+  });
+
+  /**
+   * An installed station already HAS boxes_mirror, so a changed
+   * `CREATE TABLE IF NOT EXISTS` would be skipped silently and the column
+   * would never appear. Only an ALTER reaches a device that is already in the
+   * field — this test is what keeps that true.
+   */
+  it("adds the box column to a station that already holds boxes", () => {
+    const db = new DatabaseSync(":memory:");
+    applyStationMigrations(db);
+    db.exec(
+      "INSERT INTO boxes_mirror (box_id, shift_id, opened_at) VALUES ('b1','s1','2026-09-11T07:00:00.000Z')",
+    );
+    // Re-running the whole list is what a restart does; it must be a no-op.
+    applyStationMigrations(db);
+    expect(db.prepare("SELECT pallet_id FROM boxes_mirror WHERE box_id='b1'").get()).toEqual({
+      pallet_id: null,
+    });
+  });
+
+  it("carries the shift's pallet capacity and label spec", () => {
+    const db = migratedDb();
+    const columns = (
+      db.prepare("PRAGMA table_info(shift_mirror)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    expect(columns).toEqual(
+      expect.arrayContaining(["pallet_box_capacity", "pallet_label_template_spec"]),
+    );
+    const productColumns = (
+      db.prepare("PRAGMA table_info(product_mirror)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    expect(productColumns).toContain("pallet_box_capacity");
+  });
+
+  it("queues pallet exceptions with a monotonic id", () => {
+    const db = migratedDb();
+    db.exec(
+      `INSERT INTO pallet_exceptions_mirror (kind, pallet_id, shift_id, terminal_id, operator_id, reason, occurred_at)
+       VALUES ('disassemble','p1','s1','t1','op1','повреждён поддон','2026-09-11T08:00:00.000Z')`,
+    );
+    db.exec(
+      `INSERT INTO pallet_exceptions_mirror (kind, pallet_id, shift_id, terminal_id, operator_id, reason, occurred_at)
+       VALUES ('reprint','p1','s1','t1','op1','смазалась','2026-09-11T08:01:00.000Z')`,
+    );
+    expect(db.prepare("SELECT id, kind FROM pallet_exceptions_mirror ORDER BY id").all()).toEqual([
+      { id: 1, kind: "disassemble" },
+      { id: 2, kind: "reprint" },
+    ]);
+  });
+});
