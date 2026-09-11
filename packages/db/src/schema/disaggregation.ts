@@ -14,7 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organization } from "./auth.js";
-import { boxes, products } from "./platform.js";
+import { boxes, pallets, products } from "./platform.js";
 
 export const disaggregationDocumentStatus = pgEnum("disaggregation_document_status", [
   "draft",
@@ -109,6 +109,12 @@ export const disaggregationDocumentLines = pgTable(
     ssccInput: text("sscc_input").notNull(),
     sscc: char("sscc", { length: 18 }),
     boxId: uuid("box_id"),
+    /**
+     * Set INSTEAD of `boxId` when this line names a pallet. Validation looks
+     * the SSCC up among boxes first, then pallets; the CHECK below keeps a
+     * line from claiming to be both.
+     */
+    palletId: uuid("pallet_id"),
     status: disaggregationLineStatus("status").notNull(),
     productId: uuid("product_id"),
     codeCount: integer("code_count").notNull().default(0),
@@ -130,6 +136,15 @@ export const disaggregationDocumentLines = pgTable(
       columns: [t.tenantId, t.boxId],
       foreignColumns: [boxes.tenantId, boxes.id],
     }),
+    foreignKey({
+      name: "disaggregation_document_lines_tenant_pallet_fk",
+      columns: [t.tenantId, t.palletId],
+      foreignColumns: [pallets.tenantId, pallets.id],
+    }),
+    check(
+      "disaggregation_document_lines_target_check",
+      sql`num_nonnulls(${t.boxId}, ${t.palletId}) <= 1`,
+    ),
     foreignKey({
       name: "disaggregation_document_lines_tenant_product_fk",
       columns: [t.tenantId, t.productId],

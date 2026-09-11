@@ -4,8 +4,10 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   DEFAULT_BOX_LABEL_TEMPLATE_NAME,
+  PALLET_LABEL_TEMPLATE_NAME,
   buildDefaultLabelTemplates,
   buildDuplicateLabelTemplates,
+  buildPalletLabelTemplates,
 } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
@@ -152,9 +154,36 @@ export class TenantProvisioningService {
           spec,
         });
       }
+      // Stock PALLET label (slice 06d). Its own family for the same reason
+      // the duplicate labels are: `purpose` decides which picker offers a
+      // template, and a pallet label must never appear where a box label is
+      // expected. Migration 0130 seeds the identical row for tenants that
+      // already existed, so both paths leave one stock pallet label, not two.
+      let defaultPalletLabelTemplateId: string | null = null;
+      for (const { name, spec } of buildPalletLabelTemplates()) {
+        const templateId = createId();
+        await tx.insert(schema.labelTemplates).values({
+          id: templateId,
+          tenantId: tenant.id,
+          name,
+          purpose: "pallet",
+          spec,
+        });
+        if (name === PALLET_LABEL_TEMPLATE_NAME) defaultPalletLabelTemplateId = templateId;
+      }
+      if (defaultPalletLabelTemplateId === null) {
+        // Programming error, not a user-facing conflict — the same reasoning
+        // as the box default above: a composite FK with a null column is
+        // unenforced (MATCH SIMPLE), so a failed match would insert null
+        // silently and the tenant would quietly have no pallet default.
+        throw new Error(
+          `No seeded label template matched PALLET_LABEL_TEMPLATE_NAME (${PALLET_LABEL_TEMPLATE_NAME})`,
+        );
+      }
       await tx.insert(schema.orgProfiles).values({
         tenantId: tenant.id,
         defaultBoxLabelTemplateId,
+        defaultPalletLabelTemplateId,
       });
     }
 

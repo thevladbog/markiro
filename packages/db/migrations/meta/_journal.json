@@ -911,6 +911,20 @@
       "when": 1789107294532,
       "tag": "0129_commercial_terms",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1789141200540,
+      "tag": "0130_pallets",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1789141275916,
+      "tag": "0131_drop_legacy_pallet_capacity",
+      "breakpoints": true
     }
   ]
 }
