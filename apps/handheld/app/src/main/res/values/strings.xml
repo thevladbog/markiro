@@ -425,7 +425,7 @@
     <string name="exceptions_undo">Отменить последний скан</string>
     <string name="exceptions_last_scan">Последний скан: %1$s в %2$s</string>
     <string name="exceptions_no_last_scan">Отменять нечего: в коробе нет сканов</string>
-    <string name="exceptions_no_open_box">Короб не открыт</string>
+    <string name="exceptions_no_units">В коробе нет единиц</string>
     <string name="exceptions_no_closed_boxes">В этой смене нет закрытых коробов</string>
     <string name="exceptions_confirm_undo_title">Отменить последний скан?</string>
     <string name="exceptions_confirm_undo_body">Единица %1$s, принята в %2$s. Она выйдет из короба, а код снова можно будет сканировать.</string>
@@ -461,4 +461,5 @@
     <string name="reprint_reason_title">Почему печатаем заново?</string>
     <string name="reprint_done">Этикетка отправлена на печать</string>
     <string name="reprint_unknown_sscc">Этот SSCC не принадлежит коробу этой смены</string>
+    <string name="signal_undone">ОТМЕНЁН</string>
 </resources>

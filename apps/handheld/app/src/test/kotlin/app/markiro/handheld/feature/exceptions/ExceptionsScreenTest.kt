@@ -43,7 +43,8 @@ class ExceptionsScreenTest {
         render(ui())
         // Clear and undo both need the open box, and each row states its own
         // reason: a row that explains itself does not depend on reading another.
-        compose.onAllNodesWithText("Короб не открыт").assertCountEquals(2)
+        compose.onNodeWithText("В коробе нет единиц").assertIsDisplayed()
+        compose.onNodeWithText("Отменять нечего: в коробе нет сканов").assertIsDisplayed()
         compose.onAllNodesWithText("В этой смене нет закрытых коробов").assertCountEquals(2)
         compose.onNode(hasText("Очистить короб")).assertIsNotEnabled()
         compose.onNode(hasText("Расформировать короб")).assertIsNotEnabled()
@@ -54,6 +55,8 @@ class ExceptionsScreenTest {
         render(ui(openBoxId = "box-1", openBoxCount = 0))
         compose.onNodeWithText("Отменять нечего: в коробе нет сканов").assertIsDisplayed()
         compose.onNode(hasText("Отменить последний скан")).assertIsNotEnabled()
+        // A box whose row exists but holds nothing has nothing to clear either.
+        compose.onNode(hasText("Очистить короб")).assertIsNotEnabled()
     }
 
     @Test

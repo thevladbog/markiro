@@ -413,7 +413,7 @@
     <string name="exceptions_undo">Undo last scan</string>
     <string name="exceptions_last_scan">Last scan: %1$s at %2$s</string>
     <string name="exceptions_no_last_scan">Nothing to undo: the box has no scans</string>
-    <string name="exceptions_no_open_box">No box is open</string>
+    <string name="exceptions_no_units">The box has no units</string>
     <string name="exceptions_no_closed_boxes">This shift has no closed boxes</string>
     <string name="exceptions_confirm_undo_title">Undo the last scan?</string>
     <string name="exceptions_confirm_undo_body">Unit %1$s, accepted at %2$s. It leaves the box and its code becomes scannable again.</string>
@@ -449,4 +449,5 @@
     <string name="reprint_reason_title">Why print again?</string>
     <string name="reprint_done">The label was sent to the printer</string>
     <string name="reprint_unknown_sscc">That SSCC belongs to no box of this shift</string>
+    <string name="signal_undone">UNDONE</string>
 </resources>

@@ -58,4 +58,38 @@ class WorkScreenTest {
         compose.onNodeWithText("+1").performClick()
         compose.onNodeWithText("Петров Иван").assertIsDisplayed()
     }
+
+    /**
+     * The feed renders whatever the journal holds, and the journal holds
+     * `undone` as soon as the operator takes a scan back. `Verdict.fromWire`
+     * threw on it and took the whole screen down on the main thread -- a crash
+     * the emulator walk-through found and no unit test had reached, because
+     * none of them rendered the feed after an undo.
+     */
+    @Test
+    fun anUndoneScanRendersInTheFeed() {
+        compose.setContent {
+            MarkiroTheme {
+                WorkScreen(
+                    ui.copy(feed = listOf(ScanEventEntity(1, "s1", "raw", "undone", "2026-09-10T08:00:00.000Z", null, "h"))),
+                    WorkCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("ОТМЕНЁН").assertIsDisplayed()
+    }
+
+    /** A row written by a newer build must not take the screen down either. */
+    @Test
+    fun anUnknownVerdictRendersAsItself() {
+        compose.setContent {
+            MarkiroTheme {
+                WorkScreen(
+                    ui.copy(feed = listOf(ScanEventEntity(1, "s1", "raw", "from_the_future", "2026-09-10T08:00:00.000Z", null, "h"))),
+                    WorkCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("from_the_future").assertIsDisplayed()
+    }
 }

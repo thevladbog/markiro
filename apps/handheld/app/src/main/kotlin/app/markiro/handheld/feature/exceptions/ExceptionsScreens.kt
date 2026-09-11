@@ -131,8 +131,11 @@ fun ExceptionsScreen(state: ExceptionsUi, cb: ExceptionsCallbacks) {
             ActionRow(
                 icon = Icons.Outlined.DeleteSweep,
                 label = stringResource(R.string.exceptions_clear),
-                enabled = state.openBoxId != null,
-                unavailable = stringResource(R.string.exceptions_no_open_box),
+                // Units, not merely a box row: the row is created lazily by the
+                // first scan, so a freshly opened box has none and clearing it
+                // would be a no-op the engine refuses anyway.
+                enabled = state.openBoxCount > 0,
+                unavailable = stringResource(R.string.exceptions_no_units),
                 onClick = cb.onClear,
             )
             ActionRow(
@@ -146,11 +149,10 @@ fun ExceptionsScreen(state: ExceptionsUi, cb: ExceptionsCallbacks) {
                 icon = Icons.AutoMirrored.Outlined.Undo,
                 label = stringResource(R.string.exceptions_undo),
                 enabled = state.canUndo,
-                unavailable = if (state.openBoxId == null) {
-                    stringResource(R.string.exceptions_no_open_box)
-                } else {
-                    stringResource(R.string.exceptions_no_last_scan)
-                },
+                // True whether the box is missing, empty, or simply has no scan
+                // left to take back -- the operator only needs to know there is
+                // nothing to undo.
+                unavailable = stringResource(R.string.exceptions_no_last_scan),
                 onClick = cb.onUndo,
             )
             state.undoTarget?.let { target ->

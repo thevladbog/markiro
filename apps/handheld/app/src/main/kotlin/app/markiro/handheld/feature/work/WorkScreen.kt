@@ -202,11 +202,17 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
         Column(Modifier.weight(if (box != null) 0.38f else 0.6f).fillMaxWidth().padding(horizontal = MarkiroSizes.sp4)) {
             if (state.feed.isEmpty()) Text(stringResource(R.string.work_feed_empty), style = t.caption, color = c.fg3)
             state.feed.forEach { event ->
-                val verdict = Verdict.fromWire(event.verdict)
+                // An unknown verdict is shown as a plain row rather than taking
+                // the screen down; see `Verdict.fromWireOrNull`.
+                val verdict = Verdict.fromWireOrNull(event.verdict)
                 Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(Iso.parse(event.scannedAt)?.let { TimeText.hhmm(it) } ?: "", style = t.caption, color = c.fg3)
                     Text("…" + event.raw.takeLast(8), style = t.code.copy(fontSize = 14.sp), color = c.fg1)
-                    Text(stringResource(verdict.label()), style = t.caption, color = c.tone(verdict.verdictTone()).fg)
+                    Text(
+                        verdict?.let { stringResource(it.label()) } ?: event.verdict,
+                        style = t.caption,
+                        color = c.tone(verdict?.verdictTone() ?: Tone.Neutral).fg,
+                    )
                 }
             }
         }
@@ -239,12 +245,15 @@ fun Verdict.label(): Int = when (this) {
     Verdict.DUPLICATE -> R.string.signal_duplicate
     Verdict.WRONG_GTIN -> R.string.signal_wrong_gtin
     Verdict.INVALID -> R.string.signal_wrong_code
+    Verdict.UNDONE -> R.string.signal_undone
 }
 
 fun Verdict.verdictTone(): Tone = when (this) {
     Verdict.OK -> Tone.Ok
     Verdict.DUPLICATE -> Tone.Warn
     Verdict.WRONG_GTIN, Verdict.INVALID -> Tone.Err
+    // A correction the operator made on purpose is not an error.
+    Verdict.UNDONE -> Tone.Neutral
 }
 
 @Composable
