@@ -2773,6 +2773,7 @@ describe("App", () => {
   });
 
   it("drives the real pairing success path to OperatorLogin, not back to pairing", async () => {
+    vi.stubEnv("VITE_STATION_API_URL", "https://api.factory.example");
     // Mutable so a `write_config` call updates what the next `read_config`
     // resolves to. This exercises the upgrade-safe route: an enrolled bundle
     // still advances directly to operator login after a refresh.
