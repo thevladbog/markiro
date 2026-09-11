@@ -30,7 +30,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "pnpm build && pnpm db:migrate:runtime",
     "db:migrate:runtime": "node dist/migrate-cli.js",
     "db:generate:sqlite": "drizzle-kit generate --config drizzle.sqlite.config.ts"
   },

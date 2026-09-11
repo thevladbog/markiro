@@ -1,5 +1,5 @@
 {
-  "id": "d47dba6f-304b-494a-9bbf-41facc7115c6",
+  "id": "c44120d1-edc3-4ed2-a183-6aca88a7463d",
   "prevId": "b061554e-0a80-4326-83e0-d3ccc7ad8de1",
   "version": "7",
   "dialect": "postgresql",
@@ -9164,376 +9164,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.platform_agreement_documents": {
-      "name": "platform_agreement_documents",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "agreement_id": {
-          "name": "agreement_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "platform_agreement_document_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "filename": {
-          "name": "filename",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "media_type": {
-          "name": "media_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "object_key": {
-          "name": "object_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sha256": {
-          "name": "sha256",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "byte_size": {
-          "name": "byte_size",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "renderer_version": {
-          "name": "renderer_version",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "uploaded_by_platform_user_id": {
-          "name": "uploaded_by_platform_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "platform_agreement_documents_agreement_idx": {
-          "name": "platform_agreement_documents_agreement_idx",
-          "columns": [
-            {
-              "expression": "agreement_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "platform_agreement_documents_agreement_id_platform_agreements_id_fk": {
-          "name": "platform_agreement_documents_agreement_id_platform_agreements_id_fk",
-          "tableFrom": "platform_agreement_documents",
-          "tableTo": "platform_agreements",
-          "columnsFrom": [
-            "agreement_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "platform_agreement_documents_uploader_fk": {
-          "name": "platform_agreement_documents_uploader_fk",
-          "tableFrom": "platform_agreement_documents",
-          "tableTo": "platform_users",
-          "columnsFrom": [
-            "uploaded_by_platform_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "platform_agreement_documents_object_key_uq": {
-          "name": "platform_agreement_documents_object_key_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "object_key"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "platform_agreement_documents_checksum_format": {
-          "name": "platform_agreement_documents_checksum_format",
-          "value": "\"platform_agreement_documents\".\"sha256\" ~ '^[0-9a-f]{64}$'"
-        },
-        "platform_agreement_documents_size_positive": {
-          "name": "platform_agreement_documents_size_positive",
-          "value": "\"platform_agreement_documents\".\"byte_size\" > 0"
-        },
-        "platform_agreement_documents_provenance": {
-          "name": "platform_agreement_documents_provenance",
-          "value": "(\"platform_agreement_documents\".\"kind\" = 'attachment' and \"platform_agreement_documents\".\"uploaded_by_platform_user_id\" is not null and \"platform_agreement_documents\".\"renderer_version\" is null) or (\"platform_agreement_documents\".\"kind\" in ('draft', 'generated') and \"platform_agreement_documents\".\"uploaded_by_platform_user_id\" is null and \"platform_agreement_documents\".\"renderer_version\" is not null)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.platform_agreements": {
-      "name": "platform_agreements",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "number": {
-          "name": "number",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "platform_agreement_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'draft'"
-        },
-        "conclusion_date": {
-          "name": "conclusion_date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "city": {
-          "name": "city",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "counterparty_inn": {
-          "name": "counterparty_inn",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "counterparty": {
-          "name": "counterparty",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "contractor": {
-          "name": "contractor",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "terms": {
-          "name": "terms",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "signed_at": {
-          "name": "signed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "signed_snapshot": {
-          "name": "signed_snapshot",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "terminated_at": {
-          "name": "terminated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "termination_reason": {
-          "name": "termination_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by_platform_user_id": {
-          "name": "created_by_platform_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "platform_agreements_status_idx": {
-          "name": "platform_agreements_status_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "platform_agreements_tenant_idx": {
-          "name": "platform_agreements_tenant_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "platform_agreements_counterparty_inn_idx": {
-          "name": "platform_agreements_counterparty_inn_idx",
-          "columns": [
-            {
-              "expression": "counterparty_inn",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "platform_agreements_tenant_fk": {
-          "name": "platform_agreements_tenant_fk",
-          "tableFrom": "platform_agreements",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "platform_agreements_creator_fk": {
-          "name": "platform_agreements_creator_fk",
-          "tableFrom": "platform_agreements",
-          "tableTo": "platform_users",
-          "columnsFrom": [
-            "created_by_platform_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "platform_agreements_number_uq": {
-          "name": "platform_agreements_number_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "number"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "platform_agreements_signed_consistency": {
-          "name": "platform_agreements_signed_consistency",
-          "value": "(\"platform_agreements\".\"status\" in ('signed', 'terminated')) = (\"platform_agreements\".\"signed_snapshot\" is not null and \"platform_agreements\".\"signed_at\" is not null)"
-        },
-        "platform_agreements_terminated_consistency": {
-          "name": "platform_agreements_terminated_consistency",
-          "value": "(\"platform_agreements\".\"status\" = 'terminated') = (\"platform_agreements\".\"terminated_at\" is not null)"
-        },
-        "platform_agreements_termination_reason_consistency": {
-          "name": "platform_agreements_termination_reason_consistency",
-          "value": "(\"platform_agreements\".\"terminated_at\" is null) = (\"platform_agreements\".\"termination_reason\" is null)"
-        },
-        "platform_agreements_inn_format": {
-          "name": "platform_agreements_inn_format",
-          "value": "\"platform_agreements\".\"counterparty_inn\" is null or \"platform_agreements\".\"counterparty_inn\" ~ '^[0-9]{10}$|^[0-9]{12}$'"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.addon_entitlements": {
       "name": "addon_entitlements",
       "schema": "",
@@ -9938,6 +9568,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "print_variant": {
+          "name": "print_variant",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'clean'"
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -10052,13 +9689,14 @@
             "id"
           ]
         },
-        "commercial_offer_documents_offer_revision_format_uq": {
-          "name": "commercial_offer_documents_offer_revision_format_uq",
+        "commercial_offer_documents_offer_revision_format_variant_uq": {
+          "name": "commercial_offer_documents_offer_revision_format_variant_uq",
           "nullsNotDistinct": false,
           "columns": [
             "offer_id",
             "revision",
-            "format"
+            "format",
+            "print_variant"
           ]
         }
       },
@@ -10071,6 +9709,10 @@
         "commercial_offer_documents_format_check": {
           "name": "commercial_offer_documents_format_check",
           "value": "\"commercial_offer_documents\".\"format\" in ('pdf', 'html')"
+        },
+        "commercial_offer_documents_print_variant_check": {
+          "name": "commercial_offer_documents_print_variant_check",
+          "value": "\"commercial_offer_documents\".\"print_variant\" in ('clean', 'signed')"
         },
         "commercial_offer_documents_status_check": {
           "name": "commercial_offer_documents_status_check",
@@ -27136,26 +26778,6 @@
         "ready",
         "failed",
         "expired"
-      ]
-    },
-    "public.platform_agreement_document_kind": {
-      "name": "platform_agreement_document_kind",
-      "schema": "public",
-      "values": [
-        "draft",
-        "generated",
-        "attachment"
-      ]
-    },
-    "public.platform_agreement_status": {
-      "name": "platform_agreement_status",
-      "schema": "public",
-      "values": [
-        "draft",
-        "in_review",
-        "sent",
-        "signed",
-        "terminated"
       ]
     },
     "public.catalog_billing_mode": {

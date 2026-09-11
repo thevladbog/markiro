@@ -63,7 +63,12 @@ export async function runRuntimeMigrations(
         ],
       );
       await client.query("SELECT pg_advisory_lock($1, $2)", advisoryLockKeys);
-      await migrate(db, { migrationsFolder: options.migrationsFolder });
+      const offerVariantIndex = packaged.indexOf("0127_dark_beyonder");
+      if (offerVariantIndex < 0) {
+        await migrate(db, { migrationsFolder: options.migrationsFolder });
+      } else {
+        await migrateWithOnlineOfferVariants(client, options.migrationsFolder, offerVariantIndex);
+      }
     } catch (error) {
       migrationError = error;
     } finally {
@@ -110,6 +115,109 @@ export async function runRuntimeMigrations(
 
   log("runtime migration completed");
   return result!;
+}
+
+// 0127's immutable SQL remains the canonical schema/hash (and the empty-database
+// Drizzle path). Live upgrades execute its equivalent in resumable online stages.
+// Keep the same session advisory lock across predecessor, online and successor work.
+async function migrateWithOnlineOfferVariants(
+  client: pg.PoolClient,
+  migrationsFolder: string,
+  index: number,
+): Promise<void> {
+  const { readMigrationFiles } = await import("drizzle-orm/migrator");
+  const { PgDialect } = await import("drizzle-orm/pg-core");
+  const { NodePgSession } = await import("drizzle-orm/node-postgres");
+  const migrations = readMigrationFiles({ migrationsFolder });
+  const migration = migrations[index];
+  if (migration?.hash !== "f07b534840ce77c40ac44dde9152de32599e8edb1784188ea55452dfb3e89f6c") {
+    throw new Error("Online offer variant migration hash mismatch");
+  }
+  const dialect = new PgDialect();
+  const session = new NodePgSession<Record<string, never>, Record<string, never>>(
+    client,
+    dialect,
+    undefined,
+  );
+  await dialect.migrate(migrations.slice(0, index), session, { migrationsFolder });
+  const latest = await client.query<{ created_at: string }>(
+    "SELECT created_at FROM drizzle.__drizzle_migrations ORDER BY created_at DESC LIMIT 1",
+  );
+  if (Number(latest.rows[0]?.created_at ?? 0) < migration.folderMillis) {
+    const timeout = await client.query<{ lock_timeout: string }>("SHOW lock_timeout");
+    const previousTimeout = timeout.rows[0]?.lock_timeout;
+    if (!previousTimeout) throw new Error("Missing migration lock timeout");
+    await client.query("SELECT set_config('lock_timeout', '5s', false)");
+    try {
+      await prepareOnlineOfferVariants(client);
+      await client.query("BEGIN");
+      try {
+        await client.query(`ALTER TABLE public.commercial_offer_documents
+          ADD CONSTRAINT commercial_offer_documents_offer_revision_format_variant_uq
+          UNIQUE USING INDEX commercial_offer_documents_offer_revision_format_variant_uq`);
+        await client.query(`ALTER TABLE public.commercial_offer_documents
+          DROP CONSTRAINT commercial_offer_documents_offer_revision_format_uq`);
+        await client.query(
+          "INSERT INTO drizzle.__drizzle_migrations (hash, created_at) VALUES ($1, $2)",
+          [migration.hash, migration.folderMillis],
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      }
+    } finally {
+      await client.query("SELECT set_config('lock_timeout', $1, false)", [previousTimeout]);
+    }
+  }
+  await dialect.migrate(migrations.slice(index + 1), session, { migrationsFolder });
+}
+
+async function prepareOnlineOfferVariants(client: pg.PoolClient): Promise<void> {
+  // The old constraint protects every intermediate state. Do not guess how to
+  // repair an unjournaled/manual schema change that removed it.
+  const old = await client.query(
+    `SELECT 1 FROM pg_constraint WHERE conrelid = 'public.commercial_offer_documents'::regclass
+      AND conname = 'commercial_offer_documents_offer_revision_format_uq' AND contype = 'u'`,
+  );
+  if (old.rowCount !== 1) throw new Error("Missing predecessor offer document uniqueness");
+  await client.query(`ALTER TABLE public.commercial_offer_documents
+    ADD COLUMN IF NOT EXISTS print_variant text DEFAULT 'clean' NOT NULL`);
+  await client.query(`DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+      WHERE conrelid = 'public.commercial_offer_documents'::regclass
+        AND conname = 'commercial_offer_documents_print_variant_check') THEN
+      ALTER TABLE public.commercial_offer_documents
+        ADD CONSTRAINT commercial_offer_documents_print_variant_check
+        CHECK (print_variant IN ('clean', 'signed')) NOT VALID;
+    END IF;
+  END $$`);
+  // This scan is deliberately not in the ADD CONSTRAINT transaction.
+  await client.query(`ALTER TABLE public.commercial_offer_documents
+    VALIDATE CONSTRAINT commercial_offer_documents_print_variant_check`);
+  const existing = await client.query<{ indisvalid: boolean; definition: string }>(
+    `SELECT indisvalid, pg_get_indexdef(indexrelid) AS definition FROM pg_index
+      WHERE indexrelid = to_regclass('public.commercial_offer_documents_offer_revision_format_variant_uq')`,
+  );
+  const prepared = existing.rows[0];
+  if (
+    prepared &&
+    prepared.definition !==
+      "CREATE UNIQUE INDEX commercial_offer_documents_offer_revision_format_variant_uq ON public.commercial_offer_documents USING btree (offer_id, revision, format, print_variant)"
+  ) {
+    throw new Error("Unexpected prepared offer variant index");
+  }
+  // A cancelled concurrent build leaves an INVALID index. IF NOT EXISTS alone
+  // would silently reuse it. Only rebuild the exact index owned by this stage.
+  if (prepared && !prepared.indisvalid) {
+    await client.query(
+      "DROP INDEX CONCURRENTLY public.commercial_offer_documents_offer_revision_format_variant_uq",
+    );
+  }
+  if (!prepared?.indisvalid) {
+    await client.query(`CREATE UNIQUE INDEX CONCURRENTLY commercial_offer_documents_offer_revision_format_variant_uq
+      ON public.commercial_offer_documents (offer_id, revision, format, print_variant)`);
+  }
 }
 
 async function readPackagedMigrationTags(migrationsFolder: string): Promise<readonly string[]> {

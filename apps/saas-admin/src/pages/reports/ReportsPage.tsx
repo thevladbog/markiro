@@ -23,6 +23,8 @@ import {
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { listTenants } from "../tenants/api.js";
 import { createReport, downloadReport, listReportOptions, listReports } from "./api.js";
+import { ReportProductSelect } from "./ReportProductSelect.js";
+import { ReportTimezoneSelect } from "./ReportTimezoneSelect.js";
 
 const defaultTimezone = "Europe/Moscow";
 const isoToday = () =>
@@ -74,7 +76,7 @@ export function ReportsPage() {
   const [operatorId, setOperatorId] = useState("");
   const [gtin14, setGtin14] = useState("");
   const [optionSearch, setOptionSearch] = useState("");
-  const [optionOffsets, setOptionOffsets] = useState({ lines: 0, products: 0, operators: 0 });
+  const [optionOffsets, setOptionOffsets] = useState({ lines: 0, operators: 0 });
   const [historyOffset, setHistoryOffset] = useState(0);
   const [submitError, setSubmitError] = useState(false);
   const [validationError, setValidationError] = useState(false);
@@ -99,7 +101,7 @@ export function ReportsPage() {
         ? 3_000
         : false,
   });
-  const useReportOption = (kind: "lines" | "products" | "operators", enabled: boolean) =>
+  const useReportOption = (kind: "lines" | "operators", enabled: boolean) =>
     useQuery({
       queryKey: [
         "platform",
@@ -116,10 +118,6 @@ export function ReportsPage() {
     });
   const optionQueries = {
     lines: useReportOption("lines", canRead && tenantIds.length > 0 && reportType !== "commerceml"),
-    products: useReportOption(
-      "products",
-      canRead && tenantIds.length > 0 && reportType !== "commerceml",
-    ),
     operators: useReportOption(
       "operators",
       canIdentify &&
@@ -184,7 +182,7 @@ export function ReportsPage() {
     setProductId("");
     setOperatorId("");
     setGtin14("");
-    setOptionOffsets({ lines: 0, products: 0, operators: 0 });
+    setOptionOffsets({ lines: 0, operators: 0 });
     if (!(["shifts", "shift_operators"] as PlatformReportType[]).includes(next)) {
       setPeriodBasis("events");
     }
@@ -255,7 +253,7 @@ export function ReportsPage() {
                   setLineId("");
                   setProductId("");
                   setOperatorId("");
-                  setOptionOffsets({ lines: 0, products: 0, operators: 0 });
+                  setOptionOffsets({ lines: 0, operators: 0 });
                   setTenantIds((current) =>
                     checked
                       ? [...current, tenant.id].slice(0, 10)
@@ -306,11 +304,7 @@ export function ReportsPage() {
             value={toDate}
             onValueChange={(value) => setToDate(value ?? "")}
           />
-          <Input
-            label={t("reports.fields.timezone")}
-            value={timezone}
-            onChange={(event) => setTimezone(event.target.value)}
-          />
+          <ReportTimezoneSelect value={timezone} onValueChange={setTimezone} />
           <Select<"events" | "production_date">
             label={t("reports.fields.basis")}
             value={periodBasis}
@@ -345,9 +339,8 @@ export function ReportsPage() {
                 value={optionSearch}
                 onChange={(event) => {
                   setOptionSearch(event.target.value);
-                  setOptionOffsets({ lines: 0, products: 0, operators: 0 });
+                  setOptionOffsets({ lines: 0, operators: 0 });
                   setLineId("");
-                  setProductId("");
                   setOperatorId("");
                 }}
               />
@@ -380,35 +373,12 @@ export function ReportsPage() {
                   </Button>
                 ) : null}
               </div>
-              <div className="report-option-field">
-                <Select
-                  label={t("reports.fields.product")}
-                  value={productId}
-                  onValueChange={setProductId}
-                  options={[
-                    { value: "", label: t("reports.any") },
-                    ...(optionQueries.products.data?.items ?? []).map((option) => ({
-                      value: option.id,
-                      label: option.name,
-                    })),
-                  ]}
-                />
-                {optionQueries.products.data?.nextOffset != null ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      setProductId("");
-                      setOptionOffsets((value) => ({
-                        ...value,
-                        products: optionQueries.products.data!.nextOffset!,
-                      }));
-                    }}
-                  >
-                    {t("reports.moreOptions")}
-                  </Button>
-                ) : null}
-              </div>
+              <ReportProductSelect
+                key={`${reportType}:${tenantIds.join(",")}`}
+                tenantIds={tenantIds}
+                value={productId}
+                onValueChange={setProductId}
+              />
               <Input
                 label={t("reports.fields.gtin14")}
                 mono
@@ -474,9 +444,7 @@ export function ReportsPage() {
               ) : null}
             </>
           )}
-          {[optionQueries.lines, optionQueries.products, optionQueries.operators].some(
-            (query) => query.error,
-          ) ? (
+          {[optionQueries.lines, optionQueries.operators].some((query) => query.error) ? (
             <Alert tone="error">{t("reports.optionError")}</Alert>
           ) : null}
         </fieldset>

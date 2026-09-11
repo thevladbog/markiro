@@ -26,6 +26,24 @@ export {
 } from "./platform-reports.js";
 export type { PlatformReport, PlatformReportInput } from "./platform-reports.js";
 export {
+  offerRegistryItemSchema,
+  offerPreviewSchema,
+  offerRegistryQuerySchema,
+  offerRegistrySchema,
+  offerWorkspaceBankAccountSchema,
+  offerWorkspaceDecisionSchema,
+  offerWorkspacePartySchema,
+  offerWorkspaceRequestSchema,
+  offerWorkspaceSchema,
+  platformOfferWorkspaceContracts,
+} from "./offer-workspace.js";
+export type {
+  OfferPreview,
+  OfferRegistry,
+  OfferRegistryQuery,
+  OfferWorkspace,
+} from "./offer-workspace.js";
+export {
   parseTenantBillingActObjectKey,
   parseTenantBillingRequestAttachmentObjectKey,
   tenantBillingActObjectKey,
@@ -199,6 +217,7 @@ export {
   offerPaymentSchema,
   offerReviseSchema,
   offerSchema,
+  offerStatusSchema,
   offerServiceDetailSchema,
   offerServiceLineSchema,
   offerServiceRecordSchema,
