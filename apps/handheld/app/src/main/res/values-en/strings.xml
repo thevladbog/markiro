@@ -7,6 +7,10 @@
     <string name="common_retry">Retry</string>
     <string name="common_refresh">Refresh</string>
     <string name="common_refresh_failed">Could not refresh the list — showing the previous data.</string>
+    <string name="work_plan_reached_title">The plan is met</string>
+    <string name="work_plan_reached_text">%1$d of %2$d accepted. Scanning keeps working.</string>
+    <string name="work_plan_reached_close">Close the shift</string>
+    <string name="work_plan_reached_continue">Carry on past the plan</string>
     <string name="common_other_lines_failed">Could not load the other lines.</string>
     <string name="common_continue">Continue</string>
     <string name="common_backspace">Erase</string>

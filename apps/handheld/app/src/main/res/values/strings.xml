@@ -7,6 +7,10 @@
     <string name="common_retry">Повторить</string>
     <string name="common_refresh">Обновить</string>
     <string name="common_refresh_failed">Не удалось обновить список — показаны прежние данные.</string>
+    <string name="work_plan_reached_title">План выполнен</string>
+    <string name="work_plan_reached_text">Принято %1$d из %2$d. Сканирование продолжает работать.</string>
+    <string name="work_plan_reached_close">Закрыть смену</string>
+    <string name="work_plan_reached_continue">Продолжить сверх плана</string>
     <string name="common_other_lines_failed">Не удалось загрузить другие линии.</string>
     <string name="common_continue">Продолжить</string>
     <string name="common_backspace">Стереть</string>

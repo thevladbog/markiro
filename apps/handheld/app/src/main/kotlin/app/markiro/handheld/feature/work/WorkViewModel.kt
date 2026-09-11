@@ -196,6 +196,19 @@ class WorkViewModel(
     val duplicateStep: StateFlow<DuplicateStep> = _duplicateStep
     private val duplicateUi = MutableStateFlow<DuplicateUi?>(null)
 
+    /**
+     * Offered once, when the shift's accepted count crosses its plan.
+     *
+     * Deliberately a crossing and not «total >= plan»: entering a shift that is
+     * already over plan is not the moment anyone wants to be asked, and a plain
+     * comparison would raise this again on every scan after the first. Scanning
+     * is never blocked -- the prompt sits over the screen while the router keeps
+     * recording, because a line does not stop for a dialogue.
+     */
+    private val _planPrompt = MutableStateFlow(false)
+    val planPrompt: StateFlow<Boolean> = _planPrompt
+    private var belowPlanSeen = false
+
     private data class Counters(val mine: Int, val errors: Int, val duplicates: Int)
 
     private val counters = combine(
@@ -281,6 +294,22 @@ class WorkViewModel(
         viewModelScope.launch {
             teamTicks.collect { teamState.value = team.refresh(shiftId) ?: teamState.value }
         }
+        viewModelScope.launch {
+            state.collect { ui ->
+                val plan = ui.plan ?: return@collect
+                if (plan <= 0) return@collect
+                if (ui.total < plan) {
+                    belowPlanSeen = true
+                } else if (belowPlanSeen) {
+                    belowPlanSeen = false
+                    _planPrompt.value = true
+                }
+            }
+        }
+    }
+
+    fun dismissPlanPrompt() {
+        _planPrompt.value = false
     }
 
     private suspend fun onScan(raw: String) {
