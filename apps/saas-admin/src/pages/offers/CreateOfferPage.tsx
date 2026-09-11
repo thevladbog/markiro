@@ -197,6 +197,7 @@ function OfferEditor({ forbidden, onForbidden }: { forbidden: boolean; onForbidd
       }
     },
   });
+  const createdOfferId = useRef<string | null>(null);
   const retryNavigation = useNavigationGuard(false, requestAttempt !== null || create.isPending);
 
   if (forbidden) {
@@ -296,7 +297,9 @@ function OfferEditor({ forbidden, onForbidden }: { forbidden: boolean; onForbidd
                   .mutateAsync({ kind: "request-retry", input: requestAttempt.input })
                   .then((offerId) => {
                     retryNavigation.allowNextNavigation();
-                    return navigate(`/offers?selected=${offerId}`);
+                    return navigate(`/offers/${offerId}`, {
+                      state: { createdDocument: "offer", returnTo: "/offers" },
+                    });
                   })
                   .catch(() => undefined)
                   .finally(() => {
@@ -352,12 +355,14 @@ function OfferEditor({ forbidden, onForbidden }: { forbidden: boolean; onForbidd
             }
           : {})}
         onSubmit={async (draft) => {
-          await create.mutateAsync({ kind: "draft", draft });
+          createdOfferId.current = await create.mutateAsync({ kind: "draft", draft });
         }}
         onSuccess={() => {
-          const offerId = create.data;
-          if (requestId && offerId) void navigate(`/offers?selected=${offerId}`);
-          else void navigate("/offers", { state: { createdDocument: "offer" } });
+          const offerId = createdOfferId.current;
+          if (offerId)
+            void navigate(`/offers/${offerId}`, {
+              state: { createdDocument: "offer", returnTo: "/offers" },
+            });
         }}
         onCancel={() => void navigate("/offers")}
       />

@@ -357,6 +357,7 @@ export const commercialOfferDocuments = pgTable(
     offerId: uuid("offer_id").notNull(),
     revision: integer("revision").notNull(),
     format: text("format").notNull(),
+    printVariant: text("print_variant").notNull().default("clean"),
     status: text("status").notNull().default("pending"),
     objectKey: text("object_key"),
     contentType: text("content_type"),
@@ -369,10 +370,11 @@ export const commercialOfferDocuments = pgTable(
   },
   (table) => [
     unique("commercial_offer_documents_tenant_id_uq").on(table.tenantId, table.id),
-    unique("commercial_offer_documents_offer_revision_format_uq").on(
+    unique("commercial_offer_documents_offer_revision_format_variant_uq").on(
       table.offerId,
       table.revision,
       table.format,
+      table.printVariant,
     ),
     index("commercial_offer_documents_tenant_created_id_idx").on(
       table.tenantId,
@@ -386,6 +388,10 @@ export const commercialOfferDocuments = pgTable(
     }),
     check("commercial_offer_documents_revision_positive", sql`${table.revision} > 0`),
     check("commercial_offer_documents_format_check", sql`${table.format} in ('pdf', 'html')`),
+    check(
+      "commercial_offer_documents_print_variant_check",
+      sql`${table.printVariant} in ('clean', 'signed')`,
+    ),
     check(
       "commercial_offer_documents_status_check",
       sql`${table.status} in ('pending', 'ready', 'failed')`,

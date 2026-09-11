@@ -21,6 +21,7 @@ import app.markiro.handheld.core.storage.InventoryFixtures
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.sync.SyncTransport
 import app.markiro.handheld.feature.signin.SessionHolder
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -50,6 +51,13 @@ class InventoryWorkViewModelTest {
     private fun raw(serial: String) = "010460000000001521$serial${gs}93AbCd"
     private fun hash(serial: String) = KmCodec.hash(KmCodec.canonicalize(raw(serial)))
 
+    /**
+     * The engines below publish their state with an eagerly started flow, which keeps reading Room
+     * for as long as its scope lives. Left running past the database it reads, it throws into
+     * whichever test happens to run next, so the scope is owned here and cancelled before the close.
+     */
+    private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+
     @Before
     fun setUp() = runTest {
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java).allowMainThreadQueries().build()
@@ -70,7 +78,10 @@ class InventoryWorkViewModelTest {
     }
 
     @After
-    fun tearDown() = db.close()
+    fun tearDown() {
+        engineScope.cancel()
+        db.close()
+    }
 
     /** Room answers on its own threads; keep draining the test dispatcher until the signals arrive. */
     private fun kotlinx.coroutines.test.TestScope.awaitSignals(count: Int) {
@@ -85,7 +96,7 @@ class InventoryWorkViewModelTest {
     private fun vm(): InventoryWorkViewModel {
         val engine = InventorySyncEngine(
             db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" }, NetworkModule.strictJson(),
-            CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            engineScope,
         )
         return InventoryWorkViewModel(
             SavedStateHandle(mapOf("inventoryId" to "i1")), db, InventoryRecorder(db), ScanRouterAdapter(scans), { played += it }, engine, session,

@@ -42,4 +42,11 @@ async function bootstrap() {
   render(<App />);
 }
 
-void bootstrap();
+/**
+ * Exposed, not fire-and-forget: `bootstrap` resolves only once the branch it
+ * picked has finished importing its module graph and handed the tree to React.
+ * Nothing in the app awaits this -- the browser entry is still a side effect --
+ * but it gives a caller that needs the boot to be *done* (the gallery
+ * bootstrap test) a condition to await instead of a deadline to race.
+ */
+export const ready = bootstrap();

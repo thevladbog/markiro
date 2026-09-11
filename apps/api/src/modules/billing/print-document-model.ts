@@ -37,7 +37,8 @@ export interface PrintDocumentModel {
   number: string;
   sourceNumber?: string | null;
   status: string;
-  issuedOrPublishedAt: Date;
+  /** null only for an unissued draft preview. */
+  issuedOrPublishedAt: Date | null;
   dueOrExpiresAt: Date | null;
   periodStart?: string | null;
   periodEnd?: string | null;
@@ -89,6 +90,11 @@ const optionalText = (...values: unknown[]): string | null => {
   return null;
 };
 
+export function printSellerTaxId(profileValue: unknown): string | null {
+  const source = profile(profileValue);
+  return optionalText(source.taxId, source.inn);
+}
+
 const party = (profileValue: unknown, accountValue: unknown): BillingProfileSnapshot => {
   const source = profile(profileValue);
   const contact = record(source.contact);
@@ -97,7 +103,7 @@ const party = (profileValue: unknown, accountValue: unknown): BillingProfileSnap
   return {
     ...source,
     legalName: optionalText(source.legalName, source.fullName),
-    taxId: optionalText(source.taxId, source.inn),
+    taxId: printSellerTaxId(source),
     kpp: optionalText(source.kpp),
     registrationId: optionalText(source.registrationId, source.ogrn, source.ogrnip),
     address: optionalText(source.address, source.legalAddressRaw),
@@ -176,7 +182,7 @@ export function toBillingActPrintModel(
 export function toOfferPrintModel(snapshot: {
   number: string;
   status: string;
-  publishedAt: Date;
+  publishedAt: Date | null;
   expiresAt: Date | null;
   sellerSnapshot: unknown;
   buyerSnapshot: unknown;

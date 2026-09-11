@@ -7,6 +7,8 @@ import {
   platformCommercialContracts,
   platformCommercialV2Contracts,
   platformOperationsContracts,
+  platformOfferWorkspaceContracts,
+  platformOfferWorkspaceV2Contracts,
   platformNationalCatalogContracts,
   platformTeamContracts,
   platformTenantContracts,
@@ -240,9 +242,29 @@ export const CURRENT_SAAS_ROUTES = [
     { body: platformCatalogContracts.setDefaultDemo.body },
   ),
   route("get", "/platform/offers", "200", platformCommercialContracts.offers.list.response),
+  route(
+    "get",
+    "/platform/offers/registry",
+    "200",
+    platformOfferWorkspaceContracts.registry.response,
+    { query: platformOfferWorkspaceContracts.registry.query },
+  ),
+  route(
+    "get",
+    "/platform/offers/{id}/workspace",
+    "200",
+    platformOfferWorkspaceContracts.workspace.response,
+    { commercialV2: platformOfferWorkspaceV2Contracts.workspace },
+  ),
   route("get", "/platform/offers/{id}", "200", platformCommercialContracts.offers.detail.response, {
     commercialV2: platformCommercialV2Contracts.offers.detail,
   }),
+  route(
+    "get",
+    "/platform/offers/{id}/preview",
+    "200",
+    platformOfferWorkspaceContracts.preview.response,
+  ),
   route("post", "/platform/offers", "201", platformCommercialContracts.offers.create.response, {
     body: platformCommercialContracts.offers.create.body,
     commercialV2: platformCommercialV2Contracts.offers.create,
@@ -262,7 +284,10 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/offers/{id}/publish",
     "200",
     platformCommercialContracts.offers.publish.response,
-    { commercialV2: platformCommercialV2Contracts.offers.publish },
+    {
+      body: platformCommercialContracts.offers.publish.body,
+      commercialV2: platformCommercialV2Contracts.offers.publish,
+    },
   ),
   route(
     "get",
@@ -275,6 +300,7 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/offers/{id}/documents",
     "201",
     platformCommercialContracts.offers.documents.render.response,
+    { body: platformCommercialContracts.offers.documents.render.body },
   ),
   route(
     "get",

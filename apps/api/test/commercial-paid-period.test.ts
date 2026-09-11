@@ -15,6 +15,8 @@ import { BillingApplicationService } from "../src/modules/billing/billing-applic
 import { BillingPaymentsService } from "../src/modules/billing-payments/billing-payments.service";
 import { TenantBillingReadService } from "../src/modules/tenant-billing/tenant-billing-read.service";
 import { EntitlementsService } from "../src/subscriptions/entitlements.service";
+import { OfferWorkspaceService } from "../src/modules/platform-offers/offer-workspace.service";
+import { OfferPreviewService } from "../src/modules/platform-offers/offer-preview.service";
 import { PlatformOffersController } from "../src/modules/platform-offers/platform-offers.controller";
 import { OfferDocumentsService } from "../src/modules/platform-offers/offer-documents.service";
 import type { ObjectStorageService } from "../src/modules/storage/object-storage.service";
@@ -1393,7 +1395,9 @@ describe.skipIf(!process.env.DATABASE_URL)("frozen paid commercial periods", () 
     const sold = await acceptedOffer();
     const controller = new PlatformOffersController(
       offers,
-      new OfferDocumentsService(db, {} as ObjectStorageService),
+      new OfferDocumentsService(db, {} as ObjectStorageService, new PlatformAuditService()),
+      new OfferWorkspaceService(db),
+      new OfferPreviewService(db),
     );
     const legacy = await controller.detail(
       { platformPrincipal: actor, headers: {} } as unknown as RequestWithPlatformPrincipal,
@@ -1408,6 +1412,21 @@ describe.skipIf(!process.env.DATABASE_URL)("frozen paid commercial periods", () 
       sold.id,
     );
     expect(current.lines[0]).toMatchObject({ commercialTerms: terms });
+    const currentWorkspace = await controller.workspace(
+      {
+        platformPrincipal: actor,
+        headers: { "x-markiro-commercial-version": "2" },
+      } as unknown as RequestWithPlatformPrincipal,
+      sold.id,
+    );
+    expect(currentWorkspace.offer.lines[0]).toMatchObject({ commercialTerms: terms });
+    expect(currentWorkspace.parties.seller).toBeNull();
+    const legacyWorkspace = await controller.workspace(
+      { platformPrincipal: actor, headers: {} } as unknown as RequestWithPlatformPrincipal,
+      sold.id,
+    );
+    expect(legacyWorkspace.offer.lines[0]).not.toHaveProperty("commercialTerms");
+    expect(legacyWorkspace.parties.seller).toBeNull();
   });
 
   it("rolls grants, journal and success audit back together when the final audit fails", async () => {

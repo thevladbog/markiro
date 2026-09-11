@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Work only in `/Users/thevladbog/PRSOME/q/.worktrees/catalog-entitlements` on `codex/catalog-entitlements`.
-- Commit, push, PR, deployment and cleanup are not authorized; leave scoped changes uncommitted.
+- The user authorized commit, push and PR on 2026-09-11 after local P0 acceptance. Deployment and cleanup remain outside the authorized scope.
 - Resource quotas are nonnegative PostgreSQL integers or null. Zero means not included; null means unlimited.
 - Trial days remain positive integers or null, where null disables automatic trial configuration. Add-on increments stay strictly positive.
 - Plan line quantity is exactly one; add-on quantity counts resources rather than subscription periods.
@@ -271,6 +271,39 @@ visually and textually, and existing stored document bytes remained unchanged. S
 
 Remote CI, deployment, real bank/provider operations, English PDF generation, legal/tax acceptance,
 Windows/native device and physical printing checks were not performed by these local gates.
-Branch `codex/catalog-entitlements` and its worktree remain uncommitted; no push, PR, deployment
-or cleanup was performed. Detailed logs, exact hashes, reviews and browser evidence remain in the
+At initial P0 acceptance, branch `codex/catalog-entitlements` remained uncommitted; no push, PR,
+deployment or cleanup had been performed. The user subsequently authorized commit, push and PR.
+Detailed logs, exact hashes, reviews and browser evidence remain in the
 ignored local `.superpowers/sdd/2026-09-10-commercial-p0/` evidence package.
+
+## Publication integration with main
+
+The exact accepted P0 was saved as `f7e6cfbd2`. The publication preflight then found nine newer
+upstream commits at `0758ba834`, including the offer workspace and print variants. Integration
+preserves that workspace and its preview-bound publication while carrying P0 frozen commercial
+terms, seller policy, localized periods and precise errors through the new routes and screens.
+
+Incoming migration 0127 and its snapshot remain byte-identical to main. The commercial migration
+is now 0128, generated from the incoming snapshot; its SQL is unchanged from accepted P0. Fresh
+isolated databases exercise this chain, preserving the earlier local verification databases.
+
+Focused integration checks passed: 137 API tests, 146 contract tests, five additive-migration
+tests, 17 workspace tests and 13 editor tests, plus affected static/build gates. Actual local
+MFA/catalog/buyer setup and annual offer creation, preview, publication and clean PDF download
+passed. RU/EN at 1440 and 390 widths in both themes passed all eight browser cases. The new PDF
+was inspected visually and textually: one A4 page, one year, RUB 69,000 and Without VAT.
+
+Publication gates are complete: all 52 workspace tasks and 13 package test suites are covered,
+with 759 passing files, 8,935 passed tests and four expected conditional API skips. The forced
+aggregate command stopped after 46 successful tasks on an incoming V2 invoice test fixture.
+Two bounded test-only corrections supplied valid saved service terms/total and moved the browser
+tool's model type import to the built API declaration; the original business assertions remain
+and exact frozen line values are additionally checked. Failed/unfinished tasks and affected SaaS
+typecheck then passed. The initial failed aggregate exit is retained as combined-run evidence.
+
+Production-bundle contracts passed 546/546 with no skips. Separate browser-tool typecheck and
+19/19 offer browser tests passed; actual API/browser/PDF checks are recorded above. Full workspace
+formatting and final diff checks passed. Product source stayed unchanged after the broad freeze;
+only the two reviewed test fixtures changed before final documentation. Integration review and
+scoped re-review found no remaining Critical/Important issue. Exact task/count/hash records remain
+in the ignored publication evidence package; durable results are in the acceptance map.

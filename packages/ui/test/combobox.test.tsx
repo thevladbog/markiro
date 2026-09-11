@@ -46,6 +46,23 @@ function renderCombobox(overrides: Partial<React.ComponentProps<typeof Combobox>
 }
 
 describe("Combobox", () => {
+  it("keeps a remote search open while loading another page from the footer", async () => {
+    const user = userEvent.setup();
+    const more = vi.fn();
+    renderCombobox({
+      footer: (
+        <button type="button" onClick={more}>
+          Load more
+        </button>
+      ),
+    });
+    await user.click(screen.getByRole("combobox", { name: "Offer" }));
+    await user.type(screen.getByRole("searchbox"), "production");
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+    expect(more).toHaveBeenCalledOnce();
+    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("production");
+    expect(screen.getByRole("option", { name: /Production V3/ })).toBeTruthy();
+  });
   it("filters catalog options by a case-insensitive keyword query", async () => {
     const user = userEvent.setup();
     renderCombobox();

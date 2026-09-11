@@ -47,7 +47,7 @@ describe.skipIf(!databaseUrl)("commercial terms additive migration", () => {
     await copyMigrationsThroughIndex({
       sourceFolder: migrationsFolder,
       targetFolder: legacyMigrations,
-      lastIncludedIndex: 126,
+      lastIncludedIndex: 127,
     });
     await migrate(drizzle(pool), { migrationsFolder: legacyMigrations });
     await pool.query(

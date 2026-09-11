@@ -18,6 +18,8 @@ class MetaStore(private val dao: MetaDao) {
         const val INSTALL_ID = "install_id"
         const val SYNC_PENDING_BATCH_ID = "sync_pending_batch_id"
         const val SYNC_PENDING_CEILING = "sync_pending_ceiling"
+        /** How many box closures the in-flight batch chose, so a retry re-reads the same set. */
+        const val SYNC_PENDING_BOX_COUNT = "sync_pending_box_count"
         const val SYNC_LAST_SUCCESS_AT = "sync_last_success_at"
         const val SYNC_LAST_DENIED = "sync_last_denied"
         const val INVENTORY_LAST_SUCCESS_AT = "inventory_sync_last_success_at"

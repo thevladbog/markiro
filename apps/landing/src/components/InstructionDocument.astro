@@ -18,6 +18,7 @@ import Breadcrumbs from "./Breadcrumbs.astro";
 import LandingFooter from "./LandingFooter.astro";
 import LandingHeader from "./LandingHeader.astro";
 import LegalArtifactControls from "./LegalArtifactControls.astro";
+import LegalTable from "./LegalTable.astro";
 
 interface Props {
   page: LegalDocumentPageDefinition;
@@ -42,6 +43,7 @@ const chrome = {
     step: "Шаг",
     expected: "Ожидаемый результат:",
     operatorContacts: "Контакты оператора",
+    table: "Таблица",
   },
   en: {
     registry: "← Document registry",
@@ -56,6 +58,7 @@ const chrome = {
     step: "Step",
     expected: "Expected result:",
     operatorContacts: "Operator contacts",
+    table: "Table",
   },
 }[page.locale];
 const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }, page.locale);
@@ -120,7 +123,7 @@ const stepBlocks = (blocks: readonly LegalBlock[]) => {
         {content.sections.map((section) => (
           <section id={section.id} aria-labelledby={`${section.id}-heading`}>
             <h2 id={`${section.id}-heading`}>{section.heading}</h2>
-            {stepBlocks(section.blocks).map(({ block, stepNumber }) => (
+            {stepBlocks(section.blocks).map(({ block, stepNumber }, blockIndex) => (
               <>
                 {block.kind === "paragraph" && <p>{block.text}</p>}
                 {block.kind === "ordered-list" && <ol>{block.items.map((item) => <li>{item}</li>)}</ol>}
@@ -134,6 +137,13 @@ const stepBlocks = (blocks: readonly LegalBlock[]) => {
                       </div>
                     ))}
                   </dl>
+                )}
+                {block.kind === "table" && (
+                  <LegalTable
+                    block={block}
+                    captionId={`${section.id}-table-${blockIndex}`}
+                    fallbackLabel={chrome.table}
+                  />
                 )}
                 {block.kind === "callout" && (
                   <aside class={`instruction-callout instruction-callout--${block.tone}`} role="note">

@@ -10,19 +10,11 @@ import {
   type OfferServiceRecordSource,
 } from "@markiro/platform-contracts";
 import { assertOfferInvoiceAvailable } from "../billing/commercial-sale-origin";
-import {
-  validateCommercialIssuance,
-  assertCommercialPlanSequence,
-} from "../billing/commercial-line-terms";
+import { assertCommercialPlanSequence } from "../billing/commercial-line-terms";
 import { lockSellerPolicy } from "../billing-profiles/billing-profiles.service";
 import { SubscriptionLifecycleService } from "../../subscriptions/subscription-lifecycle.service";
 import { DB } from "../../auth/auth.module";
-import {
-  bankAccountLast4,
-  bankAccountSnapshot,
-  billingProfileSnapshot,
-  resolveCommercialBillingDetails,
-} from "../billing/commercial-snapshots";
+import { bankAccountLast4 } from "../billing/commercial-snapshots";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import type { EntitlementsExecutor } from "../../subscriptions/entitlements.types";
@@ -34,8 +26,7 @@ import {
 } from "../billing-workflow-locks";
 import type { CreateOfferDto, PaymentDto } from "./dto";
 import { createOfferDraft } from "./platform-offer-draft";
-import { calculateOfferAmounts } from "./offer-totals";
-import { normalizeOfferTerms } from "./offer-terms";
+import { resolveOfferPrintInput } from "./offer-preview.service";
 import {
   beginPlatformBillingMutation,
   commitPlatformBillingMutation,
@@ -76,7 +67,11 @@ export class PlatformOffersService {
     return this.detailWith(this.db, offer.tenantId, id);
   }
 
-  async publish(actor: PlatformPrincipal, id: string): Promise<OfferServiceDetailSource> {
+  async publish(
+    actor: PlatformPrincipal,
+    id: string,
+    previewFingerprint?: string,
+  ): Promise<OfferServiceDetailSource> {
     const canonicalOfferId = canonicalBillingUuid(id);
     return this.db.transaction(async (tx) => {
       await lockSellerPolicy(tx);
@@ -117,16 +112,14 @@ export class PlatformOffersService {
       if (family[0]?.id !== draft.id) {
         throw new ConflictException({ code: "offer_version_stale" });
       }
-      const frozenLines = await tx
-        .select()
-        .from(schema.commercialOfferLines)
-        .where(eq(schema.commercialOfferLines.offerId, draft.id));
-      await validateCommercialIssuance(tx, frozenLines);
-      const { seller, buyer, sellerAccount, buyerAccount } = await resolveCommercialBillingDetails(
-        tx,
-        draft.tenantId,
-        draft.sellerBankAccountId,
-      );
+      if (draft.expiresAt !== null && draft.expiresAt.getTime() <= Date.now()) {
+        throw new ConflictException({ code: "offer_expired" });
+      }
+      const printInput = await resolveOfferPrintInput(tx, draft);
+      if (previewFingerprint !== undefined && previewFingerprint !== printInput.fingerprint) {
+        throw new ConflictException({ code: "offer_preview_changed" });
+      }
+      const { sellerAccount, buyerAccount } = printInput.details;
       const [latest] = await tx
         .select({ number: schema.commercialOffers.number })
         .from(schema.commercialOffers)
@@ -170,42 +163,13 @@ export class PlatformOffersService {
         throw error;
       }
       if (!updated) throw new ConflictException({ code: "offer_not_draft" });
-      const lines = await tx
-        .select()
-        .from(schema.commercialOfferLines)
-        .where(eq(schema.commercialOfferLines.offerId, canonicalOfferId))
-        .orderBy(asc(schema.commercialOfferLines.position));
-      const amounts = calculateOfferAmounts(
-        lines.map((line) => ({
-          quantity: line.quantity,
-          unitPrice: line.agreedUnitPrice,
-          vatRateBps: line.vatRate === null ? null : Math.round(Number(line.vatRate) * 100),
-          vatIncluded: line.vatIncluded,
-        })),
-      );
-      if (
-        amounts.total !== updated.total ||
-        lines.some((line, index) => line.lineTotal !== amounts.lines[index]?.lineTotal)
-      )
-        throw new ConflictException({ code: "commercial_source_review_required" });
-      const terms = normalizeOfferTerms(updated.termsMarkdown);
       await tx.insert(schema.commercialOfferPrintSnapshots).values({
+        ...printInput.snapshot,
         tenantId: updated.tenantId,
         offerId: updated.id,
         revision: updated.revision,
         number,
         publishedAt: updated.publishedAt ?? new Date(),
-        expiresAt: updated.expiresAt,
-        sellerSnapshot: billingProfileSnapshot(seller),
-        buyerSnapshot: billingProfileSnapshot(buyer),
-        sellerBankAccountSnapshot: bankAccountSnapshot(sellerAccount),
-        buyerBankAccountSnapshot: buyerAccount ? bankAccountSnapshot(buyerAccount) : null,
-        linesSnapshot: lines.map((line, index) => ({ ...line, ...amounts.lines[index] })),
-        subtotal: amounts.subtotal,
-        vatTotal: amounts.vatTotal,
-        total: updated.total,
-        termsMarkdown: terms.markdown,
-        termsHtml: terms.html,
       });
       await this.audit.record(tx, {
         actorPlatformUserId: actor.userId,
@@ -508,6 +472,9 @@ export class PlatformOffersService {
       if (offerPayment) throw new ConflictException({ code: "offer_already_paid" });
       if (offer.status !== "published" || offer.total !== input.amount)
         throw new ConflictException({ code: "offer_payment_invalid" });
+      if (offer.expiresAt !== null && offer.expiresAt.getTime() <= Date.now()) {
+        throw new ConflictException({ code: "offer_expired" });
+      }
       const [decision] = await tx
         .select()
         .from(schema.commercialOfferDecisions)

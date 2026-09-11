@@ -19,7 +19,18 @@ apps/
               (validates codes offline with the station's rules and syncs scan batches
               through the same /station/scans protocol; inventory check runs the
               station's inventory protocol — digest-checked snapshot bundle, event
-              batches with payloadDigest, progress feed — with a second sync engine)
+              batches with payloadDigest, progress feed — with a second sync engine;
+              renders labels on the device with a Kotlin port of the domain package's
+              ZPL/TSPL emitters and prints over Wi-Fi or Bluetooth, with no hardware agent;
+              packs boxes from its own SSCC block, burning a serial at close rather than
+              at open so an empty or abandoned box costs none, and closing a box even
+              with no printer — the label queues instead, because a dead printer must
+              not stop a line and the box is already numbered and reported.
+              Box closures are acknowledged UNCONDITIONALLY, unlike the station's
+              conditional ack: nothing in a handheld closure payload can change after
+              the box closes, because print state never leaves the device. Adding the
+              station's scan-the-label-back print verification would bring the
+              conditional rule back with it)
   kiosk/      React 19 + Vite 8 + IndexedDB — offline-first self-service
               pickup kiosk (installable PWA), paired to the api by device token
   landing/    Astro 7 — marketing site

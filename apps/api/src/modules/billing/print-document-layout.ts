@@ -18,9 +18,6 @@ export function resolvePrintVariant(
   if (printVariant === "signed" && model.seller.taxId !== SIGNED_PRINT_SELLER_TAX_ID) {
     throw new Error("signed_print_seller_not_authorized");
   }
-  if (printVariant === "signed" && model.kind === "offer") {
-    throw new Error("signed_print_document_kind_not_supported");
-  }
   return printVariant;
 }
 
@@ -35,7 +32,8 @@ export function formatPrintDate(value: Date | null): string {
     : "—";
 }
 
-export function formatPrintDateTime(value: Date): string {
+export function formatPrintDateTime(value: Date | null): string {
+  if (value === null) return "Дата выпуска не присвоена";
   return new Intl.DateTimeFormat("ru-RU", {
     day: "2-digit",
     month: "2-digit",

@@ -1,8 +1,23 @@
-import { Body, Controller, Get, Headers, HttpCode, Param, Post, Query, Req } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  Headers,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  Req,
+} from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import {
   platformCommercialContracts,
   platformCommercialV2Contracts,
+  platformOfferWorkspaceContracts,
+  platformOfferWorkspaceV2Contracts,
+  type OfferRegistryQuery,
+  type PrintDocumentVariant,
 } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
@@ -26,6 +41,8 @@ import {
 } from "./dto";
 import { PlatformOffersService } from "./platform-offers.service";
 import { OfferDocumentsService } from "./offer-documents.service";
+import { OfferWorkspaceService } from "./offer-workspace.service";
+import { OfferPreviewService } from "./offer-preview.service";
 
 const offerDocumentDownloadParamsPipe = new ZodValidationPipe(
   platformCommercialContracts.offers.documents.download.params,
@@ -37,6 +54,8 @@ export class PlatformOffersController {
   constructor(
     private readonly offers: PlatformOffersService,
     private readonly documents: OfferDocumentsService,
+    private readonly workspaceService: OfferWorkspaceService,
+    private readonly previewService: OfferPreviewService,
   ) {}
 
   @Get()
@@ -47,6 +66,59 @@ export class PlatformOffersController {
     return parsePlatformResponse(
       platformCommercialContracts.offers.list.response,
       await this.offers.list(req.platformPrincipal!, tenantId),
+    );
+  }
+
+  @Get("registry")
+  @ApiOperation({ summary: "List the commercial offer registry" })
+  @PlatformApiProtectedOk({
+    response: platformOfferWorkspaceContracts.registry.response,
+    query: platformOfferWorkspaceContracts.registry.query,
+  })
+  @RequirePlatformCapabilities("billing.read")
+  async registry(
+    @Req() req: RequestWithPlatformPrincipal,
+    @Query(new ZodValidationPipe(platformOfferWorkspaceContracts.registry.query))
+    query: OfferRegistryQuery,
+  ) {
+    return parsePlatformResponse(
+      platformOfferWorkspaceContracts.registry.response,
+      await this.workspaceService.registry(req.platformPrincipal!, query),
+    );
+  }
+
+  @Get(":id/workspace")
+  @ApiOperation({ summary: "Get the commercial offer workspace" })
+  @PlatformApiProtectedOk({
+    response: platformOfferWorkspaceContracts.workspace.response,
+    commercialV2: platformOfferWorkspaceV2Contracts.workspace,
+  })
+  @RequirePlatformCapabilities("billing.read")
+  async workspace(
+    @Req() req: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(platformOfferWorkspaceContracts.workspace.params))
+    id: string,
+  ) {
+    return commercialResponse(
+      isCommercialV2(req),
+      platformOfferWorkspaceContracts.workspace.response,
+      platformOfferWorkspaceV2Contracts.workspace.response,
+      await this.workspaceService.workspace(req.platformPrincipal!, id),
+    );
+  }
+
+  @Get(":id/preview")
+  @Header("Cache-Control", "no-store")
+  @ApiOperation({ summary: "Preview a saved commercial offer draft" })
+  @PlatformApiProtectedOk({ response: platformOfferWorkspaceContracts.preview.response })
+  @RequirePlatformCapabilities("billing.read")
+  async preview(
+    @Req() req: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
+  ) {
+    return parsePlatformResponse(
+      platformOfferWorkspaceContracts.preview.response,
+      await this.previewService.preview(req.platformPrincipal!, id),
     );
   }
 
@@ -102,6 +174,7 @@ export class PlatformOffersController {
       "Publishing also renders the offer document package and returns it with the offer.",
   })
   @PlatformApiProtectedOk({
+    body: platformCommercialContracts.offers.publish.body,
     response: platformCommercialContracts.offers.publish.response,
     commercialV2: platformCommercialV2Contracts.offers.publish,
   })
@@ -109,9 +182,11 @@ export class PlatformOffersController {
   async publish(
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
+    @Body(new ZodValidationPipe(platformCommercialContracts.offers.publish.body.prefault({})))
+    body: { previewFingerprint?: string } = {},
   ) {
     const v2 = isCommercialV2(req);
-    const offer = await this.offers.publish(req.platformPrincipal!, id);
+    const offer = await this.offers.publish(req.platformPrincipal!, id, body.previewFingerprint);
     const documents = await this.documents.render(id);
     return commercialResponse(
       v2,
@@ -161,16 +236,24 @@ export class PlatformOffersController {
   @Post(":id/documents")
   @ApiOperation({
     summary: "Render offer documents",
-    description: "Regenerates the offer document package.",
+    description: "Creates or retries a print variant while retaining ready documents.",
   })
   @PlatformApiProtectedCreated({
     response: platformCommercialContracts.offers.documents.render.response,
+    body: platformCommercialContracts.offers.documents.render.body,
   })
   @RequirePlatformCapabilities("billing.write")
-  async documentsRender(@Param("id", new ZodValidationPipe(offerIdSchema)) id: string) {
+  async documentsRender(
+    @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
+    @Req() req: RequestWithPlatformPrincipal,
+    @Body(
+      new ZodValidationPipe(platformCommercialContracts.offers.documents.render.body.prefault({})),
+    )
+    body: { printVariant: PrintDocumentVariant } = { printVariant: "clean" },
+  ) {
     return parsePlatformResponse(
       platformCommercialContracts.offers.documents.render.response,
-      await this.documents.render(id),
+      await this.documents.render(id, body.printVariant, req.platformPrincipal),
     );
   }
 

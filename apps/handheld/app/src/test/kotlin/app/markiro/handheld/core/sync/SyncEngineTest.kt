@@ -7,12 +7,14 @@ import app.cash.turbine.test
 import app.markiro.handheld.core.network.NetworkModule
 import app.markiro.handheld.core.network.RevocationBus
 import app.markiro.handheld.core.network.RevocationInterceptor
+import app.markiro.handheld.core.storage.BoxEntity
 import app.markiro.handheld.core.storage.ConflictEntity
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.OutboxEntity
 import app.markiro.handheld.core.storage.ShiftCloseEntity
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,9 +27,11 @@ import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -42,6 +46,13 @@ class SyncEngineTest {
     private val bus = RevocationBus()
     private val strict = NetworkModule.strictJson()
     private var clock = 1_757_500_000_000L
+
+    /**
+     * The engines below publish their state with an eagerly started flow, which keeps reading Room
+     * for as long as its scope lives. Left running past the database it reads, it throws into
+     * whichever test happens to run next, so the scope is owned here and cancelled before the close.
+     */
+    private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
 
     @Before
     fun setUp() = runTest {
@@ -59,6 +70,7 @@ class SyncEngineTest {
 
     @After
     fun tearDown() {
+        engineScope.cancel()
         server.shutdown()
         db.close()
     }
@@ -68,7 +80,7 @@ class SyncEngineTest {
         val transport = SyncTransport(client) { server.url("/").toString() }
         return SyncEngine(
             db = db, meta = MetaStore(db.metaDao()), config = db.deviceConfigDao(), transport = transport, json = strict,
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined), clock = { clock },
+            scope = engineScope, clock = { clock },
         )
     }
 
@@ -95,7 +107,7 @@ class SyncEngineTest {
         assertEquals("/station/scans", request.path)
         val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
         val installId = MetaStore(db.metaDao()).installId()
-        assertEquals("dev-1:$installId:3", body.getValue("batchId").jsonPrimitive.content)
+        assertEquals("dev-1:$installId:3:0", body.getValue("batchId").jsonPrimitive.content)
         val items = body.getValue("items").jsonArray
         assertEquals(3, items.size)
         assertEquals("dev-1", items[0].jsonObject.getValue("terminalId").jsonPrimitive.content)
@@ -213,6 +225,143 @@ class SyncEngineTest {
             assertFalse(engine().drainAll())
             awaitItem()
         }
+    }
+
+    private suspend fun closedBox(boxId: String, sscc: String, closedAt: String = "2026-09-10T11:00:00.000Z") =
+        db.boxDao().insert(
+            BoxEntity(
+                boxId = boxId, shiftId = "s1", sscc = sscc, openedAt = "2026-09-10T10:00:00.000Z",
+                closedAt = closedAt, operatorId = "op-1", printState = "pending", printReason = null, ackedAt = null,
+            ),
+        )
+
+    private fun bodyOf(request: RecordedRequest) = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+
+    @Test
+    fun aClosedBoxTravelsWithTheBatchAndIsAcknowledged() = runTest {
+        outbox("a")
+        closedBox("box-1", "046800899000000018")
+        server.enqueue(ok(1))
+        assertTrue(engine().drainAll())
+        val body = bodyOf(server.takeRequest())
+        val box = body.getValue("boxes").jsonArray.single().jsonObject
+        assertEquals("046800899000000018", box.getValue("sscc").jsonPrimitive.content)
+        assertEquals("dev-1", box.getValue("terminalId").jsonPrimitive.content)
+        // Print verification is the station's; this device always sends null.
+        assertEquals("null", box.getValue("printVerifiedAt").toString())
+        assertEquals("null", box.getValue("printSkippedAt").toString())
+        assertNotNull(db.boxDao().get("box-1")?.ackedAt)
+        assertEquals(0, db.boxDao().unacked(10).size)
+    }
+
+    @Test
+    fun anAcceptedScanCarriesItsBoxToTheServer() = runTest {
+        db.outboxDao().insert(
+            OutboxEntity(
+                shiftId = "s1", raw = "a", verdict = "ok", scannedAt = "2026-09-10T10:00:00.000Z", operatorId = "op-1",
+                codeHash = "a".repeat(64), gtin14 = "04680089900000", serial = "x", boxId = "box-1",
+            ),
+        )
+        server.enqueue(ok(1))
+        assertTrue(engine().drainAll())
+        val items = bodyOf(server.takeRequest()).getValue("items").jsonArray
+        assertEquals("box-1", items.single().jsonObject.getValue("boxId").jsonPrimitive.content)
+    }
+
+    @Test
+    fun aBoxThatClosesWhileABatchIsInFlightWaitsForTheNextOneAndIsNotLost() = runTest {
+        // The defect this guards: if the box set were free to grow under a
+        // pinned batch id, the retry would carry a different body under an id
+        // the server has already applied, and the closure would vanish with no
+        // trace. So the retry stays byte-identical and the box rides the next
+        // batch, which is the only way both halves stay true.
+        outbox("a")
+        server.enqueue(MockResponse().setResponseCode(500))
+        assertFalse(engine().drainAll())
+        val first = bodyOf(server.takeRequest())
+
+        closedBox("box-1", "046800899000000018")
+        server.enqueue(ok(1))
+        server.enqueue(ok(0))
+        assertTrue(engine().drainAll())
+
+        val retry = bodyOf(server.takeRequest())
+        assertEquals(first.getValue("batchId"), retry.getValue("batchId"))
+        assertEquals(0, retry.getValue("boxes").jsonArray.size)
+
+        val next = bodyOf(server.takeRequest())
+        assertNotEquals(first.getValue("batchId"), next.getValue("batchId"))
+        assertEquals(1, next.getValue("boxes").jsonArray.size)
+        assertNotNull(db.boxDao().get("box-1")?.ackedAt)
+    }
+
+    @Test
+    fun aRetryOfTheSameBatchKeepsItsIdentityAndItsBoxes() = runTest {
+        // The other half: nothing changed, so the resend must be the same batch
+        // rather than a second one the server would apply twice.
+        outbox("a")
+        closedBox("box-1", "046800899000000018")
+        server.enqueue(MockResponse().setResponseCode(500))
+        assertFalse(engine().drainAll())
+        val first = bodyOf(server.takeRequest())
+        server.enqueue(ok(1))
+        assertTrue(engine().drainAll())
+        val second = bodyOf(server.takeRequest())
+        assertEquals(
+            first.getValue("batchId").jsonPrimitive.content,
+            second.getValue("batchId").jsonPrimitive.content,
+        )
+        assertEquals(1, second.getValue("boxes").jsonArray.size)
+    }
+
+    @Test
+    fun aBatchOfBoxesAloneIsStillSent() = runTest {
+        // An empty outbox with unacknowledged boxes is not empty.
+        closedBox("box-1", "046800899000000018")
+        server.enqueue(ok(0))
+        assertTrue(engine().drainAll())
+        val body = bodyOf(server.takeRequest())
+        assertEquals(0, body.getValue("items").jsonArray.size)
+        assertEquals(1, body.getValue("boxes").jsonArray.size)
+        assertNotNull(db.boxDao().get("box-1")?.ackedAt)
+    }
+
+    @Test
+    fun anAcknowledgedBoxIsNeverSentAgain() = runTest {
+        closedBox("box-1", "046800899000000018")
+        server.enqueue(ok(0))
+        assertTrue(engine().drainAll())
+        server.takeRequest()
+        assertTrue(engine().drainAll())
+        assertNull(server.takeRequest(1, java.util.concurrent.TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun aBatchPinnedBeforeBoxesExistedStaysBoxFree() = runTest {
+        // A pending batch written by a build that predates the box count must not
+        // grow one: its id is already fixed, so the server would answer
+        // alreadyApplied and the closure would be lost.
+        outbox("a")
+        server.enqueue(MockResponse().setResponseCode(500))
+        assertFalse(engine().drainAll())
+        server.takeRequest()
+        db.metaDao().remove(MetaStore.SYNC_PENDING_BOX_COUNT)
+        closedBox("box-1", "046800899000000018")
+
+        server.enqueue(ok(1))
+        server.enqueue(ok(0))
+        assertTrue(engine().drainAll())
+        assertEquals(0, bodyOf(server.takeRequest()).getValue("boxes").jsonArray.size)
+        // It rides the next batch instead.
+        assertEquals(1, bodyOf(server.takeRequest()).getValue("boxes").jsonArray.size)
+    }
+
+    @Test
+    fun theQueueIndicatorCountsClosuresNotJustScans() = runTest {
+        // A closed box waiting to be reported is queued work. Counting only scans
+        // showed «Очередь 0» while it sat unsent.
+        closedBox("box-1", "046800899000000018")
+        assertEquals(1, engine().state.first { it.pending == 1 }.pending)
     }
 
     @Test

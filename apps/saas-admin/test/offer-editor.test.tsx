@@ -88,6 +88,42 @@ function installOfferEditorApi({
       if (url.endsWith("/api/platform/offers") && method === "GET") {
         return jsonResponse(200, offers);
       }
+      if (url.includes("/api/platform/offers/registry?") && method === "GET") {
+        return jsonResponse(200, {
+          items: offers.map((offer) => ({
+            ...offer,
+            tenantName: "Молочная мастерская",
+            tenantSlug: "dairy",
+            buyerLegalName: null,
+            buyerTaxId: null,
+            lineSummary: [],
+            lineCount: 0,
+          })),
+          page: 1,
+          limit: 25,
+          total: offers.length,
+        });
+      }
+      if (url.endsWith(`/api/platform/offers/${OFFER_ID}/workspace`)) {
+        return jsonResponse(200, {
+          offer: offerRecord({ lines: [] }),
+          tenant: { id: TENANT_ID, name: "Молочная мастерская", slug: "dairy" },
+          parties: { seller: null, buyer: null, sellerBankAccount: null, buyerBankAccount: null },
+          revisions: [],
+          decision: null,
+          documents: [],
+          request: null,
+          actions: {
+            publish: true,
+            cancel: false,
+            revise: false,
+            pay: false,
+            createInvoice: false,
+            addSignedVariant: false,
+          },
+        });
+      }
+      if (url.endsWith(`/api/platform/offers/${OFFER_ID}/documents`)) return jsonResponse(200, []);
       if (url.includes("/api/platform/tenants?") && method === "GET") {
         return jsonResponse(200, {
           items: tenantItems,
@@ -214,7 +250,8 @@ describe("offer editor route", () => {
     expect(call?.path).toBe(`/api/platform/billing/requests/${REQUEST_ID}/offer`);
     expect(call?.body).not.toHaveProperty("tenantId");
     expect(call?.body).toHaveProperty("idempotencyKey");
-    expect(await screen.findByRole("heading", { name: "Коммерческие предложения" })).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "Черновик" })).toBeDefined();
+    expect(screen.getByText("Предложение создано")).toBeDefined();
   });
 
   it("latches a forbidden surface when request-bound offer authority is revoked on mutation", async () => {
@@ -311,14 +348,16 @@ describe("offer editor route", () => {
     });
     expect(randomUuid).toHaveBeenCalledTimes(uuidCount);
     releaseRetry?.();
-    expect(await screen.findByRole("heading", { name: "Коммерческие предложения" })).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "Черновик" })).toBeDefined();
   });
   it("renders an empty offer register without a stale detail loader", async () => {
     installOfferEditorApi();
 
     renderSaasApp({ initialEntry: "/offers" });
 
-    expect(await screen.findByText("Предложений пока нет")).toBeDefined();
+    expect(
+      await screen.findByText("Предложения не найдены. Измените фильтры или создайте предложение."),
+    ).toBeDefined();
     expect(screen.queryByText("Загружаем раздел")).toBeNull();
   });
 
@@ -354,11 +393,10 @@ describe("offer editor route", () => {
 
     renderSaasApp({ initialEntry: "/offers" });
 
-    expect(await screen.findByText(TENANT_ID)).toBeDefined();
+    expect(await screen.findByText("Молочная мастерская")).toBeDefined();
     expect(screen.getByText("Коммерческие условия до выставления счёта.")).toBeDefined();
-    expect(screen.getByText("Воронка продаж")).toBeDefined();
     expect(screen.getByRole("region", { name: "Реестр предложений" })).toBeDefined();
-    expect(screen.getByText("expired")).toBeDefined();
+    expect(screen.getByText("Истекло")).toBeDefined();
     expect(screen.queryByText("Не удалось загрузить предложения")).toBeNull();
   });
 
@@ -536,24 +574,38 @@ it("shows a readable rejected-payment error and preserves bank reference", async
         payments += 1;
         return jsonResponse(409, { code: "offer_not_accepted" });
       }
-      if (url.endsWith(`/offers/${OFFER_ID}`))
-        return jsonResponse(
-          200,
-          offerRecord({
+      if (url.endsWith(`/offers/${OFFER_ID}/workspace`))
+        return jsonResponse(200, {
+          offer: offerRecord({
             number: "KP-1",
             publishedAt: OFFER_CREATED_AT,
             publishedByPlatformUserId: "platform-accountant",
             status: "published",
             lines: [],
           }),
-        );
+          tenant: { id: TENANT_ID, name: "Tenant", slug: "tenant" },
+          parties: { seller: null, buyer: null, sellerBankAccount: null, buyerBankAccount: null },
+          revisions: [],
+          decision: null,
+          documents: [],
+          request: null,
+          actions: {
+            publish: false,
+            cancel: false,
+            revise: false,
+            pay: true,
+            createInvoice: false,
+            addSignedVariant: false,
+          },
+        });
       return originalFetch(input, init);
     }),
   );
   renderSaasApp({ initialEntry: `/offers?selected=${OFFER_ID}` });
   const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Зарегистрировать оплату" }));
   await user.type(await screen.findByLabelText("Банковский референс"), "bank-ref");
-  await user.click(screen.getByRole("button", { name: "Зафиксировать оплату" }));
+  await user.click(screen.getByRole("button", { name: "Подтвердить оплату" }));
   expect(
     await screen.findByText(
       "Предложение ещё не принято клиентом. Оплату можно зарегистрировать после принятия.",

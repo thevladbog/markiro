@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import app.markiro.handheld.core.auth.OperatorAuth
 import app.markiro.handheld.core.auth.OperatorRoster
+import app.markiro.handheld.core.print.PrinterDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -18,8 +19,11 @@ object StorageModule {
     @Singleton
     fun database(@ApplicationContext context: Context): HandheldDatabase =
         Room.databaseBuilder(context, HandheldDatabase::class.java, "handheld.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
+
+    @Provides
+    fun printerDao(db: HandheldDatabase): PrinterDao = db.printerDao()
 
     @Provides
     fun inventoryTaskDao(db: HandheldDatabase): InventoryTaskDao = db.inventoryTaskDao()
