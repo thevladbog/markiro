@@ -73,6 +73,30 @@ describe("bilingual agreement", () => {
     expect(paired.sections.find((section) => section.id === "storony")?.bilingual).toBe(true);
   });
 
+  it("translates the body", () => {
+    const byId = new Map(
+      buildTenantAgreement(FILLED, "en").sections.map((section) => [section.id, section]),
+    );
+    expect(byId.get("predmet")?.heading).toBe("1. Subject matter and structure of the agreement");
+    expect(byId.get("tsena")?.heading).toBe("4. Price, settlements and tax status");
+    expect(byId.get("rekvizity")?.heading).toBe("12. Requisites and signatures");
+    expect(JSON.stringify(byId.get("dokumenty")?.blocks)).toContain(
+      "the Russian text shall prevail",
+    );
+    // The preamble carries the agreement number in both columns.
+    expect(byId.get("storony")?.heading).toContain("МКР-2026-0001");
+  });
+
+  it("keeps the filled fields and the unfilled placeholders in the English column", () => {
+    const filled = JSON.stringify(buildTenantAgreement(FILLED, "en").sections);
+    expect(filled).toContain("Краснодар");
+    expect(filled).toContain("11.09.2026");
+    // A blank customer keeps English placeholders rather than Russian ones.
+    const blank = JSON.stringify(buildTenantAgreement(BLANK, "en").sections);
+    expect(blank).toContain("[full name of the legal entity / sole proprietor]");
+    expect(blank).not.toContain("[полное наименование юридического лица / ИП]");
+  });
+
   it("throws when a section is missing from one side", () => {
     const en = buildTenantAgreement(FILLED, "en");
     expect(() =>
