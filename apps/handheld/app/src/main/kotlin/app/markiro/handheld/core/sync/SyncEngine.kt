@@ -68,20 +68,23 @@ class SyncEngine(
     /**
      * Everything this device still owes the server.
      *
-     * A box closure is queued work too, and so is a product-label event.
-     * Counting only scans showed «Очередь 0» while a closure sat unsent, and a
-     * queue that had stopped moving would never read as stuck.
+     * A box closure is queued work too, and so is a product-label event and an
+     * operator correction. Counting only scans showed «Очередь 0» while a
+     * closure sat unsent, and a queue that had stopped moving would never read
+     * as stuck.
      *
      * Summed in its own flow so the state below stays a FOUR-argument combine:
      * the vararg overload infers one element type across every flow, which for
      * a mix of `Int`, `Long?` and `Long` collapses to an intersection and costs
-     * an unchecked cast per value.
+     * an unchecked cast per value. Here every flow is `Flow<Int>`, so the
+     * vararg overload is safe.
      */
     private val pending: Flow<Int> = combine(
         db.outboxDao().count(),
         db.boxDao().observeUnackedCount(),
         db.productLabelEventDao().observeUnackedCount(),
-    ) { scans, boxes, labels -> scans + boxes + labels }
+        db.boxExceptionDao().observeUnackedCount(),
+    ) { counts -> counts.sum() }
 
     val state: StateFlow<SyncState> =
         combine(pending, db.conflictDao().count(), lastSuccess, now) { owed, conflicts, last, at ->
@@ -157,8 +160,27 @@ class SyncEngine(
             MAX_PRODUCT_LABEL_EVENTS
         }
         val labelRows = if (labelLimit == 0) emptyList() else db.productLabelEventDao().unacked(labelLimit)
-        // An empty outbox with unacknowledged boxes or events is not empty.
-        if (rows.isEmpty() && boxRows.isEmpty() && labelRows.isEmpty()) {
+        // Corrections follow the same pinning rule as boxes and label events.
+        val exceptionLimit = if (pendingCeiling != null) {
+            meta.get(MetaStore.SYNC_PENDING_EXCEPTION_COUNT)?.toIntOrNull() ?: 0
+        } else {
+            MAX_EXCEPTIONS
+        }
+        // A correction may only ride a batch that also carries -- or has already
+        // delivered -- the scans it corrects. `exceptionThrough` is this batch's
+        // outbox ceiling; an empty outbox means everything before it is
+        // acknowledged, so every watermark is satisfied. Without this, a device
+        // that packed offline sends an undo in the first batch while the scan it
+        // undoes waits for the third, and the server applies it against a row
+        // that does not exist yet and drops it with no error anywhere.
+        val exceptionThrough = if (rows.isEmpty()) Long.MAX_VALUE else rows.last().id
+        val exceptionRows = if (exceptionLimit == 0) {
+            emptyList()
+        } else {
+            db.boxExceptionDao().sendable(exceptionThrough, exceptionLimit)
+        }
+        // An empty outbox with unacknowledged boxes, events or corrections is not empty.
+        if (rows.isEmpty() && boxRows.isEmpty() && labelRows.isEmpty() && exceptionRows.isEmpty()) {
             if (pendingCeiling != null) clearPending()
             return Step.EMPTY
         }
@@ -168,10 +190,12 @@ class SyncEngine(
             // The box set is folded in. Without it, a box closing while this batch
             // awaits acknowledgement would be resent under an id the server has
             // already applied, and the closure would vanish silently.
-            val id = "${cfg.deviceId}:${meta.installId()}:$maxId:${idSignature(boxIds)}:${idSignature(labelRows.map { it.eventId })}"
+            val id = "${cfg.deviceId}:${meta.installId()}:$maxId:${idSignature(boxIds)}:" +
+                "${idSignature(labelRows.map { it.eventId })}:${idSignature(exceptionRows.map { it.id.toString() })}"
             meta.put(MetaStore.SYNC_PENDING_CEILING, maxId.toString())
             meta.put(MetaStore.SYNC_PENDING_BOX_COUNT, boxIds.size.toString())
             meta.put(MetaStore.SYNC_PENDING_LABEL_COUNT, labelRows.size.toString())
+            meta.put(MetaStore.SYNC_PENDING_EXCEPTION_COUNT, exceptionRows.size.toString())
             meta.put(MetaStore.SYNC_PENDING_BATCH_ID, id)
             id
         }
@@ -182,6 +206,7 @@ class SyncEngine(
                 rows.map { it.toItem(cfg.deviceId) },
                 boxRows.map { it.toClosure(cfg.deviceId) },
                 labelRows.map { json.parseToJsonElement(it.payloadJson) },
+                exceptionRows.map { json.parseToJsonElement(it.payloadJson) },
             ),
         )
         val result = transport.post("/station/scans", body) as? TransportResult.Ok ?: return Step.FAILED
@@ -209,10 +234,18 @@ class SyncEngine(
                     db.productLabelEventDao().markQuarantined(eventId, code, Iso.format(at))
                 }
             }
+            // Unconditional, like the boxes above: this endpoint answers no
+            // per-exception receipt, and the server records every fact it
+            // accepts -- including one that matched nothing.
+            if (exceptionRows.isNotEmpty()) {
+                db.boxExceptionDao().markAcked(exceptionRows.map { it.id }, Iso.format(at))
+                db.boxExceptionDao().purgeAcked()
+            }
             db.metaDao().remove(MetaStore.SYNC_PENDING_BATCH_ID)
             db.metaDao().remove(MetaStore.SYNC_PENDING_CEILING)
             db.metaDao().remove(MetaStore.SYNC_PENDING_BOX_COUNT)
             db.metaDao().remove(MetaStore.SYNC_PENDING_LABEL_COUNT)
+            db.metaDao().remove(MetaStore.SYNC_PENDING_EXCEPTION_COUNT)
             parsed.denied?.let { db.metaDao().put(MetaEntity(MetaStore.SYNC_LAST_DENIED, it)) }
             db.metaDao().put(MetaEntity(MetaStore.SYNC_LAST_SUCCESS_AT, at.toString()))
             // A completed job the server has fully answered is dead weight, and
@@ -229,6 +262,7 @@ class SyncEngine(
         meta.remove(MetaStore.SYNC_PENDING_CEILING)
         meta.remove(MetaStore.SYNC_PENDING_BOX_COUNT)
         meta.remove(MetaStore.SYNC_PENDING_LABEL_COUNT)
+        meta.remove(MetaStore.SYNC_PENDING_EXCEPTION_COUNT)
     }
 
     /**
@@ -368,6 +402,9 @@ class SyncEngine(
 
         /** The server's own `MAX_PRODUCT_LABEL_EVENTS`. */
         const val MAX_PRODUCT_LABEL_EVENTS = 100
+
+        /** The server's own cap on `exceptions[]`. */
+        const val MAX_EXCEPTIONS = 200
         const val RECONCILE_PAGE = 200
         const val HEARTBEAT_MS = 15_000L
         const val STUCK_AFTER_MS = 15 * 60 * 1000L

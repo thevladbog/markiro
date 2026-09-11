@@ -35,6 +35,8 @@ data class BoxEntity(
     val printReason: String?,
     /** Null until the server has accepted the closure. */
     val ackedAt: String?,
+    /** Null until the box is retired; once set the SSCC is never reissued. */
+    val disassembledAt: String? = null,
 )
 
 /**

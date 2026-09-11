@@ -9,6 +9,7 @@ import app.markiro.handheld.core.auth.OperatorRecord
 import app.markiro.handheld.core.box.BoxPrinter
 import app.markiro.handheld.core.box.PrintReason
 import app.markiro.handheld.core.box.BoxRepository
+import app.markiro.handheld.core.exceptions.ExceptionEngine
 import app.markiro.handheld.core.box.CloseBox
 import app.markiro.handheld.core.duplicate.DuplicateJobs
 import app.markiro.handheld.core.duplicate.DuplicateReason
@@ -124,7 +125,7 @@ class WorkViewModelTest {
                 SavedStateHandle(mapOf("shiftId" to "s1")), db, ScanRecorder(db), ScanRouterAdapter(scans),
                 { kind -> played += kind }, engine, session, ReachabilityTracker(), team, null,
                 boxes, CloseBox(db, boxes, pool), BoxPrinter(db, boxes, LabelRenderer(rasterize), transport),
-                DuplicateJobs(db, LabelRenderer(rasterize), transport), flowOf(Unit),
+                DuplicateJobs(db, LabelRenderer(rasterize), transport), ExceptionEngine(db), flowOf(Unit),
             ),
         )
     }
@@ -319,6 +320,47 @@ class WorkViewModelTest {
         assertEquals(0, vm.state.first { it.unprintedLabels == 0 }.unprintedLabels)
     }
 
+    /**
+     * Brief §8: «Напечатать ещё раз» out of an unknown outcome is an explicit
+     * same-SSCC reprint and is recorded as one, with a fixed reason.
+     */
+    @Test
+    fun printingAgainFromAnUnknownOutcomeWritesAReprint() = runTest {
+        aggregating(capacity = 1)
+        transport.outcome = SendOutcome.Unknown("link lost")
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        val closed = vm.closeStep.first { it is BoxCloseStep.Unknown } as BoxCloseStep.Unknown
+        vm.retryPrint()
+        // The queue depth is the observable outcome; `advanceUntilIdle` would
+        // return while Room is still writing it.
+        db.boxExceptionDao().observeUnackedCount().first { it == 1 }
+        // `queued`, not `sendable`: the closure of a box shut seconds ago is
+        // very likely still unacknowledged, and the drain rightly withholds the
+        // fact until the server has seen the box.
+        val queued = db.boxExceptionDao().queued().single()
+        assertEquals("reprint", queued.kind)
+        assertEquals(closed.box.boxId, queued.boxId)
+        assertEquals("Результат печати неизвестен", queued.reason)
+    }
+
+    /** Confirming the label is there sends nothing and records nothing. */
+    @Test
+    fun confirmingAnUnknownPrintWritesNoReprint() = runTest {
+        aggregating(capacity = 1)
+        transport.outcome = SendOutcome.Unknown("link lost")
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        vm.closeStep.first { it is BoxCloseStep.Unknown }
+        vm.confirmPrinted()
+        vm.state.first { it.unprintedLabels == 0 }
+        assertEquals(0, db.boxExceptionDao().unackedCount())
+    }
+
     @Test
     fun deferringALabelKeepsTheBoxInTheQueue() = runTest {
         aggregating(capacity = 1, withPrinter = false)
@@ -492,5 +534,46 @@ class WorkViewModelTest {
         assertEquals(true, last?.blocked)
         // Never judged, so never a verdict about the code itself.
         assertEquals(1, db.codeDao().countForShift("s1"))
+    }
+
+    /**
+     * The view model outlives its screen: the back-stack entry keeps it alive
+     * while the exception routes are on top, and the scanner is one app-wide
+     * flow. Without the gate the SSCC scanned to disassemble a box was recorded
+     * here as «НЕВЕРНЫЙ КОД», with an error beep and a bumped counter.
+     */
+    @Test
+    fun aScanIsIgnoredWhileAnotherRouteOwnsTheScanner() = runTest {
+        aggregating(capacity = 3)
+        val vm = vm()
+        advanceUntilIdle()
+        vm.setScanning(false)
+        scan("GATED1")
+        advanceUntilIdle()
+        vm.setScanning(true)
+        scan("GATED2")
+        // Awaited, not advanced: `advanceUntilIdle` returns while Room is still
+        // writing. Exactly one row proves the gated scan was dropped -- a leak
+        // would make it two.
+        db.outboxDao().count().first { it == 1 }
+        advanceUntilIdle()
+        assertEquals(1, db.outboxDao().countNow())
+    }
+
+    /** Two taps must not put two identical reprints in the manager's ledger. */
+    @Test
+    fun aDoubleRetryFromAnUnknownOutcomeWritesOneReprint() = runTest {
+        aggregating(capacity = 1)
+        transport.outcome = SendOutcome.Unknown("link lost")
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        vm.closeStep.first { it is BoxCloseStep.Unknown }
+        vm.retryPrint()
+        vm.retryPrint()
+        db.boxExceptionDao().observeUnackedCount().first { it == 1 }
+        advanceUntilIdle()
+        assertEquals(1, db.boxExceptionDao().queued().size)
     }
 }
