@@ -2,8 +2,17 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { renderLegalDocxDraft, type LegalDocxDraft } from "../artifacts/docx.js";
+import {
+  renderLegalDocxBilingual,
+  renderLegalDocxDraft,
+  type LegalDocxBilingual,
+  type LegalDocxDraft,
+} from "../artifacts/docx.js";
 import { buildTenantAgreement } from "../documents/tenant-agreement.js";
+import {
+  AGREEMENT_MONOLINGUAL_SECTION_IDS,
+  pairLocaleContent,
+} from "../documents/tenant-agreement-bilingual.js";
 import type { TenantAgreementFields } from "../documents/tenant-agreement-fields.js";
 import { TENANT_AGREEMENT_PASSPORT_CONTENT } from "../documents/tenant-agreement-passport.js";
 
@@ -39,6 +48,31 @@ interface DraftArtifact {
   readonly fileName: string;
   readonly draft: LegalDocxDraft;
 }
+
+interface BilingualArtifact {
+  readonly fileName: string;
+  readonly draft: LegalDocxBilingual;
+}
+
+const BILINGUAL_DRAFTS: readonly BilingualArtifact[] = [
+  {
+    fileName: "markiro_mkr-agr-01_2026.09-01_ru-en_draft.docx",
+    draft: {
+      code: "MKR-AGR-01",
+      revision: DRAFT_REVISION,
+      effectiveDate: DRAFT_EFFECTIVE_DATE,
+      locale: "ru",
+      verificationUrl: REGISTRY_URL,
+      classLabel: "ПРОЕКТ ДОГОВОРА",
+      operatorProfileId: "operator-2026-08-15",
+      content: pairLocaleContent(
+        buildTenantAgreement({ customer: EMPTY_CUSTOMER }, "ru"),
+        buildTenantAgreement({ customer: EMPTY_CUSTOMER }, "en"),
+        AGREEMENT_MONOLINGUAL_SECTION_IDS,
+      ),
+    },
+  },
+];
 
 const DRAFTS: readonly DraftArtifact[] = [
   {
@@ -87,6 +121,11 @@ export async function renderAgreementDrafts(outDir: string): Promise<readonly st
   for (const { fileName, draft } of DRAFTS) {
     const target = path.join(outDir, fileName);
     await writeFile(target, await renderLegalDocxDraft(draft));
+    written.push(target);
+  }
+  for (const { fileName, draft } of BILINGUAL_DRAFTS) {
+    const target = path.join(outDir, fileName);
+    await writeFile(target, await renderLegalDocxBilingual(draft));
     written.push(target);
   }
   return written;

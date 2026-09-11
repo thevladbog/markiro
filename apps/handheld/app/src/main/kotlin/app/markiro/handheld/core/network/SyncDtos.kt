@@ -1,6 +1,7 @@
 package app.markiro.handheld.core.network
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 @Serializable
 data class ScanCodeDto(val codeHash: String, val gtin14: String, val serial: String)
@@ -48,6 +49,12 @@ data class SyncBatchRequest(
     val batchId: String,
     val items: List<ScanItemDto>,
     val boxes: List<BoxClosureDto> = emptyList(),
+    /**
+     * Product-label events, sent as the stored JSON rather than re-encoded from
+     * a class: the server's schema is a strict object per event kind, and a
+     * field added or dropped by re-serialising would fail the whole batch.
+     */
+    val productLabelEvents: List<JsonElement> = emptyList(),
 )
 
 @Serializable

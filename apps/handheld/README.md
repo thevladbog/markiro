@@ -4,7 +4,9 @@ Native Android app for industrial handheld terminals. Design: `docs/design-brief
 slices: `docs/superpowers/specs/2026-09-10-handheld-foundation-design.md` (pairing, sign-in, hub) and
 `docs/superpowers/specs/2026-09-10-handheld-shift-validation-design.md` (shifts, scans, sync, close) and
 `docs/superpowers/specs/2026-09-10-handheld-inventory-check-design.md` (inventory check) and
-`docs/superpowers/specs/2026-09-10-handheld-printing-design.md` (printing).
+`docs/superpowers/specs/2026-09-10-handheld-printing-design.md` (printing) and
+`docs/superpowers/specs/2026-09-10-handheld-aggregation-boxes-design.md` (box aggregation) and
+`docs/superpowers/specs/2026-09-11-handheld-duplicate-dm-design.md` (duplicate Data Matrix).
 
 ## Build and test
 
@@ -121,6 +123,66 @@ what came out rather than being told the label printed.
 
 The status query runs before every send. Neither printer language acknowledges a job afterwards, so
 without asking first the only failure this app could ever report is silence.
+
+## Duplicate Data Matrix
+
+A shift whose validation policy is `duplicate_dm` prints a copy of the marking code
+for every accepted unit. The handheld now advertises `validation-dm-duplicate-v1`, so
+the server lets it enter such a shift at all; without that capability it answers
+`409 STATION_UPDATE_REQUIRED` and the shift is unreachable.
+
+**One job at a time.** An accepted unit becomes a job, and a second unit scanned while
+that job is unresolved is refused with words and the error signal — never silently
+dropped. The operator is holding a physical sticker, and accepting the next unit first
+would leave two labels and no way to tell which belongs to which. What the next trigger
+pull means is decided by the open job:
+
+| Open job                          | The scan is              |
+| --------------------------------- | ------------------------ |
+| none, or the last one `completed` | a new unit               |
+| `prepared` or `sending`           | refused — «идёт печать»  |
+| `awaiting_verification`           | the verification         |
+| `delivery_unknown`                | the verification         |
+| `failed_before_send`              | refused — reprint or fix |
+
+**The bytes are prepared once and replayed**, never re-rendered — the opposite of the
+box label, which re-renders because «Другой принтер» may speak another language. The
+server holds a digest of these exact bytes and the domain refuses a reprint that alters
+them, which is also why a printer whose language or dpi no longer matches fails
+*before* sending (`printer_changed`) rather than printing something the digest disowns.
+
+**An unknown delivery is resolved by scanning the sticker**, under either policy — the
+domain accepts `verified` out of `delivery_unknown` even when verification is `none`.
+That answers the operator's real question (did a label come out?) without putting a
+second sticker on the same unit. A reprint is the fallback and carries its reason:
+never printed, damaged or lost.
+
+**Retention runs in two steps at shift close.** Every job's bytes go, settled or not,
+because that is what bounds the disk; the rows go only once the server holds every one
+of their events. Closing never waits on the queue — an unresolved job is warned about,
+the shift closes, and its events still sync.
+
+The event projection is pinned to `packages/domain` by a fifth fixture set
+(`pnpm --filter @markiro/domain fixtures:product-labels`). The server validates the same
+events, so a divergence would show up as labels that print and then never settle.
+
+An event carries only what the protocol admits. `failed_before_send` names
+`printer_unconfigured` and `printer_changed`; `delivery_unknown` names
+`transport_failed`, `persistence_failed` and `interrupted`. The printer's own
+words — «нет бумаги», «открыта головка» — stay on the job row and never reach the
+wire: an event describes what happened to the LABEL, and sending a stray code
+makes the server reject the whole batch, which wedges the queue for scans and
+shift closures too. A printer that refuses before the send therefore records no
+event at all and leaves the attempt `prepared`, which is also what lets «Повторить
+печать» work once the paper is back.
+
+`acceptedAt` on an event is the SCAN's own `scannedAt`, not a fresh reading of the
+clock: the server joins an event to its accepted code on
+`codes.scannedAt = event.acceptedAt`.
+
+**Not proven by any test here:** that a printed duplicate scans. Verification checks
+exactly that at runtime, but an emulator's stand-in scan exercises the state machine,
+not print quality. Only a real printer and a real scanner settle it.
 
 ## Aggregation
 

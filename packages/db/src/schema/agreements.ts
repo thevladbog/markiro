@@ -25,6 +25,11 @@ export const platformAgreementStatus = pgEnum("platform_agreement_status", [
   "terminated",
 ]);
 
+export const platformAgreementDocumentForm = pgEnum("platform_agreement_document_form", [
+  "ru",
+  "ru_en",
+]);
+
 export const platformAgreementDocumentKind = pgEnum("platform_agreement_document_kind", [
   "draft",
   "generated",
@@ -39,6 +44,11 @@ export const platformAgreements = pgTable(
     status: platformAgreementStatus("status").notNull().default("draft"),
     conclusionDate: date("conclusion_date"),
     city: text("city"),
+    // Russian-only or the two-column Russian/English form. A property of the
+    // record rather than a download option: the stored document is the copy
+    // that gets signed, and two files under one number cannot be told apart
+    // afterwards.
+    documentForm: platformAgreementDocumentForm("document_form").notNull().default("ru"),
     // An agreement may be concluded before the tenant exists, so the link is
     // optional and is set by hand once the cabinet is registered.
     tenantId: text("tenant_id"),
