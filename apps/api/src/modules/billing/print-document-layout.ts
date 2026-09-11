@@ -77,12 +77,25 @@ export function documentSubject(model: PrintDocumentModel): string {
   return "Лицензия и услуги платформы Markiro";
 }
 
+export function documentVatLabel(model: PrintDocumentModel): string {
+  if (model.lines.length === 0 || model.lines.some((line) => !line.commercialTerms)) return "НДС";
+  const rates = [
+    ...new Set(model.lines.flatMap((line) => (line.vatRate == null ? [] : [Number(line.vatRate)]))),
+  ];
+  return rates.length === 0 ? "Без НДС" : `НДС ${rates.map((rate) => `${rate}%`).join(", ")}`;
+}
+
 export function paymentPurpose(model: PrintDocumentModel): string {
   const vat = Number(model.vatTotal);
+  const label = documentVatLabel(model);
   const vatText =
-    Number.isFinite(vat) && vat > 0
-      ? `В том числе НДС ${formatMoney(model.vatTotal)}.`
-      : "Без НДС.";
+    label !== "НДС"
+      ? label === "Без НДС"
+        ? "Без НДС."
+        : `В том числе ${label} ${formatMoney(model.vatTotal)}.`
+      : Number.isFinite(vat) && vat > 0
+        ? `В том числе НДС ${formatMoney(model.vatTotal)}.`
+        : "Без НДС.";
   return `Оплата по счёту № ${model.number} от ${formatPrintDate(model.issuedOrPublishedAt)}. ${vatText}`;
 }
 

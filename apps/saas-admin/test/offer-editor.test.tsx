@@ -397,6 +397,7 @@ describe("offer editor route", () => {
           expiresAt: "2026-09-15",
           lines: [
             {
+              commercialTerms: null,
               kind: "plan",
               catalogVersionId: PUBLISHED_PLAN.id,
               nameRu: "Базовый",
@@ -412,6 +413,7 @@ describe("offer editor route", () => {
               activationPolicy: "immediately",
             },
             {
+              commercialTerms: null,
               kind: "addon",
               catalogVersionId: ADDON.id,
               nameRu: "Дополнительная станция",
@@ -427,6 +429,7 @@ describe("offer editor route", () => {
               activationPolicy: "immediately",
             },
             {
+              commercialTerms: null,
               kind: "service",
               catalogVersionId: SERVICE.id,
               nameRu: "Внедрение",
@@ -511,3 +514,51 @@ function billingRequestDetail() {
     links: [],
   };
 }
+
+it("shows a readable rejected-payment error and preserves bank reference", async () => {
+  installOfferEditorApi({
+    offers: [
+      offerRecord({
+        number: "KP-1",
+        publishedAt: OFFER_CREATED_AT,
+        publishedByPlatformUserId: "platform-accountant",
+        status: "published",
+      }),
+    ],
+  });
+  const originalFetch = globalThis.fetch;
+  let payments = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input);
+      if (url.endsWith(`/offers/${OFFER_ID}/payment`)) {
+        payments += 1;
+        return jsonResponse(409, { code: "offer_not_accepted" });
+      }
+      if (url.endsWith(`/offers/${OFFER_ID}`))
+        return jsonResponse(
+          200,
+          offerRecord({
+            number: "KP-1",
+            publishedAt: OFFER_CREATED_AT,
+            publishedByPlatformUserId: "platform-accountant",
+            status: "published",
+            lines: [],
+          }),
+        );
+      return originalFetch(input, init);
+    }),
+  );
+  renderSaasApp({ initialEntry: `/offers?selected=${OFFER_ID}` });
+  const user = userEvent.setup();
+  await user.type(await screen.findByLabelText("Банковский референс"), "bank-ref");
+  await user.click(screen.getByRole("button", { name: "Зафиксировать оплату" }));
+  expect(
+    await screen.findByText(
+      "Предложение ещё не принято клиентом. Оплату можно зарегистрировать после принятия.",
+    ),
+  ).toBeDefined();
+  expect(screen.getByDisplayValue("bank-ref")).toBeDefined();
+  expect(payments).toBe(1);
+});

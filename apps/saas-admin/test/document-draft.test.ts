@@ -16,6 +16,10 @@ const plan = {
   id: "11111111-1111-4111-8111-111111111111",
   catalogItemId: "21111111-1111-4111-8111-111111111111",
   catalogItemCode: "plan-basic",
+  documentNameRu: null,
+  documentNameEn: null,
+  subject: null,
+  sellerPolicyRevision: null,
   kind: "plan",
   version: 3,
   status: "published",
@@ -86,6 +90,56 @@ function draft(lines: DocumentDraft["lines"] = []): DocumentDraft {
 }
 
 describe("document draft reducer", () => {
+  it("freezes structured annual terms and keeps plan quantity one", () => {
+    const annual = {
+      ...plan,
+      billingPeriod: "year" as const,
+      documentNameRu: "Годовая лицензия",
+      documentNameEn: "Annual license",
+      subject: "software_license" as const,
+      sellerPolicyRevision: 3,
+    };
+    const first = documentDraftReducer(draft(), {
+      type: "catalog.added",
+      version: annual,
+      id: "annual",
+    });
+    const repeated = documentDraftReducer(first, {
+      type: "catalog.added",
+      version: annual,
+      id: "duplicate",
+    });
+    expect(repeated.lines[0]?.quantity).toBe(1);
+    expect(toInvoiceCreateInput(first).lines[0]?.commercialTerms).toMatchObject({
+      billingPeriod: "year",
+      documentNameRu: "Годовая лицензия",
+      sellerPolicyRevision: 3,
+      activationRule: "on_application",
+    });
+    const renewed = documentDraftReducer(first, {
+      type: "line.policyChanged",
+      id: "annual",
+      policy: "after_current",
+    });
+    expect(toOfferCreateInput(renewed).lines[0]?.commercialTerms?.activationRule).toBe(
+      "after_current",
+    );
+  });
+
+  it("rounds offer included VAT half-up without changing standalone invoice truncation", () => {
+    const line = { ...createLineFromCatalog(plan, "fraction"), agreedUnitPrice: "0.03" };
+    expect(calculateDocumentTotals("offer", [line])).toEqual({
+      subtotal: "0.02",
+      vatTotal: "0.01",
+      total: "0.03",
+    });
+    expect(calculateDocumentTotals("invoice", [line])).toEqual({
+      subtotal: "0.03",
+      vatTotal: "0.00",
+      total: "0.03",
+    });
+  });
+
   it("adds catalog plan, add-on, and service with their fixed commercial terms", () => {
     const withPlan = documentDraftReducer(draft(), {
       type: "catalog.added",
@@ -109,6 +163,7 @@ describe("document draft reducer", () => {
         kind: "plan",
         catalogVersionId: plan.id,
         catalogItemCode: "plan-basic",
+        commercialTerms: null,
         version: 3,
         nameRu: "Базовый",
         nameEn: "Basic",
@@ -140,7 +195,7 @@ describe("document draft reducer", () => {
     ]);
   });
 
-  it("increments the existing line for a repeated catalog version unless explicitly separate", () => {
+  it("keeps repeated plans at one and allows an explicitly separate plan line", () => {
     const initial = documentDraftReducer(draft(), {
       type: "catalog.added",
       version: plan,
@@ -159,9 +214,9 @@ describe("document draft reducer", () => {
     });
 
     expect(combined.lines).toHaveLength(1);
-    expect(combined.lines[0]?.quantity).toBe(2);
+    expect(combined.lines[0]?.quantity).toBe(1);
     expect(separate.lines).toMatchObject([
-      { id: "line-plan", quantity: 2 },
+      { id: "line-plan", quantity: 1 },
       { id: "line-plan-second", quantity: 1 },
     ]);
   });
@@ -247,8 +302,8 @@ describe("document draft reducer", () => {
     expect(removed.lines.map((line) => line.id)).toEqual(["line-plan", "line-addon"]);
   });
 
-  it("keeps an invalid entered quantity so validation can show its line error", () => {
-    const changed = documentDraftReducer(draft([createLineFromCatalog(plan, "line-plan")]), {
+  it("keeps an invalid add-on quantity so validation can show its line error", () => {
+    const changed = documentDraftReducer(draft([createLineFromCatalog(addon, "line-plan")]), {
       type: "line.quantityChanged",
       id: "line-plan",
       quantity: 0,
@@ -348,6 +403,7 @@ describe("document draft validation and request adapters", () => {
 
     expect(toInvoiceCreateInput(draft([legacy])).lines).toEqual([
       {
+        commercialTerms: null,
         kind: "custom",
         catalogVersionId: null,
         nameRu: "Архивная настройка",
@@ -537,4 +593,19 @@ describe("document draft validation and request adapters", () => {
     );
     expect(() => toOfferCreateInput(unknownPolicy)).toThrow("activation_policy_unsupported");
   });
+});
+
+it.each([
+  ["immediate", "immediate", false],
+  ["after_current", "immediate", false],
+  ["after_current", "after_current", false],
+  ["immediate", "after_current", true],
+] as const)("composer validates ordered plan sequence %s %s", (first, second, valid) => {
+  const lines = [first, second].map((activationPolicy, i) => ({
+    ...createLineFromCatalog(plan, `line-${i}`),
+    activationPolicy,
+  }));
+  expect(validateDocumentDraft(draft(lines)).lines).toBe(
+    valid ? undefined : "commercial_plan_sequence_invalid",
+  );
 });

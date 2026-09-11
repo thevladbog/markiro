@@ -1,3 +1,6 @@
+import { getCatalogEditorContext } from "../catalog/api.js";
+import { formatVat } from "../catalog/CatalogVatField.js";
+import { commercialErrorKey, commercialIssuanceError } from "../documents/commercialError.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -7,7 +10,7 @@ import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { getOffer, listOffers, payOffer, publishOffer, type Offer } from "./api.js";
 
 export function OffersPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const principal = usePlatformPrincipal();
   const client = useQueryClient();
   const location = useLocation();
@@ -20,8 +23,21 @@ export function OffersPage() {
     queryFn: () => getOffer(selectedId!),
     enabled: selectedId !== null,
   });
+  const sellerContext = useQuery({
+    queryKey: ["platform", "catalog", "editor-context"],
+    queryFn: getCatalogEditorContext,
+    enabled: selected.data?.status === "draft" && principal.capabilities.includes("billing.write"),
+  });
+  const reviewError =
+    selected.data?.status === "draft" && sellerContext.data
+      ? commercialIssuanceError(selected.data.lines, sellerContext.data)
+      : null;
   const publish = useMutation({
     mutationFn: () => publishOffer(selected.data!.id),
+    onError: () => {
+      void sellerContext.refetch();
+      void selected.refetch();
+    },
     onSuccess: () => void client.invalidateQueries({ queryKey: ["platform", "offers"] }),
   });
   const pay = useMutation({
@@ -87,7 +103,10 @@ export function OffersPage() {
                 <button
                   type="button"
                   className="table-link"
-                  onClick={() => setSelectedId(offer.id)}
+                  onClick={() => {
+                    pay.reset();
+                    setSelectedId(offer.id);
+                  }}
                 >
                   {offer.tenantId}
                 </button>
@@ -122,8 +141,46 @@ export function OffersPage() {
             <h2 id="offer-detail-title">{`${t("offers.detail")} · ${selected.data.total} ₽`}</h2>
           </header>
           <p>{t("offers.lines", { count: selected.data.lines.length })}</p>
+          <ul>
+            {selected.data.lines.map((line) => (
+              <li key={line.id}>
+                <strong>
+                  {i18n.language.startsWith("en")
+                    ? (line.commercialTerms?.documentNameEn ?? line.nameEn)
+                    : (line.commercialTerms?.documentNameRu ?? line.nameRu)}
+                </strong>{" "}
+                · {line.quantity} · {line.agreedUnitPrice} ₽ ·{" "}
+                {formatVat(
+                  line.vatRate === null ? null : Math.round(Number(line.vatRate) * 100),
+                  line.vatIncluded,
+                  (key, options) => t(key, options ?? {}),
+                )}{" "}
+                {line.commercialTerms?.billingPeriod ? (
+                  <span>
+                    {" "}
+                    · {t(`catalog.units.${line.commercialTerms.billingPeriod}`)} ·{" "}
+                    {t(`commercial.activation.${line.commercialTerms.activationRule}`)}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          {reviewError ? <Alert tone="error">{t(`commercial.errors.${reviewError}`)}</Alert> : null}
+          {sellerContext.isError && selected.data.status === "draft" ? (
+            <Alert tone="error">{t("catalog.reviewError")}</Alert>
+          ) : null}
+          {publish.error ? (
+            <Alert tone="error">{t(commercialErrorKey(publish.error, "offers.loadError"))}</Alert>
+          ) : null}
+          {pay.error ? (
+            <Alert tone="error">{t(commercialErrorKey(pay.error, "offers.payError"))}</Alert>
+          ) : null}
           {selected.data.status === "draft" && principal.capabilities.includes("billing.write") ? (
-            <Button onClick={() => void publish.mutateAsync()} loading={publish.isPending}>
+            <Button
+              onClick={() => publish.mutate()}
+              loading={publish.isPending}
+              disabled={publish.isPending || !sellerContext.data || Boolean(reviewError)}
+            >
               {t("offers.publish")}
             </Button>
           ) : null}
@@ -136,9 +193,9 @@ export function OffersPage() {
                 onChange={(event) => setBankReference(event.target.value)}
               />
               <Button
-                onClick={() => void pay.mutateAsync()}
+                onClick={() => pay.mutate()}
                 loading={pay.isPending}
-                disabled={!bankReference}
+                disabled={!bankReference.trim() || pay.isPending}
               >
                 {t("offers.pay")}
               </Button>

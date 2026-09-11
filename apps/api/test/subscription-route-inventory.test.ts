@@ -550,6 +550,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "PlatformCatalogController.createVersion": platform(
     "platform catalog mutation uses the isolated platform principal and capability policy",
   ),
+  "PlatformCatalogController.review": platform(
+    "Reviews catalog terms using the separate platform capability boundary.",
+  ),
   "PlatformCatalogController.publish": platform(
     "platform catalog mutation uses the isolated platform principal and capability policy",
   ),

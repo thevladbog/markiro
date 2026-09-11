@@ -75,7 +75,7 @@ export function DocumentSummary({
       ) : null}
       {submitError ? <Alert tone="error">{submitError}</Alert> : null}
       <div className="document-summary__actions">
-        <Button type="submit" loading={submitting}>
+        <Button type="submit" loading={submitting} disabled={submitting}>
           {t(`documents.submit.${kind}`)}
         </Button>
         <Button type="button" variant="secondary" disabled={submitting} onClick={onCancel}>

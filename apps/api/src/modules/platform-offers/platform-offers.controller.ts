@@ -1,20 +1,26 @@
 import { Body, Controller, Get, Headers, HttpCode, Param, Post, Query, Req } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
-import { platformCommercialContracts } from "@markiro/platform-contracts";
+import {
+  platformCommercialContracts,
+  platformCommercialV2Contracts,
+} from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
 import {
   PlatformApiProtectedCreated,
   PlatformApiProtectedOk,
 } from "../../platform-http/platform-openapi";
+import {
+  commercialBody,
+  commercialResponse,
+  isCommercialV2,
+} from "../../platform-http/commercial-version";
 import { parsePlatformResponse } from "../../platform-http/platform-response";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
-  createOfferSchema,
   offerIdSchema,
   paymentSchema,
   reviseOfferSchema,
-  type CreateOfferDto,
   type PaymentDto,
   type ReviseOfferDto,
 } from "./dto";
@@ -46,14 +52,19 @@ export class PlatformOffersController {
 
   @Get(":id")
   @ApiOperation({ summary: "Get commercial offer details" })
-  @PlatformApiProtectedOk({ response: platformCommercialContracts.offers.detail.response })
+  @PlatformApiProtectedOk({
+    response: platformCommercialContracts.offers.detail.response,
+    commercialV2: platformCommercialV2Contracts.offers.detail,
+  })
   @RequirePlatformCapabilities("billing.read")
   async detail(
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
   ) {
-    return parsePlatformResponse(
+    return commercialResponse(
+      isCommercialV2(req),
       platformCommercialContracts.offers.detail.response,
+      platformCommercialV2Contracts.offers.detail.response,
       await this.offers.detail(req.platformPrincipal!, id),
     );
   }
@@ -63,15 +74,23 @@ export class PlatformOffersController {
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.offers.create.body,
     response: platformCommercialContracts.offers.create.response,
+    commercialV2: platformCommercialV2Contracts.offers.create,
   })
   @RequirePlatformCapabilities("billing.write")
-  async create(
-    @Req() req: RequestWithPlatformPrincipal,
-    @Body(new ZodValidationPipe(createOfferSchema)) body: CreateOfferDto,
-  ) {
-    return parsePlatformResponse(
+  async create(@Req() req: RequestWithPlatformPrincipal, @Body() body: unknown) {
+    return commercialResponse(
+      isCommercialV2(req),
       platformCommercialContracts.offers.create.response,
-      await this.offers.create(req.platformPrincipal!, body),
+      platformCommercialV2Contracts.offers.create.response,
+      await this.offers.create(
+        req.platformPrincipal!,
+        commercialBody(
+          isCommercialV2(req)
+            ? platformCommercialV2Contracts.offers.create.body
+            : platformCommercialContracts.offers.create.body,
+          body,
+        ),
+      ),
     );
   }
 
@@ -82,18 +101,27 @@ export class PlatformOffersController {
     description:
       "Publishing also renders the offer document package and returns it with the offer.",
   })
-  @PlatformApiProtectedOk({ response: platformCommercialContracts.offers.publish.response })
+  @PlatformApiProtectedOk({
+    response: platformCommercialContracts.offers.publish.response,
+    commercialV2: platformCommercialV2Contracts.offers.publish,
+  })
   @RequirePlatformCapabilities("billing.write")
   async publish(
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
   ) {
+    const v2 = isCommercialV2(req);
     const offer = await this.offers.publish(req.platformPrincipal!, id);
     const documents = await this.documents.render(id);
-    return parsePlatformResponse(platformCommercialContracts.offers.publish.response, {
-      ...offer,
-      documents,
-    });
+    return commercialResponse(
+      v2,
+      platformCommercialContracts.offers.publish.response,
+      platformCommercialV2Contracts.offers.publish.response,
+      {
+        ...offer,
+        documents,
+      },
+    );
   }
 
   @Post(":id/revise")
@@ -101,6 +129,7 @@ export class PlatformOffersController {
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.offers.revise.body,
     response: platformCommercialContracts.offers.revise.response,
+    commercialV2: platformCommercialV2Contracts.offers.revise,
   })
   @RequirePlatformCapabilities("billing.write")
   async revise(
@@ -108,8 +137,10 @@ export class PlatformOffersController {
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
     @Body(new ZodValidationPipe(reviseOfferSchema)) body: ReviseOfferDto,
   ) {
-    return parsePlatformResponse(
+    return commercialResponse(
+      isCommercialV2(req),
       platformCommercialContracts.offers.revise.response,
+      platformCommercialV2Contracts.offers.revise.response,
       await this.offers.revise(req.platformPrincipal!, id, body),
     );
   }
@@ -167,14 +198,19 @@ export class PlatformOffersController {
   @Post(":id/cancel")
   @HttpCode(200)
   @ApiOperation({ summary: "Cancel a commercial offer" })
-  @PlatformApiProtectedOk({ response: platformCommercialContracts.offers.cancel.response })
+  @PlatformApiProtectedOk({
+    response: platformCommercialContracts.offers.cancel.response,
+    commercialV2: platformCommercialV2Contracts.offers.cancel,
+  })
   @RequirePlatformCapabilities("billing.write")
   async cancel(
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
   ) {
-    return parsePlatformResponse(
+    return commercialResponse(
+      isCommercialV2(req),
       platformCommercialContracts.offers.cancel.response,
+      platformCommercialV2Contracts.offers.cancel.response,
       await this.offers.cancel(req.platformPrincipal!, id),
     );
   }

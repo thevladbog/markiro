@@ -1,17 +1,23 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Checkbox, Input } from "@markiro/ui";
+import { Alert, Button, Checkbox, Input, Select } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
-import { createCatalogVersion, type CatalogCreateInput, type CatalogVersionDto } from "./api.js";
+import {
+  getCatalogEditorContext,
+  createCatalogVersion,
+  type CatalogCreateInput,
+  type CatalogVersionDto,
+} from "./api.js";
 import {
   AddonEffectsEditor,
   newAddonEffect,
   toAddonEffects,
   type EditableAddonEffect,
 } from "./AddonEffectsEditor.js";
+import { CatalogQuotaField } from "./CatalogQuotaField.js";
 import { CatalogUnitField } from "./CatalogUnitField.js";
 import { CatalogVatField } from "./CatalogVatField.js";
 import { useCatalogDrawerClose } from "./CatalogDrawer.js";
@@ -30,6 +36,21 @@ export function CatalogCreatePanel({
   const { t } = useTranslation();
   const requestClose = useCatalogDrawerClose(onClose);
   const queryClient = useQueryClient();
+  const context = useQuery({
+    queryKey: ["platform", "catalog", "editor-context"],
+    queryFn: getCatalogEditorContext,
+  });
+  const [documentNameRu, setDocumentNameRu] = useState("");
+  const [documentNameEn, setDocumentNameEn] = useState("");
+  const [subject, setSubject] = useState<"service" | "development_work">("service");
+  const [vatIncluded, setVatIncluded] = useState(false);
+  const [taxTouched, setTaxTouched] = useState(false);
+  useEffect(() => {
+    if (context.data?.taxDefaults && !taxTouched) {
+      setVatRateBps(context.data.taxDefaults.vatRateBps);
+      setVatIncluded(context.data.taxDefaults.vatIncluded);
+    }
+  }, [context.data, taxTouched]);
   const [code, setCode] = useState("");
   const [nameRu, setNameRu] = useState("");
   const [nameEn, setNameEn] = useState("");
@@ -37,7 +58,7 @@ export function CatalogCreatePanel({
   const [descriptionEn, setDescriptionEn] = useState("");
   const [unit, setUnit] = useState(kind === "service" ? "project" : "month");
   const [price, setPrice] = useState("0.00");
-  const [vatRateBps, setVatRateBps] = useState<number | null>(2200);
+  const [vatRateBps, setVatRateBps] = useState<number | null>(null);
   const [addonEffects, setAddonEffects] = useState<EditableAddonEffect[]>(() => [newAddonEffect()]);
   const [lines, setLines] = useState("");
   const [stations, setStations] = useState("");
@@ -52,6 +73,9 @@ export function CatalogCreatePanel({
   useEffect(() => {
     onDirtyChange?.(
       Boolean(
+        (kind === "addon" &&
+          JSON.stringify(addonEffects.map(({ key, value }) => ({ key, value }))) !==
+            JSON.stringify([{ key: "stations", value: "1" }])) ||
         code ||
         nameRu ||
         nameEn ||
@@ -59,7 +83,10 @@ export function CatalogCreatePanel({
         descriptionEn ||
         price !== "0.00" ||
         unit !== (kind === "service" ? "project" : "month") ||
-        vatRateBps !== 2200 ||
+        taxTouched ||
+        documentNameRu ||
+        documentNameEn ||
+        subject !== "service" ||
         lines ||
         stations ||
         kiosks ||
@@ -80,6 +107,11 @@ export function CatalogCreatePanel({
     unit,
     kind,
     vatRateBps,
+    taxTouched,
+    documentNameRu,
+    documentNameEn,
+    subject,
+    addonEffects,
     lines,
     stations,
     kiosks,
@@ -94,6 +126,9 @@ export function CatalogCreatePanel({
   const create = useMutation({
     mutationFn: () => {
       const base = {
+        documentNameRu: documentNameRu.trim() || null,
+        documentNameEn: documentNameEn.trim() || null,
+        sellerPolicyRevision: context.data?.sellerPolicyRevision || null,
         nameRu: nameRu.trim(),
         nameEn: nameEn.trim(),
         descriptionRu: descriptionRu.trim() || null,
@@ -101,14 +136,15 @@ export function CatalogCreatePanel({
         unit: unit.trim(),
         unitPrice: price,
         vatRateBps,
-        vatIncluded: vatRateBps !== null,
+        vatIncluded: vatRateBps !== null && vatIncluded,
       };
       const input: CatalogCreateInput =
         kind === "plan"
           ? {
               ...base,
               billingMode: "recurring",
-              billingPeriod: "month",
+              subject: "software_license",
+              billingPeriod: unit === "year" ? "year" : "month",
               plan: {
                 maxLines: lines ? Number(lines) : null,
                 maxStations: stations ? Number(stations) : null,
@@ -124,10 +160,11 @@ export function CatalogCreatePanel({
             ? {
                 ...base,
                 billingMode: "recurring",
-                billingPeriod: "month",
+                subject: "software_license",
+                billingPeriod: unit === "year" ? "year" : "month",
                 addon: { effects: toAddonEffects(addonEffects) },
               }
-            : { ...base, billingMode: "one_time", billingPeriod: null, service: {} };
+            : { ...base, subject, billingMode: "one_time", billingPeriod: null, service: {} };
       return createCatalogVersion(code.trim(), input);
     },
     onSuccess: (created) => {
@@ -165,7 +202,17 @@ export function CatalogCreatePanel({
         className="catalog-form"
         onSubmit={(event) => {
           event.preventDefault();
+          if (create.isPending) return;
           setError(null);
+          if (
+            kind === "plan" &&
+            [lines, stations, kiosks, users].some(
+              (value) => value !== "" && !/^(0|[1-9]\d*)$/.test(value),
+            )
+          ) {
+            setError(t("catalog.validation.quota"));
+            return;
+          }
           if (!code.trim() || !nameRu.trim() || !nameEn.trim() || !unit.trim()) {
             setError(t("catalog.createRequired"));
             return;
@@ -230,36 +277,72 @@ export function CatalogCreatePanel({
               inputMode="decimal"
               required
             />
-            <CatalogVatField value={vatRateBps} onChange={setVatRateBps} />
+            <CatalogVatField
+              value={vatRateBps}
+              policy={context.data?.taxPolicy}
+              onChange={(value) => {
+                setTaxTouched(true);
+                setVatRateBps(value);
+              }}
+            />
+            {vatRateBps !== null ? (
+              <Checkbox
+                label={t("catalog.vat.includedHint")}
+                checked={vatIncluded}
+                onCheckedChange={(value) => {
+                  setTaxTouched(true);
+                  setVatIncluded(value);
+                }}
+              />
+            ) : null}
+            <Input
+              label={t("catalog.form.documentNameRu")}
+              value={documentNameRu}
+              onChange={(event) => setDocumentNameRu(event.target.value)}
+            />
+            <Input
+              label={t("catalog.form.documentNameEn")}
+              value={documentNameEn}
+              onChange={(event) => setDocumentNameEn(event.target.value)}
+            />
+            {kind === "service" ? (
+              <Select
+                label={t("catalog.form.subject")}
+                value={subject}
+                onValueChange={setSubject}
+                options={[
+                  { value: "service", label: t("commercial.subject.service") },
+                  { value: "development_work", label: t("commercial.subject.development_work") },
+                ]}
+              />
+            ) : (
+              <p>{t("commercial.subject.software_license")}</p>
+            )}
           </div>
         </fieldset>
         {kind === "plan" ? (
           <fieldset>
             <legend>{t("catalog.form.planLimits")}</legend>
             <div className="form-grid form-grid--four">
-              <Input
+              <CatalogQuotaField
                 label={t("catalog.form.maxLines")}
                 value={lines}
-                onChange={(event) => setLines(event.target.value)}
-                inputMode="numeric"
+                onChange={setLines}
               />
-              <Input
+              <CatalogQuotaField
                 label={t("catalog.form.maxStations")}
                 value={stations}
-                onChange={(event) => setStations(event.target.value)}
-                inputMode="numeric"
+                onChange={setStations}
               />
-              <Input
+              <CatalogQuotaField
                 label={t("catalog.form.maxKiosks")}
                 value={kiosks}
-                onChange={(event) => setKiosks(event.target.value)}
-                inputMode="numeric"
+                onChange={setKiosks}
               />
-              <Input
+              <CatalogQuotaField
                 label={t("catalog.form.maxUsers")}
                 value={users}
-                onChange={(event) => setUsers(event.target.value)}
-                inputMode="numeric"
+                onChange={setUsers}
               />
               <Input
                 label={t("catalog.form.demoDays")}
@@ -290,9 +373,43 @@ export function CatalogCreatePanel({
         {kind === "addon" ? (
           <AddonEffectsEditor effects={addonEffects} onChange={setAddonEffects} />
         ) : null}
+        <fieldset>
+          <legend>{t("catalog.effectsLabel")}</legend>
+          <p>
+            {nameRu || nameEn || "—"} · {kind === "service" ? unit : t(`catalog.units.${unit}`)} ·{" "}
+            {price} ₽
+          </p>
+          <p>{documentNameRu || t("catalog.form.documentNameRu")}</p>
+          {kind === "plan" ? (
+            <ul>
+              {[
+                ["maxLines", lines],
+                ["maxStations", stations],
+                ["maxKiosks", kiosks],
+                ["maxUsers", users],
+              ].map(([key, value]) => (
+                <li key={key}>
+                  {t(`catalog.form.${key}`)}:{" "}
+                  {value === ""
+                    ? t("catalog.quota.unlimited")
+                    : value === "0"
+                      ? t("catalog.quota.none")
+                      : value === "__limited__"
+                        ? t("catalog.quota.required")
+                        : value}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </fieldset>
+        {context.isError ? <Alert tone="error">{t("catalog.reviewError")}</Alert> : null}
         {error ? <Alert tone="error">{error}</Alert> : null}
         <div className="form-actions">
-          <Button type="submit" loading={create.isPending}>
+          <Button
+            type="submit"
+            loading={create.isPending}
+            disabled={create.isPending || context.isPending || !context.data?.canWrite}
+          >
             {t("catalog.create")}
           </Button>
           <Button type="button" variant="secondary" onClick={requestClose}>

@@ -22,6 +22,18 @@ import {
 } from "./support/subscription-fixtures";
 import { createTestTenantBillingNotifications } from "./support/tenant-billing-notifications";
 
+const paidTerms = (activationRule: "on_application" | "after_current" = "on_application") =>
+  ({
+    version: 1,
+    subject: "software_license",
+    documentNameRu: "Право использования",
+    documentNameEn: "License",
+    sellerPolicyRevision: 1,
+    billingPeriod: "month",
+    billingTimezone: "Europe/Moscow",
+    activationRule,
+  }) as const;
+
 const ready = Boolean(process.env.DATABASE_URL);
 
 describe("platform payment response boundary", () => {
@@ -133,6 +145,9 @@ describe.skipIf(!ready)("invoice payment application flow", () => {
       lineVat: "0.00",
       lineTotal: "1000.00",
       activationPolicy: input.activationPolicy,
+      commercialTerms: paidTerms(
+        input.activationPolicy === "after_current" ? "after_current" : "on_application",
+      ),
     });
     return { tenantId, invoiceId, lineId, planVersionId };
   }
@@ -1026,7 +1041,7 @@ describe.skipIf(!ready)("invoice payment application flow", () => {
   it("retries a failed line with a monotonic attempt and keeps the first failure", async () => {
     const invoice = await createInvoice({
       applicationMode: "manual",
-      activationPolicy: "manual",
+      activationPolicy: "after_current",
     });
     await payments.recordManual(actor, invoice.invoiceId, {
       amount: "1000.00",
@@ -1043,9 +1058,10 @@ describe.skipIf(!ready)("invoice payment application flow", () => {
       status: "partial_failure",
       results: [{ lineId: invoice.lineId, attempt: 1, status: "failed" }],
     });
+    await createManagedSubscription(db, { tenantId: invoice.tenantId });
     const retried = await application.apply(actor, invoice.invoiceId, {
-      reason: "Исправлено на немедленную активацию",
-      lines: [{ lineId: invoice.lineId, activationPolicy: "immediate" }],
+      reason: "Добавлен совместимый текущий тариф",
+      lines: [{ lineId: invoice.lineId, activationPolicy: "after_current" }],
     });
     expect(retried).toMatchObject({
       status: "applied",
@@ -1122,6 +1138,7 @@ describe.skipIf(!ready)("invoice payment application flow", () => {
       catalogKind: "plan",
       nameRu: "Новый тариф",
       nameEn: "Replacement plan",
+      commercialTerms: paidTerms(),
       quantity: 1,
       unit: "month",
       agreedUnitPrice: "1000.00",
@@ -1218,6 +1235,7 @@ describe.skipIf(!ready)("invoice payment application flow", () => {
         lineVat: "0.00",
         lineTotal: "1000.00",
         activationPolicy: "after_current",
+        commercialTerms: paidTerms("after_current"),
       },
       {
         id: addonLineId,
@@ -1237,6 +1255,7 @@ describe.skipIf(!ready)("invoice payment application flow", () => {
         lineVat: "0.00",
         lineTotal: "100.00",
         activationPolicy: "after_current",
+        commercialTerms: paidTerms("after_current"),
       },
     ]);
 

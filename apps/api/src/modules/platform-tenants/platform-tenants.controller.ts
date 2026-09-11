@@ -1,12 +1,13 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Query, Req } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
-import { platformTenantContracts } from "@markiro/platform-contracts";
+import { platformTenantContracts, platformTenantV2Contracts } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
 import {
   PlatformApiProtectedCreated,
   PlatformApiProtectedOk,
 } from "../../platform-http/platform-openapi";
+import { commercialResponse, isCommercialV2 } from "../../platform-http/commercial-version";
 import { parsePlatformResponse } from "../../platform-http/platform-response";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -60,14 +61,19 @@ export class PlatformTenantsController {
 
   @Get(":id")
   @ApiOperation({ summary: "Get tenant details" })
-  @PlatformApiProtectedOk({ response: platformTenantContracts.detail.response })
+  @PlatformApiProtectedOk({
+    response: platformTenantContracts.detail.response,
+    commercialV2: platformTenantV2Contracts.detail,
+  })
   @RequirePlatformCapabilities("tenants.read")
   async get(
     @Req() request: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(tenantReferenceSchema)) id: string,
   ) {
-    return parsePlatformResponse(
+    return commercialResponse(
+      isCommercialV2(request),
       platformTenantContracts.detail.response,
+      platformTenantV2Contracts.detail.response,
       await this.tenants.get(request.platformPrincipal!, id),
     );
   }
@@ -95,6 +101,7 @@ export class PlatformTenantsController {
   @PlatformApiProtectedCreated({
     body: platformTenantContracts.assignPlan.body,
     response: platformTenantContracts.assignPlan.response,
+    commercialV2: platformTenantV2Contracts.assignPlan,
   })
   @RequirePlatformCapabilities("tenants.write", "billing.write")
   async assignPlan(
@@ -104,7 +111,7 @@ export class PlatformTenantsController {
   ) {
     return parsePlatformResponse(
       platformTenantContracts.assignPlan.response,
-      await this.tenants.assignPlan(request.platformPrincipal!, id, body),
+      await this.tenants.assignPlan(request.platformPrincipal!, id, body, !isCommercialV2(request)),
     );
   }
 

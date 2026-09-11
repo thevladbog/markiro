@@ -174,7 +174,7 @@ async function createPlatformDocument(): Promise<{
 
 describe("current SaaS platform OpenAPI contracts", () => {
   it("converts all current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(129);
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(131);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }
@@ -207,10 +207,20 @@ describe("current SaaS platform OpenAPI contracts", () => {
       for (const contract of CURRENT_SAAS_ROUTES) {
         const documented = operation(document, contract);
         const successSchema = inlineJsonSchema(documented.responses[contract.status]);
-        expect(successSchema).toEqual(jsonSchema(contract.response));
+        expect(successSchema).toEqual(
+          contract.commercialV2
+            ? { anyOf: [jsonSchema(contract.response), jsonSchema(contract.commercialV2.response)] }
+            : jsonSchema(contract.response),
+        );
+        if (contract.commercialV2)
+          expect(documented.parameters).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ in: "header", name: "X-Markiro-Commercial-Version" }),
+            ]),
+          );
         expectOpenApi30Compatible(successSchema);
 
-        if (contract.body) {
+        if (contract.body || contract.commercialV2?.body) {
           if (contract.multipart) {
             expect(inlineJsonSchema(documented.requestBody)).toBeUndefined();
             const multipartSchema = inlineContentSchema(
@@ -229,7 +239,12 @@ describe("current SaaS platform OpenAPI contracts", () => {
             expectOpenApi30Compatible(multipartSchema);
           } else {
             const bodySchema = inlineJsonSchema(documented.requestBody);
-            expect(bodySchema).toEqual(jsonSchema(contract.body));
+            const bodies = [contract.body, contract.commercialV2?.body].filter(
+              (body): body is ZodType => body !== undefined,
+            );
+            expect(bodySchema).toEqual(
+              bodies.length === 1 ? jsonSchema(bodies[0]!) : { anyOf: bodies.map(jsonSchema) },
+            );
             expectOpenApi30Compatible(bodySchema);
           }
         } else {
@@ -287,26 +302,36 @@ describe("current SaaS platform OpenAPI contracts", () => {
       if (!contract) throw new Error("Missing POST /platform/invoices route contract");
       const body = inlineJsonSchema(operation(platformDocument.document, contract).requestBody) as {
         anyOf?: Array<{
+          anyOf?: Array<{
+            additionalProperties?: boolean;
+            properties?: Record<string, unknown>;
+            required?: string[];
+          }>;
           additionalProperties?: boolean;
           properties?: Record<string, unknown>;
           required?: string[];
         }>;
       };
 
-      expect(body.anyOf).toHaveLength(4);
-      const direct = body.anyOf?.filter(
+      expect(body.anyOf).toHaveLength(2);
+      const alternatives = body.anyOf?.flatMap((representation) => representation.anyOf ?? []);
+      expect(alternatives).toHaveLength(8);
+      const direct = alternatives?.filter(
         (candidate) =>
           !("sourceOfferId" in (candidate.properties ?? {})) &&
           !("sourceRequestId" in (candidate.properties ?? {})),
       );
-      const linked = body.anyOf?.filter(
+      const linked = alternatives?.filter(
         (candidate) =>
           "sourceOfferId" in (candidate.properties ?? {}) ||
           "sourceRequestId" in (candidate.properties ?? {}),
       );
-      expect(direct).toEqual([expect.objectContaining({ additionalProperties: false })]);
+      expect(direct).toEqual([
+        expect.objectContaining({ additionalProperties: false }),
+        expect.objectContaining({ additionalProperties: false }),
+      ]);
       expect(direct?.[0]?.required ?? []).not.toContain("idempotencyKey");
-      expect(linked).toHaveLength(3);
+      expect(linked).toHaveLength(6);
       for (const candidate of linked ?? []) {
         const sourceProperties = Object.keys(candidate.properties ?? {}).filter((property) =>
           property.startsWith("source"),

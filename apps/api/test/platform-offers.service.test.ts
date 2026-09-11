@@ -310,6 +310,13 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
       revision: 1,
       kind: "legal_entity",
       fullName: "Markiro Operator",
+      taxPolicy: {
+        kind: "vat",
+        regime: "other",
+        allowedRatesBps: [2000],
+        defaultRateBps: 2000,
+        defaultIncluded: true,
+      },
       displayName: "Markiro",
       inn: "7707083893",
       kpp: "773601001",
@@ -368,6 +375,16 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
       kind: "service",
       nameRu: "Настройка",
       nameEn: "Setup",
+      commercialTerms: {
+        version: 1,
+        subject: "service",
+        documentNameRu: "Настройка",
+        documentNameEn: "Setup",
+        sellerPolicyRevision: 1,
+        billingPeriod: null,
+        billingTimezone: null,
+        activationRule: null,
+      },
       descriptionRu: "Снимок строки",
       descriptionEn: "Line snapshot",
       quantity: 2,
@@ -601,7 +618,7 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
         tenantId,
         familyId: cancelledFamilyId,
         revision: 1,
-        status: "published",
+        status: "draft",
         number: `KP-CANCELLED-FAMILY-${randomUUID()}`,
         total: "100.00",
         publishedAt: new Date(),
@@ -609,6 +626,11 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
         createdByPlatformUserId: actorId,
       })
       .returning();
+    await insertExplicitServiceLine(connection.db, tenantId, first!.id);
+    await connection.db
+      .update(schema.commercialOffers)
+      .set({ status: "published" })
+      .where(eq(schema.commercialOffers.id, first!.id));
     await connection.db.insert(schema.commercialOfferDecisions).values({
       tenantId,
       offerId: first!.id,
@@ -666,7 +688,7 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
         tenantId,
         familyId: randomUUID(),
         revision: 1,
-        status: "published",
+        status: "draft",
         number: `KP-MIXED-INVOICE-${randomUUID()}`,
         total: "100.00",
         publishedAt: new Date(),
@@ -674,6 +696,33 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
         createdByPlatformUserId: actorId,
       })
       .returning();
+    await connection.db.insert(schema.commercialOfferLines).values({
+      tenantId,
+      offerId: invoiceOffer!.id,
+      position: 1,
+      kind: "service",
+      nameRu: "Разовая услуга",
+      nameEn: "One-time service",
+      quantity: 1,
+      unit: "услуга",
+      agreedUnitPrice: "100.00",
+      vatIncluded: false,
+      lineTotal: "100.00",
+      commercialTerms: {
+        version: 1,
+        subject: "service",
+        documentNameRu: "Разовая услуга",
+        documentNameEn: "One-time service",
+        sellerPolicyRevision: 1,
+        billingPeriod: null,
+        billingTimezone: null,
+        activationRule: null,
+      },
+    });
+    await connection.db
+      .update(schema.commercialOffers)
+      .set({ status: "published" })
+      .where(eq(schema.commercialOffers.id, invoiceOffer!.id));
     const [invoiceOutcome, acceptOutcome] = await Promise.allSettled([
       billing.create(revisionActor, {
         ...invoiceInput(tenantId),
@@ -781,6 +830,8 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
         },
       ])
       .returning();
+    await insertExplicitServiceLine(connection.db, tenantId, firstDraft!.id);
+    await insertExplicitServiceLine(connection.db, secondTenantId, secondDraft!.id);
     await connection.pool.query(`
       CREATE FUNCTION task6_offer_publish_delay() RETURNS trigger
       LANGUAGE plpgsql AS $$
@@ -898,4 +949,31 @@ function invoiceInput(tenantId: string) {
       },
     ],
   };
+}
+
+async function insertExplicitServiceLine(db: Db, tenantId: string, offerId: string) {
+  await db.insert(schema.commercialOfferLines).values({
+    tenantId,
+    offerId,
+    position: 1,
+    kind: "service",
+    nameRu: "Услуга",
+    nameEn: "Service",
+    quantity: 1,
+    unit: "service",
+    agreedUnitPrice: "100.00",
+    lineTotal: "100.00",
+    vatRate: "20.00",
+    vatIncluded: true,
+    commercialTerms: {
+      version: 1,
+      subject: "service",
+      documentNameRu: "Услуга",
+      documentNameEn: "Service",
+      sellerPolicyRevision: 1,
+      billingPeriod: null,
+      billingTimezone: null,
+      activationRule: null,
+    },
+  });
 }

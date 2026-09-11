@@ -1,12 +1,16 @@
 import { Body, Controller, Get, Param, Post, Query, Req } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
-import { platformCommercialContracts } from "@markiro/platform-contracts";
+import {
+  platformCommercialContracts,
+  platformCommercialV2Contracts,
+} from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
 import {
   PlatformApiProtectedCreated,
   PlatformApiProtectedOk,
 } from "../../platform-http/platform-openapi";
+import { commercialBody, isCommercialV2 } from "../../platform-http/commercial-version";
 import { parsePlatformResponse } from "../../platform-http/platform-response";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -15,13 +19,11 @@ import {
   platformBillingRequestLinkSchema,
   platformBillingRequestLinkTargetQuerySchema,
   platformBillingRequestListQuerySchema,
-  platformBillingRequestOfferCreateSchema,
   platformBillingRequestStatusSchema,
   type PlatformBillingRequestCommentDto,
   type PlatformBillingRequestLinkDto,
   type PlatformBillingRequestLinkTargetQueryDto,
   type PlatformBillingRequestListQueryDto,
-  type PlatformBillingRequestOfferCreateDto,
   type PlatformBillingRequestStatusMutationDto,
 } from "./dto";
 import { PlatformBillingRequestsService } from "./platform-billing-requests.service";
@@ -87,17 +89,26 @@ export class PlatformBillingRequestsController {
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.billingRequests.createOffer.body,
     response: platformCommercialContracts.billingRequests.createOffer.response,
+    commercialV2: platformCommercialV2Contracts.billingRequests.createOffer,
   })
   @RequirePlatformCapabilities("billing.write")
   async createOffer(
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(platformBillingRequestIdSchema)) id: string,
-    @Body(new ZodValidationPipe(platformBillingRequestOfferCreateSchema))
-    body: PlatformBillingRequestOfferCreateDto,
+    @Body() body: unknown,
   ) {
     return parsePlatformResponse(
       platformCommercialContracts.billingRequests.createOffer.response,
-      await this.requests.createOffer(req.platformPrincipal!, id, body),
+      await this.requests.createOffer(
+        req.platformPrincipal!,
+        id,
+        commercialBody(
+          isCommercialV2(req)
+            ? platformCommercialV2Contracts.billingRequests.createOffer.body
+            : platformCommercialContracts.billingRequests.createOffer.body,
+          body,
+        ),
+      ),
     );
   }
 

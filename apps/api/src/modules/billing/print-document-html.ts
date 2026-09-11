@@ -5,6 +5,7 @@ import { sanitizeOfferTermsHtml } from "../platform-offers/offer-terms";
 import {
   amountInWords,
   documentBarcodeValue,
+  documentVatLabel,
   documentKindLabel,
   documentSubject,
   formatMoney,
@@ -99,7 +100,7 @@ const itemsTable = (lines: PrintLine[]) =>
   `<table class="items-table"><thead><tr><th>№</th><th>ПОЗИЦИЯ</th><th>ЕД.</th><th>КОЛ-ВО</th><th>ЦЕНА</th><th>СУММА</th></tr></thead><tbody>${lineRows(lines)}</tbody></table>`;
 
 const totals = (model: PrintDocumentModel) =>
-  `<section class="total-block"><div><span>Подытог</span><strong>${escape(formatMoney(model.subtotal))}</strong></div><div><span>НДС</span><strong>${escape(formatMoney(model.vatTotal))}</strong></div><div class="grand-total"><span>ИТОГО</span><strong>${escape(formatMoney(model.total))}</strong></div><p>${escape(amountInWords(model.total))}</p></section>`;
+  `<section class="total-block"><div><span>Подытог</span><strong>${escape(formatMoney(model.subtotal))}</strong></div><div><span>${escape(documentVatLabel(model))}</span><strong>${escape(formatMoney(model.vatTotal))}</strong></div><div class="grand-total"><span>ИТОГО</span><strong>${escape(formatMoney(model.total))}</strong></div><p>${escape(amountInWords(model.total))}</p></section>`;
 
 const signatureBlock = (label: string, signed: boolean) =>
   `<div class="signature${signed ? " signature--signed" : ""}"><div class="section-label">${label}</div>${signed ? `<img class="authorized-signature" src="${authorizedSignatureDataUri}" alt="Подпись уполномоченного лица"><img class="legal-seal" src="${legalSealDataUri}" alt="Печать поставщика">` : ""}<span>________________ / ____________________</span><small>подпись / расшифровка</small></div>`;

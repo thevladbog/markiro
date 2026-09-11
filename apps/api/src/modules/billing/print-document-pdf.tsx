@@ -19,6 +19,7 @@ import { sanitizeOfferTermsHtml } from "../platform-offers/offer-terms";
 import {
   amountInWords,
   documentBarcodeValue,
+  documentVatLabel,
   documentKindLabel,
   documentSubject,
   formatMoney,
@@ -409,7 +410,7 @@ function Closing({ model, signed }: { model: PrintDocumentModel; signed: boolean
           <Text style={styles.mono}>{formatMoney(model.subtotal)}</Text>
         </View>
         <View style={styles.totalRow}>
-          <Text>НДС</Text>
+          <Text>{documentVatLabel(model)}</Text>
           <Text style={styles.mono}>{formatMoney(model.vatTotal)}</Text>
         </View>
         <View style={[styles.totalRow, styles.grandTotal]}>

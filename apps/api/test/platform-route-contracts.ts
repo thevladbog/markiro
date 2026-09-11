@@ -2,7 +2,10 @@ import {
   platformAuditContracts,
   platformAuthContracts,
   platformCatalogContracts,
+  platformCatalogV2Contracts,
+  platformTenantV2Contracts,
   platformCommercialContracts,
+  platformCommercialV2Contracts,
   platformOperationsContracts,
   platformNationalCatalogContracts,
   platformTeamContracts,
@@ -20,6 +23,7 @@ export interface PlatformRouteContract {
   path: string;
   status: PlatformSuccessStatus;
   response: ZodType;
+  commercialV2?: { response: ZodType; body?: ZodType };
   body?: ZodType;
   query?: ZodType;
   errors?: ReadonlyArray<{ status: string; schema: ZodType }>;
@@ -32,7 +36,10 @@ const route = (
   path: string,
   status: PlatformSuccessStatus,
   response: ZodType,
-  options: Pick<PlatformRouteContract, "body" | "query" | "errors" | "multipart" | "public"> = {},
+  options: Pick<
+    PlatformRouteContract,
+    "body" | "query" | "errors" | "multipart" | "public" | "commercialV2"
+  > = {},
 ): PlatformRouteContract => ({ method, path, status, response, ...options });
 
 export const CURRENT_SAAS_ROUTES = [
@@ -124,7 +131,9 @@ export const CURRENT_SAAS_ROUTES = [
   route("post", "/platform/tenants", "201", platformTenantContracts.create.response, {
     body: platformTenantContracts.create.body,
   }),
-  route("get", "/platform/tenants/{id}", "200", platformTenantContracts.detail.response),
+  route("get", "/platform/tenants/{id}", "200", platformTenantContracts.detail.response, {
+    commercialV2: platformTenantV2Contracts.detail,
+  }),
   route(
     "post",
     "/platform/tenants/{id}/owner-activation/renew",
@@ -136,7 +145,10 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/tenants/{id}/subscription/plan",
     "201",
     platformTenantContracts.assignPlan.response,
-    { body: platformTenantContracts.assignPlan.body },
+    {
+      body: platformTenantContracts.assignPlan.body,
+      commercialV2: platformTenantV2Contracts.assignPlan,
+    },
   ),
   route(
     "post",
@@ -145,44 +157,68 @@ export const CURRENT_SAAS_ROUTES = [
     platformTenantContracts.assignAddon.response,
     { body: platformTenantContracts.assignAddon.body },
   ),
-  route("get", "/platform/catalog/items", "200", platformCatalogContracts.list.response),
+  route(
+    "get",
+    "/platform/catalog/editor-context",
+    "200",
+    platformCatalogV2Contracts.editorContext.response,
+  ),
+  route(
+    "post",
+    "/platform/catalog/items/{id}/versions/{versionId}/review",
+    "200",
+    platformCatalogV2Contracts.reviewVersion.response,
+  ),
+  route("get", "/platform/catalog/items", "200", platformCatalogContracts.list.response, {
+    commercialV2: platformCatalogV2Contracts.list,
+  }),
   route(
     "get",
     "/platform/catalog/items/{id}/versions",
     "200",
     platformCatalogContracts.listVersions.response,
+    { commercialV2: platformCatalogV2Contracts.listVersions },
   ),
   route(
     "get",
     "/platform/catalog/items/{id}/versions/{versionId}",
     "200",
     platformCatalogContracts.getVersion.response,
+    { commercialV2: platformCatalogV2Contracts.getVersion },
   ),
   route(
     "post",
     "/platform/catalog/items/{id}/versions",
     "201",
     platformCatalogContracts.createVersion.response,
-    { body: platformCatalogContracts.createVersion.body },
+    {
+      commercialV2: platformCatalogV2Contracts.createVersion,
+      body: platformCatalogContracts.createVersion.body,
+    },
   ),
   route(
     "patch",
     "/platform/catalog/items/{id}/versions/{versionId}",
     "200",
     platformCatalogContracts.updateVersion.response,
-    { body: platformCatalogContracts.updateVersion.body },
+    {
+      commercialV2: platformCatalogV2Contracts.updateVersion,
+      body: platformCatalogContracts.updateVersion.body,
+    },
   ),
   route(
     "post",
     "/platform/catalog/items/{id}/versions/{versionId}/publish",
     "200",
     platformCatalogContracts.publishVersion.response,
+    { commercialV2: platformCatalogV2Contracts.publishVersion },
   ),
   route(
     "post",
     "/platform/catalog/items/{id}/versions/{versionId}/retire",
     "200",
     platformCatalogContracts.retireVersion.response,
+    { commercialV2: platformCatalogV2Contracts.retireVersion },
   ),
   route(
     "post",
@@ -204,22 +240,29 @@ export const CURRENT_SAAS_ROUTES = [
     { body: platformCatalogContracts.setDefaultDemo.body },
   ),
   route("get", "/platform/offers", "200", platformCommercialContracts.offers.list.response),
-  route("get", "/platform/offers/{id}", "200", platformCommercialContracts.offers.detail.response),
+  route("get", "/platform/offers/{id}", "200", platformCommercialContracts.offers.detail.response, {
+    commercialV2: platformCommercialV2Contracts.offers.detail,
+  }),
   route("post", "/platform/offers", "201", platformCommercialContracts.offers.create.response, {
     body: platformCommercialContracts.offers.create.body,
+    commercialV2: platformCommercialV2Contracts.offers.create,
   }),
   route(
     "post",
     "/platform/offers/{id}/revise",
     "201",
     platformCommercialContracts.offers.revise.response,
-    { body: platformCommercialContracts.offers.revise.body },
+    {
+      body: platformCommercialContracts.offers.revise.body,
+      commercialV2: platformCommercialV2Contracts.offers.revise,
+    },
   ),
   route(
     "post",
     "/platform/offers/{id}/publish",
     "200",
     platformCommercialContracts.offers.publish.response,
+    { commercialV2: platformCommercialV2Contracts.offers.publish },
   ),
   route(
     "get",
@@ -244,6 +287,7 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/offers/{id}/cancel",
     "200",
     platformCommercialContracts.offers.cancel.response,
+    { commercialV2: platformCommercialV2Contracts.offers.cancel },
   ),
   route(
     "post",
@@ -258,9 +302,11 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/invoices/{id}",
     "200",
     platformCommercialContracts.invoices.detail.response,
+    { commercialV2: platformCommercialV2Contracts.invoices.detail },
   ),
   route("post", "/platform/invoices", "201", platformCommercialContracts.invoices.create.response, {
     body: platformCommercialContracts.invoices.create.body,
+    commercialV2: platformCommercialV2Contracts.invoices.create,
   }),
   route(
     "post",
@@ -345,7 +391,10 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/billing/requests/{id}/offer",
     "201",
     platformCommercialContracts.billingRequests.createOffer.response,
-    { body: platformCommercialContracts.billingRequests.createOffer.body },
+    {
+      body: platformCommercialContracts.billingRequests.createOffer.body,
+      commercialV2: platformCommercialV2Contracts.billingRequests.createOffer,
+    },
   ),
   route(
     "post",

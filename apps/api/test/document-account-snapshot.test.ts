@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { createDb, schema } from "@markiro/db";
-import type { CreateInvoiceDto, CreateOfferDto } from "@markiro/platform-contracts";
+import type {
+  CreateInvoiceV2 as CreateInvoiceDto,
+  CreateOfferV2 as CreateOfferDto,
+} from "@markiro/platform-contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { BillingService } from "../src/modules/billing/billing.service";
@@ -61,7 +64,7 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
     });
     await connection.db
       .insert(schema.operatorBillingProfiles)
-      .values(profileValues(1, "ООО Маркиро", "7707083893", "773601001", "1027700132195"));
+      .values(sellerProfileValues(1, "ООО Маркиро", "7707083893", "773601001", "1027700132195"));
     await connection.db.insert(schema.tenantBillingProfiles).values({
       tenantId,
       ...profileValues(1, "ООО Покупатель", "7812014560", "781201001", "1027800000000", {
@@ -275,7 +278,9 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
       .where(eq(schema.operatorBillingProfiles.isCurrent, true));
     await connection.db
       .insert(schema.operatorBillingProfiles)
-      .values(profileValues(2, "ООО Маркиро Новое", "7707083893", "773601001", "1027700132195"));
+      .values(
+        sellerProfileValues(2, "ООО Маркиро Новое", "7707083893", "773601001", "1027700132195"),
+      );
     await connection.db
       .update(schema.tenantBillingProfiles)
       .set({ isCurrent: false })
@@ -326,6 +331,16 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
         {
           kind: "custom",
           catalogVersionId: null,
+          commercialTerms: {
+            version: 1,
+            subject: "service",
+            documentNameRu: "Разовая услуга",
+            documentNameEn: "One-time service",
+            sellerPolicyRevision: 1,
+            billingPeriod: null,
+            billingTimezone: null,
+            activationRule: null,
+          },
           nameRu: "Разовая услуга",
           nameEn: "One-time service",
           quantity: 1,
@@ -348,6 +363,16 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
         {
           kind: "service",
           catalogVersionId: null,
+          commercialTerms: {
+            version: 1,
+            subject: "service",
+            documentNameRu: "Разовая услуга",
+            documentNameEn: "One-time service",
+            sellerPolicyRevision: 1,
+            billingPeriod: null,
+            billingTimezone: null,
+            activationRule: null,
+          },
           nameRu: "Разовая услуга",
           nameEn: "One-time service",
           quantity: 1,
@@ -395,6 +420,10 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
       confirmedAt: new Date(),
       createdByPlatformUserId: actorId,
     };
+  }
+
+  function sellerProfileValues(...args: Parameters<typeof profileValues>) {
+    return { ...profileValues(...args), taxPolicy: { kind: "without_vat", regime: "other" } };
   }
 
   function accountValues(label: string, suffix: string) {

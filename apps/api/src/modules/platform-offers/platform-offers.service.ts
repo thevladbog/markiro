@@ -1,14 +1,21 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
-  platformCommercialContracts,
-  offerServiceDetailSchema,
+  platformCommercialV2Contracts,
+  offerServiceDetailV2Schema,
   type OfferPaymentResultSource,
   type OfferReviseDto,
   type OfferServiceDetailSource,
   type OfferServiceRecordSource,
 } from "@markiro/platform-contracts";
+import { assertOfferInvoiceAvailable } from "../billing/commercial-sale-origin";
+import {
+  validateCommercialIssuance,
+  assertCommercialPlanSequence,
+} from "../billing/commercial-line-terms";
+import { lockSellerPolicy } from "../billing-profiles/billing-profiles.service";
+import { SubscriptionLifecycleService } from "../../subscriptions/subscription-lifecycle.service";
 import { DB } from "../../auth/auth.module";
 import {
   bankAccountLast4,
@@ -27,6 +34,7 @@ import {
 } from "../billing-workflow-locks";
 import type { CreateOfferDto, PaymentDto } from "./dto";
 import { createOfferDraft } from "./platform-offer-draft";
+import { calculateOfferAmounts } from "./offer-totals";
 import { normalizeOfferTerms } from "./offer-terms";
 import {
   beginPlatformBillingMutation,
@@ -71,6 +79,7 @@ export class PlatformOffersService {
   async publish(actor: PlatformPrincipal, id: string): Promise<OfferServiceDetailSource> {
     const canonicalOfferId = canonicalBillingUuid(id);
     return this.db.transaction(async (tx) => {
+      await lockSellerPolicy(tx);
       const [located] = await tx
         .select({
           tenantId: schema.commercialOffers.tenantId,
@@ -108,6 +117,11 @@ export class PlatformOffersService {
       if (family[0]?.id !== draft.id) {
         throw new ConflictException({ code: "offer_version_stale" });
       }
+      const frozenLines = await tx
+        .select()
+        .from(schema.commercialOfferLines)
+        .where(eq(schema.commercialOfferLines.offerId, draft.id));
+      await validateCommercialIssuance(tx, frozenLines);
       const { seller, buyer, sellerAccount, buyerAccount } = await resolveCommercialBillingDetails(
         tx,
         draft.tenantId,
@@ -161,6 +175,19 @@ export class PlatformOffersService {
         .from(schema.commercialOfferLines)
         .where(eq(schema.commercialOfferLines.offerId, canonicalOfferId))
         .orderBy(asc(schema.commercialOfferLines.position));
+      const amounts = calculateOfferAmounts(
+        lines.map((line) => ({
+          quantity: line.quantity,
+          unitPrice: line.agreedUnitPrice,
+          vatRateBps: line.vatRate === null ? null : Math.round(Number(line.vatRate) * 100),
+          vatIncluded: line.vatIncluded,
+        })),
+      );
+      if (
+        amounts.total !== updated.total ||
+        lines.some((line, index) => line.lineTotal !== amounts.lines[index]?.lineTotal)
+      )
+        throw new ConflictException({ code: "commercial_source_review_required" });
       const terms = normalizeOfferTerms(updated.termsMarkdown);
       await tx.insert(schema.commercialOfferPrintSnapshots).values({
         tenantId: updated.tenantId,
@@ -173,9 +200,9 @@ export class PlatformOffersService {
         buyerSnapshot: billingProfileSnapshot(buyer),
         sellerBankAccountSnapshot: bankAccountSnapshot(sellerAccount),
         buyerBankAccountSnapshot: buyerAccount ? bankAccountSnapshot(buyerAccount) : null,
-        linesSnapshot: lines,
-        subtotal: updated.total,
-        vatTotal: "0.00",
+        linesSnapshot: lines.map((line, index) => ({ ...line, ...amounts.lines[index] })),
+        subtotal: amounts.subtotal,
+        vatTotal: amounts.vatTotal,
         total: updated.total,
         termsMarkdown: terms.markdown,
         termsHtml: terms.html,
@@ -236,8 +263,10 @@ export class PlatformOffersService {
         actorPlatformUserId: actor.userId,
       });
       if (mutation.kind === "committed") {
-        const replay = platformCommercialContracts.offers.revise.response.parse(mutation.result);
-        return offerServiceDetailSchema.parse({
+        const replay = platformCommercialV2Contracts.offers.revise.response.parse(
+          normalizeLegacyReplay(mutation.result),
+        );
+        return offerServiceDetailV2Schema.parse({
           ...replay,
           expiresAt: replay.expiresAt ? new Date(replay.expiresAt) : null,
           publishedAt: replay.publishedAt ? new Date(replay.publishedAt) : null,
@@ -327,6 +356,7 @@ export class PlatformOffersService {
             tenantId: source.tenantId,
             offerId: draft.id,
             position: line.position,
+            commercialTerms: line.commercialTerms,
             kind: line.kind,
             catalogVersionId: line.catalogVersionId,
             nameRu: line.nameRu,
@@ -445,7 +475,25 @@ export class PlatformOffersService {
           existing.bankReference !== input.bankReference
         )
           throw new ConflictException({ code: "idempotency_key_reused" });
-        return { paymentId: existing.id, fulfilments: [] };
+        const fulfilled = await tx
+          .select()
+          .from(schema.offerLineFulfilments)
+          .where(
+            and(
+              eq(schema.offerLineFulfilments.tenantId, existing.tenantId),
+              eq(schema.offerLineFulfilments.paymentId, existing.id),
+            ),
+          );
+        return {
+          paymentId: existing.id,
+          fulfilments: fulfilled.flatMap((row) =>
+            [row.tenantSubscriptionId ?? row.subscriptionAddonId ?? row.orderedServiceId].filter(
+              (id): id is string => id !== null,
+            ),
+          ),
+          subscriptionId:
+            fulfilled.find((row) => row.tenantSubscriptionId)?.tenantSubscriptionId ?? undefined,
+        };
       }
       if (!currentGeneration || currentGeneration.id !== offer.id) {
         throw new ConflictException({ code: "offer_version_stale" });
@@ -478,6 +526,7 @@ export class PlatformOffersService {
       if (decision?.decision !== "accepted") {
         throw new ConflictException({ code: "offer_not_accepted" });
       }
+      await assertOfferInvoiceAvailable(tx, offer.tenantId, offer.id);
       let payment: typeof schema.payments.$inferSelect | undefined;
       try {
         [payment] = await tx
@@ -519,88 +568,40 @@ export class PlatformOffersService {
         .from(schema.commercialOfferLines)
         .where(eq(schema.commercialOfferLines.offerId, offer.id))
         .orderBy(asc(schema.commercialOfferLines.position));
+      assertCommercialPlanSequence(lines, true);
       const fulfilments: string[] = [];
       let targetSubscriptionId: string | null = null;
-      for (const line of lines) {
-        if (line.kind === "plan" && line.catalogVersionId) {
-          const [current] = await tx
-            .select({ endsAt: schema.tenantSubscriptions.endsAt })
-            .from(schema.tenantSubscriptions)
-            .where(
-              and(
-                eq(schema.tenantSubscriptions.tenantId, offer.tenantId),
-                sql`${schema.tenantSubscriptions.status} in ('pending_activation','trial','active')`,
-              ),
-            )
-            .orderBy(desc(schema.tenantSubscriptions.updatedAt))
-            .limit(1);
-          const scheduledStart =
-            line.activationPolicy === "after_current" &&
-            current?.endsAt &&
-            current.endsAt > payment.paidAt
-              ? current.endsAt
-              : payment.paidAt;
-          await tx
-            .update(schema.tenantSubscriptions)
-            .set({ status: "superseded", updatedAt: payment.paidAt })
-            .where(
-              and(
-                eq(schema.tenantSubscriptions.tenantId, offer.tenantId),
-                sql`${schema.tenantSubscriptions.status} in ('pending_activation','trial','active')`,
-              ),
-            );
-          const [subscription] = await tx
-            .insert(schema.tenantSubscriptions)
-            .values({
-              tenantId: offer.tenantId,
-              planVersionId: line.catalogVersionId,
-              status: scheduledStart > payment.paidAt ? "scheduled" : "active",
-              startsAt: scheduledStart,
-              endsAt: null,
-              source: "paid_offer_line",
-              sourceOfferLineId: line.id,
-              createdByPlatformUserId: actor.userId,
-            })
-            .returning();
-          if (subscription) {
-            targetSubscriptionId = subscription.id;
-            await tx.insert(schema.offerLineFulfilments).values({
-              tenantId: offer.tenantId,
-              offerLineId: line.id,
-              paymentId: payment.id,
-              kind: "subscription",
-              tenantSubscriptionId: subscription.id,
-              fulfilledAt: payment.paidAt,
-            });
-            fulfilments.push(subscription.id);
-          }
-        } else if (line.kind === "addon" && line.catalogVersionId && targetSubscriptionId) {
-          const [addon] = await tx
-            .insert(schema.subscriptionAddons)
-            .values({
-              tenantId: offer.tenantId,
-              subscriptionId: targetSubscriptionId,
-              addonVersionId: line.catalogVersionId,
+      for (const line of [...lines].sort(
+        (a, b) =>
+          (a.kind === "plan" ? 0 : a.kind === "addon" ? 1 : 2) -
+            (b.kind === "plan" ? 0 : b.kind === "addon" ? 1 : 2) || a.position - b.position,
+      )) {
+        if ((line.kind === "plan" || line.kind === "addon") && line.catalogVersionId) {
+          const result = await new SubscriptionLifecycleService(
+            this.db,
+            this.audit,
+          ).applyPaidLicense(tx, actor, offer.tenantId, {
+            line: {
+              kind: line.kind,
+              catalogVersionId: line.catalogVersionId,
               quantity: line.quantity,
-              startsAt: payment.paidAt,
-              endsAt: null,
-              status: "active",
-              source: "paid_offer_line",
-              sourceOfferLineId: line.id,
-              createdByPlatformUserId: actor.userId,
-            })
-            .returning();
-          if (addon) {
-            await tx.insert(schema.offerLineFulfilments).values({
-              tenantId: offer.tenantId,
-              offerLineId: line.id,
-              paymentId: payment.id,
-              kind: "subscription_addon",
-              subscriptionAddonId: addon.id,
-              fulfilledAt: payment.paidAt,
-            });
-            fulfilments.push(addon.id);
-          }
+              commercialTerms: line.commercialTerms,
+            },
+            origin: { kind: "offer", offerLineId: line.id, paymentId: payment.id },
+            operationAt: payment.paidAt,
+            reason: `offer:${offer.number}`,
+          });
+          if (line.kind === "plan") targetSubscriptionId = result.id;
+          await tx.insert(schema.offerLineFulfilments).values({
+            tenantId: offer.tenantId,
+            offerLineId: line.id,
+            paymentId: payment.id,
+            kind: line.kind === "plan" ? "subscription" : "subscription_addon",
+            tenantSubscriptionId: line.kind === "plan" ? result.id : null,
+            subscriptionAddonId: line.kind === "addon" ? result.id : null,
+            fulfilledAt: payment.paidAt,
+          });
+          fulfilments.push(result.id);
         }
         if (line.kind === "service") {
           const [service] = await tx
@@ -684,4 +685,20 @@ async function lockCommercialOfferFamily(
     )
     .orderBy(desc(schema.commercialOffers.revision), desc(schema.commercialOffers.id))
     .for("update");
+}
+
+function normalizeLegacyReplay(value: unknown): unknown {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("lines" in value) ||
+    !Array.isArray(value.lines)
+  )
+    return value;
+  return {
+    ...value,
+    lines: value.lines.map((line: unknown) =>
+      typeof line === "object" && line !== null ? { commercialTerms: null, ...line } : line,
+    ),
+  };
 }
