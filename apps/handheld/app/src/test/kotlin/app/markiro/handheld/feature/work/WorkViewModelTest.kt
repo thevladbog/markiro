@@ -117,11 +117,15 @@ class WorkViewModelTest {
         )
         val boxes = BoxRepository(db)
         val pool = SsccPool(db)
-        return WorkViewModel(
-            SavedStateHandle(mapOf("shiftId" to "s1")), db, ScanRecorder(db), ScanRouterAdapter(scans),
-            { kind -> played += kind }, engine, session, ReachabilityTracker(), team, null,
-            boxes, CloseBox(db, boxes, pool), BoxPrinter(db, boxes, LabelRenderer(rasterize), transport),
-            DuplicateJobs(db, LabelRenderer(rasterize), transport), flowOf(Unit),
+        // `main.track` is #506's leak guard; the duplicate engine is this slice's
+        // own argument. Both belong.
+        return main.track(
+            WorkViewModel(
+                SavedStateHandle(mapOf("shiftId" to "s1")), db, ScanRecorder(db), ScanRouterAdapter(scans),
+                { kind -> played += kind }, engine, session, ReachabilityTracker(), team, null,
+                boxes, CloseBox(db, boxes, pool), BoxPrinter(db, boxes, LabelRenderer(rasterize), transport),
+                DuplicateJobs(db, LabelRenderer(rasterize), transport), flowOf(Unit),
+            ),
         )
     }
 

@@ -71,7 +71,9 @@ class CloseViewModelTest {
             db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { server.url("/").toString() },
             NetworkModule.strictJson(), engineScope,
         )
-        return CloseViewModel(SavedStateHandle(mapOf("shiftId" to "s1")), ShiftCloser(db), engine, db, SessionHolder())
+        return main.track(
+            CloseViewModel(SavedStateHandle(mapOf("shiftId" to "s1")), ShiftCloser(db), engine, db, SessionHolder()),
+        )
     }
 
     @Test
