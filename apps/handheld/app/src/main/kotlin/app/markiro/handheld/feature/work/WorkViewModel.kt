@@ -5,7 +5,10 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.core.box.BoxPrinter
+import app.markiro.handheld.core.box.BoxPrint
 import app.markiro.handheld.core.box.BoxRepository
+import app.markiro.handheld.core.exceptions.ExceptionEngine
+import app.markiro.handheld.core.exceptions.ReprintReason
 import app.markiro.handheld.core.box.CloseBox
 import app.markiro.handheld.core.box.CloseResult
 import app.markiro.handheld.core.box.PrintOutcome
@@ -148,6 +151,7 @@ class WorkViewModel(
     private val closer: CloseBox,
     private val boxPrinter: BoxPrinter,
     private val duplicates: DuplicateJobs,
+    private val exceptions: ExceptionEngine,
     /** One tick per team refresh; tests pass a single tick so virtual time never loops. */
     private val teamTicks: Flow<Unit> = flow {
         while (true) {
@@ -172,9 +176,10 @@ class WorkViewModel(
         closer: CloseBox,
         boxPrinter: BoxPrinter,
         duplicates: DuplicateJobs,
+        exceptions: ExceptionEngine,
     ) : this(
         handle, db, recorder, scans, { signaller.play(it) }, sync, session, reachability, team, repository,
-        boxes, closer, boxPrinter, duplicates,
+        boxes, closer, boxPrinter, duplicates, exceptions,
     )
 
     val shiftId: String = checkNotNull(handle["shiftId"])
@@ -258,6 +263,12 @@ class WorkViewModel(
         // recording nothing, which is the worst thing a scanner can do.
         viewModelScope.launch {
             scans.events.collect { event ->
+                // The scanner is one app-wide flow and this view model outlives
+                // its screen: a back-stack entry keeps it alive while another
+                // route is on top. Without this gate the SSCC scanned to
+                // disassemble a box was ALSO recorded here as «НЕВЕРНЫЙ КОД»,
+                // with an error beep and a bumped error counter.
+                if (!scanning.value) return@collect
                 try {
                     onScan(event.raw)
                 } catch (e: CancellationException) {
@@ -371,13 +382,57 @@ class WorkViewModel(
         is PrintOutcome.Unknown -> BoxCloseStep.Unknown(closed, printed.cause)
     }
 
+    /**
+     * Whether the work screen currently owns scans.
+     *
+     * Defaults to true so a view model built outside navigation -- every test --
+     * behaves as it always did; `AppNavigation` clears it while another route
+     * is on top.
+     */
+    private val scanning = MutableStateFlow(true)
+
+    fun setScanning(active: Boolean) {
+        scanning.value = active
+    }
+
     /** An explicit second send, chosen by a person who has looked at the printer. */
     fun retryPrint() {
         val closed = _closeStep.value.closedBox() ?: return
+        // Two taps would both read the same `unknown` state before the first
+        // print updated it, and each would write its own reprint fact.
+        if (!retrying.compareAndSet(false, true)) return
         viewModelScope.launch {
-            _closeStep.value = BoxCloseStep.Printing(closed)
-            _closeStep.value = attempt(closed)
+            try {
+                auditIfOutcomeUnknown(closed.boxId)
+                _closeStep.value = BoxCloseStep.Printing(closed)
+                _closeStep.value = attempt(closed)
+            } finally {
+                retrying.set(false)
+            }
         }
+    }
+
+    private val retrying = AtomicBoolean(false)
+
+    /**
+     * Printing again a box whose last attempt ended `unknown` is an explicit
+     * same-SSCC reprint (design brief 10 §8) and is recorded as one, with a
+     * fixed reason rather than a prompt: the operator is at the printer working
+     * out whether paper moved, not filling in a ledger.
+     *
+     * A `failed` attempt never put paper through, so retrying it is an ordinary
+     * retry and writes nothing.
+     */
+    private suspend fun auditIfOutcomeUnknown(boxId: String) {
+        val box = boxes.get(boxId) ?: return
+        if (box.printState != BoxPrint.UNKNOWN) return
+        exceptions.reprint(
+            shiftId = box.shiftId,
+            boxId = boxId,
+            reason = ReprintReason.PRINT_OUTCOME_UNKNOWN,
+            operatorId = session.state.value.operator?.operatorId,
+            terminalId = db.deviceConfigDao().get()?.deviceId,
+        )
     }
 
     /**

@@ -51,6 +51,11 @@ class Signaller(private val prefs: AppPreferences, private val tones: TonePlayer
             Verdict.OK -> SignalKind.OK
             Verdict.DUPLICATE -> SignalKind.DUPLICATE
             Verdict.WRONG_GTIN, Verdict.INVALID -> SignalKind.ERROR
+            // Never reached from a scan: `undone` is written by the exception
+            // engine, and the operator is looking at a confirmation screen
+            // rather than listening for a beep. Mapped rather than thrown so a
+            // future caller cannot take the line down over a sound.
+            Verdict.UNDONE -> SignalKind.OK
         }
     }
 }

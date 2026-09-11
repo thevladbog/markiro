@@ -32,4 +32,27 @@ object Sscc {
         val body = "$extensionDigit$gs1Prefix" + serial.toString().padStart(16 - gs1Prefix.length, '0')
         return body + KmCodec.checkDigit(body)
     }
+
+    /**
+     * The 18 digits of a scanned SSCC label, or null.
+     *
+     * A box label carries GS1 element string `(00)` + 18 digits. Some scanners
+     * keep the parentheses, some emit the bare AI, and a keyboard wedge can add
+     * whitespace. A bare 18-digit string is taken as-is rather than having a
+     * leading `00` stripped: an SSCC legitimately starts with its extension
+     * digit, so stripping would corrupt every box number beginning `00`.
+     *
+     * Deliberately no check-digit validation: the only consumer looks the value
+     * up among boxes this device closed, and a mis-decoded scan finds nothing
+     * and is reported as an unknown label either way.
+     */
+    fun parse(raw: String): String? {
+        val trimmed = raw.trim()
+        val body = when {
+            trimmed.startsWith("(00)") -> trimmed.removePrefix("(00)")
+            trimmed.length == 20 && trimmed.startsWith("00") -> trimmed.drop(2)
+            else -> trimmed
+        }
+        return body.takeIf { it.length == 18 && it.all(Char::isDigit) }
+    }
 }

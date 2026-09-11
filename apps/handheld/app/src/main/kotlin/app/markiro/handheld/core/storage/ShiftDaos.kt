@@ -55,6 +55,16 @@ interface CodeDao {
     @Query("SELECT COUNT(*) FROM codes_mirror WHERE shiftId = :shiftId")
     fun observeCountForShift(shiftId: String): Flow<Int>
 
+    /** The undo target: the most recent accepted code of this box. */
+    @Query("SELECT * FROM codes_mirror WHERE boxId = :boxId ORDER BY scannedAt DESC, codeHash DESC LIMIT 1")
+    suspend fun lastIn(boxId: String): CodeEntity?
+
+    @Query("DELETE FROM codes_mirror WHERE codeHash = :codeHash")
+    suspend fun delete(codeHash: String)
+
+    @Query("DELETE FROM codes_mirror WHERE boxId = :boxId")
+    suspend fun deleteInBox(boxId: String): Int
+
     @Query("DELETE FROM codes_mirror")
     suspend fun clear()
 }
@@ -96,6 +106,10 @@ interface OutboxDao {
 
     @Query("SELECT COUNT(*) FROM outbox")
     suspend fun countNow(): Int
+
+    /** The watermark a correction records: everything queued before it. */
+    @Query("SELECT COALESCE(MAX(id), 0) FROM outbox")
+    suspend fun maxId(): Long
 
     @Query("DELETE FROM outbox")
     suspend fun clear()

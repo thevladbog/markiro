@@ -5,6 +5,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -76,6 +77,15 @@ import app.markiro.handheld.feature.work.DuplicateScreen
 import app.markiro.handheld.feature.work.DuplicateStep
 import app.markiro.handheld.feature.work.LabelQueueCallbacks
 import app.markiro.handheld.feature.work.LabelQueueScreen
+import app.markiro.handheld.feature.exceptions.DisassembleCallbacks
+import app.markiro.handheld.feature.exceptions.DisassembleScreen
+import app.markiro.handheld.feature.exceptions.DisassembleViewModel
+import app.markiro.handheld.feature.exceptions.ExceptionsCallbacks
+import app.markiro.handheld.feature.exceptions.ExceptionsScreen
+import app.markiro.handheld.feature.exceptions.ExceptionsViewModel
+import app.markiro.handheld.feature.exceptions.ReprintCallbacks
+import app.markiro.handheld.feature.exceptions.ReprintScreen
+import app.markiro.handheld.feature.exceptions.ReprintViewModel
 import app.markiro.handheld.feature.work.LabelQueueViewModel
 import app.markiro.handheld.feature.work.WorkCallbacks
 import app.markiro.handheld.feature.work.WorkScreen
@@ -97,6 +107,9 @@ object Routes {
     const val CLOSE = "close/{shiftId}"
     const val CONFLICTS = "conflicts/{shiftId}"
     const val LABEL_QUEUE = "label-queue"
+    const val EXCEPTIONS = "exceptions/{shiftId}"
+    const val DISASSEMBLE = "exceptions/{shiftId}/disassemble"
+    const val REPRINT = "exceptions/{shiftId}/reprint"
     const val SOON = "soon/{tile}"
     const val INVENTORY = "inventory"
     const val INVENTORY_WORK = "inventory/{inventoryId}"
@@ -106,6 +119,9 @@ object Routes {
     fun work(id: String) = "work/$id"
     fun close(id: String) = "close/$id"
     fun conflicts(id: String) = "conflicts/$id"
+    fun exceptions(id: String) = "exceptions/$id"
+    fun disassemble(id: String) = "exceptions/$id/disassemble"
+    fun reprintLabel(id: String) = "exceptions/$id/reprint"
     fun soon(tile: HubTile) = "soon/${tile.name}"
 }
 
@@ -230,6 +246,15 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             composable(Routes.WORK) { entry ->
                 val vm: WorkViewModel = hiltViewModel()
+                // The view model outlives this composable: its back-stack entry
+                // keeps it alive while the exception routes are on top. The
+                // scanner is one app-wide flow, so it has to be told when the
+                // work screen stops owning scans -- otherwise a box label
+                // scanned to disassemble is recorded here as a bad code too.
+                DisposableEffect(Unit) {
+                    vm.setScanning(true)
+                    onDispose { vm.setScanning(false) }
+                }
                 val state by vm.state.collectAsStateWithLifecycle()
                 val closeStep by vm.closeStep.collectAsStateWithLifecycle()
                 val duplicateStep by vm.duplicateStep.collectAsStateWithLifecycle()
@@ -245,6 +270,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         onConflicts = { nav.navigate(Routes.conflicts(shiftId)) },
                         onCloseBoxEarly = vm::closeEarly,
                         onLabelQueue = { nav.navigate(Routes.LABEL_QUEUE) },
+                        onExceptions = { nav.navigate(Routes.exceptions(shiftId)) },
                     ),
                 )
                 // Drawn over the work screen rather than as a route of its own, so
@@ -278,6 +304,51 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         ),
                     )
                 }
+            }
+            composable(Routes.EXCEPTIONS) { entry ->
+                val shiftId = entry.arguments?.getString("shiftId").orEmpty()
+                val vm: ExceptionsViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                ExceptionsScreen(
+                    state,
+                    ExceptionsCallbacks(
+                        onBack = { nav.popBackStack() },
+                        onDisassemble = { nav.navigate(Routes.disassemble(shiftId)) },
+                        onReprint = { nav.navigate(Routes.reprintLabel(shiftId)) },
+                        onClear = vm::startClear,
+                        onUndo = vm::startUndo,
+                        onConfirm = vm::confirm,
+                        onDismiss = vm::dismiss,
+                    ),
+                )
+            }
+            composable(Routes.DISASSEMBLE) {
+                val vm: DisassembleViewModel = hiltViewModel()
+                val step by vm.step.collectAsStateWithLifecycle()
+                DisassembleScreen(
+                    step,
+                    DisassembleCallbacks(
+                        onBack = { nav.popBackStack() },
+                        onReason = vm::chooseReason,
+                        onConfirm = vm::confirm,
+                        onCancel = vm::cancel,
+                        onDone = { nav.popBackStack() },
+                    ),
+                )
+            }
+            composable(Routes.REPRINT) {
+                val vm: ReprintViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                ReprintScreen(
+                    state,
+                    ReprintCallbacks(
+                        onBack = { nav.popBackStack() },
+                        onChooseLast = vm::chooseLast,
+                        onReason = vm::chooseReason,
+                        onCancel = vm::cancel,
+                        onDone = { nav.popBackStack() },
+                    ),
+                )
             }
             composable(Routes.LABEL_QUEUE) {
                 val vm: LabelQueueViewModel = hiltViewModel()

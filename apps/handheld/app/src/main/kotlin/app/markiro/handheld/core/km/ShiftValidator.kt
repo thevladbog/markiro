@@ -6,10 +6,26 @@ enum class Verdict(val wire: String) {
     DUPLICATE("duplicate"),
     WRONG_GTIN("wrong_gtin"),
     INVALID("invalid"),
+
+    /**
+     * Not a scan outcome: the journal's record that an accepted scan was taken
+     * back. Written by the exception engine, never by the validator, and it
+     * exists here because the feed renders every journal row through this enum.
+     */
+    UNDONE("undone"),
     ;
 
     companion object {
-        fun fromWire(value: String): Verdict = entries.first { it.wire == value }
+        /**
+         * Null for a verdict this build does not know.
+         *
+         * `entries.first` threw, and the one caller is a Compose feed that
+         * renders whatever the journal holds -- so an unknown verdict took the
+         * work screen down on the main thread rather than showing one odd row.
+         * A device can always meet a row written by a newer build after a
+         * downgrade, and a scan journal is not worth a crash.
+         */
+        fun fromWireOrNull(value: String): Verdict? = entries.firstOrNull { it.wire == value }
     }
 }
 
