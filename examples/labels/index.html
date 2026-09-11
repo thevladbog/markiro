@@ -1,0 +1,951 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Markiro — образцы этикеток</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 32px;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        background: #f2f1ed;
+        color: #202322;
+      }
+      main,
+      header {
+        max-width: 1440px;
+        margin: auto;
+      }
+      header {
+        margin-bottom: 32px;
+      }
+      h1 {
+        font-size: 32px;
+        margin: 0 0 12px;
+      }
+      h2 {
+        font-size: 19px;
+        margin: 0;
+      }
+      header p {
+        max-width: 900px;
+      }
+      main {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+        gap: 20px;
+      }
+      article {
+        background: white;
+        border: 1px solid #d5d6d0;
+        padding: 22px;
+      }
+      article p {
+        font-size: 14px;
+        color: #535953;
+      }
+      a {
+        color: #155b42;
+      }
+      .preview {
+        height: 340px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f6f6f3;
+        border: 1px solid #deded8;
+        padding: 16px;
+      }
+      .preview img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        image-rendering: pixelated;
+        box-shadow: 0 1px 8px #0002;
+      }
+      textarea {
+        display: block;
+        width: 100%;
+        height: 220px;
+        margin-top: 12px;
+        font: 12px/1.5 monospace;
+      }
+      button,
+      summary {
+        cursor: pointer;
+      }
+      button {
+        margin-top: 12px;
+        padding: 8px 14px;
+      }
+      button:focus-visible,
+      a:focus-visible,
+      summary:focus-visible,
+      input:focus-visible {
+        outline: 3px solid #137252;
+        outline-offset: 3px;
+      }
+      [role="status"] {
+        font-size: 13px;
+      }
+      .name-choice {
+        border: 0;
+        padding: 0;
+        margin: 24px 0 0;
+      }
+      .name-choice legend {
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .name-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .name-options label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border: 1px solid #b8bdb5;
+        background: white;
+        cursor: pointer;
+      }
+      .name-options label:has(input:checked) {
+        border-color: #155b42;
+        background: #e5eee7;
+        color: #155b42;
+      }
+      .name-options input {
+        accent-color: #155b42;
+      }
+      .name-hint {
+        font-size: 14px;
+        color: #535953;
+      }
+      footer {
+        max-width: 1440px;
+        margin: 24px auto;
+        font-size: 14px;
+      }
+      @media (max-width: 500px) {
+        body {
+          padding: 16px;
+        }
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Образцы этикеток Markiro</h1>
+      <p>
+        Соки, растительные масла и косметика. 21 макет с кодом для создания шаблона у конкретного
+        тенанта.
+      </p>
+      <p>
+        Создайте этикетку с нужным назначением, выберите «Импорт кода», язык ZPL и
+        <strong>203 DPI</strong>, вставьте код. <a href="README.md">Подробная инструкция</a>.
+      </p>
+      <p>
+        Данные в превью демонстрационные. Это файлы импорта Markiro: напрямую принтеру их не
+        отправлять. Превью показаны в разном масштабе; размеры указаны в заголовках.
+      </p>
+      <fieldset class="name-choice" aria-describedby="name-hint">
+        <legend>Наименование товара</legend>
+        <div class="name-options">
+          <label
+            ><input type="radio" name="name-field" value="product.name" />Полное наименование</label
+          ><label
+            ><input type="radio" name="name-field" value="product.printName" checked />Наименование
+            для печати</label
+          >
+        </div>
+      </fieldset>
+      <p id="name-hint" class="name-hint">
+        Выбор меняет код всех макетов с наименованием. В этикетках 30×20 мм наименования нет.
+      </p>
+    </header>
+    <main>
+      <article id="juices/unit-30x20">
+        <h2>Соки · 30 × 20 мм</h2>
+        <p>Дубликат товара · Data Matrix · группа 23</p>
+        <div class="preview">
+          <img src="juices/unit-30x20.png" alt="Образец Соки 30 на 20 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="juices/unit-30x20.zpl" download>Скачать код</a> ·
+          <a href="juices/unit-30x20.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код juices/unit-30x20" spellcheck="false">
+^XA
+^PW240
+^LL160
+^FO8,8^BXN,144^FD{{km.code}}^FS
+^FO160,8^A0N,11,11^FB72,1,0,L,0^FDСОК^FS
+^FO160,32^A0N,11,11^FB72,1,0,L,0^FDИзг.:^FS
+^FO160,52^A0N,11,11^FB72,1,0,L,0^FD{{date}}^FS
+^FO160,88^A0N,11,11^FB72,1,0,L,0^FDГоден:^FS
+^FO160,108^A0N,11,11^FB72,1,0,L,0^FD{{expiry}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="juices/unit-58x40">
+        <h2>Соки · 58 × 40 мм</h2>
+        <p>Дубликат товара · Data Matrix · группа 23</p>
+        <div class="preview">
+          <img src="juices/unit-58x40.png" alt="Образец Соки 58 на 40 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="juices/unit-58x40.zpl" download>Скачать код</a> ·
+          <a href="juices/unit-58x40.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код juices/unit-58x40" spellcheck="false">
+^XA
+^PW464
+^LL320
+^FO16,16^A0N,17,17^FB432,1,0,L,0^FDСОКИ^FS
+^FO16,48^A0N,25,25^FB432,1,0,L,0^FD{{product.printName}}^FS
+^FO16,92^GB432,0,2^FS
+^FO16,112^A0N,14,14^FB216,1,0,L,0^FDИзготовлено^FS
+^FO16,140^A0N,20,20^FB216,1,0,L,0^FD{{date}}^FS
+^FO16,184^A0N,14,14^FB216,1,0,L,0^FDГоден до^FS
+^FO16,212^A0N,20,20^FB216,1,0,L,0^FD{{expiry}}^FS
+^FO16,268^A0N,14,14^FB216,1,0,L,0^FD{{product.gtin}}^FS
+^FO248,104^BXN,192^FD{{km.code}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="juices/unit-75x120">
+        <h2>Соки · 75 × 120 мм</h2>
+        <p>Дубликат товара · Data Matrix · группа 23</p>
+        <div class="preview">
+          <img src="juices/unit-75x120.png" alt="Образец Соки 75 на 120 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="juices/unit-75x120.zpl" download>Скачать код</a> ·
+          <a href="juices/unit-75x120.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код juices/unit-75x120" spellcheck="false">
+^XA
+^PW599
+^LL959
+^FO32,32^A0N,25,25^FB535,1,0,L,0^FDСОКИ^FS
+^FO32,96^A0N,37,37^FB535,1,0,L,0^FD{{product.printName}}^FS
+^FO32,176^GB535,0,2^FS
+^FO32,208^A0N,20,20^FB535,1,0,L,0^FDGTIN^FS
+^FO32,248^A0N,31,31^FB535,1,0,L,0^FD{{product.gtin}}^FS
+^FO32,328^A0N,20,20^FB256,1,0,L,0^FDИзготовлено^FS
+^FO312,328^A0N,20,20^FB256,1,0,L,0^FDГоден до^FS
+^FO32,376^A0N,28,28^FB256,1,0,L,0^FD{{date}}^FS
+^FO312,376^A0N,28,28^FB256,1,0,L,0^FD{{expiry}}^FS
+^FO32,472^A0N,20,20^FB535,1,0,L,0^FDСмена^FS
+^FO32,519^A0N,28,28^FB535,1,0,L,0^FD{{shift.no}}^FS
+^FO156,623^BXN,288^FD{{km.code}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="juices/box-58x40">
+        <h2>Соки · 58 × 40 мм</h2>
+        <p>Коробка · SSCC · группа 23</p>
+        <div class="preview"><img src="juices/box-58x40.png" alt="Образец Соки 58 на 40 мм" /></div>
+        <p>
+          <a class="download-code" href="juices/box-58x40.zpl" download>Скачать код</a> ·
+          <a href="juices/box-58x40.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код juices/box-58x40" spellcheck="false">
+^XA
+^PW464
+^LL320
+^FO16,12^A0N,14,14^FB432,1,0,L,0^FDСОКИ^FS
+^FO16,40^A0N,23,23^FB432,1,0,L,0^FD{{product.printName}}^FS
+^FO16,80^GB432,0,2^FS
+^FO16,92^A0N,13,13^FB144,1,0,L,0^FDИзготовлено^FS
+^FO176,92^A0N,13,13^FB144,1,0,L,0^FDГоден до^FS
+^FO336,92^A0N,13,13^FB112,1,0,L,0^FDВ коробе^FS
+^FO16,120^A0N,17,17^FB144,1,0,L,0^FD{{date}}^FS
+^FO176,120^A0N,17,17^FB144,1,0,L,0^FD{{expiry}}^FS
+^FO336,120^A0N,17,17^FB112,1,0,L,0^FD{{qty}}^FS
+^FO16,168^A0N,14,14^FB64,1,0,L,0^FDGTIN^FS
+^FO96,168^A0N,14,14^FB352,1,0,L,0^FD{{product.gtin}}^FS
+^FO76,208^BY2^BCN,56,N,N,N^FD{{sscc}}^FS
+^FO16,280^A0N,17,17^FB432,1,0,C,0^FD{{sscc}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="juices/box-75x120">
+        <h2>Соки · 75 × 120 мм</h2>
+        <p>Коробка · SSCC · группа 23</p>
+        <div class="preview">
+          <img src="juices/box-75x120.png" alt="Образец Соки 75 на 120 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="juices/box-75x120.zpl" download>Скачать код</a> ·
+          <a href="juices/box-75x120.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код juices/box-75x120" spellcheck="false">
+^XA
+^PW599
+^LL959
+^FO32,32^A0N,25,25^FB535,1,0,L,0^FDСОКИ^FS
+^FO32,96^A0N,37,37^FB535,1,0,L,0^FD{{product.printName}}^FS
+^FO32,192^GB535,0,2^FS
+^FO32,240^A0N,20,20^FB236,1,0,L,0^FDИзготовлено^FS
+^FO300,240^A0N,20,20^FB236,1,0,L,0^FDГоден до^FS
+^FO32,293^A0N,28,28^FB236,1,0,L,0^FD{{date}}^FS
+^FO300,293^A0N,28,28^FB236,1,0,L,0^FD{{expiry}}^FS
+^FO32,412^A0N,20,20^FB236,1,0,L,0^FDВ коробе^FS
+^FO300,412^A0N,20,20^FB236,1,0,L,0^FDСмена^FS
+^FO32,465^A0N,28,28^FB236,1,0,L,0^FD{{qty}}^FS
+^FO300,465^A0N,28,28^FB236,1,0,L,0^FD{{shift.no}}^FS
+^FO32,575^A0N,20,20^FB535,1,0,L,0^FDGTIN^FS
+^FO32,628^A0N,28,28^FB535,1,0,L,0^FD{{product.gtin}}^FS
+^FO66,729^BY3^BCN,115,N,N,N^FD{{sscc}}^FS
+^FO32,873^A0N,28,28^FB535,1,0,C,0^FD{{sscc}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="juices/box-100x100">
+        <h2>Соки · 100 × 100 мм</h2>
+        <p>Коробка · SSCC · группа 23</p>
+        <div class="preview">
+          <img src="juices/box-100x100.png" alt="Образец Соки 100 на 100 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="juices/box-100x100.zpl" download>Скачать код</a> ·
+          <a href="juices/box-100x100.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код juices/box-100x100" spellcheck="false">
+^XA
+^PW799
+^LL799
+^FO32,32^A0N,25,25^FB735,1,0,L,0^FDСОКИ^FS
+^FO32,80^A0N,37,37^FB735,1,0,L,0^FD{{product.printName}}^FS
+^FO32,160^GB735,0,2^FS
+^FO32,200^A0N,20,20^FB336,1,0,L,0^FDИзготовлено^FS
+^FO400,200^A0N,20,20^FB336,1,0,L,0^FDГоден до^FS
+^FO32,244^A0N,28,28^FB336,1,0,L,0^FD{{date}}^FS
+^FO400,244^A0N,28,28^FB336,1,0,L,0^FD{{expiry}}^FS
+^FO32,344^A0N,20,20^FB336,1,0,L,0^FDВ коробе^FS
+^FO400,344^A0N,20,20^FB336,1,0,L,0^FDСмена^FS
+^FO32,388^A0N,28,28^FB336,1,0,L,0^FD{{qty}}^FS
+^FO400,388^A0N,28,28^FB336,1,0,L,0^FD{{shift.no}}^FS
+^FO32,480^A0N,20,20^FB735,1,0,L,0^FDGTIN^FS
+^FO32,523^A0N,28,28^FB735,1,0,L,0^FD{{product.gtin}}^FS
+^FO88,607^BY4^BCN,96,N,N,N^FD{{sscc}}^FS
+^FO32,727^A0N,28,28^FB735,1,0,C,0^FD{{sscc}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="juices/box-100x150">
+        <h2>Соки · 100 × 150 мм</h2>
+        <p>Коробка · SSCC · группа 23</p>
+        <div class="preview">
+          <img src="juices/box-100x150.png" alt="Образец Соки 100 на 150 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="juices/box-100x150.zpl" download>Скачать код</a> ·
+          <a href="juices/box-100x150.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код juices/box-100x150" spellcheck="false">
+^XA
+^PW799
+^LL1199
+^FO32,32^A0N,25,25^FB735,1,0,L,0^FDСОКИ^FS
+^FO32,120^A0N,37,37^FB735,1,0,L,0^FD{{product.printName}}^FS
+^FO32,240^GB735,0,2^FS
+^FO32,300^A0N,20,20^FB336,1,0,L,0^FDИзготовлено^FS
+^FO400,300^A0N,20,20^FB336,1,0,L,0^FDГоден до^FS
+^FO32,366^A0N,28,28^FB336,1,0,L,0^FD{{date}}^FS
+^FO400,366^A0N,28,28^FB336,1,0,L,0^FD{{expiry}}^FS
+^FO32,515^A0N,20,20^FB336,1,0,L,0^FDВ коробе^FS
+^FO400,515^A0N,20,20^FB336,1,0,L,0^FDСмена^FS
+^FO32,581^A0N,28,28^FB336,1,0,L,0^FD{{qty}}^FS
+^FO400,581^A0N,28,28^FB336,1,0,L,0^FD{{shift.no}}^FS
+^FO32,719^A0N,20,20^FB735,1,0,L,0^FDGTIN^FS
+^FO32,785^A0N,28,28^FB735,1,0,L,0^FD{{product.gtin}}^FS
+^FO88,911^BY4^BCN,144,N,N,N^FD{{sscc}}^FS
+^FO32,1091^A0N,28,28^FB735,1,0,C,0^FD{{sscc}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="vegetable-oils/unit-30x20">
+        <h2>Растительные масла · 30 × 20 мм</h2>
+        <p>Дубликат товара · Data Matrix · группа 33</p>
+        <div class="preview">
+          <img src="vegetable-oils/unit-30x20.png" alt="Образец Растительные масла 30 на 20 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="vegetable-oils/unit-30x20.zpl" download>Скачать код</a> ·
+          <a href="vegetable-oils/unit-30x20.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код vegetable-oils/unit-30x20" spellcheck="false">
+^XA
+^PW240
+^LL160
+^FO8,8^BXN,144^FD{{km.code}}^FS
+^FO160,8^A0N,11,11^FB72,1,0,L,0^FDМАСЛО^FS
+^FO160,32^A0N,11,11^FB72,1,0,L,0^FDИзг.:^FS
+^FO160,52^A0N,11,11^FB72,1,0,L,0^FD{{date}}^FS
+^FO160,88^A0N,11,11^FB72,1,0,L,0^FDГоден:^FS
+^FO160,108^A0N,11,11^FB72,1,0,L,0^FD{{expiry}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="vegetable-oils/unit-58x40">
+        <h2>Растительные масла · 58 × 40 мм</h2>
+        <p>Дубликат товара · Data Matrix · группа 33</p>
+        <div class="preview">
+          <img src="vegetable-oils/unit-58x40.png" alt="Образец Растительные масла 58 на 40 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="vegetable-oils/unit-58x40.zpl" download>Скачать код</a> ·
+          <a href="vegetable-oils/unit-58x40.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код vegetable-oils/unit-58x40" spellcheck="false">
+^XA
+^PW464
+^LL320
+^FO16,16^A0N,17,17^FB432,1,0,L,0^FDРАСТИТЕЛЬНЫЕ МАСЛА^FS
+^FO16,48^A0N,25,25^FB432,1,0,L,0^FD{{product.printName}}^FS
+^FO16,92^GB432,0,2^FS
+^FO16,112^A0N,14,14^FB216,1,0,L,0^FDИзготовлено^FS
+^FO16,140^A0N,20,20^FB216,1,0,L,0^FD{{date}}^FS
+^FO16,184^A0N,14,14^FB216,1,0,L,0^FDГоден до^FS
+^FO16,212^A0N,20,20^FB216,1,0,L,0^FD{{expiry}}^FS
+^FO16,268^A0N,14,14^FB216,1,0,L,0^FD{{product.gtin}}^FS
+^FO248,104^BXN,192^FD{{km.code}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="vegetable-oils/unit-75x120">
+        <h2>Растительные масла · 75 × 120 мм</h2>
+        <p>Дубликат товара · Data Matrix · группа 33</p>
+        <div class="preview">
+          <img src="vegetable-oils/unit-75x120.png" alt="Образец Растительные масла 75 на 120 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="vegetable-oils/unit-75x120.zpl" download>Скачать код</a> ·
+          <a href="vegetable-oils/unit-75x120.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код vegetable-oils/unit-75x120" spellcheck="false">
+^XA
+^PW599
+^LL959
+^FO32,32^A0N,25,25^FB535,1,0,L,0^FDРАСТИТЕЛЬНЫЕ МАСЛА^FS
+^FO32,96^A0N,37,37^FB535,1,0,L,0^FD{{product.printName}}^FS
+^FO32,176^GB535,0,2^FS
+^FO32,208^A0N,20,20^FB535,1,0,L,0^FDGTIN^FS
+^FO32,248^A0N,31,31^FB535,1,0,L,0^FD{{product.gtin}}^FS
+^FO32,328^A0N,20,20^FB256,1,0,L,0^FDИзготовлено^FS
+^FO312,328^A0N,20,20^FB256,1,0,L,0^FDГоден до^FS
+^FO32,376^A0N,28,28^FB256,1,0,L,0^FD{{date}}^FS
+^FO312,376^A0N,28,28^FB256,1,0,L,0^FD{{expiry}}^FS
+^FO32,472^A0N,20,20^FB535,1,0,L,0^FDСмена^FS
+^FO32,519^A0N,28,28^FB535,1,0,L,0^FD{{shift.no}}^FS
+^FO156,623^BXN,288^FD{{km.code}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="vegetable-oils/box-58x40">
+        <h2>Растительные масла · 58 × 40 мм</h2>
+        <p>Коробка · SSCC · группа 33</p>
+        <div class="preview">
+          <img src="vegetable-oils/box-58x40.png" alt="Образец Растительные масла 58 на 40 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="vegetable-oils/box-58x40.zpl" download>Скачать код</a> ·
+          <a href="vegetable-oils/box-58x40.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код vegetable-oils/box-58x40" spellcheck="false">
+^XA
+^PW464
+^LL320
+^FO16,12^A0N,14,14^FB432,1,0,L,0^FDРАСТИТЕЛЬНЫЕ МАСЛА^FS
+^FO16,40^A0N,23,23^FB432,1,0,L,0^FD{{product.printName}}^FS
+^FO16,80^GB432,0,2^FS
+^FO16,92^A0N,13,13^FB144,1,0,L,0^FDИзготовлено^FS
+^FO176,92^A0N,13,13^FB144,1,0,L,0^FDГоден до^FS
+^FO336,92^A0N,13,13^FB112,1,0,L,0^FDВ коробе^FS
+^FO16,120^A0N,17,17^FB144,1,0,L,0^FD{{date}}^FS
+^FO176,120^A0N,17,17^FB144,1,0,L,0^FD{{expiry}}^FS
+^FO336,120^A0N,17,17^FB112,1,0,L,0^FD{{qty}}^FS
+^FO16,168^A0N,14,14^FB64,1,0,L,0^FDGTIN^FS
+^FO96,168^A0N,14,14^FB352,1,0,L,0^FD{{product.gtin}}^FS
+^FO76,208^BY2^BCN,56,N,N,N^FD{{sscc}}^FS
+^FO16,280^A0N,17,17^FB432,1,0,C,0^FD{{sscc}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="vegetable-oils/box-75x120">
+        <h2>Растительные масла · 75 × 120 мм</h2>
+        <p>Коробка · SSCC · группа 33</p>
+        <div class="preview">
+          <img src="vegetable-oils/box-75x120.png" alt="Образец Растительные масла 75 на 120 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="vegetable-oils/box-75x120.zpl" download>Скачать код</a> ·
+          <a href="vegetable-oils/box-75x120.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код vegetable-oils/box-75x120" spellcheck="false">
+^XA
+^PW599
+^LL959
+^FO32,32^A0N,25,25^FB535,1,0,L,0^FDРАСТИТЕЛЬНЫЕ МАСЛА^FS
+^FO32,96^A0N,37,37^FB535,1,0,L,0^FD{{product.printName}}^FS
+^FO32,192^GB535,0,2^FS
+^FO32,240^A0N,20,20^FB236,1,0,L,0^FDИзготовлено^FS
+^FO300,240^A0N,20,20^FB236,1,0,L,0^FDГоден до^FS
+^FO32,293^A0N,28,28^FB236,1,0,L,0^FD{{date}}^FS
+^FO300,293^A0N,28,28^FB236,1,0,L,0^FD{{expiry}}^FS
+^FO32,412^A0N,20,20^FB236,1,0,L,0^FDВ коробе^FS
+^FO300,412^A0N,20,20^FB236,1,0,L,0^FDСмена^FS
+^FO32,465^A0N,28,28^FB236,1,0,L,0^FD{{qty}}^FS
+^FO300,465^A0N,28,28^FB236,1,0,L,0^FD{{shift.no}}^FS
+^FO32,575^A0N,20,20^FB535,1,0,L,0^FDGTIN^FS
+^FO32,628^A0N,28,28^FB535,1,0,L,0^FD{{product.gtin}}^FS
+^FO66,729^BY3^BCN,115,N,N,N^FD{{sscc}}^FS
+^FO32,873^A0N,28,28^FB535,1,0,C,0^FD{{sscc}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="vegetable-oils/box-100x100">
+        <h2>Растительные масла · 100 × 100 мм</h2>
+        <p>Коробка · SSCC · группа 33</p>
+        <div class="preview">
+          <img
+            src="vegetable-oils/box-100x100.png"
+            alt="Образец Растительные масла 100 на 100 мм"
+          />
+        </div>
+        <p>
+          <a class="download-code" href="vegetable-oils/box-100x100.zpl" download>Скачать код</a> ·
+          <a href="vegetable-oils/box-100x100.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код vegetable-oils/box-100x100" spellcheck="false">
+^XA
+^PW799
+^LL799
+^FO32,32^A0N,25,25^FB735,1,0,L,0^FDРАСТИТЕЛЬНЫЕ МАСЛА^FS
+^FO32,80^A0N,37,37^FB735,1,0,L,0^FD{{product.printName}}^FS
+^FO32,160^GB735,0,2^FS
+^FO32,200^A0N,20,20^FB336,1,0,L,0^FDИзготовлено^FS
+^FO400,200^A0N,20,20^FB336,1,0,L,0^FDГоден до^FS
+^FO32,244^A0N,28,28^FB336,1,0,L,0^FD{{date}}^FS
+^FO400,244^A0N,28,28^FB336,1,0,L,0^FD{{expiry}}^FS
+^FO32,344^A0N,20,20^FB336,1,0,L,0^FDВ коробе^FS
+^FO400,344^A0N,20,20^FB336,1,0,L,0^FDСмена^FS
+^FO32,388^A0N,28,28^FB336,1,0,L,0^FD{{qty}}^FS
+^FO400,388^A0N,28,28^FB336,1,0,L,0^FD{{shift.no}}^FS
+^FO32,480^A0N,20,20^FB735,1,0,L,0^FDGTIN^FS
+^FO32,523^A0N,28,28^FB735,1,0,L,0^FD{{product.gtin}}^FS
+^FO88,607^BY4^BCN,96,N,N,N^FD{{sscc}}^FS
+^FO32,727^A0N,28,28^FB735,1,0,C,0^FD{{sscc}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="vegetable-oils/box-100x150">
+        <h2>Растительные масла · 100 × 150 мм</h2>
+        <p>Коробка · SSCC · группа 33</p>
+        <div class="preview">
+          <img
+            src="vegetable-oils/box-100x150.png"
+            alt="Образец Растительные масла 100 на 150 мм"
+          />
+        </div>
+        <p>
+          <a class="download-code" href="vegetable-oils/box-100x150.zpl" download>Скачать код</a> ·
+          <a href="vegetable-oils/box-100x150.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код vegetable-oils/box-100x150" spellcheck="false">
+^XA
+^PW799
+^LL1199
+^FO32,32^A0N,25,25^FB735,1,0,L,0^FDРАСТИТЕЛЬНЫЕ МАСЛА^FS
+^FO32,120^A0N,37,37^FB735,1,0,L,0^FD{{product.printName}}^FS
+^FO32,240^GB735,0,2^FS
+^FO32,300^A0N,20,20^FB336,1,0,L,0^FDИзготовлено^FS
+^FO400,300^A0N,20,20^FB336,1,0,L,0^FDГоден до^FS
+^FO32,366^A0N,28,28^FB336,1,0,L,0^FD{{date}}^FS
+^FO400,366^A0N,28,28^FB336,1,0,L,0^FD{{expiry}}^FS
+^FO32,515^A0N,20,20^FB336,1,0,L,0^FDВ коробе^FS
+^FO400,515^A0N,20,20^FB336,1,0,L,0^FDСмена^FS
+^FO32,581^A0N,28,28^FB336,1,0,L,0^FD{{qty}}^FS
+^FO400,581^A0N,28,28^FB336,1,0,L,0^FD{{shift.no}}^FS
+^FO32,719^A0N,20,20^FB735,1,0,L,0^FDGTIN^FS
+^FO32,785^A0N,28,28^FB735,1,0,L,0^FD{{product.gtin}}^FS
+^FO88,911^BY4^BCN,144,N,N,N^FD{{sscc}}^FS
+^FO32,1091^A0N,28,28^FB735,1,0,C,0^FD{{sscc}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="cosmetics/unit-30x20">
+        <h2>Косметика · 30 × 20 мм</h2>
+        <p>Дубликат товара · Data Matrix · группа 35</p>
+        <div class="preview">
+          <img src="cosmetics/unit-30x20.png" alt="Образец Косметика 30 на 20 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="cosmetics/unit-30x20.zpl" download>Скачать код</a> ·
+          <a href="cosmetics/unit-30x20.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код cosmetics/unit-30x20" spellcheck="false">
+^XA
+^PW240
+^LL160
+^FO8,8^BXN,144^FD{{km.code}}^FS
+^FO160,8^A0N,11,11^FB72,1,0,L,0^FDКОСМ.^FS
+^FO160,32^A0N,11,11^FB72,1,0,L,0^FDИзг.:^FS
+^FO160,52^A0N,11,11^FB72,1,0,L,0^FD{{date}}^FS
+^FO160,88^A0N,11,11^FB72,1,0,L,0^FDГоден:^FS
+^FO160,108^A0N,11,11^FB72,1,0,L,0^FD{{expiry}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="cosmetics/unit-58x40">
+        <h2>Косметика · 58 × 40 мм</h2>
+        <p>Дубликат товара · Data Matrix · группа 35</p>
+        <div class="preview">
+          <img src="cosmetics/unit-58x40.png" alt="Образец Косметика 58 на 40 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="cosmetics/unit-58x40.zpl" download>Скачать код</a> ·
+          <a href="cosmetics/unit-58x40.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код cosmetics/unit-58x40" spellcheck="false">
+^XA
+^PW464
+^LL320
+^FO16,16^A0N,17,17^FB432,1,0,L,0^FDКОСМЕТИКА^FS
+^FO16,48^A0N,25,25^FB432,1,0,L,0^FD{{product.printName}}^FS
+^FO16,92^GB432,0,2^FS
+^FO16,112^A0N,14,14^FB216,1,0,L,0^FDИзготовлено^FS
+^FO16,140^A0N,20,20^FB216,1,0,L,0^FD{{date}}^FS
+^FO16,184^A0N,14,14^FB216,1,0,L,0^FDГоден до^FS
+^FO16,212^A0N,20,20^FB216,1,0,L,0^FD{{expiry}}^FS
+^FO16,268^A0N,14,14^FB216,1,0,L,0^FD{{product.gtin}}^FS
+^FO248,104^BXN,192^FD{{km.code}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="cosmetics/unit-75x120">
+        <h2>Косметика · 75 × 120 мм</h2>
+        <p>Дубликат товара · Data Matrix · группа 35</p>
+        <div class="preview">
+          <img src="cosmetics/unit-75x120.png" alt="Образец Косметика 75 на 120 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="cosmetics/unit-75x120.zpl" download>Скачать код</a> ·
+          <a href="cosmetics/unit-75x120.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код cosmetics/unit-75x120" spellcheck="false">
+^XA
+^PW599
+^LL959
+^FO32,32^A0N,25,25^FB535,1,0,L,0^FDКОСМЕТИКА^FS
+^FO32,96^A0N,37,37^FB535,1,0,L,0^FD{{product.printName}}^FS
+^FO32,176^GB535,0,2^FS
+^FO32,208^A0N,20,20^FB535,1,0,L,0^FDGTIN^FS
+^FO32,248^A0N,31,31^FB535,1,0,L,0^FD{{product.gtin}}^FS
+^FO32,328^A0N,20,20^FB256,1,0,L,0^FDИзготовлено^FS
+^FO312,328^A0N,20,20^FB256,1,0,L,0^FDГоден до^FS
+^FO32,376^A0N,28,28^FB256,1,0,L,0^FD{{date}}^FS
+^FO312,376^A0N,28,28^FB256,1,0,L,0^FD{{expiry}}^FS
+^FO32,472^A0N,20,20^FB535,1,0,L,0^FDСмена^FS
+^FO32,519^A0N,28,28^FB535,1,0,L,0^FD{{shift.no}}^FS
+^FO156,623^BXN,288^FD{{km.code}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="cosmetics/box-58x40">
+        <h2>Косметика · 58 × 40 мм</h2>
+        <p>Коробка · SSCC · группа 35</p>
+        <div class="preview">
+          <img src="cosmetics/box-58x40.png" alt="Образец Косметика 58 на 40 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="cosmetics/box-58x40.zpl" download>Скачать код</a> ·
+          <a href="cosmetics/box-58x40.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код cosmetics/box-58x40" spellcheck="false">
+^XA
+^PW464
+^LL320
+^FO16,12^A0N,14,14^FB432,1,0,L,0^FDКОСМЕТИКА^FS
+^FO16,40^A0N,23,23^FB432,1,0,L,0^FD{{product.printName}}^FS
+^FO16,80^GB432,0,2^FS
+^FO16,92^A0N,13,13^FB144,1,0,L,0^FDИзготовлено^FS
+^FO176,92^A0N,13,13^FB144,1,0,L,0^FDГоден до^FS
+^FO336,92^A0N,13,13^FB112,1,0,L,0^FDВ коробе^FS
+^FO16,120^A0N,17,17^FB144,1,0,L,0^FD{{date}}^FS
+^FO176,120^A0N,17,17^FB144,1,0,L,0^FD{{expiry}}^FS
+^FO336,120^A0N,17,17^FB112,1,0,L,0^FD{{qty}}^FS
+^FO16,168^A0N,14,14^FB64,1,0,L,0^FDGTIN^FS
+^FO96,168^A0N,14,14^FB352,1,0,L,0^FD{{product.gtin}}^FS
+^FO76,208^BY2^BCN,56,N,N,N^FD{{sscc}}^FS
+^FO16,280^A0N,17,17^FB432,1,0,C,0^FD{{sscc}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="cosmetics/box-75x120">
+        <h2>Косметика · 75 × 120 мм</h2>
+        <p>Коробка · SSCC · группа 35</p>
+        <div class="preview">
+          <img src="cosmetics/box-75x120.png" alt="Образец Косметика 75 на 120 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="cosmetics/box-75x120.zpl" download>Скачать код</a> ·
+          <a href="cosmetics/box-75x120.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код cosmetics/box-75x120" spellcheck="false">
+^XA
+^PW599
+^LL959
+^FO32,32^A0N,25,25^FB535,1,0,L,0^FDКОСМЕТИКА^FS
+^FO32,96^A0N,37,37^FB535,1,0,L,0^FD{{product.printName}}^FS
+^FO32,192^GB535,0,2^FS
+^FO32,240^A0N,20,20^FB236,1,0,L,0^FDИзготовлено^FS
+^FO300,240^A0N,20,20^FB236,1,0,L,0^FDГоден до^FS
+^FO32,293^A0N,28,28^FB236,1,0,L,0^FD{{date}}^FS
+^FO300,293^A0N,28,28^FB236,1,0,L,0^FD{{expiry}}^FS
+^FO32,412^A0N,20,20^FB236,1,0,L,0^FDВ коробе^FS
+^FO300,412^A0N,20,20^FB236,1,0,L,0^FDСмена^FS
+^FO32,465^A0N,28,28^FB236,1,0,L,0^FD{{qty}}^FS
+^FO300,465^A0N,28,28^FB236,1,0,L,0^FD{{shift.no}}^FS
+^FO32,575^A0N,20,20^FB535,1,0,L,0^FDGTIN^FS
+^FO32,628^A0N,28,28^FB535,1,0,L,0^FD{{product.gtin}}^FS
+^FO66,729^BY3^BCN,115,N,N,N^FD{{sscc}}^FS
+^FO32,873^A0N,28,28^FB535,1,0,C,0^FD{{sscc}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="cosmetics/box-100x100">
+        <h2>Косметика · 100 × 100 мм</h2>
+        <p>Коробка · SSCC · группа 35</p>
+        <div class="preview">
+          <img src="cosmetics/box-100x100.png" alt="Образец Косметика 100 на 100 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="cosmetics/box-100x100.zpl" download>Скачать код</a> ·
+          <a href="cosmetics/box-100x100.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код cosmetics/box-100x100" spellcheck="false">
+^XA
+^PW799
+^LL799
+^FO32,32^A0N,25,25^FB735,1,0,L,0^FDКОСМЕТИКА^FS
+^FO32,80^A0N,37,37^FB735,1,0,L,0^FD{{product.printName}}^FS
+^FO32,160^GB735,0,2^FS
+^FO32,200^A0N,20,20^FB336,1,0,L,0^FDИзготовлено^FS
+^FO400,200^A0N,20,20^FB336,1,0,L,0^FDГоден до^FS
+^FO32,244^A0N,28,28^FB336,1,0,L,0^FD{{date}}^FS
+^FO400,244^A0N,28,28^FB336,1,0,L,0^FD{{expiry}}^FS
+^FO32,344^A0N,20,20^FB336,1,0,L,0^FDВ коробе^FS
+^FO400,344^A0N,20,20^FB336,1,0,L,0^FDСмена^FS
+^FO32,388^A0N,28,28^FB336,1,0,L,0^FD{{qty}}^FS
+^FO400,388^A0N,28,28^FB336,1,0,L,0^FD{{shift.no}}^FS
+^FO32,480^A0N,20,20^FB735,1,0,L,0^FDGTIN^FS
+^FO32,523^A0N,28,28^FB735,1,0,L,0^FD{{product.gtin}}^FS
+^FO88,607^BY4^BCN,96,N,N,N^FD{{sscc}}^FS
+^FO32,727^A0N,28,28^FB735,1,0,C,0^FD{{sscc}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+      <article id="cosmetics/box-100x150">
+        <h2>Косметика · 100 × 150 мм</h2>
+        <p>Коробка · SSCC · группа 35</p>
+        <div class="preview">
+          <img src="cosmetics/box-100x150.png" alt="Образец Косметика 100 на 150 мм" />
+        </div>
+        <p>
+          <a class="download-code" href="cosmetics/box-100x150.zpl" download>Скачать код</a> ·
+          <a href="cosmetics/box-100x150.png">Открыть PNG</a>
+        </p>
+        <details>
+          <summary>Код импорта</summary>
+          <button type="button">Копировать код</button
+          ><textarea readonly aria-label="Код cosmetics/box-100x150" spellcheck="false">
+^XA
+^PW799
+^LL1199
+^FO32,32^A0N,25,25^FB735,1,0,L,0^FDКОСМЕТИКА^FS
+^FO32,120^A0N,37,37^FB735,1,0,L,0^FD{{product.printName}}^FS
+^FO32,240^GB735,0,2^FS
+^FO32,300^A0N,20,20^FB336,1,0,L,0^FDИзготовлено^FS
+^FO400,300^A0N,20,20^FB336,1,0,L,0^FDГоден до^FS
+^FO32,366^A0N,28,28^FB336,1,0,L,0^FD{{date}}^FS
+^FO400,366^A0N,28,28^FB336,1,0,L,0^FD{{expiry}}^FS
+^FO32,515^A0N,20,20^FB336,1,0,L,0^FDВ коробе^FS
+^FO400,515^A0N,20,20^FB336,1,0,L,0^FDСмена^FS
+^FO32,581^A0N,28,28^FB336,1,0,L,0^FD{{qty}}^FS
+^FO400,581^A0N,28,28^FB336,1,0,L,0^FD{{shift.no}}^FS
+^FO32,719^A0N,20,20^FB735,1,0,L,0^FDGTIN^FS
+^FO32,785^A0N,28,28^FB735,1,0,L,0^FD{{product.gtin}}^FS
+^FO88,911^BY4^BCN,144,N,N,N^FD{{sscc}}^FS
+^FO32,1091^A0N,28,28^FB735,1,0,C,0^FD{{sscc}}^FS
+^XZ
+</textarea
+          ><span role="status"></span>
+        </details>
+      </article>
+    </main>
+    <footer>
+      Макеты для рабочих наклеек. Состав, INCI и другая полная потребительская информация в них не
+      предусмотрены. Перед использованием — пробная печать и проверка сканером.
+    </footer>
+    <script>
+      const nameCards = Array.from(document.querySelectorAll("article"), (article) => ({
+        input: article.querySelector("textarea"),
+        source: article.querySelector("textarea").value,
+        link: article.querySelector(".download-code"),
+        filename: article.querySelector(".download-code").getAttribute("href").split("/").pop(),
+        status: article.querySelector("[role=status]"),
+        downloadUrl: null,
+      }));
+      function updateNameField() {
+        const field = document.querySelector('input[name="name-field"]:checked').value;
+        for (const card of nameCards) {
+          const code = card.source.replaceAll("{{product.printName}}", "{{" + field + "}}");
+          card.input.value = code;
+          card.status.textContent = "";
+          if (card.downloadUrl) URL.revokeObjectURL(card.downloadUrl);
+          card.downloadUrl = URL.createObjectURL(
+            new Blob([code], { type: "text/plain;charset=utf-8" }),
+          );
+          card.link.href = card.downloadUrl;
+          const suffix = field === "product.name" ? "full-name" : "print-name";
+          card.link.download = card.source.includes("{{product.printName}}")
+            ? card.filename.replace(".zpl", "-" + suffix + ".zpl")
+            : card.filename;
+        }
+      }
+      document
+        .querySelectorAll('input[name="name-field"]')
+        .forEach((input) => input.addEventListener("change", updateNameField));
+      updateNameField();
+      document.querySelectorAll("button").forEach((button) =>
+        button.addEventListener("click", async () => {
+          const container = button.closest("details");
+          const input = container.querySelector("textarea");
+          const status = container.querySelector("[role=status]");
+          try {
+            await navigator.clipboard.writeText(input.value);
+            status.textContent = "Код скопирован";
+          } catch {
+            input.focus();
+            input.select();
+            status.textContent = "Код выделен — нажмите Ctrl+C или Cmd+C";
+          }
+        }),
+      );
+    </script>
+  </body>
+</html>

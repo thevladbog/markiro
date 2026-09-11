@@ -1038,6 +1038,23 @@ it("builds a 58 by 40 product duplicate template when its purpose is selected", 
   });
 });
 
+it("imports and saves a duplicate using the whole Data Matrix square", async () => {
+  const fetchMock = stubCreateFetch("imported-duplicate");
+  renderCreateFlow();
+  await chooseOption(userEvent.setup(), "Назначение", "Дубликат товара");
+  importZpl("^XA\n^PW464\n^LL320\n^FO256,64^BXN,176^FD{{km.code}}^FS\n^XZ");
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+  await waitFor(() =>
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true),
+  );
+  const call = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+  const body = JSON.parse(String(call?.[1]?.body));
+  expect(body.purpose).toBe("product_duplicate");
+  expect(body.spec.elements).toEqual([
+    expect.objectContaining({ format: "datamatrix", data: "km.code", sizeMm: (176 * 25.4) / 203 }),
+  ]);
+});
+
 it("refuses to save an imported layout without a product code as a product duplicate", async () => {
   const fetchMock = stubCreateFetch("invalid");
   renderCreateFlow();
