@@ -42,7 +42,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.markiro.handheld.R
 import app.markiro.handheld.core.design.Banner
+import app.markiro.handheld.core.design.FullScreenState
 import app.markiro.handheld.core.design.IconAction
+import app.markiro.handheld.core.design.StateAction
 import app.markiro.handheld.core.km.KmCodec
 import app.markiro.handheld.core.design.MarkiroChip
 import app.markiro.handheld.core.design.MarkiroSizes
@@ -336,6 +338,27 @@ private fun LastScanStrip(last: LastScan?) {
             Text(stringResource(last.verdict.label()), style = t.strong.copy(fontSize = 16.sp), color = colors.fg)
             Text(last.tail, style = t.code.copy(fontSize = 16.sp), color = c.fg1)
         }
+    }
+}
+
+/**
+ * Offered when the shift's accepted count crosses its plan.
+ *
+ * Drawn over the work screen rather than as a route of its own, like the box
+ * close and duplicate prompts: the scan router keeps recording underneath, so
+ * an operator who carries on packing loses nothing while this is up.
+ */
+@Composable
+fun PlanReachedScreen(total: Int, plan: Int, onClose: () -> Unit, onContinue: () -> Unit) {
+    Box(Modifier.fillMaxSize().background(MarkiroTheme.colors.surfacePage)) {
+        FullScreenState(
+            icon = Icons.Outlined.CheckCircle,
+            title = stringResource(R.string.work_plan_reached_title),
+            text = stringResource(R.string.work_plan_reached_text, total, plan),
+            primary = StateAction(stringResource(R.string.work_plan_reached_close), onClose),
+            secondary = StateAction(stringResource(R.string.work_plan_reached_continue), onContinue),
+            tone = Tone.Ok,
+        )
     }
 }
 
