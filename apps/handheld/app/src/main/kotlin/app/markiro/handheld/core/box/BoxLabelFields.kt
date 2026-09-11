@@ -136,6 +136,9 @@ fun boxLabelFields(input: BoxLabelInput, zone: ZoneId = ZoneId.systemDefault()):
         LabelField.DATE to formatLabelDate(effectiveDate),
         LabelField.EXPIRY to formatLabelDate(effectiveExpiry),
         LabelField.QTY to input.itemCount.toString(),
+        // A box holds units, not boxes. Empty rather than "0": a zero would
+        // print as «0 кор.» on any template that binds the field.
+        LabelField.QTY_BOXES to "",
         LabelField.OPERATOR to (input.operatorName ?: ""),
         LabelField.COUNTERPARTY_NAME to (input.counterpartyName ?: ""),
     )

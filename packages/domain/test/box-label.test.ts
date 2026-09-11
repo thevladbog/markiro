@@ -65,6 +65,11 @@ describe("boxLabelFields", () => {
     expect(fields.expiry).toBe("");
   });
 
+  it("leaves the box-count field empty: a box holds no boxes", () => {
+    expect(boxLabelFields(base)["qty.boxes"]).toBe("");
+    expect(boxLabelFields(base).qty).toBe("20");
+  });
+
   it("turns absent optionals into empty strings rather than the word null", () => {
     const fields = boxLabelFields({
       ...base,

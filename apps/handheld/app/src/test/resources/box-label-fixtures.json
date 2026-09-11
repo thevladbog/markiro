@@ -107,6 +107,7 @@
         "date": "10.09.2026",
         "expiry": "09.09.2027",
         "qty": "20",
+        "qty.boxes": "",
         "operator": "Иванов И.",
         "counterparty.name": "ООО «Завод»"
       }
@@ -139,6 +140,7 @@
         "date": "10.09.2026",
         "expiry": "09.09.2027",
         "qty": "20",
+        "qty.boxes": "",
         "operator": "Иванов И.",
         "counterparty.name": "ООО «Завод»"
       }
@@ -171,6 +173,7 @@
         "date": "10.09.2026",
         "expiry": "10.09.2026",
         "qty": "20",
+        "qty.boxes": "",
         "operator": "Иванов И.",
         "counterparty.name": "ООО «Завод»"
       }
@@ -203,6 +206,7 @@
         "date": "29.02.2028",
         "expiry": "28.02.2029",
         "qty": "20",
+        "qty.boxes": "",
         "operator": "Иванов И.",
         "counterparty.name": "ООО «Завод»"
       }
@@ -235,6 +239,7 @@
         "date": "31.12.2026",
         "expiry": "29.01.2027",
         "qty": "20",
+        "qty.boxes": "",
         "operator": "Иванов И.",
         "counterparty.name": "ООО «Завод»"
       }
@@ -267,6 +272,7 @@
         "date": "10.09.2026",
         "expiry": "",
         "qty": "20",
+        "qty.boxes": "",
         "operator": "Иванов И.",
         "counterparty.name": "ООО «Завод»"
       }
@@ -299,6 +305,7 @@
         "date": "",
         "expiry": "",
         "qty": "20",
+        "qty.boxes": "",
         "operator": "Иванов И.",
         "counterparty.name": "ООО «Завод»"
       }
@@ -331,6 +338,7 @@
         "date": "10.09.2026",
         "expiry": "09.09.2027",
         "qty": "20",
+        "qty.boxes": "",
         "operator": "Иванов И.",
         "counterparty.name": "ООО «Завод»"
       }
@@ -363,6 +371,7 @@
         "date": "10.09.2026",
         "expiry": "09.09.2027",
         "qty": "20",
+        "qty.boxes": "",
         "operator": "",
         "counterparty.name": ""
       }
@@ -395,6 +404,7 @@
         "date": "10.09.2026",
         "expiry": "09.09.2027",
         "qty": "1",
+        "qty.boxes": "",
         "operator": "Иванов И.",
         "counterparty.name": "ООО «Завод»"
       }
@@ -427,6 +437,7 @@
         "date": "11.09.2026",
         "expiry": "10.09.2027",
         "qty": "20",
+        "qty.boxes": "",
         "operator": "Иванов И.",
         "counterparty.name": "ООО «Завод»"
       }

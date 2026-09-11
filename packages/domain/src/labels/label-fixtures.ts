@@ -62,6 +62,13 @@ const DATA: Record<LabelField, string> = {
   date: "23.07.2026",
   expiry: "19.01.2027",
   qty: "20",
+  // These fixtures are shared with the handheld, so this record is a
+  // CONTRACT, not test-local data: it lands in
+  // `apps/handheld/app/src/test/resources/label-fixtures.json` through
+  // `pnpm --filter @markiro/domain fixtures:labels`. No existing fixture
+  // element binds this field, so adding it changed no emitted ZPL/TSPL bytes
+  // -- only the data record gained a key.
+  "qty.boxes": "12",
   operator: "Smirnov A.",
   "counterparty.name": "Zavod Partner",
 };
