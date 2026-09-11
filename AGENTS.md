@@ -61,9 +61,12 @@ rules; keep shared policies here and detailed procedures beside their code.
   `handheld`, keeps an offline operator roster, and receives scans from the
   vendor scanner service or a keyboard wedge. Gradle project outside the pnpm
   workspace; CI job `handheld-android`.
-- `apps/saas-admin`: platform operator panel for tenants, catalog, billing,
-  acts, payments, offers, legal documents, platform team, and audit. It has its
-  own auth boundary and client; it is not a tenant-admin route set.
+- `apps/saas-admin`: platform operator panel for tenants, catalog, agreements,
+  billing, acts, payments, offers, legal documents, platform team, and audit. It
+  has its own auth boundary and client; it is not a tenant-admin route set.
+  Its principal fixtures derive capabilities from `platformCapabilitiesForRole`;
+  a hard-coded array breaks every suite the next time a capability is added,
+  because `platformPrincipalSchema` requires an exact role match.
 - `apps/landing`: Astro public site with localized content, SEO, the demo form,
   and published legal artifacts.
 - `packages/domain`: shared GS1/KM/GTIN/SSCC validation, label models,
