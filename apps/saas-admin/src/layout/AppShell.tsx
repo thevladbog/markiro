@@ -55,13 +55,16 @@ function AppShellContent() {
         ...(hasCapability("catalog.read")
           ? [item("catalog", t("shell.catalog"), "/catalog", "03")]
           : []),
+        ...(hasCapability("agreements.read")
+          ? [item("agreements", t("shell.agreements"), "/agreements", "04")]
+          : []),
         ...(hasCapability("billing.read")
           ? [
-              item("offers", t("shell.offers"), "/offers", "04"),
-              item("invoices", t("shell.invoices"), "/invoices", "05"),
-              item("acts", t("shell.acts"), "/billing-acts", "06"),
-              item("payments", t("shell.payments"), "/payments", "07"),
-              item("billing-requests", t("shell.billingRequests"), "/billing-requests", "08"),
+              item("offers", t("shell.offers"), "/offers", "05"),
+              item("invoices", t("shell.invoices"), "/invoices", "06"),
+              item("acts", t("shell.acts"), "/billing-acts", "07"),
+              item("payments", t("shell.payments"), "/payments", "08"),
+              item("billing-requests", t("shell.billingRequests"), "/billing-requests", "09"),
             ]
           : []),
       ],
@@ -71,14 +74,14 @@ function AppShellContent() {
       label: t("shell.groups.platform"),
       items: [
         ...(hasCapability("diagnostics.read")
-          ? [item("monitoring", t("shell.monitoring"), "/monitoring", "09")]
+          ? [item("monitoring", t("shell.monitoring"), "/monitoring", "10")]
           : []),
         ...(hasCapability("platformTeam.write")
-          ? [item("team", t("shell.team"), "/team", "10")]
+          ? [item("team", t("shell.team"), "/team", "11")]
           : []),
-        ...(hasCapability("audit.read") ? [item("audit", t("shell.audit"), "/audit", "11")] : []),
+        ...(hasCapability("audit.read") ? [item("audit", t("shell.audit"), "/audit", "12")] : []),
         ...(hasCapability("reports.read")
-          ? [item("reports", t("shell.reports"), "/reports", "12")]
+          ? [item("reports", t("shell.reports"), "/reports", "13")]
           : []),
       ],
     },
@@ -87,7 +90,7 @@ function AppShellContent() {
           {
             id: "settings",
             label: t("shell.groups.settings"),
-            items: [item("organization", t("shell.organization"), "/settings/organization", "13")],
+            items: [item("organization", t("shell.organization"), "/settings/organization", "14")],
           },
         ]
       : []),

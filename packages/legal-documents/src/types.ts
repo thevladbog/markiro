@@ -18,7 +18,8 @@ export type LegalDocumentCode =
   | "MKR-INS-07"
   | "MKR-INS-08"
   | "MKR-INS-09"
-  | "MKR-INS-10";
+  | "MKR-INS-10"
+  | "MKR-INS-11";
 
 export type LegalDocumentKind = "legal" | "template" | "instruction";
 
@@ -59,6 +60,9 @@ export interface LegalDocumentLocaleContent {
     readonly id: string;
     readonly heading: string;
     readonly blocks: readonly LegalBlock[];
+    // Multi-part documents whose parts are signed separately (a contract and
+    // its appendices) must not start a part mid-page.
+    readonly startsPage?: boolean;
   }[];
 }
 

@@ -994,6 +994,10 @@ describe("repack inventory work screen", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Применить дату" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // The dialog leaving the DOM is a commit; re-subscribing the scanner is the
+    // passive effect after it. `emit` on a null listener is a silent no-op, so
+    // a scan sent in that window is dropped and the count never moves.
+    await waitFor(() => expect(scan.active()).toBe(true));
 
     const box = db
       .prepare("SELECT production_date FROM inventory_repack_boxes_mirror LIMIT 1")

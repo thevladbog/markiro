@@ -19,6 +19,8 @@ const ADMIN_CAPABILITIES = [
   "catalog.write",
   "billing.read",
   "billing.write",
+  "agreements.read",
+  "agreements.write",
   "platformTeam.write",
   "audit.read",
   "diagnostics.read",
@@ -32,13 +34,22 @@ describe("platform identity contracts", () => {
   it("accepts every platform role with only its exact capability vocabulary", () => {
     expect(platformCapabilitiesForRole).toEqual({
       platform_admin: ADMIN_CAPABILITIES,
-      support: ["tenants.read", "tenants.write", "catalog.read", "audit.read", "diagnostics.read"],
+      support: [
+        "tenants.read",
+        "tenants.write",
+        "catalog.read",
+        "agreements.read",
+        "audit.read",
+        "diagnostics.read",
+      ],
       accountant: [
         "tenants.read",
         "catalog.read",
         "catalog.write",
         "billing.read",
         "billing.write",
+        "agreements.read",
+        "agreements.write",
         "audit.read",
       ],
     });
@@ -217,5 +228,29 @@ describe("platform identity contracts", () => {
     expect(platformAuditResponseSchema.parse({ items: [], nextOffset: 10_100 }).nextOffset).toBe(
       10_100,
     );
+  });
+});
+
+describe("agreement capabilities", () => {
+  it("gives write access to platform_admin and accountant only", () => {
+    expect(platformCapabilitiesForRole.platform_admin).toContain("agreements.write");
+    expect(platformCapabilitiesForRole.accountant).toContain("agreements.write");
+    expect(platformCapabilitiesForRole.support).not.toContain("agreements.write");
+  });
+
+  it("gives read access to every role", () => {
+    for (const role of ["platform_admin", "support", "accountant"] as const) {
+      expect(platformCapabilitiesForRole[role]).toContain("agreements.read");
+    }
+  });
+
+  it("still rejects a principal whose capabilities do not match its role", () => {
+    const result = platformPrincipalSchema.safeParse({
+      userId: "user-1",
+      role: "support",
+      capabilities: [...platformCapabilitiesForRole.support, "agreements.write"],
+      twoFactorReady: true,
+    });
+    expect(result.success).toBe(false);
   });
 });
