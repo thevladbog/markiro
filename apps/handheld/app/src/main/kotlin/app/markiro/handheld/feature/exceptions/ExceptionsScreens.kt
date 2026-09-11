@@ -166,14 +166,14 @@ fun ExceptionsScreen(state: ExceptionsUi, cb: ExceptionsCallbacks) {
 }
 
 /**
- * One 64 dp action row.
+ * One 64 dp action row, shared with the disassemble and reprint flows.
  *
  * An unavailable row carries its reason in words underneath. A greyed control
  * with no explanation reads as a broken screen, and an operator who cannot tell
  * the two apart stops trusting either.
  */
 @Composable
-private fun ActionRow(
+fun ActionRow(
     icon: ImageVector,
     label: String,
     enabled: Boolean,
