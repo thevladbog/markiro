@@ -311,13 +311,25 @@ export interface ShiftBundleDto {
    * reference-only bundle, which never touches allocation state at all).
    */
   ssccRevokedFrom: number[];
+  /**
+   * This device's pallet serial block (extension digit 1). Non-null only for
+   * a shift with pallets enabled; null for every other reason `sscc` is null
+   * (no issuer prefix, exhausted capacity, read-only subscription), because
+   * the device must still receive its product, templates and roster.
+   */
+  palletSscc: ShiftBundleDto["sscc"];
+  /** `ssccRevokedFrom` for the pallet stream. Always present, `[]` when empty. */
+  palletSsccRevokedFrom: number[];
 }
 
 /**
  * GET /shifts/:id/reference-bundle response. It carries only mirrored
  * reference data and can never allocate or reconcile an SSCC block.
  */
-export type ShiftReferenceBundleDto = Omit<ShiftBundleDto, "sscc"> & { sscc: null };
+export type ShiftReferenceBundleDto = Omit<ShiftBundleDto, "sscc" | "palletSscc"> & {
+  sscc: null;
+  palletSscc: null;
+};
 
 export const productionDateOpenApiSchema = {
   type: "string",
@@ -698,6 +710,8 @@ const shiftBundleRequiredFields = [
   "operators",
   "sscc",
   "ssccRevokedFrom",
+  "palletSscc",
+  "palletSsccRevokedFrom",
 ];
 
 export const shiftBundleOpenApiSchema = {
@@ -713,6 +727,8 @@ export const shiftBundleOpenApiSchema = {
     operators: { type: "array", items: operatorMirrorOpenApiSchema },
     sscc: ssccBundleOpenApiSchema,
     ssccRevokedFrom: { type: "array", items: { type: "integer", minimum: 0 } },
+    palletSscc: ssccBundleOpenApiSchema,
+    palletSsccRevokedFrom: { type: "array", items: { type: "integer", minimum: 0 } },
   },
 };
 
@@ -721,5 +737,6 @@ export const shiftReferenceBundleOpenApiSchema = {
   properties: {
     ...shiftBundleOpenApiSchema.properties,
     sscc: { type: "object", nullable: true, enum: [null] },
+    palletSscc: { type: "object", nullable: true, enum: [null] },
   },
 };

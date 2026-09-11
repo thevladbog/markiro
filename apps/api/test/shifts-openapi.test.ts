@@ -276,6 +276,8 @@ describe("shifts OpenAPI contract", () => {
           "operators",
           "sscc",
           "ssccRevokedFrom",
+          "palletSscc",
+          "palletSsccRevokedFrom",
         ]);
         expectRequired(bundle, [
           "shift",
@@ -286,6 +288,8 @@ describe("shifts OpenAPI contract", () => {
           "operators",
           "sscc",
           "ssccRevokedFrom",
+          "palletSscc",
+          "palletSsccRevokedFrom",
         ]);
         const bundleShift = property(bundle, "shift");
         expectProperties(bundleShift, [...shiftProperties, "labelTemplateId", "labelTemplateName"]);

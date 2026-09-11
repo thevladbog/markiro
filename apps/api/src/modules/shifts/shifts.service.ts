@@ -37,6 +37,7 @@ import { OperatorsService } from "../operators/operators.service";
 import type { ProductImageDescriptor } from "../products/dto";
 import {
   BOX_EXTENSION_DIGIT,
+  PALLET_EXTENSION_DIGIT,
   SsccCapacityExhaustedException,
   SsccService,
 } from "../sscc/sscc.service";
@@ -185,6 +186,13 @@ const CURRENT_PRODUCT_SELECTION = {
  * a burnt serial costs nothing — SSCCs need not be contiguous.
  */
 const BOX_BLOCK_SIZE = 2000;
+/**
+ * A tenth of the box block. A pallet is consumed `palletBoxCapacity` times
+ * more slowly than a box, so 200 matches 2000 boxes' offline reach at a
+ * pallet of ten boxes and exceeds it above that — and a device that never
+ * fills them has not burned 2000 numbers into the sand.
+ */
+const PALLET_BLOCK_SIZE = 200;
 
 @Injectable()
 export class ShiftsService {
@@ -1253,7 +1261,7 @@ export class ShiftsService {
     const allocation =
       referenceBundle.shift.mode === "aggregation" && deviceId
         ? await this.bundleSscc(tenantId, referenceBundle.shift.id, deviceId)
-        : { sscc: null, ssccRevokedFrom: [] };
+        : { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
     return { ...referenceBundle, ...allocation };
   }
 
@@ -1357,6 +1365,8 @@ export class ShiftsService {
       operators,
       sscc: null,
       ssccRevokedFrom: [],
+      palletSscc: null,
+      palletSsccRevokedFrom: [],
     };
   }
 
@@ -1406,31 +1416,40 @@ export class ShiftsService {
    * local pool (`sscc-pool.ts`'s `burnSerial` returning null), so degrading
    * to `sscc: null` here lands the device in that SAME, already-handled
    * state rather than losing the whole bundle over it.
+   *
+   * The pallet block (extension digit 1, Task 7) is layered on top of all of
+   * the above, only for a shift with `palletsEnabled`: it shares the box
+   * block's issuer prefix and transaction, but its own exhaustion degrades
+   * only `palletSscc` to null -- never the whole bundle, and never the box
+   * block already secured in this same call.
    */
   private async bundleSscc(
     tenantId: string,
     shiftId: string,
     deviceId: string,
-  ): Promise<Pick<ShiftBundleDto, "sscc" | "ssccRevokedFrom">> {
+  ): Promise<
+    Pick<ShiftBundleDto, "sscc" | "ssccRevokedFrom" | "palletSscc" | "palletSsccRevokedFrom">
+  > {
     return this.db.transaction(async (tx) => {
       const [shift] = await tx
         .select({
           status: schema.shifts.status,
           mode: schema.shifts.mode,
           openedAt: schema.shifts.openedAt,
+          palletsEnabled: schema.shifts.palletsEnabled,
         })
         .from(schema.shifts)
         .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, shiftId)))
         .for("update");
       if (!shift || shift.status !== "active" || shift.mode !== "aggregation") {
-        return { sscc: null, ssccRevokedFrom: [] };
+        return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
       }
 
       const access = await this.entitlements.resolveRecovery(tenantId, tx, new Date());
       if (access.access === "read_only") {
         const endsAt = access.subscription?.endsAt;
         if (!endsAt || !shift.openedAt || shift.openedAt >= endsAt) {
-          return { sscc: null, ssccRevokedFrom: [] };
+          return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
         }
       }
 
@@ -1448,7 +1467,7 @@ export class ShiftsService {
         this.logger.warn(
           `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
         );
-        return { sscc: null, ssccRevokedFrom: [] };
+        return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
       }
       try {
         const sscc = await this.sscc.allocateForBundle(
@@ -1469,13 +1488,48 @@ export class ShiftsService {
           deviceId,
           tx,
         );
-        return { sscc, ssccRevokedFrom };
+
+        let palletSscc: ShiftBundleDto["palletSscc"] = null;
+        let palletSsccRevokedFrom: number[] = [];
+        if (shift.palletsEnabled) {
+          try {
+            palletSscc = await this.sscc.allocateForBundle(
+              tenantId,
+              issuerPrefix,
+              PALLET_EXTENSION_DIGIT,
+              deviceId,
+              PALLET_BLOCK_SIZE,
+              tx,
+            );
+            // Read AFTER allocation, in the same transaction, for the same
+            // reason the box read is: allocation may have just cut the
+            // replacement for a revoked block, and the two must describe one
+            // consistent moment.
+            palletSsccRevokedFrom = await this.sscc.revokedFromSerials(
+              tenantId,
+              issuerPrefix,
+              PALLET_EXTENSION_DIGIT,
+              deviceId,
+              tx,
+            );
+          } catch (error) {
+            if (!(error instanceof SsccCapacityExhaustedException)) throw error;
+            // Degraded exactly like the box block: the station has a
+            // graceful "no serials" state, and landing it there beats
+            // costing the operator product, templates and roster.
+            this.logger.warn(
+              `Shift ${shiftId} (tenant ${tenantId}) bundle has no pallet serial block -- ${error.message}`,
+            );
+          }
+        }
+
+        return { sscc, ssccRevokedFrom, palletSscc, palletSsccRevokedFrom };
       } catch (error) {
         if (!(error instanceof SsccCapacityExhaustedException)) throw error;
         this.logger.warn(
           `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
         );
-        return { sscc: null, ssccRevokedFrom: [] };
+        return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
       }
     });
   }
