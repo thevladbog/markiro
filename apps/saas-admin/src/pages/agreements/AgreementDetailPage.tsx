@@ -25,6 +25,7 @@ import {
   unlinkAgreementTenant,
   uploadAgreementAttachment,
 } from "./api.js";
+import { AgreementDocumentFormField } from "./AgreementDocumentFormField.js";
 import { AgreementRequisitesForm, fromRequisites } from "./AgreementRequisitesForm.js";
 
 const STATUS_CHIP: Record<AgreementStatus, StatusChipStatus> = {
@@ -192,6 +193,11 @@ export function AgreementDetailPage() {
       />
 
       <h3>{t("agreements.sections.documents")}</h3>
+      {/* Read-only for the same reason as the requisites above: the detail
+          page has no update workflow, and an enabled control whose onChange
+          is discarded would silently lose the choice. The form is picked on
+          the create form. */}
+      <AgreementDocumentFormField value={detail.documentForm} onChange={() => undefined} disabled />
       <Button type="button" onClick={() => render.mutate()} disabled={render.isPending}>
         {t("agreements.detail.renderDraft")}
       </Button>

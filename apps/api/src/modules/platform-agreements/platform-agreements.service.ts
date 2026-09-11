@@ -75,6 +75,7 @@ export class PlatformAgreementsService {
               status: "draft",
               conclusionDate: input.conclusionDate ?? null,
               city: input.city ?? null,
+              documentForm: input.documentForm ?? "ru",
               counterpartyInn: input.counterparty.inn ?? null,
               counterparty: input.counterparty,
               contractor,
@@ -132,6 +133,7 @@ export class PlatformAgreementsService {
             ...(input.number === undefined ? {} : { number: input.number }),
             ...(input.conclusionDate === undefined ? {} : { conclusionDate: input.conclusionDate }),
             ...(input.city === undefined ? {} : { city: input.city }),
+            ...(input.documentForm === undefined ? {} : { documentForm: input.documentForm }),
             ...(input.counterparty === undefined
               ? {}
               : {
@@ -200,6 +202,7 @@ export class PlatformAgreementsService {
                 number: existing.number,
                 conclusionDate: existing.conclusionDate,
                 city: existing.city,
+                documentForm: existing.documentForm,
                 counterparty: existing.counterparty,
                 contractor: existing.contractor,
                 terms: existing.terms,
@@ -471,6 +474,7 @@ function toSummary(row: AgreementRow): AgreementSummary {
     id: row.id,
     number: row.number,
     status: row.status,
+    documentForm: row.documentForm,
     counterpartyName: counterparty.name,
     counterpartyInn: row.counterpartyInn,
     conclusionDate: row.conclusionDate,

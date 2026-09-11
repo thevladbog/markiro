@@ -543,6 +543,7 @@ export type { CommercialReviewIdentity, CatalogPublicationReview } from "./catal
 export {
   AGREEMENT_EDITABLE_STATUSES,
   AGREEMENT_TRANSITIONS,
+  agreementDocumentFormSchema,
   agreementDocumentKindSchema,
   agreementRequisitesSchema,
   agreementSignatorySchema,
@@ -555,6 +556,7 @@ export {
 export type {
   AgreementDetail,
   AgreementDocument,
+  AgreementDocumentForm,
   AgreementListQuery,
   AgreementRequisitesInput,
   AgreementStatus,

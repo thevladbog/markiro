@@ -1729,6 +1729,7 @@
       "counterparty": "Counterparty",
       "inn": "INN",
       "status": "Status",
+      "documentForm": "Form",
       "conclusionDate": "Concluded",
       "tenant": "Tenant",
       "documentKind": "Kind",
@@ -1760,6 +1761,13 @@
       "sole_proprietor": "Sole proprietor",
       "self_employed": "Self-employed",
       "individual": "Individual"
+    },
+    "documentForm": {
+      "label": "Document form",
+      "ru": "Russian",
+      "ru_en": "Bilingual (RU/EN)",
+      "badgeRu": "RU",
+      "badgeRuEn": "RU + EN"
     },
     "sections": {
       "counterparty": "Counterparty",
