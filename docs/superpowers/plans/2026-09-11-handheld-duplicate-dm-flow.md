@@ -131,7 +131,11 @@ function verified(sequence: number, attemptId: string, digest: string) {
 }
 
 function rejected(sequence: number, attemptId: string, reason: "invalid" | "mismatch") {
-  return { ...base(sequence, attemptId), kind: "verification_rejected", reason } as ProductLabelEvent;
+  return {
+    ...base(sequence, attemptId),
+    kind: "verification_rejected",
+    reason,
+  } as ProductLabelEvent;
 }
 
 interface Case {
@@ -202,12 +206,23 @@ export function buildProductLabelFixtures() {
       simple(5, ATTEMPT_2, "sending"),
       simple(6, ATTEMPT_2, "sent"),
     ]),
-    run("a completed job is frozen", "required", [
+    // A verified label can still be damaged or lost afterwards, so the job
+    // takes a new attempt -- and under `required` the reprint drops back to
+    // `pending`, because the new sticker has to be scanned back in its turn.
+    run("a completed job still takes a reprint, which must be verified again", "required", [
       prepared(1, ATTEMPT_1, 1, null),
       simple(2, ATTEMPT_1, "sending"),
       simple(3, ATTEMPT_1, "sent"),
       verified(4, ATTEMPT_1, duplicatePayloadDigest(RAW)),
       prepared(5, ATTEMPT_2, 2, "lost"),
+    ]),
+    // What IS frozen is the verified attempt: nothing may be appended to it.
+    run("a verified attempt takes no further event of its own", "required", [
+      prepared(1, ATTEMPT_1, 1, null),
+      simple(2, ATTEMPT_1, "sending"),
+      simple(3, ATTEMPT_1, "sent"),
+      verified(4, ATTEMPT_1, duplicatePayloadDigest(RAW)),
+      rejected(5, ATTEMPT_1, "mismatch"),
     ]),
     run("a gap in the sequence is refused", "none", [
       prepared(1, ATTEMPT_1, 1, null),
@@ -328,7 +343,9 @@ describe("product label fixtures shared with the handheld", () => {
     const statuses = new Set(fixtures.projection.map((c) => c.projection?.status));
     for (const status of ["prepared", "sending", "awaiting_verification", "completed", "attention"])
       expect(statuses, status).toContain(status);
-    expect(fixtures.projection.filter((c) => c.invalidAt !== null).length).toBeGreaterThanOrEqual(5);
+    expect(fixtures.projection.filter((c) => c.invalidAt !== null).length).toBeGreaterThanOrEqual(
+      5,
+    );
     expect(new Set(fixtures.compare.map((c) => c.result))).toEqual(
       new Set(["match", "mismatch", "invalid"]),
     );
@@ -391,7 +408,7 @@ class ProductLabelFixturesTest {
     @Test
     fun everyProjectionCaseAgrees() {
         val cases = fixtures.getValue("projection").jsonArray
-        assertTrue(cases.size >= 13)
+        assertTrue(cases.size >= 14)
         for (element in cases) {
             val case = element.jsonObject
             val name = case.getValue("name").jsonPrimitive.content
@@ -1012,9 +1029,10 @@ interface ProductLabelJobDao {
     suspend fun get(jobId: String): ProductLabelJobEntity?
 
     /**
-     * The one job the next trigger pull is about. `completed` is terminal and
-     * everything else is outstanding, which is why this is a negative test
-     * rather than a list of live statuses.
+     * The one job the next trigger pull is about. A `completed` job is at rest
+     * -- the protocol still accepts a reprint of one, but nothing a scan does
+     * concerns it -- and every other status is outstanding, which is why this
+     * is a negative test rather than a list of live statuses.
      */
     @Query("SELECT * FROM product_label_jobs WHERE shiftId = :shiftId AND status <> 'completed' ORDER BY acceptedAt LIMIT 1")
     suspend fun openJob(shiftId: String): ProductLabelJobEntity?
@@ -1441,8 +1459,13 @@ Create `app/src/test/kotlin/app/markiro/handheld/core/duplicate/DuplicateVerifyT
     @Test
     fun aReprintIsRefusedWhileAnAttemptIsStillInFlight()
 
+    /** The attempt is what freezes, not the job. */
     @Test
-    fun aCompletedJobTakesNoReprintAndNoFurtherEvent()
+    fun aVerifiedAttemptTakesNoFurtherEventOfItsOwn()
+
+    /** A verified label can be damaged later; under `required` the new copy must be scanned back. */
+    @Test
+    fun aCompletedJobTakesAReprintWhichDropsBackToPendingVerification()
 
     /** Retention dropped the bytes at shift close; there is nothing to replay. */
     @Test
@@ -1463,7 +1486,7 @@ Expected: FAIL — compilation error, `Unresolved reference: verify`.
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `./gradlew --no-daemon testDebugUnitTest --tests '*DuplicateVerifyTest*'`
-Expected: PASS, 9 tests.
+Expected: PASS, 10 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1628,12 +1651,12 @@ The operator-facing half, and the one line that makes the whole thing reachable.
 
 In `WorkViewModel.onScan`, before the existing recorder call, branch on the shift's policy. The routing is the spec's table and must be implemented exactly:
 
-| Open job                          | The scan is             |
-| --------------------------------- | ----------------------- |
-| none, or the last one `completed` | a new unit              |
-| `prepared` or `sending`           | refused — «идёт печать» |
-| `awaiting_verification`           | the verification        |
-| `delivery_unknown`                | the verification        |
+| Open job                          | The scan is              |
+| --------------------------------- | ------------------------ |
+| none, or the last one `completed` | a new unit               |
+| `prepared` or `sending`           | refused — «идёт печать»  |
+| `awaiting_verification`           | the verification         |
+| `delivery_unknown`                | the verification         |
 | `failed_before_send`              | refused — reprint or fix |
 
 A refusal is a verdict on the last-scan zone with its own text and the error signal, never a silently dropped scan: an operator whose unit vanished with no sound and no count has no way to know it needs scanning again.
