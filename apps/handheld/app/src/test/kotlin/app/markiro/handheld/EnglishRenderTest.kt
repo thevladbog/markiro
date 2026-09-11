@@ -35,6 +35,17 @@ import app.markiro.handheld.feature.printer.PrinterUi
 import app.markiro.handheld.feature.printer.TestPrintCallbacks
 import app.markiro.handheld.feature.printer.TestPrintScreen
 import app.markiro.handheld.feature.printer.TestPrintStep
+import app.markiro.handheld.core.box.BoxPrint
+import app.markiro.handheld.core.box.CloseResult
+import app.markiro.handheld.core.box.PrintReason
+import app.markiro.handheld.feature.work.BoxCloseCallbacks
+import app.markiro.handheld.feature.work.BoxCloseScreen
+import app.markiro.handheld.feature.work.BoxCloseStep
+import app.markiro.handheld.feature.work.ClosedBoxUi
+import app.markiro.handheld.feature.work.LabelQueueCallbacks
+import app.markiro.handheld.feature.work.LabelQueueItem
+import app.markiro.handheld.feature.work.LabelQueueScreen
+import app.markiro.handheld.feature.work.LabelQueueUi
 import app.markiro.handheld.feature.pairing.PairingCallbacks
 import app.markiro.handheld.feature.pairing.PairingScreen
 import app.markiro.handheld.feature.pairing.PairingUi
@@ -158,6 +169,58 @@ class EnglishRenderTest {
         compose.setContent {
             MarkiroTheme {
                 TestPrintScreen(TestPrintStep.Unknown("link lost"), PrinterLanguage.ZPL, 203, TestPrintCallbacks())
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun aClosedBoxAwaitingItsLabelRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                BoxCloseScreen(
+                    BoxCloseStep.Failed(ClosedBoxUi("b1", 27, "046800899000000018", 20), PrintReason.NO_PAPER),
+                    BoxCloseCallbacks(),
+                )
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun anUnknownBoxPrintRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                BoxCloseScreen(
+                    BoxCloseStep.Unknown(ClosedBoxUi("b1", 27, "046800899000000018", 20), "link lost"),
+                    BoxCloseCallbacks(),
+                )
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun aBoxRefusedForWantOfSerialsRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme { BoxCloseScreen(BoxCloseStep.Refused(CloseResult.NoSerials), BoxCloseCallbacks()) }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun theLabelQueueRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                LabelQueueScreen(
+                    LabelQueueUi(
+                        listOf(
+                            LabelQueueItem("b1", "046800899000000018", "2026-09-10T08:00:00.000Z", BoxPrint.FAILED, PrintReason.NO_PAPER),
+                            LabelQueueItem("b2", "046800899000000025", "2026-09-10T08:10:00.000Z", BoxPrint.UNKNOWN, null),
+                        ),
+                    ),
+                    LabelQueueCallbacks(),
+                )
             }
         }
         assertNoCyrillic()

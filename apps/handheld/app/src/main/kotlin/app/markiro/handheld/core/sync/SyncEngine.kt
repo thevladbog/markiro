@@ -2,6 +2,7 @@ package app.markiro.handheld.core.sync
 
 import androidx.room.withTransaction
 import app.markiro.handheld.core.network.BatchConflictDto
+import app.markiro.handheld.core.network.BoxClosureDto
 import app.markiro.handheld.core.network.ConflictStatusRequest
 import app.markiro.handheld.core.network.ConflictStatusResponse
 import app.markiro.handheld.core.network.ScanCodeDto
@@ -9,6 +10,7 @@ import app.markiro.handheld.core.network.ScanItemDto
 import app.markiro.handheld.core.network.ShiftCloseRequest
 import app.markiro.handheld.core.network.ShiftCloseResponse
 import app.markiro.handheld.core.network.SyncBatchRequest
+import app.markiro.handheld.core.storage.BoxEntity
 import app.markiro.handheld.core.storage.ConflictEntity
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.HandheldDatabase
@@ -63,7 +65,17 @@ class SyncEngine(
     private val now = MutableStateFlow(clock())
 
     val state: StateFlow<SyncState> =
-        combine(db.outboxDao().count(), db.conflictDao().count(), lastSuccess, now) { pending, conflicts, last, at ->
+        combine(
+            db.outboxDao().count(),
+            // A box closure is queued work too. Counting only scans showed
+            // «Очередь 0» while a closure sat unsent, and a queue that has
+            // stopped moving would never read as stuck.
+            db.boxDao().observeUnackedCount(),
+            db.conflictDao().count(),
+            lastSuccess,
+            now,
+        ) { scans, boxes, conflicts, last, at ->
+            val pending = scans + boxes
             val since = last ?: startedAt
             SyncState(pending = pending, lastSuccessAt = last, stuck = pending > 0 && at - since > STUCK_AFTER_MS, conflicts = conflicts)
         }.stateIn(scope, SharingStarted.Eagerly, SyncState())
@@ -116,18 +128,38 @@ class SyncEngine(
         val cfg = config.get() ?: return Step.EMPTY
         val pendingCeiling = meta.get(MetaStore.SYNC_PENDING_CEILING)?.toLongOrNull()
         val rows = if (pendingCeiling != null) db.outboxDao().headThrough(pendingCeiling, BATCH_SIZE) else db.outboxDao().head(BATCH_SIZE)
-        if (rows.isEmpty()) {
+        // A batch in flight re-reads the EXACT box set it already chose. `unacked`
+        // orders by (closedAt, boxId) and nothing can close earlier than a box that
+        // already closed, so the first N rows are stable and a retry stays
+        // byte-identical. Boxes closed since simply wait for the next batch.
+        // A pinned batch carries the box set it already chose and no more. When the
+        // count is missing -- a batch pinned by a build that predates it -- that set
+        // is empty, NOT everything unacknowledged: growing a batch whose id is
+        // already fixed is the exact way a closure gets answered `alreadyApplied`
+        // and lost. Those boxes ride the next batch.
+        val boxLimit = if (pendingCeiling != null) meta.get(MetaStore.SYNC_PENDING_BOX_COUNT)?.toIntOrNull() ?: 0 else MAX_BOX_CLOSURES
+        val boxRows = if (boxLimit == 0) emptyList() else db.boxDao().unacked(boxLimit)
+        // An empty outbox with unacknowledged boxes is not empty.
+        if (rows.isEmpty() && boxRows.isEmpty()) {
             if (pendingCeiling != null) clearPending()
             return Step.EMPTY
         }
-        val maxId = rows.last().id
+        val maxId = rows.lastOrNull()?.id ?: pendingCeiling ?: 0L
+        val boxIds = boxRows.map { it.boxId }
         val batchId = meta.get(MetaStore.SYNC_PENDING_BATCH_ID)?.takeIf { pendingCeiling != null } ?: run {
-            val id = "${cfg.deviceId}:${meta.installId()}:$maxId"
+            // The box set is folded in. Without it, a box closing while this batch
+            // awaits acknowledgement would be resent under an id the server has
+            // already applied, and the closure would vanish silently.
+            val id = "${cfg.deviceId}:${meta.installId()}:$maxId:${boxSignature(boxIds)}"
             meta.put(MetaStore.SYNC_PENDING_CEILING, maxId.toString())
+            meta.put(MetaStore.SYNC_PENDING_BOX_COUNT, boxIds.size.toString())
             meta.put(MetaStore.SYNC_PENDING_BATCH_ID, id)
             id
         }
-        val body = json.encodeToString(SyncBatchRequest.serializer(), SyncBatchRequest(batchId, rows.map { it.toItem(cfg.deviceId) }))
+        val body = json.encodeToString(
+            SyncBatchRequest.serializer(),
+            SyncBatchRequest(batchId, rows.map { it.toItem(cfg.deviceId) }, boxRows.map { it.toClosure(cfg.deviceId) }),
+        )
         val result = transport.post("/station/scans", body) as? TransportResult.Ok ?: return Step.FAILED
         if (result.code !in 200..299) return Step.FAILED
         val parsed = parseBatchResponse(result.body) ?: return Step.FAILED
@@ -139,8 +171,14 @@ class SyncEngine(
                 parsed.conflicts.map { ConflictEntity(it.codeHash, it.winningTerminalId, it.winningScannedAt!!, Iso.format(at)) },
             )
             db.outboxDao().deleteThrough(maxId)
+            // Unconditional, unlike the station's. Nothing in a handheld box payload
+            // can change after close, because print state never leaves this device.
+            // When print verification is added, the station's conditional ack has to
+            // come back with it.
+            if (boxIds.isNotEmpty()) db.boxDao().markAcked(boxIds, Iso.format(at))
             db.metaDao().remove(MetaStore.SYNC_PENDING_BATCH_ID)
             db.metaDao().remove(MetaStore.SYNC_PENDING_CEILING)
+            db.metaDao().remove(MetaStore.SYNC_PENDING_BOX_COUNT)
             parsed.denied?.let { db.metaDao().put(MetaEntity(MetaStore.SYNC_LAST_DENIED, it)) }
             db.metaDao().put(MetaEntity(MetaStore.SYNC_LAST_SUCCESS_AT, at.toString()))
         }
@@ -151,7 +189,21 @@ class SyncEngine(
     private suspend fun clearPending() {
         meta.remove(MetaStore.SYNC_PENDING_BATCH_ID)
         meta.remove(MetaStore.SYNC_PENDING_CEILING)
+        meta.remove(MetaStore.SYNC_PENDING_BOX_COUNT)
     }
+
+    /** Short and stable: one set always signs the same, a different set never does. */
+    private fun boxSignature(boxIds: List<String>): String =
+        if (boxIds.isEmpty()) "0" else "${boxIds.size}-${boxIds.joinToString(",").hashCode().toUInt().toString(16)}"
+
+    private fun BoxEntity.toClosure(deviceId: String) = BoxClosureDto(
+        boxId = boxId,
+        shiftId = shiftId,
+        terminalId = deviceId,
+        sscc = checkNotNull(sscc) { "box $boxId is queued without an SSCC" },
+        closedAt = checkNotNull(closedAt) { "box $boxId is queued while still open" },
+        operatorId = operatorId,
+    )
 
     private class BatchResponse(val applied: Int, val alreadyApplied: Boolean, val conflicts: List<BatchConflictDto>, val denied: String?)
 
@@ -208,6 +260,7 @@ class SyncEngine(
         scannedAt = scannedAt,
         code = if (verdict == "ok" && codeHash != null && gtin14 != null && serial != null) ScanCodeDto(codeHash, gtin14, serial) else null,
         operatorId = operatorId,
+        boxId = boxId,
     )
 
     private fun ShiftCloseEntity.toRequest() = ShiftCloseRequest(
@@ -223,6 +276,9 @@ class SyncEngine(
 
     companion object {
         const val BATCH_SIZE = 100
+
+        /** The server's own `MAX_BOX_CLOSURES_PER_SYNC_BATCH`. */
+        const val MAX_BOX_CLOSURES = 50
         const val RECONCILE_PAGE = 200
         const val HEARTBEAT_MS = 15_000L
         const val STUCK_AFTER_MS = 15 * 60 * 1000L

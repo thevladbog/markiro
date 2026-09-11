@@ -19,7 +19,7 @@ class ShiftListScreenTest {
     val compose = createComposeRule()
 
     @Test
-    fun showsContinueMineAndDisabledAggregation() {
+    fun showsContinueMineAndOffersAggregationShifts() {
         var selected: String? = null
         var continued = false
         compose.setContent {
@@ -41,8 +41,12 @@ class ShiftListScreenTest {
         assertEquals(true, continued)
         compose.onNodeWithText("SEP26-002").performClick()
         assertEquals("s2", selected)
-        compose.onNodeWithText("агрегация: в следующем срезе").assertIsDisplayed()
-        compose.onNode(hasText("SEP26-003")).assertIsNotEnabled()
+        // An aggregation shift is enterable like any other. This assertion used to
+        // say the opposite, and pinned the slice shut: the list, the view model and
+        // the repository each gated aggregation separately, and a walk-through was
+        // what found the one with no distinctive name to grep for.
+        compose.onNodeWithText("SEP26-003").performClick()
+        assertEquals("s3", selected)
     }
 
     @Test
