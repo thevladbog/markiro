@@ -113,6 +113,26 @@ describe("bilingual agreement", () => {
     expect(JSON.stringify(byId.get("prilozhenie-1")?.blocks)).toContain("[order number]");
   });
 
+  it("translates appendices 3 and 4 in 152-FZ vocabulary", () => {
+    const byId = new Map(
+      buildTenantAgreement(FILLED, "en").sections.map((section) => [section.id, section]),
+    );
+    expect(byId.get("prilozhenie-3")?.heading).toBe(
+      "Appendix No. 3. Personal data processing instruction",
+    );
+    expect(byId.get("prilozhenie-4")?.heading).toBe(
+      "Appendix No. 4. Assignment for services / works",
+    );
+    const roles = JSON.stringify(byId.get("prilozhenie-3-roli")?.blocks);
+    expect(roles).toContain("Federal Law No. 152-FZ");
+    // The Customer is the operator in the 152-FZ sense, never a "controller"
+    // borrowed from the GDPR, which would misdescribe the obligation.
+    expect(roles).toContain("is the operator");
+    expect(JSON.stringify(buildTenantAgreement(FILLED, "en").sections)).not.toContain(
+      "data controller",
+    );
+  });
+
   it("throws when a section is missing from one side", () => {
     const en = buildTenantAgreement(FILLED, "en");
     expect(() =>

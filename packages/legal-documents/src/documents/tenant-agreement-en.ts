@@ -23,6 +23,15 @@ const SIGNATURES = {
   rows: SIGNATURE_ROWS,
 } as const satisfies LegalBlock;
 
+// 152-FZ vocabulary, not GDPR: the Customer is the "operator" and the
+// Contractor processes on its instruction. "Operator" here is the data
+// operator, never the Markiro platform operator.
+const PROCESSING_SIGNATURES = {
+  kind: "table",
+  columns: ["Processor — the Contractor", "Operator — the Customer"],
+  rows: SIGNATURE_ROWS,
+} as const satisfies LegalBlock;
+
 function partyName(party: PartyRequisites | undefined, placeholder: string): string {
   return agreementField(party?.name, placeholder);
 }
@@ -376,7 +385,7 @@ function bodySections(fields: TenantAgreementFields): readonly AgreementSection[
         },
         {
           kind: "paragraph",
-          text: "8.2. The instruction to process personal data is documented by Appendix No. 3 before production personal data is uploaded. The Customer is the controller of the data entrusted; the Contractor is the person processing it on the Customer's instruction. For its own settlements and mandatory records the Contractor acts in its own capacity on a separate lawful basis.",
+          text: "8.2. The instruction to process personal data is documented by Appendix No. 3 before production personal data is uploaded. The Customer is the operator of the data entrusted; the Contractor is the person processing it on the Customer's instruction. For its own settlements and mandatory records the Contractor acts in its own capacity on a separate lawful basis.",
         },
         {
           kind: "paragraph",
@@ -864,6 +873,369 @@ function appendixOneTwoSections(fields: TenantAgreementFields): readonly Agreeme
   ];
 }
 
+function appendixThreeFourSections(fields: TenantAgreementFields): readonly AgreementSection[] {
+  const number = agreementField(fields.number, "[number]");
+  const conclusionDate = agreementDate(fields.conclusionDate, "[date of conclusion]");
+
+  return [
+    {
+      id: "prilozhenie-3",
+      heading: "Appendix No. 3. Personal data processing instruction",
+      startsPage: true,
+      blocks: [
+        {
+          kind: "paragraph",
+          text: `To agreement No. ${number} of ${conclusionDate}. Individual instruction No. [number] of [date]. It is executed before the processing of the entrusted data begins.`,
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-3-roli",
+      heading: "Appendix No. 3 · 1. Roles, subject matter and lawful grounds",
+      blocks: [
+        {
+          kind: "paragraph",
+          text: "3-A.1. The Customer — [name, TIN, address] — instructs Sole Proprietor Vladislav Sergeevich Bogatyrev, TIN [TIN], to process the personal data listed below for the agreed Markiro functions. The Customer determines the purposes and the composition of the data and is the operator. The Contractor processes the data on documented instructions and acquires no authority to act as the Customer's representative.",
+        },
+        {
+          kind: "paragraph",
+          text: "3-A.2. The Customer secures the grounds for processing and for transferring data for processing, informs the data subjects and obtains consents where the law requires them, including under part 3 of article 6 of Federal Law No. 152-FZ. The Customer's signature does not replace its employees' consents. Special categories of data, biometric data, health information, copies of identity documents and other excessive data are outside this instruction.",
+        },
+        {
+          kind: "table",
+          columns: ["Data subjects and data", "Purpose and limit"],
+          columnRatios: [1.3, 1],
+          rows: [
+            [
+              "Employees and operators: full name, position/unit where required, work contact, internal identifier, role, badge identifier.",
+              "Identification of an authorised user and the assignment of access. Without facial recognition or other biometric methods.",
+            ],
+            [
+              "Account attributes: login, protected authentication verification values, device binding; account activity.",
+              "Login to the cabinet/client and the security of the entrusted processing. Plain passwords and the private keys of a qualified electronic signature are never included in documents or requests.",
+            ],
+            [
+              "Employees' actions: date and time of the operation, shift, device, dispensing, stocktaking and adjustment data and the related internal identifier.",
+              "Performance of production assignments and audit of operations. Not for independent profiling of employees by the Contractor.",
+            ],
+            [
+              "Counterparties' contact persons, where used: full name, position, work telephone/e-mail; sole proprietor details to the extent required.",
+              "The agreed exchange of information and the Customer's record of contacts. Not for mailings by the Contractor.",
+            ],
+            [
+              "Agreed additions to the list",
+              "[none / exact list, purpose and category of data subjects].",
+            ],
+          ],
+        },
+        {
+          kind: "paragraph",
+          text: "3-A.3. Permitted operations: receipt from the Customer and from agreed sources, recording, systematisation, accumulation, storage, updating, retrieval, use for the purposes listed, provision to authorised users and agreed recipients, blocking, deletion and destruction. Public dissemination and use in advertising or training datasets are not entrusted.",
+        },
+        {
+          kind: "paragraph",
+          text: "3-A.4. The method of processing is automated and, where agreed support is provided, mixed. The principal place of processing and the databases used for collecting, storing and other operations subject to localisation are in the Russian Federation. Cross-border transfer and remote access to the entrusted data from abroad are not permitted by this instruction; any change requires separate agreement and compliance with the law.",
+        },
+        {
+          kind: "paragraph",
+          text: "3-A.5. Processing begins: [date or event]. Term of the principal purpose: [the order period / a shorter agreed term]. After it ends, only the processing necessary for the agreed return of the data is permitted, for no more than 30 calendar days and while a lawful ground remains, after which the data is deleted. A shorter mandatory statutory period prevails.",
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-3-obyazannosti",
+      heading: "Appendix No. 3 · 2. The Contractor's obligations and engaged persons",
+      blocks: [
+        {
+          kind: "paragraph",
+          text: "3-B.1. The Contractor observes the principles of processing and confidentiality and the requirements of part 5 of article 18 and of article 18.1 of Federal Law No. 152-FZ, and ensures the measures required by article 19. It restricts authority, separates cabinets' data, protects channels, manages access and backups, logs significant actions, remedies identified vulnerabilities and provides recovery within the agreed scope.",
+        },
+        {
+          kind: "paragraph",
+          text: "3-B.2. The applicable protection level, threat model and set of measures are determined before the production launch, having regard to the actual data and environment. The Customer supplies the necessary input information. The existence of the Agreement does not replace the implementation of measures or the mandatory documents. The Customer's special requirements: [none / list and agreed measures].",
+        },
+        {
+          kind: "paragraph",
+          text: "3-B.3. At the Customer's request, including before processing begins, the Contractor provides documents and information confirming compliance with the instruction within five working days, or sooner where a mandatory deadline requires it. Access to the evidence is arranged without disclosing other clients' data or secrets that are not needed for the check. Where an instruction is contradictory or apparently unlawful, the Contractor requests clarification and suspends only the disputed processing.",
+        },
+        {
+          kind: "paragraph",
+          text: "3-B.4. Only the engaged processors listed and agreed below are permitted, and only to the extent necessary. The Contractor imposes comparable obligations on them, monitors performance and is answerable to the Customer for the part entrusted. A blank line is not consent to an unknown recipient; the list is completed before data is transferred.",
+        },
+        {
+          kind: "table",
+          columns: [
+            "Person / details",
+            "Function and data accessible",
+            "Territory / database addresses",
+          ],
+          columnRatios: [1.2, 1.6, 1.2],
+          rows: [
+            [
+              "Infrastructure provider Yandex Cloud: [exact name, TIN and contract]",
+              "[hosting of the database, objects and backups; the categories from section 1]",
+              "Russian Federation; [region and addresses/list of sites per the provider's documents]",
+            ],
+            [
+              "Corporate mail provider: [exact name, TIN and contract]",
+              "[delivery of messages and correspondence; work contacts and the minimum content of requests]",
+              "Russian Federation; [confirmed places of processing]",
+            ],
+            [
+              "Other persons",
+              "[none engaged / name, TIN, role, data]",
+              "[territory and places of processing]",
+            ],
+          ],
+        },
+        {
+          kind: "paragraph",
+          text: "3-B.5. A new processor or a material extension of access is agreed in advance and documented. The Contractor sends the particulars at least 10 working days before the intended transfer; silence does not amount to consent. Cloud infrastructure the Contractor procures in order to perform the Agreement is not sold to the Customer as a separate third-party licence.",
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-3-intsidenty",
+      heading: "Appendix No. 3 · 3. Incidents and assistance",
+      blocks: [
+        {
+          kind: "paragraph",
+          text: "3-B.6. The Contractor reports indications of an incident involving the entrusted data without undue delay and, where a case referred to in part 3.1 of article 21 of Federal Law No. 152-FZ is established, no later than 12 hours after detection. The 12-hour contractual period is set by the Parties and is shorter than the period the law allows the operator, so that the Customer has time to perform its own obligation. The available particulars of the time, nature, data affected, likely consequences and measures taken are reported; incomplete particulars are not a ground for waiting until the investigation is finished.",
+        },
+        {
+          kind: "paragraph",
+          text: "3-B.7. Supplements are provided as they become available. The Contractor preserves the evidence relating to the incident and helps the Customer prepare the mandatory notifications. As the operator, the Customer decides whether to notify the regulator and the data subjects; this does not remove the Contractor's own obligations. The incident notification period applies regardless of the ordinary support schedule.",
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-3-obrashcheniya",
+      heading: "Appendix No. 3 · 4. Requests, return and deletion",
+      blocks: [
+        {
+          kind: "paragraph",
+          text: "3-C.1. The Contractor forwards data subjects' requests concerning the entrusted data to the Customer within one working day and takes no independent decision to grant them, except where the law obliges it to. On a documented instruction the Contractor assists with search, correction, blocking and deletion within a period that allows the Customer to meet its mandatory deadline; the ordinary period for assistance is three working days.",
+        },
+        {
+          kind: "paragraph",
+          text: "3-C.2. The Customer may give a lawful instruction to return and/or delete the data before the order ends. Such an instruction takes precedence over the ordinary export window. When the purpose ceases, the Contractor stops ordinary processing and destroys the data, including the copies under its control, no later than 30 calendar days, unless the law sets a shorter period or a separate lawful ground requires a limited part to be retained.",
+        },
+        {
+          kind: "paragraph",
+          text: "3-C.3. The ordinary backup cycle period: [period agreed with the infrastructure]. Copies are not used to continue ordinary processing of deleted data; on restoration the restrictions and deletions are applied again. Where timely destruction is technically impossible, this is documented and handled under part 6 of article 21 of Federal Law No. 152-FZ: the data is blocked and destroyed within the maximum period that provision sets. That exception is not a general permission to retain everything for six months.",
+        },
+        {
+          kind: "paragraph",
+          text: "3-C.4. The Contractor confirms the actions performed by a document in the form of Appendix No. 10. A return is confirmed by the set of files, the format, the date and the secure method of delivery; destruction is confirmed separately, after it has actually been completed. Confirming receipt of an export does not mean the data has already been deleted. If particular information must be retained, its composition, the ground, the restricted access and the period are stated.",
+        },
+        {
+          kind: "paragraph",
+          text: "3-C.5. For its own purposes of entering into and performing the Agreement, settlements, mandatory records, the protection of rights and the security of the platform, the Contractor may itself process the necessary information about representatives and settlements where a separate lawful ground exists. That processing is confined to the corresponding purpose and is disclosed in the privacy policy; it does not permit the whole production database to be retained in the guise of an accounting archive.",
+        },
+        {
+          kind: "paragraph",
+          text: "3-C.6. The Contractor does not use the entrusted data for advertising, for independent analysis of employees, for publication or for training external models, and does not transfer it to foreign support or development systems that have not been agreed. Diagnostics use minimal information and anonymised examples wherever possible.",
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-3-kontakty",
+      heading: "Appendix No. 3 · 5. Contacts and special instructions",
+      blocks: [
+        {
+          kind: "table",
+          columns: ["Parameter", "Value"],
+          columnRatios: [1, 2.4],
+          rows: [
+            [
+              "The Customer's person responsible for personal data",
+              "[full name, position, e-mail, telephone for incidents]",
+            ],
+            [
+              "The Contractor's contact",
+              "Vladislav Sergeevich Bogatyrev; hello@v-b.tech; +7 934 355-14-90. Backup incident channel: [channel].",
+            ],
+            [
+              "The Customer's lawful grounds and notices",
+              "[description of the grounds; particulars of the consents/notices required; do not attach excessive copies of subjects' data]",
+            ],
+            ["Special instructions", "[none / composition, date and signed document]"],
+            [
+              "Processing readiness check",
+              "[date on which the hosting location, the list of processors and the protective measures were confirmed]",
+            ],
+          ],
+        },
+        {
+          kind: "paragraph",
+          text: "This instruction does not transfer to the Contractor the functions of an employer, authority to act as a representative in Chestny ZNAK, or the right to sign documents with the Customer's qualified electronic signature. A separate signature signifies agreement to the purposes, lists and terms of the instruction, and not the issue of a power of attorney.",
+        },
+        PROCESSING_SIGNATURES,
+      ],
+    },
+    {
+      id: "prilozhenie-4",
+      heading: "Appendix No. 4. Assignment for services / works",
+      startsPage: true,
+      blocks: [
+        {
+          kind: "paragraph",
+          text: `To agreement No. ${number} of ${conclusionDate}. Assignment No. [number] of [date], under order No. [number / not applicable].`,
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-4-sostav",
+      heading: "Appendix No. 4 · 1. Composition of the assignment",
+      blocks: [
+        {
+          kind: "table",
+          columns: ["Condition", "Agreed description"],
+          columnRatios: [1, 2.4],
+          rows: [
+            [
+              "Subject matter",
+              "[exact name of the service or work from the catalogue; not merely the name of a package]",
+            ],
+            [
+              "Type of performance",
+              "[one-off service / hourly services / work with a result / retainer support / author's commission — select whichever applies]",
+            ],
+            ["Initial state and task", "[the problem and the expected result]"],
+            [
+              "Cabinet, equipment and versions",
+              "[tenant ID, models, operating system, 1C, Markiro version; for handheld terminals, the verified modes]",
+            ],
+            [
+              "Input data and cooperation",
+              "[what the Customer provides and by what date; the secure method of delivering access]",
+            ],
+            [
+              "Composition and limit of scope",
+              "[actions; number of devices/rows/templates; hour limit; exclusions stated separately]",
+            ],
+            [
+              "Result and delivery",
+              "[files, version, configuration, document, demonstration; place of delivery]",
+            ],
+            [
+              "Acceptance criteria",
+              "[verifiable scenarios, input data, expected results, permissible deviations]",
+            ],
+            [
+              "Deadlines",
+              "Start: [date/condition]. Completion: [exact date]. Stages: [dates and results]. For an author's commission, having regard to the applicable rules of the Civil Code of the Russian Federation.",
+            ],
+            [
+              "Price and settlements",
+              "[fixed price / rate × volume with a cap]; prepayment [amount/%]; balance [condition]. Without VAT where the tax on professional income applies.",
+            ],
+            [
+              "Amendment of the assignment",
+              "Only before the additional performance, through an agreed amendment with a new price/deadline.",
+            ],
+            [
+              "Not included",
+              "[repair of hardware, issue of a qualified electronic signature, third-party licences, new features and other specific exclusions].",
+            ],
+          ],
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-4-abonement",
+      heading: "Appendix No. 4 · 2. Retainer support",
+      blocks: [
+        {
+          kind: "paragraph",
+          text: "To be completed only for a retainer model. Package: [name]. Period: [exact dates]. Retainer fee: [amount] RUB. Included: [number] minutes. Schedule and channel: [terms]. Carry-over of the balance: [none / rule]. Additional rate: [amount] RUB per hour; additional work only after agreement. Recording of actual time: minutes per request, without automatic rounding up to a full hour.",
+        },
+        {
+          kind: "paragraph",
+          text: "The report is prepared in the form of Appendix No. 8. If the retainer model field is not completed, no monthly fee and no obligation to provide such a package arise.",
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-4-rezultaty",
+      heading: "Appendix No. 4 · 3. Terms concerning protected results",
+      blocks: [
+        {
+          kind: "paragraph",
+          text: "To be completed where a protected result is created or transferred. For ordinary installation or consultancy, state “Not applicable”. Transferring the right to a result does not replace the Markiro and 1C licences the Customer requires.",
+        },
+        {
+          kind: "table",
+          columns: ["Condition", "Agreed value"],
+          columnRatios: [1, 2.4],
+          rows: [
+            [
+              "Protected result",
+              "[name of the work/program/template, version and identification]",
+            ],
+            [
+              "Author and right holder",
+              "[author; who holds the exclusive right; the grounds for using the materials]",
+            ],
+            [
+              "Previously created components",
+              "[list and applicable terms; the exclusive right to them is not alienated]",
+            ],
+            [
+              "Rights granted",
+              "[simple non-exclusive licence / another expressly agreed regime]",
+            ],
+            [
+              "Methods of use",
+              "[installation, launch, reproduction, printing, modification and so on — an exact list; without automatic transfer of every method]",
+            ],
+            [
+              "Term and territory",
+              "[exact term / the duration of the exclusive right — only where expressly agreed]; [territory]",
+            ],
+            ["Fee for creation", "[amount] RUB."],
+            [
+              "Fee for the rights",
+              "[amount] RUB; [included in the assignment total / a separate line]. Where it is 0 RUB, state expressly that the corresponding grant is free of charge.",
+            ],
+            [
+              "Source code / editable file",
+              "[not delivered / exact composition and manner of delivery]",
+            ],
+            [
+              "Condition for the licence to the result to begin",
+              "[delivery and payment / another defined moment]",
+            ],
+            [
+              "Use after the subscription ends",
+              "[for a standalone result — the permitted methods; access to the Markiro service separately; for an embedded module — dependent on a valid licence]",
+            ],
+          ],
+        },
+        {
+          kind: "paragraph",
+          text: "Where a new work is commissioned from the author personally, this assignment together with the Agreement determines the corresponding terms of the author's commission. The Parties do not apply the rules on the alienation of rights to it arbitrarily merely because the work has been paid for. The essential terms are completed before the creation of the result begins.",
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-4-soglasovanie",
+      heading: "Appendix No. 4 · 4. Confirmation of agreement",
+      blocks: [
+        {
+          kind: "paragraph",
+          text: "The Parties have agreed the scope and acceptance criteria stated above. Persons responsible for the technical check: for the Contractor — [full name]; for the Customer — [full name, contact]. The right to accept a technical result does not of itself confer the right to change the price or to sign an agreement on behalf of the organisation.",
+        },
+        {
+          kind: "paragraph",
+          text: "Materials attached: [specification, sample files, list of scenarios, version number].",
+        },
+        SIGNATURES,
+      ],
+    },
+  ];
+}
+
 /**
  * The English sections of the standard Markiro client agreement.
  *
@@ -881,7 +1253,11 @@ export function buildEnAgreementSections(
   fields: TenantAgreementFields,
 ): readonly AgreementSection[] {
   const translated = new Map<string, AgreementSection>(
-    [...bodySections(fields), ...appendixOneTwoSections(fields)].map((section) => [
+    [
+      ...bodySections(fields),
+      ...appendixOneTwoSections(fields),
+      ...appendixThreeFourSections(fields),
+    ].map((section) => [
       section.id,
       section,
     ]),
