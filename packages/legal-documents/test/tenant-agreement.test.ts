@@ -92,6 +92,12 @@ describe("buildTenantAgreement", () => {
     expect(text).toContain("[Старт / Цех / Производство / индивидуальный]");
   });
 
+  it("states that the Russian text prevails and that the forms stay Russian", () => {
+    const text = flatten({ customer: ORG_CUSTOMER });
+    expect(text).toContain("преимущественную силу имеет русский текст");
+    expect(text).toContain("Приложениях № 5–8");
+  });
+
   it("builds an English tree of the same shape", () => {
     const en = buildTenantAgreement({ customer: ORG_CUSTOMER }, "en");
     expect(en.locale).toBe("en");
