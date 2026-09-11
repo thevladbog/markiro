@@ -7,16 +7,19 @@ import {
   type LabelCodeLanguage,
   type LabelField,
   type LabelImportResult,
+  type LabelTemplatePurpose,
 } from "@markiro/domain";
 import { Button, Checkbox, Modal, Select, Textarea } from "@markiro/ui";
 
 import { fitSpecElements } from "../geometry.js";
+import { labelPreviewData, labelRenderOptions } from "../preview-data.js";
 
 export interface ImportCodeDialogProps {
   open: boolean;
   initialLanguage: LabelCodeLanguage;
   initialDpi: 203 | 300;
   currentDirty: boolean;
+  purpose: LabelTemplatePurpose;
   onClose: () => void;
   onReplace: (result: LabelImportResult) => void;
 }
@@ -46,6 +49,7 @@ export function ImportCodeDialog({
   initialLanguage,
   initialDpi,
   currentDirty,
+  purpose,
   onClose,
   onReplace,
 }: ImportCodeDialogProps) {
@@ -100,7 +104,11 @@ export function ImportCodeDialog({
     setAcknowledgedUnsupported(false);
     try {
       const parsed = parseLabelCode(source, { language, dpi });
-      const fitted = fitSpecElements(parsed.spec);
+      const fitted = fitSpecElements(
+        parsed.spec,
+        labelPreviewData(purpose),
+        labelRenderOptions(purpose),
+      );
       if (!fitted.ok) {
         setError(t("pages.labels.editor.import.elementTooLarge"));
         return;
