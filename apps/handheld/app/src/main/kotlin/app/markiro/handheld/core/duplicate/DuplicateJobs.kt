@@ -18,6 +18,9 @@ import app.markiro.handheld.core.storage.ProductLabelJobEntity
 import app.markiro.handheld.core.storage.ShiftEntity
 import app.markiro.handheld.core.util.Iso
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 
@@ -107,11 +110,34 @@ class DuplicateJobs(
     suspend fun openJob(shiftId: String): ProductLabelJobEntity? = db.productLabelJobDao().openJob(shiftId)
 
     /**
+     * Why an outstanding job needs a person, taken from its own last event.
+     *
+     * The screen is rebuilt from this after a restart: a job whose attempt
+     * failed or went unknown is invisible otherwise, and the next unit is then
+     * refused for a reason nothing on screen explains.
+     */
+    suspend fun attentionReason(jobId: String): String? {
+        // The device-local reason first: it carries the printer's own words,
+        // which the wire deliberately cannot.
+        db.productLabelJobDao().get(jobId)?.lastFailure?.let { return it }
+        val payload = db.productLabelEventDao().lastPayload(jobId) ?: return null
+        return runCatching {
+            Json.parseToJsonElement(payload).jsonObject["errorCode"]?.jsonPrimitive?.content
+        }.getOrNull()
+    }
+
+    /**
      * Turns an accepted unit into a job with its label already rendered.
      *
      * The render happens before the transaction: it is the slow part, it touches
      * no database, and holding a write transaction across it would block every
      * other writer for the length of a rasterization.
+     *
+     * `acceptedAt` is the SCAN's own `scannedAt`, not a fresh reading of the
+     * clock. The server joins an event to its accepted code on
+     * `codes.scannedAt = event.acceptedAt`, so a timestamp of convenience makes
+     * every event `parent_missing` -- quarantined one by one while the device
+     * shows nothing wrong.
      */
     suspend fun accept(
         shift: ShiftEntity,
@@ -119,6 +145,7 @@ class DuplicateJobs(
         codeHash: String,
         operatorId: String,
         operatorName: String?,
+        acceptedAt: String,
     ): DuplicateOutcome = mutex.withLock {
         if (db.productLabelJobDao().openJob(shift.id) != null) {
             return DuplicateOutcome.Refused(DuplicateReason.JOB_OUTSTANDING)
@@ -131,7 +158,6 @@ class DuplicateJobs(
             return DuplicateOutcome.Refused(DuplicateReason.TEMPLATE_INVALID)
         }
 
-        val acceptedAt = Iso.format(clock())
         val fields = try {
             duplicateLabelFields(shift, canonicalRaw, acceptedAt, operatorName)
         } catch (_: KmException) {
@@ -191,6 +217,7 @@ class DuplicateJobs(
                     verification = projection.verification,
                     verificationOutcome = projection.verificationOutcome,
                     status = projection.status,
+                    lastFailure = null,
                 ),
             )
             db.productLabelEventDao().insert(event.toEntity())
@@ -224,13 +251,18 @@ class DuplicateJobs(
         return when (val outcome = transport.send(printer, bytes)) {
             SendOutcome.Delivered -> {
                 append(sending, EventKind.SENT)
+                db.productLabelJobDao().setLastFailure(job.jobId, null)
                 DuplicateSend.Sent
             }
             is SendOutcome.Refused -> {
                 // The status query said ready and the send refused anyway. The
                 // attempt is already `sending`, so the honest record is unknown:
-                // the bytes reached the transport.
-                append(sending, EventKind.DELIVERY_UNKNOWN, errorCode = outcome.reason.wire())
+                // the bytes reached the transport. The wire code is
+                // `transport_failed` -- `delivery_unknown` admits only that,
+                // `persistence_failed` and `interrupted` -- while the printer's
+                // own words stay on the job row for the screen.
+                db.productLabelJobDao().setLastFailure(job.jobId, outcome.reason.wire())
+                append(sending, EventKind.DELIVERY_UNKNOWN, errorCode = DuplicateReason.TRANSPORT_FAILED)
                 DuplicateSend.Unknown(outcome.reason.wire())
             }
             is SendOutcome.Unknown -> {
@@ -335,8 +367,24 @@ class DuplicateJobs(
         return DuplicateOutcome.Prepared(job.jobId)
     }
 
+    /**
+     * Records that nothing was sent, and why.
+     *
+     * `failed_before_send` admits ONLY `printer_unconfigured` and
+     * `printer_changed`: an event describes what happened to the LABEL, and
+     * those two are the cases where the device could not make one at all.
+     * «Нет бумаги» is a fact about the printer -- it is kept on the job row and
+     * never sent. Sending it made the server reject the whole batch, which
+     * wedged the queue for scans and shift closures too, permanently.
+     *
+     * The attempt therefore stays `prepared` in that case, which is also what
+     * lets «Повторить печать» work once the paper is back.
+     */
     private suspend fun fail(job: ProductLabelJobEntity, reason: String): DuplicateSend.Failed {
-        append(job, EventKind.FAILED_BEFORE_SEND, errorCode = reason)
+        db.productLabelJobDao().setLastFailure(job.jobId, reason)
+        if (reason == DuplicateReason.PRINTER_UNCONFIGURED || reason == DuplicateReason.PRINTER_CHANGED) {
+            append(job, EventKind.FAILED_BEFORE_SEND, errorCode = reason)
+        }
         return DuplicateSend.Failed(reason)
     }
 

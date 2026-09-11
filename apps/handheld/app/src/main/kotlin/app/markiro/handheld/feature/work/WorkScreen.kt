@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.markiro.handheld.R
@@ -252,6 +253,10 @@ private fun LastScanZone(last: LastScan?, duplicate: DuplicateUi?, modifier: Mod
         if (last == null || colors == null) {
             Icon(Icons.Outlined.QrCodeScanner, contentDescription = null, tint = c.fg3)
             Text(stringResource(R.string.work_waiting), style = t.strong, color = c.fg3)
+        } else if (last.blocked) {
+            // A refusal, not a verdict: the code was never judged.
+            Icon(Icons.Outlined.Print, contentDescription = null, tint = c.tone(Tone.Warn).fg)
+            Text(stringResource(R.string.duplicate_blocked), style = t.title, color = c.tone(Tone.Warn).fg, textAlign = TextAlign.Center)
         } else {
             val icon = when (last.verdict) {
                 Verdict.OK -> Icons.Outlined.CheckCircle

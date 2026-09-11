@@ -12,6 +12,7 @@ import app.markiro.handheld.core.box.PrintOutcome
 import app.markiro.handheld.core.duplicate.DuplicateJobs
 import app.markiro.handheld.core.duplicate.DuplicateMatch
 import app.markiro.handheld.core.duplicate.DuplicateOutcome
+import app.markiro.handheld.core.duplicate.DuplicateReason
 import app.markiro.handheld.core.duplicate.DuplicateSend
 import app.markiro.handheld.core.duplicate.JobStatus
 import app.markiro.handheld.core.duplicate.Verification
@@ -50,7 +51,20 @@ fun interface SignalPort {
     fun play(kind: SignalKind)
 }
 
-data class LastScan(val verdict: Verdict, val tail: String, val firstSeenAt: String?, val at: String)
+data class LastScan(
+    val verdict: Verdict,
+    val tail: String,
+    val firstSeenAt: String?,
+    val at: String,
+    /**
+     * Set when the scan was REFUSED rather than judged.
+     *
+     * Reusing `Verdict.INVALID` told the operator «НЕВЕРНЫЙ КОД» for a perfectly
+     * good code whose only problem was that another unit's label was still
+     * unresolved -- a lie, and one that sends them looking at the wrong thing.
+     */
+    val blocked: Boolean = false,
+)
 
 /** The open box, as the fill grid needs it. Null outside an aggregation shift. */
 data class BoxUi(val ordinal: Int, val filled: Int, val capacity: Int)
@@ -236,6 +250,7 @@ class WorkViewModel(
         viewModelScope.launch {
             duplicates.demoteInterrupted()
             refreshDuplicate()
+            restoreDuplicateStep()
         }
         // Each scan is handled inside its own guard. A failure on one -- a print
         // that throws, a template that will not render -- must not take the
@@ -286,7 +301,7 @@ class WorkViewModel(
         // Only an ACCEPTED unit gets a label. A duplicate of a code this device
         // already holds would put a second sticker on one physical item.
         if (shift.validationPrintMode == "duplicate_dm" && outcome.verdict == Verdict.OK) {
-            printDuplicate(shift, raw)
+            printDuplicate(shift, raw, outcome.scannedAt)
         }
     }
 
@@ -416,8 +431,7 @@ class WorkViewModel(
         val job = duplicates.openJob(shiftId) ?: return false
         return when (job.status) {
             JobStatus.PREPARED, JobStatus.SENDING -> {
-                last.value = LastScan(Verdict.INVALID, BLOCKED_TAIL, null, Iso.format(System.currentTimeMillis()))
-                signals.play(SignalKind.ERROR)
+                refuse()
                 true
             }
             JobStatus.AWAITING_VERIFICATION -> {
@@ -431,12 +445,44 @@ class WorkViewModel(
                 if (job.attemptState == app.markiro.handheld.core.duplicate.AttemptState.DELIVERY_UNKNOWN) {
                     verifyScan(job.jobId, raw)
                 } else {
-                    last.value = LastScan(Verdict.INVALID, BLOCKED_TAIL, null, Iso.format(System.currentTimeMillis()))
-                    signals.play(SignalKind.ERROR)
+                    // Nothing was printed, so there is nothing to scan. Put the
+                    // job's own screen back rather than refusing into a void.
+                    refuse()
+                    restoreDuplicateStep()
                 }
                 true
             }
             else -> false
+        }
+    }
+
+    /** A scan that was not judged at all: its own words, and the error signal. */
+    private fun refuse() {
+        last.value = LastScan(Verdict.OK, BLOCKED_TAIL, null, Iso.format(System.currentTimeMillis()), blocked = true)
+        signals.play(SignalKind.ERROR)
+    }
+
+    /**
+     * Puts an outstanding job's screen back after a restart.
+     *
+     * `_duplicateStep` lives in memory, so a job whose attempt failed or went
+     * unknown is invisible once the process dies -- and the next unit is then
+     * refused with nothing on screen explaining why. The row survives; the
+     * screen has to be rebuilt from it.
+     */
+    private suspend fun restoreDuplicateStep() {
+        val job = duplicates.openJob(shiftId) ?: return
+        val reason = duplicates.attentionReason(job.jobId) ?: DuplicateReason.TRANSPORT_FAILED
+        _duplicateStep.value = when {
+            job.attemptState == app.markiro.handheld.core.duplicate.AttemptState.DELIVERY_UNKNOWN ->
+                DuplicateStep.Unknown(job.jobId, reason)
+            job.attemptState == app.markiro.handheld.core.duplicate.AttemptState.FAILED_BEFORE_SEND ->
+                DuplicateStep.Failed(job.jobId, reason)
+            // A printer that refused BEFORE the send leaves the attempt
+            // `prepared` -- «нет бумаги» is no event at all. The job row is the
+            // only record that it needs a person.
+            job.lastFailure != null -> DuplicateStep.Failed(job.jobId, job.lastFailure)
+            else -> _duplicateStep.value
         }
     }
 
@@ -462,11 +508,11 @@ class WorkViewModel(
     }
 
     /** Prepares and sends this unit's duplicate; the screen only opens if it goes wrong. */
-    private suspend fun printDuplicate(shift: ShiftEntity, raw: String) {
+    private suspend fun printDuplicate(shift: ShiftEntity, raw: String, scannedAt: String) {
         duplicateUi.value = DuplicateUi(printing = true, awaitingVerification = false)
         val operator = session.state.value.operator
         val hash = app.markiro.handheld.core.km.KmCodec.hash(app.markiro.handheld.core.km.KmCodec.canonicalize(raw))
-        when (val prepared = duplicates.accept(shift, raw, hash, operator?.operatorId.orEmpty(), operator?.name)) {
+        when (val prepared = duplicates.accept(shift, raw, hash, operator?.operatorId.orEmpty(), operator?.name, scannedAt)) {
             is DuplicateOutcome.Refused -> {
                 _duplicateStep.value = DuplicateStep.Failed("", prepared.reason)
                 refreshDuplicate()

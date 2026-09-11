@@ -11,6 +11,7 @@ import app.markiro.handheld.core.box.PrintReason
 import app.markiro.handheld.core.box.BoxRepository
 import app.markiro.handheld.core.box.CloseBox
 import app.markiro.handheld.core.duplicate.DuplicateJobs
+import app.markiro.handheld.core.duplicate.DuplicateReason
 import app.markiro.handheld.core.box.CloseResult
 import app.markiro.handheld.core.box.ServerRange
 import app.markiro.handheld.core.box.SsccPool
@@ -18,6 +19,7 @@ import app.markiro.handheld.core.km.Verdict
 import app.markiro.handheld.core.label.LabelRenderer
 import app.markiro.handheld.core.label.RasterResult
 import app.markiro.handheld.core.label.RasterizeText
+import app.markiro.handheld.core.print.NotReadyReason
 import app.markiro.handheld.core.print.PrinterEntity
 import app.markiro.handheld.core.print.PrinterStatus
 import app.markiro.handheld.core.print.PrinterTransport
@@ -436,6 +438,55 @@ class WorkViewModelTest {
         vm.state.first { it.duplicate?.awaitingVerification == false }
         assertEquals(DuplicateStep.Idle, vm.duplicateStep.value)
         // And it did not count as a second unit.
+        assertEquals(1, db.codeDao().countForShift("s1"))
+    }
+
+    /**
+     * Found on the emulator: `_duplicateStep` lives in memory, so a job whose
+     * attempt failed was invisible after a restart -- and the next unit was then
+     * refused with nothing on screen explaining why.
+     */
+    @Test
+    fun anOutstandingJobsScreenComesBackAfterARestart() = runTest {
+        duplicateShift()
+        transport.nextStatus = PrinterStatus.NotReady(NotReadyReason.NO_PAPER)
+        val first = vm()
+        advanceUntilIdle()
+        scans.tryEmit(ScanEvent(duplicateRaw("AAA111"), null, "debug", 0))
+        advanceUntilIdle()
+        first.duplicateStep.first { it is DuplicateStep.Failed }
+
+        // A fresh view model over the same database is what a restart looks like.
+        val restarted = vm()
+        advanceUntilIdle()
+        val step = restarted.duplicateStep.first { it is DuplicateStep.Failed } as DuplicateStep.Failed
+        assertEquals(DuplicateReason.NO_PAPER, step.reason)
+    }
+
+    /**
+     * Also found on the emulator: the refusal reused `Verdict.INVALID`, so a
+     * perfectly good code read as «НЕВЕРНЫЙ КОД» when its only problem was that
+     * another unit's label was unresolved.
+     */
+    @Test
+    fun aRefusedScanIsNotReportedAsABadCode() = runTest {
+        duplicateShift(verification = "required")
+        val vm = vm()
+        advanceUntilIdle()
+        scans.tryEmit(ScanEvent(duplicateRaw("AAA111"), null, "debug", 0))
+        advanceUntilIdle()
+        db.productLabelEventDao().observeUnackedCount().first { it == 3 }
+
+        // While the first awaits verification, freeze it mid-print so the next
+        // scan is refused rather than read as a verification.
+        val job = checkNotNull(db.productLabelJobDao().openJob("s1"))
+        db.productLabelJobDao().update(job.copy(status = "sending", attemptState = "sending"))
+
+        scans.tryEmit(ScanEvent(duplicateRaw("BBB222"), null, "debug", 0))
+        advanceUntilIdle()
+        val last = vm.state.first { it.last?.blocked == true }.last
+        assertEquals(true, last?.blocked)
+        // Never judged, so never a verdict about the code itself.
         assertEquals(1, db.codeDao().countForShift("s1"))
     }
 }

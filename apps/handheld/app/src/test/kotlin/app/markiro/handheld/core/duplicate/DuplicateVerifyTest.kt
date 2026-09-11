@@ -25,6 +25,9 @@ private const val VGS = "\u001d"
 private const val VRAW = "0104600682000013215Y7HG9${VGS}93Zf8K"
 private const val VOTHER = "0104600682000013215Y7HG8${VGS}93Zf8K"
 
+/** The scan's own `scannedAt`: the server joins an event to its code on this. */
+private const val ACCEPTED_AT = "2026-09-11T08:00:00.000Z"
+
 @RunWith(AndroidJUnit4::class)
 class DuplicateVerifyTest {
     private lateinit var db: HandheldDatabase
@@ -85,7 +88,7 @@ class DuplicateVerifyTest {
     private suspend fun printed(verification: String = Verification.REQUIRED): String {
         val s = shift(verification)
         db.shiftDao().upsert(s)
-        val jobId = (jobs().accept(s, VRAW, "c".repeat(64), "55555555-5555-4555-8555-555555555555", null) as DuplicateOutcome.Prepared).jobId
+        val jobId = (jobs().accept(s, VRAW, "c".repeat(64), "55555555-5555-4555-8555-555555555555", null, ACCEPTED_AT) as DuplicateOutcome.Prepared).jobId
         jobs().send(jobId)
         return jobId
     }
@@ -183,7 +186,7 @@ class DuplicateVerifyTest {
     fun aReprintIsRefusedWhileAnAttemptIsStillInFlight() = runTest {
         val s = shift(Verification.NONE)
         db.shiftDao().upsert(s)
-        val jobId = (jobs().accept(s, VRAW, "c".repeat(64), "55555555-5555-4555-8555-555555555555", null) as DuplicateOutcome.Prepared).jobId
+        val jobId = (jobs().accept(s, VRAW, "c".repeat(64), "55555555-5555-4555-8555-555555555555", null, ACCEPTED_AT) as DuplicateOutcome.Prepared).jobId
         // Never sent: the attempt is still `prepared`.
         val outcome = jobs().reprint(jobId, ReprintReason.DAMAGED)
         assertEquals(DuplicateReason.ATTEMPT_IN_FLIGHT, (outcome as DuplicateOutcome.Refused).reason)

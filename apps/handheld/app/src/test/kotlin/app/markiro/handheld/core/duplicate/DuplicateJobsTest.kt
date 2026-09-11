@@ -27,6 +27,9 @@ private const val GS = "\u001d"
 private const val RAW = "0104600682000013215Y7HG9${GS}93Zf8K"
 private const val OTHER = "0104600682000013215Y7HG8${GS}93Zf8K"
 
+/** The scan's own `scannedAt`: the server joins an event to its code on this. */
+private const val ACCEPTED_AT = "2026-09-11T08:00:00.000Z"
+
 @RunWith(AndroidJUnit4::class)
 class DuplicateJobsTest {
     private lateinit var db: HandheldDatabase
@@ -92,7 +95,7 @@ class DuplicateJobsTest {
         )
     }
 
-    private fun jobs(clock: () -> Long = { 1_757_577_600_000L }) = DuplicateJobs(
+    private fun jobs(clock: () -> Long = { 1_757_577_600_000L }): DuplicateJobs = DuplicateJobs(
         db = db,
         renderer = LabelRenderer(RasterizeText { _, _ -> RasterResult("00", 1, 1, 1, 1) }),
         transport = transport,
@@ -112,7 +115,7 @@ class DuplicateJobsTest {
     fun tearDown() = db.close()
 
     private suspend fun accept(raw: String = RAW, shift: ShiftEntity = shift()) =
-        jobs().accept(shift, raw, "c".repeat(64), "55555555-5555-4555-8555-555555555555", "Иванова Анна")
+        jobs().accept(shift, raw, "c".repeat(64), "55555555-5555-4555-8555-555555555555", "Иванова Анна", ACCEPTED_AT)
 
     /** Caught before the first unit is accepted, not halfway through a shift. */
     @Test
@@ -191,16 +194,62 @@ class DuplicateJobsTest {
         assertEquals(JobStatus.AWAITING_VERIFICATION, db.productLabelJobDao().get(jobId)?.status)
     }
 
+    /**
+     * The printer's own words stay on the device.
+     *
+     * `failed_before_send` admits only `printer_unconfigured` and
+     * `printer_changed`; sending `no_paper` made the server reject the whole
+     * batch, which wedged the queue for scans and shift closures too. The
+     * attempt therefore stays `prepared`, which is also what lets «Повторить
+     * печать» work once the paper is back.
+     */
     @Test
-    fun aRefusedSendRecordsFailedBeforeSendWithThePrintersOwnReason() = runTest {
+    fun aPrinterThatIsNotReadyIsRecordedOnlyOnTheDevice() = runTest {
         val jobId = (accept() as DuplicateOutcome.Prepared).jobId
         transport.nextStatus = PrinterStatus.NotReady(NotReadyReason.NO_PAPER)
         assertEquals(DuplicateReason.NO_PAPER, (jobs().send(jobId) as DuplicateSend.Failed).reason)
         val job = checkNotNull(db.productLabelJobDao().get(jobId))
-        assertEquals(AttemptState.FAILED_BEFORE_SEND, job.attemptState)
-        assertEquals(JobStatus.ATTENTION, job.status)
-        // Asked before sending, so nothing left the device.
+        assertEquals(DuplicateReason.NO_PAPER, job.lastFailure)
+        assertEquals(AttemptState.PREPARED, job.attemptState)
+        // Asked before sending, so nothing left the device -- and no event either.
         assertTrue(transport.sent.isEmpty())
+        assertEquals(listOf("prepared"), db.productLabelEventDao().bySequence(jobId).map { it.kind })
+    }
+
+    /** The one refusal the protocol does name reaches the server. */
+    @Test
+    fun aPrinterThatVanishedIsRecordedAsAnEvent() = runTest {
+        val jobId = (accept() as DuplicateOutcome.Prepared).jobId
+        db.printerDao().clear()
+        assertEquals(DuplicateReason.PRINTER_UNCONFIGURED, (jobs().send(jobId) as DuplicateSend.Failed).reason)
+        assertEquals(listOf("prepared", "failed_before_send"), db.productLabelEventDao().bySequence(jobId).map { it.kind })
+    }
+
+    /**
+     * Every code that reaches the wire must be one the server's schema admits.
+     * A stray one is a 400 on the whole batch, and a 400 on the whole batch is a
+     * queue that never moves again -- scans and shift closures included.
+     */
+    @Test
+    fun noEventCarriesAnErrorCodeTheServerWouldRefuse() = runTest {
+        val allowed = mapOf(
+            "failed_before_send" to setOf("printer_unconfigured", "printer_changed"),
+            "delivery_unknown" to setOf("transport_failed", "persistence_failed", "interrupted"),
+        )
+        // Drive every path that can record one.
+        val a = (accept() as DuplicateOutcome.Prepared).jobId
+        transport.nextStatus = PrinterStatus.NotReady(NotReadyReason.NO_PAPER)
+        jobs().send(a)
+        transport.nextStatus = PrinterStatus.Ready
+        transport.outcome = SendOutcome.Refused(NotReadyReason.HEAD_OPEN)
+        jobs().send(a)
+        jobs().demoteInterrupted()
+
+        for (event in db.productLabelEventDao().bySequence(a)) {
+            val codes = allowed[event.kind] ?: continue
+            val code = Regex("\"errorCode\":\"([^\"]+)\"").find(event.payloadJson)?.groupValues?.get(1)
+            assertTrue("${event.kind} carries $code", code != null && code in codes)
+        }
     }
 
     @Test
@@ -272,5 +321,21 @@ class DuplicateJobsTest {
         assertTrue(!payload.contains("scannedPayloadDigest"))
         // The first attempt's reason is null and must be present as null.
         assertTrue(payload.contains("\"reason\":null"))
+    }
+
+    /**
+     * Found end to end: the server joins an event to its accepted code on
+     * `codes.scannedAt = event.acceptedAt`, so a fresh reading of the clock here
+     * made every event `parent_missing` -- quarantined one by one while the
+     * device showed nothing wrong.
+     */
+    @Test
+    fun theJobCarriesTheScansOwnTimestampNotTheClock() = runTest {
+        val jobId = (jobs { 9_999_999_999_999L }
+            .accept(shift(), RAW, "c".repeat(64), "55555555-5555-4555-8555-555555555555", null, ACCEPTED_AT)
+            as DuplicateOutcome.Prepared).jobId
+        val job = checkNotNull(db.productLabelJobDao().get(jobId))
+        assertEquals(ACCEPTED_AT, job.acceptedAt)
+        assertTrue(db.productLabelEventDao().bySequence(jobId).single().payloadJson.contains("\"acceptedAt\":\"$ACCEPTED_AT\""))
     }
 }

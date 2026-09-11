@@ -197,7 +197,7 @@ class MigrationTest {
             }
             db.execSQL(
                 "INSERT INTO product_label_jobs VALUES ('j1','s1','hash','raw','t','op','rev','dig','pay','AAEC','byt','zpl',203,1,'att',1," +
-                    "'prepared','none','not_required','prepared')",
+                    "'prepared','none','not_required','prepared',NULL)",
             )
             db.execSQL("INSERT INTO product_label_events VALUES ('e1','j1',1,'prepared','{}','t',NULL,NULL)")
             db.query("SELECT COUNT(*) FROM product_label_jobs").use { cursor ->

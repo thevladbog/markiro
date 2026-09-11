@@ -88,7 +88,7 @@ class ShiftCloserTest {
                 templateDigest = "a".repeat(64), payloadDigest = "p".repeat(64), bytesBase64 = "AAEC",
                 bytesDigest = "b".repeat(64), language = "zpl", dpi = 203, latestSequence = 1,
                 attemptId = "att", attemptNo = 1, attemptState = "delivery_unknown", verification = "none",
-                verificationOutcome = "not_required", status = "attention",
+                verificationOutcome = "not_required", status = "attention", lastFailure = null,
             ),
         )
         db.productLabelEventDao().insert(

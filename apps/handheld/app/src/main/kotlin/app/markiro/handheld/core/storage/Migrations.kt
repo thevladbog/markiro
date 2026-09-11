@@ -153,7 +153,7 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
                 "`language` TEXT NOT NULL, `dpi` INTEGER NOT NULL, `latestSequence` INTEGER NOT NULL, " +
                 "`attemptId` TEXT NOT NULL, `attemptNo` INTEGER NOT NULL, `attemptState` TEXT NOT NULL, " +
                 "`verification` TEXT NOT NULL, `verificationOutcome` TEXT NOT NULL, `status` TEXT NOT NULL, " +
-                "PRIMARY KEY(`jobId`))",
+                "`lastFailure` TEXT, PRIMARY KEY(`jobId`))",
         )
         db.execSQL(
             "CREATE INDEX IF NOT EXISTS `index_product_label_jobs_shiftId_status` ON `product_label_jobs` (`shiftId`, `status`)",

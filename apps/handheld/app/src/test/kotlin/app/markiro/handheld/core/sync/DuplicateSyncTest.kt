@@ -78,7 +78,7 @@ class DuplicateSyncTest {
         templateDigest = "a".repeat(64), payloadDigest = "p".repeat(64), bytesBase64 = "AAEC",
         bytesDigest = "b".repeat(64), language = "zpl", dpi = 203, latestSequence = 1,
         attemptId = "att", attemptNo = 1, attemptState = "prepared", verification = "none",
-        verificationOutcome = "not_required", status = "prepared",
+        verificationOutcome = "not_required", status = "prepared", lastFailure = null,
     )
 
     private suspend fun event(id: String, sequence: Int, jobId: String = "j1", occurredAt: String = "2026-09-11T08:00:0$sequence.000Z") =

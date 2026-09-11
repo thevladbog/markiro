@@ -47,6 +47,7 @@ class ProductLabelStorageTest {
             verification = "none",
             verificationOutcome = "not_required",
             status = status,
+            lastFailure = null,
         )
 
     private fun event(id: String, jobId: String, sequence: Int, occurredAt: String = "2026-09-11T08:00:00.000Z") =

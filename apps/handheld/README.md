@@ -166,6 +166,20 @@ The event projection is pinned to `packages/domain` by a fifth fixture set
 (`pnpm --filter @markiro/domain fixtures:product-labels`). The server validates the same
 events, so a divergence would show up as labels that print and then never settle.
 
+An event carries only what the protocol admits. `failed_before_send` names
+`printer_unconfigured` and `printer_changed`; `delivery_unknown` names
+`transport_failed`, `persistence_failed` and `interrupted`. The printer's own
+words — «нет бумаги», «открыта головка» — stay on the job row and never reach the
+wire: an event describes what happened to the LABEL, and sending a stray code
+makes the server reject the whole batch, which wedges the queue for scans and
+shift closures too. A printer that refuses before the send therefore records no
+event at all and leaves the attempt `prepared`, which is also what lets «Повторить
+печать» work once the paper is back.
+
+`acceptedAt` on an event is the SCAN's own `scannedAt`, not a fresh reading of the
+clock: the server joins an event to its accepted code on
+`codes.scannedAt = event.acceptedAt`.
+
 **Not proven by any test here:** that a printed duplicate scans. Verification checks
 exactly that at runtime, but an emulator's stand-in scan exercises the state machine,
 not print quality. Only a real printer and a real scanner settle it.

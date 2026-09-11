@@ -55,6 +55,9 @@ interface ProductLabelJobDao {
     @Query("SELECT COUNT(*) FROM product_label_jobs WHERE shiftId = :shiftId AND status <> 'completed'")
     suspend fun outstandingCount(shiftId: String): Int
 
+    @Query("UPDATE product_label_jobs SET lastFailure = :reason WHERE jobId = :jobId")
+    suspend fun setLastFailure(jobId: String, reason: String?)
+
     @Query("DELETE FROM product_label_jobs")
     suspend fun clear()
 }
@@ -88,6 +91,10 @@ interface ProductLabelEventDao {
 
     @Query("SELECT * FROM product_label_events WHERE jobId = :jobId ORDER BY sequence")
     suspend fun bySequence(jobId: String): List<ProductLabelEventEntity>
+
+    /** The newest event's payload, which is where an attention state keeps its reason. */
+    @Query("SELECT payloadJson FROM product_label_events WHERE jobId = :jobId ORDER BY sequence DESC LIMIT 1")
+    suspend fun lastPayload(jobId: String): String?
 
     @Query("SELECT COUNT(*) FROM product_label_events WHERE quarantineCode IS NOT NULL")
     fun observeQuarantinedCount(): Flow<Int>

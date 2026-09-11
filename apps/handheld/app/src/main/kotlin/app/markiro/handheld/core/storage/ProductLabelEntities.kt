@@ -40,6 +40,17 @@ data class ProductLabelJobEntity(
     val verification: String,
     val verificationOutcome: String,
     val status: String,
+    /**
+     * Why the last attempt did not leave the device, in the printer's own terms.
+     *
+     * DEVICE-LOCAL and deliberately not an event: the protocol's
+     * `failed_before_send` admits only `printer_unconfigured` and
+     * `printer_changed`, because an event describes what happened to the LABEL.
+     * «Нет бумаги» is a fact about the printer, and sending it made the server
+     * reject the whole batch -- wedging the queue for scans and shift closures
+     * too.
+     */
+    val lastFailure: String?,
 )
 
 /**
