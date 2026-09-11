@@ -1,0 +1,2 @@
+ALTER TABLE "platform_agreement_documents" ADD COLUMN "source_digest" text;--> statement-breakpoint
+ALTER TABLE "platform_agreement_documents" ADD CONSTRAINT "platform_agreement_documents_source_digest_format" CHECK ("platform_agreement_documents"."source_digest" is null or "platform_agreement_documents"."source_digest" ~ '^[0-9a-f]{64}$');

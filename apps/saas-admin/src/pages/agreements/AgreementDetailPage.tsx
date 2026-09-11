@@ -223,6 +223,13 @@ export function AgreementDetailPage() {
       {uploadError && <Alert tone="error">{uploadError}</Alert>}
       {upload.error && <Alert tone="error">{upload.error.message}</Alert>}
 
+      {detail.documents.some((document) => document.stale) && (
+        // The record says one thing and the stored file says another. Said
+        // before the download button, not after: the point is to stop an
+        // operator sending a document that no longer matches the agreement.
+        <Alert tone="warn">{t("agreements.detail.staleDraft")}</Alert>
+      )}
+
       <Table<(typeof detail.documents)[number]>
         scrollLabel={t("agreements.sections.documents")}
         empty={t("agreements.detail.noDocuments")}
@@ -234,7 +241,22 @@ export function AgreementDetailPage() {
             title: t("agreements.columns.documentKind"),
             render: (row) => t(`agreements.documentKinds.${row.kind}`),
           },
-          { key: "filename", title: t("agreements.columns.filename"), wrap: true },
+          {
+            key: "filename",
+            title: t("agreements.columns.filename"),
+            wrap: true,
+            render: (row) => (
+              <>
+                {row.filename}
+                {row.stale && (
+                  <>
+                    {" "}
+                    <StatusChip status="warn" label={t("agreements.detail.staleBadge")} />
+                  </>
+                )}
+              </>
+            ),
+          },
           {
             key: "size",
             title: t("agreements.columns.size"),

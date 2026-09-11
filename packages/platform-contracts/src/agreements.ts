@@ -151,6 +151,12 @@ const agreementDocumentSchema = z
     mediaType: z.string(),
     sha256: z.string().regex(/^[0-9a-f]{64}$/),
     byteSize: z.number().int().positive(),
+    /**
+     * The agreement has been edited since this document was rendered, so the
+     * file no longer matches the record. Always false for an attachment,
+     * which is not rendered from anything.
+     */
+    stale: z.boolean(),
     createdAt: platformTimestampSchema,
   })
   .strict();
