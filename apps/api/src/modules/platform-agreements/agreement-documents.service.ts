@@ -10,7 +10,13 @@ import {
 } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { buildTenantAgreement, renderLegalDocxDraft } from "@markiro/legal-documents";
+import {
+  AGREEMENT_MONOLINGUAL_SECTION_IDS,
+  buildTenantAgreement,
+  pairLocaleContent,
+  renderLegalDocxBilingual,
+  renderLegalDocxDraft,
+} from "@markiro/legal-documents";
 import type { AgreementDocument } from "@markiro/platform-contracts";
 
 import { DB } from "../../auth/auth.module";
@@ -25,7 +31,7 @@ import {
 import { toAgreementFields } from "./agreement-fields";
 import { parseRequisites, parseSignatory, parseTerms } from "./agreement-state";
 
-export const AGREEMENT_RENDERER_VERSION = "agreement-docx-v1";
+export const AGREEMENT_RENDERER_VERSION = "agreement-docx-v2";
 const DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 // MKR-AGR-01 is not a registry release, so the Data Matrix points at the
@@ -82,7 +88,7 @@ export class AgreementDocumentsService {
     const objectKey = agreementDraftObjectKey(agreement.id);
     await this.storage.putVerified(objectKey, bytes, DOCX_MEDIA_TYPE, sha256);
 
-    const filename = `${agreement.number}-проект.docx`;
+    const filename = `${agreement.number}-проект${this.formSuffix(agreement)}.docx`;
     const row = await this.db.transaction(async (tx) => {
       const [existing] = await tx
         .select()
@@ -163,7 +169,7 @@ export class AgreementDocumentsService {
       .values({
         agreementId: agreement.id,
         kind: "generated",
-        filename: `${agreement.number}.docx`,
+        filename: `${agreement.number}${this.formSuffix(agreement)}.docx`,
         mediaType: DOCX_MEDIA_TYPE,
         objectKey: rendered.objectKey,
         sha256: rendered.sha256,
@@ -283,29 +289,48 @@ export class AgreementDocumentsService {
   }
 
   private async render(agreement: AgreementRow, classLabel: string): Promise<Buffer> {
-    const content = buildTenantAgreement(
-      toAgreementFields({
-        number: agreement.number,
-        conclusionDate: agreement.conclusionDate,
-        city: agreement.city,
-        counterparty: parseRequisites(agreement.counterparty, "counterparty"),
-        contractor: parseRequisites(agreement.contractor, "contractor"),
-        signatory: parseSignatory(agreement.terms),
-        terms: parseTerms(agreement.terms),
-      }),
-      "ru",
-    );
-    const bytes = await renderLegalDocxDraft({
+    const fields = toAgreementFields({
+      number: agreement.number,
+      conclusionDate: agreement.conclusionDate,
+      city: agreement.city,
+      counterparty: parseRequisites(agreement.counterparty, "counterparty"),
+      contractor: parseRequisites(agreement.contractor, "contractor"),
+      signatory: parseSignatory(agreement.terms),
+      terms: parseTerms(agreement.terms),
+    });
+    const meta = {
       code: AGREEMENT_CODE,
       revision: AGREEMENT_REVISION,
       effectiveDate: AGREEMENT_EFFECTIVE_DATE,
-      locale: "ru",
+      locale: "ru" as const,
       verificationUrl: REGISTRY_URL,
       classLabel,
-      operatorProfileId: "operator-2026-08-15",
-      content,
-    });
-    return Buffer.from(bytes);
+      operatorProfileId: "operator-2026-08-15" as const,
+    };
+
+    if (agreement.documentForm === "ru_en") {
+      return Buffer.from(
+        await renderLegalDocxBilingual({
+          ...meta,
+          content: pairLocaleContent(
+            buildTenantAgreement(fields, "ru"),
+            buildTenantAgreement(fields, "en"),
+            AGREEMENT_MONOLINGUAL_SECTION_IDS,
+          ),
+        }),
+      );
+    }
+    return Buffer.from(
+      await renderLegalDocxDraft({ ...meta, content: buildTenantAgreement(fields, "ru") }),
+    );
+  }
+
+  /**
+   * The stored document is the copy that gets signed, so the form is visible
+   * in its name rather than only in the record.
+   */
+  private formSuffix(agreement: AgreementRow): string {
+    return agreement.documentForm === "ru_en" ? "_ru-en" : "";
   }
 }
 

@@ -1,0 +1,2 @@
+CREATE TYPE "public"."platform_agreement_document_form" AS ENUM('ru', 'ru_en');--> statement-breakpoint
+ALTER TABLE "platform_agreements" ADD COLUMN "document_form" "platform_agreement_document_form" DEFAULT 'ru' NOT NULL;

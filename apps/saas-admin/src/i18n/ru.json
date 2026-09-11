@@ -1729,6 +1729,7 @@
       "counterparty": "Контрагент",
       "inn": "ИНН",
       "status": "Статус",
+      "documentForm": "Форма",
       "conclusionDate": "Дата заключения",
       "tenant": "Тенант",
       "documentKind": "Тип",
@@ -1760,6 +1761,13 @@
       "sole_proprietor": "Индивидуальный предприниматель",
       "self_employed": "Самозанятый",
       "individual": "Физическое лицо"
+    },
+    "documentForm": {
+      "label": "Форма документа",
+      "ru": "Русская",
+      "ru_en": "Двуязычная (рус./англ.)",
+      "badgeRu": "RU",
+      "badgeRuEn": "RU + EN"
     },
     "sections": {
       "counterparty": "Контрагент",
