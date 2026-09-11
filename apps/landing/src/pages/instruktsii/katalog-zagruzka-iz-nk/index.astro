@@ -1,0 +1,30 @@
+---
+import importUnavailable from "@markiro/legal-documents/assets/instructions/mkr-ins-11/ru/import-unavailable.png?url";
+import importStart from "@markiro/legal-documents/assets/instructions/mkr-ins-11/ru/import-start.png?url";
+import importSelection from "@markiro/legal-documents/assets/instructions/mkr-ins-11/ru/import-selection.png?url";
+import importReview from "@markiro/legal-documents/assets/instructions/mkr-ins-11/ru/import-review.png?url";
+import importReviewBlocked from "@markiro/legal-documents/assets/instructions/mkr-ins-11/ru/import-review-blocked.png?url";
+import importPhoto from "@markiro/legal-documents/assets/instructions/mkr-ins-11/ru/import-photo.png?url";
+import importResult from "@markiro/legal-documents/assets/instructions/mkr-ins-11/ru/import-result.png?url";
+import importResultPhoto from "@markiro/legal-documents/assets/instructions/mkr-ins-11/ru/import-result-photo.png?url";
+import chzLink from "@markiro/legal-documents/assets/instructions/mkr-ins-11/ru/chz-link.png?url";
+import chzRefreshError from "@markiro/legal-documents/assets/instructions/mkr-ins-11/ru/chz-refresh-error.png?url";
+
+import { getLegalDocumentPage } from "../../../content/legal-pages";
+import InstructionDocument from "../../../components/InstructionDocument.astro";
+
+const images = {
+  "import-unavailable": importUnavailable,
+  "import-start": importStart,
+  "import-selection": importSelection,
+  "import-review": importReview,
+  "import-review-blocked": importReviewBlocked,
+  "import-photo": importPhoto,
+  "import-result": importResult,
+  "import-result-photo": importResultPhoto,
+  "chz-link": chzLink,
+  "chz-refresh-error": chzRefreshError,
+};
+---
+
+<InstructionDocument page={getLegalDocumentPage("MKR-INS-11", "ru")} images={images} />
