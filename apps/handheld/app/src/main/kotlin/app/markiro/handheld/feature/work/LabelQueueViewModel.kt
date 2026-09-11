@@ -5,6 +5,10 @@ import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.core.box.BoxPrint
 import app.markiro.handheld.core.box.BoxPrinter
 import app.markiro.handheld.core.box.BoxRepository
+import app.markiro.handheld.core.exceptions.ExceptionEngine
+import app.markiro.handheld.core.exceptions.ReprintReason
+import app.markiro.handheld.core.storage.DeviceConfigDao
+import app.markiro.handheld.feature.signin.SessionHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -35,6 +39,9 @@ data class LabelQueueUi(val items: List<LabelQueueItem> = emptyList(), val print
 class LabelQueueViewModel @Inject constructor(
     private val boxes: BoxRepository,
     private val printer: BoxPrinter,
+    private val exceptions: ExceptionEngine,
+    private val session: SessionHolder,
+    private val config: DeviceConfigDao,
 ) : ViewModel() {
     private val printing = MutableStateFlow(false)
     private val busy = AtomicBoolean(false)
@@ -50,7 +57,31 @@ class LabelQueueViewModel @Inject constructor(
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, LabelQueueUi())
 
-    fun printOne(boxId: String) = runPrint { printer.print(boxId) }
+    fun printOne(boxId: String) = runPrint {
+        auditIfOutcomeUnknown(boxId)
+        printer.print(boxId)
+    }
+
+    /**
+     * Printing again a box whose last attempt ended `unknown` is an explicit
+     * same-SSCC reprint (design brief 10 §8) and is recorded as one -- with a
+     * fixed reason rather than a prompt, because the operator is standing at
+     * the printer deciding whether paper moved, not filling in a ledger.
+     *
+     * `failed` and `deferred` never put paper through, so they are ordinary
+     * retries and write nothing.
+     */
+    private suspend fun auditIfOutcomeUnknown(boxId: String) {
+        val box = boxes.get(boxId) ?: return
+        if (box.printState != BoxPrint.UNKNOWN) return
+        exceptions.reprint(
+            shiftId = box.shiftId,
+            boxId = boxId,
+            reason = ReprintReason.PRINT_OUTCOME_UNKNOWN,
+            operatorId = session.state.value.operator?.operatorId,
+            terminalId = config.get()?.deviceId,
+        )
+    }
 
     /**
      * Every queued label except those whose last attempt is `unknown`.

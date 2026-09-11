@@ -30,6 +30,17 @@ interface BoxExceptionDao {
     )
     suspend fun sendable(through: Long, limit: Int): List<BoxExceptionEntity>
 
+    /**
+     * Everything still owed, in send order, whether or not it may leave yet.
+     *
+     * `sendable` is the drain's view and deliberately withholds a fact whose
+     * targets the server has not seen; this is the queue itself. The two answer
+     * different questions and a caller that confuses them will read an empty
+     * list as an empty queue.
+     */
+    @Query("SELECT * FROM box_exceptions WHERE ackedAt IS NULL ORDER BY id")
+    suspend fun queued(): List<BoxExceptionEntity>
+
     @Query("UPDATE box_exceptions SET ackedAt = :at WHERE id IN (:ids)")
     suspend fun markAcked(ids: List<Long>, at: String)
 

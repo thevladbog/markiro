@@ -5,7 +5,10 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.core.box.BoxPrinter
+import app.markiro.handheld.core.box.BoxPrint
 import app.markiro.handheld.core.box.BoxRepository
+import app.markiro.handheld.core.exceptions.ExceptionEngine
+import app.markiro.handheld.core.exceptions.ReprintReason
 import app.markiro.handheld.core.box.CloseBox
 import app.markiro.handheld.core.box.CloseResult
 import app.markiro.handheld.core.box.PrintOutcome
@@ -148,6 +151,7 @@ class WorkViewModel(
     private val closer: CloseBox,
     private val boxPrinter: BoxPrinter,
     private val duplicates: DuplicateJobs,
+    private val exceptions: ExceptionEngine,
     /** One tick per team refresh; tests pass a single tick so virtual time never loops. */
     private val teamTicks: Flow<Unit> = flow {
         while (true) {
@@ -172,9 +176,10 @@ class WorkViewModel(
         closer: CloseBox,
         boxPrinter: BoxPrinter,
         duplicates: DuplicateJobs,
+        exceptions: ExceptionEngine,
     ) : this(
         handle, db, recorder, scans, { signaller.play(it) }, sync, session, reachability, team, repository,
-        boxes, closer, boxPrinter, duplicates,
+        boxes, closer, boxPrinter, duplicates, exceptions,
     )
 
     val shiftId: String = checkNotNull(handle["shiftId"])
@@ -375,9 +380,31 @@ class WorkViewModel(
     fun retryPrint() {
         val closed = _closeStep.value.closedBox() ?: return
         viewModelScope.launch {
+            auditIfOutcomeUnknown(closed.boxId)
             _closeStep.value = BoxCloseStep.Printing(closed)
             _closeStep.value = attempt(closed)
         }
+    }
+
+    /**
+     * Printing again a box whose last attempt ended `unknown` is an explicit
+     * same-SSCC reprint (design brief 10 §8) and is recorded as one, with a
+     * fixed reason rather than a prompt: the operator is at the printer working
+     * out whether paper moved, not filling in a ledger.
+     *
+     * A `failed` attempt never put paper through, so retrying it is an ordinary
+     * retry and writes nothing.
+     */
+    private suspend fun auditIfOutcomeUnknown(boxId: String) {
+        val box = boxes.get(boxId) ?: return
+        if (box.printState != BoxPrint.UNKNOWN) return
+        exceptions.reprint(
+            shiftId = box.shiftId,
+            boxId = boxId,
+            reason = ReprintReason.PRINT_OUTCOME_UNKNOWN,
+            operatorId = session.state.value.operator?.operatorId,
+            terminalId = db.deviceConfigDao().get()?.deviceId,
+        )
     }
 
     /**
