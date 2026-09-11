@@ -386,7 +386,9 @@ function validArtifacts(): {
   artifacts.push(artifactEntry("MKR-INS-09", "ru", "pdfa-2b"));
   artifacts.push(artifactEntry("MKR-INS-09", "en", "pdfa-2b"));
   artifacts.push(artifactEntry("MKR-INS-10", "ru", "pdfa-2b"));
+  artifacts.push(artifactEntry("MKR-INS-10", "en", "pdfa-2b"));
   artifacts.push(artifactEntry("MKR-INS-11", "ru", "pdfa-2b"));
+  artifacts.push(artifactEntry("MKR-INS-11", "en", "pdfa-2b"));
   return {
     entries: artifacts.map(({ entry }) => entry),
     bytesByFile: new Map(artifacts.map(({ entry, bytes }) => [entry.fileName, bytes])),
@@ -1288,9 +1290,9 @@ describe("legal artifact release generation", () => {
     );
 
     expect(beforePublishCalls).toBe(1);
-    expect(entries).toHaveLength(32);
-    expect(dependencies.converted).toHaveLength(28);
-    expect(dependencies.requests).toHaveLength(32);
+    expect(entries).toHaveLength(34);
+    expect(dependencies.converted).toHaveLength(30);
+    expect(dependencies.requests).toHaveLength(34);
     expect(
       dependencies.requests.map(
         ({ code, locale, kind, verificationUrl }) => `${code}|${locale}|${kind}|${verificationUrl}`,
@@ -1327,7 +1329,9 @@ describe("legal artifact release generation", () => {
       "MKR-INS-09|ru|legal-pdf|https://markiro.app/d/MKR-INS-09/2026.09/03/10.09.2026",
       "MKR-INS-09|en|legal-pdf|https://markiro.app/d/MKR-INS-09/2026.09/03/10.09.2026",
       "MKR-INS-10|ru|legal-pdf|https://markiro.app/d/MKR-INS-10/2026.09/01/10.09.2026",
+      "MKR-INS-10|en|legal-pdf|https://markiro.app/d/MKR-INS-10/2026.09/01/10.09.2026",
       "MKR-INS-11|ru|legal-pdf|https://markiro.app/d/MKR-INS-11/2026.09/01/11.09.2026",
+      "MKR-INS-11|en|legal-pdf|https://markiro.app/d/MKR-INS-11/2026.09/01/11.09.2026",
     ]);
     expect(new Set(entries.map(({ revision }) => revision))).toEqual(
       new Set(["2026.08/01", "2026.08/02", "2026.08/03", "2026.09/01", "2026.09/03"]),
@@ -1335,10 +1339,10 @@ describe("legal artifact release generation", () => {
     expect(new Set(entries.map(({ effectiveDate }) => effectiveDate))).toEqual(
       new Set(["2026-08-15", "2026-09-01", "2026-09-02", "2026-09-10", "2026-09-11"]),
     );
-    expect(entries.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(28);
+    expect(entries.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(30);
     expect(await readdir(path.dirname(outDir))).toEqual(["legal"]);
     expect(await readdir(outDir)).toEqual(["artifacts.json", "files"]);
-    expect(await readdir(path.join(outDir, "files"))).toHaveLength(32);
+    expect(await readdir(path.join(outDir, "files"))).toHaveLength(34);
     expect(await readFile(path.join(outDir, "artifacts.json"), "utf8")).toBe(
       canonicalArtifactManifest(entries),
     );
@@ -1454,7 +1458,7 @@ describe("legal artifact release generation", () => {
     );
     await expect(
       generateLegalArtifacts({ ...generation, check: true }, fakeGenerationDependencies()),
-    ).resolves.toHaveLength(32);
+    ).resolves.toHaveLength(34);
 
     const changed = path.join(outDir, "files", "markiro_mkr-pd-01_2026.08-01_ru.pdf");
     await writeFile(changed, "%PDF-1.7\nchanged\n%%EOF\n");
@@ -1465,7 +1469,7 @@ describe("legal artifact release generation", () => {
 });
 
 describe("instruction artifact bounds", () => {
-  it("expects bilingual PDFs for MKR-INS-01 and a Russian-only PDF for MKR-INS-10", () => {
+  it("names bilingual PDFs for every instruction and refuses a non-template docx", () => {
     const release = findLegalRelease("MKR-INS-01");
     expect(
       artifactFileName({
@@ -1487,8 +1491,11 @@ describe("instruction artifact bounds", () => {
         verificationUrl: legalVerificationUrl(release),
       }),
     ).toBe("markiro_mkr-ins-01_2026.09-01_en.pdf");
+    // The catalog pair completed the English series, so an instruction no
+    // longer has an unpublished locale to refuse -- both now name an English
+    // PDF the same way the station set does.
     const cabinetRelease = findLegalRelease("MKR-INS-10");
-    expect(() =>
+    expect(
       artifactFileName({
         code: "MKR-INS-10",
         revision: cabinetRelease.revision,
@@ -1497,7 +1504,18 @@ describe("instruction artifact bounds", () => {
         kind: "legal-pdf",
         verificationUrl: legalVerificationUrl(cabinetRelease),
       }),
-    ).toThrow(/locale/i);
+    ).toBe("markiro_mkr-ins-10_2026.09-01_en.pdf");
+    const importRelease = findLegalRelease("MKR-INS-11");
+    expect(
+      artifactFileName({
+        code: "MKR-INS-11",
+        revision: importRelease.revision,
+        effectiveDate: importRelease.effectiveDate,
+        locale: "en",
+        kind: "legal-pdf",
+        verificationUrl: legalVerificationUrl(importRelease),
+      }),
+    ).toBe("markiro_mkr-ins-11_2026.09-01_en.pdf");
     expect(() =>
       artifactFileName({
         code: "MKR-INS-01",
