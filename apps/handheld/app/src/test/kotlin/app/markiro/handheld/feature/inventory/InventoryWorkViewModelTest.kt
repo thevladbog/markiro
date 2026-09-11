@@ -79,8 +79,12 @@ class InventoryWorkViewModelTest {
 
     @After
     fun tearDown() {
-        engineScope.cancel()
-        db.close()
+        try {
+            main.cancelAndJoinModels()
+        } finally {
+            engineScope.cancel()
+            db.close()
+        }
     }
 
     /** Room answers on its own threads; keep draining the test dispatcher until the signals arrive. */

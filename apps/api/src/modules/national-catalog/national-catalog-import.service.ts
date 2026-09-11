@@ -1,3 +1,7 @@
+import {
+  type EntitlementAdmissionService,
+  admissionScopeDigest,
+} from "../../subscriptions/entitlement-admission.service";
 import { releaseExpiredImportPayloads } from "./national-catalog-import-retention";
 import { cancelAcceptedImportWork } from "./national-catalog-import-cancellation";
 import { lockTenantSubscriptionTimeline } from "../../subscriptions/subscription-locks";
@@ -66,6 +70,7 @@ export class NationalCatalogImportService {
     private readonly authorization: AuthorizationService,
     private readonly entitlements: EntitlementsService,
     private readonly features: ImportFeatures = { ownCatalog: false, gtinLookup: false },
+    private readonly admission?: EntitlementAdmissionService,
   ) {}
   releaseExpired(now = new Date(), limit = 50): Promise<number> {
     return releaseExpiredImportPayloads(this.repository, now, limit);
@@ -73,6 +78,7 @@ export class NationalCatalogImportService {
   async start(actor: ImportActor, body: ImportStart): Promise<ImportSession> {
     const parsed = importStartSchema.safeParse(body);
     if (!parsed.success) throw new UnprocessableEntityException("invalid_import_start");
+    const facts = await this.admission?.capture(actor.tenantId);
     return this.repository.transaction(async (tx) => {
       const environment = await this.authorize(tx, actor, parsed.data.mode);
       const now = new Date();
@@ -100,6 +106,15 @@ export class NationalCatalogImportService {
         nextRetryAt: null,
         enqueuePending: work.length > 0,
       };
+      await this.admission?.observe({
+        tenantId: actor.tenantId,
+        actor: { domain: "cabinet", id: actor.userId },
+        operationId: "nk.lookup.v1",
+        scopeDigest: admissionScopeDigest({ mode: parsed.data.mode, checkpoint }),
+        transaction: tx,
+        facts,
+        runtime: { enabled: true, observedAt: new Date() },
+      });
       const session = await this.repository.create(tx, {
         ...actor,
         actorId: actor.userId,
@@ -255,6 +270,7 @@ export class NationalCatalogImportService {
       result = await this.coordinator.run(
         { tenantId, environment: session.environment },
         async ({ auth, ...options }) => {
+          const facts = await this.admission?.capture(tenantId);
           const permitted = await this.repository.transaction(async (tx) => {
             const current = await this.expire(
               tx,
@@ -269,6 +285,16 @@ export class NationalCatalogImportService {
             )
               throw new CatalogRequestError("deferred", "step_changed");
             if (!(await this.authorizeBackground(tx, current, cp))) return false;
+            await this.admission?.observe({
+              tenantId: tenantId,
+              actor: { domain: "cabinet", id: current.actorId },
+              operationId: "nk.worker.v1",
+              scopeDigest: admissionScopeDigest({ sessionId, stepId: cp.stepId, work }),
+              transaction: tx,
+              facts,
+              runtime: { enabled: true, observedAt: new Date() },
+              attempt: { number: cp.attempts + 1, identity: runId },
+            });
             await this.repository.save(tx, current, {
               state: "loading",
               checkpoint: {

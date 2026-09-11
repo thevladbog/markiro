@@ -1,3 +1,4 @@
+import { EntitlementAdmissionService } from "../src/subscriptions/entitlement-admission.service";
 import { HttpException } from "@nestjs/common";
 import { sourceEnvelopeSchema } from "../src/modules/national-catalog/national-catalog-import-apply-state";
 import { randomUUID } from "node:crypto";
@@ -169,7 +170,11 @@ describe("atomic National Catalog product application (real PostgreSQL services)
   async function init() {
     const { NationalCatalogImportApplyService } =
       await import("../src/modules/national-catalog/national-catalog-import-apply.service");
-    service = new NationalCatalogImportApplyService(repository, sessions);
+    service = new NationalCatalogImportApplyService(
+      repository,
+      sessions,
+      new EntitlementAdmissionService(db, new EntitlementsService(db, "managed_only")),
+    );
   }
   async function apply(body: ImportApply) {
     // Task9 requires reviewed ready metadata BEFORE acceptance; these remain metadata-only fixtures.
@@ -421,6 +426,14 @@ describe("atomic National Catalog product application (real PostgreSQL services)
   it("replays accepted results after expiry and rejects changed canonical decisions", async () => {
     const body = decision(await preview(), true);
     const result = await apply(body);
+    const observations = () =>
+      db
+        .select()
+        .from(schema.entitlementShadowObservations)
+        .where(eq(schema.entitlementShadowObservations.tenantId, actor.tenantId));
+    const before = await observations();
+    expect(before.map((row) => row.operationId).sort()).toEqual(["nk.apply.v1", "nk.worker.v1"]);
+    expect(before.every((row) => row.actorId === actor.userId)).toBe(true);
     await db
       .update(schema.nationalCatalogImportSessions)
       .set({ state: "expired" })
@@ -435,6 +448,7 @@ describe("atomic National Catalog product application (real PostgreSQL services)
       }),
     ).rejects.toThrow("import_request_mismatch");
     expect(await links()).toHaveLength(1);
+    expect(await observations()).toEqual(before);
   });
   it("records product conflict without changing name/link on concurrent old-value change", async () => {
     const body = decision(await preview(), true);

@@ -1,3 +1,4 @@
+import type { CommercialVersion } from "../../platform-http/commercial-version";
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   and,
@@ -412,6 +413,7 @@ export class PlatformBillingRequestsService {
     actor: PlatformPrincipal,
     requestId: string,
     input: Omit<CreateOfferV2, "tenantId"> & { idempotencyKey: string },
+    commercialVersion: CommercialVersion = 2,
   ) {
     const canonicalRequestId = canonicalBillingUuid(requestId);
     const located = await this.locate(canonicalRequestId);
@@ -435,10 +437,15 @@ export class PlatformBillingRequestsService {
         { kind: "request", id: canonicalRequestId },
       ]);
       const request = await lockRequest(tx, located.tenantId, canonicalRequestId);
-      const offerId = await createOfferDraft(tx, actor.userId, {
-        ...offerInput,
-        tenantId: request.tenantId,
-      });
+      const offerId = await createOfferDraft(
+        tx,
+        actor.userId,
+        {
+          ...offerInput,
+          tenantId: request.tenantId,
+        },
+        commercialVersion,
+      );
       // Keep the request event key authoritative. A collision here proves that the
       // offer and its lines are rolled back with the rest of this transaction.
       await rejectExistingEventKey(tx, request.tenantId, idempotencyKey);

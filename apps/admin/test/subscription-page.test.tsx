@@ -5,11 +5,23 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import { ThemeProvider } from "@markiro/ui";
 import { AccessProvider } from "../src/access/context.js";
 import { BillingSubscriptionPage } from "../src/pages/billing/BillingSubscriptionPage.js";
+import { useBillingEntitlements } from "../src/pages/billing/entitlements-api.js";
+import { ENTITLEMENT_SNAPSHOT } from "./entitlements-fixture.js";
+import { beforeEach } from "vitest";
 import { useBillingSubscription } from "../src/pages/billing/api.js";
 
 vi.mock("../src/pages/billing/api.js", () => ({
   useBillingSubscription: vi.fn(),
 }));
+
+vi.mock("../src/pages/billing/entitlements-api.js", () => ({ useBillingEntitlements: vi.fn() }));
+beforeEach(() => {
+  vi.mocked(useBillingEntitlements).mockReturnValue({
+    data: ENTITLEMENT_SNAPSHOT,
+    isPending: false,
+    isError: false,
+  } as never);
+});
 
 const subscription = {
   access: "read_only",
@@ -117,19 +129,11 @@ it("renders server-provided read-only, exceeded, scheduled, add-on, and service 
   renderSubscription();
 
   expect(screen.getAllByText("Только чтение").length).toBeGreaterThan(0);
-  expect(screen.getByText("Лимит превышен")).toBeDefined();
+  expect(screen.getByText("17 / 20")).toBeDefined();
   expect(screen.getByRole("heading", { name: "Следующее изменение", level: 2 })).toBeDefined();
   expect(screen.getByText("Корпоративный")).toBeDefined();
   expect(screen.getByText("Приоритетная поддержка")).toBeDefined();
   expect(screen.getByText("Выполняется")).toBeDefined();
-  const lineProgress = screen.getByRole("progressbar", {
-    name: "Линии: использовано 2 из 1",
-  }) as HTMLProgressElement;
-  expect(lineProgress.value).toBe(1);
-  expect(lineProgress.max).toBe(1);
-  expect(screen.getByRole("link", { name: "Увеличить лимит линий" }).getAttribute("href")).toBe(
-    "/billing/requests/new?type=capacity_change&contextType=limit&contextId=lines",
-  );
 });
 
 it("renders subscription loading, failure, and unmanaged empty states", () => {
@@ -175,4 +179,29 @@ it("renders the Task 4 scheduled-only projection instead of treating it as unman
   expect(screen.getByText("Только чтение")).toBeDefined();
   expect(screen.queryByRole("heading", { name: "Текущая подписка", level: 2 })).toBeNull();
   expect(screen.queryByText("Подписка не назначена")).toBeNull();
+});
+
+it("shows the safe server snapshot even for unmanaged tenants and never renders internal decision data", () => {
+  vi.mocked(useBillingSubscription).mockReturnValue({
+    data: { ...subscription, access: "unmanaged", subscription: null },
+    isPending: false,
+    isError: false,
+  } as never);
+  vi.mocked(useBillingEntitlements).mockReturnValue({
+    data: {
+      ...ENTITLEMENT_SNAPSHOT,
+      current: { ...ENTITLEMENT_SNAPSHOT.current, access: "unmanaged", writeAllowed: false },
+    },
+    isPending: false,
+    isError: false,
+  } as never);
+  renderSubscription();
+  expect(screen.getByText("17 / 20")).toBeDefined();
+  expect(screen.getByText("Осталось: 3")).toBeDefined();
+  expect(screen.getByText("Текущая политика ограничивает запись")).toBeDefined();
+  expect(screen.getByText("НК: поиск товара")).toBeDefined();
+  expect(screen.queryByText("internal-decision")).toBeNull();
+  expect(screen.queryByText(/перед сохранением|Публикация недоступна|V3/)).toBeNull();
+  expect(screen.getByText(/Условия новых модулей пока не сопоставлены/)).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Подготовить источник" })).toBeNull();
 });

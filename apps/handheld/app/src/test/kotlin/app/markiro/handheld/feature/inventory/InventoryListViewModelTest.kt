@@ -97,7 +97,13 @@ class InventoryListViewModelTest {
     }
 
     @After
-    fun tearDown() = db.close()
+    fun tearDown() {
+        try {
+            main.cancelAndJoinModels()
+        } finally {
+            db.close()
+        }
+    }
 
     private fun vm(repo: FakeRepo = FakeRepo()) = main.track(
         InventoryListViewModel(repo, db.deviceConfigDao(), session, reachability, ScanRouterAdapter(scans)),

@@ -1,8 +1,12 @@
 import { Body, Controller, Get, HttpCode, Param, Patch, Post, Req } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
-import { platformCatalogContracts, platformCatalogV2Contracts } from "@markiro/platform-contracts";
 import {
-  isCommercialV2,
+  platformCatalogContracts,
+  platformCatalogV2Contracts,
+  platformCatalogV3Contracts,
+} from "@markiro/platform-contracts";
+import {
+  commercialVersion,
   commercialBody,
   commercialResponse,
 } from "../../platform-http/commercial-version";
@@ -30,19 +34,29 @@ export class PlatformCatalogController {
 
   @Get("editor-context")
   @ApiOperation({ summary: "Get commercial catalog editor context" })
-  @PlatformApiProtectedOk({ response: platformCatalogV2Contracts.editorContext.response })
+  @PlatformApiProtectedOk({
+    response: platformCatalogV2Contracts.editorContext.response,
+    commercialV2: platformCatalogV2Contracts.editorContext,
+    commercialV3: platformCatalogV3Contracts.editorContext,
+  })
   @RequirePlatformCapabilities("catalog.read")
   async editorContext(@Req() request: RequestWithPlatformPrincipal) {
     return parsePlatformResponse(
-      platformCatalogV2Contracts.editorContext.response,
-      await this.catalog.editorContext(request.platformPrincipal!),
+      commercialVersion(request) === 3
+        ? platformCatalogV3Contracts.editorContext.response
+        : platformCatalogV2Contracts.editorContext.response,
+      await this.catalog.editorContext(request.platformPrincipal!, commercialVersion(request)),
     );
   }
 
   @Post("items/:id/versions/:versionId/review")
   @ApiOperation({ summary: "Review a catalog version against current seller policy" })
   @HttpCode(200)
-  @PlatformApiProtectedOk({ response: platformCatalogV2Contracts.reviewVersion.response })
+  @PlatformApiProtectedOk({
+    response: platformCatalogV2Contracts.reviewVersion.response,
+    commercialV2: platformCatalogV2Contracts.reviewVersion,
+    commercialV3: platformCatalogV3Contracts.reviewVersion,
+  })
   @RequirePlatformCapabilities("catalog.write")
   async review(
     @Req() request: RequestWithPlatformPrincipal,
@@ -50,8 +64,15 @@ export class PlatformCatalogController {
     @Param("versionId", new ZodValidationPipe(catalogVersionIdSchema)) versionId: string,
   ) {
     return parsePlatformResponse(
-      platformCatalogV2Contracts.reviewVersion.response,
-      await this.catalog.review(request.platformPrincipal!, id, versionId),
+      commercialVersion(request) === 3
+        ? platformCatalogV3Contracts.reviewVersion.response
+        : platformCatalogV2Contracts.reviewVersion.response,
+      await this.catalog.review(
+        request.platformPrincipal!,
+        id,
+        versionId,
+        commercialVersion(request),
+      ),
     );
   }
 
@@ -60,14 +81,16 @@ export class PlatformCatalogController {
   @PlatformApiProtectedOk({
     response: platformCatalogContracts.list.response,
     commercialV2: platformCatalogV2Contracts.list,
+    commercialV3: platformCatalogV3Contracts.list,
   })
   @RequirePlatformCapabilities("catalog.read")
   async list(@Req() request: RequestWithPlatformPrincipal) {
     return commercialResponse(
-      isCommercialV2(request),
+      commercialVersion(request),
       platformCatalogContracts.list.response,
       platformCatalogV2Contracts.list.response,
       await this.catalog.list(request.platformPrincipal!),
+      platformCatalogV3Contracts.list.response,
     );
   }
 
@@ -76,6 +99,7 @@ export class PlatformCatalogController {
   @PlatformApiProtectedOk({
     response: platformCatalogContracts.listVersions.response,
     commercialV2: platformCatalogV2Contracts.listVersions,
+    commercialV3: platformCatalogV3Contracts.listVersions,
   })
   @RequirePlatformCapabilities("catalog.read")
   async listVersions(
@@ -83,10 +107,11 @@ export class PlatformCatalogController {
     @Param("id", new ZodValidationPipe(catalogItemReferenceSchema)) id: string,
   ) {
     return commercialResponse(
-      isCommercialV2(request),
+      commercialVersion(request),
       platformCatalogContracts.listVersions.response,
       platformCatalogV2Contracts.listVersions.response,
       await this.catalog.listVersions(request.platformPrincipal!, id),
+      platformCatalogV3Contracts.listVersions.response,
     );
   }
 
@@ -95,6 +120,7 @@ export class PlatformCatalogController {
   @PlatformApiProtectedOk({
     response: platformCatalogContracts.getVersion.response,
     commercialV2: platformCatalogV2Contracts.getVersion,
+    commercialV3: platformCatalogV3Contracts.getVersion,
   })
   @RequirePlatformCapabilities("catalog.read")
   async getVersion(
@@ -103,10 +129,11 @@ export class PlatformCatalogController {
     @Param("versionId", new ZodValidationPipe(catalogVersionIdSchema)) versionId: string,
   ) {
     return commercialResponse(
-      isCommercialV2(request),
+      commercialVersion(request),
       platformCatalogContracts.getVersion.response,
       platformCatalogV2Contracts.getVersion.response,
       await this.catalog.getVersion(request.platformPrincipal!, id, versionId),
+      platformCatalogV3Contracts.getVersion.response,
     );
   }
 
@@ -116,6 +143,7 @@ export class PlatformCatalogController {
     body: platformCatalogContracts.createVersion.body,
     response: platformCatalogContracts.createVersion.response,
     commercialV2: platformCatalogV2Contracts.createVersion,
+    commercialV3: platformCatalogV3Contracts.createVersion,
   })
   @RequirePlatformCapabilities("catalog.write")
   async createVersion(
@@ -124,20 +152,24 @@ export class PlatformCatalogController {
     @Body() body: unknown,
   ) {
     return commercialResponse(
-      isCommercialV2(request),
+      commercialVersion(request),
       platformCatalogContracts.createVersion.response,
       platformCatalogV2Contracts.createVersion.response,
       await this.catalog.createVersion(
         request.platformPrincipal!,
         id,
         commercialBody(
-          isCommercialV2(request)
-            ? platformCatalogV2Contracts.createVersion.body
-            : platformCatalogContracts.createVersion.body,
+          commercialVersion(request) === 3
+            ? platformCatalogV3Contracts.createVersion.body
+            : commercialVersion(request) === 2
+              ? platformCatalogV2Contracts.createVersion.body
+              : platformCatalogContracts.createVersion.body,
           body,
+          commercialVersion(request),
         ),
-        !isCommercialV2(request),
+        commercialVersion(request),
       ),
+      platformCatalogV3Contracts.createVersion.response,
     );
   }
 
@@ -147,6 +179,7 @@ export class PlatformCatalogController {
     body: platformCatalogContracts.updateVersion.body,
     response: platformCatalogContracts.updateVersion.response,
     commercialV2: platformCatalogV2Contracts.updateVersion,
+    commercialV3: platformCatalogV3Contracts.updateVersion,
   })
   @RequirePlatformCapabilities("catalog.write")
   async updateVersion(
@@ -156,7 +189,7 @@ export class PlatformCatalogController {
     @Body() body: unknown,
   ) {
     return commercialResponse(
-      isCommercialV2(request),
+      commercialVersion(request),
       platformCatalogContracts.updateVersion.response,
       platformCatalogV2Contracts.updateVersion.response,
       await this.catalog.updateVersion(
@@ -164,13 +197,17 @@ export class PlatformCatalogController {
         id,
         versionId,
         commercialBody(
-          isCommercialV2(request)
-            ? platformCatalogV2Contracts.updateVersion.body
-            : platformCatalogContracts.updateVersion.body,
+          commercialVersion(request) === 3
+            ? platformCatalogV3Contracts.updateVersion.body
+            : commercialVersion(request) === 2
+              ? platformCatalogV2Contracts.updateVersion.body
+              : platformCatalogContracts.updateVersion.body,
           body,
+          commercialVersion(request),
         ),
-        !isCommercialV2(request),
+        commercialVersion(request),
       ),
+      platformCatalogV3Contracts.updateVersion.response,
     );
   }
 
@@ -180,6 +217,7 @@ export class PlatformCatalogController {
   @PlatformApiProtectedOk({
     response: platformCatalogContracts.publishVersion.response,
     commercialV2: platformCatalogV2Contracts.publishVersion,
+    commercialV3: platformCatalogV3Contracts.publishVersion,
   })
   @RequirePlatformCapabilities("catalog.write")
   async publish(
@@ -189,17 +227,21 @@ export class PlatformCatalogController {
     @Param("versionId", new ZodValidationPipe(catalogVersionIdSchema)) versionId: string,
   ) {
     return commercialResponse(
-      isCommercialV2(request),
+      commercialVersion(request),
       platformCatalogContracts.publishVersion.response,
       platformCatalogV2Contracts.publishVersion.response,
       await this.catalog.publish(
         request.platformPrincipal!,
         id,
         versionId,
-        isCommercialV2(request)
-          ? commercialBody(platformCatalogV2Contracts.publishVersion.body, body)
-          : undefined,
+        commercialVersion(request) === 3
+          ? commercialBody(platformCatalogV3Contracts.publishVersion.body, body)
+          : commercialVersion(request) === 2
+            ? commercialBody(platformCatalogV2Contracts.publishVersion.body, body)
+            : undefined,
+        commercialVersion(request),
       ),
+      platformCatalogV3Contracts.publishVersion.response,
     );
   }
 
@@ -209,6 +251,7 @@ export class PlatformCatalogController {
   @PlatformApiProtectedOk({
     response: platformCatalogContracts.retireVersion.response,
     commercialV2: platformCatalogV2Contracts.retireVersion,
+    commercialV3: platformCatalogV3Contracts.retireVersion,
   })
   @RequirePlatformCapabilities("catalog.write")
   async retire(
@@ -217,15 +260,16 @@ export class PlatformCatalogController {
     @Param("versionId", new ZodValidationPipe(catalogVersionIdSchema)) versionId: string,
   ) {
     return commercialResponse(
-      isCommercialV2(request),
+      commercialVersion(request),
       platformCatalogContracts.retireVersion.response,
       platformCatalogV2Contracts.retireVersion.response,
       await this.catalog.retire(
         request.platformPrincipal!,
         id,
         versionId,
-        !isCommercialV2(request),
+        commercialVersion(request),
       ),
+      platformCatalogV3Contracts.retireVersion.response,
     );
   }
 
@@ -269,6 +313,8 @@ export class PlatformSettingsController {
   @PlatformApiProtectedOk({
     body: platformCatalogContracts.setDefaultDemo.body,
     response: platformCatalogContracts.setDefaultDemo.response,
+    commercialV2: platformCatalogV2Contracts.setDefaultDemo,
+    commercialV3: platformCatalogV3Contracts.setDefaultDemo,
   })
   @RequirePlatformCapabilities("catalog.write")
   async setDefaultDemo(
@@ -277,7 +323,11 @@ export class PlatformSettingsController {
   ) {
     return parsePlatformResponse(
       platformCatalogContracts.setDefaultDemo.response,
-      await this.catalog.setDefaultDemo(request.platformPrincipal!, body),
+      await this.catalog.setDefaultDemo(
+        request.platformPrincipal!,
+        body,
+        commercialVersion(request),
+      ),
     );
   }
 }

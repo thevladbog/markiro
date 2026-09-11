@@ -21,3 +21,4 @@ export * from "./schema/inventory.js";
 export * from "./schema/chz.js";
 export * from "./schema/product-regulatory.js";
 export * from "./schema/national-catalog-import.js";
+export * from "./schema/entitlements.js";

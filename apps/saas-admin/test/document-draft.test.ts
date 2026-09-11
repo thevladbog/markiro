@@ -20,6 +20,7 @@ const plan = {
   documentNameEn: null,
   subject: null,
   sellerPolicyRevision: null,
+  lifecyclePolicyId: null,
   kind: "plan",
   version: 3,
   status: "published",
@@ -43,6 +44,10 @@ const plan = {
     labelEditorEnabled: false,
     publicApiEnabled: false,
     palletsEnabled: false,
+    chzIntegrationEnabled: null,
+    inventoryEnabled: null,
+    commerceMlEnabled: null,
+    handheldEnabled: null,
     demoDurationDays: null,
   },
 } satisfies CatalogVersionDto;

@@ -189,3 +189,6 @@ function safeReleaseSha(value: string | null): string | null {
   if (!value || value.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(value)) return null;
   return value;
 }
+
+/** Current catalog selections use V3; saved commercial documents retain their V2 schemas. */
+export const CURRENT_COMMERCIAL_VERSION = "3";

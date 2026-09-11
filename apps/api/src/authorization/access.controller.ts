@@ -1,3 +1,8 @@
+import { entitlementSnapshotV1Schema } from "@markiro/platform-contracts";
+import { EntitlementsService } from "../subscriptions/entitlements.service";
+import { AllowSubscriptionReadOnly } from "../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../subscriptions/subscription-access.guard";
+import { platformOpenApiSchema } from "../platform-http/platform-openapi";
 import { Controller, Get, Req, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiOperation, ApiTags, type SchemaObject } from "@nestjs/swagger";
 import { CABINET_CAPABILITY, type CabinetCapability, type CabinetRole } from "@markiro/domain";
@@ -101,7 +106,23 @@ export const accessDocumentOpenApiSchema: SchemaObject = {
 @UseGuards(TenantGuard, AuthorizationGuard)
 @ApiCabinetAuth()
 export class AccessController {
-  constructor(private readonly authorization: AuthorizationService) {}
+  constructor(
+    private readonly authorization: AuthorizationService,
+    private readonly entitlements: EntitlementsService,
+  ) {}
+
+  @Get("entitlements")
+  @RequireMembership()
+  @UseGuards(SubscriptionAccessGuard)
+  @AllowSubscriptionReadOnly("read")
+  @ApiOperation({ summary: "Read the active cabinet tenant entitlement snapshot" })
+  @ApiOkResponse({ schema: platformOpenApiSchema(entitlementSnapshotV1Schema) })
+  @ApiHttpErrors(401, 403)
+  async entitlementSnapshot(@Req() request: RequestWithTenant) {
+    return entitlementSnapshotV1Schema.parse(
+      await this.entitlements.resolveSnapshot(request.cabinetPrincipal!.tenantId),
+    );
+  }
 
   @Get("me")
   @RequireMembership()

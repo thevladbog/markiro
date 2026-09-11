@@ -213,7 +213,7 @@ describe("offers workspace", () => {
     const workspaceFetch = vi
       .mocked(fetch)
       .mock.calls.find(([path]) => String(path).endsWith("/workspace"));
-    expect(new Headers(workspaceFetch?.[1]?.headers).get("X-Markiro-Commercial-Version")).toBe("2");
+    expect(new Headers(workspaceFetch?.[1]?.headers).get("X-Markiro-Commercial-Version")).toBe("3");
   });
   it("locks competing actions until the exact ambiguous payment attempt succeeds", async () => {
     const data = workspace();

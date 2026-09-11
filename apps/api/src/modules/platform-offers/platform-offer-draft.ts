@@ -1,3 +1,5 @@
+import { assertCatalogCommercialCompatibility } from "../../platform-http/commercial-catalog-compatibility";
+import type { CommercialVersion } from "../../platform-http/commercial-version";
 import { BadRequestException } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
@@ -16,6 +18,7 @@ export async function createOfferDraft(
   tx: OfferDraftExecutor,
   actorUserId: string,
   input: CreateOfferDto,
+  commercialVersion: CommercialVersion = 2,
 ): Promise<string> {
   assertCommercialPlanSequence(input.lines);
   let termsMarkdown: string | null;
@@ -62,6 +65,7 @@ export async function createOfferDraft(
     if (!version || version.kind !== line.kind || version.status !== "published") {
       throw new BadRequestException({ code: "offer_catalog_version_invalid" });
     }
+    await assertCatalogCommercialCompatibility(tx, version.id, commercialVersion);
     const priceOverrideReason = line.priceOverrideReason?.trim() || null;
     if (line.agreedUnitPrice !== version.unitPrice && !priceOverrideReason) {
       throw new BadRequestException({ code: "offer_price_override_reason_required" });

@@ -51,7 +51,13 @@ class ExceptionsViewModelTest {
     }
 
     @After
-    fun tearDown() = db.close()
+    fun tearDown() {
+        try {
+            main.cancelAndJoinModels()
+        } finally {
+            db.close()
+        }
+    }
 
     private suspend fun openBox() = db.boxDao().insert(
         BoxEntity(

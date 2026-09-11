@@ -564,3 +564,7 @@ export type {
   CreateAgreementInput,
   UpdateAgreementInput,
 } from "./agreements.js";
+
+export * from "./entitlements.js";
+export * from "./catalog-v3.js";
+export * from "./tenants-v3.js";

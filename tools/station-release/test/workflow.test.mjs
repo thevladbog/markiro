@@ -78,6 +78,10 @@ test("station beta build and dual-origin publication use separate exact protecte
   );
   assert.match(
     verifyStep.run,
+    /pnpm turbo build --filter @markiro\/ui\.\.\.[\s\S]*pnpm --filter @markiro\/station exec vitest/,
+  );
+  assert.match(
+    verifyStep.run,
     /pnpm --filter @markiro\/station exec vitest run --maxWorkers=2 --testTimeout=30000/,
   );
   const corsStep = workflow.jobs.build.steps.find(

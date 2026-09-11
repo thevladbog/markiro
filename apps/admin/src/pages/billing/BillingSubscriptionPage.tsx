@@ -1,9 +1,11 @@
 import { useTranslation } from "react-i18next";
 
-import { Card, EmptyState } from "@markiro/ui";
+import { Alert, Button, Card, EmptyState } from "@markiro/ui";
 
+import { EntitlementSnapshotView } from "./EntitlementSnapshotView.js";
+import { useBillingEntitlements } from "./entitlements-api.js";
 import { useBillingSubscription } from "./api.js";
-import { BillingLimitCards, BillingStatusChip, SubscriptionSummary } from "./BillingSections.js";
+import { BillingStatusChip, SubscriptionSummary } from "./BillingSections.js";
 import { BillingError, BillingLoading } from "./BillingOverviewPage.js";
 import { formatBillingDate } from "./format.js";
 
@@ -11,6 +13,7 @@ import { formatBillingDate } from "./format.js";
 export function BillingSubscriptionPage() {
   const { t, i18n } = useTranslation();
   const query = useBillingSubscription();
+  const entitlements = useBillingEntitlements();
 
   if (query.isPending) return <BillingLoading />;
   if (query.isError || !query.data)
@@ -20,17 +23,25 @@ export function BillingSubscriptionPage() {
         onRetry={() => void query.refetch()}
       />
     );
-  if (query.data.access === "unmanaged") {
-    return (
-      <EmptyState
-        title={t("pages.billing.subscription.unmanagedTitle")}
-        hint={t("pages.billing.subscription.unmanagedHint")}
-      />
-    );
-  }
 
   return (
     <section className="mk-billing-subscription" aria-label={t("pages.billing.tabs.subscription")}>
+      {query.data.access === "unmanaged" ? (
+        <EmptyState
+          title={t("pages.billing.subscription.unmanagedTitle")}
+          hint={t("pages.billing.subscription.unmanagedHint")}
+        />
+      ) : null}
+      {entitlements.isPending ? (
+        <BillingLoading />
+      ) : entitlements.isError || !entitlements.data ? (
+        <Alert tone="error">
+          {t("entitlements.loadError")}
+          <Button onClick={() => void entitlements.refetch()}>{t("entitlements.retry")}</Button>
+        </Alert>
+      ) : (
+        <EntitlementSnapshotView snapshot={entitlements.data} />
+      )}
       {query.data.subscription ? (
         <Card title={t("pages.billing.subscription.current")} titleAs="h2">
           <SubscriptionSummary subscription={query.data.subscription} access={query.data.access} />
@@ -45,10 +56,6 @@ export function BillingSubscriptionPage() {
           />
         </Card>
       ) : null}
-
-      <Card title={t("pages.billing.subscription.limits")} titleAs="h2">
-        <BillingLimitCards limitPresentation={query.data.limitPresentation} />
-      </Card>
 
       {query.data.addons.length ? (
         <Card title={t("pages.billing.subscription.addons")} titleAs="h2">

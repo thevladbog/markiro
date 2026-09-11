@@ -61,9 +61,13 @@ class CloseViewModelTest {
 
     @After
     fun tearDown() {
-        engineScope.cancel()
-        server.shutdown()
-        db.close()
+        try {
+            main.cancelAndJoinModels()
+        } finally {
+            engineScope.cancel()
+            server.shutdown()
+            db.close()
+        }
     }
 
     private fun vm(): CloseViewModel {

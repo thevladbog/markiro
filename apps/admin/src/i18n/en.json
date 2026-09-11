@@ -420,7 +420,8 @@
           "CHZ_CREATE_ATTEMPTS_EXHAUSTED": "The retry limit for ordering this status from Chestny ZNAK has been reached. Upload the file for this status manually instead.",
           "CHZ_DOWNLOAD_REJECTED": "Chestny ZNAK refused to hand over the finished file. Upload the file for this status manually instead.",
           "CHZ_IMPORT_FAILED": "The downloaded file could not be imported. Upload the file for this status manually instead.",
-          "CHZ_JOB_RETRIES_EXHAUSTED": "This status could not be processed after several attempts. Retry the order or upload the file manually."
+          "CHZ_JOB_RETRIES_EXHAUSTED": "This status could not be processed after several attempts. Retry the order or upload the file manually.",
+          "CHZ_ACTION_ACCESS_DENIED": "Export creation access has changed. Restore your permissions and subscription access, then retry."
         }
       },
       "snapshot": {
@@ -3722,5 +3723,112 @@
         }
       }
     }
+  },
+  "entitlements": {
+    "title": "Rights and usage",
+    "current": "Current",
+    "candidate": "Prepared model",
+    "prepared": "Prepared",
+    "shadow": "Prepared terms are not applied yet. Current access checks remain in force.",
+    "unknown": "Not mapped",
+    "enabled": "Enabled",
+    "disabled": "Not included",
+    "notEvaluated": "Not evaluated by current model",
+    "unlimited": "Unlimited",
+    "remaining": "Remaining: {{value}}",
+    "sources": "Entitlement sources",
+    "noSources": "No sources",
+    "from": "Start",
+    "until": "End (exclusive)",
+    "noEnd": "No end date",
+    "observed": "Observed: {{value}}",
+    "readiness": "Readiness and connectivity",
+    "writeAllowed": "Current policy permits writes",
+    "writeDenied": "Current policy restricts writes",
+    "loadError": "Unable to load rights.",
+    "retry": "Retry",
+    "prepare": "Prepare source",
+    "revoke": "Revoke prepared source",
+    "reason": "Reason",
+    "decision": "Decision reference",
+    "kind": "Source kind",
+    "periodHint": "Times use your browser timezone: {{zone}}. The end is exclusive; temporary sources do not extend the subscription.",
+    "operations": "Operation scope",
+    "effects": "Source effects",
+    "preview": "Calculate changes",
+    "confirm": "Confirm preparation",
+    "confirmRevoke": "Confirm revocation",
+    "cancel": "Close",
+    "before": "Before change",
+    "after": "After change",
+    "stale": "Preview expired. Facts refreshed; calculate changes again.",
+    "error": "Unable to complete the operation. Check the inputs and retry.",
+    "invalid": "Choose effects and operations, provide a reason, decision and valid period.",
+    "success": "Change prepared. Current rights have not changed.",
+    "previewExpires": "Preview valid until {{value}}",
+    "policy": "Lifecycle policy",
+    "policyMissing": "Publication unavailable: a server-approved lifecycle policy is required. You can prepare a draft.",
+    "policySelect": "Choose an approved policy",
+    "mappingRequired": "Explicitly choose values for the four new modules before saving.",
+    "choice": "Choose a value",
+    "scopeHint": "A module does not grant every operation: the listed scope applies. Connection readiness is checked separately.",
+    "features": {
+      "labelEditor": "Label editor",
+      "publicApi": "Public API",
+      "pallets": "Pallets",
+      "chzIntegration": "Chestny ZNAK and National Catalog",
+      "inventory": "Inventory",
+      "commerceMl": "CommerceML",
+      "handheld": "Handheld"
+    },
+    "operationsLabels": {
+      "nk_lookup_v1": "NC: product lookup",
+      "nk_proposal_v1": "NC: propose changes",
+      "nk_apply_v1": "NC: apply changes",
+      "nk_refresh_v1": "NC: refresh link",
+      "nk_worker_v1": "NC: background processing",
+      "chz_export_create_v1": "CHZ: create export",
+      "chz_export_poll_v1": "CHZ: poll export",
+      "chz_export_receipt_v1": "CHZ: read receipt",
+      "inventory_file_create_v1": "Inventory: create from file",
+      "commerceMl_exchange_v1": "CommerceML: exchange",
+      "handheld_work_start_v1": "Handheld: start work",
+      "labelEditor_template_write_v1": "Editor: write template",
+      "pallets_shift_configure_v1": "Pallets: configure shift",
+      "publicApi_request_v1": "Public API: request"
+    },
+    "quotas": {
+      "lines": "Lines",
+      "stations": "Stations and handhelds",
+      "kiosks": "Kiosks",
+      "cabinetUsers": "Cabinet users"
+    },
+    "kinds": {
+      "plan": "Plan",
+      "addon": "Add-on",
+      "temporary": "Temporary",
+      "compatibility": "Compatibility"
+    },
+    "connections": {
+      "ready": "Ready",
+      "not_ready": "Not ready",
+      "unknown": "Unknown"
+    },
+    "reasons": {
+      "mapping_required": "The new modules have not been mapped yet. Current access rules remain in force.",
+      "lifecycle_policy_required": "Transition terms have not been approved yet. Prepared rights are not applied.",
+      "subscription_unmanaged": "Subscription is unmanaged",
+      "subscription_read_only": "Subscription is read-only",
+      "other": "Readiness review required"
+    },
+    "chz": "Chestny ZNAK",
+    "nationalCatalog": "National Catalog",
+    "calculatedAt": "Calculated: {{value}}",
+    "usageAt": "Usage counted: {{value}}",
+    "nextChange": "Next change: {{value}}",
+    "planBaseline": "Plan source terms",
+    "scheduled": "Scheduled",
+    "ended": "Ended",
+    "comparison": "Effects on the prepared model"
   }
 }

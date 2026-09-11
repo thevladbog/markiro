@@ -54,7 +54,13 @@ class AppShellViewModelTest {
     }
 
     @After
-    fun close() = db.close()
+    fun close() {
+        try {
+            main.cancelAndJoinModels()
+        } finally {
+            db.close()
+        }
+    }
 
     private fun vm() = main.track(
         AppShellViewModel(db.deviceConfigDao(), session, revocation, DeviceWipe(db, credential), idleMs = 5 * 60 * 1000L),

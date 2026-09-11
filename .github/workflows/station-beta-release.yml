@@ -163,7 +163,7 @@ jobs:
         run: |
           set -euo pipefail
           pnpm --filter @markiro/domain build
-          pnpm --filter @markiro/ui build
+          pnpm turbo build --filter @markiro/ui...
           pnpm --filter @markiro/db build
           pnpm --filter @markiro/station exec vitest run --maxWorkers=2 --testTimeout=30000
           pnpm --filter @markiro/station typecheck
