@@ -126,9 +126,11 @@ class HubViewModelTest {
             db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), engineScope,
         )
-        return HubViewModel(
-            api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(), db.printerDao(),
-            BoxRepository(db), scannerLabel = { "встроенный" }, now = { clock }, tick = flowOf(Unit),
+        return main.track(
+            HubViewModel(
+                api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(), db.printerDao(),
+                BoxRepository(db), scannerLabel = { "встроенный" }, now = { clock }, tick = flowOf(Unit),
+            ),
         )
     }
 

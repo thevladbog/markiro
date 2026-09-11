@@ -114,10 +114,12 @@ class WorkViewModelTest {
         )
         val boxes = BoxRepository(db)
         val pool = SsccPool(db)
-        return WorkViewModel(
-            SavedStateHandle(mapOf("shiftId" to "s1")), db, ScanRecorder(db), ScanRouterAdapter(scans),
-            { kind -> played += kind }, engine, session, ReachabilityTracker(), team, null,
-            boxes, CloseBox(db, boxes, pool), BoxPrinter(db, boxes, LabelRenderer(rasterize), transport), flowOf(Unit),
+        return main.track(
+            WorkViewModel(
+                SavedStateHandle(mapOf("shiftId" to "s1")), db, ScanRecorder(db), ScanRouterAdapter(scans),
+                { kind -> played += kind }, engine, session, ReachabilityTracker(), team, null,
+                boxes, CloseBox(db, boxes, pool), BoxPrinter(db, boxes, LabelRenderer(rasterize), transport), flowOf(Unit),
+            ),
         )
     }
 

@@ -80,9 +80,11 @@ class LabelQueueViewModelTest {
         ),
     )
 
-    private fun model() = LabelQueueViewModel(
-        BoxRepository(db),
-        BoxPrinter(db, BoxRepository(db), LabelRenderer(RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) }), transport),
+    private fun model() = main.track(
+        LabelQueueViewModel(
+            BoxRepository(db),
+            BoxPrinter(db, BoxRepository(db), LabelRenderer(RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) }), transport),
+        ),
     )
 
     @Test
