@@ -126,7 +126,7 @@ export async function closeCurrentBox(
   // any physical stack.
   let pallet: ClosePalletResult | null = null;
   if (deps.palletBoxCapacity !== null) {
-    let open = await currentPallet(deps.exec, shiftId);
+    let open = await currentPallet(deps.exec, shiftId, deps.terminalId);
     if (open === null) {
       const palletId = await openPallet(deps.exec, shiftId, deps.terminalId, closedAt);
       open = {

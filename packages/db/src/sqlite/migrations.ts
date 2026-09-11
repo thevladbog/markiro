@@ -3546,6 +3546,31 @@ export const STATION_MIGRATIONS: string[] = [
      BEGIN
        UPDATE pallets_mirror SET disassembled_at = NEW.occurred_at WHERE pallet_id = NEW.pallet_id;
      END;`,
+  // Task 13 review finding B4: `currentPallet` scoping by `shift_id` alone
+  // was a read-only check, not a database guarantee -- two concurrent
+  // `closeCurrentBox` calls (two terminals, or a retry racing itself) could
+  // each see no open pallet and both INSERT one, leaving two simultaneously
+  // open pallets for one shift/terminal. This partial unique index makes the
+  // 06d ownership invariant ("one terminal, one open pallet at a time")
+  // hold even under that race: a second concurrent open now fails at the
+  // database rather than silently succeeding.
+  //
+  // The indexed expression is `COALESCE(terminal_id, '')`, not the bare
+  // column: SQLite (confirmed against the bundled node:sqlite 3.53.4, which
+  // has no `NULLS NOT DISTINCT` support at all -- that syntax errors) treats
+  // two NULLs in a UNIQUE index as distinct from each other, so a plain
+  // `UNIQUE (shift_id, terminal_id)` index would leave every NULL-terminal
+  // device (a device before pairing, or any dev/test caller that passes
+  // `terminalId: null`) completely unconstrained -- any number of open
+  // NULL-terminal pallets could coexist for the same shift. Folding the
+  // NULL into the sentinel `''` before comparing closes that gap, verified
+  // by a dedicated test in packages/db/test/sqlite-schema.test.ts. `''` is
+  // safe as a sentinel because `terminal_id`, when not null, is always this
+  // device's paired `deviceId` (`App.tsx`'s `config.deviceId`), which is
+  // never the empty string.
+  `CREATE UNIQUE INDEX IF NOT EXISTS pallets_mirror_open_terminal_uk
+     ON pallets_mirror (shift_id, COALESCE(terminal_id, ''))
+     WHERE closed_at IS NULL;`,
 ];
 
 export interface StationMigrationEntry {

@@ -41,18 +41,18 @@ describe("pallets", () => {
   });
 
   it("has no current pallet before one opens", async () => {
-    expect(await currentPallet(exec, "s1")).toBeNull();
+    expect(await currentPallet(exec, "s1", "t1")).toBeNull();
   });
 
   it("opens one pallet per shift and reuses it", async () => {
     const a = await openPallet(exec, "s1", "t1", iso(0));
-    expect(await currentPallet(exec, "s1")).toMatchObject({ palletId: a, boxCount: 0 });
-    expect((await currentPallet(exec, "s1"))!.palletId).toBe(a);
+    expect(await currentPallet(exec, "s1", "t1")).toMatchObject({ palletId: a, boxCount: 0 });
+    expect((await currentPallet(exec, "s1", "t1"))!.palletId).toBe(a);
   });
 
   it("keeps the persisted shift and terminal identity on the current pallet", async () => {
     const a = await openPallet(exec, "s1", "t1", iso(0));
-    expect(await currentPallet(exec, "s1")).toMatchObject({
+    expect(await currentPallet(exec, "s1", "t1")).toMatchObject({
       palletId: a,
       shiftId: "s1",
       terminalId: "t1",
@@ -62,7 +62,13 @@ describe("pallets", () => {
 
   it("keeps pallets of different shifts apart", async () => {
     await openPallet(exec, "s1", "t1", iso(0));
-    expect(await currentPallet(exec, "s2")).toBeNull();
+    expect(await currentPallet(exec, "s2", "t1")).toBeNull();
+  });
+
+  it("keeps pallets of different terminals in the same shift apart", async () => {
+    const a = await openPallet(exec, "s1", "t1", iso(0));
+    expect(await currentPallet(exec, "s1", "t2")).toBeNull();
+    expect((await currentPallet(exec, "s1", "t1"))!.palletId).toBe(a);
   });
 
   it("counts only boxes that joined it", async () => {
@@ -70,7 +76,7 @@ describe("pallets", () => {
     await insertClosedBox("b1");
     await joinPallet(exec, "b1", p);
     await insertClosedBox("b2");
-    expect((await currentPallet(exec, "s1"))!.boxCount).toBe(1);
+    expect((await currentPallet(exec, "s1", "t1"))!.boxCount).toBe(1);
   });
 
   it("does not count a disassembled box", async () => {
@@ -78,13 +84,13 @@ describe("pallets", () => {
     await insertClosedBox("b1");
     await joinPallet(exec, "b1", p);
     await exec.run("UPDATE boxes_mirror SET disassembled_at = ? WHERE box_id = 'b1'", [iso(1)]);
-    expect((await currentPallet(exec, "s1"))!.boxCount).toBe(0);
+    expect((await currentPallet(exec, "s1", "t1"))!.boxCount).toBe(0);
   });
 
   it("stops being current once closed", async () => {
     const p = await openPallet(exec, "s1", "t1", iso(0));
     await closePallet(exec, p, "103460068200000004", iso(1), "op1");
-    expect(await currentPallet(exec, "s1")).toBeNull();
+    expect(await currentPallet(exec, "s1", "t1")).toBeNull();
   });
 
   it("closes a pallet into pending print state in the same write that records its SSCC", async () => {
@@ -315,7 +321,7 @@ describe("pallets", () => {
       try {
         const reopenedExec = makeExec(reopenedDb);
         await applyMigrations(reopenedExec);
-        expect((await currentPallet(reopenedExec, "s1"))!.palletId).toBe(p);
+        expect((await currentPallet(reopenedExec, "s1", "t1"))!.palletId).toBe(p);
       } finally {
         reopenedDb.close();
       }

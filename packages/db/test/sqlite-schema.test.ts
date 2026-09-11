@@ -2506,10 +2506,13 @@ describe("pallet mirror", () => {
 
   it("leaves other pallets untouched when one is disassembled", () => {
     const db = migratedDb();
+    // Different terminals -- both still open at once, which is only legal
+    // because they don't share (shift_id, terminal_id); see
+    // `pallets_mirror_open_terminal_uk` below.
     db.prepare(
       `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
        VALUES ('p1', 's1', 't1', '2026-09-11T07:00:00.000Z'),
-              ('p2', 's1', 't1', '2026-09-11T07:01:00.000Z')`,
+              ('p2', 's1', 't2', '2026-09-11T07:01:00.000Z')`,
     ).run();
 
     db.prepare(
@@ -2537,5 +2540,115 @@ describe("pallet mirror", () => {
     expect(
       db.prepare("SELECT disassembled_at FROM pallets_mirror WHERE pallet_id = 'p1'").get(),
     ).toEqual({ disassembled_at: null });
+  });
+
+  // Task 13 review, finding B4: without a database guard, two concurrent
+  // closers (two terminals, or a retry racing itself) that both see no open
+  // pallet can each INSERT one, leaving two simultaneously open pallets for
+  // one shift/terminal -- `currentPallet`'s own scoped read (apps/station's
+  // pallets.ts) is a check, not an enforcement.
+  describe("pallets_mirror_open_terminal_uk", () => {
+    it("rejects a second concurrently-open pallet for the same shift and terminal", () => {
+      const db = migratedDb();
+      db.prepare(
+        `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+         VALUES ('p1', 's1', 't1', '2026-09-11T07:00:00.000Z')`,
+      ).run();
+
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+             VALUES ('p2', 's1', 't1', '2026-09-11T07:01:00.000Z')`,
+          )
+          .run(),
+      ).toThrow(/UNIQUE constraint failed/);
+    });
+
+    // SQLite's own rule: two NULLs compared inside a UNIQUE index are NOT
+    // equal to each other, so a plain `UNIQUE (shift_id, terminal_id)`
+    // partial index would leave every null-terminal device (a station
+    // before pairing, or any caller that legitimately passes
+    // `terminalId: null`) completely unconstrained -- confirmed directly
+    // against this repo's bundled `node:sqlite` (3.53.4): a bare
+    // column-based version of this index lets an unlimited number of
+    // open, null-terminal pallets coexist for one shift. The migration
+    // folds the NULL into the sentinel `COALESCE(terminal_id, '')` before
+    // comparing specifically to close that gap -- this test is what keeps
+    // it closed. (`node:sqlite` 3.53.4 also has no `NULLS NOT DISTINCT`
+    // index syntax at all -- it is a hard syntax error -- so that was not
+    // an available alternative.)
+    it("also rejects a second open pallet when both rows report a null terminal_id", () => {
+      const db = migratedDb();
+      db.prepare(
+        `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+         VALUES ('p1', 's1', NULL, '2026-09-11T07:00:00.000Z')`,
+      ).run();
+
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+             VALUES ('p2', 's1', NULL, '2026-09-11T07:01:00.000Z')`,
+          )
+          .run(),
+      ).toThrow(/UNIQUE constraint failed/);
+    });
+
+    it("allows a different terminal, a different shift, or a since-closed pallet to coexist", () => {
+      const db = migratedDb();
+      db.prepare(
+        `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+         VALUES ('p1', 's1', 't1', '2026-09-11T07:00:00.000Z')`,
+      ).run();
+
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+             VALUES ('p2', 's1', 't2', '2026-09-11T07:01:00.000Z')`,
+          )
+          .run(),
+      ).not.toThrow();
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+             VALUES ('p3', 's2', 't1', '2026-09-11T07:01:00.000Z')`,
+          )
+          .run(),
+      ).not.toThrow();
+
+      db.prepare(
+        `UPDATE pallets_mirror SET closed_at = '2026-09-11T08:00:00.000Z' WHERE pallet_id = 'p1'`,
+      ).run();
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+             VALUES ('p4', 's1', 't1', '2026-09-11T09:00:00.000Z')`,
+          )
+          .run(),
+      ).not.toThrow();
+    });
+
+    it("survives being re-created on every station start", () => {
+      const db = migratedDb();
+      db.prepare(
+        `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+         VALUES ('p1', 's1', 't1', '2026-09-11T07:00:00.000Z')`,
+      ).run();
+
+      expect(() => applyStationMigrations(db)).not.toThrow();
+
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+             VALUES ('p2', 's1', 't1', '2026-09-11T07:01:00.000Z')`,
+          )
+          .run(),
+      ).toThrow(/UNIQUE constraint failed/);
+    });
   });
 });

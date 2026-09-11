@@ -183,6 +183,46 @@ describe("closeCurrentBox", () => {
     expect(box?.sscc).toBeNull();
     expect(box?.closedAt).toBeNull();
   });
+
+  // Task 13 review, finding B4: the 06d ownership model is "One terminal.
+  // Two terminals in one shift build two pallets" -- `currentPallet` used to
+  // scope only by `shift_id`, so the SECOND terminal to close a box in this
+  // shift would find and join the FIRST terminal's already-open pallet
+  // instead of opening its own. This fails without the `terminalId` scoping
+  // fix: both boxes would land on one shared pallet row.
+  it("gives two terminals in the same shift two separate pallets, never one shared", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 1,
+      toSerial: 10,
+    });
+    const dev1: CloseBoxDeps = { ...deps, palletBoxCapacity: 100, terminalId: "dev-1" };
+    const dev2: CloseBoxDeps = { ...deps, palletBoxCapacity: 100, terminalId: "dev-2" };
+
+    await openBox(exec, SHIFT, "b1", ISO, "dev-1");
+    await recordScan(exec, event("a"), code("aa", "b1"));
+    expect((await closeCurrentBox(dev1, SHIFT, "op-1")).status).toBe("closed");
+
+    await openBox(exec, SHIFT, "b2", ISO, "dev-2");
+    await recordScan(exec, event("b"), code("bb", "b2"));
+    expect((await closeCurrentBox(dev2, SHIFT, "op-2")).status).toBe("closed");
+
+    const pallets = await exec.all<{ pallet_id: string; terminal_id: string | null }>(
+      "SELECT pallet_id, terminal_id FROM pallets_mirror ORDER BY terminal_id",
+    );
+    expect(pallets).toHaveLength(2);
+    expect(pallets.map((p) => p.terminal_id)).toEqual(["dev-1", "dev-2"]);
+
+    const palletByTerminal = new Map(pallets.map((p) => [p.terminal_id, p.pallet_id]));
+    const boxes = await exec.all<{ box_id: string; pallet_id: string | null }>(
+      "SELECT box_id, pallet_id FROM boxes_mirror ORDER BY box_id",
+    );
+    expect(boxes).toEqual([
+      { box_id: "b1", pallet_id: palletByTerminal.get("dev-1") },
+      { box_id: "b2", pallet_id: palletByTerminal.get("dev-2") },
+    ]);
+  });
 });
 
 describe("boxLabelFields", () => {

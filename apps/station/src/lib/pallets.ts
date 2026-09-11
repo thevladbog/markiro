@@ -38,8 +38,16 @@ export interface UnresolvedPalletPrint {
 }
 
 /**
- * The shift's open pallet (`closed_at IS NULL`), or null if none is open,
- * with a LIVE box count.
+ * The shift AND TERMINAL's open pallet (`closed_at IS NULL`), or null if none
+ * is open, with a LIVE box count.
+ *
+ * Scoped by `terminal_id` as well as `shift_id` -- the 06d spec's ownership
+ * model is "One terminal. Two terminals in one shift build two pallets": an
+ * unscoped query would hand two stations working the same shift the SAME
+ * open pallet and have them fight over it. Uses `IS` rather than `=` so a
+ * device with no terminal id (`terminalId: null`) still matches only its own
+ * kind of pallet row, the same way `findUnresolvedPalletPrint` already
+ * compares this column.
  *
  * The count is derived, never stored, for the same reason a box's item count
  * is (see `DevicePallet`'s doc comment): a stored counter and the rows it
@@ -52,6 +60,7 @@ export interface UnresolvedPalletPrint {
 export async function currentPallet(
   exec: SqlExecutor,
   shiftId: string,
+  terminalId: string | null,
 ): Promise<DevicePallet | null> {
   const rows = await exec.all<{
     pallet_id: string;
@@ -65,10 +74,10 @@ export async function currentPallet(
             (SELECT COUNT(*) FROM boxes_mirror b
               WHERE b.pallet_id = p.pallet_id AND b.disassembled_at IS NULL) AS box_count
        FROM pallets_mirror p
-      WHERE p.shift_id = ? AND p.closed_at IS NULL
+      WHERE p.shift_id = ? AND p.terminal_id IS ? AND p.closed_at IS NULL
       ORDER BY p.opened_at ASC
       LIMIT 1`,
-    [shiftId],
+    [shiftId, terminalId],
   );
   const row = rows[0];
   if (!row) return null;
