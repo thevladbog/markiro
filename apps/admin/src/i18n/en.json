@@ -2028,6 +2028,7 @@
         "label": "Purpose",
         "box": "Box",
         "duplicate": "Product duplicate",
+        "pallet": "Pallet",
         "invalid": "One Data Matrix containing the full product code must fit inside the label. SSCC is not allowed.",
         "sample": "Synthetic sample code. The line prints the code received from the scanner.",
         "copy": "Create a copy",
