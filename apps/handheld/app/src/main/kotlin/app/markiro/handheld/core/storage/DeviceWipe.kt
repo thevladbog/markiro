@@ -8,6 +8,7 @@ class DeviceWipe(private val db: HandheldDatabase, private val credential: Crede
         credential.clear()
         db.withTransaction {
             db.printerDao().clear()
+            db.boxExceptionDao().clear()
             db.boxDao().clear()
             db.ssccPoolDao().clear()
             // The duplicate flow carries no credential-ownership column precisely

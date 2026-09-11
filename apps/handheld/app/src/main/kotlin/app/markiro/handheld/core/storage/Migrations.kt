@@ -170,3 +170,16 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_product_label_events_ackedAt` ON `product_label_events` (`ackedAt`)")
     }
 }
+
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `boxes` ADD COLUMN `disassembledAt` TEXT")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `box_exceptions` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`kind` TEXT NOT NULL, `boxId` TEXT NOT NULL, `codeHash` TEXT, `targetScannedAt` TEXT, " +
+                "`shiftId` TEXT NOT NULL, `operatorId` TEXT, `reason` TEXT, `occurredAt` TEXT NOT NULL, " +
+                "`payloadJson` TEXT NOT NULL, `afterOutboxId` INTEGER NOT NULL, `ackedAt` TEXT)",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_box_exceptions_ackedAt` ON `box_exceptions` (`ackedAt`)")
+    }
+}

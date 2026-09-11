@@ -43,7 +43,7 @@ class MigrationTest {
             legacy.version = 1
         }
         val db = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
             .allowMainThreadQueries()
             .build()
         try {
@@ -213,6 +213,66 @@ class MigrationTest {
                 duplicateRejected = true
             }
             assertTrue("a second event took sequence 1 of the same job", duplicateRejected)
+        } finally {
+            helper.close()
+            context.deleteDatabase(name)
+        }
+    }
+
+    /**
+     * A device that upgrades mid-shift keeps its boxes and gains an empty queue.
+     *
+     * Seeded first and driven directly, for the same reason as the two above: a
+     * database Room builds from the entities is already v7.
+     */
+    @Test
+    fun theExceptionMigrationKeepsBoxesAndOpensTheQueue() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "migration-6-7-test.db"
+        context.deleteDatabase(name)
+        val file = context.getDatabasePath(name).also { it.parentFile?.mkdirs() }
+        SQLiteDatabase.openOrCreateDatabase(file, null).use { legacy ->
+            legacy.execSQL(
+                "CREATE TABLE `boxes` (`boxId` TEXT NOT NULL, `shiftId` TEXT NOT NULL, `sscc` TEXT, " +
+                    "`openedAt` TEXT NOT NULL, `closedAt` TEXT, `operatorId` TEXT, `printState` TEXT NOT NULL, " +
+                    "`printReason` TEXT, `ackedAt` TEXT, PRIMARY KEY(`boxId`))",
+            )
+            legacy.execSQL(
+                "INSERT INTO boxes VALUES ('box-1','s1','000000000000000017','2026-09-11T07:00:00.000Z'," +
+                    "'2026-09-11T07:30:00.000Z','op-1','printed',NULL,NULL)",
+            )
+            legacy.version = 6
+        }
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(name).callback(
+                object : SupportSQLiteOpenHelper.Callback(6) {
+                    override fun onCreate(db: SupportSQLiteDatabase) = Unit
+                    override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                },
+            ).build(),
+        )
+        try {
+            val db = helper.writableDatabase
+            MIGRATION_6_7.migrate(db)
+            db.query("SELECT boxId, sscc, disassembledAt FROM boxes").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("box-1", cursor.getString(0))
+                // What the box already had survives...
+                assertEquals("000000000000000017", cursor.getString(1))
+                // ...and a box closed before this feature is not retired.
+                assertTrue(cursor.isNull(2))
+            }
+            db.execSQL(
+                "INSERT INTO box_exceptions (kind, boxId, codeHash, targetScannedAt, shiftId, operatorId, reason, " +
+                    "occurredAt, payloadJson, afterOutboxId, ackedAt) VALUES " +
+                    "('clear','box-1',NULL,NULL,'s1','op-1',NULL,'2026-09-11T08:00:00.000Z','{}',0,NULL)",
+            )
+            db.query("SELECT id, afterOutboxId FROM box_exceptions").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                // AUTOINCREMENT, so the drain's id order is also its send order.
+                assertEquals(1, cursor.getInt(0))
+                assertEquals(0, cursor.getInt(1))
+            }
         } finally {
             helper.close()
             context.deleteDatabase(name)
