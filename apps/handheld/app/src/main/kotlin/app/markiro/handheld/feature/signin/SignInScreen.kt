@@ -6,10 +6,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -36,6 +38,7 @@ import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.design.MarkiroTextButton
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.core.design.PinDots
+import app.markiro.handheld.core.design.ScreenColumn
 
 data class SignInCallbacks(
     val onDigit: (Char) -> Unit = {},
@@ -64,9 +67,9 @@ fun SignInScreen(state: SignInUi, callbacks: SignInCallbacks) {
 private fun LoginStep(state: SignInUi.Login, cb: SignInCallbacks) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    Column(Modifier.fillMaxSize().padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+    ScreenColumn(padding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
         Column(
-            Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(MarkiroSizes.radius)).background(c.surfaceCard)
+            Modifier.fillMaxWidth().weight(1f).heightIn(min = 96.dp).clip(RoundedCornerShape(MarkiroSizes.radius)).background(c.surfaceCard)
                 .border(1.dp, c.lineStrong, RoundedCornerShape(MarkiroSizes.radius)),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -93,8 +96,12 @@ private fun LoginStep(state: SignInUi.Login, cb: SignInCallbacks) {
 private fun PinStep(state: SignInUi.Pin, cb: SignInCallbacks) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    Column(Modifier.fillMaxSize().padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
-        Column(Modifier.fillMaxWidth().weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+    ScreenColumn(padding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+        Column(
+            Modifier.fillMaxWidth().weight(1f).heightIn(min = 96.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
             val initials = (state.operatorName ?: "?").split(' ').take(2).mapNotNull { it.firstOrNull() }.joinToString("")
             Box(Modifier.size(44.dp).clip(CircleShape).background(c.surfacePanel), contentAlignment = Alignment.Center) {
                 Text(initials, style = t.strong.copy(fontSize = 16.sp), color = c.fg1)
@@ -131,7 +138,8 @@ private fun SearchStep(state: SignInUi.Search, cb: SignInCallbacks) {
     val t = MarkiroTheme.type
     Column(Modifier.fillMaxSize()) {
         AppBar(stringResource(R.string.signin_find_by_name), onBack = cb.onBack)
-        Column(Modifier.padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+        // The roster of a real line runs to dozens of names; the bar stays put and the matches scroll.
+        ScreenColumn(padding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
             OutlinedTextField(
                 value = state.query,
                 onValueChange = cb.onSearchQuery,

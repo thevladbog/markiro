@@ -5,7 +5,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -15,8 +18,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Backspace
@@ -41,6 +46,36 @@ import app.markiro.handheld.R
 
 data class StatusItem(val icon: ImageVector, val label: String, val tone: Tone = Tone.Neutral)
 data class StateAction(val label: String, val onClick: () -> Unit)
+
+/**
+ * A screen-height column that scrolls only when its content does not fit.
+ *
+ * `weight` keeps working, which a plain `verticalScroll` would break: the
+ * minimum height pins the column to the viewport, so a screen that fits is laid
+ * out exactly as before, and one that does not -- a short handheld display, a
+ * larger system font, a two-line error -- can be reached instead of being cut
+ * off at the bottom edge with no way to scroll to it.
+ */
+@Composable
+fun ScreenColumn(
+    modifier: Modifier = Modifier,
+    padding: PaddingValues = PaddingValues(0.dp),
+    verticalArrangement: Arrangement.Vertical = Arrangement.Top,
+    horizontalAlignment: Alignment.Horizontal = Alignment.Start,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        // `padding` sits inside `heightIn` on purpose: outside it, the content
+        // would always be the viewport plus the padding and every screen would
+        // scroll by a few millimetres even when it fits.
+        Column(
+            modifier = Modifier.verticalScroll(rememberScrollState()).heightIn(min = maxHeight).padding(padding),
+            verticalArrangement = verticalArrangement,
+            horizontalAlignment = horizontalAlignment,
+            content = content,
+        )
+    }
+}
 
 @Composable
 fun StatusStrip(items: List<StatusItem>, modifier: Modifier = Modifier) {
@@ -249,8 +284,11 @@ fun FullScreenState(
     primaryIsAccent: Boolean = true,
 ) {
     val c = MarkiroTheme.colors
-    Column(
-        modifier = Modifier.fillMaxSize().padding(MarkiroSizes.sp6),
+    // Centred while it fits, scrollable once the title, the text and two buttons
+    // no longer do -- otherwise the action a state screen exists for is the part
+    // that falls off the bottom.
+    ScreenColumn(
+        padding = PaddingValues(MarkiroSizes.sp6),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
