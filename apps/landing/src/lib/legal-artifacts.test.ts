@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { loadLegalArtifacts } from "./legal-artifacts";
 
@@ -129,25 +129,30 @@ describe("loadLegalArtifacts", () => {
     },
   );
 
-  it("rejects an English artifact for a Russian-only instruction", async () => {
-    // MKR-INS-06 is a cabinet instruction outside INSTRUCTION_EN_PUBLISHED;
-    // the station instructions (01-05) now legitimately publish English.
-    const root = await copiedPublicRoot();
-    await editManifest(root, (manifest) => {
-      manifest.push({
-        code: "MKR-INS-10",
-        revision: "2026.09/01",
-        effectiveDate: "2026-09-10",
-        locale: "en",
-        kind: "pdfa-2b",
-        fileName: "markiro_mkr-ins-10_2026.09-01_en.pdf",
-        bytes: 1,
-        sha256: "0".repeat(64),
-        mediaType: "application/pdf",
-        generator: { docx: "9.7.1", libreOffice: "26.2.5", veraPdf: "1.30.2" },
-      });
+  it("rejects a manifest artifact whose locale the registry does not publish", async () => {
+    // Every instruction is bilingual now, so no real code can carry an
+    // unpublished locale and the guard has nothing live to reject. It still
+    // protects the next instruction added before its translation lands, so
+    // exercise it against a registry stub that keeps MKR-INS-10 Russian-only
+    // while the published release legitimately carries its English PDF.
+    vi.resetModules();
+    vi.doMock("@markiro/legal-documents", async () => {
+      const actual = await vi.importActual<typeof import("@markiro/legal-documents")>(
+        "@markiro/legal-documents",
+      );
+      return {
+        ...actual,
+        legalReleaseLocales: (code: string) =>
+          code === "MKR-INS-10" ? ["ru"] : actual.legalReleaseLocales(code as never),
+      };
     });
-
-    await expect(loadLegalArtifacts(root)).rejects.toThrow(/locale is not published/);
+    try {
+      const { loadLegalArtifacts: load } = await import("./legal-artifacts");
+      const root = await copiedPublicRoot();
+      await expect(load(root)).rejects.toThrow(/locale is not published/);
+    } finally {
+      vi.doUnmock("@markiro/legal-documents");
+      vi.resetModules();
+    }
   });
 });
