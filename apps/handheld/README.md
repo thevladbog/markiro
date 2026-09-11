@@ -236,6 +236,64 @@ it was generated in, because one case exercises the local-date path.
    Closing the shift with a non-empty queue must succeed, and the queue must still be
    there afterwards.
 
+## Релизная сборка и подпись
+
+`assembleDebug` подписывается отладочным ключом и ставится где угодно. Релиз без
+ключа собирается в `app-release-unsigned.apk`, который не установится никуда: это
+намеренно, чтобы обычный чекаут не требовал секретов и не падал из-за их
+отсутствия.
+
+Ключ подписи — это удостоверение приложения в сторе. Потеряв его, обновить
+опубликованное приложение нельзя: только выложить новое с нуля и заново собрать
+установки. Поэтому он не лежит в репозитории, не создаётся на машине
+разработчика и живёт только в секретах защищённого окружения.
+
+### Создать ключ (делается один раз владельцем)
+
+    keytool -genkeypair -v -keystore markiro-handheld.jks -alias markiro-handheld \
+      -keyalg RSA -keysize 4096 -validity 10000
+
+`keytool` спросит пароль хранилища, пароль ключа и владельца сертификата.
+Срок в 10 000 дней взят не из суеверия: стор отказывает в обновлении, подписанном
+просроченным ключом, а заменить ключ у опубликованного приложения нельзя.
+
+Файл и пароли после этого нужны только GitHub. Положите в секреты окружения
+`handheld-release`:
+
+| Секрет                              | Что это                                     |
+| ----------------------------------- | ------------------------------------------- |
+| `MARKIRO_HANDHELD_KEYSTORE_BASE64`  | `base64 -i markiro-handheld.jks` одной строкой |
+| `MARKIRO_HANDHELD_STORE_PASSWORD`   | пароль хранилища                            |
+| `MARKIRO_HANDHELD_KEY_ALIAS`        | `markiro-handheld`                          |
+| `MARKIRO_HANDHELD_KEY_PASSWORD`     | пароль ключа                                |
+
+Сам `.jks` держите в офлайн-хранилище: секреты GitHub читать обратно нельзя, и
+при утрате обоих копий приложение в сторе становится неподдерживаемым.
+
+### Собрать релиз
+
+Workflow **Build handheld release**, только с `main` и только владельцем:
+подтверждение `BUILD-HANDHELD-RELEASE`, семантическая версия и монотонный
+`versionCode`. Он прогоняет гейты, собирает подписанный APK, **доказывает**
+подпись через `apksigner verify` (сборка без ключа успешна, но даёт
+неустановимый файл — успех сборки сам по себе ничего не значит) и выкладывает
+артефакт с sha256 и отпечатком сертификата в summary.
+
+Публикацию в стор workflow не делает намеренно: выкладка — отдельное решение
+человека, как и у станции.
+
+### Локальная релизная сборка
+
+Для проверки на своём устройстве ключ не нужен — подпишите отладочным:
+
+    ./gradlew :app:assembleRelease
+    apksigner sign --ks ~/.android/debug.keystore --ks-pass pass:android \
+      --out /tmp/release-test.apk app/build/outputs/apk/release/app-release-unsigned.apk
+
+Такой APK ставится и позволяет увидеть то, чего не видно в debug: адрес сервера
+прибит, поле для его правки отсутствует, отладочные сканы выключены. В стор он,
+разумеется, не годится.
+
 ## Scanner sources
 
 Built-in vendor intent (Datalogic Intent Wedge, Honeywell Data Intent, Zebra DataWedge; the

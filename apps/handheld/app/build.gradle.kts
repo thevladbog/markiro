@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -7,6 +9,24 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+/**
+ * Release signing, from the environment or a gitignored `keystore.properties`.
+ *
+ * Absent on purpose in a normal checkout: `assembleDebug` and every CI gate run
+ * without it, and `assembleRelease` then produces an unsigned APK rather than
+ * failing. Only the release workflow supplies the material, so the key never
+ * has to exist on a developer machine.
+ */
+val signingProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+
+fun signingValue(property: String, variable: String): String? =
+    signingProperties.getProperty(property) ?: System.getenv(variable)
+
+val releaseStoreFile = signingValue("storeFile", "MARKIRO_HANDHELD_STORE_FILE")
+
 android {
     namespace = "app.markiro.handheld"
     compileSdk = 35
@@ -15,12 +35,26 @@ android {
         applicationId = "app.markiro.handheld"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // Overridable by the release workflow: a store needs a monotonic code,
+        // and the name is the tag it publishes under. The defaults keep every
+        // local build and CI gate working without arguments.
+        versionCode = (findProperty("markiro.versionCode") as String?)?.toInt() ?: 1
+        versionName = (findProperty("markiro.versionName") as String?) ?: "0.1.0"
         // The edge proxies /station/*, /shifts and /products on the admin host to the API.
         buildConfigField("String", "SAAS_SERVER_URL", "\"https://admin.markiro.app\"")
         buildConfigField("boolean", "SERVER_URL_EDITABLE", "false")
         buildConfigField("boolean", "DEBUG_SCAN_SOURCE", "false")
+    }
+
+    signingConfigs {
+        create("release") {
+            if (releaseStoreFile != null) {
+                storeFile = file(releaseStoreFile)
+                storePassword = signingValue("storePassword", "MARKIRO_HANDHELD_STORE_PASSWORD")
+                keyAlias = signingValue("keyAlias", "MARKIRO_HANDHELD_KEY_ALIAS")
+                keyPassword = signingValue("keyPassword", "MARKIRO_HANDHELD_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -29,6 +63,9 @@ android {
             buildConfigField("boolean", "DEBUG_SCAN_SOURCE", "true")
         }
         release {
+            // Unsigned when the material is absent, which is what a checkout
+            // without the key should produce -- not a build that fails.
+            signingConfig = if (releaseStoreFile != null) signingConfigs.getByName("release") else null
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
