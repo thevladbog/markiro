@@ -39,7 +39,11 @@ import app.markiro.handheld.core.box.BoxPrint
 import app.markiro.handheld.core.box.CloseResult
 import app.markiro.handheld.core.box.PrintReason
 import app.markiro.handheld.feature.work.BoxCloseCallbacks
+import app.markiro.handheld.core.duplicate.DuplicateReason
 import app.markiro.handheld.feature.work.BoxCloseScreen
+import app.markiro.handheld.feature.work.DuplicateCallbacks
+import app.markiro.handheld.feature.work.DuplicateScreen
+import app.markiro.handheld.feature.work.DuplicateStep
 import app.markiro.handheld.feature.work.BoxCloseStep
 import app.markiro.handheld.feature.work.ClosedBoxUi
 import app.markiro.handheld.feature.work.LabelQueueCallbacks
@@ -221,6 +225,36 @@ class EnglishRenderTest {
                     ),
                     LabelQueueCallbacks(),
                 )
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun aFailedDuplicateRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                DuplicateScreen(DuplicateStep.Failed("j1", DuplicateReason.NO_PAPER), DuplicateCallbacks())
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun anUnknownDuplicateRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                DuplicateScreen(DuplicateStep.Unknown("j1", "transport_failed"), DuplicateCallbacks())
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun aRejectedVerificationRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                DuplicateScreen(DuplicateStep.Rejected("j1", mismatch = true), DuplicateCallbacks())
             }
         }
         assertNoCyrillic()

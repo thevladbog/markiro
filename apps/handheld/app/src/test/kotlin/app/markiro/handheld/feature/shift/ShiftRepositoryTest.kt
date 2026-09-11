@@ -56,6 +56,18 @@ class ShiftRepositoryTest {
         "sscc":{"issuerPrefix":"468008990","extensionDigit":0,"fromSerial":1,"toSerial":1000,"consumedThroughSerial":100},
         "ssccRevokedFrom":[1],"operators":[]}"""
 
+    /** A validation shift whose policy prints a duplicate, as the server sends it. */
+    private val duplicateShiftJson = activeShiftJson.replace(
+        """"validationPrint":{"mode":"none"}""",
+        """"validationPrint":{"mode":"duplicate_dm","verification":"required","templateId":"dt1",""" +
+            """"policyRevision":"rev-1","snapshot":{"id":"dt1","name":"Дубликат 30×20",""" +
+            """"spec":{"widthMm":30,"heightMm":20,"dpi":203,"language":"zpl","elements":[]},"digest":"abc"}}""",
+    )
+
+    private val duplicateBundleJson = """{"shift":$duplicateShiftJson,
+        "product":{"id":"p1","gtin14":"04600682000013","name":"Вода 0,5","printName":"Вода","shelfLifeDays":365,"egaisCode":null},
+        "labelTemplate":null,"boxLabelTemplate":null,"counterpartyGln":null,"sscc":null,"ssccRevokedFrom":[],"operators":[]}"""
+
     @Before
     fun setUp() = runTest {
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java)
@@ -159,6 +171,39 @@ class ShiftRepositoryTest {
         // Burning picks the lowest fromSerial with room, so a revoked range left
         // in place would keep winning over the block the admin just cut.
         assertEquals(101L, pool.burn("468008990", 0))
+    }
+
+    @Test
+    fun enteringADuplicateShiftStoresItsPolicy() = runTest {
+        server.enqueue(MockResponse().setBody(duplicateShiftJson))
+        server.enqueue(MockResponse().setBody(duplicateBundleJson))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+        val shift = db.shiftDao().get("s1")!!
+        assertEquals("duplicate_dm", shift.validationPrintMode)
+        assertEquals("required", shift.duplicateVerification)
+        assertEquals("abc", shift.duplicateTemplateDigest)
+        assertEquals("rev-1", shift.duplicatePolicyRevision)
+        assertTrue(shift.duplicateTemplate!!.contains("\"widthMm\""))
+    }
+
+    @Test
+    fun refreshingTheListKeepsTheDuplicatePolicy() = runTest {
+        // Same trap as the SSCC issuer and the box template: the list carries no
+        // policy, so rebuilding the row from it would strip one off a shift
+        // already entered, and every later unit would refuse to print with
+        // nothing on screen connecting that to a list refresh.
+        server.enqueue(MockResponse().setBody(duplicateShiftJson))
+        server.enqueue(MockResponse().setBody(duplicateBundleJson))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+
+        server.enqueue(MockResponse().setBody("""{"items":[$duplicateShiftJson]}"""))
+        assertTrue(repo().refreshList())
+
+        val shift = db.shiftDao().get("s1")!!
+        assertEquals("required", shift.duplicateVerification)
+        assertEquals("abc", shift.duplicateTemplateDigest)
+        assertEquals("rev-1", shift.duplicatePolicyRevision)
+        assertNotNull(shift.duplicateTemplate)
     }
 
     @Test

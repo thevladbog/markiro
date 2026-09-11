@@ -43,4 +43,31 @@ class CloseScreensTest {
         compose.onNodeWithText("Смену закроет кабинет: работало несколько устройств").assertIsDisplayed()
         compose.onNodeWithText("В хаб").assertIsDisplayed()
     }
+
+    /**
+     * An unresolved duplicate is said out loud and the shift closes anyway.
+     * Blocking a close on a printer would stop a line over a sticker.
+     */
+    @Test
+    fun anOutstandingDuplicateWarnsWithoutBlockingTheClose() {
+        compose.setContent {
+            MarkiroTheme {
+                CloseScreen(
+                    CloseStep.Confirm(
+                        ShiftCloser.Preview(
+                            accepted = 20, errors = 0, duplicates = 0, plan = 20,
+                            reasonRequired = false, alreadyClosed = false, outstandingDuplicates = 2,
+                        ),
+                    ),
+                    CloseCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText(
+            "Нерешённых дубликатов: 2. Смена закроется, события уйдут на сервер.",
+            substring = true,
+        ).assertIsDisplayed()
+        // The close is offered, not withheld.
+        compose.onNodeWithText("Закрыть").assertIsDisplayed()
+    }
 }

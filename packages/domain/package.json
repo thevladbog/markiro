@@ -25,7 +25,8 @@
     "fixtures:km": "pnpm run build && node scripts/export-km-fixtures.mjs",
     "fixtures:inventory": "pnpm run build && node scripts/export-inventory-fixtures.mjs",
     "fixtures:labels": "pnpm run build && node scripts/export-label-fixtures.mjs",
-    "fixtures:box-labels": "pnpm run build && node scripts/export-box-label-fixtures.mjs"
+    "fixtures:box-labels": "pnpm run build && node scripts/export-box-label-fixtures.mjs",
+    "fixtures:product-labels": "pnpm run build && node scripts/export-product-label-fixtures.mjs"
   },
   "peerDependencies": {
     "zod": "4.4.3"

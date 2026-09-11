@@ -17,6 +17,7 @@ export { parseImportGtins } from "./catalog/national-catalog.js";
 export { canonicalizeKm, kmHash, kmKey, MAX_KM_UTF8_BYTES, parseKm } from "./gs1/km.js";
 export type { ParsedKm } from "./gs1/km.js";
 export * from "./product-labels/contracts.js";
+export { buildProductLabelFixtures } from "./product-labels/fixtures.js";
 export * from "./product-labels/history.js";
 export * from "./product-labels/km.js";
 export * from "./product-labels/state.js";

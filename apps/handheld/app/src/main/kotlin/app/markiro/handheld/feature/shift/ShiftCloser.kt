@@ -17,6 +17,8 @@ class ShiftCloser(private val db: HandheldDatabase, private val clock: () -> Lon
         val plan: Int?,
         val reasonRequired: Boolean,
         val alreadyClosed: Boolean,
+        /** Duplicate labels still unresolved. Closing warns about them; it never waits. */
+        val outstandingDuplicates: Int = 0,
     )
 
     suspend fun preview(shiftId: String): Preview? {
@@ -31,6 +33,7 @@ class ShiftCloser(private val db: HandheldDatabase, private val clock: () -> Lon
             plan = shift.plannedQty,
             reasonRequired = reasonRequired(shift.plannedQty, accepted),
             alreadyClosed = db.shiftCloseDao().forShift(shiftId) != null,
+            outstandingDuplicates = db.productLabelJobDao().outstandingCount(shiftId),
         )
     }
 
@@ -70,6 +73,19 @@ class ShiftCloser(private val db: HandheldDatabase, private val clock: () -> Lon
     private suspend fun finishLocally(shiftId: String) {
         db.shiftDao().setStatus(shiftId, "closed")
         db.deviceConfigDao().get()?.let { if (it.activeShiftId == shiftId) db.deviceConfigDao().upsert(it.copy(activeShiftId = null)) }
+        // Duplicate-label retention, in two steps and in this order.
+        //
+        // The prepared bytes exist only so a reprint can replay them, and a
+        // reprint into a closed shift is not a thing -- a shift's worth of
+        // labels would otherwise grow without bound on a fixed disk. They go for
+        // every job here, settled or not, so an unresolved one survives as a
+        // record without costing anything.
+        //
+        // The rows themselves go only once the server holds every one of their
+        // events, which is why this runs after the close rather than instead of
+        // it: closing never waits on the queue.
+        db.productLabelJobDao().dropBytesForShift(shiftId)
+        db.productLabelJobDao().purgeSettled(shiftId)
     }
 
     companion object {
