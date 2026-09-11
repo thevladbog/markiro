@@ -16,7 +16,7 @@ okhttp = "4.12.0"
 serialization = "1.9.0"
 coroutines = "1.10.2"
 securityCrypto = "1.1.0"
-zxing = "3.5.3"
+zxing = "3.5.4"
 junit = "4.13.2"
 robolectric = "4.15.1"
 # Robolectric 4.15.1 and 4.16.1 pin bcprov 1.80/1.81 with critical CVEs (GHSA-574f-3g2m-x479,
