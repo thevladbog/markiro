@@ -1,6 +1,7 @@
-import { ConflictException } from "@nestjs/common";
+import { ConflictException, type Logger } from "@nestjs/common";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import { PALLET_EXTENSION_DIGIT } from "../sscc/sscc.service";
 
 /**
  * The ingest transaction handle. Loosely derived from `Db["transaction"]`'s own
@@ -168,10 +169,12 @@ function isDuplicatePalletSscc(error: unknown): boolean {
 
 /**
  * Applies this batch's pallet closures, mirroring the box-closure loop's
- * guards exactly.
+ * guards -- and its LOGGING -- exactly.
  *
  * `recordConsumedSerial` is passed in rather than imported so this module does
- * not depend on the SSCC service; the caller binds it to the SAME transaction.
+ * not depend on the SSCC service (only on the constant naming the pallet
+ * serial space); the caller binds the callback to the SAME transaction, and
+ * passes its own logger so a no-op here is as findable as the box loop's.
  */
 export async function applyPalletClosures(
   tx: Transaction,
@@ -179,6 +182,7 @@ export async function applyPalletClosures(
   closures: readonly PalletClosureDto[],
   byKey: Map<PalletKey, string>,
   recordConsumedSerial: (sscc: string) => Promise<void>,
+  logger: Pick<Logger, "warn">,
 ): Promise<void> {
   // Sorted by the full identity key for the same 40P01 reason the box loop
   // sorts, and for the same totality reason `upsertPallets` does.
@@ -188,6 +192,25 @@ export async function applyPalletClosures(
     return left < right ? -1 : left > right ? 1 : 0;
   });
   for (const closure of ordered) {
+    // The two SSCC serial spaces must never interleave: a box and the pallet
+    // it stands on sharing one number is exactly what the separate extension
+    // digits exist to prevent. A closure carrying a BOX-space serial writes to
+    // `pallets.sscc` without tripping any constraint and makes
+    // `recordConsumedSerial` advance the BOX block instead -- so it is
+    // reported, loudly. Deliberately NOT rejected: a 400 here would wedge this
+    // device's queue forever (the drain retries a rejected batch indefinitely
+    // rather than dropping data), which is far worse than a mis-attributed
+    // serial the warning below makes findable.
+    if (closure.sscc[0] !== String(PALLET_EXTENSION_DIGIT)) {
+      logger.warn(
+        `Pallet closure for palletId ${closure.palletId} (tenant ${tenantId}, shift ` +
+          `${closure.shiftId}, terminal ${closure.terminalId ?? "null"}) carries sscc ` +
+          `${closure.sscc}, whose extension digit is not the pallet space's ` +
+          `${PALLET_EXTENSION_DIGIT}; the serial will be recorded against the block that ` +
+          `range belongs to, not the pallet block`,
+      );
+    }
+
     const id = byKey.get(palletKey(closure.shiftId, closure.terminalId, closure.palletId));
     // `upsertPallets` created every pallet this batch names, so a miss here
     // means the row vanished under us; nothing to apply, and the serial is
@@ -201,8 +224,12 @@ export async function applyPalletClosures(
       // actually printed on the physical pallet. A genuine redelivery under a
       // fresh batch id also matches zero rows here, which is the correct
       // no-op.
+      // Assigned in the try below and read after it. Every path through the
+      // catch rethrows, so the statements past it are reachable only when the
+      // UPDATE completed and set this.
+      let matched: number;
       try {
-        await tx
+        const changed = await tx
           .update(schema.pallets)
           .set({
             sscc: closure.sscc,
@@ -224,13 +251,25 @@ export async function applyPalletClosures(
               eq(schema.pallets.id, id),
               isNull(schema.pallets.closedAt),
             ),
-          );
+          )
+          .returning({ id: schema.pallets.id });
+        matched = changed.length;
       } catch (error) {
         // Two physical pallets carrying one serial is a device-side serial
         // reuse, not a server fault. Surfaced as a 409 rather than letting the
         // raw 23505 render as a 500: both abort the batch (the transaction is
         // already unusable by the time this is caught), but only one is
         // diagnosable from the device's own logs.
+        //
+        // Be clear about the cost, because it is NOT an ordinary rejection:
+        // the device's drain retries every non-401 forever, so one duplicate
+        // serial stops all scan, box and pallet delivery from that terminal
+        // until someone edits its local database by hand. That wedge is
+        // accepted here only because it is exactly what the box path already
+        // does with `boxes_tenant_sscc_uq` (which merely renders as a 500
+        // instead); changing it is a deliberate product decision about both
+        // paths, not something to fix on the pallet side alone. Recorded as a
+        // known wedge.
         if (isDuplicatePalletSscc(error)) {
           throw new ConflictException({ code: "station_pallet_sscc_conflict" });
         }
@@ -266,6 +305,28 @@ export async function applyPalletClosures(
               eq(schema.pallets.sscc, closure.sscc),
             ),
           );
+      }
+
+      // Zero rows is "nothing [more] to apply to the pallet row", not an
+      // error -- the same branch the box-closure loop carries, and logged with
+      // the same detail for the same reason. Two ordinary inputs land here: a
+      // genuine redelivery of a closure an earlier batch already applied, and
+      // a device that lost its local database, restarted its pallet counter at
+      // an id it had already used inside a still-open shift, and closed the
+      // NEW pallet with a NEW serial. The first is a correct no-op; the second
+      // is not harmless at all -- `closed_at IS NULL` rightly protects the old
+      // row, the sscc-scoped write above matches nothing, and
+      // `recordConsumedSerial` below still marks the new serial consumed, so
+      // that serial is standing on a physical pallet that no row references.
+      // The guard stays; the SILENCE is what this log removes.
+      if (matched === 0) {
+        logger.warn(
+          `Pallet closure for palletId ${closure.palletId} (tenant ${tenantId}, shift ` +
+            `${closure.shiftId}, terminal ${closure.terminalId ?? "null"}, sscc ` +
+            `${closure.sscc}) matched no open pallet row -- the pallet was already closed by ` +
+            `an earlier delivery, or this device-local pallet id was reused after its first ` +
+            `pallet closed; skipping as a no-op, but the serial is still recorded as consumed`,
+        );
       }
     }
 

@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
-import type { INestApplication } from "@nestjs/common";
+import { Logger, type INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import {
   buildSscc,
@@ -63,6 +63,21 @@ describe.skipIf(!ready)("station-scans pallet ingest (06d Task 9)", () => {
   afterAll(async () => {
     await app?.close();
   });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Captures what the ingest actually logged. Spied on the prototype rather
+   * than on one service instance because the closure loop logs through
+   * `StationScansService`'s own logger, which the module owns.
+   */
+  function captureWarnings(): () => string[] {
+    const spy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+    return () =>
+      spy.mock.calls.map(([message]) => (typeof message === "string" ? message : String(message)));
+  }
 
   // Same fixture as station-scans.e2e.test.ts: a genuinely valid GTIN-14,
   // because POST /products validates the GS1 check digit.
@@ -334,6 +349,12 @@ describe.skipIf(!ready)("station-scans pallet ingest (06d Task 9)", () => {
   });
 
   it("refuses a pallet SSCC already used in the tenant", async () => {
+    // KNOWN WEDGE, pinned deliberately: the device's drain retries every
+    // non-401 forever, so this 409 stops all scan, box and pallet delivery
+    // from that terminal until someone edits its local database by hand. It is
+    // kept only because the box path behaves the same way (its
+    // `boxes_tenant_sscc_uq` violation merely renders as a 500 instead);
+    // changing it is a product decision about both paths at once.
     const sscc = palletSscc(2);
     await closePalletWith("p1", sscc);
     await postRaw(
@@ -459,6 +480,74 @@ describe.skipIf(!ready)("station-scans pallet ingest (06d Task 9)", () => {
     expect(exceptions).toHaveLength(1);
     expect(exceptions[0]).toMatchObject({ kind: "reprint", operatorId: null });
     expect((await palletRows())[0]!.disassembledAt).toBeNull();
+  });
+
+  it("logs the closure that matches no open pallet row instead of failing silently", async () => {
+    // The scenario that makes the silence expensive: a device restores an old
+    // local database, reopens "p1" inside the SAME still-open shift and closes
+    // it with a NEW serial. `closed_at IS NULL` correctly refuses to rewrite
+    // the old closed row, the sscc-scoped late-print write matches nothing --
+    // and the new serial is still marked consumed, so it is standing on a
+    // physical pallet that no row references.
+    const first = palletSscc(20);
+    const second = palletSscc(21);
+    await closePalletWith("p1", first);
+
+    const warnings = captureWarnings();
+    await postBatch({ pallets: [palletClosure("p1", { sscc: second })] });
+
+    const noOpWarnings = warnings().filter((message) => message.includes("matched no open pallet"));
+    expect(noOpWarnings).toHaveLength(1);
+    // Enough detail to find the pallet by hand, exactly as the box-closure
+    // loop's own no-op log carries.
+    expect(noOpWarnings[0]).toContain("p1");
+    expect(noOpWarnings[0]).toContain(tenantId);
+    expect(noOpWarnings[0]).toContain(shiftId);
+    expect(noOpWarnings[0]).toContain(second);
+
+    // The guard itself is correct and stays: the old row keeps the serial
+    // physically printed on it.
+    const rows = await palletRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.sscc).toBe(first);
+  });
+
+  it("warns when a pallet closure carries a serial from the box space", async () => {
+    // Nothing rejects this: a 400 would wedge the device's queue forever,
+    // which is worse than the mis-attribution. But the two serial spaces must
+    // never interleave silently.
+    const boxSpaceSscc = nextBoxSscc();
+    const warnings = captureWarnings();
+    await postBatch({ pallets: [palletClosure("p1", { sscc: boxSpaceSscc })] });
+
+    const digitWarnings = warnings().filter((message) => message.includes("extension digit"));
+    expect(digitWarnings).toHaveLength(1);
+    expect(digitWarnings[0]).toContain("p1");
+    expect(digitWarnings[0]).toContain(tenantId);
+    expect(digitWarnings[0]).toContain(shiftId);
+    expect(digitWarnings[0]).toContain(boxSpaceSscc);
+
+    // Accepted, and the pallet block is untouched -- which is precisely the
+    // mis-attribution the warning exists to make findable.
+    const rows = await palletRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.sscc).toBe(boxSpaceSscc);
+    const [block] = await db
+      .select({ consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial })
+      .from(schema.ssccBlocks)
+      .where(
+        and(
+          eq(schema.ssccBlocks.tenantId, tenantId),
+          eq(schema.ssccBlocks.extensionDigit, PALLET_EXTENSION_DIGIT),
+        ),
+      );
+    expect(block!.consumedThroughSerial).toBeNull();
+  });
+
+  it("keeps an ordinary pallet closure out of both warning paths", async () => {
+    const warnings = captureWarnings();
+    await postBatch({ pallets: [palletClosure("p1", { sscc: palletSscc(22) })] });
+    expect(warnings().filter((message) => message.includes("Pallet closure"))).toEqual([]);
   });
 
   it("refuses a batch carrying more pallet closures than the shared limit", async () => {
