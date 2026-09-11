@@ -211,6 +211,24 @@ export const syncBatchSchema = z.object({
     // MAX_PALLET_CLOSURES_PER_SYNC_BATCH's own comment for what a mismatch
     // wedges.
     .max(MAX_PALLET_CLOSURES_PER_SYNC_BATCH)
+    // One closure per pallet per batch, the same in-batch uniqueness rule
+    // `productLabelEvents` above carries. Without it, two closures for one
+    // pallet carrying DIFFERENT serials both reach the ingest: the first wins
+    // the `closed_at IS NULL` match, the second silently no-ops -- yet BOTH
+    // serials are marked consumed, so one of them is burned with no row
+    // naming it.
+    //
+    // Keyed on (shiftId, palletId) and deliberately NOT on terminalId: the
+    // ingest substitutes the authenticated device id into every record's
+    // `terminalId` before any of them is resolved to a pallet, so two closures
+    // differing only in their wire terminal name the SAME pallet by the time
+    // it matters.
+    .refine(
+      (pallets) =>
+        new Set(pallets.map((pallet) => `${pallet.shiftId}|${pallet.palletId}`)).size ===
+        pallets.length,
+      "Pallet closures must name each pallet at most once in a batch",
+    )
     .default([]),
   // Pallet exceptions (disassemble/reprint). Bounded by the same constant: a
   // batch cannot carry exceptions against more pallets than it could close.
@@ -335,7 +353,13 @@ export interface BatchConflictDto {
 }
 
 export interface DeniedStationRecordDto {
-  recordKind: "item" | "box" | "exception" | "product_label_event";
+  /**
+   * Must stay in step with `station_sync_quarantine_record_kind_check`
+   * (packages/db/src/schema/platform.ts): every kind the ingest can deny is
+   * also written to the quarantine table, and a kind missing from that CHECK
+   * raises 23514 and 500s the whole batch instead.
+   */
+  recordKind: "item" | "box" | "exception" | "product_label_event" | "pallet" | "pallet_exception";
   recordIndex: number;
   shiftId: string;
   code: ProductLabelRejectionCode | "legacy_unbound_replay";
@@ -400,7 +424,10 @@ const deniedStationRecordOpenApiSchema: SchemaObject = {
   additionalProperties: false,
   required: ["recordKind", "recordIndex", "shiftId", "code"],
   properties: {
-    recordKind: { type: "string", enum: ["item", "box", "exception", "product_label_event"] },
+    recordKind: {
+      type: "string",
+      enum: ["item", "box", "exception", "product_label_event", "pallet", "pallet_exception"],
+    },
     recordIndex: { type: "integer", minimum: 0 },
     shiftId: { type: "string", format: "uuid" },
     code: {

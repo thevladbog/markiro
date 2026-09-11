@@ -449,30 +449,41 @@ export class StationScansService {
                   },
                 ],
           ),
+          // Pallet records are held to the SAME eligibility rule as the boxes
+          // they hold, and they are quarantined like every other kind. Dropping
+          // them with only a log line -- what this path did before migration
+          // 0132 widened `station_sync_quarantine_record_kind_check` -- was
+          // data loss, not a lesser evil: `sync_batches` stores a digest and
+          // never the body, and the device's drain acks and DELETEs its outbox
+          // rows unconditionally, so a physically labelled pallet's closure
+          // would have survived nowhere at all.
+          ...body.pallets.flatMap((pallet, recordIndex) =>
+            eligible(pallet.shiftId)
+              ? []
+              : [
+                  {
+                    recordKind: "pallet" as const,
+                    recordIndex,
+                    shiftId: pallet.shiftId,
+                    code: "subscription_read_only" as const,
+                  },
+                ],
+          ),
+          ...body.palletExceptions.flatMap((exception, recordIndex) =>
+            eligible(exception.shiftId)
+              ? []
+              : [
+                  {
+                    recordKind: "pallet_exception" as const,
+                    recordIndex,
+                    shiftId: exception.shiftId,
+                    code: "subscription_read_only" as const,
+                  },
+                ],
+          ),
         ];
         await this.quarantine(tx, tenantId, authenticatedTerminalId, digest, body, denied);
         const deniedKeys = new Set(denied.map((item) => `${item.recordKind}:${item.recordIndex}`));
-        // Pallet records are held to the SAME eligibility rule as the boxes
-        // they hold, but they cannot be quarantined alongside them:
-        // `station_sync_quarantine_record_kind_check` enumerates the four
-        // kinds that existed when it was written, so a pallet row would
-        // violate it and 500 the whole batch -- wedging the device on a
-        // retryable error, which is strictly worse than dropping the record.
-        // Widening that CHECK needs its own migration; until then a dropped
-        // pallet record is logged with enough detail to find it by hand.
-        const ineligiblePallets = body.pallets.filter((pallet) => !eligible(pallet.shiftId));
-        const ineligiblePalletExceptions = body.palletExceptions.filter(
-          (exception) => !eligible(exception.shiftId),
-        );
-        if (ineligiblePallets.length > 0 || ineligiblePalletExceptions.length > 0) {
-          this.logger.warn(
-            `Batch ${body.batchId} (tenant ${tenantId}, terminal ${authenticatedTerminalId}) ` +
-              `carries ${ineligiblePallets.length} pallet closure(s) and ` +
-              `${ineligiblePalletExceptions.length} pallet exception(s) for shifts outside the ` +
-              `read-only recovery window; dropped without a quarantine row (pallet record kinds ` +
-              `are not yet accepted by station_sync_quarantine)`,
-          );
-        }
         body = {
           ...body,
           items: body.items.filter((_item, index) => !deniedKeys.has(`item:${index}`)),
@@ -480,9 +491,9 @@ export class StationScansService {
           exceptions: body.exceptions.filter(
             (_exception, index) => !deniedKeys.has(`exception:${index}`),
           ),
-          pallets: body.pallets.filter((pallet) => eligible(pallet.shiftId)),
-          palletExceptions: body.palletExceptions.filter((exception) =>
-            eligible(exception.shiftId),
+          pallets: body.pallets.filter((_pallet, index) => !deniedKeys.has(`pallet:${index}`)),
+          palletExceptions: body.palletExceptions.filter(
+            (_exception, index) => !deniedKeys.has(`pallet_exception:${index}`),
           ),
         };
       } else if (
@@ -1442,12 +1453,21 @@ export class StationScansService {
       // Pallet closures, after the box closures above so a pallet closing in
       // the same batch that filled it already owns its member boxes.
       if (body.pallets.length > 0) {
-        await applyPalletClosures(tx, tenantId, body.pallets, palletsByKey, (sscc) =>
-          // `recordConsumedSerial` derives the extension digit from the SSCC
-          // itself (`parseSscc`), so a pallet serial finds the pallet block
-          // and a box serial the box block; there is no digit argument to
-          // pass. `tx` enlists it in the SAME transaction as the closure.
-          this.ssccService.recordConsumedSerial(tenantId, sscc, tx),
+        await applyPalletClosures(
+          tx,
+          tenantId,
+          body.pallets,
+          palletsByKey,
+          (sscc) =>
+            // `recordConsumedSerial` derives the extension digit from the SSCC
+            // itself (`parseSscc`), so a pallet serial finds the pallet block
+            // and a box serial the box block; there is no digit argument to
+            // pass. `tx` enlists it in the SAME transaction as the closure.
+            // That derivation is also why a box-space serial delivered in
+            // `pallets[]` silently advances the wrong block -- which is what
+            // the callee warns about.
+            this.ssccService.recordConsumedSerial(tenantId, sscc, tx),
+          this.logger,
         );
       }
 
@@ -1555,11 +1575,17 @@ export class StationScansService {
     denied: DeniedStationRecordDto[],
   ): Promise<void> {
     if (denied.length === 0) return;
+    // One entry per `DeniedStationRecordDto["recordKind"]`, and per value of
+    // `station_sync_quarantine_record_kind_check`. The three must agree: a
+    // kind denied above but absent here would index `undefined` and store a
+    // null payload, and a kind absent from the CHECK 23514s the whole batch.
     const payloads = {
       item: body.items,
       box: body.boxes,
       exception: body.exceptions,
       product_label_event: body.productLabelEvents,
+      pallet: body.pallets,
+      pallet_exception: body.palletExceptions,
     } as const;
     await tx
       .insert(schema.stationSyncQuarantine)
