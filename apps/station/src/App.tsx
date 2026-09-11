@@ -42,6 +42,7 @@ import {
 import {
   DEFAULT_HARDWARE_CONFIG,
   loadHardwareConfig,
+  configuredScanners,
   type HardwareConfig,
 } from "./lib/hardware-config.js";
 import {
@@ -192,7 +193,7 @@ function configuredStationApiUrl(): string | undefined {
  * a serial scanner is opted into on the setup screen.
  */
 export function pickScanSource(config: HardwareConfig): "wedge" | "hardware" {
-  return config.scanner ? "hardware" : "wedge";
+  return configuredScanners(config).length > 0 ? "hardware" : "wedge";
 }
 
 /**
@@ -207,8 +208,8 @@ export function scannerIndicator(
   config: HardwareConfig,
   status: ScannerStatus | null,
 ): ScannerIndicator {
-  if (!config.scanner) return "keyboard";
-  return status === "connected" ? "connected" : "disconnected";
+  if (configuredScanners(config).length === 0) return "keyboard";
+  return status ?? "disconnected";
 }
 
 export function App() {
@@ -355,15 +356,8 @@ export function App() {
     (transition: () => Promise<void>) => runConfigTransition(transition, () => {}),
     [runConfigTransition],
   );
-  // Bumped every time the operator leaves the setup screen (Done or Back),
-  // so the scanner-session effect below re-runs even when the saved
-  // `hardwareConfig.scanner` port/baud are unchanged -- e.g. Setup's own
-  // "Connect scanner" button opened a different port that failed, or a
-  // manual test-connect was never saved. Without this, saving an identical
-  // configuration only changes the config object's identity, not the
-  // port/baud values the effect is keyed on, so it would never re-run and
-  // the station would be left with whatever session Setup's own buttons put
-  // it in.
+  // Leaving Setup (Done or Back) reconciles the saved port list, including
+  // when test connections changed the native set without saving settings.
   const [sessionEpoch, setSessionEpoch] = useState(0);
 
   useEffect(() => {
@@ -421,40 +415,19 @@ export function App() {
     [],
   );
 
-  // Open a configured scanner at start so a set-up station comes up ready,
-  // and again whenever the configured scanner changes (e.g. from Setup).
-  // `scannerStatus` is reset to null up front so a scanner that has not (yet,
-  // or ever) opened successfully never keeps showing a stale "connected"
-  // left over from whatever was configured before -- `scannerIndicator`
-  // reads a null status as disconnected once a scanner is configured.
+  const scanners = useMemo(() => configuredScanners(hardwareConfig), [hardwareConfig]);
+  // Reconcile the whole set at boot and after Setup. Rust retains unchanged
+  // readers, so changing one port never interrupts another working scanner.
   useEffect(() => {
     let cancelled = false;
     setScannerStatus(null);
-    void (async () => {
-      // Retire any previous session before evaluating the new configuration
-      // -- even when the new configuration has no scanner at all -- so
-      // clearing the port in Setup actually releases the OS handle instead
-      // of leaving the Rust session open and emitting `station://scan`
-      // until the app restarts. Order matters: await the close, then open;
-      // never fire both concurrently. This is the same close-before-open
-      // the setup screen's "Connect scanner" button already does -- the
-      // Rust `open_scanner` retry loop is what absorbs the up-to-200ms the
-      // retiring reader thread needs to release the port handle.
-      await tauriHardware.closeScanner();
-      if (cancelled || !hardwareConfig.scanner) return;
-      const { port, baud } = hardwareConfig.scanner;
-      await tauriHardware.openScanner(port, baud);
-    })().catch((err: unknown) => {
-      // A stale run's failure (superseded by a newer configuration, or the
-      // component already unmounted) must not be reported as if it were the
-      // current configuration's problem.
-      if (!cancelled) console.error("station: opening the configured scanner failed", err);
+    void tauriHardware.configureScanners(scanners).catch((err: unknown) => {
+      if (!cancelled) console.error("station: configuring scanners failed", err);
     });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the scanner's port/baud rather than the object identity, so a re-read of the config that changed nothing does not close and reopen the port.
-  }, [hardwareConfig.scanner?.port, hardwareConfig.scanner?.baud, sessionEpoch]);
+  }, [scanners, sessionEpoch]);
 
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;

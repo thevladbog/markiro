@@ -82,6 +82,11 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
   to system/serial/network printers. The internal hardware module mirrors the
   idento-agent HTTP contract (`/scan/consume`, `/print`, discovery) so it can
   be extracted into a standalone agent later without touching the UI.
+- **Multiple COM scanners:** every saved port has an independent reader and
+  reconnect loop. Any scanner can feed the existing scan queue without operator
+  switching; one failed port does not stop the others. Local settings retain
+  compatibility with the legacy single-scanner configuration. See
+  [runtime and acceptance](acceptance/station-multiple-com-scanners.md).
 - **Local DB:** SQLite via `tauri-plugin-sql`, accessed with
   `drizzle-orm/sqlite-proxy`; schema defined in `packages/db`, mirrors the
   server's shift entities (shift, codes, scan journal, boxes, pallets).
