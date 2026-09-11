@@ -23,6 +23,20 @@ class WorkScreenTest {
     @get:Rule
     val compose = createComposeRule()
 
+    /**
+     * The feed printed the raw tail, which on a real code is the crypto
+     * signature: «…5\u001d93txKP» named no unit and did not match the serial
+     * shown for the same scan two centimetres higher.
+     */
+    @Test
+    fun theFeedShowsTheSerialNotTheCryptoTail() {
+        val km = "010460068200001321ABCDEF1234\u001d93XyZw"
+        assertEquals("ABCDEF1234".takeLast(8).let { "…" + it }, feedTail(km))
+        // A code that does not parse keeps its raw tail: for a rejected scan the
+        // raw text is the only thing there is to show.
+        assertEquals("garbage", feedTail("garbage"))
+    }
+
     private val ui = WorkUi(
         shift = ShiftEntityFixtures.bundled("s1"),
         last = LastScan(Verdict.DUPLICATE, "…1234567", firstSeenAt = "2026-09-10T07:42:00.000Z", at = "2026-09-10T08:00:00.000Z"),
