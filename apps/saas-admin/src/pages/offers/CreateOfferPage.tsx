@@ -19,7 +19,6 @@ import {
   type TenantListItem,
 } from "../tenants/api.js";
 import { createOffer } from "./api.js";
-import { OfferTermsEditor } from "./OfferTermsEditor.js";
 import { listOperatorBankAccounts } from "../settings/api.js";
 import { createBillingRequestOffer, getBillingRequest } from "../billing-requests/api.js";
 
@@ -48,7 +47,6 @@ function OfferEditor({ forbidden, onForbidden }: { forbidden: boolean; onForbidd
   const client = useQueryClient();
   const { requestId } = useParams();
   const [search] = useSearchParams();
-  const [termsMarkdown, setTermsMarkdown] = useState<string | null>(null);
   const retryPending = useRef(false);
   const request = useQuery({
     queryKey: ["platform", "billing", "requests", requestId],
@@ -155,7 +153,6 @@ function OfferEditor({ forbidden, onForbidden }: { forbidden: boolean; onForbidd
         };
         const requestInput = {
           ...offerInput,
-          ...(termsMarkdown ? { termsMarkdown } : {}),
           idempotencyKey: crypto.randomUUID(),
         };
         setRequestAttempt({ input: requestInput });
@@ -183,7 +180,7 @@ function OfferEditor({ forbidden, onForbidden }: { forbidden: boolean; onForbidd
         }
       }
       try {
-        const offer = await createOffer(termsMarkdown ? { ...input, termsMarkdown } : input);
+        const offer = await createOffer(input);
         return offer.id;
       } catch (error) {
         if (isForbidden(error)) {
@@ -330,11 +327,6 @@ function OfferEditor({ forbidden, onForbidden }: { forbidden: boolean; onForbidd
 
   return (
     <div className="offer-editor">
-      <OfferTermsEditor
-        value={termsMarkdown}
-        onChange={setTermsMarkdown}
-        label={t("offers.terms.label")}
-      />
       <DocumentComposer
         kind="offer"
         initialDraft={initialDraft}

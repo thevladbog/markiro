@@ -22,6 +22,7 @@ const globalCss = readFileSync("src/global.css", "utf8");
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -291,7 +292,9 @@ describe("DocumentComposer", () => {
     const { props, container } = renderComposer();
 
     await selectCombobox(user, "Тенант", "sever", "Завод Север · sever-factory");
-    await user.type(screen.getByLabelText("Срок оплаты"), "2026-09-01");
+    vi.setSystemTime(new Date("2026-09-01T12:00:00Z"));
+    await user.click(screen.getByRole("button", { name: "Срок оплаты" }));
+    await user.click(screen.getByRole("button", { name: /^1 сентября 2026/ }));
     await selectCombobox(user, "Добавить позицию", "v3", "Базовый тариф · plan-basic · v3");
     await selectCombobox(user, "Добавить позицию", "plan-basic", "Базовый тариф · plan-basic · v3");
     expect((screen.getByLabelText("Количество Базовый тариф") as HTMLInputElement).value).toBe("1");

@@ -13,6 +13,7 @@ import {
   entitlementSourceConfirmationSchema,
   platformTenantV2Contracts,
   platformCommercialContracts,
+  platformOfferDraftContracts,
   platformCommercialV2Contracts,
   platformOperationsContracts,
   platformAgreementContracts,
@@ -384,6 +385,15 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/offers/{id}/preview",
     "200",
     platformOfferWorkspaceContracts.preview.response,
+  ),
+  route(
+    "patch",
+    "/platform/offers/{id}/draft",
+    "200",
+    platformOfferDraftContracts.update.response,
+    {
+      body: platformOfferDraftContracts.update.body,
+    },
   ),
   route("post", "/platform/offers", "201", platformCommercialContracts.offers.create.response, {
     body: platformCommercialContracts.offers.create.body,

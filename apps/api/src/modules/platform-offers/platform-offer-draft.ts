@@ -14,12 +14,11 @@ import { normalizeOfferTerms } from "./offer-terms";
 
 type OfferDraftExecutor = Pick<Db, "insert" | "select">;
 
-export async function createOfferDraft(
-  tx: OfferDraftExecutor,
-  actorUserId: string,
+export async function prepareOfferDraft(
+  tx: Pick<Db, "select">,
   input: CreateOfferDto,
   commercialVersion: CommercialVersion = 2,
-): Promise<string> {
+) {
   assertCommercialPlanSequence(input.lines);
   let termsMarkdown: string | null;
   try {
@@ -80,6 +79,41 @@ export async function createOfferDraft(
   assertCommercialPlanSequence(
     validatedLines.map(({ line, commercialTerms }) => ({ ...line, commercialTerms })),
   );
+  const lines = validatedLines.map(
+    ({ line, catalogUnitPrice, priceOverrideReason, commercialTerms }, index) => ({
+      tenantId: input.tenantId,
+      position: index + 1,
+      kind: line.kind,
+      catalogVersionId: line.catalogVersionId ?? null,
+      commercialTerms,
+      nameRu: commercialTerms?.documentNameRu ?? line.nameRu,
+      nameEn: commercialTerms?.documentNameEn ?? line.nameEn,
+      descriptionRu: line.descriptionRu ?? null,
+      descriptionEn: line.descriptionEn ?? null,
+      quantity: line.quantity,
+      unit: commercialTerms?.billingPeriod ?? line.unit,
+      catalogUnitPrice,
+      agreedUnitPrice: line.agreedUnitPrice,
+      vatRate:
+        line.vatRateBps === null || line.vatRateBps === undefined
+          ? null
+          : String(line.vatRateBps / 100),
+      vatIncluded: line.vatIncluded,
+      priceOverrideReason,
+      activationPolicy: line.kind === "plan" ? (line.activationPolicy ?? "immediately") : null,
+      lineTotal: total.lines[index]?.lineTotal ?? "0.00",
+    }),
+  );
+  return { termsMarkdown, total: total.total, lines };
+}
+
+export async function createOfferDraft(
+  tx: OfferDraftExecutor,
+  actorUserId: string,
+  input: CreateOfferDto,
+  commercialVersion: CommercialVersion = 2,
+): Promise<string> {
+  const prepared = await prepareOfferDraft(tx, input, commercialVersion);
   const [offer] = await tx
     .insert(schema.commercialOffers)
     .values({
@@ -87,40 +121,15 @@ export async function createOfferDraft(
       sellerBankAccountId: input.sellerBankAccountId ?? null,
       revision: 1,
       status: "draft",
-      total: total.total,
+      total: prepared.total,
       expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
-      termsMarkdown,
+      termsMarkdown: prepared.termsMarkdown,
       createdByPlatformUserId: actorUserId,
     })
     .returning({ id: schema.commercialOffers.id });
   if (!offer) throw new Error("offer insert failed");
-  await tx.insert(schema.commercialOfferLines).values(
-    validatedLines.map(
-      ({ line, catalogUnitPrice, priceOverrideReason, commercialTerms }, index) => ({
-        tenantId: input.tenantId,
-        offerId: offer.id,
-        position: index + 1,
-        kind: line.kind,
-        catalogVersionId: line.catalogVersionId ?? null,
-        commercialTerms,
-        nameRu: commercialTerms?.documentNameRu ?? line.nameRu,
-        nameEn: commercialTerms?.documentNameEn ?? line.nameEn,
-        descriptionRu: line.descriptionRu ?? null,
-        descriptionEn: line.descriptionEn ?? null,
-        quantity: line.quantity,
-        unit: commercialTerms?.billingPeriod ?? line.unit,
-        catalogUnitPrice,
-        agreedUnitPrice: line.agreedUnitPrice,
-        vatRate:
-          line.vatRateBps === null || line.vatRateBps === undefined
-            ? null
-            : String(line.vatRateBps / 100),
-        vatIncluded: line.vatIncluded,
-        priceOverrideReason,
-        activationPolicy: line.kind === "plan" ? (line.activationPolicy ?? "immediately") : null,
-        lineTotal: total.lines[index]?.lineTotal ?? "0.00",
-      }),
-    ),
-  );
+  await tx
+    .insert(schema.commercialOfferLines)
+    .values(prepared.lines.map((line) => ({ ...line, offerId: offer.id })));
   return offer.id;
 }

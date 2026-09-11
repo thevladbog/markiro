@@ -122,8 +122,35 @@
       "billing_buyer_profile_required": "Complete buyer details in the customer profile.",
       "billing_profile_unconfirmed": "Confirm party details before issuing.",
       "billing_seller_account_required": "Select a seller bank account.",
-      "billing_seller_account_inactive": "The seller bank account is inactive. Select an active account."
-    }
+      "billing_seller_account_inactive": "The seller bank account is inactive. Select an active account.",
+      "offer_draft_changed": "This draft has changed. Reopen it before saving your changes.",
+      "offer_not_draft": "The offer has already been issued or changed status. Reopen its details.",
+      "offer_version_stale": "A newer offer version exists. Open it from the history.",
+      "offer_catalog_version_invalid": "A selected catalog version is no longer published. Replace it in the offer.",
+      "offer_price_override_reason_required": "Provide a reason for the price override."
+    },
+    "edit": "Edit",
+    "editDraft": "Edit offer",
+    "saveDraft": "Save changes",
+    "open": "Open",
+    "backToOffer": "Back to offer",
+    "correct": "Fix",
+    "openCatalog": "Open catalog",
+    "beforeIssue": "Before issuing the offer",
+    "sellerUnconfirmed": "Confirm the seller's billing details.",
+    "buyerUnconfirmed": "Confirm the buyer's billing details.",
+    "sellerAccountMissing": "Select an active seller bank account.",
+    "expiredDraft": "The draft has expired. Select a new expiry date.",
+    "lineTermsMissing": "Missing terms for “{{name}}”: document name, sale subject and license period where applicable.",
+    "legacyDraftHint": "You can save and preview this draft. To issue it, publish a catalog version with complete terms, then replace the old line in the offer editor. Saved prices and terms are never updated automatically.",
+    "issuedImmutable": "Issued offers retain their frozen terms. Changes require a subsequent version.",
+    "publishUnavailable": "Issuing is unavailable: check billing details, expiry and whether this is the latest offer version.",
+    "fixTermsBeforeIssue": "Correct the marked line terms before issuing. Draft preview is available.",
+    "readyToIssue": "Preview is ready. You can issue the offer.",
+    "paymentUnavailable": "Payment requires the current unexpired offer to be accepted by the customer.",
+    "revisionUnavailable": "A subsequent version requires a customer change request and no existing revision draft.",
+    "tenant": "Customer · {{tenantId}}",
+    "retryFrozen": "The retry uses the saved changes. Fields are temporarily unavailable to preserve the first attempt."
   },
   "brand": {
     "logoAlt": "Markiro logo"
@@ -1712,7 +1739,7 @@
     "purchasedPeriod": "Purchased period",
     "errors": {
       "commercial_review_stale": "Seller policy changed. Review the new terms and create a new document; saved terms remain unchanged.",
-      "commercial_terms_review_required": "Review the commercial terms and create a new catalog version.",
+      "commercial_terms_review_required": "You can save and preview this draft. To issue it, publish a catalog version with complete terms, then replace the old line in the offer editor. Saved prices and terms are never updated automatically.",
       "seller_tax_policy_unconfigured": "Configure the seller tax policy before publishing.",
       "seller_tax_policy_violation": "VAT conflicts with current seller policy. Review the terms.",
       "commercial_source_review_required": "The source document requires review. Its terms and amounts remain unchanged.",

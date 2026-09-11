@@ -2570,13 +2570,27 @@ textarea {
   background: var(--surface-card);
 }
 
+.document-composer__fieldset {
+  display: contents;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.offer-editor[hidden] {
+  display: none;
+}
+
 .offer-editor {
   display: grid;
   gap: 20px;
 }
 
 .offer-terms-editor {
+  min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   padding: clamp(16px, 3vw, 28px);
   border: 1px solid var(--line-strong);
@@ -2603,6 +2617,10 @@ textarea {
   border: 1px solid var(--line-strong);
   color: var(--fg-1);
   background: var(--surface-panel);
+}
+
+.offer-terms-editor [role="toolbar"] {
+  flex-wrap: wrap;
 }
 
 .document-composer__workspace {

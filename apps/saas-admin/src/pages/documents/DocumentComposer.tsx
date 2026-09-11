@@ -1,3 +1,5 @@
+import { Link } from "react-router";
+import { OfferTermsEditor } from "../offers/OfferTermsEditor.js";
 import { useMemo, useRef, useState } from "react";
 import type { OperatorBankAccount } from "@markiro/platform-contracts";
 import { useTranslation } from "react-i18next";
@@ -22,6 +24,8 @@ import { SellerAccountPicker } from "./SellerAccountPicker.js";
 export interface DocumentComposerProps {
   kind: "invoice" | "offer";
   initialDraft?: DocumentDraft;
+  editing?: boolean;
+  lockedTenantName?: string;
   tenants: readonly TenantListItem[];
   catalog: readonly CatalogVersionDto[];
   sellerAccounts?: readonly OperatorBankAccount[];
@@ -46,6 +50,8 @@ function snapshot(draft: DocumentDraft) {
 export function DocumentComposer({
   kind,
   initialDraft,
+  editing = false,
+  lockedTenantName,
   tenants,
   catalog,
   sellerAccounts = [],
@@ -124,97 +130,120 @@ export function DocumentComposer({
         void submit();
       }}
     >
-      <section className="document-composer__workspace" aria-labelledby="document-lines-title">
-        <header className="document-composer__header">
-          <div>
-            <p>{t(`documents.eyebrow.${kind}`)}</p>
-            <h1 id="document-lines-title">{t(`documents.title.${kind}`)}</h1>
-          </div>
-          <div className="document-composer__parties">
-            {lockedTenantId || draft.sourceOfferId ? (
-              <p>
-                {t("documents.lockedRequestTenant", { tenantId: lockedTenantId ?? draft.tenantId })}
-              </p>
-            ) : (
-              <TenantPicker
-                tenants={tenants}
-                value={draft.tenantId}
-                loading={loadingSources}
-                {...(errors.tenantId ? { error: t(`documents.errors.${errors.tenantId}`) } : {})}
-                onValueChange={(tenantId) => dispatch({ type: "tenant.selected", tenantId })}
+      <fieldset disabled={submitting} className="document-composer__fieldset">
+        <section className="document-composer__workspace" aria-labelledby="document-lines-title">
+          <header className="document-composer__header">
+            <div>
+              <p>{t(`documents.eyebrow.${kind}`)}</p>
+              <h1 id="document-lines-title">
+                {t(editing ? "offerWorkspace.editDraft" : `documents.title.${kind}`)}
+              </h1>
+            </div>
+            <div className="document-composer__parties">
+              {lockedTenantId || draft.sourceOfferId ? (
+                <p>
+                  {t(editing ? "offerWorkspace.tenant" : "documents.lockedRequestTenant", {
+                    tenantId: lockedTenantName ?? lockedTenantId ?? draft.tenantId,
+                  })}
+                </p>
+              ) : (
+                <TenantPicker
+                  tenants={tenants}
+                  value={draft.tenantId}
+                  loading={loadingSources}
+                  {...(errors.tenantId ? { error: t(`documents.errors.${errors.tenantId}`) } : {})}
+                  onValueChange={(tenantId) => dispatch({ type: "tenant.selected", tenantId })}
+                />
+              )}
+              <SellerAccountPicker
+                accounts={sellerAccounts}
+                {...(draft.sellerBankAccountId !== undefined
+                  ? { value: draft.sellerBankAccountId }
+                  : {})}
+                loading={loadingSellerAccounts}
+                onValueChange={(accountId) =>
+                  dispatch({ type: "sellerAccount.selected", accountId })
+                }
               />
-            )}
-            <SellerAccountPicker
-              accounts={sellerAccounts}
-              {...(draft.sellerBankAccountId !== undefined
-                ? { value: draft.sellerBankAccountId }
-                : {})}
-              loading={loadingSellerAccounts}
-              onValueChange={(accountId) => dispatch({ type: "sellerAccount.selected", accountId })}
+            </div>
+          </header>
+          {!draft.sourceOfferId ? (
+            <CatalogPositionPicker
+              catalog={catalog}
+              loading={loadingSources}
+              separate={separate}
+              onSeparateChange={setSeparate}
+              onSelected={addCatalogPosition}
             />
-          </div>
-        </header>
-        {!draft.sourceOfferId ? (
-          <CatalogPositionPicker
-            catalog={catalog}
-            loading={loadingSources}
-            separate={separate}
-            onSeparateChange={setSeparate}
-            onSelected={addCatalogPosition}
-          />
-        ) : (
-          <p>{t("commercial.sourceFrozen")}</p>
-        )}
-        {draft.lines.length === 0 ? (
-          <p className="document-composer__onboarding">{t("documents.emptyOnboarding")}</p>
-        ) : (
-          <DocumentLinesTable
-            kind={kind}
-            draft={draft}
-            errors={errors}
-            onQuantityChange={(line, quantity) =>
-              dispatch({ type: "line.quantityChanged", id: line.id, quantity })
-            }
-            onPriceChange={(line, price) =>
-              dispatch({ type: "line.priceChanged", id: line.id, price })
-            }
-            onPriceBlur={(line, price) =>
-              dispatch({
-                type: "line.priceChanged",
-                id: line.id,
-                price: normalizeMoneyInput(price),
-              })
-            }
-            onDescriptionChange={(line, description) =>
-              dispatch({ type: "line.descriptionChanged", id: line.id, description })
-            }
-            onPriceOverrideReasonChange={(line, reason) =>
-              dispatch({ type: "line.priceOverrideReasonChanged", id: line.id, reason })
-            }
-            onVatIncludedChange={(line, included) =>
-              dispatch({ type: "line.vatIncludedChanged", id: line.id, included })
-            }
-            onPolicyChange={(line, policy) =>
-              dispatch({ type: "line.policyChanged", id: line.id, policy })
-            }
-            onMove={(line, direction) => dispatch({ type: "line.moved", id: line.id, direction })}
-            onRemove={(line) => dispatch({ type: "line.removed", id: line.id })}
-          />
-        )}
-      </section>
-      <DocumentSummary
-        kind={kind}
-        draft={draft}
-        totals={draft.sourceTotal ? { ...totals, total: draft.sourceTotal } : totals}
-        errors={errors}
-        submitting={submitting}
-        {...(submitError ? { submitError } : {})}
-        onApplicationModeChange={(applicationMode) =>
-          setDraft((current) => ({ ...current, applicationMode }))
-        }
-        onDateChange={(date) => setDraft((current) => ({ ...current, date }))}
-        onCancel={() => guard.requestProtectedAction(onCancel)}
-      />
+          ) : (
+            <p>{t("commercial.sourceFrozen")}</p>
+          )}
+          {kind === "offer" && draft.lines.some((line) => !line.commercialTerms) ? (
+            <p role="status">
+              {t("offerWorkspace.legacyDraftHint")}{" "}
+              <Link to="/catalog">{t("offerWorkspace.openCatalog")}</Link>
+            </p>
+          ) : null}
+          {draft.lines.length === 0 ? (
+            <p className="document-composer__onboarding">{t("documents.emptyOnboarding")}</p>
+          ) : (
+            <DocumentLinesTable
+              kind={kind}
+              draft={draft}
+              errors={errors}
+              onQuantityChange={(line, quantity) =>
+                dispatch({ type: "line.quantityChanged", id: line.id, quantity })
+              }
+              onPriceChange={(line, price) =>
+                dispatch({ type: "line.priceChanged", id: line.id, price })
+              }
+              onPriceBlur={(line, price) =>
+                dispatch({
+                  type: "line.priceChanged",
+                  id: line.id,
+                  price: normalizeMoneyInput(price),
+                })
+              }
+              onDescriptionChange={(line, description) =>
+                dispatch({ type: "line.descriptionChanged", id: line.id, description })
+              }
+              onPriceOverrideReasonChange={(line, reason) =>
+                dispatch({ type: "line.priceOverrideReasonChanged", id: line.id, reason })
+              }
+              onVatIncludedChange={(line, included) =>
+                dispatch({ type: "line.vatIncludedChanged", id: line.id, included })
+              }
+              onPolicyChange={(line, policy) =>
+                dispatch({ type: "line.policyChanged", id: line.id, policy })
+              }
+              onMove={(line, direction) => dispatch({ type: "line.moved", id: line.id, direction })}
+              onRemove={(line) => dispatch({ type: "line.removed", id: line.id })}
+            />
+          )}
+          {kind === "offer" ? (
+            <OfferTermsEditor
+              readOnly={submitting}
+              value={draft.termsMarkdown ?? null}
+              label={t("offers.terms.label")}
+              onChange={(termsMarkdown) => setDraft((current) => ({ ...current, termsMarkdown }))}
+            />
+          ) : null}
+        </section>
+        <DocumentSummary
+          kind={kind}
+          editing={editing}
+          draft={draft}
+          totals={draft.sourceTotal ? { ...totals, total: draft.sourceTotal } : totals}
+          errors={errors}
+          submitting={submitting}
+          {...(submitError ? { submitError } : {})}
+          onApplicationModeChange={(applicationMode) =>
+            setDraft((current) => ({ ...current, applicationMode }))
+          }
+          onDateChange={(date) => setDraft((current) => ({ ...current, date }))}
+          onCancel={() => guard.requestProtectedAction(onCancel)}
+        />
+      </fieldset>
     </form>
   );
 }

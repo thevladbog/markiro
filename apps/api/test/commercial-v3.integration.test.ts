@@ -382,6 +382,22 @@ describe.skipIf(!process.env.DATABASE_URL)("Commercial V3 transaction boundaries
       );
       expect(assigned.addonVersionId).toBe(catalogVersionId);
       const created = await offers.create(principal, { tenantId, lines: [line] }, 3);
+      const update = {
+        expectedUpdatedAt: new Date(created.updatedAt).toISOString(),
+        idempotencyKey: randomUUID(),
+        termsMarkdown: "Reviewed V3 draft",
+        lines: [line],
+      };
+      await expect(
+        offers.updateDraft(principal, created.id, update, clientVersion),
+      ).rejects.toMatchObject({ response: { code: "client_update_required" } });
+      expect((await offers.detail(principal, created.id)).termsMarkdown).toBe(
+        created.termsMarkdown,
+      );
+      expect(await offers.updateDraft(principal, created.id, update, 3)).toMatchObject({
+        id: created.id,
+        termsMarkdown: update.termsMarkdown,
+      });
       await expect(
         offers.publish(principal, created.id, undefined, clientVersion),
       ).rejects.toMatchObject({ response: { code: "client_update_required" } });

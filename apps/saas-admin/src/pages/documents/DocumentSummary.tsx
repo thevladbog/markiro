@@ -1,10 +1,11 @@
-import { Alert, Button, Input, Select } from "@markiro/ui";
+import { Alert, Button, DatePicker, Select } from "@markiro/ui";
 import { useTranslation } from "react-i18next";
 
 import type { DocumentDraft, DocumentKind } from "./documentDraft.js";
 
 export function DocumentSummary({
   kind,
+  editing = false,
   draft,
   totals,
   errors,
@@ -15,6 +16,7 @@ export function DocumentSummary({
   onCancel,
 }: {
   kind: DocumentKind;
+  editing?: boolean;
   draft: DocumentDraft;
   totals: { subtotal: string; vatTotal: string; total: string };
   errors: Record<string, string>;
@@ -24,7 +26,7 @@ export function DocumentSummary({
   onDateChange: (date: string) => void;
   onCancel: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const errorValues = Array.from(new Set(Object.values(errors)));
 
   return (
@@ -47,11 +49,16 @@ export function DocumentSummary({
           </div>
         </dl>
       </div>
-      <Input
-        type="date"
+      <DatePicker
+        locale={i18n.language}
+        placeholder={t("reports.calendar.placeholder")}
+        clearLabel={t("reports.calendar.clear")}
+        calendarLabel={t("reports.calendar.title")}
+        previousMonthLabel={t("reports.calendar.previousMonth")}
+        nextMonthLabel={t("reports.calendar.nextMonth")}
         label={t(`documents.date.${kind}`)}
         value={draft.date}
-        onChange={(event) => onDateChange(event.target.value)}
+        onValueChange={(value) => onDateChange(value ?? "")}
       />
       {kind === "invoice" ? (
         <Select
@@ -76,7 +83,7 @@ export function DocumentSummary({
       {submitError ? <Alert tone="error">{submitError}</Alert> : null}
       <div className="document-summary__actions">
         <Button type="submit" loading={submitting} disabled={submitting}>
-          {t(`documents.submit.${kind}`)}
+          {t(editing ? "offerWorkspace.saveDraft" : `documents.submit.${kind}`)}
         </Button>
         <Button type="button" variant="secondary" disabled={submitting} onClick={onCancel}>
           {t("documents.cancel")}
