@@ -75,6 +75,8 @@ export {
   localIsoDate,
 } from "./labels/box-label.js";
 export type { BoxLabelInput } from "./labels/box-label.js";
+export { palletLabelFields } from "./labels/pallet-label.js";
+export type { PalletLabelInput } from "./labels/pallet-label.js";
 export {
   code128ModuleCount,
   CODE128_FNC1_MODULES,
