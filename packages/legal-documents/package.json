@@ -21,15 +21,18 @@
   "scripts": {
     "artifacts:generate": "tsc -p tsconfig.json && node dist/cli/generate-artifacts.js --out-dir ../../apps/landing/public/legal",
     "artifacts:verify": "tsc -p tsconfig.json && node dist/cli/verify-artifacts.js --out-dir ../../apps/landing/public/legal",
+    "agreement:draft": "tsc -p tsconfig.json && node dist/cli/render-agreement-draft.js",
     "build": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run"
   },
-  "devDependencies": {
+  "dependencies": {
     "@markiro/domain": "workspace:*",
     "docx": "9.7.1",
-    "fflate": "0.8.3",
+    "fflate": "0.8.3"
+  },
+  "devDependencies": {
     "typescript": "6.0.3",
     "vitest": "4.1.11"
   }

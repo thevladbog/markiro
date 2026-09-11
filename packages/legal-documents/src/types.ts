@@ -60,6 +60,9 @@ export interface LegalDocumentLocaleContent {
     readonly id: string;
     readonly heading: string;
     readonly blocks: readonly LegalBlock[];
+    // Multi-part documents whose parts are signed separately (a contract and
+    // its appendices) must not start a part mid-page.
+    readonly startsPage?: boolean;
   }[];
 }
 
