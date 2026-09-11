@@ -86,6 +86,9 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.security.crypto)
+    // Data Matrix symbol sizing, Reed-Solomon and module placement. The GS1
+    // codeword framing around it is ours: no library provides it.
+    implementation(libs.zxing.core)
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
 
