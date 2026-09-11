@@ -64,7 +64,7 @@ class PrinterViewModelTest {
     private fun vm(
         transport: FakeTransport = FakeTransport(),
         paired: List<DiscoveredPrinter> = emptyList(),
-    ) = PrinterViewModel(db.printerDao(), transport, LabelRenderer(rasterize), { paired }, { 1_757_000_000_000L })
+    ) = main.track(PrinterViewModel(db.printerDao(), transport, LabelRenderer(rasterize), { paired }, { 1_757_000_000_000L }))
 
     @Test
     fun aCheckedPrinterIsSavedAndSelected() = runTest {

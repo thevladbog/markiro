@@ -26,7 +26,7 @@ class SignInViewModelTest {
     private val scans = MutableSharedFlow<ScanEvent>(extraBufferCapacity = 4)
     private val session = SessionHolder()
 
-    private fun vm() = SignInViewModel(auth, session, scans)
+    private fun vm() = main.track(SignInViewModel(auth, session, scans))
 
     @Test
     fun loginThenPinSignsTheOperatorIn() = runTest {

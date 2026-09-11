@@ -99,7 +99,9 @@ class InventoryListViewModelTest {
     @After
     fun tearDown() = db.close()
 
-    private fun vm(repo: FakeRepo = FakeRepo()) = InventoryListViewModel(repo, db.deviceConfigDao(), session, reachability, ScanRouterAdapter(scans))
+    private fun vm(repo: FakeRepo = FakeRepo()) = main.track(
+        InventoryListViewModel(repo, db.deviceConfigDao(), session, reachability, ScanRouterAdapter(scans)),
+    )
 
     @Test
     fun listsOwnLineThenOthersOnRequest() = runTest {
