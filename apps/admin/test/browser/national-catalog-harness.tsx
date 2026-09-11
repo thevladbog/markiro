@@ -31,13 +31,26 @@ import {
  *
  * The screen under test comes from `?route=`; every spec passes it
  * explicitly, so the fallback below is only a safe landing page.
+ *
+ * The printed instruction ships both locales from this one harness, so the
+ * session strings follow `?locale=` too: an English frame carrying a Cyrillic
+ * operator in the sidebar would document a screen the cabinet never shows.
  */
+const container = document.getElementById("root");
+if (!container) throw new Error("#root element not found");
+const params = new URLSearchParams(window.location.search);
+const harnessLocale = params.get("locale") === "en" ? "en" : "ru";
+
 const session: SessionData = {
   session: { activeOrganizationId: "browser_org" },
-  user: { id: "browser_manager", email: "manager@example.test", name: "Игорь Волков" },
+  user: {
+    id: "browser_manager",
+    email: "manager@example.test",
+    name: harnessLocale === "ru" ? "Игорь Волков" : "Igor Volkov",
+  },
 };
 const organizations: OrganizationSummary[] = [
-  { id: "browser_org", name: "Марка Ко", slug: "marka-ko" },
+  { id: "browser_org", name: harnessLocale === "ru" ? "Марка Ко" : "Marka Co", slug: "marka-ko" },
 ];
 const authClient: AuthClientLike = {
   useSession: () => ({ data: session, isPending: false, error: null }),
@@ -53,10 +66,9 @@ const authClient: AuthClientLike = {
   },
 };
 
-const container = document.getElementById("root");
-if (!container) throw new Error("#root element not found");
-const params = new URLSearchParams(window.location.search);
-void i18n.changeLanguage(params.get("lang") === "en" ? "en" : "ru");
+// Before the first paint, so the shell never flashes the default language
+// and `<html lang>` is synced by the listener in src/i18n/index.ts.
+void i18n.changeLanguage(harnessLocale);
 const initialEntry = params.get("route") ?? "/";
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },

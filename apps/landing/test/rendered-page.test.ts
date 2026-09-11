@@ -1332,7 +1332,7 @@ describe("rendered landing page", () => {
     );
     expect(ruInstructionLinks).toHaveLength(11);
     expect(ruInstructionLinks.every((href) => href?.startsWith("/instruktsii/"))).toBe(true);
-    expect([...enInstructions.querySelectorAll("[data-hub-item] a[href]")]).toHaveLength(9);
+    expect([...enInstructions.querySelectorAll("[data-hub-item] a[href]")]).toHaveLength(11);
 
     for (const hub of [ruArticles, enArticles, ruInstructions, enInstructions]) {
       expect(hub.querySelectorAll("h1")).toHaveLength(1);

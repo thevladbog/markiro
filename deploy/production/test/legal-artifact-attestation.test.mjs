@@ -13,8 +13,8 @@ import {
 const root = new URL("../../../", import.meta.url);
 const releasedRoot = new URL("apps/landing/public/legal/", root);
 const releasedAttestation = new URL("deploy/production/legal-artifacts-attestation.json", root);
-const releaseId = "MKR-LEGAL-2026.09-20-2026-09-11";
-const manifestSha256 = "8ec841a171bded41b1219439431990d0dfe51ba03b17bf6b2fb56ee688256505";
+const releaseId = "MKR-LEGAL-2026.09-21-2026-09-11";
+const manifestSha256 = "90c1985b320ff3f782c0248ff925bfb644dd1be7772f4892cef1e9c36d30433e";
 const releasedPdfNames = [
   "markiro_mkr-brd-01_2026.08-01_en.pdf",
   "markiro_mkr-brd-01_2026.08-01_ru.pdf",
@@ -38,7 +38,9 @@ const releasedPdfNames = [
   "markiro_mkr-ins-08_2026.09-01_ru.pdf",
   "markiro_mkr-ins-09_2026.09-03_en.pdf",
   "markiro_mkr-ins-09_2026.09-03_ru.pdf",
+  "markiro_mkr-ins-10_2026.09-01_en.pdf",
   "markiro_mkr-ins-10_2026.09-01_ru.pdf",
+  "markiro_mkr-ins-11_2026.09-01_en.pdf",
   "markiro_mkr-ins-11_2026.09-01_ru.pdf",
   "markiro_mkr-pd-01_2026.08-01_en.pdf",
   "markiro_mkr-pd-01_2026.08-01_ru.pdf",
@@ -117,12 +119,12 @@ test("committed attestation independently binds the exact released PDF set", asy
     releasedPdfNames,
   );
   assert.equal(spy.calls.length, 1);
-  assert.equal(pdfaSpy.calls.length, 28);
+  assert.equal(pdfaSpy.calls.length, 30);
   assert.deepEqual(
     pdfaSpy.calls.map((pdfPath) => path.basename(pdfPath)),
     releasedPdfNames.map((_fileName, index) => `document-${index}.pdf`),
   );
-  assert.equal(spy.calls[0].pdfaValidatedFiles.size, 28);
+  assert.equal(spy.calls[0].pdfaValidatedFiles.size, 30);
   assert.deepEqual(
     [...spy.calls[0].pdfaValidatedFiles].sort(),
     (await readJson(work.attestationPath)).pdfs.map(({ fileName }) => fileName).sort(),
