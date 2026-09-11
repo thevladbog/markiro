@@ -59,7 +59,13 @@ class PrinterViewModelTest {
     }
 
     @After
-    fun tearDown() = db.close()
+    fun tearDown() {
+        try {
+            main.cancelAndJoinModels()
+        } finally {
+            db.close()
+        }
+    }
 
     private fun vm(
         transport: FakeTransport = FakeTransport(),

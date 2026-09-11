@@ -84,8 +84,12 @@ class HubViewModelTest {
 
     @After
     fun tearDown() {
-        engineScope.cancel()
-        db.close()
+        try {
+            main.cancelAndJoinModels()
+        } finally {
+            engineScope.cancel()
+            db.close()
+        }
     }
 
     private fun dto(id: String, number: String, status: String) =

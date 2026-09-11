@@ -53,7 +53,13 @@ class DisassembleViewModelTest {
     }
 
     @After
-    fun tearDown() = db.close()
+    fun tearDown() {
+        try {
+            main.cancelAndJoinModels()
+        } finally {
+            db.close()
+        }
+    }
 
     private suspend fun closedBox(
         id: String = "box-1",
