@@ -1,7 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.Markiro" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <item name="android:windowBackground">#131216</item>
-        <item name="android:statusBarColor">#131216</item>
+        <item name="android:windowBackground">@color/markiro_splash_background</item>
+        <item name="android:statusBarColor">@color/markiro_splash_background</item>
+    </style>
+
+    <!--
+      The launch theme, and the only theme the manifest names.
+
+      `core-splashscreen` makes Android 12's system splash and the plain window
+      background of older releases behave the same way, which matters here: the
+      fleet is industrial handhelds and the oldest of them run Android 9. Without
+      it those devices would show an unbranded dark rectangle while the app
+      starts, and the newer ones would show the launcher icon instead of the
+      mark. `postSplashScreenTheme` is what hands the activity back to the real
+      theme once the first frame is ready.
+    -->
+    <style name="Theme.Markiro.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/markiro_splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
+        <item name="postSplashScreenTheme">@style/Theme.Markiro</item>
     </style>
 </resources>
