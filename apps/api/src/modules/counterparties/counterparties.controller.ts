@@ -40,8 +40,8 @@ import {
   counterpartyOpenApiSchema,
   createCounterpartySchema,
   listCounterpartiesOpenApiSchema,
+  ssccCounterListOpenApiSchema,
   ssccCounterSchema,
-  ssccCounterStateOpenApiSchema,
   updateCounterpartySchema,
   type CounterpartyDto,
   type CreateCounterpartyDto,
@@ -49,7 +49,7 @@ import {
   type SsccCounterDto,
   type UpdateCounterpartyDto,
 } from "./dto";
-import type { SsccCounterStateDto } from "../sscc/dto";
+import type { SsccCounterListDto } from "../sscc/dto";
 import { CounterpartiesService } from "./counterparties.service";
 
 @ApiTags("counterparties")
@@ -134,17 +134,17 @@ export class CounterpartiesController {
   @Get(":id/sscc")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   @ApiOperation({
-    summary: "Get a counterparty's SSCC counter state",
+    summary: "Get a counterparty's box and pallet SSCC counter states",
     description:
-      "The box SSCC counter keyed by the counterparty's own GLN-derived prefix, plus the seed floor and any current reseed blocker.",
+      "The SSCC counters keyed by the counterparty's own GLN-derived prefix, one per extension digit (box, then pallet), plus each one's seed floor and any current reseed blocker.",
   })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
-  @ApiOkResponse({ schema: ssccCounterStateOpenApiSchema })
+  @ApiOkResponse({ schema: ssccCounterListOpenApiSchema })
   @ApiHttpErrors(401, 403, 404)
   async getSscc(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
-  ): Promise<SsccCounterStateDto> {
+  ): Promise<SsccCounterListDto> {
     return this.counterpartiesService.getSscc(req.tenantId!, id);
   }
 
@@ -152,9 +152,9 @@ export class CounterpartiesController {
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @ApiOperation({
-    summary: "Seed a counterparty's SSCC counter",
+    summary: "Seed a counterparty's box or pallet SSCC counter",
     description:
-      "Reseeding revokes the serial blocks devices still hold, so it is rejected (409) while a shift is open or a device holding a block is out of sync, and rejected (400) below the printed-serial floor.",
+      "Reseeds the counter named by extensionDigit. Reseeding revokes the serial blocks devices still hold, so it is rejected (409) while a shift is open or a device holding a block is out of sync, and rejected (400) below the printed-serial floor.",
   })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiZodBody(ssccCounterSchema)

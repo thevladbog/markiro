@@ -18,8 +18,13 @@ import {
   findLabelTemplateEligibility,
 } from "../label-templates/box-label-template-eligibility";
 import { isMissingObjectError, ObjectStorageService } from "../storage/object-storage.service";
-import { BOX_EXTENSION_DIGIT, deriveIssuerPrefix, SsccService } from "../sscc/sscc.service";
-import type { SsccCounterStateDto } from "../sscc/dto";
+import {
+  BOX_EXTENSION_DIGIT,
+  deriveIssuerPrefix,
+  PALLET_EXTENSION_DIGIT,
+  SsccService,
+} from "../sscc/sscc.service";
+import type { SsccCounterListDto } from "../sscc/dto";
 import { processLogo } from "./logo-processor";
 import { RasterImageInputError } from "../profile/raster-image-processor";
 import type {
@@ -597,22 +602,32 @@ export class OrgProfileService {
   }
 
   /**
-   * The tenant's own box SSCC counter plus everything the settings form needs
-   * to render its rules (floor, current blocker) -- see
-   * `SsccService.counterState`. Always reads `BOX_EXTENSION_DIGIT`: 06c only
-   * has boxes; 06d's pallets will need their own read path.
+   * The tenant's own SSCC counters -- one entry per extension digit the
+   * tenant has (boxes at `BOX_EXTENSION_DIGIT`, pallets at
+   * `PALLET_EXTENSION_DIGIT`) -- plus everything the settings form needs to
+   * render each one's rules (floor, current blocker); see
+   * `SsccService.counterState`. Returned as a list keyed by `extensionDigit`
+   * (06d) rather than two named fields, so a third numbering space later
+   * needs no response-shape change.
    */
-  async getSscc(tenantId: string): Promise<SsccCounterStateDto> {
+  async getSscc(tenantId: string): Promise<SsccCounterListDto> {
     const issuerPrefix = await this.ownIssuerPrefix(tenantId);
-    return this.sscc.counterState(tenantId, issuerPrefix, BOX_EXTENSION_DIGIT);
+    const counters = await Promise.all(
+      [BOX_EXTENSION_DIGIT, PALLET_EXTENSION_DIGIT].map((extensionDigit) =>
+        this.sscc.counterState(tenantId, issuerPrefix, extensionDigit),
+      ),
+    );
+    return { counters };
   }
 
   /**
-   * Seeds the tenant's own box counter. All of the rules -- the active-shift
-   * and out-of-sync-device guards, the printed-serial floor, the atomic
-   * write, the revocation of blocks devices still hold -- live in
-   * `SsccService.seedCounter`, shared verbatim with the counterparties
-   * module: this method's only job is naming WHOSE prefix is being seeded.
+   * Seeds one of the tenant's own counters -- `dto.extensionDigit` names
+   * which one (box or pallet); each digit's counter is independent of every
+   * other's. All of the rules -- the active-shift and out-of-sync-device
+   * guards, the printed-serial floor, the atomic write, the revocation of
+   * blocks devices still hold -- live in `SsccService.seedCounter`, shared
+   * verbatim with the counterparties module: this method's only job is
+   * naming WHOSE prefix is being seeded.
    */
   async putSscc(tenantId: string, dto: SsccCounterDto): Promise<SsccCounterDto> {
     const issuerPrefix = await this.ownIssuerPrefix(tenantId);

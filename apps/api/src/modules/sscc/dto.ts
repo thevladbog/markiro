@@ -34,3 +34,15 @@ export interface SsccCounterStateDto {
   minSerial: number;
   blockedBy: SsccSeedBlocker | null;
 }
+
+/**
+ * `GET /org/profile/sscc` and `GET /counterparties/:id/sscc` response: one
+ * `SsccCounterStateDto` per extension digit the tenant has (boxes at
+ * `BOX_EXTENSION_DIGIT`, pallets at `PALLET_EXTENSION_DIGIT` -- both in
+ * sscc.service.ts), keyed by `extensionDigit` rather than two named fields
+ * (`box`/`pallet`). A third numbering space later only means a longer list,
+ * not another response schema.
+ */
+export interface SsccCounterListDto {
+  counters: SsccCounterStateDto[];
+}

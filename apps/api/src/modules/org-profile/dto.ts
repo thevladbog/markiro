@@ -142,7 +142,7 @@ export const organizationLogoOpenApiSchema: SchemaObject = {
   },
 };
 
-/** `GET /org/profile/sscc` response; mirrors `SsccCounterStateDto` (../sscc/dto). */
+/** One entry of `GET /org/profile/sscc`'s `counters` list; mirrors `SsccCounterStateDto` (../sscc/dto). */
 export const ssccCounterStateOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -187,5 +187,19 @@ export const ssccCounterStateOpenApiSchema: SchemaObject = {
         },
       ],
     },
+  },
+};
+
+/**
+ * `GET /org/profile/sscc` response; mirrors `SsccCounterListDto` (../sscc/dto):
+ * one entry per extension digit (boxes, then pallets) rather than two named
+ * fields, so a third numbering space later needs no schema change here.
+ */
+export const ssccCounterListOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["counters"],
+  properties: {
+    counters: { type: "array", items: ssccCounterStateOpenApiSchema },
   },
 };

@@ -8,8 +8,13 @@ import {
 import { and, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
-import { BOX_EXTENSION_DIGIT, deriveIssuerPrefix, SsccService } from "../sscc/sscc.service";
-import type { SsccCounterStateDto } from "../sscc/dto";
+import {
+  BOX_EXTENSION_DIGIT,
+  deriveIssuerPrefix,
+  PALLET_EXTENSION_DIGIT,
+  SsccService,
+} from "../sscc/sscc.service";
+import type { SsccCounterListDto } from "../sscc/dto";
 import type {
   CounterpartyDto,
   CreateCounterpartyDto,
@@ -123,23 +128,29 @@ export class CounterpartiesService {
   }
 
   /**
-   * A counterparty's box SSCC counter plus everything the settings form needs
-   * to render its rules (floor, current blocker) -- see
-   * `SsccService.counterState`. Kept separate from the tenant's own counter
-   * (org-profile.service.ts's getSscc) because it's keyed by the
-   * counterparty's own GLN-derived prefix, ordinarily a different number
-   * space entirely. `getCounterparty` both 404s a cross-tenant id and
-   * tenant-scopes the lookup in one place.
+   * A counterparty's SSCC counters -- one entry per extension digit (box,
+   * then pallet) -- plus everything the settings form needs to render each
+   * one's rules (floor, current blocker); see `SsccService.counterState`.
+   * Kept separate from the tenant's own counters (org-profile.service.ts's
+   * getSscc) because they're keyed by the counterparty's own GLN-derived
+   * prefix, ordinarily a different number space entirely. `getCounterparty`
+   * both 404s a cross-tenant id and tenant-scopes the lookup in one place.
    */
-  async getSscc(tenantId: string, id: string): Promise<SsccCounterStateDto> {
+  async getSscc(tenantId: string, id: string): Promise<SsccCounterListDto> {
     const issuerPrefix = await this.counterpartyIssuerPrefix(tenantId, id);
-    return this.sscc.counterState(tenantId, issuerPrefix, BOX_EXTENSION_DIGIT);
+    const counters = await Promise.all(
+      [BOX_EXTENSION_DIGIT, PALLET_EXTENSION_DIGIT].map((extensionDigit) =>
+        this.sscc.counterState(tenantId, issuerPrefix, extensionDigit),
+      ),
+    );
+    return { counters };
   }
 
   /**
-   * Seeds a counterparty's box counter. All of the rules -- the active-shift
-   * and out-of-sync-device guards, the printed-serial floor, the atomic
-   * write, the revocation of blocks devices still hold -- live in
+   * Seeds one of a counterparty's counters -- `dto.extensionDigit` names
+   * which one (box or pallet). All of the rules -- the active-shift and
+   * out-of-sync-device guards, the printed-serial floor, the atomic write,
+   * the revocation of blocks devices still hold -- live in
    * `SsccService.seedCounter`, shared verbatim with the org-profile module.
    * The prefix is resolved FIRST: that call is also what 404s a counterparty
    * id belonging to another tenant.
