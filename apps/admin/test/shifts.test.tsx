@@ -1441,7 +1441,7 @@ describe("ShiftsPage", () => {
     ).toBe(false);
   });
 
-  it("shows box/pallet capacity fields only in aggregation mode, and pallet capacity only when pallets are enabled", async () => {
+  it("shows box capacity and boxes-per-pallet only in aggregation mode, and boxes-per-pallet only when pallets are enabled", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });

@@ -794,7 +794,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       })
       .expect(400);
 
-    expect(res.body.message).toEqual(expect.stringContaining("pallet capacity"));
+    expect(res.body.message).toEqual(expect.stringContaining("boxes-per-pallet count"));
   });
 
   it("POST /shifts rejects a nonexistent productId with 400", async () => {

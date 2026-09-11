@@ -34,7 +34,7 @@ import { productImageUrl } from "./api.js";
  * boxCapacity/palletBoxCapacity optional positive integers entered as text
  * (kept as strings in form state, parsed to number|null on submit by
  * `toCreateInput`). shelfLifeDays is also an optional positive integer, but
- * unlike box/pallet capacity the API bounds it (`z.number().int().min(1).
+ * unlike box capacity and boxes-per-pallet the API bounds it (`z.number().int().min(1).
  * max(3650)`), so its client check enforces that same 1..3650 range. Error
  * messages are i18n keys (resolved through `t()` at render time) -- same
  * convention as `../counterparties/CounterpartyForm.tsx`.

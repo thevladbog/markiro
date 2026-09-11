@@ -1543,7 +1543,7 @@ export class ShiftsService {
 
   /**
    * aggregation mode needs an effective box capacity; a pallets-enabled
-   * aggregation shift additionally needs an effective pallet capacity.
+   * aggregation shift additionally needs an effective boxes-per-pallet count.
    */
   private assertCapacityRules(
     mode: ShiftMode,
@@ -1555,7 +1555,9 @@ export class ShiftsService {
       throw new BadRequestException("Aggregation mode requires a box capacity");
     }
     if (palletsEnabled && mode === "aggregation" && !palletBoxCapacity) {
-      throw new BadRequestException("Pallet-enabled aggregation shifts require a pallet capacity");
+      throw new BadRequestException(
+        "Pallet-enabled aggregation shifts require a boxes-per-pallet count",
+      );
     }
   }
 
