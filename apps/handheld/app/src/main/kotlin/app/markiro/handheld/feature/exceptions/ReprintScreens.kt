@@ -9,6 +9,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Print
 import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -64,7 +69,9 @@ fun ReprintScreen(state: ReprintUi, cb: ReprintCallbacks) {
         return
     }
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
-        AppBar(stringResource(R.string.reprint_title), onBack = cb.onBack)
+        // Backing out of the reason step returns to the box choice, not out of
+        // the flow: the operator picked a box and may want another reason.
+        AppBar(stringResource(R.string.reprint_title), onBack = if (state.selected == null) cb.onBack else cb.onCancel)
         Column(
             Modifier.padding(MarkiroSizes.sp4),
             verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2),
@@ -79,13 +86,13 @@ fun ReprintScreen(state: ReprintUi, cb: ReprintCallbacks) {
                     unavailable = stringResource(R.string.exceptions_no_closed_boxes),
                     onClick = cb.onChooseLast,
                 )
-                ActionRow(
-                    icon = Icons.Outlined.QrCodeScanner,
-                    label = stringResource(R.string.reprint_scan),
-                    enabled = true,
-                    unavailable = "",
-                    onClick = {},
-                )
+                // Instruction, not a control: the box is chosen by scanning its
+                // label, and a row that looks like a button and does nothing
+                // when tapped reads as a broken screen.
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
+                    Icon(Icons.Outlined.QrCodeScanner, contentDescription = null, tint = c.fg3, modifier = Modifier.size(24.dp))
+                    Text(stringResource(R.string.reprint_scan), style = t.body, color = c.fg2)
+                }
                 Text(stringResource(R.string.reprint_audit_note), style = t.caption, color = c.fg3)
                 state.error?.let { Text(stringResource(it), style = t.caption, color = c.tone(Tone.Warn).fg) }
             } else {

@@ -535,4 +535,45 @@ class WorkViewModelTest {
         // Never judged, so never a verdict about the code itself.
         assertEquals(1, db.codeDao().countForShift("s1"))
     }
+
+    /**
+     * The view model outlives its screen: the back-stack entry keeps it alive
+     * while the exception routes are on top, and the scanner is one app-wide
+     * flow. Without the gate the SSCC scanned to disassemble a box was recorded
+     * here as «НЕВЕРНЫЙ КОД», with an error beep and a bumped counter.
+     */
+    @Test
+    fun aScanIsIgnoredWhileAnotherRouteOwnsTheScanner() = runTest {
+        aggregating(capacity = 3)
+        val vm = vm()
+        advanceUntilIdle()
+        vm.setScanning(false)
+        scan("GATED1")
+        advanceUntilIdle()
+        vm.setScanning(true)
+        scan("GATED2")
+        // Awaited, not advanced: `advanceUntilIdle` returns while Room is still
+        // writing. Exactly one row proves the gated scan was dropped -- a leak
+        // would make it two.
+        db.outboxDao().count().first { it == 1 }
+        advanceUntilIdle()
+        assertEquals(1, db.outboxDao().countNow())
+    }
+
+    /** Two taps must not put two identical reprints in the manager's ledger. */
+    @Test
+    fun aDoubleRetryFromAnUnknownOutcomeWritesOneReprint() = runTest {
+        aggregating(capacity = 1)
+        transport.outcome = SendOutcome.Unknown("link lost")
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        vm.closeStep.first { it is BoxCloseStep.Unknown }
+        vm.retryPrint()
+        vm.retryPrint()
+        db.boxExceptionDao().observeUnackedCount().first { it == 1 }
+        advanceUntilIdle()
+        assertEquals(1, db.boxExceptionDao().queued().size)
+    }
 }

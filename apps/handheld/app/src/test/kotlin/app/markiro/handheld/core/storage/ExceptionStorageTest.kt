@@ -155,10 +155,12 @@ class ExceptionStorageTest {
         assertEquals(0, db.boxDao().observeUnprintedCount().first())
     }
 
+    /** Through the real wipe: the table has to be in `DeviceWipe`, not merely clearable. */
     @Test
     fun aWipeLeavesNoException() = runTest {
         db.boxExceptionDao().insert(fact("undo"))
-        db.boxExceptionDao().clear()
+        db.boxDao().insert(box("box-1", acked = true))
+        DeviceWipe(db, InMemoryCredentialStore()).wipeAll()
         assertEquals(0, db.boxExceptionDao().unackedCount())
         assertNull(db.boxDao().get("box-1"))
     }

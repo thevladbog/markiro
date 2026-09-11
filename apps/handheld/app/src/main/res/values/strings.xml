@@ -462,4 +462,5 @@
     <string name="reprint_done">Этикетка отправлена на печать</string>
     <string name="reprint_unknown_sscc">Этот SSCC не принадлежит коробу этой смены</string>
     <string name="signal_undone">ОТМЕНЁН</string>
+    <string name="reprint_outcome_unknown">Результат печати неизвестен — этикетка в очереди</string>
 </resources>

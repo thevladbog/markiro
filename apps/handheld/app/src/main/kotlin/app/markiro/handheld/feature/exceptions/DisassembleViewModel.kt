@@ -15,6 +15,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 sealed interface DisassembleStep {
@@ -45,6 +46,15 @@ class DisassembleViewModel @Inject constructor(
     private val _step = MutableStateFlow<DisassembleStep>(DisassembleStep.ScanBox)
     val step: StateFlow<DisassembleStep> = _step
     private var chosen: DisassembleReason? = null
+
+    /**
+     * One confirmation at a time.
+     *
+     * The engine refuses a second retirement, so a double tap cannot retire
+     * twice -- but the second call answered `AlreadyRetired` and overwrote the
+     * success the operator had just been shown with «Короб уже расформирован».
+     */
+    private val confirming = AtomicBoolean(false)
 
     init {
         viewModelScope.launch {
@@ -85,13 +95,18 @@ class DisassembleViewModel @Inject constructor(
     fun confirm() {
         val at = _step.value as? DisassembleStep.Confirm ?: return
         val reason = chosen ?: return
+        if (!confirming.compareAndSet(false, true)) return
         viewModelScope.launch {
-            val deviceId = db.deviceConfigDao().get()?.deviceId
-            val operatorId = session.state.value.operator?.operatorId
-            _step.value = when (engine.disassemble(shiftId, at.boxId, reason, operatorId, deviceId)) {
-                DisassembleResult.Retired -> DisassembleStep.Retired
-                DisassembleResult.AlreadyRetired -> DisassembleStep.Refused(R.string.disassemble_already)
-                DisassembleResult.NotClosed -> DisassembleStep.Refused(R.string.disassemble_not_closed)
+            try {
+                val deviceId = db.deviceConfigDao().get()?.deviceId
+                val operatorId = session.state.value.operator?.operatorId
+                _step.value = when (engine.disassemble(shiftId, at.boxId, reason, operatorId, deviceId)) {
+                    DisassembleResult.Retired -> DisassembleStep.Retired
+                    DisassembleResult.AlreadyRetired -> DisassembleStep.Refused(R.string.disassemble_already)
+                    DisassembleResult.NotClosed -> DisassembleStep.Refused(R.string.disassemble_not_closed)
+                }
+            } finally {
+                confirming.set(false)
             }
         }
     }

@@ -263,6 +263,12 @@ class WorkViewModel(
         // recording nothing, which is the worst thing a scanner can do.
         viewModelScope.launch {
             scans.events.collect { event ->
+                // The scanner is one app-wide flow and this view model outlives
+                // its screen: a back-stack entry keeps it alive while another
+                // route is on top. Without this gate the SSCC scanned to
+                // disassemble a box was ALSO recorded here as «НЕВЕРНЫЙ КОД»,
+                // with an error beep and a bumped error counter.
+                if (!scanning.value) return@collect
                 try {
                     onScan(event.raw)
                 } catch (e: CancellationException) {
@@ -376,15 +382,37 @@ class WorkViewModel(
         is PrintOutcome.Unknown -> BoxCloseStep.Unknown(closed, printed.cause)
     }
 
+    /**
+     * Whether the work screen currently owns scans.
+     *
+     * Defaults to true so a view model built outside navigation -- every test --
+     * behaves as it always did; `AppNavigation` clears it while another route
+     * is on top.
+     */
+    private val scanning = MutableStateFlow(true)
+
+    fun setScanning(active: Boolean) {
+        scanning.value = active
+    }
+
     /** An explicit second send, chosen by a person who has looked at the printer. */
     fun retryPrint() {
         val closed = _closeStep.value.closedBox() ?: return
+        // Two taps would both read the same `unknown` state before the first
+        // print updated it, and each would write its own reprint fact.
+        if (!retrying.compareAndSet(false, true)) return
         viewModelScope.launch {
-            auditIfOutcomeUnknown(closed.boxId)
-            _closeStep.value = BoxCloseStep.Printing(closed)
-            _closeStep.value = attempt(closed)
+            try {
+                auditIfOutcomeUnknown(closed.boxId)
+                _closeStep.value = BoxCloseStep.Printing(closed)
+                _closeStep.value = attempt(closed)
+            } finally {
+                retrying.set(false)
+            }
         }
     }
+
+    private val retrying = AtomicBoolean(false)
 
     /**
      * Printing again a box whose last attempt ended `unknown` is an explicit

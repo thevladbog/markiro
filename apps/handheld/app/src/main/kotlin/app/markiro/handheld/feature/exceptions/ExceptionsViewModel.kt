@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.R
 import app.markiro.handheld.core.exceptions.ExceptionEngine
 import app.markiro.handheld.core.exceptions.UndoResult
+import app.markiro.handheld.core.storage.CodeEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.util.Iso
 import app.markiro.handheld.core.util.TimeText
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 /** The unit an undo would take back, named so the operator confirms against it. */
@@ -59,7 +61,11 @@ class ExceptionsViewModel @Inject constructor(
     private val shiftId: String = handle.get<String>("shiftId").orEmpty()
     private val step = MutableStateFlow<ExceptionsStep>(ExceptionsStep.List)
     private val target = MutableStateFlow<UndoTarget?>(null)
-    private val reprintable = MutableStateFlow(0)
+    /**
+     * One confirmation at a time: a second tap would answer against state the
+     * first has already changed and overwrite what the operator was just shown.
+     */
+    private val confirming = AtomicBoolean(false)
 
     private val openBox = db.boxDao().observeOpen(shiftId)
 
@@ -68,6 +74,13 @@ class ExceptionsViewModel @Inject constructor(
         if (box == null) flowOf(0) else db.boxDao().observeItemCount(box.boxId)
     }
 
+    /**
+     * Observed, not read once: a box retired on the disassemble route leaves
+     * this list while this screen is still on the back stack, and a one-shot
+     * count would keep offering an action with nothing behind it.
+     */
+    private val reprintable = db.boxDao().observeReprintable(shiftId)
+
     val state: StateFlow<ExceptionsUi> = combine(openBox, filled, target, reprintable, step) { box, count, undo, closed, current ->
         ExceptionsUi(
             canUndo = box != null && undo != null,
@@ -75,7 +88,7 @@ class ExceptionsViewModel @Inject constructor(
             openBoxId = box?.boxId,
             openBoxOrdinal = box?.let { ordinals[it.boxId] ?: 0 } ?: 0,
             openBoxCount = count,
-            reprintableCount = closed,
+            reprintableCount = closed.size,
             step = current,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, ExceptionsUi())
@@ -84,26 +97,24 @@ class ExceptionsViewModel @Inject constructor(
     private val ordinals = mutableMapOf<String, Int>()
 
     init {
+        // Driven by the item count as well as the box: a scan arriving while
+        // this screen is open changes what "the last scan" means, and a target
+        // refreshed only when the box row changes would name the wrong unit.
         viewModelScope.launch {
-            reprintable.value = db.boxDao().reprintable(shiftId).size
-        }
-        viewModelScope.launch {
-            openBox.collect { box ->
+            combine(openBox, filled) { box, _ -> box }.collect { box ->
                 if (box != null && box.boxId !in ordinals) {
                     ordinals[box.boxId] = db.boxDao().ordinal(shiftId, box.openedAt, box.boxId)
                 }
-                target.value = box?.let { open ->
-                    engine.lastScanIn(open.boxId)?.let { last ->
-                        UndoTarget(
-                            codeTail = last.codeHash.takeLast(6).uppercase(),
-                            scannedAt = Iso.parse(last.scannedAt)?.let { TimeText.hhmmss(it) } ?: last.scannedAt,
-                            codeHash = last.codeHash,
-                        )
-                    }
-                }
+                target.value = box?.let { open -> engine.lastScanIn(open.boxId)?.let(::targetOf) }
             }
         }
     }
+
+    private fun targetOf(last: CodeEntity) = UndoTarget(
+        codeTail = last.codeHash.takeLast(6).uppercase(),
+        scannedAt = Iso.parse(last.scannedAt)?.let { TimeText.hhmmss(it) } ?: last.scannedAt,
+        codeHash = last.codeHash,
+    )
 
     fun startUndo() {
         if (state.value.canUndo) step.value = ExceptionsStep.ConfirmUndo
@@ -121,36 +132,35 @@ class ExceptionsViewModel @Inject constructor(
         val current = step.value
         val boxId = state.value.openBoxId ?: return
         val operatorId = session.state.value.operator?.operatorId
+        if (!confirming.compareAndSet(false, true)) return
         viewModelScope.launch {
-            // Read at the moment it is needed rather than cached from an observer:
-            // the config arrives on Room's own threads.
-            val deviceId = db.deviceConfigDao().get()?.deviceId
-            step.value = when (current) {
-                ExceptionsStep.ConfirmUndo -> {
-                    val expected = state.value.undoTarget?.codeHash
-                        ?: return@launch run { step.value = ExceptionsStep.Refused(R.string.exceptions_no_last_scan) }
-                    when (engine.undoLastScan(shiftId, boxId, expected, operatorId, deviceId)) {
-                        is UndoResult.Undone -> ExceptionsStep.Done(R.string.exceptions_undone)
-                        UndoResult.Stale -> ExceptionsStep.Refused(R.string.exceptions_undo_stale)
-                        UndoResult.Empty -> ExceptionsStep.Refused(R.string.exceptions_no_last_scan)
+            try {
+                // Read at the moment it is needed rather than cached from an
+                // observer: the config arrives on Room's own threads.
+                val deviceId = db.deviceConfigDao().get()?.deviceId
+                val expected = state.value.undoTarget?.codeHash
+                step.value = when (current) {
+                    ExceptionsStep.ConfirmUndo -> when {
+                        expected == null -> ExceptionsStep.Refused(R.string.exceptions_no_last_scan)
+                        else -> when (engine.undoLastScan(shiftId, boxId, expected, operatorId, deviceId)) {
+                            is UndoResult.Undone -> ExceptionsStep.Done(R.string.exceptions_undone)
+                            UndoResult.Stale -> ExceptionsStep.Refused(R.string.exceptions_undo_stale)
+                            UndoResult.Empty -> ExceptionsStep.Refused(R.string.exceptions_no_last_scan)
+                        }
                     }
-                }
-                ExceptionsStep.ConfirmClear -> {
-                    val released = engine.clearBox(shiftId, boxId, operatorId, deviceId)
-                    if (released > 0) {
-                        ExceptionsStep.Done(R.string.exceptions_cleared)
-                    } else {
-                        ExceptionsStep.Refused(R.string.exceptions_no_last_scan)
+                    ExceptionsStep.ConfirmClear -> {
+                        val released = engine.clearBox(shiftId, boxId, operatorId, deviceId)
+                        if (released > 0) {
+                            ExceptionsStep.Done(R.string.exceptions_cleared)
+                        } else {
+                            ExceptionsStep.Refused(R.string.exceptions_no_last_scan)
+                        }
                     }
+                    else -> return@launch
                 }
-                else -> return@launch
-            }
-            target.value = engine.lastScanIn(boxId)?.let { last ->
-                UndoTarget(
-                    codeTail = last.codeHash.takeLast(6).uppercase(),
-                    scannedAt = Iso.parse(last.scannedAt)?.let { TimeText.hhmmss(it) } ?: last.scannedAt,
-                    codeHash = last.codeHash,
-                )
+                target.value = engine.lastScanIn(boxId)?.let(::targetOf)
+            } finally {
+                confirming.set(false)
             }
         }
     }

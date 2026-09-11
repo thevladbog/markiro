@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Rule
@@ -176,16 +177,33 @@ class ReprintViewModelTest {
         assertEquals("box-1", vm.state.first { it.selected != null }.selected!!.boxId)
     }
 
-    /** The ledger records the request even when the printer then refuses. */
+    /**
+     * The ledger records the request even when the printer then refuses -- and
+     * the screen says so instead of claiming the label came out.
+     */
     @Test
-    fun theFactIsQueuedEvenWhenPrintingFails() = runTest {
+    fun aRefusedPrintIsReportedAndStillRecorded() = runTest {
         closedBox("box-1", sscc, "2026-09-11T07:30:00.000Z")
         transport.refuse = true
         val vm = vm()
         vm.state.first { it.last != null }
         vm.chooseLast()
         vm.chooseReason(ReprintReason.PRINTER_JAM)
-        vm.state.first { it.done }
+        val reported = vm.state.first { it.error != null }
+        assertFalse(reported.done)
         assertEquals(1, db.boxExceptionDao().unackedCount())
+    }
+
+    /** Two taps must not put two identical reprints in the ledger. */
+    @Test
+    fun aDoubleTapQueuesOneReprint() = runTest {
+        closedBox("box-1", sscc, "2026-09-11T07:30:00.000Z")
+        val vm = vm()
+        vm.state.first { it.last != null }
+        vm.chooseLast()
+        vm.chooseReason(ReprintReason.DAMAGED_LABEL)
+        vm.chooseReason(ReprintReason.DAMAGED_LABEL)
+        vm.state.first { it.done }
+        assertEquals(1, db.boxExceptionDao().queued().size)
     }
 }

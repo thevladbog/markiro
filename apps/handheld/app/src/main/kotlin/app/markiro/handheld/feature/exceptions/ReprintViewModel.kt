@@ -5,16 +5,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.R
 import app.markiro.handheld.core.box.BoxPrinter
+import app.markiro.handheld.core.box.PrintOutcome
 import app.markiro.handheld.core.box.Sscc
 import app.markiro.handheld.core.exceptions.ExceptionEngine
 import app.markiro.handheld.core.exceptions.ReprintReason
 import app.markiro.handheld.core.scan.ScanEvents
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.feature.signin.SessionHolder
+import app.markiro.handheld.feature.work.printReasonLabel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 /** A closed box offered for reprint, named the way the operator reads it. */
@@ -46,6 +49,13 @@ class ReprintViewModel @Inject constructor(
     private val shiftId: String = handle.get<String>("shiftId").orEmpty()
     private val _state = MutableStateFlow(ReprintUi())
     val state: StateFlow<ReprintUi> = _state
+
+    /**
+     * One reprint at a time. Unlike the other three, nothing downstream makes a
+     * second one a no-op: `engine.reprint` queues whatever it is given, so a
+     * double tap put two identical facts in the manager's ledger.
+     */
+    private val printing = AtomicBoolean(false)
 
     init {
         viewModelScope.launch {
@@ -82,11 +92,23 @@ class ReprintViewModel @Inject constructor(
 
     fun chooseReason(reason: ReprintReason) {
         val target = _state.value.selected ?: return
+        if (!printing.compareAndSet(false, true)) return
         viewModelScope.launch {
-            val deviceId = db.deviceConfigDao().get()?.deviceId
-            engine.reprint(shiftId, target.boxId, reason, session.state.value.operator?.operatorId, deviceId)
-            printer.print(target.boxId)
-            _state.value = _state.value.copy(done = true)
+            try {
+                val deviceId = db.deviceConfigDao().get()?.deviceId
+                engine.reprint(shiftId, target.boxId, reason, session.state.value.operator?.operatorId, deviceId)
+                // `done` means the label came out. Saying so without looking at
+                // the outcome told the operator the job reached a printer that
+                // was never configured -- and the deferred-label queue is where
+                // an unprinted label actually belongs.
+                _state.value = when (val outcome = printer.print(target.boxId)) {
+                    PrintOutcome.Printed -> _state.value.copy(done = true, error = null)
+                    is PrintOutcome.Failed -> _state.value.copy(selected = null, error = printReasonLabel(outcome.reason))
+                    is PrintOutcome.Unknown -> _state.value.copy(selected = null, error = R.string.reprint_outcome_unknown)
+                }
+            } finally {
+                printing.set(false)
+            }
         }
     }
 

@@ -5,6 +5,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -245,6 +246,15 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             composable(Routes.WORK) { entry ->
                 val vm: WorkViewModel = hiltViewModel()
+                // The view model outlives this composable: its back-stack entry
+                // keeps it alive while the exception routes are on top. The
+                // scanner is one app-wide flow, so it has to be told when the
+                // work screen stops owning scans -- otherwise a box label
+                // scanned to disassemble is recorded here as a bad code too.
+                DisposableEffect(Unit) {
+                    vm.setScanning(true)
+                    onDispose { vm.setScanning(false) }
+                }
                 val state by vm.state.collectAsStateWithLifecycle()
                 val closeStep by vm.closeStep.collectAsStateWithLifecycle()
                 val duplicateStep by vm.duplicateStep.collectAsStateWithLifecycle()

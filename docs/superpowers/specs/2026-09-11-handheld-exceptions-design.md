@@ -117,12 +117,12 @@ current model — the same rule the station's reprint follows, and what
 The server validates each exception with a `superRefine` that rejects the
 **whole batch** when one fact has the wrong shape:
 
-| kind          | `codeHash` | `targetScannedAt` | `reason`   |
-| ------------- | ---------- | ----------------- | ---------- |
-| `undo`        | required   | required          | must be null |
-| `clear`       | must be null | must be null    | must be null |
-| `disassemble` | must be null | must be null    | required   |
-| `reprint`     | must be null | must be null    | required   |
+| kind          | `codeHash`   | `targetScannedAt` | `reason`     |
+| ------------- | ------------ | ----------------- | ------------ |
+| `undo`        | required     | required          | must be null |
+| `clear`       | must be null | must be null      | must be null |
+| `disassemble` | must be null | must be null      | required     |
+| `reprint`     | must be null | must be null      | required     |
 
 `codeHash`, `reason`, `terminalId` and `operatorId` are declared `.nullable()`
 **without** `.default()`, so Zod requires the key to be present even when its
@@ -162,10 +162,11 @@ different problem.
 
 The handheld closes it with a watermark. Every exception row records
 `afterOutboxId` — the outbox's highest id at the moment the operator confirmed
-the action. The drain may send an exception only when no outbox row with
-`id <= afterOutboxId` remains, which is cheap to evaluate because acks delete
-`outbox` rows in id order. A scan queued *after* the exception does not hold it
-back, because the exception does not target it.
+the action. The drain may send an exception once `afterOutboxId` is at or below
+the ceiling of the batch being built: its targets are then either already
+acknowledged or carried by this very request, and the server applies `items`
+before `exceptions` within one transaction. A scan queued _after_ the exception
+does not hold it back, because the exception does not target it.
 
 `disassemble` and `reprint` additionally wait for their box's closure to be
 acknowledged (`boxes.ackedAt`). The closure and the exception can legitimately
@@ -184,20 +185,20 @@ Room schema version 6 → 7 (`MIGRATION_6_7`, joining the list in
 
 **New table `box_exceptions`:**
 
-| column          | purpose                                                               |
-| --------------- | --------------------------------------------------------------------- |
-| `id`            | autoincrement; send order and ack ceiling                             |
-| `kind`          | `undo` / `clear` / `disassemble` / `reprint`                          |
-| `boxId`         | the device-local box id, same value `BoxClosureDto.boxId` carries      |
-| `codeHash`      | only for `undo`                                                        |
-| `targetScannedAt` | only for `undo`                                                      |
-| `shiftId`       | server shift UUID                                                      |
-| `operatorId`    | the operator who acted                                                 |
-| `reason`        | only for `disassemble` and `reprint`                                   |
-| `occurredAt`    | when the operator confirmed, ISO                                       |
-| `payloadJson`   | the exact wire object; what is resent on retry                        |
-| `afterOutboxId` | the ordering watermark above                                           |
-| `ackedAt`       | null while owed                                                        |
+| column            | purpose                                                           |
+| ----------------- | ----------------------------------------------------------------- |
+| `id`              | autoincrement; send order and ack ceiling                         |
+| `kind`            | `undo` / `clear` / `disassemble` / `reprint`                      |
+| `boxId`           | the device-local box id, same value `BoxClosureDto.boxId` carries |
+| `codeHash`        | only for `undo`                                                   |
+| `targetScannedAt` | only for `undo`                                                   |
+| `shiftId`         | server shift UUID                                                 |
+| `operatorId`      | the operator who acted                                            |
+| `reason`          | only for `disassemble` and `reprint`                              |
+| `occurredAt`      | when the operator confirmed, ISO                                  |
+| `payloadJson`     | the exact wire object; what is resent on retry                    |
+| `afterOutboxId`   | the ordering watermark above                                      |
+| `ackedAt`         | null while owed                                                   |
 
 **`boxes` gains `disassembledAt`** — a local mirror of the retirement flag. A
 retired box leaves the reprint and disassemble lists and never reappears.
