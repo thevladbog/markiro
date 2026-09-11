@@ -140,17 +140,29 @@ describe.skipIf(!databaseUrl)("commercial terms additive migration", () => {
       operator_billing_profiles: ["tax_policy"],
       invoice_lines: ["commercial_terms"],
     };
+    // Columns added after the pinned chain that carry a default instead of a
+    // null. A legacy row must have taken the default, not been rewritten.
+    const defaulted: Record<string, Record<string, string>> = {
+      platform_agreements: { document_form: "ru" },
+    };
     for (const table of tables) {
-      const fields = additions[table] ?? [];
+      const defaults = defaulted[table] ?? {};
+      const fields = [...(additions[table] ?? []), ...Object.keys(defaults)];
       const result = await pool.query(
         `SELECT to_jsonb(t) - $1::text[] AS value FROM ${table} t ORDER BY ${table === "plan_entitlements" ? "catalog_version_id" : "id"}`,
         [fields],
       );
       expect(result.rows).toEqual(baseline.get(table));
-      for (const field of fields)
+      for (const field of additions[table] ?? [])
         expect(
           (await pool.query(`SELECT ${field} AS value FROM ${table}`)).rows.every(
             (row) => row.value === null,
+          ),
+        ).toBe(true);
+      for (const [field, expected] of Object.entries(defaults))
+        expect(
+          (await pool.query(`SELECT ${field} AS value FROM ${table}`)).rows.every(
+            (row) => row.value === expected,
           ),
         ).toBe(true);
     }
