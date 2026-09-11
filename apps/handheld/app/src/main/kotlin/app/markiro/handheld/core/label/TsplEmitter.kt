@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.label
 
+import app.markiro.handheld.core.barcode.rasterizeGs1DataMatrix
 import java.io.ByteArrayOutputStream
 import kotlin.math.abs
 import kotlin.math.max
@@ -44,7 +45,7 @@ suspend fun generateTspl(
                 element.fontSizePt, element.bold, element.align, element.maxWidthMm, element.maxLines,
                 rasterize, out, ::line,
             )
-            is LabelElement.Barcode -> line(barcode(spec, element, data))
+            is LabelElement.Barcode -> barcode(spec, element, data, out, ::line)
             is LabelElement.Line -> line(bar(spec, element))
             is LabelElement.Box -> line(box(spec, element))
         }
@@ -122,13 +123,30 @@ private suspend fun textLike(
     }
 }
 
-private fun barcode(spec: LabelSpec, element: LabelElement.Barcode, data: Map<LabelField, String>): String {
-    if (element.format != BarcodeFormat.CODE128) {
-        throw LabelRenderException("barcode format ${element.format.wire} is not supported on this device")
-    }
+private fun barcode(
+    spec: LabelSpec,
+    element: LabelElement.Barcode,
+    data: Map<LabelField, String>,
+    out: ByteArrayOutputStream,
+    line: (String) -> Unit,
+) {
     val x = mmToDots(element.xMm, spec.dpi)
     val y = mmToDots(element.yMm, spec.dpi)
     val source = element.data
+    // This language's own DMATRIX carries no FNC1, so a native symbol would be a plain Data Matrix
+    // rather than a GS1 one. The bitmap is the only correct form, and it is the same bitmap the
+    // other language sends.
+    if (element.format == BarcodeFormat.DATAMATRIX && source is BarcodeSource.Field && source.field == LabelField.KM_CODE) {
+        val raw = data[LabelField.KM_CODE].orEmpty()
+        if (raw.isEmpty()) throw LabelRenderException("no marking code to print")
+        // Unlike every other barcode element, `sizeMm` here is the whole symbol square.
+        buildBitmapCommand(x, y, rasterizeGs1DataMatrix(raw, mmToDots(element.sizeMm, spec.dpi)), out)
+        out.write('\n'.code)
+        return
+    }
+    if (element.format != BarcodeFormat.CODE128) {
+        throw LabelRenderException("barcode format ${element.format.wire} is not supported on this device")
+    }
     val value = when (source) {
         is BarcodeSource.Field -> data[source.field] ?: ""
         is BarcodeSource.Literal -> source.value
@@ -139,7 +157,7 @@ private fun barcode(spec: LabelSpec, element: LabelElement.Barcode, data: Map<La
     val payload = if (gs1) "!100$value" else value
     val narrow = element.moduleWidthMm?.let { max(1, mmToDots(it, spec.dpi)) } ?: DEFAULT_NARROW_DOTS
     // The interpretation line is off, matching the other language.
-    return "BARCODE $x,$y,\"128\",${mmToDots(element.sizeMm, spec.dpi)},0,0,$narrow,$narrow,\"${escape(payload)}\""
+    line("BARCODE $x,$y,\"128\",${mmToDots(element.sizeMm, spec.dpi)},0,0,$narrow,$narrow,\"${escape(payload)}\"")
 }
 
 private fun bar(spec: LabelSpec, element: LabelElement.Line): String {

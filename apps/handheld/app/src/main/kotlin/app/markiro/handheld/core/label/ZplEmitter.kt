@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.label
 
+import app.markiro.handheld.core.barcode.rasterizeGs1DataMatrix
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -113,12 +114,23 @@ private suspend fun textLike(
 }
 
 private fun barcode(spec: LabelSpec, element: LabelElement.Barcode, data: Map<LabelField, String>): String {
-    if (element.format != BarcodeFormat.CODE128) {
-        throw LabelRenderException("barcode format ${element.format.wire} is not supported on this device")
-    }
     val x = mmToDots(element.xMm, spec.dpi)
     val y = mmToDots(element.yMm, spec.dpi)
     val source = element.data
+    // The only Data Matrix this device prints is the marking code, and it prints as a bitmap rather
+    // than the printer's own ^BX: the other language has no way to carry FNC1 at all, so a native
+    // symbol there would be a plain Data Matrix instead of a GS1 one, which is a wrong code on a
+    // product. Keeping both languages on one path also means a template cannot print differently
+    // depending on the printer brand.
+    if (element.format == BarcodeFormat.DATAMATRIX && source is BarcodeSource.Field && source.field == LabelField.KM_CODE) {
+        val raw = data[LabelField.KM_CODE].orEmpty()
+        if (raw.isEmpty()) throw LabelRenderException("no marking code to print")
+        // Unlike every other barcode element, `sizeMm` here is the whole symbol square.
+        return "^FO$x,$y${buildGfaCommand(rasterizeGs1DataMatrix(raw, mmToDots(element.sizeMm, spec.dpi)))}^FS"
+    }
+    if (element.format != BarcodeFormat.CODE128) {
+        throw LabelRenderException("barcode format ${element.format.wire} is not supported on this device")
+    }
     val value = when (source) {
         is BarcodeSource.Field -> data[source.field] ?: ""
         is BarcodeSource.Literal -> source.value

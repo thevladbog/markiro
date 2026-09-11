@@ -115,7 +115,11 @@ sealed interface LabelElement {
         override val yMm: Double,
         val format: BarcodeFormat,
         val data: BarcodeSource,
-        /** Height for code128 and ean13; the module square side for datamatrix and qr. */
+        /**
+         * Height for code128 and ean13; the module square side for qr. For the marking-code
+         * Data Matrix it is the WHOLE symbol square, quiet zone included -- that is the
+         * convention a duplicate template is authored to.
+         */
         val sizeMm: Double,
         val moduleWidthMm: Double? = null,
     ) : LabelElement

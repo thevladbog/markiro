@@ -85,8 +85,22 @@ rasterized with Android's own font engine and cannot match the station's pixels:
 cabinet editor share one implementation and are deliberately identical to each other, and this is a
 third. The fixtures pin command framing and bitmap dimensions for those cases, never glyph pixels.
 
-No barcode is encoded on the device. Both emitters hand the payload to a native printer command, so
-bar quality is the printer's business and carries no risk from the port.
+Linear barcodes are not encoded on the device: both emitters hand the payload to a native printer
+command, so bar quality is the printer's business and carries no risk from the port.
+
+The marking-code Data Matrix is the exception, and it is encoded here (`core/barcode`) and sent as a
+bitmap. TSPL's own `DMATRIX` command cannot carry the FNC1 flag, so a natively printed symbol would
+be a plain Data Matrix rather than a GS1 one — a wrong code on a product. Symbol sizing,
+Reed–Solomon and module placement come from ZXing; the GS1 codeword framing around them is ours,
+because no library provides it. For that element, and only that element, a template's `sizeMm` is
+the whole symbol square rather than a module width.
+
+Unlike the emitters, this encoder is deliberately **not** byte-pinned to `packages/domain`, which
+encodes through bwip-js: nothing ever compares one device's label bytes with another's, so the
+contract is that the printed symbol decodes to the right payload. `DataMatrixTest` asserts exactly
+that, by decoding the finished symbol with ZXing's decoder and expecting the marking code back with
+its leading GS1 flag and every separator intact. What no test here can show is whether a printed
+symbol scans: module size against a real print head and real scanner optics is hardware validation.
 
 Printers live only on this device, in the `printers` table, following the rule stated in
 `apps/station/src/lib/hardware-config.ts`. Settings, then «Принтер», adds one over Wi-Fi by address
