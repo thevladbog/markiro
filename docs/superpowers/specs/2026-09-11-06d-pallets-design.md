@@ -326,12 +326,19 @@ Pallets are sorted by `devicePalletId` before processing, for the same
 40P01-avoidance reason the item upsert and the box-closure loop already sort:
 concurrent batches touching overlapping rows must take them in the same order.
 
-A pallet row is created **lazily by the first box closure that names it** —
-exactly as a box row is created by its first arriving item, and for the same
-reason: the drain is sequential, so no buffering and no out-of-order handling
-is needed. A pallet closure naming a `devicePalletId` nobody has mentioned also
-creates the row: that is a pallet closed with no boxes, the direct analogue of
-the zero-item box closure the ingest already handles.
+Pallet rows are created by a **pre-pass** over the batch, before the
+box-closure loop: every `devicePalletId` named by a box closure or a pallet
+closure is upserted `ON CONFLICT DO NOTHING` in one sorted multi-row insert,
+then read back into a `(shiftId, terminalId, devicePalletId) → id` map. The
+box-closure UPDATE takes `pallet_id` straight from that map, so a box's
+membership and its closure are one statement and one fact.
+
+This is the box rule one level up — a box row is created by its first arriving
+item, a pallet row by the first closure naming it — and the pre-pass is what
+makes it one statement instead of a per-closure round trip. A pallet closure
+naming an id no box mentioned still creates the row: that is a pallet closed
+with no boxes, the direct analogue of the zero-item box closure the ingest
+already handles.
 
 The upsert resolves on `pallets_device_pallet_uq` and writes `sscc`,
 `closed_at`, `closure_received_at`, `operator_id` and the print outcomes only
