@@ -1,3 +1,7 @@
+import {
+  EntitlementAdmissionService,
+  admissionScopeDigest,
+} from "../../subscriptions/entitlement-admission.service";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
@@ -260,9 +264,11 @@ export class NationalCatalogProposalService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly now: () => Date = () => new Date(),
+    private readonly admission?: EntitlementAdmissionService,
   ) {}
 
   async preview(tenantId: string, actorUserId: string, productId: string, snapshotId: string) {
+    const facts = await this.admission?.capture(tenantId);
     return this.db.transaction(async (tx) => {
       const [product] = await tx
         .select({
@@ -412,6 +418,15 @@ export class NationalCatalogProposalService {
         },
       );
       const now = this.now();
+      await this.admission?.observe({
+        tenantId: tenantId,
+        actor: { domain: "cabinet", id: actorUserId },
+        operationId: "nk.proposal.v1",
+        scopeDigest: admissionScopeDigest({ productId, snapshotId, diff }),
+        transaction: tx,
+        facts,
+        runtime: { enabled: null, observedAt: new Date() },
+      });
       const [proposal] = await tx
         .insert(schema.productRegulatoryProposals)
         .values({

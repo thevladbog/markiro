@@ -28,7 +28,7 @@ import {
 import {
   commercialBody,
   commercialResponse,
-  isCommercialV2,
+  commercialVersion,
 } from "../../platform-http/commercial-version";
 import { parsePlatformResponse } from "../../platform-http/platform-response";
 import { ZodValidationPipe } from "../../zod.pipe";
@@ -100,7 +100,7 @@ export class PlatformOffersController {
     id: string,
   ) {
     return commercialResponse(
-      isCommercialV2(req),
+      commercialVersion(req),
       platformOfferWorkspaceContracts.workspace.response,
       platformOfferWorkspaceV2Contracts.workspace.response,
       await this.workspaceService.workspace(req.platformPrincipal!, id),
@@ -134,7 +134,7 @@ export class PlatformOffersController {
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
   ) {
     return commercialResponse(
-      isCommercialV2(req),
+      commercialVersion(req),
       platformCommercialContracts.offers.detail.response,
       platformCommercialV2Contracts.offers.detail.response,
       await this.offers.detail(req.platformPrincipal!, id),
@@ -151,17 +151,18 @@ export class PlatformOffersController {
   @RequirePlatformCapabilities("billing.write")
   async create(@Req() req: RequestWithPlatformPrincipal, @Body() body: unknown) {
     return commercialResponse(
-      isCommercialV2(req),
+      commercialVersion(req),
       platformCommercialContracts.offers.create.response,
       platformCommercialV2Contracts.offers.create.response,
       await this.offers.create(
         req.platformPrincipal!,
         commercialBody(
-          isCommercialV2(req)
+          commercialVersion(req) >= 2
             ? platformCommercialV2Contracts.offers.create.body
             : platformCommercialContracts.offers.create.body,
           body,
         ),
+        commercialVersion(req),
       ),
     );
   }
@@ -185,11 +186,16 @@ export class PlatformOffersController {
     @Body(new ZodValidationPipe(platformCommercialContracts.offers.publish.body.prefault({})))
     body: { previewFingerprint?: string } = {},
   ) {
-    const v2 = isCommercialV2(req);
-    const offer = await this.offers.publish(req.platformPrincipal!, id, body.previewFingerprint);
+    const version = commercialVersion(req);
+    const offer = await this.offers.publish(
+      req.platformPrincipal!,
+      id,
+      body.previewFingerprint,
+      version,
+    );
     const documents = await this.documents.render(id);
     return commercialResponse(
-      v2,
+      version,
       platformCommercialContracts.offers.publish.response,
       platformCommercialV2Contracts.offers.publish.response,
       {
@@ -213,10 +219,10 @@ export class PlatformOffersController {
     @Body(new ZodValidationPipe(reviseOfferSchema)) body: ReviseOfferDto,
   ) {
     return commercialResponse(
-      isCommercialV2(req),
+      commercialVersion(req),
       platformCommercialContracts.offers.revise.response,
       platformCommercialV2Contracts.offers.revise.response,
-      await this.offers.revise(req.platformPrincipal!, id, body),
+      await this.offers.revise(req.platformPrincipal!, id, body, commercialVersion(req)),
     );
   }
 
@@ -291,7 +297,7 @@ export class PlatformOffersController {
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
   ) {
     return commercialResponse(
-      isCommercialV2(req),
+      commercialVersion(req),
       platformCommercialContracts.offers.cancel.response,
       platformCommercialV2Contracts.offers.cancel.response,
       await this.offers.cancel(req.platformPrincipal!, id),

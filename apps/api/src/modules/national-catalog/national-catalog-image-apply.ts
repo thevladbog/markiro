@@ -1,3 +1,7 @@
+import {
+  type EntitlementAdmissionService,
+  admissionScopeDigest,
+} from "../../subscriptions/entitlement-admission.service";
 import type { DbTx } from "./national-catalog-import.types";
 import { ConflictException, ForbiddenException } from "@nestjs/common";
 import { schema } from "@markiro/db";
@@ -18,6 +22,7 @@ export async function applyAcceptedImage(
   tenantId: string,
   operationId: string,
   previewId: string,
+  admission?: EntitlementAdmissionService,
 ): Promise<void> {
   const operations = schema.nationalCatalogImportOperations;
   const receipts = schema.nationalCatalogImportOperationItems;
@@ -165,6 +170,7 @@ export async function applyAcceptedImage(
       return { candidate, asset };
     });
     const image = await readPreparedBytes(storage, cached.asset, cached.candidate);
+    const facts = await admission?.capture(tenantId);
     await repository.transaction(async (tx) => {
       const session = await repository.lock(tx, tenantId, sessionId);
       const [operation] = await tx
@@ -236,6 +242,21 @@ export async function applyAcceptedImage(
         { tenantId, userId: operation.actorId },
         session,
       );
+      await admission?.observe({
+        tenantId,
+        actor: { domain: "cabinet", id: operation.actorId },
+        operationId: "nk.worker.v1",
+        scopeDigest: admissionScopeDigest({
+          operationId,
+          previewId,
+          receiptId: receipt.id,
+          assetId: asset.id,
+        }),
+        transaction: tx,
+        facts,
+        attempt: { number: claim.attempt, identity: receipt.id },
+        runtime: { enabled: null, observedAt: new Date() },
+      });
       const result = await products.applyPreparedImage(
         tx,
         tenantId,

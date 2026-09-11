@@ -247,7 +247,7 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
   ControllerClass,
   Readonly<Record<string, RouteAccessPolicy>>,
 ][] = [
-  [AccessController, { me: membershipPolicy }],
+  [AccessController, { me: membershipPolicy, entitlementSnapshot: membershipPolicy }],
   [
     OrgProfileController,
     {

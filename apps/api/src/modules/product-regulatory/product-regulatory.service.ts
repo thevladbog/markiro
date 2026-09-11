@@ -1,9 +1,11 @@
+import { EntitlementAdmissionService } from "../../subscriptions/entitlement-admission.service";
 import {
   BadRequestException,
   ConflictException,
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { and, count, eq, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
@@ -27,7 +29,10 @@ type RegulatoryTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 @Injectable()
 export class ProductRegulatoryService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    @Optional() private readonly admission?: EntitlementAdmissionService,
+  ) {}
 
   async getProfile(tenantId: string, productId: string) {
     await this.writer.requireProduct(this.db, tenantId, productId);
@@ -346,8 +351,18 @@ export class ProductRegulatoryService {
     proposalId: string,
     body: ApplyRegulatoryProposalDto,
   ) {
+    const facts = await this.admission?.capture(tenantId);
     const outcome = await this.db.transaction((tx) =>
-      this.writer.applyInTransaction(tx, tenantId, actorUserId, productId, proposalId, body),
+      this.writer.applyInTransaction(
+        tx,
+        tenantId,
+        actorUserId,
+        productId,
+        proposalId,
+        body,
+        this.admission,
+        facts,
+      ),
     );
     if (outcome === "stale")
       throw new ConflictException({ code: "PRODUCT_REGULATORY_REVISION_STALE" });

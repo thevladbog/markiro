@@ -157,8 +157,8 @@ describe("tenant subscription detail", () => {
     expect(screen.getAllByText("Дополнительная станция · addon-station · версия 1")).toHaveLength(
       2,
     );
-    expect(screen.getByText("3 из 2 · лимит превышен на 1")).toBeDefined();
-    expect(screen.getByText("5 из 4 · лимит превышен на 1")).toBeDefined();
+    expect(await screen.findByText("17 / 20")).toBeDefined();
+    expect(screen.getAllByText("3 / 5")[0]).toBeDefined();
     expect(screen.getByText("Согласованный переход")).toBeDefined();
     expect(screen.getByText("platform_manual")).toBeDefined();
   });
@@ -219,7 +219,7 @@ describe("tenant subscription detail", () => {
     expect(within(dialog).getByText("Производственный · plan-production · версия 3")).toBeDefined();
     expect(within(dialog).getByText("После текущего тарифа")).toBeDefined();
     expect(within(dialog).getByText("Линии: 10")).toBeDefined();
-    expect(within(dialog).getByText("Публичный API: включён")).toBeDefined();
+    expect(within(dialog).getByText("Публичный API: Включено")).toBeDefined();
     expect(
       within(dialog).getByText("Причина: Согласованный переход на производство"),
     ).toBeDefined();
@@ -251,7 +251,7 @@ describe("tenant subscription detail", () => {
     await user.click(screen.getByRole("button", { name: "Проверить назначение" }));
     const dialog = screen.getByRole("alertdialog");
     expect(within(dialog).getByText("Количество: 2")).toBeDefined();
-    expect(within(dialog).getByText("Станции после изменения: 6")).toBeDefined();
+    expect(within(dialog).getByText("Станции и ТСД: +1 × 2")).toBeDefined();
     await user.click(within(dialog).getByRole("button", { name: "Назначить точную версию" }));
 
     expect(api.mutationCalls()[0]).toEqual({
@@ -287,7 +287,7 @@ describe("tenant subscription detail", () => {
     expect(
       within(dialog).getByText("Целевая подписка: d1111111-1111-4111-8111-111111111111"),
     ).toBeDefined();
-    expect(within(dialog).getByText("Станции после изменения: 16")).toBeDefined();
+    expect(within(dialog).getByText("Станции и ТСД: +1 × 2")).toBeDefined();
     expect(api.detailRequestCount()).toBe(2);
     expect(api.mutationCalls()).toEqual([]);
 
@@ -608,13 +608,13 @@ describe("tenant subscription detail", () => {
       "Обзор",
       "Текущий тариф",
       "Следующий тариф",
-      "Использование и лимиты",
+      "Права и использование",
       "Активные дополнения",
       "Запланированные дополнения",
       "Прямое назначение",
       "История подписки",
     ]) {
-      expect(screen.getByRole("heading", { level: 2, name })).toBeDefined();
+      expect(await screen.findByRole("heading", { level: 2, name })).toBeDefined();
     }
     const levels = screen
       .getAllByRole("heading")

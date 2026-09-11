@@ -1,3 +1,7 @@
+import {
+  type EntitlementAdmissionService,
+  admissionScopeDigest,
+} from "../../subscriptions/entitlement-admission.service";
 import { parseImportDiff, sourceEnvelopeSchema } from "./national-catalog-import-apply-state";
 import { overlayStoredImages } from "./national-catalog-image-state";
 import type { CatalogCategoryGroup } from "./national-catalog-product-group";
@@ -75,6 +79,7 @@ export class NationalCatalogImportPreviewService {
       enabled: false,
       verifiedHosts: [],
     },
+    private readonly admission?: EntitlementAdmissionService,
   ) {}
   async prepare(
     actor: ImportActor,
@@ -82,6 +87,7 @@ export class NationalCatalogImportPreviewService {
     input: ImportPrepare,
   ): Promise<ImportPrepareResponse> {
     const { body, hash } = canonicalPreparation(input);
+    const facts = await this.admission?.capture(actor.tenantId);
     return this.repository.transaction(async (tx) => {
       const session = await this.repository.lock(tx, actor.tenantId, sessionId);
       await this.sessions.assertSessionAccess(tx, actor, session);
@@ -103,6 +109,16 @@ export class NationalCatalogImportPreviewService {
       await this.selectedItems(tx, actor.tenantId, sessionId, body.itemIds);
       for (const choice of body.categoryChoices)
         await resolveCategoryOption(tx, actor.tenantId, sessionId, choice.itemId, choice.optionId);
+      await this.admission?.observe({
+        tenantId: actor.tenantId,
+        actor: { domain: "cabinet", id: actor.userId },
+        operationId: "nk.proposal.v1",
+        scopeDigest: admissionScopeDigest({ sessionId, requestHash: hash }),
+        transaction: tx,
+        facts,
+        runtime: { enabled: true, observedAt: new Date() },
+        requestId: body.requestId,
+      });
       const [row] = await tx
         .insert(preparations)
         .values({
@@ -207,6 +223,7 @@ export class NationalCatalogImportPreviewService {
       result = await this.coordinator.run(
         { tenantId, environment: session.environment },
         async ({ auth, ...options }) => {
+          const facts = await this.admission?.capture(tenantId);
           const allowed = await this.repository.transaction(async (tx) => {
             const currentSession = await this.repository.lock(tx, tenantId, sessionId);
             const current = await this.lock(tx, tenantId, sessionId, preparationId);
@@ -218,6 +235,20 @@ export class NationalCatalogImportPreviewService {
             )
               throw new CatalogRequestError("deferred", "step_changed");
             if (!(await this.authorize(tx, currentSession, current, checkpoint))) return false;
+            await this.admission?.observe({
+              tenantId: tenantId,
+              actor: { domain: "cabinet", id: current.actorId },
+              operationId: "nk.worker.v1",
+              scopeDigest: admissionScopeDigest({
+                preparationId,
+                stepId: checkpoint.stepId,
+                method: "feed_product",
+              }),
+              transaction: tx,
+              facts,
+              runtime: { enabled: true, observedAt: new Date() },
+              attempt: { number: checkpoint.attempts + 1, identity: runId },
+            });
             await this.save(tx, current, {
               ...checkpoint,
               runId,
@@ -245,6 +276,7 @@ export class NationalCatalogImportPreviewService {
         const categories = await this.coordinator.run(
           { tenantId, environment: session.environment },
           async ({ auth, ...options }) => {
+            const facts = await this.admission?.capture(tenantId);
             const allowed = await this.repository.transaction(async (tx) => {
               const currentSession = await this.repository.lock(tx, tenantId, sessionId);
               const current = await this.lock(tx, tenantId, sessionId, preparationId);
@@ -255,7 +287,22 @@ export class NationalCatalogImportPreviewService {
                 !checkpoint.enqueuePending
               )
                 throw new CatalogRequestError("deferred", "step_changed");
-              return this.authorize(tx, currentSession, current, checkpoint);
+              if (!(await this.authorize(tx, currentSession, current, checkpoint))) return false;
+              await this.admission?.observe({
+                tenantId: tenantId,
+                actor: { domain: "cabinet", id: current.actorId },
+                operationId: "nk.worker.v1",
+                scopeDigest: admissionScopeDigest({
+                  preparationId,
+                  stepId: checkpoint.stepId,
+                  method: "categories",
+                }),
+                transaction: tx,
+                facts,
+                runtime: { enabled: true, observedAt: new Date() },
+                attempt: { number: checkpoint.attempts, identity: runId },
+              });
+              return true;
             });
             if (!allowed) throw new CatalogRequestError("blocked", "access_changed");
             options.signal.throwIfAborted();

@@ -1,3 +1,8 @@
+import {
+  type EntitlementAdmissionService,
+  admissionScopeDigest,
+  type AdmissionFacts,
+} from "../../subscriptions/entitlement-admission.service";
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { and, eq, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
@@ -19,6 +24,8 @@ export class ProductRegulatoryWriter {
     productId: string,
     proposalId: string,
     body: ApplyRegulatoryProposalDto,
+    admission?: EntitlementAdmissionService,
+    facts?: AdmissionFacts,
   ): Promise<"applied" | "replay" | "stale"> {
     const selection = canonicalProposalSelection(body.acceptedEntryIds);
     const accepted = selection.acceptedEntryIds;
@@ -247,6 +254,17 @@ export class ProductRegulatoryWriter {
       return "stale" as const;
     }
 
+    if (diff.kind === "national_catalog_import")
+      await admission?.observe({
+        tenantId,
+        actor: { domain: "cabinet", id: actorUserId },
+        operationId: "nk.apply.v1",
+        scopeDigest: admissionScopeDigest({ productId, proposalId, selectionHash: selection.hash }),
+        transaction: tx,
+        facts,
+        // This legacy path has no server-owned release flag; never infer one from the registry.
+        runtime: { enabled: null, observedAt: new Date() },
+      });
     if (diff.kind === "category_change") {
       await tx
         .update(schema.productRegulatoryAttributeValues)

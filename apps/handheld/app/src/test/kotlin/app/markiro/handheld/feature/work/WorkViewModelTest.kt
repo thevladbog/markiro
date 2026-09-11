@@ -107,8 +107,12 @@ class WorkViewModelTest {
 
     @After
     fun tearDown() {
-        engineScope.cancel()
-        db.close()
+        try {
+            main.cancelAndJoinModels()
+        } finally {
+            engineScope.cancel()
+            db.close()
+        }
     }
 
     private fun vm(team: TeamRefresher = TeamRefresher { null }): WorkViewModel {

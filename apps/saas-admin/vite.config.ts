@@ -27,6 +27,8 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // Bound CPU contention between jsdom suites and their interactive queries.
+    maxWorkers: 2,
     setupFiles: ["./test/setup.ts"],
   },
 });

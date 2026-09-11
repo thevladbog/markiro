@@ -18,6 +18,10 @@ const EFFECT_KEYS = [
   "labelEditor",
   "publicApi",
   "pallets",
+  "chzIntegration",
+  "inventory",
+  "commerceMl",
+  "handheld",
 ] as const satisfies readonly AddonEffect["key"][];
 
 const QUOTA_EFFECT_KEYS = new Set<AddonEffect["key"]>([
@@ -41,14 +45,21 @@ export function fromAddonEffects(effects: AddonEffect[]): EditableAddonEffect[] 
 }
 
 export function toAddonEffects(editable: EditableAddonEffect[]): AddonEffect[] {
-  if (editable.length < 1 || editable.length > 7) throw new Error("effectRequired");
+  if (editable.length < 1 || editable.length > 11) throw new Error("effectRequired");
   const seen = new Set<AddonEffect["key"]>();
   return editable.map((effect) => {
     if (seen.has(effect.key)) throw new Error("effectDuplicate");
     seen.add(effect.key);
     if (!QUOTA_EFFECT_KEYS.has(effect.key)) {
       return {
-        key: effect.key as "labelEditor" | "publicApi" | "pallets",
+        key: effect.key as
+          | "labelEditor"
+          | "publicApi"
+          | "pallets"
+          | "chzIntegration"
+          | "inventory"
+          | "commerceMl"
+          | "handheld",
         featureEnabled: true as const,
       };
     }
@@ -144,7 +155,7 @@ export function AddonEffectsEditor({
       <Button
         type="button"
         variant="secondary"
-        disabled={disabled || effects.length >= 7}
+        disabled={disabled || effects.length >= 11}
         onClick={() => onChange([...effects, newAddonEffect()])}
       >
         {t("catalog.form.addEffect")}

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { validateCatalogPatchCommercialTerms } from "./catalog-validation.js";
 
 import { platformTimestampSchema, platformUuidSchema } from "./primitives.js";
 import { assignableCatalogResponseSchema, assignableCatalogVersionSchema } from "./tenants.js";
@@ -279,32 +280,7 @@ export const catalogVersionCreateV2Schema = z.union([
 ]);
 export const catalogVersionPatchV2Schema = catalogVersionPatchSchema
   .safeExtend({ ...optionalMetadataShape, plan: planEntitlementsSchema.optional() })
-  .superRefine((value, ctx) => {
-    const recurring =
-      value.plan !== undefined || value.addon !== undefined || value.subject === "software_license";
-    const service =
-      value.service !== undefined ||
-      value.subject === "service" ||
-      value.subject === "development_work";
-    if (
-      (recurring && (value.billingMode === "one_time" || value.billingPeriod === null)) ||
-      (service &&
-        (value.billingMode === "recurring" ||
-          (value.billingPeriod !== undefined && value.billingPeriod !== null))) ||
-      (value.billingMode === "one_time" && value.billingPeriod != null) ||
-      (value.billingMode === "recurring" && value.billingPeriod === null)
-    )
-      ctx.addIssue({ code: "custom", message: "Kind and billing period must agree" });
-
-    if (
-      (value.plan || value.addon) &&
-      value.subject != null &&
-      value.subject !== "software_license"
-    )
-      ctx.addIssue({ code: "custom", path: ["subject"], message: "License subject required" });
-    if (value.service && value.subject === "software_license")
-      ctx.addIssue({ code: "custom", path: ["subject"], message: "Service subject required" });
-  });
+  .superRefine(validateCatalogPatchCommercialTerms);
 export const catalogVersionV2Schema = z.discriminatedUnion("kind", [
   planVersionResponseSchema.safeExtend({
     ...catalogCommercialMetadataShape,

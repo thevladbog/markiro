@@ -59,9 +59,12 @@ export class JournalService {
    * которого предостерегает комментарий выше. `append` обязан создать строку
    * сам, если её нет, а не полагаться на то, что кто-то другой её уже создал.
    */
-  async append(input: AppendEventInput): Promise<void> {
+  async append(
+    input: AppendEventInput,
+    transaction?: Parameters<Parameters<Db["transaction"]>[0]>[0],
+  ): Promise<void> {
     const at = new Date();
-    await this.db.transaction(async (tx) => {
+    const write = async (tx: Parameters<Parameters<Db["transaction"]>[0]>[0]) => {
       await tx.insert(schema.integrationEvents).values({ ...input, at });
       await tx
         .insert(schema.integrationChannels)
@@ -75,7 +78,9 @@ export class JournalService {
           target: [schema.integrationChannels.tenantId, schema.integrationChannels.type],
           set: { lastEventAt: at, lastOutcome: input.outcome },
         });
-    });
+    };
+    if (transaction) await transaction.transaction(write);
+    else await this.db.transaction(write);
   }
 
   async finishSession(

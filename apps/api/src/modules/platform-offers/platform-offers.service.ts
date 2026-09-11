@@ -1,3 +1,5 @@
+import { assertCatalogCommercialCompatibility } from "../../platform-http/commercial-catalog-compatibility";
+import type { CommercialVersion } from "../../platform-http/commercial-version";
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
@@ -41,9 +43,13 @@ export class PlatformOffersService {
     private readonly notifications: TenantBillingNotificationsService,
   ) {}
 
-  async create(actor: PlatformPrincipal, input: CreateOfferDto): Promise<OfferServiceDetailSource> {
+  async create(
+    actor: PlatformPrincipal,
+    input: CreateOfferDto,
+    commercialVersion: CommercialVersion = 2,
+  ): Promise<OfferServiceDetailSource> {
     return this.db.transaction(async (tx) => {
-      const offerId = await createOfferDraft(tx, actor.userId, input);
+      const offerId = await createOfferDraft(tx, actor.userId, input, commercialVersion);
       return this.detailWith(tx, input.tenantId, offerId);
     });
   }
@@ -71,6 +77,7 @@ export class PlatformOffersService {
     actor: PlatformPrincipal,
     id: string,
     previewFingerprint?: string,
+    commercialVersion: CommercialVersion = 2,
   ): Promise<OfferServiceDetailSource> {
     const canonicalOfferId = canonicalBillingUuid(id);
     return this.db.transaction(async (tx) => {
@@ -115,6 +122,18 @@ export class PlatformOffersService {
       if (draft.expiresAt !== null && draft.expiresAt.getTime() <= Date.now()) {
         throw new ConflictException({ code: "offer_expired" });
       }
+      const selectedLines = await tx
+        .select({ catalogVersionId: schema.commercialOfferLines.catalogVersionId })
+        .from(schema.commercialOfferLines)
+        .where(
+          and(
+            eq(schema.commercialOfferLines.tenantId, draft.tenantId),
+            eq(schema.commercialOfferLines.offerId, draft.id),
+          ),
+        );
+      for (const line of selectedLines)
+        if (line.catalogVersionId)
+          await assertCatalogCommercialCompatibility(tx, line.catalogVersionId, commercialVersion);
       const printInput = await resolveOfferPrintInput(tx, draft);
       if (previewFingerprint !== undefined && previewFingerprint !== printInput.fingerprint) {
         throw new ConflictException({ code: "offer_preview_changed" });
@@ -206,6 +225,7 @@ export class PlatformOffersService {
     actor: PlatformPrincipal,
     id: string,
     input: OfferReviseDto,
+    commercialVersion: CommercialVersion = 2,
   ): Promise<OfferServiceDetailSource> {
     const canonicalOfferId = canonicalBillingUuid(id);
     const [located] = await this.db
@@ -288,6 +308,19 @@ export class PlatformOffersService {
       if (decision?.decision !== "changes_requested") {
         throw new ConflictException({ code: "offer_revision_not_requested" });
       }
+      const lines = await tx
+        .select()
+        .from(schema.commercialOfferLines)
+        .where(
+          and(
+            eq(schema.commercialOfferLines.tenantId, source.tenantId),
+            eq(schema.commercialOfferLines.offerId, source.id),
+          ),
+        )
+        .orderBy(asc(schema.commercialOfferLines.position));
+      for (const line of lines)
+        if (line.catalogVersionId)
+          await assertCatalogCommercialCompatibility(tx, line.catalogVersionId, commercialVersion);
       const [draft] = await tx
         .insert(schema.commercialOffers)
         .values({
@@ -304,16 +337,6 @@ export class PlatformOffersService {
         })
         .returning();
       if (!draft) throw new Error("offer revision insert failed");
-      const lines = await tx
-        .select()
-        .from(schema.commercialOfferLines)
-        .where(
-          and(
-            eq(schema.commercialOfferLines.tenantId, source.tenantId),
-            eq(schema.commercialOfferLines.offerId, source.id),
-          ),
-        )
-        .orderBy(asc(schema.commercialOfferLines.position));
       if (lines.length > 0) {
         await tx.insert(schema.commercialOfferLines).values(
           lines.map((line) => ({

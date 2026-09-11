@@ -1,3 +1,4 @@
+import { EntitlementAdmissionService } from "../../subscriptions/entitlement-admission.service";
 import { Global, Module, type DynamicModule } from "@nestjs/common";
 
 import { DB } from "../../auth/auth.module";
@@ -111,6 +112,7 @@ export class NationalCatalogModule {
             NationalCatalogRequestCoordinator,
             AuthorizationService,
             EntitlementsService,
+            EntitlementAdmissionService,
           ],
           useFactory: (
             repository: NationalCatalogImportRepository,
@@ -118,6 +120,7 @@ export class NationalCatalogModule {
             coordinator: NationalCatalogRequestCoordinator,
             authorization: AuthorizationService,
             entitlements: EntitlementsService,
+            admission: EntitlementAdmissionService,
           ) =>
             new NationalCatalogImportService(
               repository,
@@ -129,6 +132,7 @@ export class NationalCatalogModule {
                 ownCatalog: env.NATIONAL_CATALOG_OWN_IMPORT_ENABLED,
                 gtinLookup: env.NATIONAL_CATALOG_GTIN_IMPORT_ENABLED,
               },
+              admission,
             ),
         },
         {
@@ -138,12 +142,14 @@ export class NationalCatalogModule {
             NationalCatalogImportService,
             NationalCatalogClient,
             NationalCatalogRequestCoordinator,
+            EntitlementAdmissionService,
           ],
           useFactory: (
             repository: NationalCatalogImportRepository,
             sessions: NationalCatalogImportService,
             client: NationalCatalogClient,
             coordinator: NationalCatalogRequestCoordinator,
+            admission: EntitlementAdmissionService,
           ) =>
             new NationalCatalogImportPreviewService(
               repository,
@@ -151,15 +157,21 @@ export class NationalCatalogModule {
               client,
               coordinator,
               photos,
+              admission,
             ),
         },
         {
           provide: NationalCatalogImportApplyService,
-          inject: [NationalCatalogImportRepository, NationalCatalogImportService],
+          inject: [
+            NationalCatalogImportRepository,
+            NationalCatalogImportService,
+            EntitlementAdmissionService,
+          ],
           useFactory: (
             repository: NationalCatalogImportRepository,
             sessions: NationalCatalogImportService,
-          ) => new NationalCatalogImportApplyService(repository, sessions),
+            admission: EntitlementAdmissionService,
+          ) => new NationalCatalogImportApplyService(repository, sessions, admission),
         },
         {
           provide: NationalCatalogImageService,
@@ -169,6 +181,7 @@ export class NationalCatalogModule {
             NationalCatalogRequestCoordinator,
             ObjectStorageService,
             ProductsService,
+            EntitlementAdmissionService,
           ],
           useFactory: (
             repository: NationalCatalogImportRepository,
@@ -176,6 +189,7 @@ export class NationalCatalogModule {
             coordinator: NationalCatalogRequestCoordinator,
             storage: ObjectStorageService,
             products: ProductsService,
+            admission: EntitlementAdmissionService,
           ) =>
             new NationalCatalogImageService(
               repository,
@@ -184,6 +198,8 @@ export class NationalCatalogModule {
               storage,
               products,
               photos,
+              undefined,
+              admission,
             ),
         },
         {
@@ -194,6 +210,7 @@ export class NationalCatalogModule {
             EntitlementsService,
             NationalCatalogClient,
             NationalCatalogRequestCoordinator,
+            EntitlementAdmissionService,
           ],
           useFactory: (
             db: ConstructorParameters<typeof NationalCatalogLinkRefreshService>[0],
@@ -201,6 +218,7 @@ export class NationalCatalogModule {
             entitlements: EntitlementsService,
             client: NationalCatalogClient,
             coordinator: NationalCatalogRequestCoordinator,
+            admission: EntitlementAdmissionService,
           ) =>
             new NationalCatalogLinkRefreshService(
               db,
@@ -209,6 +227,8 @@ export class NationalCatalogModule {
               client,
               coordinator,
               { enabled: isCatalogBaseUrlConfigured(env.NATIONAL_CATALOG_BASE_URL), photos },
+              undefined,
+              admission,
             ),
         },
         {
@@ -255,9 +275,11 @@ export class NationalCatalogModule {
         },
         {
           provide: NationalCatalogProposalService,
-          inject: [DB],
-          useFactory: (db: ConstructorParameters<typeof NationalCatalogProposalService>[0]) =>
-            new NationalCatalogProposalService(db),
+          inject: [DB, EntitlementAdmissionService],
+          useFactory: (
+            db: ConstructorParameters<typeof NationalCatalogProposalService>[0],
+            admission: EntitlementAdmissionService,
+          ) => new NationalCatalogProposalService(db, undefined, admission),
         },
         nationalCatalogProductsRepositoryProvider,
         nationalCatalogSchemaRepositoryProvider,
@@ -277,13 +299,23 @@ export class NationalCatalogModule {
             NationalCatalogClient,
             ChzTokenService,
             NATIONAL_CATALOG_BASE_URL,
+            EntitlementAdmissionService,
           ],
           useFactory: (
             repository: ConstructorParameters<typeof NationalCatalogProductsService>[0],
             client: NationalCatalogClient,
             tokens: ChzTokenService,
             baseUrl: string | undefined,
-          ) => new NationalCatalogProductsService(repository, client, tokens, baseUrl),
+            admission: EntitlementAdmissionService,
+          ) =>
+            new NationalCatalogProductsService(
+              repository,
+              client,
+              tokens,
+              baseUrl,
+              undefined,
+              admission,
+            ),
         },
         {
           provide: NationalCatalogSchemaService,

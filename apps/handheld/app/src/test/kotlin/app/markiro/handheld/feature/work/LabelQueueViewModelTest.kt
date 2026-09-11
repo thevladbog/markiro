@@ -77,7 +77,13 @@ class LabelQueueViewModelTest {
     }
 
     @After
-    fun tearDown() = db.close()
+    fun tearDown() {
+        try {
+            main.cancelAndJoinModels()
+        } finally {
+            db.close()
+        }
+    }
 
     private suspend fun box(id: String, sscc: String, state: String, shiftId: String = "s1") = db.boxDao().insert(
         BoxEntity(

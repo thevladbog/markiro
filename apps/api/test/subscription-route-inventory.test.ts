@@ -53,6 +53,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   {
     contract: customerContract(CABINET_GUARDS, { mode: "read_only_allowed", reason: "read" }),
     routes: [
+      "GET /access/entitlements (AccessController.entitlementSnapshot)",
       "GET /national-catalog/capabilities (NationalCatalogImportController.capabilitiesRead)",
       "GET /national-catalog/import-sessions/:sessionId (NationalCatalogImportController.read)",
       "GET /national-catalog/import-sessions/:sessionId/preparations/:preparationId (NationalCatalogImportController.preparation)",
@@ -618,6 +619,12 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   ),
   "PlatformTeamController.suspend": platform(
     "platform account lifecycle uses the isolated platform principal and capability policy",
+  ),
+  "PlatformEntitlementsController.preview": platform(
+    "source preview uses the isolated platform principal and both entitlement write capabilities",
+  ),
+  "PlatformEntitlementsController.confirm": platform(
+    "source confirmation uses the isolated platform principal and both entitlement write capabilities",
   ),
   "PlatformTenantsController.assignAddon": platform(
     "subscription lifecycle is administered by the isolated platform trust domain",

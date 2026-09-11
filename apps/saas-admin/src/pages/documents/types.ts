@@ -1,5 +1,5 @@
 import type {
-  CatalogVersionV2 as CatalogVersion,
+  CatalogVersionV3 as CatalogVersion,
   CommercialLineTerms,
   CreateInvoiceV2 as SharedCreateInvoiceInput,
   CreateOfferV2 as SharedCreateOfferInput,

@@ -10,7 +10,7 @@ import {
   PlatformApiProtectedCreated,
   PlatformApiProtectedOk,
 } from "../../platform-http/platform-openapi";
-import { commercialBody, isCommercialV2 } from "../../platform-http/commercial-version";
+import { commercialBody, commercialVersion } from "../../platform-http/commercial-version";
 import { parsePlatformResponse } from "../../platform-http/platform-response";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -103,11 +103,12 @@ export class PlatformBillingRequestsController {
         req.platformPrincipal!,
         id,
         commercialBody(
-          isCommercialV2(req)
+          commercialVersion(req) >= 2
             ? platformCommercialV2Contracts.billingRequests.createOffer.body
             : platformCommercialContracts.billingRequests.createOffer.body,
           body,
         ),
+        commercialVersion(req),
       ),
     );
   }

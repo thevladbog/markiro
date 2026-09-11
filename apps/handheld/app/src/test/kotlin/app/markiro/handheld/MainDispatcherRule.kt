@@ -4,10 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.job
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.rules.TestWatcher
 import org.junit.runner.Description
@@ -21,8 +23,9 @@ import org.junit.runner.Description
  * to hold the dispatcher at that moment — never the one that leaked. Pass every model through
  * [track] so its scope dies with the test that made it.
  *
- * Cancelling happens before `resetMain`, which is why tracking lives in this rule rather than a
- * second `@Rule`: JUnit does not order independent rules.
+ * Cancellation must finish before `resetMain`: Room collectors can still return from a worker and
+ * dispatch cleanup to Main after cancellation is requested. Tracking and joining live in this rule
+ * rather than a second `@Rule`, because JUnit does not order independent rules.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class MainDispatcherRule(val dispatcher: TestDispatcher = StandardTestDispatcher()) : TestWatcher() {
@@ -33,9 +36,25 @@ class MainDispatcherRule(val dispatcher: TestDispatcher = StandardTestDispatcher
 
     override fun starting(description: Description) = Dispatchers.setMain(dispatcher)
 
+    /** Call from `@After` before closing Room or other dependencies used by a tracked model. */
+    fun cancelAndJoinModels() {
+        if (models.isEmpty()) return
+        try {
+            runTest(dispatcher) {
+                val jobs = models.map { it.viewModelScope.coroutineContext.job }
+                jobs.forEach { it.cancel() }
+                jobs.joinAll()
+            }
+        } finally {
+            models.clear()
+        }
+    }
+
     override fun finished(description: Description) {
-        models.forEach { it.viewModelScope.cancel() }
-        models.clear()
-        Dispatchers.resetMain()
+        try {
+            cancelAndJoinModels()
+        } finally {
+            Dispatchers.resetMain()
+        }
     }
 }

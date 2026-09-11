@@ -243,6 +243,7 @@ export function TenantPage() {
           <SubscriptionPanel
             detail={detail}
             canDirectAssign={canDirectAssign}
+            capabilities={principal.capabilities}
             financialVisible={financialVisible}
             accountant={principal.role === "accountant"}
           />

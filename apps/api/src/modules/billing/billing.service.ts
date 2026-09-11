@@ -1,3 +1,5 @@
+import { assertCatalogCommercialCompatibility } from "../../platform-http/commercial-catalog-compatibility";
+import type { CommercialVersion } from "../../platform-http/commercial-version";
 import { assertCommercialMoneyRange } from "./commercial-money-range";
 import { randomUUID } from "node:crypto";
 import {
@@ -70,6 +72,7 @@ export class BillingService {
   async create(
     principal: PlatformPrincipal,
     input: CreateInvoiceDto,
+    commercialVersion: CommercialVersion = 2,
   ): Promise<InvoiceCreateServiceResultSource> {
     const normalizedInput = platformCommercialV2Contracts.invoices.create.body.parse(input);
     return this.db.transaction(async (tx) => {
@@ -153,6 +156,16 @@ export class BillingService {
         ? sourceOfferInvoiceLines(sourceLines, normalizedInput.lines)
         : normalizedInput.lines;
       assertCommercialPlanSequence(invoiceLines);
+      // sourceOfferInvoiceLines validates an exact copy of immutable sold terms.
+      // A source request alone still uses caller-selected lines and must be checked.
+      if (!sourceLines)
+        for (const line of invoiceLines)
+          if (line.catalogVersionId)
+            await assertCatalogCommercialCompatibility(
+              tx,
+              line.catalogVersionId,
+              commercialVersion,
+            );
       const sourceAmounts =
         sourceOfferId && sourceLines
           ? await sourceOfferAmounts(tx, normalizedInput.tenantId, sourceOfferId, sourceLines)

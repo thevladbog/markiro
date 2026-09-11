@@ -434,4 +434,50 @@ describe.skipIf(!ready)("EntitlementsService", () => {
       response: { code: "subscription_entitlements_invalid" },
     });
   });
+  it("projects only old feature keys while new-module and mixed addons contribute to V1", async () => {
+    const managed = await createManagedSubscription(db, { maxLines: 0, maxStations: null });
+    const onlyNew = await createPublishedAddon(db, [{ entitlementKey: "chzIntegration" }]);
+    const mixed = await createPublishedAddon(db, [
+      { entitlementKey: "inventory" },
+      { entitlementKey: "publicApi" },
+      { entitlementKey: "lines", increment: 1_500_000_000 },
+    ]);
+    await db.insert(schema.subscriptionAddons).values(
+      [onlyNew, mixed].map((addonVersionId) => ({
+        tenantId: managed.tenantId,
+        subscriptionId: managed.subscriptionId,
+        addonVersionId,
+        quantity: 2,
+        status: "active" as const,
+        source: "manual" as const,
+        startsAt: new Date(Date.now() - 1000),
+        endsAt: new Date(Date.now() + 60_000),
+      })),
+    );
+    const service = new EntitlementsService(db, "managed_only");
+    expect((await service.resolve(managed.tenantId)).features).toEqual({
+      labelEditor: false,
+      publicApi: true,
+      pallets: false,
+    });
+    expect(await service.accessSnapshot(managed.tenantId)).toEqual({
+      access: "managed",
+      status: "active",
+      startsAt: expect.any(String),
+      endsAt: expect.any(String),
+    });
+    const snapshot = await service.resolveSnapshot(managed.tenantId);
+    expect(snapshot.current.features).toEqual({
+      labelEditor: false,
+      publicApi: true,
+      pallets: false,
+    });
+    expect(snapshot.candidate.features).toMatchObject({ chzIntegration: true, inventory: true });
+    expect(snapshot.current.quotas.lines.limit).toBe(3_000_000_000);
+    expect(snapshot.candidate.quotas.lines.limit).toBe(3_000_000_000);
+    expect(snapshot.sources.find((source) => source.versionId === mixed)?.effects).toContainEqual({
+      key: "lines",
+      quotaIncrement: 3_000_000_000,
+    });
+  });
 });

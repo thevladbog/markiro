@@ -200,6 +200,10 @@ test("normal stable modes validate the exact beta at both origins before rebuild
   assert.ok(steps.indexOf(build) < steps.indexOf(signing));
   assert.match(
     build.run,
+    /pnpm turbo build --filter @markiro\/ui\.\.\.[\s\S]*pnpm --filter @markiro\/station exec vitest/,
+  );
+  assert.match(
+    build.run,
     /cargo test --manifest-path apps\/station\/src-tauri\/Cargo\.toml --no-run/,
   );
   assert.doesNotMatch(

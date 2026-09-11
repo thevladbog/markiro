@@ -258,13 +258,26 @@ not the display unit or quantity as a period multiplier. Invoice and direct acce
 application share lifecycle and sold-line ownership; repeated application cannot grant twice.
 Issued bytes and historical snapshots remain unchanged after catalog or seller edits.
 
-Updated platform clients negotiate `X-Markiro-Commercial-Version: 2`; legacy positive/null
+P0 platform clients negotiate `X-Markiro-Commercial-Version: 2`; legacy positive/null
 representations remain strict and truthful, and unrepresentable zero values fail with
 `client_update_required`. Review and issuance revalidate the current seller revision. Calculated
 invoice/offer amounts fail with `commercial_amount_out_of_range` before overflowing money columns.
 See the [rollout and recovery guide](operations/commercial-p0-rollout.md) for additive migration,
 client order, read-only impact reporting and rollback limits. This P0 does not enable P1 module
 or offline licensing enforcement and does not implement P2 recurring services.
+
+P1A adds an explicit Commercial V3 and a coherent entitlement snapshot with separate current and
+candidate conditions. New module mappings remain nullable on legacy versions. Prepared temporary
+and compatibility sources retain their operation-version scope, immutable proof and audit; they
+affect shadow calculations only. Terms and occupied-capacity revisions commit with their owning
+writes, and confirmation also binds time and policy identity. New V3 publication requires an
+approved lifecycle policy and four explicit plan module values. The customer projection excludes
+internal source metadata, while platform preparation requires both tenant and billing write
+capabilities. Tenant readiness/impact is a read-only current observation that does not assign or
+activate rights, migrate customers, or verify native clients. See the
+[P1A preparation and recovery guide](operations/entitlements-p1a.md) for
+version negotiation, preview recovery and migration order. Device allocation, offline grants and
+production activation remain P1B–P1D.
 
 Bank imports retain the bounded source row as reconciliation evidence, while the public match and
 audit contracts expose only the payer account's last four digits and whether it is a known active,

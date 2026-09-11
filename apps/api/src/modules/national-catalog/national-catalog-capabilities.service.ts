@@ -1,6 +1,10 @@
 import { schema, type Db } from "@markiro/db";
 import { and, eq } from "drizzle-orm";
-import { catalogCapabilitiesSchema, type CatalogCapabilities } from "@markiro/platform-contracts";
+import {
+  catalogCapabilitiesSchema,
+  type CatalogCapabilities,
+  type EntitlementSnapshotV1,
+} from "@markiro/platform-contracts";
 import type { Env } from "../../env";
 import { chzSignerSettingsSchema } from "../integrations/channel-registry";
 import { CHZ_TRUE_API_BASE_URLS } from "../signer-agents/chz-constants";
@@ -14,6 +18,42 @@ export class NationalCatalogCapabilitiesService {
     private readonly tokens: ChzTokenService,
     private readonly env: Env,
   ) {}
+  /** Separate stored observations: missing NK configuration does not negate CHZ connectivity. */
+  async observeEntitlementConnectivity(
+    tenantId: string,
+  ): Promise<EntitlementSnapshotV1["connectivity"]> {
+    const result: EntitlementSnapshotV1["connectivity"] = {
+      observedAt: new Date().toISOString(),
+      chz: "unknown",
+      nationalCatalog: "unknown",
+    };
+    try {
+      const [row] = await this.db
+        .select({ settings: schema.integrationChannels.settings })
+        .from(schema.integrationChannels)
+        .where(
+          and(
+            eq(schema.integrationChannels.tenantId, tenantId),
+            eq(schema.integrationChannels.type, "chestny_znak"),
+          ),
+        );
+      const settings = chzSignerSettingsSchema.safeParse(row?.settings);
+      result.chz =
+        settings.success &&
+        (await this.tokens.inspectCatalogToken(tenantId, settings.data.environment)) === "ok"
+          ? "ready"
+          : "not_ready";
+    } catch {
+      /* A failed observation remains unknown; no provider call or renewal. */
+    }
+    try {
+      result.nationalCatalog =
+        (await this.read(tenantId)).connection.state === "ready" ? "ready" : "not_ready";
+    } catch {
+      /* Preserve the independently observed CHZ state. */
+    }
+    return result;
+  }
   async read(tenantId: string): Promise<CatalogCapabilities> {
     const [row] = await this.db
       .select({ settings: schema.integrationChannels.settings })

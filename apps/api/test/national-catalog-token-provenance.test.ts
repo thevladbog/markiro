@@ -89,6 +89,16 @@ describe.skipIf(!process.env.DATABASE_URL)("National Catalog token provenance", 
       connection: { state: "ready", reason: null },
       unavailableReason: { images: "image_policy_unavailable" },
     });
+    expect(await service.observeEntitlementConnectivity(tenantId)).toMatchObject({
+      chz: "ready",
+      nationalCatalog: "ready",
+    });
+    env.NATIONAL_CATALOG_BASE_URL = "";
+    expect(await service.observeEntitlementConnectivity(tenantId)).toMatchObject({
+      chz: "ready",
+      nationalCatalog: "not_ready",
+    });
+    env.NATIONAL_CATALOG_BASE_URL = "https://api.nk.sandbox.crptech.ru";
     env.NATIONAL_CATALOG_OWN_IMPORT_ENABLED = false;
     expect(await service.read(tenantId)).toMatchObject({
       ownCatalog: false,
