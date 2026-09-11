@@ -2,10 +2,11 @@
 
 **Date:** 2026-09-11
 
-**Status:** Approved in brainstorming on 2026-09-11. Ships in two parts: the
-DataMatrix encoder first
-([plan](../plans/2026-09-11-handheld-datamatrix-encoder.md)), then the duplicate
-flow this document describes. See "Prerequisite" below for why.
+**Status:** Approved in brainstorming on 2026-09-11. Ships in two parts. The
+DataMatrix encoder came first
+([plan](../plans/2026-09-11-handheld-datamatrix-encoder.md)) and is done; the
+duplicate flow this document describes is next. See "Prerequisite" below for
+why it was split.
 
 **Scope:** Sixth implementation slice of design brief 10
 (`docs/design-briefs/10-tsd-handheld.md`), after the foundation
@@ -56,35 +57,40 @@ same protocol.
 | Full-screen states | Only `failed_before_send`, `delivery_unknown` and a rejected verification                                        | A duplicate prints on **every** unit, not every twentieth. A full-screen state per scan would be unusable                                                                     |
 | Unknown delivery   | Resolved by scanning the printed sticker, under either policy; a reprint is the fallback                         | The domain accepts `verified` from `delivery_unknown` even when verification is `none`, and that answers the operator's real question: did a label come out?                  |
 
-## Prerequisite: the device cannot draw a Data Matrix
+## Prerequisite: the Data Matrix encoder — done
 
-Found while planning, after this design was approved, and large enough to ship
-on its own.
+Found while planning, after this design was approved, and large enough that it
+shipped on its own. **This part is complete**; what follows records why it was
+needed and what it settled, because both shape the flow below.
 
-Both handheld emitters refuse every barcode format except `code128`
-(`ZplEmitter.kt:116`, `TsplEmitter.kt:126`). A box label needs no Data Matrix,
-so none was ported. A duplicate is nothing but a Data Matrix.
+Until then, both handheld emitters refused every barcode format except
+`code128` — a box label needs no Data Matrix, so none had been ported — while a
+duplicate is nothing but a Data Matrix. `core/barcode` now renders one for the
+`km.code` field, and both emitters carry the branch that sends it.
 
-The station prints it as a **raster** rather than a native printer command, and
-that is not incidental: TSPL's own `DMATRIX` has no way to carry the FNC1 flag,
-so a natively printed symbol would be a plain Data Matrix rather than a GS1 one
-— a wrong code on a product. ZPL's `^BXN` does carry FNC1, but a duplicate
+It is a **raster** rather than a native printer command, and that was not
+incidental: TSPL's own `DMATRIX` has no way to carry the FNC1 flag, so a
+natively printed symbol would be a plain Data Matrix rather than a GS1 one — a
+wrong code on a product. ZPL's `^BXN` does carry FNC1, but a duplicate
 template's `sizeMm` is the whole symbol square, and converting that to a module
-size requires knowing the symbol's dimensions, which requires encoding it. Both
-roads lead to the same place: the handheld needs a real ECC200 encoder.
+size requires knowing the symbol's dimensions, which requires encoding it
+anyway. Both roads led to the same place, which is why the station rasterizes
+too.
 
-The raster path itself is already there — `convertToMonochrome`,
-`bitmapToZplHex`, `buildGfaCommand`, `buildBitmapCommand`. Only "marking code →
-module grid" is missing. ZXing supplies the parts that are identical for every
-Data Matrix and easy to get subtly wrong (the symbol-size table, Reed–Solomon,
+The raster path was already there — `convertToMonochrome`, `bitmapToZplHex`,
+`buildGfaCommand`, `buildBitmapCommand` — so only "marking code → module grid"
+had to be built. ZXing supplies the parts that are identical for every Data
+Matrix and easy to get subtly wrong (the symbol-size table, Reed–Solomon,
 module placement); the GS1 codeword framing — FNC1 first, FNC1 for every AI
 separator — is ours, because no library provides it.
 
-That encoder is **not byte-pinned to `packages/domain`**, which encodes through
-bwip-js. Nothing ever compares one device's label bytes with another's: the
-server stores a digest of each device's own bytes, and verification compares the
-scanned payload. The contract is that the printed symbol decodes to the right
-GS1 payload, proved by decoding it.
+Two consequences the flow below inherits. For this element, and only this one, a
+template's `sizeMm` is the whole symbol square rather than a module width. And
+the encoder is **not byte-pinned to `packages/domain`**, which encodes through
+bwip-js: nothing ever compares one device's label bytes with another's, since
+the server stores a digest of each device's own bytes and verification compares
+the scanned payload. The contract is that the printed symbol decodes to the
+right GS1 payload, which its tests prove by decoding it.
 
 ## Why no server work
 
@@ -145,10 +151,19 @@ of the same product as a valid verification.
 
 ## What is reshaped for this device
 
-**No credential scoping.** `DeviceWipe.wipeAll()` clears every table when a
-device is revoked, so a job cannot outlive the credential that created it. The
-station's `credential_ownership` column, its `ownershipConflict` flag and every
-query predicate over them collapse to nothing here.
+**No credential scoping.** Revoking a device wipes its database, so a job cannot
+outlive the credential that created it. The station's `credential_ownership`
+column, its `ownershipConflict` flag and every query predicate over them
+collapse to nothing here.
+
+That argument is only as good as the wipe, and the wipe is **not** automatic:
+`DeviceWipe.wipeAll()` names one `clear()` per DAO, so a table nobody adds to
+that list survives revocation and re-pairing silently. Both new tables must join
+it, and a test must assert that a wipe leaves no job and no event behind —
+otherwise the honest design is the station's ownership predicates, not this one.
+The list already runs inside `db.withTransaction`, so adding to it stays
+all-or-nothing; a wipe interrupted partway leaves the previous state, and the
+next one starts over.
 
 **Two tables, not five.** The station keeps `product_label_accept_commands`,
 `product_label_jobs`, `product_label_attempts`, `product_label_events` and
@@ -233,8 +248,20 @@ routes every scan by the open job's status before anything else looks at it.
 ## Recovery, reprint, retention
 
 **A job caught in `sending`** when the app died becomes `delivery_unknown` with
-`interrupted` at startup. Same rule and same reason as a box label mid-print:
-resuming is an automatic resend.
+`interrupted` at startup, and the device **never** picks the send back up. The
+same rule and the same reason as a box label caught mid-print: resuming would
+be an automatic resend, and a second sticker for a unit the server has already
+accepted is exactly what nobody can untangle afterwards.
+
+The device is obliged to emit that event rather than merely leaving the row
+alone. The domain accepts only `sent` or `delivery_unknown` out of `sending`, so
+a job left in `sending` across a restart would be frozen: no reprint (a settled
+attempt is required), no verification, nothing.
+
+From `delivery_unknown` there is exactly one recovery, and it is the same one
+the routing table and the screens describe: the operator looks at the printer
+and scans the sticker if it came out, which the domain accepts as `verified`
+under either policy. A reprint is the fallback for when nothing came out.
 
 **A reprint carries a reason** — `not_printed`, `damaged` or `lost` — and the
 contract requires it: only `attemptNo == 1` may have a null reason. The cabinet
@@ -312,6 +339,10 @@ server validates the same events.
 - **A quarantined receipt** does not read as a delivery.
 - **Shift close drops the bytes but keeps an unacknowledged job**, and the job's
   events still reach the server afterwards.
+- **A revoked device keeps no job and no event.** This is what the whole "no
+  credential scoping" decision rests on, so it is asserted directly against
+  `DeviceWipe.wipeAll()` rather than assumed, including a wipe with an
+  unresolved job and unsent events, followed by a re-pair.
 - **Migration v5 → v6** driven directly over a seeded database, not through
   Room, which would build the schema from the entities and never run it.
 - Robolectric over the screens in both languages.

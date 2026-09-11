@@ -241,7 +241,7 @@ Turns the codeword stream into a finished module grid: ZXing picks the symbol si
 In `gradle/libs.versions.toml`, add to `[versions]` after the `securityCrypto = "1.1.0"` line:
 
 ```toml
-zxing = "3.5.3"
+zxing = "3.5.4"
 ```
 
 and to `[libraries]` after the `androidx-security-crypto = ...` line:
