@@ -3,7 +3,11 @@ import { resolve } from "node:path";
 import { and, eq, inArray, like, or } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createDb, schema } from "@markiro/db";
-import { buildDuplicateLabelTemplate } from "@markiro/domain";
+import {
+  buildDuplicateLabelTemplate,
+  buildPalletLabelTemplates,
+  PALLET_LABEL_TEMPLATE_NAME,
+} from "@markiro/domain";
 import { MailCryptoService } from "../src/modules/mail/mail-crypto.service";
 import { MailDeliveryService } from "../src/modules/mail/mail-delivery.service";
 import { activationIdentifier } from "../src/modules/tenant-owner-activation/token";
@@ -330,7 +334,15 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .select({ id: schema.labelTemplates.id })
       .from(schema.labelTemplates)
       .where(eq(schema.labelTemplates.tenantId, result.tenantId));
-    expect(after).toHaveLength(18);
+    // 16 box + 2 product_duplicate + 1 pallet (slice 06d).
+    expect(after).toHaveLength(19);
+    const pallets = templates.filter((t) => t.purpose === "pallet");
+    expect(pallets).toEqual([
+      expect.objectContaining({
+        name: PALLET_LABEL_TEMPLATE_NAME,
+        spec: buildPalletLabelTemplates()[0]!.spec,
+      }),
+    ]);
     const duplicates = templates.filter((t) => t.purpose === "product_duplicate");
     expect(duplicates).toHaveLength(2);
     expect(duplicates).toEqual(

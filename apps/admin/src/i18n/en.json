@@ -2001,6 +2001,7 @@
           "date": "Date",
           "expiry": "Best before",
           "qty": "Quantity",
+          "qty.boxes": "Boxes per pallet",
           "operator": "Operator",
           "counterparty.name": "Counterparty"
         },

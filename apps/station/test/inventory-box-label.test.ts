@@ -69,6 +69,8 @@ describe("inventory box label", () => {
       date: "19.08.2026",
       expiry: "18.02.2027",
       qty: "6",
+      // A box holds units, not boxes.
+      "qty.boxes": "",
       operator: "",
       "counterparty.name": "",
     });
