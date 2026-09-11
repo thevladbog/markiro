@@ -1,6 +1,7 @@
 package app.markiro.handheld.core.network
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 @Serializable
 data class ValidationPrintDto(val mode: String)
@@ -9,11 +10,43 @@ data class ValidationPrintDto(val mode: String)
 data class StationCloseAccessDto(val kind: String, val ownerDeviceId: String? = null)
 
 @Serializable
-data class BundleProductDto(val id: String, val gtin14: String, val name: String, val printName: String? = null)
+data class BundleProductDto(
+    val id: String,
+    val gtin14: String,
+    val name: String,
+    val printName: String? = null,
+    val shelfLifeDays: Int? = null,
+    val egaisCode: String? = null,
+)
 
-/** `GET /shifts/:id/bundle`; label templates and SSCC blocks are ignored in this slice. */
+/**
+ * The box serial block this device may print from. `fromSerial`/`toSerial` are
+ * always the block's ORIGINAL bounds, even on a repeat fetch of one already
+ * held, and `consumedThroughSerial` is the server's own cursor into it.
+ */
 @Serializable
-data class ShiftBundleDto(val shift: ShiftDto, val product: BundleProductDto, val operators: List<OperatorDto> = emptyList())
+data class BundleSsccDto(
+    val issuerPrefix: String,
+    val extensionDigit: Int,
+    val fromSerial: Long,
+    val toSerial: Long,
+    val consumedThroughSerial: Long? = null,
+)
+
+@Serializable
+data class BundleBoxTemplateDto(val id: String, val name: String, val spec: JsonElement)
+
+/** `GET /shifts/:id/bundle`. */
+@Serializable
+data class ShiftBundleDto(
+    val shift: ShiftDto,
+    val product: BundleProductDto,
+    val operators: List<OperatorDto> = emptyList(),
+    val boxLabelTemplate: BundleBoxTemplateDto? = null,
+    val sscc: BundleSsccDto? = null,
+    /** `fromSerial` of every block an admin has revoked since it was granted. */
+    val ssccRevokedFrom: List<Long> = emptyList(),
+)
 
 @Serializable
 data class ShiftOutputDto(

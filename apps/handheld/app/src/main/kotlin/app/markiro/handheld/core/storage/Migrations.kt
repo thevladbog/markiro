@@ -114,3 +114,26 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
         )
     }
 }
+
+/** Aggregation: boxes, the device's own SSCC ranges, and the columns both need. */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `boxes` (`boxId` TEXT NOT NULL, `shiftId` TEXT NOT NULL, `sscc` TEXT, " +
+                "`openedAt` TEXT NOT NULL, `closedAt` TEXT, `operatorId` TEXT, `printState` TEXT NOT NULL, " +
+                "`printReason` TEXT, `ackedAt` TEXT, PRIMARY KEY(`boxId`))",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_boxes_shiftId_closedAt` ON `boxes` (`shiftId`, `closedAt`)")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `sscc_pool` (`issuerPrefix` TEXT NOT NULL, `extensionDigit` INTEGER NOT NULL, " +
+                "`fromSerial` INTEGER NOT NULL, `toSerial` INTEGER NOT NULL, `nextSerial` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`issuerPrefix`, `extensionDigit`, `fromSerial`))",
+        )
+        db.execSQL("ALTER TABLE `codes_mirror` ADD COLUMN `boxId` TEXT")
+        db.execSQL("ALTER TABLE `outbox` ADD COLUMN `boxId` TEXT")
+        db.execSQL("ALTER TABLE `shift_mirror` ADD COLUMN `boxLabelTemplate` TEXT")
+        db.execSQL("ALTER TABLE `shift_mirror` ADD COLUMN `shelfLifeDays` INTEGER")
+        db.execSQL("ALTER TABLE `shift_mirror` ADD COLUMN `egaisCode` TEXT")
+        db.execSQL("ALTER TABLE `shift_mirror` ADD COLUMN `ssccIssuerPrefix` TEXT")
+    }
+}

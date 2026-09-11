@@ -1,7 +1,9 @@
 package app.markiro.handheld.feature.hub
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -40,7 +42,7 @@ import app.markiro.handheld.core.design.Tone
 import app.markiro.handheld.core.util.TimeText
 
 @Composable
-fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit) {
+fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, onLabelQueue: () -> Unit = {}) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
@@ -65,6 +67,17 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit) {
                 stringResource(R.string.hub_offline_banner)
             }
             Banner(text, Tone.Warn, Icons.Outlined.WifiOff)
+        }
+        // Labels owed on boxes already closed and reported. Shown on the hub
+        // because the queue belongs to the device, not to any one shift.
+        if (state.unprintedLabels > 0) {
+            Box(Modifier.fillMaxWidth().clickable(onClick = onLabelQueue)) {
+                Banner(
+                    pluralStringResource(R.plurals.work_labels_unprinted, state.unprintedLabels, state.unprintedLabels),
+                    Tone.Warn,
+                    Icons.Outlined.Print,
+                )
+            }
         }
         Column(Modifier.padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
             Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {

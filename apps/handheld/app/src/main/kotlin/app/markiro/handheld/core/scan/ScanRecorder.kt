@@ -32,17 +32,28 @@ data class ScanOutcome(
 class ScanRecorder(private val db: HandheldDatabase, private val clock: () -> Long = System::currentTimeMillis) {
     private val mutex = Mutex()
 
-    suspend fun record(shift: ShiftEntity, raw: String, operatorId: String?): ScanOutcome = mutex.withLock {
+    /**
+     * `boxId` names the transport box this scan belongs to, or null outside an
+     * aggregation shift. It reaches the code row and the outbox row only on an
+     * ACCEPTED scan: a box counts what it actually holds, and the server rejects
+     * a `boxId` without an accepted code.
+     */
+    suspend fun record(
+        shift: ShiftEntity,
+        raw: String,
+        operatorId: String?,
+        boxId: String? = null,
+    ): ScanOutcome = mutex.withLock {
         val expectedGtin = checkNotNull(shift.productGtin14) { "shift ${shift.id} has no bundle" }
         val scannedAt = Iso.format(clock())
         db.withTransaction {
             when (val c = ShiftValidator.classify(raw, expectedGtin)) {
                 is Classification.Invalid -> {
-                    write(shift.id, raw, Verdict.INVALID, scannedAt, operatorId, null, null)
+                    write(shift.id, raw, Verdict.INVALID, scannedAt, operatorId, null, null, null)
                     ScanOutcome(Verdict.INVALID, null, null, null, scannedAt)
                 }
                 is Classification.WrongGtin -> {
-                    write(shift.id, raw, Verdict.WRONG_GTIN, scannedAt, operatorId, null, null)
+                    write(shift.id, raw, Verdict.WRONG_GTIN, scannedAt, operatorId, null, null, null)
                     ScanOutcome(Verdict.WRONG_GTIN, c.km, null, null, scannedAt)
                 }
                 is Classification.Km -> {
@@ -54,14 +65,17 @@ class ScanRecorder(private val db: HandheldDatabase, private val clock: () -> Lo
                         firstSeen = existing.scannedAt
                     } else {
                         try {
-                            db.codeDao().insert(CodeEntity(c.hash, shift.id, c.km.gtin14, c.km.serial, scannedAt))
+                            db.codeDao().insert(CodeEntity(c.hash, shift.id, c.km.gtin14, c.km.serial, scannedAt, boxId))
                         } catch (_: SQLiteConstraintException) {
                             verdict = Verdict.DUPLICATE
                             firstSeen = db.codeDao().get(c.hash)?.scannedAt
                         }
                     }
                     val accepted = verdict == Verdict.OK
-                    write(shift.id, raw, verdict, scannedAt, operatorId, if (accepted) c.km else null, if (accepted) c.hash else null)
+                    write(
+                        shift.id, raw, verdict, scannedAt, operatorId,
+                        if (accepted) c.km else null, if (accepted) c.hash else null, if (accepted) boxId else null,
+                    )
                     ScanOutcome(verdict, c.km, c.hash, firstSeen, scannedAt)
                 }
             }
@@ -76,6 +90,7 @@ class ScanRecorder(private val db: HandheldDatabase, private val clock: () -> Lo
         operatorId: String?,
         km: ParsedKm?,
         hash: String?,
+        boxId: String?,
     ) {
         db.scanEventDao().insert(
             ScanEventEntity(shiftId = shiftId, raw = raw, verdict = verdict.wire, scannedAt = scannedAt, operatorId = operatorId, codeHash = hash),
@@ -90,6 +105,7 @@ class ScanRecorder(private val db: HandheldDatabase, private val clock: () -> Lo
                 codeHash = hash,
                 gtin14 = km?.gtin14,
                 serial = km?.serial,
+                boxId = boxId,
             ),
         )
     }

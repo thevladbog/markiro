@@ -5,7 +5,11 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class ScanCodeDto(val codeHash: String, val gtin14: String, val serial: String)
 
-/** One `POST /station/scans` item; `code` present iff `verdict == "ok"`, `boxId` always null here. */
+/**
+ * One `POST /station/scans` item; `code` is present iff `verdict == "ok"`, and
+ * `boxId` only ever accompanies an accepted code — the server rejects the batch
+ * otherwise.
+ */
 @Serializable
 data class ScanItemDto(
     val shiftId: String,
@@ -18,8 +22,33 @@ data class ScanItemDto(
     val boxId: String? = null,
 )
 
+/**
+ * A box closure, scoped with shift and terminal because a device-local box id
+ * is not globally unique.
+ *
+ * `printVerifiedAt` and `printSkippedAt` are always null: print verification is
+ * the station's scan-the-label-back reconciliation and this device does not do
+ * it. Nothing else in this payload can change after the box closes, which is
+ * why acknowledgement here is unconditional — see `SyncEngine`.
+ */
 @Serializable
-data class SyncBatchRequest(val batchId: String, val items: List<ScanItemDto>)
+data class BoxClosureDto(
+    val boxId: String,
+    val shiftId: String,
+    val terminalId: String?,
+    val sscc: String,
+    val closedAt: String,
+    val operatorId: String?,
+    val printVerifiedAt: String? = null,
+    val printSkippedAt: String? = null,
+)
+
+@Serializable
+data class SyncBatchRequest(
+    val batchId: String,
+    val items: List<ScanItemDto>,
+    val boxes: List<BoxClosureDto> = emptyList(),
+)
 
 @Serializable
 data class BatchConflictDto(val codeHash: String, val winningTerminalId: String? = null, val winningScannedAt: String? = null)

@@ -32,6 +32,12 @@ data class ShiftEntity(
     val bundleFetchedAt: Long? = null,
     val enteredAt: Long? = null,
     val leftAt: Long? = null,
+    /** The box label template's spec as the bundle delivered it, kept so a deferred label survives shift close. */
+    val boxLabelTemplate: String? = null,
+    val shelfLifeDays: Int? = null,
+    val egaisCode: String? = null,
+    /** The 9-digit issuer prefix this shift's SSCC block was cut from. */
+    val ssccIssuerPrefix: String? = null,
 )
 
 /** Accepted codes on this device, keyed by the KM hash device-wide (a code is one physical item). */
@@ -42,6 +48,8 @@ data class CodeEntity(
     val gtin14: String,
     val serial: String,
     val scannedAt: String,
+    /** The transport box this code was scanned into, or null for an unboxed scan. */
+    val boxId: String? = null,
 )
 
 /** Every scan with its final verdict; feeds the recent list and the counters. */
@@ -68,6 +76,8 @@ data class OutboxEntity(
     val codeHash: String?,
     val gtin14: String?,
     val serial: String?,
+    /** Threaded into `items[].boxId`; the server rejects one without an accepted code. */
+    val boxId: String? = null,
 )
 
 @Entity(tableName = "conflicts_mirror")

@@ -23,12 +23,16 @@ import app.markiro.handheld.core.print.PrinterEntity
         InventoryResultEntity::class,
         InventoryOutboxEntity::class,
         PrinterEntity::class,
+        BoxEntity::class,
+        SsccRangeEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class HandheldDatabase : RoomDatabase() {
     abstract fun printerDao(): PrinterDao
+    abstract fun boxDao(): BoxDao
+    abstract fun ssccPoolDao(): SsccPoolDao
 
     abstract fun inventoryTaskDao(): InventoryTaskDao
     abstract fun inventorySnapshotCodeDao(): InventorySnapshotCodeDao

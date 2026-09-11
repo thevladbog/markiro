@@ -3,6 +3,8 @@ package app.markiro.handheld.feature.shift
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.markiro.handheld.core.box.ServerRange
+import app.markiro.handheld.core.box.SsccPool
 import app.markiro.handheld.core.network.NetworkModule
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.storage.DeviceConfigEntity
@@ -41,6 +43,19 @@ class ShiftRepositoryTest {
         "labelTemplate":null,"boxLabelTemplate":null,"counterpartyGln":null,"sscc":null,"ssccRevokedFrom":[],
         "operators":[{"operatorId":"op-1","name":"Иванова Анна","login":"4127","role":"operator","pinHash":"x","badgeHash":null,"active":true}]}"""
 
+    private val aggregationShiftJson = activeShiftJson
+        .replace("\"mode\":\"validation\"", "\"mode\":\"aggregation\"")
+        .replace("\"boxCapacity\":null", "\"boxCapacity\":20")
+
+    /** An aggregation shift as the server sends it: a box template and a serial block. */
+    private val aggregationBundleJson = """{"shift":$aggregationShiftJson,
+        "product":{"id":"p1","gtin14":"04600682000013","name":"Вода 0,5","printName":"Вода","shelfLifeDays":365,"egaisCode":null},
+        "labelTemplate":null,
+        "boxLabelTemplate":{"id":"t1","name":"Коробка 58×40","spec":{"widthMm":58,"heightMm":40,"dpi":203,"language":"zpl","elements":[]}},
+        "counterpartyGln":null,
+        "sscc":{"issuerPrefix":"468008990","extensionDigit":0,"fromSerial":1,"toSerial":1000,"consumedThroughSerial":100},
+        "ssccRevokedFrom":[1],"operators":[]}"""
+
     @Before
     fun setUp() = runTest {
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java)
@@ -65,7 +80,7 @@ class ShiftRepositoryTest {
         db.close()
     }
 
-    private fun repo() = ShiftRepository(api, db, NetworkModule.json()) { clock }
+    private fun repo() = ShiftRepository(api, db, NetworkModule.json(), SsccPool(db)) { clock }
 
     @Test
     fun refreshStoresTheListAndDropsVanishedListOnlyRows() = runTest {
@@ -82,7 +97,7 @@ class ShiftRepositoryTest {
     fun enterRecordsParticipationStoresTheBundleAndActiveShiftButLeavesTheRosterAlone() = runTest {
         server.enqueue(MockResponse().setBody(activeShiftJson))
         server.enqueue(MockResponse().setBody(bundleJson))
-        assertEquals(EnterResult.Ok, repo().enter("s1", null))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
         assertEquals("/shifts/s1/enter", server.takeRequest().path)
         assertEquals("/shifts/s1/bundle", server.takeRequest().path)
         val shift = db.shiftDao().get("s1")
@@ -105,24 +120,67 @@ class ShiftRepositoryTest {
     @Test
     fun updateRequiredAndClosedAreDistinguished() = runTest {
         server.enqueue(MockResponse().setResponseCode(409).setBody("""{"code":"STATION_UPDATE_REQUIRED","message":"x"}"""))
-        assertEquals(EnterResult.UpdateRequired, repo().enter("s1", null))
+        assertEquals(EnterResult.UpdateRequired, repo().enter("s1"))
         server.enqueue(MockResponse().setResponseCode(409).setBody("""{"message":"Closed shifts cannot be entered"}"""))
-        assertEquals(EnterResult.Closed, repo().enter("s1", null))
+        assertEquals(EnterResult.Closed, repo().enter("s1"))
     }
 
     @Test
     fun offlineEntryWorksOnlyWithABundle() = runTest {
         server.shutdown()
-        assertEquals(EnterResult.Unavailable, repo().enter("s1", null))
+        assertEquals(EnterResult.Unavailable, repo().enter("s1"))
         db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1").copy(leftAt = 5L))
-        assertEquals(EnterResult.Ok, repo().enter("s1", null))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
         assertNull(db.shiftDao().get("s1")?.leftAt)
         assertEquals("s1", db.deviceConfigDao().get()?.activeShiftId)
     }
 
     @Test
-    fun aggregationShiftsAreRefused() = runTest {
-        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s2").copy(mode = "aggregation"))
-        assertEquals(EnterResult.AggregationUnsupported, repo().enter("s2", null))
+    fun enteringAnAggregationShiftStoresItsBlockAndTemplate() = runTest {
+        server.enqueue(MockResponse().setBody(aggregationShiftJson))
+        server.enqueue(MockResponse().setBody(aggregationBundleJson))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+        val shift = db.shiftDao().get("s1")!!
+        assertEquals("468008990", shift.ssccIssuerPrefix)
+        assertEquals(365, shift.shelfLifeDays)
+        assertTrue(shift.boxLabelTemplate!!.contains("\"widthMm\""))
+        // The block lands at its ORIGINAL bounds, advanced past what the server
+        // already recorded as consumed.
+        assertEquals(101L, SsccPool(db).burn("468008990", 0))
+    }
+
+    @Test
+    fun aRevokedBlockIsDroppedBeforeTheReplacementIsApplied() = runTest {
+        val pool = SsccPool(db)
+        pool.addRange(ServerRange("468008990", 0, 1, 50, null))
+        server.enqueue(MockResponse().setBody(aggregationShiftJson))
+        server.enqueue(MockResponse().setBody(aggregationBundleJson))
+        repo().enter("s1")
+        // Burning picks the lowest fromSerial with room, so a revoked range left
+        // in place would keep winning over the block the admin just cut.
+        assertEquals(101L, pool.burn("468008990", 0))
+    }
+
+    @Test
+    fun refreshingTheListKeepsWhatOnlyTheBundleCarries() = runTest {
+        // The list has no SSCC issuer and no box template. Rebuilding the row from
+        // it silently stripped both off a shift already entered, and boxes stopped
+        // closing with nothing on screen connecting that to a list refresh.
+        server.enqueue(MockResponse().setBody(aggregationShiftJson))
+        server.enqueue(MockResponse().setBody(aggregationBundleJson))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+
+        server.enqueue(MockResponse().setBody("""{"items":[$aggregationShiftJson]}"""))
+        assertTrue(repo().refreshList())
+
+        val shift = db.shiftDao().get("s1")!!
+        assertEquals("468008990", shift.ssccIssuerPrefix)
+        assertEquals(365, shift.shelfLifeDays)
+        assertNotNull(shift.boxLabelTemplate)
+        assertEquals("04600682000013", shift.productGtin14)
+        // The bundle resolves these from the product and the list never carries a
+        // print name, so a refresh must not replace what gets printed.
+        assertEquals("Вода 0,5", shift.productName)
+        assertEquals("Вода", shift.productPrintName)
     }
 }
