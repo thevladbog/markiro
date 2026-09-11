@@ -29,6 +29,7 @@ sealed interface ShiftDialog {
     data object UpdateRequired : ShiftDialog
     data object Closed : ShiftDialog
     data object Unavailable : ShiftDialog
+    data class Refused(val step: EnterStep, val status: Int, val code: String?) : ShiftDialog
 }
 
 data class ShiftListUi(
@@ -160,7 +161,7 @@ class ShiftListViewModel(
     private fun enter(shiftId: String, fallback: ShiftDto?) {
         viewModelScope.launch {
             dialog.value = ShiftDialog.Entering
-            when (repository.enter(shiftId)) {
+            when (val result = repository.enter(shiftId)) {
                 EnterResult.Ok -> {
                     dialog.value = null
                     _events.emit(ShiftListEvent.Entered(shiftId))
@@ -171,6 +172,11 @@ class ShiftListViewModel(
                     repository.refreshList()
                 }
                 EnterResult.Unavailable -> dialog.value = ShiftDialog.Unavailable
+                // Also refreshed: a 404 can simply mean the cached list is behind.
+                is EnterResult.Refused -> {
+                    dialog.value = ShiftDialog.Refused(result.step, result.status, result.code)
+                    repository.refreshList()
+                }
             }
         }
     }

@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,6 +37,7 @@ import app.markiro.handheld.core.design.Banner
 import app.markiro.handheld.core.design.IconAction
 import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.design.MarkiroTheme
+import app.markiro.handheld.core.design.ScreenColumn
 import app.markiro.handheld.core.design.StatusItem
 import app.markiro.handheld.core.design.StatusStrip
 import app.markiro.handheld.core.design.Tile
@@ -79,7 +82,7 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                 )
             }
         }
-        Column(Modifier.padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
+        ScreenColumn(padding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
             Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(state.organization, style = t.caption, color = c.fg3)
@@ -114,8 +117,11 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                     statusTone = if (state.continueInventoryNumber != null) Tone.Ok else Tone.Neutral,
                 )
             }
+            // Three tiles, not four: «Проверка кода» promised a trigger-press check
+            // that does not exist yet, and a tile that only ever answers «в
+            // следующем срезе» is worse than no tile. The spacer keeps the
+            // remaining tile the same size as the two above it.
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-                Tile(Icons.Outlined.QrCodeScanner, stringResource(R.string.hub_tile_check), stringResource(R.string.hub_check_status), { onTile(HubTile.CHECK) }, tile)
                 Tile(
                     Icons.Outlined.Settings,
                     stringResource(R.string.hub_tile_settings),
@@ -124,6 +130,7 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                     tile,
                     statusTone = if (state.printerConfigured) Tone.Neutral else Tone.Warn,
                 )
+                Spacer(Modifier.weight(1f))
             }
         }
     }
