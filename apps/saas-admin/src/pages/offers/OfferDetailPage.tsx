@@ -3,7 +3,7 @@ import { Alert, Button, SectionHeader, Spinner, StatusChip, Table } from "@marki
 import {
   platformUuidSchema,
   type OfferPreview as Preview,
-  type OfferWorkspace,
+  type OfferWorkspaceV2 as OfferWorkspace,
 } from "@markiro/platform-contracts";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -119,7 +119,17 @@ function OfferDetail({ offerId }: { offerId: string }) {
                   wrap: true,
                   render: (line) => (
                     <div className="offer-cell">
-                      <strong>{i18n.language.startsWith("ru") ? line.nameRu : line.nameEn}</strong>
+                      <strong>
+                        {i18n.language.startsWith("ru")
+                          ? (line.commercialTerms?.documentNameRu ?? line.nameRu)
+                          : (line.commercialTerms?.documentNameEn ?? line.nameEn)}
+                      </strong>
+                      {line.commercialTerms?.billingPeriod ? (
+                        <small>
+                          {t(`catalog.units.${line.commercialTerms.billingPeriod}`)} ·{" "}
+                          {t(`commercial.activation.${line.commercialTerms.activationRule}`)}
+                        </small>
+                      ) : null}
                       {(
                         i18n.language.startsWith("ru") ? line.descriptionRu : line.descriptionEn
                       ) ? (
@@ -136,7 +146,14 @@ function OfferDetail({ offerId }: { offerId: string }) {
                   mono: true,
                   align: "right",
                 },
-                { key: "unit", title: t("offerWorkspace.unit") },
+                {
+                  key: "unit",
+                  title: t("offerWorkspace.unit"),
+                  render: (line) =>
+                    line.commercialTerms?.billingPeriod
+                      ? t(`catalog.units.${line.commercialTerms.billingPeriod}`)
+                      : line.unit,
+                },
                 {
                   key: "agreedUnitPrice",
                   title: t("offerWorkspace.price"),

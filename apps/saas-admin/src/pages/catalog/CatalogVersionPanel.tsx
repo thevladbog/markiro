@@ -1,4 +1,5 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { CatalogPayablePreview } from "./CatalogPayablePreview.js";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useForm, type FieldError } from "react-hook-form";
 import { useTranslation } from "react-i18next";
@@ -6,10 +7,13 @@ import { z } from "zod";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 
-import { Alert, Button, Checkbox, ConfirmDialog, Input, StatusChip } from "@markiro/ui";
+import { Alert, Button, Checkbox, ConfirmDialog, Input, Select, StatusChip } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import {
+  getCatalogEditorContext,
+  getCatalogVersion,
+  reviewCatalogVersion,
   publishCatalogVersion,
   retireCatalogVersion,
   archiveCatalogItem,
@@ -22,6 +26,8 @@ import {
   type CatalogVersionPatch,
   type PlanEntitlements,
 } from "./api.js";
+import type { CatalogPublicationReview } from "@markiro/platform-contracts";
+import { CatalogQuotaField } from "./CatalogQuotaField.js";
 import { CatalogUnitField } from "./CatalogUnitField.js";
 import { CatalogVatField, formatVat } from "./CatalogVatField.js";
 import {
@@ -34,6 +40,9 @@ import { useCatalogDrawerClose } from "./CatalogDrawer.js";
 interface CatalogFormValues {
   kind: CatalogVersionDto["kind"];
   financialVisible: boolean;
+  documentNameRu: string;
+  documentNameEn: string;
+  subject: "software_license" | "service" | "development_work";
   nameRu: string;
   nameEn: string;
   descriptionRu: string;
@@ -96,6 +105,9 @@ const catalogFormSchema = z
   .object({
     kind: z.enum(["plan", "addon", "service"]),
     financialVisible: z.boolean(),
+    documentNameRu: z.string().max(300),
+    documentNameEn: z.string().max(300),
+    subject: z.enum(["software_license", "service", "development_work"]),
     nameRu: z.string().trim().min(1, "required").max(300, "nameTooLong"),
     nameEn: z.string().trim().min(1, "required").max(300, "nameTooLong"),
     descriptionRu: z.string().max(2000, "descriptionTooLong"),
@@ -135,7 +147,14 @@ const catalogFormSchema = z
         "demoDurationDays",
       ] as const) {
         const value = values[field];
-        const issue = positiveIntegerIssue(value, true);
+        const issue =
+          field !== "demoDurationDays"
+            ? value === "0" || value === ""
+              ? null
+              : value === "__limited__"
+                ? "quota"
+                : positiveIntegerIssue(value, false)
+            : positiveIntegerIssue(value, true);
         if (issue) {
           context.addIssue({ code: "custom", path: [field], message: issue });
         }
@@ -186,11 +205,14 @@ function formDefaults(item: CatalogVersionDto): CatalogFormValues {
   return {
     kind: item.kind,
     financialVisible: item.unitPrice !== undefined,
+    documentNameRu: item.documentNameRu ?? "",
+    documentNameEn: item.documentNameEn ?? "",
+    subject: item.subject ?? (item.kind === "service" ? "service" : "software_license"),
     nameRu: item.nameRu,
     nameEn: item.nameEn,
     descriptionRu: item.descriptionRu ?? "",
     descriptionEn: item.descriptionEn ?? "",
-    unit: item.unit,
+    unit: item.kind === "service" ? item.unit : (item.billingPeriod ?? "month"),
     unitPrice: item.unitPrice ?? "",
     vatRateBps: item.vatRateBps ?? null,
     vatIncluded: item.vatIncluded ?? false,
@@ -211,6 +233,10 @@ function formDefaults(item: CatalogVersionDto): CatalogFormValues {
 
 function patchForKind(item: CatalogVersionDto, values: CatalogFormValues): CatalogVersionPatch {
   const common: CatalogVersionPatch = {
+    documentNameRu: values.documentNameRu.trim() || null,
+    documentNameEn: values.documentNameEn.trim() || null,
+    subject: values.subject,
+    billingPeriod: item.kind === "service" ? null : values.unit === "year" ? "year" : "month",
     nameRu: values.nameRu,
     nameEn: values.nameEn,
     descriptionRu: values.descriptionRu.trim() || null,
@@ -299,6 +325,13 @@ export function CatalogVersionPanel({
   const { t } = useTranslation();
   const requestClose = useCatalogDrawerClose(onClose);
   const queryClient = useQueryClient();
+  const context = useQuery({
+    queryKey: ["platform", "catalog", "editor-context"],
+    queryFn: getCatalogEditorContext,
+    enabled: canWrite,
+  });
+  const [reviewedVersion, setReviewedVersion] = useState<CatalogVersionDto | null>(null);
+  const [review, setReview] = useState<CatalogPublicationReview | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [retireOpen, setRetireOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -323,9 +356,14 @@ export function CatalogVersionPanel({
 
   const save = useMutation({
     mutationFn: (values: CatalogFormValues) =>
-      updateCatalogVersion(item.catalogItemCode, item.id, patchForKind(item, values)),
+      updateCatalogVersion(item.catalogItemCode, item.id, {
+        ...patchForKind(item, values),
+        sellerPolicyRevision: context.data?.sellerPolicyRevision || null,
+      }),
     onSuccess: (updated) => {
       replaceCatalogItem(updated);
+      form.reset(formDefaults(updated));
+      setReview(null);
       setStatusMessage({ tone: "ok", text: t("catalog.saved") });
     },
     onError: (error) => {
@@ -349,8 +387,40 @@ export function CatalogVersionPanel({
     },
     onError: () => setStatusMessage({ tone: "error", text: t("catalog.cloneError") }),
   });
+  const prepareReview = useMutation({
+    mutationFn: async () => {
+      if (form.formState.isDirty) await save.mutateAsync(form.getValues());
+      await context.refetch();
+      const before = await reviewCatalogVersion(item.catalogItemCode, item.id);
+      const version = await getCatalogVersion(item.catalogItemCode, item.id);
+      const after = await reviewCatalogVersion(item.catalogItemCode, item.id);
+      if (JSON.stringify(before.identity) !== JSON.stringify(after.identity))
+        throw new ApiRequestError(409, "Review changed", "commercial_review_stale");
+      return { review: after, version };
+    },
+    onSuccess: (result) => {
+      setReview(result.review);
+      setReviewedVersion(result.version);
+      replaceCatalogItem(result.version);
+      if (!form.formState.isDirty) form.reset(formDefaults(result.version));
+      setPublishOpen(true);
+    },
+    onError: () => setStatusMessage({ tone: "error", text: t("catalog.reviewError") }),
+  });
   const publish = useMutation({
-    mutationFn: () => publishCatalogVersion(item.catalogItemCode, item.id),
+    mutationFn: () => {
+      if (!review || review.errors.length) throw new Error("commercial_review_invalid");
+      return publishCatalogVersion(item.catalogItemCode, item.id, review.identity);
+    },
+    onError: async (error) => {
+      if (error instanceof ApiRequestError && error.code === "commercial_review_stale") {
+        setPublishOpen(false);
+        setReview(null);
+        setStatusMessage({ tone: "error", text: t("catalog.reviewStale") });
+        await context.refetch();
+        prepareReview.mutate();
+      }
+    },
     onSuccess: (updated) => {
       replaceCatalogItem(updated);
       setPublishOpen(false);
@@ -405,7 +475,23 @@ export function CatalogVersionPanel({
     onError: () => setStatusMessage({ tone: "error", text: t("catalog.archiveError") }),
   });
 
-  const summaries = quotaSummary(item, (key, options = {}) => t(key, options));
+  const watched = form.watch();
+  const summaries =
+    canEdit && item.kind === "plan"
+      ? ["maxLines", "maxStations", "maxKiosks", "maxCabinetUsers"].map((key) => {
+          const field = key as "maxLines" | "maxStations" | "maxKiosks" | "maxCabinetUsers";
+          const value = watched[field];
+          return `${t(`catalog.form.${key === "maxCabinetUsers" ? "maxUsers" : key}`)}: ${value === "" ? t("catalog.quota.unlimited") : value === "0" ? t("catalog.quota.none") : value === "__limited__" ? t("catalog.quota.required") : value}`;
+        })
+      : canEdit && item.kind === "addon"
+        ? watched.addonEffects.map((effect) =>
+            ["lines", "stations", "kiosks", "cabinetUsers"].includes(effect.key)
+              ? /^[1-9]\d*$/.test(effect.value)
+                ? t(`catalog.effects.${effect.key}`, { count: Number(effect.value) })
+                : `${t(`catalog.effectNames.${effect.key}`)}: ${t("catalog.quota.required")}`
+              : t(`catalog.effects.${effect.key}`),
+          )
+        : quotaSummary(item, (key, options = {}) => t(key, options));
   const addonFormErrors = form.formState.errors.addonEffects;
   const addonErrorEntries = Array.isArray(addonFormErrors)
     ? (addonFormErrors as unknown as Array<{ key?: FieldError; value?: FieldError }>)
@@ -475,7 +561,7 @@ export function CatalogVersionPanel({
                 void form.handleSubmit(
                   (values) => {
                     setStatusMessage(null);
-                    save.mutate(values);
+                    if (!save.isPending) save.mutate(values);
                   },
                   () => setStatusMessage(null),
                 )(event)
@@ -483,9 +569,44 @@ export function CatalogVersionPanel({
             >
               <input type="hidden" {...form.register("kind")} />
               <input type="hidden" {...form.register("financialVisible")} />
-              <fieldset>
+              <fieldset disabled={save.isPending || prepareReview.isPending || publish.isPending}>
                 <legend>{t("catalog.form.identity")}</legend>
                 <div className="form-grid form-grid--two">
+                  <Input
+                    label={t("catalog.form.documentNameRu")}
+                    {...form.register("documentNameRu")}
+                  />
+                  <Input
+                    label={t("catalog.form.documentNameEn")}
+                    {...form.register("documentNameEn")}
+                  />
+                  {item.kind === "service" ? (
+                    <Select
+                      label={t("catalog.form.subject")}
+                      value={form.watch("subject")}
+                      onValueChange={(value) =>
+                        form.setValue("subject", value, { shouldDirty: true })
+                      }
+                      options={[
+                        { value: "service", label: t("commercial.subject.service") },
+                        {
+                          value: "development_work",
+                          label: t("commercial.subject.development_work"),
+                        },
+                      ]}
+                    />
+                  ) : (
+                    <p>{t("commercial.subject.software_license")}</p>
+                  )}
+                  {form.watch("vatRateBps") !== null ? (
+                    <Checkbox
+                      label={t("catalog.vat.includedHint")}
+                      checked={form.watch("vatIncluded")}
+                      onCheckedChange={(value) =>
+                        form.setValue("vatIncluded", value, { shouldDirty: true })
+                      }
+                    />
+                  ) : null}
                   <Input
                     label={t("catalog.form.nameRu")}
                     required
@@ -528,13 +649,15 @@ export function CatalogVersionPanel({
                         {...form.register("unitPrice")}
                       />
                       <CatalogVatField
+                        policy={context.data?.taxPolicy}
                         value={form.watch("vatRateBps")}
                         onChange={(value) => {
                           form.setValue("vatRateBps", value, {
                             shouldDirty: true,
                             shouldValidate: true,
                           });
-                          form.setValue("vatIncluded", value !== null, { shouldDirty: true });
+                          if (value === null)
+                            form.setValue("vatIncluded", false, { shouldDirty: true });
                         }}
                         {...(() => {
                           const error = fieldError(form.formState.errors.vatRateBps, t);
@@ -546,36 +669,52 @@ export function CatalogVersionPanel({
                 </div>
               </fieldset>
               {item.kind === "plan" ? (
-                <fieldset>
+                <fieldset disabled={save.isPending || prepareReview.isPending || publish.isPending}>
                   <legend>{t("catalog.form.planLimits")}</legend>
                   <div className="form-grid form-grid--four">
-                    <Input
+                    <CatalogQuotaField
                       label={t("catalog.form.maxLines")}
-                      inputMode="numeric"
-                      mono
+                      value={form.watch("maxLines")}
+                      onChange={(value) =>
+                        form.setValue("maxLines", value, {
+                          shouldDirty: true,
+                          shouldValidate: true,
+                        })
+                      }
                       {...inputErrorProps(form.formState.errors.maxLines, t)}
-                      {...form.register("maxLines")}
                     />
-                    <Input
+                    <CatalogQuotaField
                       label={t("catalog.form.maxStations")}
-                      inputMode="numeric"
-                      mono
+                      value={form.watch("maxStations")}
+                      onChange={(value) =>
+                        form.setValue("maxStations", value, {
+                          shouldDirty: true,
+                          shouldValidate: true,
+                        })
+                      }
                       {...inputErrorProps(form.formState.errors.maxStations, t)}
-                      {...form.register("maxStations")}
                     />
-                    <Input
+                    <CatalogQuotaField
                       label={t("catalog.form.maxKiosks")}
-                      inputMode="numeric"
-                      mono
+                      value={form.watch("maxKiosks")}
+                      onChange={(value) =>
+                        form.setValue("maxKiosks", value, {
+                          shouldDirty: true,
+                          shouldValidate: true,
+                        })
+                      }
                       {...inputErrorProps(form.formState.errors.maxKiosks, t)}
-                      {...form.register("maxKiosks")}
                     />
-                    <Input
+                    <CatalogQuotaField
                       label={t("catalog.form.maxUsers")}
-                      inputMode="numeric"
-                      mono
+                      value={form.watch("maxCabinetUsers")}
+                      onChange={(value) =>
+                        form.setValue("maxCabinetUsers", value, {
+                          shouldDirty: true,
+                          shouldValidate: true,
+                        })
+                      }
                       {...inputErrorProps(form.formState.errors.maxCabinetUsers, t)}
-                      {...form.register("maxCabinetUsers")}
                     />
                     <Input
                       label={t("catalog.form.demoDays")}
@@ -589,23 +728,30 @@ export function CatalogVersionPanel({
                     <Checkbox
                       label={t("catalog.form.labelEditor")}
                       checked={form.watch("labelEditorEnabled")}
-                      onCheckedChange={(value) => form.setValue("labelEditorEnabled", value)}
+                      onCheckedChange={(value) =>
+                        form.setValue("labelEditorEnabled", value, { shouldDirty: true })
+                      }
                     />
                     <Checkbox
                       label={t("catalog.form.publicApi")}
                       checked={form.watch("publicApiEnabled")}
-                      onCheckedChange={(value) => form.setValue("publicApiEnabled", value)}
+                      onCheckedChange={(value) =>
+                        form.setValue("publicApiEnabled", value, { shouldDirty: true })
+                      }
                     />
                     <Checkbox
                       label={t("catalog.form.pallets")}
                       checked={form.watch("palletsEnabled")}
-                      onCheckedChange={(value) => form.setValue("palletsEnabled", value)}
+                      onCheckedChange={(value) =>
+                        form.setValue("palletsEnabled", value, { shouldDirty: true })
+                      }
                     />
                   </div>
                 </fieldset>
               ) : null}
               {item.kind === "addon" ? (
                 <AddonEffectsEditor
+                  disabled={save.isPending || prepareReview.isPending || publish.isPending}
                   effects={form.watch("addonEffects")}
                   onChange={(next) =>
                     form.setValue("addonEffects", next, {
@@ -621,15 +767,23 @@ export function CatalogVersionPanel({
                 <Alert tone="info">{t("catalog.form.serviceNotice")}</Alert>
               ) : null}
               <div className="form-actions">
-                <Button type="submit" loading={save.isPending}>
+                <Button
+                  type="submit"
+                  loading={save.isPending}
+                  disabled={save.isPending || prepareReview.isPending}
+                >
                   {t("catalog.save")}
                 </Button>
                 <Button
                   type="button"
                   variant="secondary"
+                  disabled={save.isPending || prepareReview.isPending || !context.data?.taxPolicy}
+                  loading={prepareReview.isPending}
                   onClick={() => {
-                    setStatusMessage(null);
-                    setPublishOpen(true);
+                    void form.handleSubmit(() => {
+                      setStatusMessage(null);
+                      prepareReview.mutate();
+                    })();
                   }}
                 >
                   {t("catalog.publishVersion", { version: item.version })}
@@ -643,6 +797,24 @@ export function CatalogVersionPanel({
               ) : null}
               <dl className="version-data">
                 <div>
+                  <dt>{t("catalog.form.documentNameRu")}</dt>
+                  <dd>{item.documentNameRu ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt>{t("catalog.form.documentNameEn")}</dt>
+                  <dd>{item.documentNameEn ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt>{t("catalog.form.subject")}</dt>
+                  <dd>{item.subject ? t(`commercial.subject.${item.subject}`) : "—"}</dd>
+                </div>
+                {item.billingPeriod ? (
+                  <div>
+                    <dt>{t("catalog.form.period")}</dt>
+                    <dd>{t(`catalog.units.${item.billingPeriod}`)}</dd>
+                  </div>
+                ) : null}
+                <div>
                   <dt>{t("catalog.form.nameRu")}</dt>
                   <dd>{item.nameRu}</dd>
                 </div>
@@ -652,7 +824,11 @@ export function CatalogVersionPanel({
                 </div>
                 <div>
                   <dt>{t("catalog.form.unit")}</dt>
-                  <dd>{item.unit}</dd>
+                  <dd>
+                    {item.kind !== "service" && item.billingPeriod
+                      ? t(`catalog.units.${item.billingPeriod}`)
+                      : item.unit}
+                  </dd>
                 </div>
                 {!isSupport && item.unitPrice !== undefined ? (
                   <div>
@@ -678,6 +854,16 @@ export function CatalogVersionPanel({
         </div>
         <aside className="effect-rail" aria-label={t("catalog.effectsLabel")}>
           <span className="effect-rail__label">{t("catalog.effectsLabel")}</span>
+          {item.kind !== "service" ? (
+            <p>{t(`catalog.units.${canEdit ? watched.unit : item.billingPeriod}`)}</p>
+          ) : null}
+          {!isSupport && item.unitPrice !== undefined ? (
+            <CatalogPayablePreview
+              price={canEdit ? watched.unitPrice : item.unitPrice}
+              vatRateBps={canEdit ? watched.vatRateBps : (item.vatRateBps ?? null)}
+              vatIncluded={canEdit ? watched.vatIncluded : (item.vatIncluded ?? false)}
+            />
+          ) : null}
           <ol>
             {summaries.map((summary, index) => (
               <li key={summary}>
@@ -717,14 +903,64 @@ export function CatalogVersionPanel({
       <ConfirmDialog
         open={publishOpen}
         title={t("catalog.publishTitle", { version: item.version })}
-        description={t("catalog.publishWarning", { version: item.version })}
+        description={
+          review?.errors.length ? (
+            <ul>
+              {review.errors.map((error) => (
+                <li key={`${error.path}:${error.code}`}>
+                  {t(`commercial.errors.${error.code}`, { defaultValue: t("catalog.reviewError") })}
+                </li>
+              ))}
+            </ul>
+          ) : reviewedVersion ? (
+            <>
+              <p>{t("catalog.publishWarning", { version: item.version })}</p>
+              <p>
+                {reviewedVersion.documentNameRu} · {reviewedVersion.documentNameEn}
+              </p>
+              <p>
+                {reviewedVersion.subject ? t(`commercial.subject.${reviewedVersion.subject}`) : "—"}{" "}
+                ·{" "}
+                {reviewedVersion.billingPeriod
+                  ? t(`catalog.units.${reviewedVersion.billingPeriod}`)
+                  : reviewedVersion.unit}{" "}
+              </p>
+              {reviewedVersion.unitPrice !== undefined ? (
+                <CatalogPayablePreview
+                  price={reviewedVersion.unitPrice}
+                  vatRateBps={reviewedVersion.vatRateBps ?? null}
+                  vatIncluded={reviewedVersion.vatIncluded ?? false}
+                />
+              ) : null}
+              <ul>
+                {quotaSummary(reviewedVersion, (key, options = {}) => t(key, options)).map(
+                  (summary) => (
+                    <li key={summary}>{summary}</li>
+                  ),
+                )}
+              </ul>
+              {reviewedVersion.plan ? (
+                <p>
+                  {t("catalog.form.maxUsers")}:{" "}
+                  {reviewedVersion.plan.maxCabinetUsers ?? t("catalog.quota.unlimited")} ·{" "}
+                  {t("catalog.form.demoDays")}: {reviewedVersion.plan.demoDurationDays ?? "—"}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            t("catalog.reviewError")
+          )
+        }
         entity={`${item.catalogItemCode} · v${item.version}`}
         confirmLabel={t("catalog.publishVersion", { version: item.version })}
         cancelLabel={t("catalog.cancel")}
         busy={publish.isPending}
+        confirmDisabled={!review || review.errors.length > 0}
         error={publish.error ? t("catalog.publishError") : undefined}
         onCancel={() => setPublishOpen(false)}
-        onConfirm={() => publish.mutate()}
+        onConfirm={() => {
+          if (review && !review.errors.length && !publish.isPending) publish.mutate();
+        }}
       />
       <ConfirmDialog
         open={retireOpen}

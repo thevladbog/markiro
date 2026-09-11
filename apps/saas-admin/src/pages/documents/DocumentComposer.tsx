@@ -74,7 +74,7 @@ export function DocumentComposer({
   const dirty = snapshot(draft) !== snapshot(initial);
   const guard = useNavigationGuard(dirty, submitting);
   const totals = calculateDocumentTotals(
-    kind,
+    draft.sourceOfferId ? "offer" : kind,
     draft.lines.filter(
       (line) =>
         Number.isInteger(line.quantity) &&
@@ -89,6 +89,7 @@ export function DocumentComposer({
   };
 
   const submit = async () => {
+    if (submitting) return;
     const normalizedDraft = normalizeDocumentDraftPrices(draft);
     if (snapshot(normalizedDraft) !== snapshot(draft)) setDraft(normalizedDraft);
     const nextErrors = validateDocumentDraft(normalizedDraft, kind);
@@ -130,8 +131,10 @@ export function DocumentComposer({
             <h1 id="document-lines-title">{t(`documents.title.${kind}`)}</h1>
           </div>
           <div className="document-composer__parties">
-            {lockedTenantId ? (
-              <p>{t("documents.lockedRequestTenant", { tenantId: lockedTenantId })}</p>
+            {lockedTenantId || draft.sourceOfferId ? (
+              <p>
+                {t("documents.lockedRequestTenant", { tenantId: lockedTenantId ?? draft.tenantId })}
+              </p>
             ) : (
               <TenantPicker
                 tenants={tenants}
@@ -151,13 +154,17 @@ export function DocumentComposer({
             />
           </div>
         </header>
-        <CatalogPositionPicker
-          catalog={catalog}
-          loading={loadingSources}
-          separate={separate}
-          onSeparateChange={setSeparate}
-          onSelected={addCatalogPosition}
-        />
+        {!draft.sourceOfferId ? (
+          <CatalogPositionPicker
+            catalog={catalog}
+            loading={loadingSources}
+            separate={separate}
+            onSeparateChange={setSeparate}
+            onSelected={addCatalogPosition}
+          />
+        ) : (
+          <p>{t("commercial.sourceFrozen")}</p>
+        )}
         {draft.lines.length === 0 ? (
           <p className="document-composer__onboarding">{t("documents.emptyOnboarding")}</p>
         ) : (
@@ -198,7 +205,7 @@ export function DocumentComposer({
       <DocumentSummary
         kind={kind}
         draft={draft}
-        totals={totals}
+        totals={draft.sourceTotal ? { ...totals, total: draft.sourceTotal } : totals}
         errors={errors}
         submitting={submitting}
         {...(submitError ? { submitError } : {})}

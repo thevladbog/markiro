@@ -18,7 +18,9 @@ import {
 import { toOfferPrintModel } from "../billing/print-document-model";
 import { renderPrintHtml } from "../billing/print-document-html";
 import { acquireBillingWorkflowLocks } from "../billing-workflow-locks";
-import { calculateOfferBreakdown } from "./offer-preview-model";
+import { validateCommercialIssuance } from "../billing/commercial-line-terms";
+import { lockSellerPolicy } from "../billing-profiles/billing-profiles.service";
+import { calculateSavedOfferAmounts } from "./offer-preview-model";
 import { normalizeOfferTerms } from "./offer-terms";
 
 type Transaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -44,7 +46,10 @@ export async function resolveOfferPrintInput(
     )
     .orderBy(asc(schema.commercialOfferLines.position))
     .for("share");
-  const totals = calculateOfferBreakdown(lines, draft.total);
+  await validateCommercialIssuance(tx, lines);
+  const totals = calculateSavedOfferAmounts(lines, draft.total);
+  if (lines.some((line, index) => line.lineTotal !== totals.lines[index]?.lineTotal))
+    throw new ConflictException({ code: "commercial_source_review_required" });
   const terms = normalizeOfferTerms(draft.termsMarkdown);
   const snapshot = {
     expiresAt: draft.expiresAt,
@@ -56,7 +61,7 @@ export async function resolveOfferPrintInput(
       : null,
     linesSnapshot: lines.map((line, index) => ({
       ...line,
-      lineTotal: totals.lineTotals[index] ?? line.lineTotal,
+      ...totals.lines[index],
     })),
     subtotal: totals.subtotal,
     vatTotal: totals.vatTotal,
@@ -86,6 +91,7 @@ export class OfferPreviewService {
   async preview(actor: PlatformPrincipal, id: string) {
     if (!actor.capabilities.includes("billing.read")) throw new ForbiddenException();
     return this.db.transaction(async (tx) => {
+      await lockSellerPolicy(tx);
       const [located] = await tx
         .select()
         .from(schema.commercialOffers)

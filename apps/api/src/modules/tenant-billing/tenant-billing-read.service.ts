@@ -590,15 +590,28 @@ export class TenantBillingReadService {
         kiosks: limitPresentation(usage.kiosks, resolved.quotas.kiosks),
         cabinetUsers: limitPresentation(usage.cabinetUsers, resolved.quotas.cabinetUsers),
       },
-      addons: addons.map((addon) => ({
-        id: addon.id,
-        catalogVersionId: addon.addonVersionId,
-        name: versionsById.get(addon.addonVersionId)?.nameRu ?? "",
-        quantity: addon.quantity,
-        status: this.addonPresentationStatus(addon, at),
-        startsAt: iso(addon.startsAt),
-        endsAt: iso(addon.endsAt),
-      })),
+      addons: addons.map((addon) => {
+        const base = subscriptions.find((subscription) => subscription.id === addon.subscriptionId);
+        const starts = [addon.startsAt, base?.startsAt].filter(
+          (value): value is Date => value instanceof Date,
+        );
+        const ends = [addon.endsAt, base?.endsAt].filter(
+          (value): value is Date => value instanceof Date,
+        );
+        return {
+          id: addon.id,
+          catalogVersionId: addon.addonVersionId,
+          name: versionsById.get(addon.addonVersionId)?.nameRu ?? "",
+          quantity: addon.quantity,
+          status: this.addonPresentationStatus(addon, at, base),
+          startsAt: starts.length
+            ? new Date(Math.max(...starts.map((value) => value.getTime()))).toISOString()
+            : null,
+          endsAt: ends.length
+            ? new Date(Math.min(...ends.map((value) => value.getTime()))).toISOString()
+            : null,
+        };
+      }),
       services: services.map((service) => ({
         id: service.id,
         name: service.nameRu,
@@ -627,8 +640,19 @@ export class TenantBillingReadService {
     );
   }
 
-  private addonPresentationStatus(addon: typeof schema.subscriptionAddons.$inferSelect, at: Date) {
-    if (addon.status === "revoked") return "revoked" as const;
+  private addonPresentationStatus(
+    addon: typeof schema.subscriptionAddons.$inferSelect,
+    at: Date,
+    base?: typeof schema.tenantSubscriptions.$inferSelect,
+  ) {
+    if (
+      addon.status === "revoked" ||
+      !base ||
+      base.status === "cancelled" ||
+      base.status === "superseded"
+    )
+      return "revoked" as const;
+    if (base.status === "expired" || (base.endsAt && base.endsAt <= at)) return "expired" as const;
     if (addon.startsAt && addon.startsAt > at) return "scheduled" as const;
     if (addon.endsAt && addon.endsAt <= at) return "expired" as const;
     return "active" as const;

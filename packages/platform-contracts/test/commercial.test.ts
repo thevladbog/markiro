@@ -1,3 +1,10 @@
+import {
+  legacyOfferLineSchema,
+  offerLineV2Schema,
+  legacyInvoiceLineSchema,
+  invoiceLineV2Schema,
+  invoiceDetailV2Schema,
+} from "../src/index.js";
 import { describe, expect, it } from "vitest";
 
 import { invoiceApplicationEventSchema, platformCommercialContracts } from "../src/index.js";
@@ -1688,5 +1695,71 @@ describe("platform commercial contracts", () => {
         url: "https://objects.example.test/acts/document.pdf",
       }),
     ).toEqual({ url: "https://objects.example.test/acts/document.pdf" });
+  });
+});
+
+// Complete response payloads prove that no metadata leaks into strict legacy clients.
+describe("commercial version negotiation boundaries", () => {
+  const terms = {
+    version: 1,
+    subject: "software_license",
+    documentNameRu: "Право использования Маркиро",
+    documentNameEn: null,
+    sellerPolicyRevision: 1,
+    billingPeriod: "year",
+    billingTimezone: "Europe/Moscow",
+    activationRule: "on_application",
+  };
+  it("keeps offer line V1 strict while V2 carries frozen terms and validates subject/quantity", () => {
+    expect(legacyOfferLineSchema.safeParse(offerLine).success).toBe(true);
+    expect(legacyOfferLineSchema.safeParse({ ...offerLine, commercialTerms: terms }).success).toBe(
+      false,
+    );
+    expect(
+      offerLineV2Schema.parse({ ...offerLine, commercialTerms: terms }).commercialTerms,
+    ).toEqual(terms);
+    expect(offerLineV2Schema.safeParse({ ...offerLine, commercialTerms: null }).success).toBe(true);
+    expect(offerLineV2Schema.safeParse(offerLine).success).toBe(false);
+    expect(
+      offerLineV2Schema.safeParse({ ...offerLine, quantity: 2, commercialTerms: terms }).success,
+    ).toBe(false);
+  });
+  it("keeps invoice line V1 strict while V2 preserves null legacy terms", () => {
+    expect(legacyInvoiceLineSchema.safeParse(invoiceLine).success).toBe(true);
+    expect(
+      legacyInvoiceLineSchema.safeParse({ ...invoiceLine, commercialTerms: terms }).success,
+    ).toBe(false);
+    expect(
+      invoiceLineV2Schema.parse({ ...invoiceLine, commercialTerms: terms }).commercialTerms,
+    ).toEqual(terms);
+    expect(invoiceLineV2Schema.safeParse({ ...invoiceLine, commercialTerms: null }).success).toBe(
+      true,
+    );
+    expect(
+      invoiceLineV2Schema.safeParse({
+        ...invoiceLine,
+        commercialTerms: { ...terms, subject: "development_work" },
+      }).success,
+    ).toBe(false);
+  });
+  it("does not lose invoice aggregate/lifecycle checks in V2", () => {
+    const payload = {
+      ...invoiceBase,
+      ...issuedInvoiceMetadata,
+      status: "issued",
+      tenantName: TENANT_NAME,
+      lines: [{ ...invoiceLine, commercialTerms: terms }],
+      documents: [],
+      payments: [],
+      paymentSummary: { status: "issued", confirmedAmount: "0.00", remainingAmount: "15000.00" },
+      application: { status: "not_paid", latestByLine: [], attempts: [] },
+    };
+    expect(invoiceDetailV2Schema.safeParse(payload).success).toBe(true);
+    expect(
+      invoiceDetailV2Schema.safeParse({
+        ...payload,
+        paymentSummary: { ...payload.paymentSummary, confirmedAmount: "1.00" },
+      }).success,
+    ).toBe(false);
   });
 });

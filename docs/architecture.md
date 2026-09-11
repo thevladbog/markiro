@@ -239,6 +239,21 @@ already-issued document. A tenant and Markiro each have one legal profile and ma
 bank accounts with one active default. DaData is an optional suggestion adapter for organizations,
 addresses, and banks; it never makes a suggestion authoritative or blocks manual entry.
 
+Commercial P0 adds explicit catalog document names, seller-policy revisions and frozen line terms.
+Resource quotas distinguish zero (not included), positive limits and null (unlimited); trial days
+remain positive or null. Paid license intervals use the original calendar anchor in Europe/Moscow,
+not the display unit or quantity as a period multiplier. Invoice and direct accepted-offer
+application share lifecycle and sold-line ownership; repeated application cannot grant twice.
+Issued bytes and historical snapshots remain unchanged after catalog or seller edits.
+
+Updated platform clients negotiate `X-Markiro-Commercial-Version: 2`; legacy positive/null
+representations remain strict and truthful, and unrepresentable zero values fail with
+`client_update_required`. Review and issuance revalidate the current seller revision. Calculated
+invoice/offer amounts fail with `commercial_amount_out_of_range` before overflowing money columns.
+See the [rollout and recovery guide](operations/commercial-p0-rollout.md) for additive migration,
+client order, read-only impact reporting and rollback limits. This P0 does not enable P1 module
+or offline licensing enforcement and does not implement P2 recurring services.
+
 Bank imports retain the bounded source row as reconciliation evidence, while the public match and
 audit contracts expose only the payer account's last four digits and whether it is a known active,
 known archived, unknown, or unavailable account. Active known accounts may be suggested. Archived

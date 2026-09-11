@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { platformOfferWorkspaceContracts } from "../src/index.js";
+import {
+  platformOfferWorkspaceContracts,
+  platformOfferWorkspaceV2Contracts,
+} from "../src/index.js";
 
 const OFFER_ID = "11111111-1111-4111-8111-111111111111";
 const TENANT_ID = "tenant-offer-registry";
@@ -155,6 +158,38 @@ describe("platform offer registry and workspace contracts", () => {
     };
 
     expect(platformOfferWorkspaceContracts.workspace.response.parse(workspace)).toEqual(workspace);
+    const current = {
+      ...workspace,
+      offer: {
+        ...workspace.offer,
+        lines: [
+          {
+            ...line,
+            commercialTerms: {
+              version: 1,
+              subject: "service",
+              documentNameRu: "Frozen service",
+              documentNameEn: null,
+              sellerPolicyRevision: 2,
+              billingPeriod: null,
+              billingTimezone: null,
+              activationRule: null,
+            },
+          },
+        ],
+      },
+    };
+    expect(platformOfferWorkspaceV2Contracts.workspace.response.parse(current)).toEqual(current);
+    expect(platformOfferWorkspaceContracts.workspace.response.safeParse(current).success).toBe(
+      false,
+    );
+    expect(
+      platformOfferWorkspaceV2Contracts.workspace.response.safeParse({
+        ...current,
+        privateKey: "hidden",
+      }).success,
+    ).toBe(false);
+
     expect(
       platformOfferWorkspaceContracts.workspace.response.safeParse({
         ...workspace,

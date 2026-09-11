@@ -98,6 +98,7 @@ function operatorHarness(
     limit: vi.fn(async () => (current ? [current] : [])),
   };
   const tx = {
+    execute: vi.fn(async () => undefined),
     select: vi.fn(() => selectQuery),
     update: vi.fn(() => ({
       set: vi.fn((values: Record<string, unknown>) => {
@@ -371,6 +372,7 @@ describe("BillingProfilesService", () => {
       limit: vi.fn(async () => []),
     };
     const tx = {
+      execute: vi.fn(async () => undefined),
       select: vi.fn(() => currentQuery),
       update: vi.fn(),
       insert: vi.fn(() => ({

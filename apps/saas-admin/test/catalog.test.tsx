@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -38,6 +38,219 @@ async function submitMinimalCatalogCreate(user: ReturnType<typeof userEvent.setu
 }
 
 describe("commercial catalog", () => {
+  it.each(["save", "review"])(
+    "locks addon effects during deferred %s and retains the submitted values",
+    async (operation) => {
+      const api = installCatalogApi({ items: [{ ...ADDON, status: "draft" }] });
+      const originalFetch = globalThis.fetch;
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+          const response = await originalFetch(input, init);
+          if (init.method === "PATCH") await gate;
+          return response;
+        }),
+      );
+      renderSaasApp();
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("tab", { name: "Дополнения" }));
+      await user.click(
+        screen.getByRole("button", { name: "Открыть Дополнительная станция, версия 1" }),
+      );
+      const amount = screen.getByLabelText("Прибавка к квоте 1") as HTMLInputElement;
+      await user.clear(amount);
+      await user.type(amount, "3");
+      await user.click(
+        screen.getByRole("button", {
+          name: operation === "save" ? "Сохранить черновик" : "Опубликовать версию 1",
+        }),
+      );
+      await waitFor(() => expect(api.patchCalls()).toHaveLength(1));
+      try {
+        expect(amount.disabled).toBe(true);
+        expect(
+          (screen.getByRole("button", { name: "Добавить эффект" }) as HTMLButtonElement).disabled,
+        ).toBe(true);
+        expect(
+          (screen.getByRole("combobox", { name: "Тип эффекта 1" }) as HTMLSelectElement).disabled,
+        ).toBe(true);
+      } finally {
+        release();
+      }
+      if (operation === "save") await screen.findByText("Черновик сохранён");
+      else await screen.findByRole("alertdialog");
+      await waitFor(() =>
+        expect((screen.getByLabelText("Прибавка к квоте 1") as HTMLInputElement).value).toBe("3"),
+      );
+      expect(api.patchCalls()[0]?.body).toMatchObject({
+        addon: { effects: [{ key: "stations", quotaIncrement: 3 }] },
+      });
+    },
+  );
+
+  it.each([
+    {
+      price: "100.00",
+      rate: 2000,
+      included: false,
+      invoice: "120.00",
+      offer: "120.00",
+      vat: "20.00",
+    },
+    {
+      price: "100.00",
+      rate: 2000,
+      included: true,
+      invoice: "100.00",
+      offer: "100.00",
+      vat: "16.66",
+    },
+    { price: "100.00", rate: 0, included: false, invoice: "100.00", offer: "100.00", vat: "0.00" },
+    {
+      price: "100.00",
+      rate: null,
+      included: false,
+      invoice: "100.00",
+      offer: "100.00",
+      vat: "0.00",
+    },
+    { price: "0.03", rate: 2000, included: false, invoice: "0.03", offer: "0.04", vat: "0.00" },
+  ])(
+    "shows exact publication and live payable amounts %j",
+    async ({ price, rate, included, invoice, offer, vat }) => {
+      installCatalogApi({
+        items: [{ ...DRAFT_PLAN, unitPrice: price, vatRateBps: rate, vatIncluded: included }],
+        taxPolicy:
+          rate === null
+            ? { kind: "without_vat", regime: "npd" }
+            : {
+                kind: "vat",
+                regime: "other",
+                allowedRatesBps: [rate],
+                defaultRateBps: rate,
+                defaultIncluded: included,
+              },
+      });
+      renderSaasApp();
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Открыть Базовый, версия 2" }));
+      const live = screen.getByRole("complementary", { name: "Эффект версии" });
+      expect(live.textContent).toContain(`К оплате`);
+      expect(live.textContent).toContain(`${invoice} RUB`);
+      expect(live.textContent).toContain(`${offer} RUB`);
+      await user.click(screen.getByRole("button", { name: "Опубликовать версию 2" }));
+      const review = await screen.findByRole("alertdialog");
+      expect(review.textContent).toContain(`Цена: ${price} RUB`);
+      expect(review.textContent).toContain(`${vat} RUB`);
+      expect(review.textContent).toContain(`К оплате`);
+      expect(review.textContent).toContain(`${invoice} RUB`);
+      expect(review.textContent).toContain(`${offer} RUB`);
+      if (invoice !== offer || included) {
+        expect(review.textContent).toContain("Счёт");
+        expect(review.textContent).toContain("Предложение");
+      }
+      if (rate === null) expect(review.textContent).toContain("Без НДС");
+      if (rate === 0) expect(review.textContent).toContain("0%");
+    },
+  );
+
+  it("updates addon effect summary before saving", async () => {
+    installCatalogApi({ items: [{ ...ADDON, status: "draft" }] });
+    renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("tab", { name: "Дополнения" }));
+    await user.click(
+      screen.getByRole("button", { name: "Открыть Дополнительная станция, версия 1" }),
+    );
+    await user.clear(screen.getByLabelText("Прибавка к квоте 1"));
+    await user.type(screen.getByLabelText("Прибавка к квоте 1"), "3");
+    expect(screen.getByText("+3 станции")).toBeDefined();
+  });
+
+  it("creates an annual plan with explicit zero finite and unlimited quotas", async () => {
+    const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
+    renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
+    await user.type(screen.getByLabelText("Код позиции"), "plan-year");
+    await user.type(screen.getByLabelText("Название на русском"), "Годовой");
+    await user.type(screen.getByLabelText("Название на английском"), "Annual");
+    await chooseOption(user, "Период лицензии", "Год");
+    await user.clear(screen.getByLabelText("Цена за единицу"));
+    await user.type(screen.getByLabelText("Цена за единицу"), "69000.00");
+    await chooseOption(user, "Киоски: режим", "Нет");
+    await chooseOption(user, "Линии: режим", "Ограничено");
+    await user.type(screen.getByLabelText("Линии"), "2");
+    await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
+    expect(api.createCalls()[0]?.body).toMatchObject({
+      billingPeriod: "year",
+      unit: "year",
+      unitPrice: "69000.00",
+      plan: { maxKiosks: 0, maxLines: 2, maxStations: null },
+    });
+  });
+
+  it("saves an annual draft and rejects an empty limited quota", async () => {
+    const api = installCatalogApi();
+    renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Открыть Базовый, версия 2" }));
+    await chooseOption(user, "Период лицензии", "Год");
+    await user.clear(screen.getByLabelText("Линии"));
+    await user.click(screen.getByRole("button", { name: "Сохранить черновик" }));
+    expect(api.patchCalls()).toHaveLength(0);
+    expect(await screen.findByText("Укажите положительное целое количество.")).toBeDefined();
+    await user.type(screen.getByLabelText("Линии"), "4");
+    await user.click(screen.getByRole("button", { name: "Сохранить черновик" }));
+    expect(api.patchCalls()[0]?.body).toMatchObject({
+      billingPeriod: "year",
+      unit: "year",
+      plan: { maxLines: 4 },
+    });
+  });
+
+  it("refreshes a competing draft price before a second publication confirmation", async () => {
+    installCatalogApi({ items: [DRAFT_PLAN], stalePublishPrice: "79000.00" });
+    renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Открыть Базовый, версия 2" }));
+    await user.click(screen.getByRole("button", { name: "Опубликовать версию 2" }));
+    const first = await screen.findByRole("alertdialog");
+    expect(first.textContent).toContain("15000.00");
+    await user.click(within(first).getByRole("button", { name: "Опубликовать версию 2" }));
+    await screen.findByText(/Условия изменились/);
+    const refreshed = await screen.findByRole("alertdialog");
+    expect(refreshed.textContent).toContain("79000.00");
+    expect(refreshed.textContent).not.toContain("15000.00");
+  });
+
+  it("refreshes the payable total and period together after stale publication", async () => {
+    installCatalogApi({
+      items: [{ ...DRAFT_PLAN, unitPrice: "100.00", vatRateBps: 2000, vatIncluded: false }],
+      stalePublishPrice: "200.00",
+      stalePublishPeriod: "year",
+    });
+    renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Открыть Базовый, версия 2" }));
+    await user.click(screen.getByRole("button", { name: "Опубликовать версию 2" }));
+    const first = await screen.findByRole("alertdialog");
+    expect(first.textContent).toContain("120.00 RUB");
+    await user.click(within(first).getByRole("button", { name: "Опубликовать версию 2" }));
+    await screen.findByText(/Условия изменились/);
+    const refreshed = await screen.findByRole("alertdialog");
+    expect(refreshed.textContent).toContain("240.00 RUB");
+    expect(refreshed.textContent).toContain("Год");
+    expect(refreshed.textContent).not.toContain("120.00 RUB");
+    const live = screen.getByRole("complementary", { name: "Эффект версии" });
+    expect(live.textContent).toContain("240.00 RUB");
+    expect(live.textContent).toContain("Год");
+  });
+
   it("rejects a malformed catalog success body at the browser boundary", async () => {
     vi.stubGlobal(
       "fetch",
@@ -156,16 +369,16 @@ describe("commercial catalog", () => {
     },
   );
 
-  it("submits a custom unit and included custom VAT for a service", async () => {
+  it("submits a custom service unit and seller-allowed VAT", async () => {
     const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
     renderSaasApp();
     const user = userEvent.setup();
 
+    await user.click(await screen.findByRole("tab", { name: "Услуги" }));
     await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
     await chooseOption(user, "Единица учёта", "Другое");
     await user.type(screen.getByLabelText("Другая единица"), "license");
-    await chooseOption(user, "НДС", "Другая ставка");
-    await user.type(screen.getByLabelText("Ставка НДС, %"), "12.34");
+    await chooseOption(user, "НДС", "НДС 12.34%");
     await user.type(screen.getByLabelText("Код позиции"), "service-license");
     await user.type(screen.getByLabelText("Название на русском"), "Лицензия");
     await user.type(screen.getByLabelText("Название на английском"), "License");
@@ -179,7 +392,11 @@ describe("commercial catalog", () => {
   });
 
   it("submits without VAT explicitly", async () => {
-    const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
+    const api = installCatalogApi({
+      me: PLATFORM_ADMIN_ME,
+      items: [],
+      taxPolicy: { kind: "without_vat", regime: "npd" },
+    });
     renderSaasApp();
     const user = userEvent.setup();
 
@@ -196,7 +413,7 @@ describe("commercial catalog", () => {
     });
   });
 
-  it("keeps a legacy custom unit visible when editing a draft", async () => {
+  it("uses structured period instead of a legacy custom license unit", async () => {
     const legacyDraft = { ...structuredClone(DRAFT_PLAN), unit: "station" };
     installCatalogApi({ items: [legacyDraft] });
     renderSaasApp();
@@ -204,8 +421,10 @@ describe("commercial catalog", () => {
 
     await user.click(await screen.findByRole("button", { name: "Открыть Базовый, версия 2" }));
 
-    expect(screen.getByRole("combobox", { name: "Единица учёта" }).textContent).toContain("Другое");
-    expect((screen.getByLabelText("Другая единица") as HTMLInputElement).value).toBe("station");
+    expect(screen.getByRole("combobox", { name: "Период лицензии" }).textContent).toContain(
+      "Месяц",
+    );
+    expect(screen.queryByLabelText("Другая единица")).toBeNull();
   });
 
   it("shows and submits explicit add-on entitlement effects", async () => {
@@ -252,7 +471,7 @@ describe("commercial catalog", () => {
     await user.type(screen.getByLabelText("Название на английском"), "Complete plan");
     await user.type(screen.getByLabelText("Описание на русском"), "Для производства");
     await user.type(screen.getByLabelText("Описание на английском"), "For production");
-    await user.clear(screen.getByLabelText("Линии"));
+    await chooseOption(user, "Линии: режим", "Ограничено");
     await user.type(screen.getByLabelText("Линии"), "10");
     await user.clear(screen.getByLabelText("Дней демо"));
     await user.type(screen.getByLabelText("Дней демо"), "30");
@@ -428,7 +647,7 @@ describe("commercial catalog", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Открыть Базовый, версия 1" }));
     const panel = screen.getByRole("region", { name: "Версия 1 · Базовый" });
     expect(within(panel).getByText("2 линии")).toBeDefined();
-    expect(within(panel).queryByText(/цен|₽|недоступ/i)).toBeNull();
+    expect(within(panel).queryByText(/цена|стоимость|₽|недоступ/i)).toBeNull();
   });
 
   it("edits the real discriminated plan draft fields", async () => {
@@ -494,13 +713,11 @@ describe("commercial catalog", () => {
     await user.clear(screen.getByLabelText("Цена за единицу"));
     await user.type(screen.getByLabelText("Цена за единицу"), "15000");
     await user.clear(screen.getByLabelText("Линии"));
-    await user.type(screen.getByLabelText("Линии"), "0");
+    await user.type(screen.getByLabelText("Линии"), "-1");
     await user.click(screen.getByRole("button", { name: "Сохранить черновик" }));
 
     expect(await screen.findByText("Введите сумму в формате 0.00")).toBeDefined();
-    expect(
-      screen.getByText("Введите целое число больше нуля или оставьте поле пустым"),
-    ).toBeDefined();
+    expect(screen.getByText("Введите целое число больше нуля")).toBeDefined();
     expect(planApi.items()[0]?.unitPrice).toBe("15000.00");
     planRender.unmount();
 
@@ -530,9 +747,7 @@ describe("commercial catalog", () => {
     await user.type(lines, "2147483648");
     await user.click(screen.getByRole("button", { name: "Сохранить черновик" }));
 
-    expect(
-      await screen.findByText("Введите целое число от 1 до 2147483647 или оставьте поле пустым"),
-    ).toBeDefined();
+    expect(await screen.findByText("Введите целое число от 1 до 2147483647")).toBeDefined();
     expect(api.patchCalls()).toEqual([]);
     expect(api.items()[0]?.plan?.maxLines).toBe(2);
 
@@ -546,6 +761,11 @@ describe("commercial catalog", () => {
         method: "PATCH",
         path: "/api/platform/catalog/items/plan-basic/versions/11111111-1111-4111-8111-111111111111",
         body: {
+          billingPeriod: "month",
+          documentNameRu: null,
+          documentNameEn: null,
+          subject: "software_license",
+          sellerPolicyRevision: 1,
           descriptionRu: "Для одной площадки",
           descriptionEn: "For one site",
           nameRu: "Базовый",
@@ -599,11 +819,16 @@ describe("commercial catalog", () => {
         method: "PATCH",
         path: "/api/platform/catalog/items/addon-station/versions/41111111-1111-4111-8111-111111111111",
         body: {
+          billingPeriod: "month",
+          documentNameRu: null,
+          documentNameEn: null,
+          subject: "software_license",
+          sellerPolicyRevision: 1,
           descriptionRu: null,
           descriptionEn: null,
           nameRu: "Дополнительная станция",
           nameEn: "Extra station",
-          unit: "station",
+          unit: "month",
           unitPrice: "2500.00",
           vatRateBps: 2000,
           vatIncluded: true,
@@ -702,9 +927,7 @@ describe("commercial catalog", () => {
     await user.click(await screen.findByRole("button", { name: "Открыть Базовый, версия 2" }));
     await user.click(screen.getByRole("button", { name: "Опубликовать версию 2" }));
     const dialog = screen.getByRole("alertdialog");
-    expect(
-      within(dialog).getByText("Версия 2 станет неизменяемой после публикации."),
-    ).toBeDefined();
+    expect(within(dialog).getByText(/Версия 2 станет неизменяемой после публикации/)).toBeDefined();
     await user.click(within(dialog).getByRole("button", { name: "Опубликовать версию 2" }));
 
     expect(await screen.findByText("Опубликованная версия не редактируется.")).toBeDefined();

@@ -1,3 +1,6 @@
+import type { CommercialLineTerms } from "@markiro/platform-contracts";
+import { commercialTermDescription, readStoredCommercialTerms } from "./commercial-line-terms";
+
 export type PrintDocumentKind = "invoice" | "offer" | "act";
 
 export interface BillingProfileSnapshot {
@@ -17,6 +20,7 @@ export interface BillingProfileSnapshot {
 }
 
 export interface PrintLine {
+  commercialTerms?: CommercialLineTerms | null;
   position: number;
   name: string;
   description?: string | null;
@@ -61,6 +65,7 @@ type InvoiceLike = {
   total: string;
   lines: Array<{
     position: number;
+    commercialTerms?: unknown;
     nameRu: string;
     descriptionRu?: string | null;
     unit: string;
@@ -112,6 +117,12 @@ const party = (profileValue: unknown, accountValue: unknown): BillingProfileSnap
   };
 };
 
+function commercialPrintUnit(value: unknown, legacyUnit: string): string {
+  const terms = readStoredCommercialTerms(value);
+  if (terms?.subject !== "software_license") return legacyUnit;
+  return terms.billingPeriod === "year" ? "год" : "мес.";
+}
+
 export function toInvoicePrintModel(invoice: InvoiceLike): PrintDocumentModel {
   return {
     kind: "invoice",
@@ -125,10 +136,13 @@ export function toInvoicePrintModel(invoice: InvoiceLike): PrintDocumentModel {
     seller: party(invoice.sellerSnapshot, invoice.sellerBankAccountSnapshot),
     buyer: party(invoice.buyerSnapshot, invoice.buyerBankAccountSnapshot),
     lines: invoice.lines.map((line) => ({
+      ...(line.commercialTerms == null
+        ? {}
+        : { commercialTerms: readStoredCommercialTerms(line.commercialTerms) }),
       position: line.position,
-      name: line.nameRu,
-      description: line.descriptionRu ?? null,
-      unit: line.unit,
+      name: readStoredCommercialTerms(line.commercialTerms)?.documentNameRu ?? line.nameRu,
+      description: commercialTermDescription(line.commercialTerms, line.descriptionRu),
+      unit: commercialPrintUnit(line.commercialTerms, line.unit),
       quantity: line.quantity,
       unitPrice: line.agreedUnitPrice,
       vatRate: line.vatRate ?? null,
@@ -195,10 +209,16 @@ export function toOfferPrintModel(snapshot: {
     lines: lines.map((line, index) => {
       const item = line as Record<string, unknown>;
       return {
+        ...(item.commercialTerms == null
+          ? {}
+          : { commercialTerms: readStoredCommercialTerms(item.commercialTerms) }),
         position: Number(item.position ?? index + 1),
-        name: text(item.nameRu),
-        description: typeof item.descriptionRu === "string" ? item.descriptionRu : null,
-        unit: text(item.unit),
+        name: readStoredCommercialTerms(item.commercialTerms)?.documentNameRu ?? text(item.nameRu),
+        description: commercialTermDescription(
+          item.commercialTerms,
+          typeof item.descriptionRu === "string" ? item.descriptionRu : null,
+        ),
+        unit: commercialPrintUnit(item.commercialTerms, text(item.unit)),
         quantity: Number(item.quantity ?? 0),
         unitPrice: text(item.agreedUnitPrice, "0.00"),
         vatRate: typeof item.vatRate === "string" ? item.vatRate : null,

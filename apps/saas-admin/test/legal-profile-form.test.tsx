@@ -56,6 +56,38 @@ function renderForm(
 }
 
 describe("LegalProfileForm", () => {
+  it("requires explicit seller policy without inferring it from legal form and excludes it for tenants", async () => {
+    renderForm("operator");
+    const user = userEvent.setup();
+    expect(
+      screen.getByText("Настройте налоговую политику продавца перед публикацией."),
+    ).toBeDefined();
+    await user.selectOptions(screen.getByLabelText("Тип плательщика"), "self_employed");
+    expect((screen.getByLabelText("Налоговая политика продавца") as HTMLSelectElement).value).toBe(
+      "unconfigured",
+    );
+    cleanup();
+    renderForm("tenant");
+    expect(screen.queryByLabelText("Налоговая политика продавца")).toBeNull();
+  });
+
+  it("saves an explicitly selected NPD policy with the seller profile", async () => {
+    const save = renderForm("operator");
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText("Тип плательщика"), "individual");
+    await user.type(screen.getByLabelText("ФИО"), "Иванов Иван Иванович");
+    await user.type(screen.getByLabelText("Краткое наименование"), "Иванов");
+    await user.type(screen.getByLabelText("Адрес регистрации"), "Москва");
+    await user.selectOptions(screen.getByLabelText("Налоговая политика продавца"), "npd");
+    await user.click(screen.getByLabelText("Реквизиты проверены по документам"));
+    await user.click(screen.getByRole("button", { name: "Сохранить и подтвердить" }));
+    await waitFor(() => expect(save).toHaveBeenCalledOnce());
+    expect(save.mock.calls[0]?.[0]).toMatchObject({
+      kind: "individual",
+      taxPolicy: { kind: "without_vat", regime: "npd" },
+    });
+  });
+
   it("lets an operator save an individual with person labels and no legal-entity identifiers", async () => {
     const save = renderForm("operator");
     const user = userEvent.setup();

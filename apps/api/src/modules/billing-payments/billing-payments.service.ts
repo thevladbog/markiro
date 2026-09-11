@@ -17,6 +17,7 @@ import {
   type PaymentMatchServiceSource,
   PaymentImportServiceResultSource,
 } from "@markiro/platform-contracts";
+import { lockInvoiceCommercialOrigin } from "../billing/commercial-sale-origin";
 import { DB } from "../../auth/auth.module";
 import { BillingApplicationService } from "../billing/billing-application.service";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
@@ -104,6 +105,7 @@ export class BillingPaymentsService {
           existing.bankReference === input.bankReference &&
           existing.paidAt.getTime() === input.paidAt.getTime()
         ) {
+          await lockInvoiceCommercialOrigin(tx, invoiceId);
           await tx.execute(sql`select id from invoices where id = ${invoiceId} for update`);
           const [invoice] = await tx
             .select()
@@ -124,6 +126,7 @@ export class BillingPaymentsService {
         }
         throw new ConflictException({ code: "payment_idempotency_key_reused" });
       }
+      await lockInvoiceCommercialOrigin(tx, invoiceId);
       await tx.execute(sql`select id from invoices where id = ${invoiceId} for update`);
       const [invoice] = await tx
         .select()
@@ -410,6 +413,7 @@ export class BillingPaymentsService {
         return matchSource(updated, row, invoiceNumber);
       }
 
+      await lockInvoiceCommercialOrigin(tx, input.invoiceId);
       const [invoice] = await tx
         .select()
         .from(schema.invoices)

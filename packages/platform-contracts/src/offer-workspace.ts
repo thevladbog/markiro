@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { sellerTaxPolicySchema } from "./commercial-terms.js";
 
 import {
   billingContactSchema,
@@ -9,6 +10,7 @@ import {
   expiredOfferSchema,
   normalizedBillingAddressSchema,
   offerDetailSchema,
+  offerDetailV2Schema,
   offerSchema,
   offerStatusSchema,
   paidOfferSchema,
@@ -209,3 +211,25 @@ export const platformOfferWorkspaceContracts = {
 export type OfferRegistryQuery = z.output<typeof offerRegistryQuerySchema>;
 export type OfferRegistry = z.output<typeof offerRegistrySchema>;
 export type OfferWorkspace = z.output<typeof offerWorkspaceSchema>;
+
+export const offerWorkspacePartyV2Schema = offerWorkspacePartySchema
+  .extend({
+    taxPolicy: sellerTaxPolicySchema.nullable().optional(),
+  })
+  .strict();
+export const offerWorkspaceV2Schema = offerWorkspaceSchema
+  .extend({
+    offer: offerDetailV2Schema,
+    parties: offerWorkspaceSchema.shape.parties
+      .extend({
+        seller: offerWorkspacePartyV2Schema.nullable(),
+        buyer: offerWorkspacePartyV2Schema.nullable(),
+      })
+      .strict(),
+  })
+  .strict();
+export const platformOfferWorkspaceV2Contracts = {
+  ...platformOfferWorkspaceContracts,
+  workspace: { ...platformOfferWorkspaceContracts.workspace, response: offerWorkspaceV2Schema },
+} as const;
+export type OfferWorkspaceV2 = z.output<typeof offerWorkspaceV2Schema>;

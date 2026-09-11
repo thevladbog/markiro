@@ -696,6 +696,26 @@ describe.skipIf(!ready)("transactional subscription quotas", () => {
     ]);
   }, 20_000);
 
+  it("denies the first line at zero quota with a truthful limit and preserves read access", async () => {
+    const target = await managedTenant({
+      lines: 0,
+      stations: null,
+      kiosks: null,
+      cabinetUsers: null,
+    });
+    const result = await target.agent.post("/lines").send({ name: "Not included" }).expect(409);
+    expect(result.body).toEqual({
+      code: "subscription_limit_reached",
+      entitlement: "lines",
+      used: 0,
+      limit: 0,
+    });
+    expect(
+      await db.select().from(schema.lines).where(eq(schema.lines.tenantId, target.tenantId)),
+    ).toEqual([]);
+    await target.agent.get("/lines").expect(200);
+  });
+
   it("allows unlimited quotas, blocks over-limit downgrade usage, and rolls back a failed create", async () => {
     const unlimited = await managedTenant({
       lines: null,

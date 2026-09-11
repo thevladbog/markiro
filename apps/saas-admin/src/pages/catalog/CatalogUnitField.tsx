@@ -38,18 +38,18 @@ export function CatalogUnitField({
   return (
     <div className="catalog-unit-field">
       <Select
-        label={t("catalog.form.unit")}
+        label={t(kind === "service" ? "catalog.form.unit" : "catalog.form.period")}
         value={selected}
         options={[
           ...presets.map((unit) => ({ value: unit, label: t(`catalog.units.${unit}`) })),
-          { value: OTHER, label: t("catalog.units.other") },
+          ...(kind === "service" ? [{ value: OTHER, label: t("catalog.units.other") }] : []),
         ]}
         onValueChange={(next) => onChange(next === OTHER ? (isPreset ? "" : value) : next)}
         {...(error ? { error } : {})}
         disabled={disabled}
         required
       />
-      {selected === OTHER ? (
+      {kind === "service" && selected === OTHER ? (
         <Input
           label={t("catalog.form.customUnit")}
           value={value}
