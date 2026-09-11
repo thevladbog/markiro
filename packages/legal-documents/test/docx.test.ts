@@ -19,7 +19,11 @@ import {
   type LegalArtifactRequest,
   type LegalDocxDraft,
 } from "../src/artifacts/index.js";
-import { normalizeCorePropertyTimestamps, normalizeZipDates } from "../src/artifacts/docx.js";
+import {
+  legalTableColumnWidths,
+  normalizeCorePropertyTimestamps,
+  normalizeZipDates,
+} from "../src/artifacts/docx.js";
 
 const PRIVACY_REQUEST = {
   code: "MKR-PD-01",
@@ -636,5 +640,23 @@ describe("published artifacts are unchanged", () => {
     expect(createHash("sha256").update(bytes).digest("hex")).toBe(
       createHash("sha256").update(published).digest("hex"),
     );
+  });
+});
+
+describe("legalTableColumnWidths", () => {
+  it("defaults to the full A4 text column", () => {
+    expect(legalTableColumnWidths(2, undefined).reduce((a, b) => a + b, 0)).toBe(9638);
+  });
+
+  it("fills exactly the width it is given", () => {
+    expect(legalTableColumnWidths(3, undefined, 4700).reduce((a, b) => a + b, 0)).toBe(4700);
+  });
+
+  it("honours ratios inside a narrower width", () => {
+    expect(legalTableColumnWidths(2, [3, 1], 4000)).toEqual([3000, 1000]);
+  });
+
+  it("refuses a width that cannot hold a column", () => {
+    expect(() => legalTableColumnWidths(2, undefined, 0)).toThrow(/positive/);
   });
 });

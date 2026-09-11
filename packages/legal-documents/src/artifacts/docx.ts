@@ -539,6 +539,7 @@ function renderBlock(
   block: LegalBlock,
   locale: LegalLocale,
   keepNext = false,
+  contentWidth: number = CONTENT_WIDTH,
 ): readonly FileChild[] {
   const isLast = (index: number, length: number): boolean => index === length - 1;
   switch (block.kind) {
@@ -571,7 +572,7 @@ function renderBlock(
           }),
       );
     case "table":
-      return renderTable(block, keepNext);
+      return renderTable(block, keepNext, contentWidth);
     case "callout":
       return [
         new Paragraph({
@@ -593,8 +594,14 @@ function renderBlock(
 export function legalTableColumnWidths(
   columnCount: number,
   ratios: readonly number[] | undefined,
+  // A bilingual document nests a table inside a half-width column, so the
+  // available width is not always the A4 text column.
+  contentWidth: number = CONTENT_WIDTH,
 ): readonly number[] {
   if (columnCount < 1) throw new Error("Legal table needs at least one column");
+  if (!Number.isFinite(contentWidth) || contentWidth <= 0) {
+    throw new Error("Legal table content width must be a positive number");
+  }
   const effective = ratios ?? Array.from({ length: columnCount }, () => 1);
   if (effective.length !== columnCount) {
     throw new Error("Legal table column ratios must match the column count");
@@ -611,20 +618,21 @@ export function legalTableColumnWidths(
   let assigned = 0;
   for (let index = 0; index < columnCount - 1; index += 1) {
     // Non-null: the loop stays inside `effective`, which has `columnCount` entries.
-    const width = Math.round((CONTENT_WIDTH * (effective[index] as number)) / total);
+    const width = Math.round((contentWidth * (effective[index] as number)) / total);
     widths.push(width);
     assigned += width;
   }
   // The last column absorbs the rounding so the row always spans the text column.
-  widths.push(CONTENT_WIDTH - assigned);
+  widths.push(contentWidth - assigned);
   return widths;
 }
 
 function renderTable(
   block: Extract<LegalBlock, { kind: "table" }>,
   keepNext = false,
+  contentWidth: number = CONTENT_WIDTH,
 ): readonly FileChild[] {
-  const widths = legalTableColumnWidths(block.columns.length, block.columnRatios);
+  const widths = legalTableColumnWidths(block.columns.length, block.columnRatios, contentWidth);
   for (const row of block.rows) {
     if (row.length !== block.columns.length) {
       throw new Error("Legal table row does not match its column count");
@@ -647,7 +655,7 @@ function renderTable(
 
   const children: FileChild[] = [
     new Table({
-      width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+      width: { size: contentWidth, type: WidthType.DXA },
       columnWidths: [...widths],
       layout: TableLayoutType.FIXED,
       borders: {
