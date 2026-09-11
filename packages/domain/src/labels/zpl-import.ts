@@ -24,6 +24,7 @@ interface ZplState {
   align?: "left" | "center" | "right";
   maxWidthDots?: number;
   hexIndicator?: string;
+  moduleWidthDots?: number;
   barcode?: { format: "code128" | "ean13" | "datamatrix" | "qr"; sizeDots: number };
   graphic?: { widthDots: number; heightDots: number; thicknessDots: number };
   data?: string;
@@ -42,6 +43,7 @@ const SUPPORTED = new Set([
   "FS",
   "FH",
   "BC",
+  "BY",
   "BE",
   "BX",
   "BQ",
@@ -164,6 +166,10 @@ function finalizeField(
       format: state.barcode.format,
       data: parsed.kind === "field" ? parsed.field : { literal: parsed.value },
       sizeMm: Math.max(0.1, dotsToMm(state.barcode.sizeDots, dpi)),
+      ...((state.barcode.format === "code128" || state.barcode.format === "ean13") &&
+      state.moduleWidthDots !== undefined
+        ? { moduleWidthMm: dotsToMm(state.moduleWidthDots, dpi) }
+        : {}),
     };
     elements.push(element);
     sourceLines[id] = state.line;
@@ -203,6 +209,7 @@ export function parseZplLabel(input: string, dpi: 203 | 300): LabelImportResult 
   const sourceLineByElementId: Record<string, number> = {};
   const warnings: LabelImportResult["warnings"] = [];
   let state: ZplState | null = null;
+  let moduleWidthDots: number | undefined;
   let started = false;
   let ended = false;
 
@@ -253,6 +260,7 @@ export function parseZplLabel(input: string, dpi: 203 | 300): LabelImportResult 
             yDots,
             fontHeightDots: 24,
             fontWidthDots: 24,
+            ...(moduleWidthDots === undefined ? {} : { moduleWidthDots }),
           };
           break;
         }
@@ -284,6 +292,14 @@ export function parseZplLabel(input: string, dpi: 203 | 300): LabelImportResult 
           if (!state) fail(line, source, "ZPL data command requires ^FO");
           state.data = args;
           break;
+        case "BY": {
+          const width = Number(args.split(",")[0]);
+          if (!Number.isInteger(width) || width < 1 || width > 10)
+            fail(line, source, "ZPL module width must be an integer from 1 to 10 dots");
+          moduleWidthDots = width;
+          if (state) state.moduleWidthDots = width;
+          break;
+        }
         case "BC":
           if (!state) fail(line, source, "ZPL barcode command requires ^FO");
           state.barcode = { format: "code128", sizeDots: barcodeSize(args, line, source) };
