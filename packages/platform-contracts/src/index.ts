@@ -1,4 +1,5 @@
 export { platformErrorSchema } from "./errors.js";
+export * from "./offer-draft.js";
 export type { PlatformError } from "./errors.js";
 export {
   platformMoneySchema,

@@ -1,10 +1,18 @@
 import { assertCatalogCommercialCompatibility } from "../../platform-http/commercial-catalog-compatibility";
 import type { CommercialVersion } from "../../platform-http/commercial-version";
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  ForbiddenException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   platformCommercialV2Contracts,
+  platformOfferDraftContracts,
+  type OfferDraftUpdate,
   offerServiceDetailV2Schema,
   type OfferPaymentResultSource,
   type OfferReviseDto,
@@ -27,7 +35,7 @@ import {
   postgresUniqueConstraint,
 } from "../billing-workflow-locks";
 import type { CreateOfferDto, PaymentDto } from "./dto";
-import { createOfferDraft } from "./platform-offer-draft";
+import { createOfferDraft, prepareOfferDraft } from "./platform-offer-draft";
 import { resolveOfferPrintInput } from "./offer-preview.service";
 import {
   beginPlatformBillingMutation,
@@ -51,6 +59,106 @@ export class PlatformOffersService {
     return this.db.transaction(async (tx) => {
       const offerId = await createOfferDraft(tx, actor.userId, input, commercialVersion);
       return this.detailWith(tx, input.tenantId, offerId);
+    });
+  }
+
+  async updateDraft(
+    actor: PlatformPrincipal,
+    id: string,
+    input: OfferDraftUpdate,
+    clientVersion: CommercialVersion = 2,
+  ) {
+    if (!actor.capabilities.includes("billing.write")) throw new ForbiddenException();
+    const offerId = canonicalBillingUuid(id);
+    return this.db.transaction(async (tx) => {
+      await lockSellerPolicy(tx);
+      const [located] = await tx
+        .select()
+        .from(schema.commercialOffers)
+        .where(eq(schema.commercialOffers.id, offerId))
+        .limit(1);
+      if (!located) throw new NotFoundException({ code: "offer_not_found" });
+      const mutation = await beginPlatformBillingMutation(tx, {
+        tenantId: located.tenantId,
+        idempotencyKey: input.idempotencyKey,
+        operation: "billing.offer.update",
+        targetId: offerId,
+        payload: input,
+        actorPlatformUserId: actor.userId,
+      });
+      if (mutation.kind === "committed")
+        return platformOfferDraftContracts.update.response.parse(mutation.result);
+      await acquireBillingWorkflowLocks(tx, located.tenantId, [
+        { kind: "offer_family", id: located.familyId },
+        { kind: "offer", id: offerId },
+      ]);
+      const family = await lockCommercialOfferFamily(tx, located.tenantId, located.familyId);
+      const draft = family.find((offer) => offer.id === offerId);
+      if (!draft || draft.status !== "draft")
+        throw new ConflictException({ code: "offer_not_draft" });
+      if (family[0]?.id !== offerId) throw new ConflictException({ code: "offer_version_stale" });
+      if (draft.updatedAt.toISOString() !== input.expectedUpdatedAt)
+        throw new ConflictException({ code: "offer_draft_changed" });
+      const prepared = await prepareOfferDraft(
+        tx,
+        { ...input, tenantId: draft.tenantId },
+        clientVersion,
+      );
+      const where = and(
+        eq(schema.commercialOffers.tenantId, draft.tenantId),
+        eq(schema.commercialOffers.id, offerId),
+      );
+      await tx
+        .update(schema.commercialOffers)
+        .set({
+          total: prepared.total,
+          termsMarkdown: prepared.termsMarkdown,
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+          sellerBankAccountId:
+            input.sellerBankAccountId === undefined
+              ? draft.sellerBankAccountId
+              : input.sellerBankAccountId,
+          updatedAt: new Date(Math.max(Date.now(), draft.updatedAt.getTime() + 1)),
+        })
+        .where(where);
+      await tx
+        .delete(schema.commercialOfferLines)
+        .where(
+          and(
+            eq(schema.commercialOfferLines.tenantId, draft.tenantId),
+            eq(schema.commercialOfferLines.offerId, offerId),
+          ),
+        );
+      await tx
+        .insert(schema.commercialOfferLines)
+        .values(prepared.lines.map((line) => ({ ...line, offerId })));
+      const result = platformOfferDraftContracts.update.response.parse(
+        await this.detailWith(tx, draft.tenantId, offerId),
+      );
+      await this.audit.record(tx, {
+        actorPlatformUserId: actor.userId,
+        actorRole: actor.role,
+        action: "billing.offer.updated",
+        outcome: "success",
+        tenantId: draft.tenantId,
+        targetType: "commercial_offer",
+        targetId: offerId,
+        reason: null,
+        before: {
+          status: draft.status,
+          total: draft.total,
+          updatedAt: draft.updatedAt.toISOString(),
+        },
+        after: {
+          status: result.status,
+          total: result.total,
+          updatedAt: result.updatedAt,
+          lineCount: result.lines.length,
+        },
+        requestId: null,
+      });
+      await commitPlatformBillingMutation(tx, mutation.row.id, offerId, result);
+      return result;
     });
   }
 

@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router";
 import { ApiRequestError } from "../../api/client.js";
+import { commercialIssuanceError } from "../documents/commercialError.js";
 import { cancelOffer, payOffer, publishOffer, reviseOffer } from "./api.js";
 import { offerErrorKey, offerMoney } from "./offerPresentation.js";
 
@@ -41,10 +42,21 @@ export function OfferActions({
   // Keep the existing attempt available for an exact idempotent retry.
   const actionAvailable = (selected: Action) =>
     workspace.actions[selected] || (selected === "pay" && paymentLocked);
+  const offer = workspace.offer;
+  const hasMissingTerms = offer.lines.some((line) => !line.commercialTerms);
+  const seller = workspace.parties.seller;
+  const commercialBlock = commercialIssuanceError(offer.lines, {
+    sellerPolicyRevision: seller?.revision ?? 0,
+    taxPolicy: seller?.taxPolicy ?? null,
+  });
+  const publishBlocked = hasMissingTerms || commercialBlock !== null;
+  const actionShown = (selected: Action) =>
+    actionAvailable(selected) ||
+    (selected === "publish" ? offer.status === "draft" : offer.status === "published");
   const actionBlocked = (selected: Action) =>
     !actionAvailable(selected) ||
     (paymentLocked && selected !== "pay") ||
-    (selected === "publish" && preview === null);
+    (selected === "publish" && (preview === null || publishBlocked));
   const mutation = useMutation({
     mutationFn: async (selected: Action) => {
       if (
@@ -102,7 +114,16 @@ export function OfferActions({
         <Alert tone="error">{t(offerErrorKey(mutation.error))}</Alert>
       ) : null}
       <div className="offer-action-bar">
-        {(["publish", "pay", "revise", "cancel"] as const).filter(actionAvailable).map((key) => (
+        {offer.status === "draft" ? (
+          mutation.isPending || paymentLocked ? (
+            <Button disabled>{t("offerWorkspace.edit")}</Button>
+          ) : (
+            <Link to={`/offers/${offer.id}/edit`} state={{ returnTo }}>
+              {t("offerWorkspace.edit")}
+            </Link>
+          )
+        ) : null}
+        {(["publish", "pay", "revise", "cancel"] as const).filter(actionShown).map((key) => (
           <Button
             key={key}
             variant={
@@ -140,6 +161,25 @@ export function OfferActions({
           )
         ) : null}
       </div>
+      {offer.status === "draft" ? (
+        <p className="offer-muted">
+          {t(
+            !workspace.actions.publish
+              ? "offerWorkspace.publishUnavailable"
+              : publishBlocked
+                ? "offerWorkspace.fixTermsBeforeIssue"
+                : preview === null
+                  ? "offerWorkspace.previewHint"
+                  : "offerWorkspace.readyToIssue",
+          )}
+        </p>
+      ) : null}
+      {offer.status === "published" && !workspace.actions.pay ? (
+        <p className="offer-muted">{t("offerWorkspace.paymentUnavailable")}</p>
+      ) : null}
+      {offer.status === "published" && !workspace.actions.revise ? (
+        <p className="offer-muted">{t("offerWorkspace.revisionUnavailable")}</p>
+      ) : null}
       <ConfirmDialog
         open={action !== null}
         title={action ? t(`offerWorkspace.${action}`) : ""}

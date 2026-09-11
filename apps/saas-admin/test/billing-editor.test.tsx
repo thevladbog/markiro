@@ -44,6 +44,7 @@ function publishedOffer(overrides: Record<string, unknown> = {}) {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -557,7 +558,9 @@ describe("invoice editor route", () => {
     await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
     await addPosition(user, "Дополнительная", "Дополнительная станция · addon-station · v1");
     await addPosition(user, "Внедрение", "Внедрение · service-implementation · v1");
-    await user.type(screen.getByLabelText("Срок оплаты"), "2026-09-01");
+    vi.setSystemTime(new Date("2026-09-01T12:00:00Z"));
+    await user.click(screen.getByRole("button", { name: "Срок оплаты" }));
+    await user.click(screen.getByRole("button", { name: /^1 сентября 2026/ }));
     await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
 
     expect(api.calls()).toEqual([

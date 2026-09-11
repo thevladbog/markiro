@@ -21,6 +21,16 @@ export function registryReturnTo(value: unknown): string {
 export function offerErrorKey(error: unknown): string {
   if (error instanceof ApiRequestError) {
     if (error.status === 403) return "offerWorkspace.errors.forbidden";
+    if (
+      [
+        "offer_draft_changed",
+        "offer_not_draft",
+        "offer_version_stale",
+        "offer_catalog_version_invalid",
+        "offer_price_override_reason_required",
+      ].includes(error.code ?? "")
+    )
+      return `offerWorkspace.errors.${error.code}`;
     if (error.code === "offer_preview_changed") return "offerWorkspace.errors.previewChanged";
     if (
       [

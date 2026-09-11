@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createDb, schema } from "@markiro/db";
+import { offerDetailV2Schema } from "@markiro/platform-contracts";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -176,17 +177,104 @@ describe.skipIf(!databaseUrl)("offer previews and immutable variants on isolated
     expect((await offers.detail(actor, id)).status).toBe("draft");
   });
 
-  it("requires current reviewed commercial terms in both preview and publication", async () => {
+  it("previews legacy saved lines but still blocks publication until terms are reviewed", async () => {
     const id = await draft();
     await db
       .update(schema.commercialOfferLines)
       .set({ commercialTerms: null })
       .where(eq(schema.commercialOfferLines.offerId, id));
-    for (const run of [() => preview.preview(actor, id), () => offers.publish(actor, id)]) {
-      await expect(run()).rejects.toMatchObject({
-        response: { code: "commercial_terms_review_required" },
-      });
-    }
+    expect((await preview.preview(actor, id)).html).toContain("Actual &lt;line&gt;");
+    await expect(offers.publish(actor, id)).rejects.toMatchObject({
+      response: { code: "commercial_terms_review_required" },
+    });
+  });
+
+  it("updates a draft once, keeps its identity and rejects stale or issued edits", async () => {
+    const id = await draft();
+    const before = await offers.detail(actor, id);
+    const oldPreview = await preview.preview(actor, id);
+    const input = {
+      expectedUpdatedAt: new Date(before.updatedAt).toISOString(),
+      idempotencyKey: randomUUID(),
+      termsMarkdown: "Changed terms",
+      expiresAt: null,
+      lines: [
+        {
+          kind: "service" as const,
+          catalogVersionId: null,
+          nameRu: "Corrected line",
+          nameEn: "Corrected line",
+          quantity: 2,
+          unit: "шт",
+          agreedUnitPrice: "150.00",
+          vatRateBps: 2000,
+          vatIncluded: false,
+          priceOverrideReason: null,
+          activationPolicy: null,
+          commercialTerms: {
+            version: 1 as const,
+            subject: "service" as const,
+            documentNameRu: "Corrected line",
+            documentNameEn: "Corrected line",
+            sellerPolicyRevision: 1,
+            billingPeriod: null,
+            billingTimezone: null,
+            activationRule: null,
+          },
+        },
+      ],
+    };
+    const changed = await offers.updateDraft(actor, id, input);
+    expect(changed).toMatchObject({
+      id,
+      tenantId,
+      familyId: before.familyId,
+      revision: 5,
+      status: "draft",
+      total: "360.00",
+      termsMarkdown: "Changed terms",
+    });
+    expect(changed.lines).toHaveLength(1);
+    expect(changed.lines[0]).toMatchObject({
+      offerId: id,
+      tenantId,
+      nameRu: "Corrected line",
+      quantity: 2,
+      lineTotal: "360.00",
+    });
+    expect(await offers.updateDraft(actor, id, input)).toEqual(changed);
+    const events = await db
+      .select()
+      .from(schema.platformAuditEvents)
+      .where(eq(schema.platformAuditEvents.targetId, id));
+    expect(events.filter((event) => event.action === "billing.offer.updated")).toMatchObject([
+      {
+        actorPlatformUserId: actor.userId,
+        actorRole: "accountant",
+        tenantId,
+        action: "billing.offer.updated",
+        targetId: id,
+        targetType: "commercial_offer",
+        outcome: "success",
+        before: { total: "120.00" },
+        after: { total: "360.00" },
+      },
+    ]);
+    await expect(
+      offers.updateDraft(actor, id, { ...input, idempotencyKey: randomUUID() }),
+    ).rejects.toMatchObject({ response: { code: "offer_draft_changed" } });
+    await expect(offers.publish(actor, id, oldPreview.fingerprint)).rejects.toMatchObject({
+      response: { code: "offer_preview_changed" },
+    });
+    await offers.publish(actor, id, (await preview.preview(actor, id)).fingerprint);
+    await expect(
+      offers.updateDraft(actor, id, {
+        ...input,
+        expectedUpdatedAt: changed.updatedAt,
+        idempotencyKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ response: { code: "offer_not_draft" } });
+    expect((await offers.detail(actor, id)).total).toBe("360.00");
   });
 
   it.each([
@@ -240,14 +328,10 @@ describe.skipIf(!databaseUrl)("offer previews and immutable variants on isolated
     const reviewed = await preview.preview(actor, id);
     await db.update(schema.operatorBillingProfiles).set({ revision: 2 });
     try {
-      for (const run of [
-        () => preview.preview(actor, id),
-        () => offers.publish(actor, id, reviewed.fingerprint),
-      ]) {
-        await expect(run()).rejects.toMatchObject({
-          response: { code: "commercial_review_stale" },
-        });
-      }
+      expect((await preview.preview(actor, id)).html).toContain("Actual &lt;line&gt;");
+      await expect(offers.publish(actor, id, reviewed.fingerprint)).rejects.toMatchObject({
+        response: { code: "commercial_review_stale" },
+      });
       expect((await offers.detail(actor, id)).status).toBe("draft");
     } finally {
       await db.update(schema.operatorBillingProfiles).set({ revision: 1 });
@@ -621,6 +705,40 @@ describe.skipIf(!databaseUrl)("offer previews and immutable variants on isolated
     try {
       const id = await draft();
       await request(app.getHttpServer()).get(`/platform/offers/${id}/preview`).expect(401);
+      await request(app.getHttpServer()).patch(`/platform/offers/${id}/draft`).send({}).expect(401);
+      const detail = offerDetailV2Schema.parse(await offers.detail(actor, id));
+      const line = detail.lines[0]!;
+      const update = {
+        expectedUpdatedAt: new Date(detail.updatedAt).toISOString(),
+        idempotencyKey: randomUUID(),
+        termsMarkdown: "Edited through the protected route",
+        lines: [
+          {
+            kind: line.kind,
+            catalogVersionId: line.catalogVersionId,
+            nameRu: line.nameRu,
+            nameEn: line.nameEn,
+            quantity: line.quantity,
+            unit: line.unit,
+            agreedUnitPrice: line.agreedUnitPrice,
+            vatRateBps: line.vatRate === null ? null : Math.round(Number(line.vatRate) * 100),
+            vatIncluded: line.vatIncluded,
+            activationPolicy: line.activationPolicy,
+            commercialTerms: line.commercialTerms,
+          },
+        ],
+      };
+      await request(app.getHttpServer())
+        .patch(`/platform/offers/${id}/draft`)
+        .set("Cookie", "fixture=platform")
+        .send({ ...update, tenantId: "another-tenant" })
+        .expect(400);
+      const edited = await request(app.getHttpServer())
+        .patch(`/platform/offers/${id}/draft`)
+        .set("Cookie", "fixture=platform")
+        .send(update)
+        .expect(200);
+      expect(edited.body).toMatchObject({ id, tenantId, termsMarkdown: update.termsMarkdown });
       const response = await request(app.getHttpServer())
         .get(`/platform/offers/${id}/preview`)
         .set("Cookie", "fixture=platform")
@@ -656,6 +774,11 @@ describe.skipIf(!databaseUrl)("offer previews and immutable variants on isolated
       await request(app.getHttpServer())
         .get(`/platform/offers/${id}/preview`)
         .set("Cookie", "fixture=platform")
+        .expect(403);
+      await request(app.getHttpServer())
+        .patch(`/platform/offers/${id}/draft`)
+        .set("Cookie", "fixture=platform")
+        .send(update)
         .expect(403);
       await request(app.getHttpServer())
         .post(`/platform/offers/${id}/documents`)

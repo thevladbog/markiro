@@ -11,6 +11,7 @@ import { Link, useLocation, useParams } from "react-router";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { ApiRequestError } from "../../api/client.js";
 import { getOfferWorkspace } from "./api.js";
+import { OfferReadiness } from "./OfferReadiness.js";
 import { OfferActions } from "./OfferActions.js";
 import { OfferDocuments } from "./OfferDocuments.js";
 import { OfferPreview } from "./OfferPreview.js";
@@ -96,6 +97,7 @@ function OfferDetail({ offerId }: { offerId: string }) {
               <dd>{offerDate(offer.expiresAt, i18n.language) ?? t("offerWorkspace.noExpiry")}</dd>
             </div>
           </dl>
+          <OfferReadiness workspace={data} canWrite={canWrite} />
           {canWrite ? (
             <OfferActions
               workspace={data}
