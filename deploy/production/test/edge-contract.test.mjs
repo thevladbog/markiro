@@ -988,7 +988,7 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.deepEqual(
     landingInstructions.filter((instruction) => instruction.name === "RUN"),
     [
-      { name: "RUN", arguments: "pnpm --filter @markiro/ui build" },
+      { name: "RUN", arguments: "pnpm turbo build --filter @markiro/ui..." },
       { name: "RUN", arguments: "pnpm --filter @markiro/landing build" },
     ],
   );
