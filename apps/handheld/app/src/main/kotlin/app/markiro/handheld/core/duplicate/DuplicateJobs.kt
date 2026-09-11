@@ -36,6 +36,12 @@ object DuplicateReason {
 
     /** Another unit's label is still unresolved; the operator is holding a sticker. */
     const val JOB_OUTSTANDING = "job_outstanding"
+
+    /** A reprint was asked for while this job's own attempt was still in flight. */
+    const val ATTEMPT_IN_FLIGHT = "attempt_in_flight"
+
+    /** Retention dropped the prepared bytes at shift close; there is nothing to replay. */
+    const val BYTES_GONE = "bytes_gone"
     const val NO_PAPER = PrintReason.NO_PAPER
     const val HEAD_OPEN = PrintReason.HEAD_OPEN
     const val UNREACHABLE = PrintReason.UNREACHABLE
@@ -247,6 +253,86 @@ class DuplicateJobs(
         for (job in db.productLabelJobDao().interrupted()) {
             append(job, EventKind.DELIVERY_UNKNOWN, errorCode = "interrupted")
         }
+    }
+
+    /**
+     * Reads a scan as this job's verification.
+     *
+     * `compareDuplicateKm` covers the whole raw code, separators and crypto tail
+     * included -- unlike the identity hash the scan loop uses for duplicates,
+     * which a different unit of the same product would share. Only a match may
+     * be recorded as `verified`: the domain checks the digest too and would
+     * refuse the event, so lying here fails loudly rather than quietly.
+     */
+    suspend fun verify(jobId: String, scannedRaw: String): DuplicateMatch = mutex.withLock {
+        val job = db.productLabelJobDao().get(jobId) ?: return DuplicateMatch.INVALID
+        val match = compareDuplicateKm(job.canonicalRaw, scannedRaw)
+        // A verified attempt takes no further event; the job is already settled.
+        if (job.verificationOutcome == VerificationOutcome.VERIFIED) return match
+        when (match) {
+            DuplicateMatch.MATCH -> append(
+                job,
+                EventKind.VERIFIED,
+                scannedPayloadDigest = duplicatePayloadDigest(scannedRaw),
+            )
+            DuplicateMatch.MISMATCH -> append(job, EventKind.VERIFICATION_REJECTED, reason = "mismatch")
+            DuplicateMatch.INVALID -> append(job, EventKind.VERIFICATION_REJECTED, reason = "invalid")
+        }
+        return match
+    }
+
+    /**
+     * Starts a second attempt on the same bytes.
+     *
+     * It does not send; the caller sends, exactly as the first attempt does. The
+     * bytes, language and dpi are carried over unchanged because the domain
+     * refuses a `prepared` that alters any of them -- which is also why a job
+     * whose bytes retention has dropped can no longer be reprinted at all
+     * rather than being re-rendered into a symbol the stored digest disowns.
+     */
+    suspend fun reprint(jobId: String, reason: String): DuplicateOutcome = mutex.withLock {
+        val job = db.productLabelJobDao().get(jobId) ?: return DuplicateOutcome.Refused(DuplicateReason.BYTES_GONE)
+        if (job.bytesBase64 == null) return DuplicateOutcome.Refused(DuplicateReason.BYTES_GONE)
+        if (job.attemptState == AttemptState.PREPARED || job.attemptState == AttemptState.SENDING) {
+            return DuplicateOutcome.Refused(DuplicateReason.ATTEMPT_IN_FLIGHT)
+        }
+
+        val now = Iso.format(clock())
+        val event = ProductLabelEvent(
+            eventId = newId(),
+            jobId = job.jobId,
+            attemptId = newId(),
+            sequence = job.latestSequence + 1,
+            shiftId = job.shiftId,
+            codeHash = job.codeHash,
+            acceptedAt = job.acceptedAt,
+            policyRevision = job.policyRevision,
+            templateDigest = job.templateDigest,
+            payloadDigest = job.payloadDigest,
+            operatorId = job.operatorId,
+            occurredAt = now,
+            kind = EventKind.PREPARED,
+            attemptNo = job.attemptNo + 1,
+            reason = reason,
+            language = job.language,
+            dpi = job.dpi,
+            bytesDigest = job.bytesDigest,
+        )
+        val projection = applyProductLabelEvent(job.toProjection(), event, job.verification)
+        db.withTransaction {
+            db.productLabelJobDao().update(
+                job.copy(
+                    latestSequence = projection.latestSequence,
+                    attemptId = projection.attemptId,
+                    attemptNo = projection.attemptNo,
+                    attemptState = projection.attemptState,
+                    verificationOutcome = projection.verificationOutcome,
+                    status = projection.status,
+                ),
+            )
+            db.productLabelEventDao().insert(event.toEntity())
+        }
+        return DuplicateOutcome.Prepared(job.jobId)
     }
 
     private suspend fun fail(job: ProductLabelJobEntity, reason: String): DuplicateSend.Failed {
