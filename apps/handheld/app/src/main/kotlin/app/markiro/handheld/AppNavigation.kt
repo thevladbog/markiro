@@ -76,6 +76,9 @@ import app.markiro.handheld.feature.work.DuplicateScreen
 import app.markiro.handheld.feature.work.DuplicateStep
 import app.markiro.handheld.feature.work.LabelQueueCallbacks
 import app.markiro.handheld.feature.work.LabelQueueScreen
+import app.markiro.handheld.feature.exceptions.ExceptionsCallbacks
+import app.markiro.handheld.feature.exceptions.ExceptionsScreen
+import app.markiro.handheld.feature.exceptions.ExceptionsViewModel
 import app.markiro.handheld.feature.work.LabelQueueViewModel
 import app.markiro.handheld.feature.work.WorkCallbacks
 import app.markiro.handheld.feature.work.WorkScreen
@@ -97,6 +100,7 @@ object Routes {
     const val CLOSE = "close/{shiftId}"
     const val CONFLICTS = "conflicts/{shiftId}"
     const val LABEL_QUEUE = "label-queue"
+    const val EXCEPTIONS = "exceptions/{shiftId}"
     const val SOON = "soon/{tile}"
     const val INVENTORY = "inventory"
     const val INVENTORY_WORK = "inventory/{inventoryId}"
@@ -106,6 +110,7 @@ object Routes {
     fun work(id: String) = "work/$id"
     fun close(id: String) = "close/$id"
     fun conflicts(id: String) = "conflicts/$id"
+    fun exceptions(id: String) = "exceptions/$id"
     fun soon(tile: HubTile) = "soon/${tile.name}"
 }
 
@@ -245,6 +250,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         onConflicts = { nav.navigate(Routes.conflicts(shiftId)) },
                         onCloseBoxEarly = vm::closeEarly,
                         onLabelQueue = { nav.navigate(Routes.LABEL_QUEUE) },
+                        onExceptions = { nav.navigate(Routes.exceptions(shiftId)) },
                     ),
                 )
                 // Drawn over the work screen rather than as a route of its own, so
@@ -278,6 +284,20 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         ),
                     )
                 }
+            }
+            composable(Routes.EXCEPTIONS) {
+                val vm: ExceptionsViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                ExceptionsScreen(
+                    state,
+                    ExceptionsCallbacks(
+                        onBack = { nav.popBackStack() },
+                        onClear = vm::startClear,
+                        onUndo = vm::startUndo,
+                        onConfirm = vm::confirm,
+                        onDismiss = vm::dismiss,
+                    ),
+                )
             }
             composable(Routes.LABEL_QUEUE) {
                 val vm: LabelQueueViewModel = hiltViewModel()

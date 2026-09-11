@@ -405,4 +405,22 @@
     <string name="duplicate_busy">A duplicate is printing</string>
     <string name="duplicate_blocked">Deal with the duplicate first</string>
     <string name="work_close_duplicates_outstanding">%1$d duplicate(s) unresolved. The shift will close and the events still sync.</string>
+    <string name="work_exceptions">Exceptions</string>
+    <string name="exceptions_title">Exceptions</string>
+    <string name="exceptions_disassemble">Disassemble box</string>
+    <string name="exceptions_clear">Clear box</string>
+    <string name="exceptions_reprint">Reprint label</string>
+    <string name="exceptions_undo">Undo last scan</string>
+    <string name="exceptions_last_scan">Last scan: %1$s at %2$s</string>
+    <string name="exceptions_no_last_scan">Nothing to undo: the box has no scans</string>
+    <string name="exceptions_no_open_box">No box is open</string>
+    <string name="exceptions_no_closed_boxes">This shift has no closed boxes</string>
+    <string name="exceptions_confirm_undo_title">Undo the last scan?</string>
+    <string name="exceptions_confirm_undo_body">Unit %1$s, accepted at %2$s. It leaves the box and its code becomes scannable again.</string>
+    <string name="exceptions_confirm_clear_title">Clear the box?</string>
+    <string name="exceptions_confirm_clear_body">Box %1$d · %2$d units. Every unit leaves the box; the box stays open.</string>
+    <string name="exceptions_undone">Scan undone</string>
+    <string name="exceptions_cleared">Box cleared</string>
+    <string name="exceptions_undo_stale">A new scan arrived, so undo now targets that one. Reopen the screen.</string>
+    <string name="exceptions_confirm">Confirm</string>
 </resources>

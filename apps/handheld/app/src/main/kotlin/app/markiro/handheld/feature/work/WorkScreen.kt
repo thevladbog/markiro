@@ -56,6 +56,7 @@ import app.markiro.handheld.core.util.TimeText
 import java.text.NumberFormat
 
 data class WorkCallbacks(
+    val onExceptions: () -> Unit = {},
     val onLeave: () -> Unit = {},
     val onClose: () -> Unit = {},
     val onConflicts: () -> Unit = {},
@@ -133,6 +134,13 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                             },
                         )
                     }
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.work_exceptions)) },
+                        onClick = {
+                            menu = false
+                            cb.onExceptions()
+                        },
+                    )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.work_leave)) },
                         onClick = {

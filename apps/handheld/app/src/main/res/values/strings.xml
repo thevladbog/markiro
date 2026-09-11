@@ -417,4 +417,22 @@
     <string name="duplicate_busy">Идёт печать дубликата</string>
     <string name="duplicate_blocked">Сначала разберитесь с дубликатом</string>
     <string name="work_close_duplicates_outstanding">Нерешённых дубликатов: %1$d. Смена закроется, события уйдут на сервер.</string>
+    <string name="work_exceptions">Исключения</string>
+    <string name="exceptions_title">Исключения</string>
+    <string name="exceptions_disassemble">Расформировать короб</string>
+    <string name="exceptions_clear">Очистить короб</string>
+    <string name="exceptions_reprint">Перепечатать этикетку</string>
+    <string name="exceptions_undo">Отменить последний скан</string>
+    <string name="exceptions_last_scan">Последний скан: %1$s в %2$s</string>
+    <string name="exceptions_no_last_scan">Отменять нечего: в коробе нет сканов</string>
+    <string name="exceptions_no_open_box">Короб не открыт</string>
+    <string name="exceptions_no_closed_boxes">В этой смене нет закрытых коробов</string>
+    <string name="exceptions_confirm_undo_title">Отменить последний скан?</string>
+    <string name="exceptions_confirm_undo_body">Единица %1$s, принята в %2$s. Она выйдет из короба, а код снова можно будет сканировать.</string>
+    <string name="exceptions_confirm_clear_title">Очистить короб?</string>
+    <string name="exceptions_confirm_clear_body">Короб %1$d · %2$d единиц. Все единицы выйдут из короба, короб останется открытым.</string>
+    <string name="exceptions_undone">Скан отменён</string>
+    <string name="exceptions_cleared">Короб очищен</string>
+    <string name="exceptions_undo_stale">Появился новый скан — отмена относится уже к нему. Откройте экран заново.</string>
+    <string name="exceptions_confirm">Подтвердить</string>
 </resources>
