@@ -537,7 +537,7 @@ export const CABINET_CATALOG_IMPORT_CONTENT = {
           {
             kind: "step",
             title: "Deal with a position that cannot be applied",
-            text: "When a position cannot be applied, its tab is marked “Unavailable” and the reason is printed both above the form and next to the offending field. In the frame below it is “The ChZ categories indicate multiple or conflicting groups. Select the group in the product form.”: the group on the right reads “Not set”, “Apply selected” is disabled, and the bottom line says “Complete your choices and update the review to see the totals.”",
+            text: "When a position cannot be applied, its tab is marked “Unavailable” and the reason is printed both above the form and next to the offending field. In the frame below it reads “The ChZ categories indicate multiple or conflicting groups. Select the group in the product form.” The group on the right then reads “Not set”, “Apply selected” is disabled, and the bottom line says “Complete your choices and update the review to see the totals.”",
             image: {
               id: "import-review-blocked",
               caption: "A position with an ambiguous product group: applying is blocked",

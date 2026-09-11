@@ -14,7 +14,7 @@ const root = new URL("../../../", import.meta.url);
 const releasedRoot = new URL("apps/landing/public/legal/", root);
 const releasedAttestation = new URL("deploy/production/legal-artifacts-attestation.json", root);
 const releaseId = "MKR-LEGAL-2026.09-21-2026-09-11";
-const manifestSha256 = "7f5916d46c453f4596fa2dc0025d9bd767e6cc2348bd64165b0b6952b298cc09";
+const manifestSha256 = "c53201ac3eea8da407812c2c3514bdd136ed4dd450a5cfc225efe1eb9457cb30";
 const releasedPdfNames = [
   "markiro_mkr-brd-01_2026.08-01_en.pdf",
   "markiro_mkr-brd-01_2026.08-01_ru.pdf",
