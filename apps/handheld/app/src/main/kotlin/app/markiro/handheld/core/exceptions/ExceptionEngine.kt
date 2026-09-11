@@ -1,6 +1,5 @@
 package app.markiro.handheld.core.exceptions
 
-import androidx.room.withTransaction
 import app.markiro.handheld.core.storage.BoxExceptionEntity
 import app.markiro.handheld.core.storage.CodeEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
@@ -43,9 +42,17 @@ class ExceptionEngine(
         expectedCodeHash: String,
         operatorId: String?,
         terminalId: String?,
-    ): UndoResult = db.withTransaction {
-        val last = db.codeDao().lastIn(boxId) ?: return@withTransaction UndoResult.Empty
-        if (last.codeHash != expectedCodeHash) return@withTransaction UndoResult.Stale
+    ): UndoResult = db.recovery.commit { undoLastScanOwned(shiftId, boxId, expectedCodeHash, operatorId, terminalId) }
+
+    private suspend fun undoLastScanOwned(
+        shiftId: String,
+        boxId: String,
+        expectedCodeHash: String,
+        operatorId: String?,
+        terminalId: String?,
+    ): UndoResult = db.recovery.commit {
+        val last = db.codeDao().lastIn(boxId) ?: return@commit UndoResult.Empty
+        if (last.codeHash != expectedCodeHash) return@commit UndoResult.Stale
         val at = Iso.format(clock())
         // Released locally first: the row leaving `codes_mirror` is what makes the
         // code scannable again on this device without waiting for a round trip.
@@ -74,9 +81,16 @@ class ExceptionEngine(
         boxId: String,
         operatorId: String?,
         terminalId: String?,
-    ): Int = db.withTransaction {
+    ): Int = db.recovery.commit { clearBoxOwned(shiftId, boxId, operatorId, terminalId) }
+
+    private suspend fun clearBoxOwned(
+        shiftId: String,
+        boxId: String,
+        operatorId: String?,
+        terminalId: String?,
+    ): Int = db.recovery.commit {
         val released = db.codeDao().deleteInBox(boxId)
-        if (released == 0) return@withTransaction 0
+        if (released == 0) return@commit 0
         queue(
             ExceptionFact.Clear(
                 boxId = boxId, shiftId = shiftId, terminalId = terminalId,
@@ -92,11 +106,19 @@ class ExceptionEngine(
         reason: DisassembleReason,
         operatorId: String?,
         terminalId: String?,
-    ): DisassembleResult = db.withTransaction {
-        val box = db.boxDao().get(boxId) ?: return@withTransaction DisassembleResult.NotClosed
-        if (box.closedAt == null) return@withTransaction DisassembleResult.NotClosed
+    ): DisassembleResult = db.recovery.commit { disassembleOwned(shiftId, boxId, reason, operatorId, terminalId) }
+
+    private suspend fun disassembleOwned(
+        shiftId: String,
+        boxId: String,
+        reason: DisassembleReason,
+        operatorId: String?,
+        terminalId: String?,
+    ): DisassembleResult = db.recovery.commit {
+        val box = db.boxDao().get(boxId) ?: return@commit DisassembleResult.NotClosed
+        if (box.closedAt == null) return@commit DisassembleResult.NotClosed
         val at = Iso.format(clock())
-        if (db.boxDao().markDisassembled(boxId, at) == 0) return@withTransaction DisassembleResult.AlreadyRetired
+        if (db.boxDao().markDisassembled(boxId, at) == 0) return@commit DisassembleResult.AlreadyRetired
         db.codeDao().deleteInBox(boxId)
         queue(
             ExceptionFact.Disassemble(
@@ -109,6 +131,14 @@ class ExceptionEngine(
 
     /** Records the request. The printing itself is the caller's business. */
     suspend fun reprint(
+        shiftId: String,
+        boxId: String,
+        reason: ReprintReason,
+        operatorId: String?,
+        terminalId: String?,
+    ) = db.recovery.work { reprintOwned(shiftId, boxId, reason, operatorId, terminalId) }
+
+    private suspend fun reprintOwned(
         shiftId: String,
         boxId: String,
         reason: ReprintReason,
@@ -127,7 +157,9 @@ class ExceptionEngine(
      * The watermark is read here, inside the same transaction as the local
      * effect, so it names exactly the scans that preceded this correction.
      */
-    private suspend fun queue(fact: ExceptionFact) {
+    private suspend fun queue(fact: ExceptionFact) = db.recovery.commit { queueOwned(fact) }
+
+    private suspend fun queueOwned(fact: ExceptionFact) {
         val undo = fact as? ExceptionFact.Undo
         db.boxExceptionDao().insert(
             BoxExceptionEntity(

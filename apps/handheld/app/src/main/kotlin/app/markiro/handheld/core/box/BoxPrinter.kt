@@ -55,7 +55,9 @@ class BoxPrinter(
     private val renderer: LabelRenderer,
     private val transport: PrinterTransport,
 ) {
-    suspend fun print(boxId: String): PrintOutcome {
+    suspend fun print(boxId: String): PrintOutcome = db.recovery.printing { printOwned(boxId) }
+
+    private suspend fun printOwned(boxId: String): PrintOutcome {
         val box = db.boxDao().get(boxId) ?: return fail(boxId, PrintReason.BOX_MISSING)
         val closedAt = box.closedAt ?: return fail(boxId, PrintReason.BOX_OPEN)
         val sscc = box.sscc ?: return fail(boxId, PrintReason.BOX_OPEN)
@@ -99,6 +101,9 @@ class BoxPrinter(
             return fail(boxId, PrintReason.RENDER_FAILED)
         }
 
+        if (!db.recovery.valid(checkNotNull(app.markiro.handheld.core.storage.DeviceRecovery.generationContext.get()))) {
+            throw app.markiro.handheld.core.storage.RecoveryBlocked()
+        }
         return when (val outcome = transport.send(printer, document)) {
             SendOutcome.Delivered -> {
                 boxes.setPrintState(boxId, BoxPrint.PRINTED, null)
@@ -113,7 +118,9 @@ class BoxPrinter(
     }
 
     /** The operator looked at the printer and says the label is there. Nothing is sent. */
-    suspend fun resolveUnknownAsPrinted(boxId: String) =
+    suspend fun resolveUnknownAsPrinted(boxId: String) = db.recovery.commit { resolveUnknownAsPrintedOwned(boxId) }
+
+    private suspend fun resolveUnknownAsPrintedOwned(boxId: String) =
         boxes.setPrintState(boxId, BoxPrint.PRINTED, null)
 
     /**
@@ -123,10 +130,14 @@ class BoxPrinter(
      * queue saying only that the label did not print, which is both less useful
      * and untrue: the operator set it aside, and «Нет бумаги» is still why.
      */
-    suspend fun defer(boxId: String) =
+    suspend fun defer(boxId: String) = db.recovery.commit { deferOwned(boxId) }
+
+    private suspend fun deferOwned(boxId: String) =
         boxes.setPrintState(boxId, BoxPrint.DEFERRED, db.boxDao().get(boxId)?.printReason)
 
-    private suspend fun fail(boxId: String, reason: String): PrintOutcome.Failed {
+    private suspend fun fail(boxId: String, reason: String): PrintOutcome.Failed = db.recovery.commit { failOwned(boxId, reason) }
+
+    private suspend fun failOwned(boxId: String, reason: String): PrintOutcome.Failed {
         boxes.setPrintState(boxId, BoxPrint.FAILED, reason)
         return PrintOutcome.Failed(reason)
     }

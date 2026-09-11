@@ -1,6 +1,5 @@
 package app.markiro.handheld.core.box
 
-import androidx.room.withTransaction
 import app.markiro.handheld.core.storage.BoxEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.util.Iso
@@ -63,7 +62,9 @@ class CloseBox(
     /** Rolls the burn back when the guarded close turns out to affect no row. */
     private class AlreadyClosed : Exception()
 
-    suspend fun close(shiftId: String, issuerPrefix: String?, operatorId: String?): CloseResult = mutex.withLock {
+    suspend fun close(shiftId: String, issuerPrefix: String?, operatorId: String?): CloseResult = db.recovery.commit { closeOwned(shiftId, issuerPrefix, operatorId) }
+
+    private suspend fun closeOwned(shiftId: String, issuerPrefix: String?, operatorId: String?): CloseResult = mutex.withLock {
         if (issuerPrefix == null) return CloseResult.NoIssuer
         val box = db.boxDao().open(shiftId) ?: return CloseResult.Empty
         val itemCount = boxes.itemCount(box.boxId)
@@ -73,16 +74,16 @@ class CloseBox(
         // without landing on a box is gone -- the pool has no way to give one
         // back -- so the guarded update failing has to take the burn with it.
         return try {
-            db.withTransaction {
+            db.recovery.commit {
                 val serial = pool.burn(issuerPrefix, SsccPool.BOX_EXTENSION_DIGIT)
-                    ?: return@withTransaction CloseResult.NoSerials
+                    ?: return@commit CloseResult.NoSerials
                 val sscc = try {
                     Sscc.build(SsccPool.BOX_EXTENSION_DIGIT, issuerPrefix, serial)
                 } catch (_: SsccException) {
                     // The serial IS spent here, deliberately: the pool row is
                     // beyond its prefix's capacity and rolling back would hand the
                     // same impossible serial out again on the next attempt.
-                    return@withTransaction CloseResult.InvalidSerial
+                    return@commit CloseResult.InvalidSerial
                 }
                 // The box's own moment, persisted: the label's «Дата производства»
                 // and «Годен до» derive from it, and a recovery print the next

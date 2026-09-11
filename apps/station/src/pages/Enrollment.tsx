@@ -1,11 +1,18 @@
+import { RecoveryWorkSummary } from "../ui/RecoveryWorkSummary.js";
+import {
+  initializeDeviceRecovery,
+  readDeviceRecovery,
+  type DurableStationOwner,
+} from "../lib/device-recovery.js";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Input, PinPad } from "@markiro/ui";
 import { createStationClient } from "../lib/api-client.js";
-import { writeConfig } from "../lib/config.js";
+import { readConfig, writeConfig } from "../lib/config.js";
 import {
   persistStationProvisioning,
   redeemStationPairing,
+  redeemStationRecovery,
   type PairingError,
 } from "../lib/pairing.js";
 import { tauriExecutor } from "../lib/sqlite.js";
@@ -17,6 +24,7 @@ export interface EnrollmentProps {
   machineId: string;
   /** Pins recovery pairing to the device record that owns the local queue. */
   expectedDeviceId?: string;
+  expectedOwner?: DurableStationOwner;
   sealedWork?: SealedWorkSummary;
   onEnrolled: () => void;
   pairingServerUrl: string | null;
@@ -37,6 +45,7 @@ interface EnrollmentOperation {
 interface EnrollmentLifecycleIdentity {
   readonly machineId: string;
   readonly expectedDeviceId: string | undefined;
+  readonly expectedOwner: DurableStationOwner | undefined;
   readonly pairingServerUrl: string | null;
   readonly runConfigTransition: (transition: () => Promise<void>) => Promise<void>;
 }
@@ -63,6 +72,7 @@ export function normalizePairingKeyboardInput(current: string, key: string): str
 export function Enrollment({
   machineId,
   expectedDeviceId,
+  expectedOwner,
   sealedWork,
   onEnrolled,
   pairingServerUrl,
@@ -88,6 +98,7 @@ export function Enrollment({
   const lifecycleIdentity = useRef<EnrollmentLifecycleIdentity>({
     machineId,
     expectedDeviceId,
+    expectedOwner,
     pairingServerUrl,
     runConfigTransition,
   });
@@ -133,11 +144,13 @@ export function Enrollment({
     const changed =
       previous.machineId !== machineId ||
       previous.expectedDeviceId !== expectedDeviceId ||
+      previous.expectedOwner !== expectedOwner ||
       previous.pairingServerUrl !== pairingServerUrl ||
       previous.runConfigTransition !== runConfigTransition;
     lifecycleIdentity.current = {
       machineId,
       expectedDeviceId,
+      expectedOwner,
       pairingServerUrl,
       runConfigTransition,
     };
@@ -160,7 +173,7 @@ export function Enrollment({
       activeOperation.current?.controller.abort();
       activeOperation.current = null;
     };
-  }, [machineId, expectedDeviceId, pairingServerUrl, runConfigTransition]);
+  }, [machineId, expectedDeviceId, expectedOwner, pairingServerUrl, runConfigTransition]);
 
   // A configured serial scanner has no focused DOM input to type into. The
   // same source is therefore consumed here and in the floor, but only an
@@ -183,11 +196,41 @@ export function Enrollment({
     setState("redeeming");
     setError(null);
     try {
-      const result = await redeemStationPairing(
-        pairingServerUrl,
-        code,
-        operation.controller.signal,
-      );
+      let saved = await readDeviceRecovery(tauriExecutor);
+      if (!operationIsCurrent(operation)) return;
+      if (saved?.phase === "restoring" || saved?.phase === "sealing") {
+        // The shell write can succeed before IPC reports failure. Reconcile
+        // actual disk state under the same writer coordinator before retrying.
+        let restored = false;
+        await runConfigTransition(async () => {
+          if (!operationIsCurrent(operation)) return;
+          const disk = await readConfig();
+          if (!operationIsCurrent(operation)) return;
+          saved = await initializeDeviceRecovery(tauriExecutor, disk);
+          restored = saved.phase === "active" && saved.owner !== null;
+          if (restored) {
+            setSuccessSummary({
+              organizationName: disk.organizationName ?? "",
+              ...(disk.lineName ? { lineName: disk.lineName } : {}),
+            });
+          }
+        });
+        if (!operationIsCurrent(operation)) return;
+        if (restored) {
+          setState("success");
+          scheduleEnrolled();
+          return;
+        }
+      }
+      const owner = expectedOwner ?? saved?.owner;
+      if (saved?.phase === "owner_unresolved" || ((expectedDeviceId || sealedWork) && !owner)) {
+        setError("owner_unresolved");
+        setState("waiting");
+        return;
+      }
+      const result = owner
+        ? await redeemStationRecovery(pairingServerUrl, code, owner, operation.controller.signal)
+        : await redeemStationPairing(pairingServerUrl, code, operation.controller.signal);
       if (!operationIsCurrent(operation)) return;
       if (!result.ok) {
         setError(result.error);
@@ -198,6 +241,7 @@ export function Enrollment({
         persistStationProvisioning(result.provisioning, {
           machineId,
           ...(expectedDeviceId ? { expectedDeviceId } : {}),
+          ...(owner ? { expectedOwner: owner } : {}),
           exec: tauriExecutor,
           writeConfig,
         }),
@@ -222,12 +266,15 @@ export function Enrollment({
   }
 
   async function serviceConnect() {
-    if (expectedDeviceId || busy || !serverUrl || !apiKey) return;
+    if (expectedDeviceId || expectedOwner || sealedWork || busy || !serverUrl || !apiKey) return;
     serviceInFlight.current = true;
     const operation = beginOperation();
     setState("redeeming");
     setError(null);
     try {
+      const saved = await readDeviceRecovery(tauriExecutor);
+      if (saved && (saved.owner || saved.phase !== "active"))
+        throw new Error("Recovery identity required");
       const client = createStationClient({ machineId, apiKey, serverUrl });
       await client.whoami(operation.controller.signal);
       if (!operationIsCurrent(operation)) return;
@@ -261,84 +308,93 @@ export function Enrollment({
   }
 
   const serviceMode =
-    (state === "service" || (busy && serviceInFlight.current)) && !expectedDeviceId;
+    (state === "service" || (busy && serviceInFlight.current)) &&
+    !expectedDeviceId &&
+    !expectedOwner &&
+    !sealedWork;
   const showRecoveryPanel = error !== null && !serviceMode;
 
   const status = busy ? <p role="status">{t("enroll.redeemingDetail")}</p> : null;
   const errorNotice = error ? <Alert tone="error">{t(`enroll.errors.${error}`)}</Alert> : null;
 
   const pairingPanel = (
-    <>
-      <header className="station-enrollment__panel-heading">
-        <h1 id="station-enrollment-title">{t("enroll.title")}</h1>
-      </header>
-      {sealedWork ? (
-        <Alert tone="warn">
-          <p data-testid="sealed-work-summary">
-            {t("enroll.sealedWork", {
-              scans: sealedWork.scans,
-              inventoryScans: sealedWork.inventoryScans,
-              boxes: sealedWork.boxes,
-              exceptions: sealedWork.exceptions,
+    <div className="station-enrollment__pairing">
+      <div className="station-enrollment__pairing-context">
+        <header className="station-enrollment__panel-heading">
+          <h1 id="station-enrollment-title">{t("enroll.title")}</h1>
+        </header>
+        {expectedOwner ? (
+          <p>
+            {t("enroll.savedIdentity", {
+              device: expectedOwner.deviceId,
+              tenant: expectedOwner.tenantId,
+              server: expectedOwner.serverOrigin,
             })}
           </p>
-        </Alert>
-      ) : null}
-      {status}
-      <Input
-        className="station-enrollment__code-field"
-        size="floor"
-        label={t("enroll.code")}
-        value={code}
-        inputMode="numeric"
-        pattern="[0-9]*"
-        maxLength={8}
-        autoComplete="one-time-code"
-        mono
-        disabled={busy}
-        onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 8))}
-        onKeyDown={handleCodeKeyDown}
-      />
-      <div className="station-enrollment__keypad">
-        <PinPad
-          value={code}
-          onChange={setCode}
-          maxLength={8}
-          size="floor"
-          disabled={busy}
-          ariaLabel={t("enroll.keypad")}
-          backspaceLabel={t("enroll.backspace")}
-          clearLabel={t("enroll.clear")}
-        />
-      </div>
-      <div className="station-enrollment__actions station-enrollment__actions--pairing">
-        <Button
-          size="floor"
-          onClick={() => void redeem()}
-          disabled={busy || code.length !== 8 || !pairingServerUrl}
-        >
-          {busy ? t("enroll.redeeming") : t("enroll.submit")}
-        </Button>
-        {onSetup ? (
-          <Button size="floor" variant="secondary" onClick={onSetup} disabled={busy}>
-            {t("enroll.setup")}
-          </Button>
         ) : null}
-        {expectedDeviceId ? null : (
+        {sealedWork ? (
+          <Alert tone="warn">
+            <RecoveryWorkSummary summary={sealedWork} />
+          </Alert>
+        ) : null}
+        {status}
+      </div>
+      <div className="station-enrollment__pairing-controls">
+        <Input
+          className="station-enrollment__code-field"
+          size="floor"
+          label={t("enroll.code")}
+          value={code}
+          inputMode="numeric"
+          pattern="[0-9]*"
+          maxLength={8}
+          autoComplete="one-time-code"
+          mono
+          disabled={busy}
+          onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 8))}
+          onKeyDown={handleCodeKeyDown}
+        />
+        <div className="station-enrollment__keypad">
+          <PinPad
+            value={code}
+            onChange={setCode}
+            maxLength={8}
+            size="floor"
+            disabled={busy}
+            ariaLabel={t("enroll.keypad")}
+            backspaceLabel={t("enroll.backspace")}
+            clearLabel={t("enroll.clear")}
+          />
+        </div>
+        <div className="station-enrollment__actions station-enrollment__actions--pairing">
           <Button
             size="floor"
-            variant="secondary"
-            onClick={() => {
-              setError(null);
-              setState("service");
-            }}
-            disabled={busy}
+            onClick={() => void redeem()}
+            disabled={busy || code.length !== 8 || !pairingServerUrl}
           >
-            {t("enroll.serviceMode")}
+            {busy ? t("enroll.redeeming") : t("enroll.submit")}
           </Button>
-        )}
+          {onSetup ? (
+            <Button size="floor" variant="secondary" onClick={onSetup} disabled={busy}>
+              {t("enroll.setup")}
+            </Button>
+          ) : null}
+          {expectedDeviceId ? null : (
+            <Button
+              size="floor"
+              variant="secondary"
+              onClick={() => {
+                setError(null);
+                setState("service");
+              }}
+              disabled={busy}
+            >
+              {t("enroll.serviceMode")}
+            </Button>
+          )}
+        </div>
       </div>
-    </>
+    </div>
   );
 
   const servicePanel = (
@@ -446,9 +502,14 @@ export function Enrollment({
           <li>{t("enroll.steps.three")}</li>
         </ol>
       </aside>
-      <section className="station-enrollment__entry">
+      <section
+        className={`station-enrollment__entry${
+          expectedOwner || sealedWork ? " station-enrollment__entry--recovery" : ""
+        }`}
+      >
         {state === "success" ? (
           <div className="station-enrollment__success" role="status">
+            {sealedWork ? <p>{t("enroll.restoredPending", { count: sealedWork.total })}</p> : null}
             <h1 id="station-enrollment-title">{t("enroll.success")}</h1>
             {successSummary ? (
               <p>{`${successSummary.organizationName}${

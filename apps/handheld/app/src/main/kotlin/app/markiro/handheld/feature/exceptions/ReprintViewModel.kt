@@ -17,6 +17,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import app.markiro.handheld.core.storage.DeviceRecovery
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
@@ -46,6 +48,12 @@ class ReprintViewModel @Inject constructor(
     scans: ScanEvents,
     handle: SavedStateHandle,
 ) : ViewModel() {
+    private val generation = db.recovery.token()
+
+    private fun launchOwned(block: suspend CoroutineScope.() -> Unit) = viewModelScope.launch {
+        db.recovery.work(generation) { block() }
+    }
+
     private val shiftId: String = handle.get<String>("shiftId").orEmpty()
     private val _state = MutableStateFlow(ReprintUi())
     val state: StateFlow<ReprintUi> = _state
@@ -58,10 +66,10 @@ class ReprintViewModel @Inject constructor(
     private val printing = AtomicBoolean(false)
 
     init {
-        viewModelScope.launch {
+        launchOwned {
             _state.value = _state.value.copy(last = firstReprintable())
         }
-        viewModelScope.launch {
+        launchOwned {
             scans.events.collect { event ->
                 if (_state.value.selected != null || _state.value.done) return@collect
                 val sscc = Sscc.parse(event.raw) ?: return@collect fail(R.string.reprint_unknown_sscc)
@@ -93,7 +101,7 @@ class ReprintViewModel @Inject constructor(
     fun chooseReason(reason: ReprintReason) {
         val target = _state.value.selected ?: return
         if (!printing.compareAndSet(false, true)) return
-        viewModelScope.launch {
+        launchOwned {
             try {
                 val deviceId = db.deviceConfigDao().get()?.deviceId
                 engine.reprint(shiftId, target.boxId, reason, session.state.value.operator?.operatorId, deviceId)

@@ -1,3 +1,4 @@
+import { AUTHORIZED_CREDENTIAL_OWNERS_SQL } from "../device-recovery.js";
 import type { SqlExecutor } from "../mirror.js";
 import { isProductLabelSendActive } from "./printing.js";
 import {
@@ -14,7 +15,7 @@ export async function restoreProductLabelWork(
   actor: ProductLabelActor,
 ): Promise<ProductLabelJobView | null> {
   const [row] = await exec.all<{ job_id: string }>(
-    "SELECT job_id FROM product_label_jobs WHERE credential_ownership=? AND status<>'completed' LIMIT 1",
+    `SELECT job_id FROM product_label_jobs WHERE credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND status<>'completed' LIMIT 1`,
     [credentialOwnership],
   );
   if (!row) return null;
@@ -41,7 +42,7 @@ export async function readProductLabelRecoveryShift(
   owner: string,
 ): Promise<{ id: string; status: string; mode: string } | null> {
   const [pending] = await exec.all<{ job_id: string; shift_id: string }>(
-    "SELECT job_id,shift_id FROM product_label_jobs WHERE credential_ownership=? AND status<>'completed' LIMIT 1",
+    `SELECT job_id,shift_id FROM product_label_jobs WHERE credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND status<>'completed' LIMIT 1`,
     [owner],
   );
   if (!pending) return null;

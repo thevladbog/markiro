@@ -544,6 +544,10 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
     reason:
       "unpaired kiosk has no device identity; PairingService resolves the authoritative tenant and enforces write access",
   },
+  "StationPairController.recovery": {
+    reason:
+      "recovery authenticates the single-use code and expected identity; StationPairingService enforces authoritative tenant write/quota access",
+  },
   "StationPairController.pair": {
     reason:
       "unpaired station has no device identity; StationPairingService resolves the authoritative tenant and enforces write/quota access",

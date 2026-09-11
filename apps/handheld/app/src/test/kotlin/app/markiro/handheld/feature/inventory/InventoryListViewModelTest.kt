@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.inventory
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -52,6 +53,7 @@ class InventoryListViewModelTest {
 
     /** Fake gateway: the view model only needs the repository's public surface. */
     private inner class FakeRepo(private val joinResult: JoinResult = JoinResult.Ok(manifestFor("i1")), var mirror: MirrorResult = MirrorResult.Active) : InventoryGateway {
+        var beforeDownloadReturn: suspend () -> Unit = {}
         val joins = mutableListOf<Triple<String, Boolean, String?>>()
         override fun observeTasks() = db.inventoryTaskDao().observeAll()
         override suspend fun listTasks(scope: String?) = if (scope == "all") listOf(own, other, repack) else listOf(own, repack)
@@ -67,11 +69,13 @@ class InventoryListViewModelTest {
         override suspend fun manifest(inventoryId: String): InventoryManifestDto = manifestFor(inventoryId)
         override suspend fun download(manifest: InventoryManifestDto, onProgress: suspend (Int, Int) -> Unit): MirrorResult {
             onProgress(2, 4)
+            beforeDownloadReturn()
             return mirror
         }
-        override suspend fun activate(inventoryId: String) {
+        override suspend fun activate(inventoryId: String): Unit = db.recovery.commit {
             db.inventoryTaskDao().upsert(InventoryFixtures.task(inventoryId))
             db.deviceConfigDao().get()?.let { db.deviceConfigDao().upsert(it.copy(activeInventoryId = inventoryId)) }
+            Unit
         }
         override suspend fun leave(inventoryId: String): LeaveResult = LeaveResult.Left
         override suspend fun queued(inventoryId: String) = 0
@@ -94,6 +98,7 @@ class InventoryListViewModelTest {
             ),
         )
         reachability.markSuccess()
+        db.initializeRecoveryForTest()
     }
 
     @After
@@ -106,7 +111,7 @@ class InventoryListViewModelTest {
     }
 
     private fun vm(repo: FakeRepo = FakeRepo()) = main.track(
-        InventoryListViewModel(repo, db.deviceConfigDao(), session, reachability, ScanRouterAdapter(scans)),
+        InventoryListViewModel(repo, db.deviceConfigDao(), db.recovery, session, reachability, ScanRouterAdapter(scans)),
     )
 
 
@@ -202,4 +207,24 @@ class InventoryListViewModelTest {
         assertEquals(InventoryError.INVALID_SNAPSHOT, (ui.dialog as InventoryDialog.Error).kind)
         assertNull(db.deviceConfigDao().get()?.activeInventoryId)
     }
+    @Test fun oldDownloadContinuationCannotActivateAfterRecovery() = runTest {
+        val config = checkNotNull(db.deviceConfigDao().get())
+        val repo = FakeRepo()
+        val resumed = kotlinx.coroutines.CompletableDeferred<Unit>()
+        repo.beforeDownloadReturn = {
+            db.recovery.reject(db.recovery.token())
+            db.recovery.restore(app.markiro.handheld.core.network.PairResponse(
+                app.markiro.handheld.core.network.DeviceDto(config.deviceId, config.deviceName, config.kind, config.tenantId, config.organizationName),
+                app.markiro.handheld.core.network.CredentialDto("new-key", config.serverUrl), emptyList()), config.serverUrl)
+            resumed.complete(Unit)
+        }
+        val vm = vm(repo)
+        vm.state.first { !it.loading }
+        vm.select(own)
+        resumed.await()
+        advanceUntilIdle()
+        assertNull(db.deviceConfigDao().get()?.activeInventoryId)
+        assertNull(db.inventoryTaskDao().get("i1"))
+    }
+
 }

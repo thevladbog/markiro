@@ -42,6 +42,8 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    sourceSets["test"].resources.srcDir("../../../packages/platform-contracts/fixtures")
+
     testOptions {
         unitTests {
             isIncludeAndroidResources = true

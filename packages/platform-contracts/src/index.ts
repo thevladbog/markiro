@@ -568,3 +568,14 @@ export type {
 export * from "./entitlements.js";
 export * from "./catalog-v3.js";
 export * from "./tenants-v3.js";
+
+export {
+  stationRecoveryIdentitySchema,
+  stationRecoveryRequestSchema,
+  stationRecoveryResponseSchema,
+} from "./station-recovery.js";
+export type {
+  StationRecoveryIdentity,
+  StationRecoveryRequest,
+  StationRecoveryResponse,
+} from "./station-recovery.js";

@@ -155,14 +155,14 @@ class ExceptionStorageTest {
         assertEquals(0, db.boxDao().observeUnprintedCount().first())
     }
 
-    /** Through the real wipe: the table has to be in `DeviceWipe`, not merely clearable. */
+    /** Rejection preserves the original exception and box evidence. */
     @Test
-    fun aWipeLeavesNoException() = runTest {
+    fun rejectionRetainsExceptions() = runTest {
         db.boxExceptionDao().insert(fact("undo"))
         db.boxDao().insert(box("box-1", acked = true))
-        DeviceWipe(db, InMemoryCredentialStore()).wipeAll()
-        assertEquals(0, db.boxExceptionDao().unackedCount())
-        assertNull(db.boxDao().get("box-1"))
+        DeviceRecovery(db, InMemoryCredentialStore()).initialize()
+        assertEquals(1, db.boxExceptionDao().unackedCount())
+        assertEquals(box("box-1", acked = true), db.boxDao().get("box-1"))
     }
 
     /** Only a settled fact is dropped; one still owed survives the purge. */

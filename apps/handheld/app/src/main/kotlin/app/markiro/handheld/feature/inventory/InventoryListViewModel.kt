@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import app.markiro.handheld.core.storage.DeviceRecovery
 import retrofit2.HttpException
 import java.io.IOException
 import javax.inject.Inject
@@ -55,10 +57,17 @@ private const val REACHABLE_WINDOW_MS = 2 * 60 * 1000L
 class InventoryListViewModel @Inject constructor(
     private val repository: InventoryGateway,
     private val config: DeviceConfigDao,
+    private val recovery: DeviceRecovery,
     private val session: SessionHolder,
     reachability: ReachabilityTracker,
     scans: ScanEvents,
 ) : ViewModel() {
+    private val generation = recovery.token()
+
+    private fun launchOwned(block: suspend CoroutineScope.() -> Unit) = viewModelScope.launch {
+        recovery.work(generation) { block() }
+    }
+
     private val now: () -> Long = System::currentTimeMillis
     private val loading = MutableStateFlow(true)
     private val mine = MutableStateFlow<List<InventoryTaskDto>>(emptyList())
@@ -105,12 +114,12 @@ class InventoryListViewModel @Inject constructor(
     private suspend fun ownLineId(): String? = config.get()?.lineId
 
     init {
-        viewModelScope.launch { scans.events.collect { onScan(it.raw) } }
+        launchOwned { scans.events.collect { onScan(it.raw) } }
         refresh()
     }
 
     fun refresh() {
-        viewModelScope.launch {
+        launchOwned {
             loading.value = true
             runCatching { repository.listTasks(null) }.onSuccess {
                 mine.value = it
@@ -124,7 +133,7 @@ class InventoryListViewModel @Inject constructor(
         if (othersExpanded.value) return
         othersExpanded.value = true
         othersLoading.value = true
-        viewModelScope.launch {
+        launchOwned {
             val all = runCatching { repository.listTasks("all") }.getOrDefault(emptyList())
             val own = ownLineId()
             others.value = all.filter { it.lineId != own }.groupBy { it.lineName }
@@ -134,7 +143,7 @@ class InventoryListViewModel @Inject constructor(
 
     fun continueActive() {
         val active = state.value.active ?: return
-        viewModelScope.launch {
+        launchOwned {
             repository.activate(active.inventoryId)
             _events.emit(InventoryListEvent.Entered(active.inventoryId))
         }
@@ -142,10 +151,10 @@ class InventoryListViewModel @Inject constructor(
 
     fun select(task: InventoryTaskDto) {
         if (task.mode != "check") return
-        viewModelScope.launch {
+        launchOwned {
             if (task.lineId != ownLineId()) {
                 dialog.value = InventoryDialog.ConfirmOther(task, null)
-                return@launch
+                return@launchOwned
             }
             join(task, confirm = false, barcode = null)
         }
@@ -153,7 +162,7 @@ class InventoryListViewModel @Inject constructor(
 
     fun confirmOther() {
         val d = dialog.value as? InventoryDialog.ConfirmOther ?: return
-        viewModelScope.launch { join(d.task, confirm = true, barcode = d.barcode) }
+        launchOwned { join(d.task, confirm = true, barcode = d.barcode) }
     }
 
     fun dismissDialog() {
@@ -163,7 +172,7 @@ class InventoryListViewModel @Inject constructor(
     fun retry() {
         val d = dialog.value as? InventoryDialog.Error ?: return
         val task = d.retry ?: return dismissDialog()
-        viewModelScope.launch { join(task, confirm = task.lineId != ownLineId(), barcode = null) }
+        launchOwned { join(task, confirm = task.lineId != ownLineId(), barcode = null) }
     }
 
     private suspend fun onScan(raw: String) {

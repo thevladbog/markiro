@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.shift
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -84,6 +85,7 @@ class ShiftRepositoryTest {
                 kind = "handheld", serverUrl = "http://x", pairedAt = 1L,
             ),
         )
+        db.initializeRecoveryForTest()
     }
 
     @After

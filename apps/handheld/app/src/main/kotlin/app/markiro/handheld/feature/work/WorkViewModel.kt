@@ -183,6 +183,7 @@ class WorkViewModel(
     )
 
     val shiftId: String = checkNotNull(handle["shiftId"])
+    private val generation = db.recovery.token()
     private val last = MutableStateFlow<LastScan?>(null)
     private val teamState = MutableStateFlow<TeamState?>(null)
     private val boxUi = MutableStateFlow<BoxUi?>(null)
@@ -247,21 +248,21 @@ class WorkViewModel(
         // An aggregation shift shows its box from the moment it opens. Waiting for
         // the first scan means the operator meets the validation layout and the
         // grid appears from nowhere.
-        viewModelScope.launch { showCurrentBox() }
+        viewModelScope.launch { db.recovery.work(generation) { showCurrentBox() } }
         // A send the app died inside is unknown, never resumed. Emitting the
         // event is an obligation: the domain accepts only `sent` or
         // `delivery_unknown` out of `sending`, so a job left there across a
         // restart would be frozen -- no reprint, no verification, nothing.
-        viewModelScope.launch {
+        viewModelScope.launch { db.recovery.work(generation) {
             duplicates.demoteInterrupted()
             refreshDuplicate()
             restoreDuplicateStep()
-        }
+        } }
         // Each scan is handled inside its own guard. A failure on one -- a print
         // that throws, a template that will not render -- must not take the
         // collector down with it: the app would keep looking alive while silently
         // recording nothing, which is the worst thing a scanner can do.
-        viewModelScope.launch {
+        viewModelScope.launch { db.recovery.work(generation) {
             scans.events.collect { event ->
                 // The scanner is one app-wide flow and this view model outlives
                 // its screen: a back-stack entry keeps it alive while another
@@ -277,10 +278,10 @@ class WorkViewModel(
                     Log.e("markiro.work", "scan handling failed", e)
                 }
             }
-        }
-        viewModelScope.launch {
+        } }
+        viewModelScope.launch { db.recovery.work(generation) {
             teamTicks.collect { teamState.value = team.refresh(shiftId) ?: teamState.value }
-        }
+        } }
     }
 
     private suspend fun onScan(raw: String) {
@@ -346,14 +347,14 @@ class WorkViewModel(
         // of the box that first one just opened. `CloseBox` serialises them
         // anyway; this stops the pointless second attempt from being started.
         if (!closing.compareAndSet(false, true)) return
-        viewModelScope.launch {
+        viewModelScope.launch { db.recovery.work(generation) {
             try {
-                val shift = db.shiftDao().get(shiftId) ?: return@launch
+                val shift = db.shiftDao().get(shiftId) ?: return@work
                 closeAndPrint(shift)
             } finally {
                 closing.set(false)
             }
-        }
+        } }
     }
 
     private suspend fun closeAndPrint(shift: ShiftEntity) {
@@ -401,7 +402,7 @@ class WorkViewModel(
         // Two taps would both read the same `unknown` state before the first
         // print updated it, and each would write its own reprint fact.
         if (!retrying.compareAndSet(false, true)) return
-        viewModelScope.launch {
+        viewModelScope.launch { db.recovery.work(generation) {
             try {
                 auditIfOutcomeUnknown(closed.boxId)
                 _closeStep.value = BoxCloseStep.Printing(closed)
@@ -409,7 +410,7 @@ class WorkViewModel(
             } finally {
                 retrying.set(false)
             }
-        }
+        } }
     }
 
     private val retrying = AtomicBoolean(false)
@@ -446,14 +447,14 @@ class WorkViewModel(
     fun confirmPrinted() {
         val closed = _closeStep.value.closedBox()
         _closeStep.value = BoxCloseStep.Idle
-        if (closed != null) viewModelScope.launch { boxPrinter.resolveUnknownAsPrinted(closed.boxId) }
+        if (closed != null) viewModelScope.launch { db.recovery.work(generation) { boxPrinter.resolveUnknownAsPrinted(closed.boxId) } }
     }
 
     /** Set aside for later, so a dead printer does not stop the line. */
     fun deferLabel() {
         val closed = _closeStep.value.closedBox()
         _closeStep.value = BoxCloseStep.Idle
-        if (closed != null) viewModelScope.launch { boxPrinter.defer(closed.boxId) }
+        if (closed != null) viewModelScope.launch { db.recovery.work(generation) { boxPrinter.defer(closed.boxId) } }
     }
 
     fun dismissClose() {
@@ -598,7 +599,7 @@ class WorkViewModel(
     /** An explicit second send, chosen by a person who has looked at the printer. */
     fun retryDuplicate() {
         val jobId = _duplicateStep.value.jobId() ?: return
-        viewModelScope.launch {
+        viewModelScope.launch { db.recovery.work(generation) {
             _duplicateStep.value = DuplicateStep.Idle
             when (val sent = duplicates.send(jobId)) {
                 DuplicateSend.Sent -> Unit
@@ -607,12 +608,12 @@ class WorkViewModel(
             }
             refreshDuplicate()
             sync.nudge()
-        }
+        } }
     }
 
     fun reprintDuplicate(reason: String) {
         val jobId = _duplicateStep.value.jobId() ?: return
-        viewModelScope.launch {
+        viewModelScope.launch { db.recovery.work(generation) {
             when (val outcome = duplicates.reprint(jobId, reason)) {
                 is DuplicateOutcome.Refused -> _duplicateStep.value = DuplicateStep.Failed(jobId, outcome.reason)
                 is DuplicateOutcome.Prepared -> {
@@ -626,7 +627,7 @@ class WorkViewModel(
             }
             refreshDuplicate()
             sync.nudge()
-        }
+        } }
     }
 
     /** Closes the screen without settling anything; the job stays outstanding. */
@@ -635,6 +636,6 @@ class WorkViewModel(
     }
 
     fun leave() {
-        viewModelScope.launch { repository?.leave(shiftId) }
+        viewModelScope.launch { db.recovery.work(generation) { repository?.leave(shiftId) } }
     }
 }

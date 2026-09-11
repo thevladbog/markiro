@@ -1,7 +1,6 @@
 package app.markiro.handheld.feature.shift
 
 import android.database.sqlite.SQLiteConstraintException
-import androidx.room.withTransaction
 import app.markiro.handheld.core.km.Verdict
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.ShiftCloseEntity
@@ -38,10 +37,12 @@ class ShiftCloser(private val db: HandheldDatabase, private val clock: () -> Lon
     }
 
     /** Idempotent per shift: a second call returns the stored row and re-applies the local close. */
-    suspend fun close(shiftId: String, operatorId: String?, reasonCode: String?): ShiftCloseEntity = db.withTransaction {
+    suspend fun close(shiftId: String, operatorId: String?, reasonCode: String?): ShiftCloseEntity = db.recovery.commit { closeOwned(shiftId, operatorId, reasonCode) }
+
+    private suspend fun closeOwned(shiftId: String, operatorId: String?, reasonCode: String?): ShiftCloseEntity = db.recovery.commit {
         db.shiftCloseDao().forShift(shiftId)?.let { existing ->
             finishLocally(shiftId)
-            return@withTransaction existing
+            return@commit existing
         }
         val shift = db.shiftDao().get(shiftId) ?: error("shift $shiftId is not on this device")
         val accepted = db.codeDao().countForShift(shiftId)
@@ -64,7 +65,7 @@ class ShiftCloser(private val db: HandheldDatabase, private val clock: () -> Lon
             db.shiftCloseDao().insert(row)
         } catch (_: SQLiteConstraintException) {
             finishLocally(shiftId)
-            return@withTransaction checkNotNull(db.shiftCloseDao().forShift(shiftId))
+            return@commit checkNotNull(db.shiftCloseDao().forShift(shiftId))
         }
         finishLocally(shiftId)
         row

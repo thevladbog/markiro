@@ -1,5 +1,15 @@
 package app.markiro.handheld.feature.pairing
 
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.DeviceRecovery
+import app.markiro.handheld.core.storage.InMemoryCredentialStore
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
+import org.junit.After
+import org.junit.Before
+import org.junit.runner.RunWith
 import app.markiro.handheld.MainDispatcherRule
 import app.markiro.handheld.core.network.CredentialDto
 import app.markiro.handheld.core.network.DeviceDto
@@ -9,6 +19,7 @@ import app.markiro.handheld.core.network.PairingError
 import app.markiro.handheld.core.network.PairingGateway
 import app.markiro.handheld.core.network.PairingResult
 import app.markiro.handheld.core.scan.ScanEvent
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -17,7 +28,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
+@RunWith(AndroidJUnit4::class)
 class PairingViewModelTest {
+    private lateinit var db: HandheldDatabase
+    private lateinit var recovery: DeviceRecovery
+    @Before fun setupRecovery() {
+        db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java).allowMainThreadQueries().build()
+        recovery = DeviceRecovery(db, InMemoryCredentialStore())
+        kotlinx.coroutines.runBlocking { recovery.initialize() }
+    }
+    @After fun closeRecovery() { main.cancelAndJoinModels(); db.close() }
+
     @get:Rule
     val main = MainDispatcherRule()
 
@@ -32,10 +53,11 @@ class PairingViewModelTest {
 
     private fun viewModel(redeem: suspend (String, String) -> PairingResult): PairingViewModel {
         val gateway = object : PairingGateway {
+            override suspend fun recover(serverUrl: String, code: String, expected: app.markiro.handheld.core.network.RecoveryIdentity): PairingResult = error("unexpected recovery")
             override suspend fun redeem(serverUrl: String, code: String) = redeem(serverUrl, code)
         }
         return main.track(
-            PairingViewModel(gateway, store, scans, initialServerUrl = "https://admin.markiro.app", serverEditable = false),
+            PairingViewModel(gateway, store, recovery, scans, initialServerUrl = "https://admin.markiro.app", serverEditable = false),
         )
     }
 
@@ -85,4 +107,25 @@ class PairingViewModelTest {
         vm.onBackspace()
         assertEquals("1234567", (vm.state.value as PairingUi.Enter).code)
     }
+    @Test fun retryAfterConfigFailureFinishesTheReceivedCandidateWithoutRedeemingAgain() = runTest {
+        var calls = 0
+        val gateway = object : PairingGateway {
+            override suspend fun redeem(serverUrl: String, code: String): PairingResult { calls++; return PairingResult.Success(response) }
+            override suspend fun recover(serverUrl: String, code: String, expected: app.markiro.handheld.core.network.RecoveryIdentity): PairingResult = error("unexpected recovery")
+        }
+        db.openHelper.writableDatabase.execSQL("CREATE TRIGGER fail_config BEFORE INSERT ON device_config BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END")
+        val vm = main.track(PairingViewModel(gateway, RoomProvisioningStore(recovery), recovery, scans, "https://admin.markiro.app", false))
+        "12345678".forEach(vm::onDigit)
+        vm.onConfirm()
+        vm.state.first { it is PairingUi.Failed }
+        assertEquals(PairingError.PUBLICATION_FAILED, (vm.state.value as PairingUi.Failed).error)
+        assertEquals(app.markiro.handheld.core.storage.RecoveryPhase.RESTORING, recovery.current().phase)
+        db.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_config")
+        vm.retry()
+        vm.state.first { it is PairingUi.Success }
+        assertEquals(1, calls)
+        assertEquals(response.device.id, db.deviceConfigDao().get()?.deviceId)
+        assertEquals(app.markiro.handheld.core.storage.RecoveryPhase.ACTIVE, recovery.current().phase)
+    }
+
 }

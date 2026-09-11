@@ -1,5 +1,7 @@
 package app.markiro.handheld.core.design
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -247,10 +249,11 @@ fun FullScreenState(
     secondary: StateAction? = null,
     tone: Tone = Tone.Neutral,
     primaryIsAccent: Boolean = true,
+    scrollable: Boolean = false,
 ) {
     val c = MarkiroTheme.colors
     Column(
-        modifier = Modifier.fillMaxSize().padding(MarkiroSizes.sp6),
+        modifier = Modifier.fillMaxSize().then(if (scrollable) Modifier.verticalScroll(rememberScrollState()) else Modifier).padding(MarkiroSizes.sp6),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {

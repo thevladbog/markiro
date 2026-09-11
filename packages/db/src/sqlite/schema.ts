@@ -1070,3 +1070,27 @@ export const productLabelReceipts = sqliteTable(
     ),
   ],
 );
+
+/** One operational database owner; transition metadata never contains credentials. */
+export const stationDeviceRecovery = sqliteTable(
+  "station_device_recovery",
+  {
+    id: integer("id").primaryKey(),
+    machineId: text("machine_id").notNull(),
+    ownerJson: text("owner_json"),
+    phase: text("phase").notNull(),
+    activeHash: text("active_hash"),
+    candidateHash: text("candidate_hash"),
+  },
+  (table) => [
+    check("station_device_recovery_singleton", sql`${table.id}=1`),
+    check(
+      "station_device_recovery_phase",
+      sql`${table.phase} IN ('active','sealing','sealed','restoring','owner_unresolved')`,
+    ),
+  ],
+);
+export const stationDeviceOwners = sqliteTable("station_device_owners", {
+  credentialHash: text("credential_hash").primaryKey(),
+  ownerJson: text("owner_json").notNull(),
+});

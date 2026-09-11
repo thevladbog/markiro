@@ -1,3 +1,8 @@
+import {
+  stationRecoveryRequestSchema,
+  stationRecoveryResponseSchema,
+} from "@markiro/platform-contracts";
+import { zodApiSchema } from "../src/lib/openapi";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import { Test } from "@nestjs/testing";
@@ -75,7 +80,7 @@ function scriptSources(html: string): string[] {
 function operationResponse(
   document: OpenAPIObject,
   path: string,
-  status: "200" | "201",
+  status: "200" | "201" | "401" | "403" | "409",
   method: "get" | "post" = "post",
 ): Record<string, unknown> {
   const operation = document.paths[path]?.[method];
@@ -350,6 +355,7 @@ describe("self-hosted OpenAPI documentation", () => {
       const contracts = [
         ["/station-devices/{id}/pairing-code", "201", ["code", "expiresAt"]],
         ["/station/pair", "201", ["device", "credential", "operators"]],
+        ["/station/pair/recovery", "201", ["version", "device", "credential", "operators"]],
         ["/kiosks/{id}/pairing-code", "201", ["code", "expiresAt"]],
         ["/kiosk/pair", "201", ["device", "token", "nextDeviceSeq", "bootstrap"]],
         ["/kiosks/{id}/enroll", "200", ["token"]],
@@ -381,6 +387,52 @@ describe("self-hosted OpenAPI documentation", () => {
         responseSchema(operationResponse(document, "/kiosks/{id}/pairing-code", "201")),
         pairingCodeFields,
       );
+
+      const recovery = document.paths["/station/pair/recovery"]?.post;
+      expect(recovery?.security).toBeUndefined();
+      expect(recovery?.requestBody).toMatchObject({
+        content: { "application/json": { schema: zodApiSchema(stationRecoveryRequestSchema) } },
+      });
+      expect(responseSchema(operationResponse(document, "/station/pair/recovery", "201"))).toEqual(
+        zodApiSchema(stationRecoveryResponseSchema),
+      );
+      expect(
+        responseSchema(operationResponse(document, "/station/pair/recovery", "401")),
+      ).toMatchObject({
+        properties: {
+          code: {
+            enum: expect.arrayContaining([
+              "PAIR_RECOVERY_MISMATCH",
+              "PAIR_KIND_MISMATCH",
+              "PAIR_RATE_LIMITED",
+            ]),
+          },
+        },
+      });
+      expect(Object.keys(recovery?.responses ?? {})).toEqual(
+        expect.arrayContaining(["201", "400", "401", "403", "409"]),
+      );
+
+      expect(
+        responseSchema(operationResponse(document, "/station/pair/recovery", "403")),
+      ).toMatchObject({
+        required: ["code"],
+        properties: { code: { enum: ["subscription_read_only"] } },
+      });
+      expect(
+        responseSchema(operationResponse(document, "/station/pair/recovery", "409")),
+      ).toMatchObject({
+        oneOf: [
+          { required: ["code"], properties: { code: { enum: ["subscription_unmanaged"] } } },
+          {
+            required: ["code", "entitlement", "used", "limit"],
+            properties: {
+              code: { enum: ["subscription_limit_reached"] },
+              entitlement: { enum: ["stations"] },
+            },
+          },
+        ],
+      });
 
       const station = responseSchema(operationResponse(document, "/station/pair", "201"));
       expect(Object.keys(station.properties ?? {}).sort()).toEqual([

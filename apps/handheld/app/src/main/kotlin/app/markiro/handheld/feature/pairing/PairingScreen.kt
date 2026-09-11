@@ -1,5 +1,7 @@
 package app.markiro.handheld.feature.pairing
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -48,6 +50,22 @@ fun PairingScreen(state: PairingUi, callbacks: PairingCallbacks) {
     val c = MarkiroTheme.colors
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
         when (state) {
+            is PairingUi.Recovery -> FullScreenState(
+                Icons.Outlined.Lock,
+                stringResource(if (state.unresolved) R.string.recovery_unresolved_title else R.string.recovery_title),
+                buildString {
+                    append(stringResource(if (state.unresolved) R.string.recovery_unresolved_text else R.string.recovery_text))
+                    state.deviceId?.let { append("\n"); append(it) }
+                    append("\n\n")
+                    append(state.summary?.let {
+                        stringResource(R.string.recovery_summary, it["scans"] ?: 0, it["inventory"] ?: 0, it["labels"] ?: 0,
+                            it["boxes"] ?: 0, it["exceptions"] ?: 0, it["closes"] ?: 0, it["conflicts"] ?: 0, it["unknownPrints"] ?: 0)
+                    } ?: stringResource(R.string.recovery_summary_unknown))
+                },
+                primary = if (state.unresolved) null else StateAction(stringResource(R.string.recovery_connect), callbacks.onRetry),
+                tone = Tone.Warn,
+                scrollable = true,
+            )
             is PairingUi.Enter -> EnterCode(state, callbacks)
             PairingUi.Binding -> FullScreenState(
                 Icons.Outlined.Sync,
@@ -58,8 +76,8 @@ fun PairingScreen(state: PairingUi, callbacks: PairingCallbacks) {
             is PairingUi.Failed -> Failed(state.error, callbacks.onRetry)
             is PairingUi.Success -> FullScreenState(
                 Icons.Outlined.CheckCircle,
-                stringResource(R.string.pairing_success_title),
-                listOfNotNull(state.organizationName, state.lineName).joinToString(" · "),
+                stringResource(if (state.restored) R.string.recovery_success_title else R.string.pairing_success_title),
+                listOfNotNull(state.organizationName, state.lineName, if (state.restored) stringResource(R.string.recovery_success_text) else null).joinToString(" · "),
                 primary = StateAction(stringResource(R.string.pairing_go_sign_in), callbacks.onDone),
                 tone = Tone.Ok,
             )
@@ -71,10 +89,10 @@ fun PairingScreen(state: PairingUi, callbacks: PairingCallbacks) {
 private fun EnterCode(state: PairingUi.Enter, callbacks: PairingCallbacks) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    Column(Modifier.fillMaxSize().padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
         Text(stringResource(R.string.pairing_brand), style = t.label, color = c.fg3)
-        Text(stringResource(R.string.pairing_title), style = t.title, color = c.fg1)
-        Text(stringResource(R.string.pairing_hint), style = t.body.copy(fontSize = 15.sp), color = c.fg2)
+        Text(stringResource(if (state.restoring) R.string.recovery_connect else R.string.pairing_title), style = t.title, color = c.fg1)
+        Text(stringResource(if (state.restoring) R.string.recovery_code_hint else R.string.pairing_hint), style = t.body.copy(fontSize = 15.sp), color = c.fg2)
         Row(Modifier.fillMaxWidth().height(56.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             val typed = state.code.toList().joinToString(" ")
             val rest = List(8 - state.code.length) { "_" }.joinToString(" ")
@@ -92,13 +110,25 @@ private fun EnterCode(state: PairingUi.Enter, callbacks: PairingCallbacks) {
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(MarkiroSizes.sp3))
     }
 }
 
 @Composable
 private fun Failed(error: PairingError, onRetry: () -> Unit) {
     when (error) {
+        PairingError.RECOVERY_MISMATCH, PairingError.UPDATE_REQUIRED, PairingError.OWNER_UNRESOLVED, PairingError.PUBLICATION_FAILED -> FullScreenState(
+            Icons.Outlined.Lock,
+            stringResource(R.string.recovery_title),
+            stringResource(when (error) {
+                PairingError.RECOVERY_MISMATCH -> R.string.recovery_mismatch
+                PairingError.UPDATE_REQUIRED -> R.string.recovery_update_required
+                PairingError.OWNER_UNRESOLVED -> R.string.recovery_unresolved_text
+                else -> R.string.recovery_publication_failed
+            }),
+            primary = if (error == PairingError.OWNER_UNRESOLVED) null else StateAction(stringResource(R.string.common_retry), onRetry),
+            tone = Tone.Err,
+        )
         PairingError.INVALID, PairingError.EXPIRED, PairingError.INVALID_RESPONSE -> FullScreenState(
             Icons.Outlined.Key,
             stringResource(R.string.pairing_invalid_title),

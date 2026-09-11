@@ -34,8 +34,8 @@
   },
   "legacyIdentity": {
     "title": "Station service required",
-    "resolving": "Updating station identity. Cached offline work remains available.",
-    "degraded": "Station identity update is waiting for a connection. Cached offline work remains available.",
+    "resolving": "Updating station identity. Operator sign-in will be available after verification.",
+    "degraded": "Station identity verification is waiting for a connection. Verify the identity before operator sign-in.",
     "retry": "Retry identity update",
     "missingServer": "Station identity cannot be updated because no trusted API address is available. Local work and the device key are preserved; contact service support.",
     "rejected": "This legacy station key could not prove its device identity. Local work is preserved; contact service support before pairing again."
@@ -71,7 +71,7 @@
     "serviceConnect": "Connect service credentials",
     "backToPairing": "Back to pairing",
     "success": "Station connected",
-    "sealedWork": "Unsynchronized work is sealed on this station: {{scans}} production scans, {{inventoryScans}} inventory scans, {{boxes}} boxes, {{exceptions}} corrections.",
+    "sealedWork": "Saved: scans {{scans}}, inventory {{inventoryScans}}, labels {{productLabels}}, boxes {{boxes}}, exceptions {{exceptions}}, task closures {{closes}}.",
     "recoverySealing": "Securing local work and removing the rejected credential…",
     "recoveryFailed": "Local work is sealed, but station recovery could not be completed. Retry or contact support.",
     "retryRecovery": "Retry recovery",
@@ -83,8 +83,15 @@
       "unavailable": "The station could not reach the server. Check the connection and try again.",
       "invalid_response": "The server returned an invalid pairing response.",
       "setup_required": "Station API setup is required before pairing.",
-      "service": "Could not connect. Check the URL and key."
-    }
+      "service": "Could not connect. Check the URL and key.",
+      "mismatch": "The code belongs to another device, organization or server. Saved data remains protected.",
+      "update_required": "Update the server to restore this device. Saved data remains protected.",
+      "owner_unresolved": "The owner of saved data could not be confirmed. Contact support; connecting another device cannot restore it."
+    },
+    "savedIdentity": "Saved device: {{device}} · {{tenant}} · {{server}}",
+    "restoredPending": "Device connected. {{count}} saved records await synchronization. Uncertain prints need operator review.",
+    "savedAttention": "Conflicts: {{conflicts}} · Quarantined label events: {{quarantined}} · Printing outcome unknown: {{unknownPrints}}.",
+    "summaryUnknown": "Saved records remain protected. Their counts are currently unavailable."
   },
   "login": {
     "title": "Operator sign-in",

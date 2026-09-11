@@ -25,6 +25,12 @@ import {
 } from "../src/lib/credential-recovery.js";
 import { openProductLabelWork } from "./support/product-label-work.js";
 
+import {
+  initializeDeviceRecovery,
+  sealDeviceRecovery,
+  restoreDeviceRecovery,
+} from "../src/lib/device-recovery.js";
+
 describe("product label sync", () => {
   let work: Awaited<ReturnType<typeof openProductLabelWork>>;
   let generation: ReturnType<typeof createCredentialGeneration>;
@@ -33,7 +39,7 @@ describe("product label sync", () => {
     generation = createCredentialGeneration("test-station-key");
     const ownership = await credentialGenerationOwnership(generation);
     if (!ownership) throw new Error("missing fixture ownership");
-    work = await openProductLabelWork("required", ownership);
+    work = await openProductLabelWork("required", ownership, true, true);
   });
   afterEach(() => {
     for (const engine of engines.splice(0)) engine.stop();
@@ -90,6 +96,182 @@ describe("product label sync", () => {
     alreadyApplied: false,
     conflicts: [],
     productLabelReceipt: receipt(body.productLabelEvents ?? []),
+  });
+
+  it("restores an exact pinned key-A batch under verified same-device key B without changing evidence", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const config = {
+      machineId: "station-local",
+      deviceId: work.input.deviceId,
+      tenantId: "tenant-a",
+      serverUrl: "https://station.example/api",
+      apiKey: "test-station-key",
+    };
+    const view = await initializeDeviceRecovery(work.exec, config);
+    expect(view.owner).not.toBeNull();
+    await work.exec.run(
+      `INSERT INTO boxes_mirror(box_id,shift_id,terminal_id,sscc,opened_at,closed_at,closed_by) VALUES('retained-box',?,?,'004601234560000017',?,?,NULL)`,
+      [work.input.shiftId, work.input.terminalId, work.input.acceptedAt, work.input.acceptedAt],
+    );
+    await work.exec.run(
+      `INSERT INTO box_exceptions_mirror(kind,box_id,shift_id,terminal_id,reason,at) VALUES('reprint','retained-box',?,?,'damaged',?)`,
+      [work.input.shiftId, work.input.terminalId, work.input.acceptedAt],
+    );
+    await sendPreparedProductLabel(work.deps, work.input.jobId);
+    const events = await work.exec.all("SELECT * FROM product_label_events");
+    const jobs = await work.exec.all("SELECT * FROM product_label_accept_commands");
+    const requests: SentBatch[] = [];
+    const first = engine(
+      client((body) => {
+        requests.push(structuredClone(body));
+        throw new Error("lost reply");
+      }),
+    );
+    first.nudge();
+    await first.idle();
+    first.stop();
+    const pin = await work.exec.all(
+      "SELECT * FROM station_meta WHERE key='sync_pending_product_label_batch'",
+    );
+    await sealDeviceRecovery(work.exec, config, generation);
+    work.restart();
+    const sealed = await initializeDeviceRecovery(work.exec, {
+      machineId: config.machineId,
+      deviceId: config.deviceId,
+      serverUrl: config.serverUrl,
+    });
+    expect(sealed.phase).toBe("sealed");
+    if (!sealed.owner) throw new Error("missing owner");
+    const provisioning = {
+      deviceId: config.deviceId,
+      tenantId: config.tenantId,
+      serverUrl: config.serverUrl,
+      apiKey: "key-b",
+      deviceName: "Station",
+      organizationName: "Org",
+      operators: [],
+    };
+    await expect(
+      restoreDeviceRecovery(
+        work.exec,
+        sealed.owner,
+        { ...provisioning, tenantId: "foreign" },
+        async () => {},
+      ),
+    ).rejects.toThrow();
+    const foreign = engine(client(response), {
+      credentialGeneration: createCredentialGeneration("foreign"),
+    });
+    foreign.nudge();
+    await foreign.idle();
+    foreign.stop();
+    expect(
+      await work.exec.all(
+        "SELECT * FROM station_meta WHERE key='sync_pending_product_label_batch'",
+      ),
+    ).toEqual(pin);
+    await restoreDeviceRecovery(work.exec, sealed.owner, provisioning, async () => {});
+    const second = engine(
+      client((body) => {
+        requests.push(structuredClone(body));
+        return response(body);
+      }),
+      { credentialGeneration: createCredentialGeneration("key-b") },
+    );
+    second.nudge();
+    await second.idle();
+    expect(requests).toHaveLength(3);
+    expect(requests[1]).toEqual(requests[0]);
+    expect(requests[2]).toMatchObject({
+      items: [],
+      exceptions: [expect.objectContaining({ kind: "reprint", boxId: "retained-box" })],
+    });
+    expect(requests[2]?.productLabelEvents).toBeUndefined();
+    expect(await work.exec.all("SELECT * FROM boxes_mirror WHERE acked_at IS NULL")).toEqual([]);
+    expect(await work.exec.all("SELECT * FROM box_exceptions_mirror")).toEqual([]);
+    expect(await readPendingProductLabelEvents(work.exec, "foreign", 100, null)).toEqual([]);
+    await expect(
+      ackProductLabelEvents(
+        work.exec,
+        "foreign",
+        requests[0]?.productLabelEvents ?? [],
+        receipt(requests[0]?.productLabelEvents ?? []),
+      ),
+    ).rejects.toThrow();
+    expect(await work.exec.all("SELECT * FROM product_label_outbox")).toEqual([]);
+    expect(await work.exec.all("SELECT * FROM outbox")).toEqual([]);
+    expect(await work.exec.all("SELECT * FROM product_label_events")).toEqual(events);
+    expect(await work.exec.all("SELECT * FROM product_label_accept_commands")).toEqual(jobs);
+    expect(work.print).toHaveBeenCalledTimes(1);
+  });
+
+  it("fences a delayed close ACK after sealing and restores that exact close with key B", async () => {
+    const config = {
+      machineId: "station-local",
+      deviceId: work.input.deviceId,
+      tenantId: "tenant-a",
+      serverUrl: "https://station.example",
+      apiKey: "test-station-key",
+    };
+    const view = await initializeDeviceRecovery(work.exec, config);
+    if (!view.owner) throw new Error("missing owner");
+    await work.exec.run(
+      `INSERT INTO shift_close_outbox(event_id,shift_id,device_id,product_id,product_name,actual_qty,closed_box_count,closed_at) VALUES('close-event','another-shift',?,'product','Product',0,0,'2026-09-11T00:00:00.000Z')`,
+      [work.input.deviceId],
+    );
+    const closures: unknown[] = [];
+    let resolve!: (value: unknown) => void;
+    const post = vi.fn(async (path: string, body?: unknown) => {
+      if (path === "/station/shift-closures") {
+        closures.push(body);
+        return new Promise((done) => {
+          resolve = done;
+        });
+      }
+      return { applied: 0, alreadyApplied: false, conflicts: [] };
+    });
+    const sync = engine(post);
+    sync.nudge();
+    await vi.waitFor(() => expect(closures).toHaveLength(1));
+    await sealDeviceRecovery(work.exec, config, generation);
+    resolve({ outcome: "accepted" });
+    await sync.idle();
+    sync.stop();
+    expect(
+      await work.exec.all("SELECT * FROM shift_close_outbox WHERE state='pending'"),
+    ).toHaveLength(1);
+    await restoreDeviceRecovery(
+      work.exec,
+      view.owner,
+      {
+        deviceId: config.deviceId,
+        tenantId: config.tenantId,
+        serverUrl: config.serverUrl,
+        apiKey: "key-b",
+        deviceName: "Station",
+        organizationName: "Org",
+        operators: [],
+      },
+      async () => {},
+    );
+    const replay = engine(
+      vi.fn(async (path: string, body: SentBatch) => {
+        if (path === "/station/shift-closures") {
+          closures.push(body);
+          return { outcome: "accepted" };
+        }
+        if (path === "/station/scans") return response(body);
+        return { until: "0", releasedCodeHashes: [], reviewedCodeHashes: [] };
+      }),
+      { credentialGeneration: createCredentialGeneration("key-b") },
+    );
+    replay.nudge();
+    await replay.idle();
+    expect(closures).toHaveLength(2);
+    expect(closures[1]).toEqual(closures[0]);
+    expect(
+      await work.exec.all("SELECT * FROM shift_close_outbox WHERE state='pending'"),
+    ).toHaveLength(0);
   });
 
   it("keeps immutable events after ACK and does not remove a later verification", async () => {

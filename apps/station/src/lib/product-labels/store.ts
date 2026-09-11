@@ -1,3 +1,4 @@
+import { AUTHORIZED_CREDENTIAL_OWNERS_SQL } from "../device-recovery.js";
 import {
   applyProductLabelEvent,
   DomainError,
@@ -39,6 +40,7 @@ export async function readProductLabelJob(
 ): Promise<StoredProductLabelJob | null> {
   // One read snapshot: a concurrent append cannot mix the previous projection with later events.
   const [row] = await exec.all<{
+    credential_ownership: string;
     acceptance_json: string;
     command_digest: string;
     projection_json: string;
@@ -48,7 +50,7 @@ export async function readProductLabelJob(
     events_json: string;
     attempts_json: string;
   }>(
-    `SELECT command.acceptance_json, command.command_digest,
+    `SELECT job.credential_ownership, command.acceptance_json, command.command_digest,
         job.projection_json, job.status, job.ownership_conflict, job.updated_at,
         (SELECT json_group_array(json(event_json)) FROM (
           SELECT event_json FROM product_label_events
@@ -64,13 +66,13 @@ export async function readProductLabelJob(
       FROM product_label_jobs job
       JOIN product_label_accept_commands command
         ON command.credential_ownership = job.credential_ownership AND command.job_id = job.job_id
-      WHERE job.credential_ownership = ? AND job.job_id = ?`,
+      WHERE job.credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND job.job_id = ?`,
     [credentialOwnership, jobId],
   );
   if (!row) return null;
   const input = parseProductLabelAcceptance(parseJson(row.acceptance_json));
   if (
-    input.credentialOwnership !== credentialOwnership ||
+    input.credentialOwnership !== row.credential_ownership ||
     input.jobId !== jobId ||
     productLabelValueDigest(input) !== row.command_digest
   )
@@ -126,7 +128,7 @@ export async function hasUnresolvedProductLabelJob(
   shiftId?: string,
 ): Promise<boolean> {
   const [row] = await exec.all<{ job_id: string }>(
-    `SELECT job_id FROM product_label_jobs WHERE credential_ownership = ? AND status <> 'completed'
+    `SELECT job_id FROM product_label_jobs WHERE credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND status <> 'completed'
        ${shiftId === undefined ? "" : "AND shift_id = ?"} LIMIT 1`,
     shiftId === undefined ? [credentialOwnership] : [credentialOwnership, shiftId],
   );
@@ -196,7 +198,7 @@ export async function appendProductLabelEvent(
   const event = productLabelEventSchema.parse(input);
   const digest = productLabelValueDigest(event);
   const [existing] = await exec.all<{ event_json: string }>(
-    "SELECT event_json FROM product_label_events WHERE credential_ownership=? AND event_id=?",
+    `SELECT event_json FROM product_label_events WHERE credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND event_id=?`,
     [credentialOwnership, event.eventId],
   );
   if (existing) {
@@ -208,6 +210,8 @@ export async function appendProductLabelEvent(
     return "replayed";
   }
   const job = await requireProductLabelJob(exec, credentialOwnership, event.jobId);
+  const writerOwnership = credentialOwnership;
+  credentialOwnership = job.credentialOwnership;
   if (event.sequence !== job.projection.latestSequence + 1) return "stale";
   const projection = applyProductLabelEvent(job.projection, event, job.policy.verification);
   const token = crypto.randomUUID();
@@ -215,7 +219,8 @@ export async function appendProductLabelEvent(
     await exec.run(
       `INSERT INTO product_label_event_commands
       (credential_ownership,event_id,job_id,command_token,event_digest,expected_sequence,expected_attempt_id,event_json,projection_json,recovery)
-      VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(credential_ownership,event_id) DO NOTHING`,
+      SELECT ?,?,?,?,?,?,?,?,?,? WHERE ? IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL})
+      ON CONFLICT(credential_ownership,event_id) DO NOTHING`,
       [
         credentialOwnership,
         event.eventId,
@@ -227,6 +232,8 @@ export async function appendProductLabelEvent(
         JSON.stringify(event),
         JSON.stringify(projection),
         options.recovery ? 1 : 0,
+        credentialOwnership,
+        writerOwnership,
       ],
     );
   } catch (error) {
@@ -245,7 +252,7 @@ export async function appendProductLabelEvent(
     throw error;
   }
   const [command] = await exec.all<{ command_token: string; event_digest: string }>(
-    "SELECT command_token,event_digest FROM product_label_event_commands WHERE credential_ownership=? AND event_id=?",
+    `SELECT command_token,event_digest FROM product_label_event_commands WHERE credential_ownership=? AND event_id=?`,
     [credentialOwnership, event.eventId],
   );
   if (!command) invalidStoredJob();
@@ -263,7 +270,7 @@ export async function listProductLabelJobViews(
   shiftId: string,
 ): Promise<ProductLabelJobView[]> {
   const rows = await exec.all<{ job_id: string }>(
-    "SELECT job_id FROM product_label_jobs WHERE credential_ownership=? AND shift_id=? ORDER BY updated_at DESC,job_id DESC LIMIT 100",
+    `SELECT job_id FROM product_label_jobs WHERE credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND shift_id=? ORDER BY updated_at DESC,job_id DESC LIMIT 100`,
     [owner, shiftId],
   );
   const result: ProductLabelJobView[] = [];

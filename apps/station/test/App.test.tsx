@@ -2,7 +2,11 @@ import type { ScannerConnection } from "../src/lib/hardware.js";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { DatabaseSync } from "node:sqlite";
 import { StrictMode } from "react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { openRecoveryMetadata } from "./support/recovery-metadata.js";
+
+let recoveryMetadata: Awaited<ReturnType<typeof openRecoveryMetadata>>;
+let usesRealDatabase = false;
 
 // `@tauri-apps/plugin-sql`'s `Database.load`/`execute`/`select` are themselves
 // thin wrappers over `@tauri-apps/api/core`'s `invoke` (`plugin:sql|load`,
@@ -49,10 +53,19 @@ vi.mock("@tauri-apps/plugin-sql", () => {
       return new FakeDatabase(resolved as string);
     }
     async execute(query: string, values: unknown[] = []): Promise<unknown> {
-      return callInvoke("plugin:sql|execute", { db: this.path, query, values });
+      const result = await callInvoke("plugin:sql|execute", { db: this.path, query, values });
+      if (!usesRealDatabase && recoveryMetadata.handles(query)) {
+        await recoveryMetadata.exec.run(query, values);
+      }
+      return result;
     }
     async select<T>(query: string, values: unknown[] = []): Promise<T> {
-      return callInvoke("plugin:sql|select", { db: this.path, query, values }) as Promise<T>;
+      const result = await callInvoke("plugin:sql|select", { db: this.path, query, values });
+      return (
+        !usesRealDatabase && recoveryMetadata.handles(query)
+          ? await recoveryMetadata.exec.all(query, values)
+          : result
+      ) as T;
     }
   }
   return { default: FakeDatabase };
@@ -145,10 +158,17 @@ import {
 } from "../src/lib/credential-recovery.js";
 
 beforeAll(async () => {
+  lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
   await i18n.changeLanguage("en");
 });
 
+beforeEach(async () => {
+  usesRealDatabase = false;
+  recoveryMetadata = await openRecoveryMetadata();
+});
+
 afterEach(() => {
+  recoveryMetadata.close();
   vi.useRealTimers();
   invokeMock.mockClear();
   vi.unstubAllGlobals();
@@ -272,7 +292,7 @@ function outboxRow(id: number): OutboxSeedRow {
   return {
     id,
     shift_id: "shift-1",
-    terminal_id: "t1",
+    terminal_id: "device-1",
     raw: `RAW${id}`,
     verdict: "ok",
     scanned_at: new Date().toISOString(),
@@ -311,6 +331,7 @@ function mockInvokeForFloor(
   outboxRows: OutboxSeedRow[] = [],
   stationConfig: Record<string, unknown> = {
     machine_id: "m1",
+    tenant_id: "tenant-1",
     device_id: "device-1",
     api_key: "mk_key",
     server_url: "http://localhost:3000",
@@ -321,6 +342,25 @@ function mockInvokeForFloor(
   inventoryOutboxCount = 0,
 ): OutboxSeedRow[] {
   const outbox = [...outboxRows];
+  for (const item of outbox) {
+    recoveryMetadata.seed(
+      `INSERT INTO outbox(id,shift_id,terminal_id,raw,verdict,scanned_at,code_hash,gtin14,serial,box_id,operator_id)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        item.id,
+        item.shift_id,
+        item.terminal_id,
+        item.raw,
+        item.verdict,
+        item.scanned_at,
+        item.code_hash,
+        item.gtin14,
+        item.serial,
+        item.box_id,
+        item.operator_id,
+      ],
+    );
+  }
   // Mutated by a real `recordConflicts`/`conflictCount` round-trip through
   // this mock (see the Finding 1 regression test below): unlike `outbox`,
   // no test seeds this up front -- every existing test in this file never
@@ -382,6 +422,12 @@ function mockInvokeForFloor(
     }
     if (cmd === "plugin:sql|select") {
       const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+      if (query.startsWith("WITH expected(hash,device)")) {
+        return recoveryMetadata.exec.all(query, values);
+      }
+      if (query.includes("AS count") && query.includes("COUNT(*) FROM outbox")) {
+        return Promise.resolve([{ count: outbox.length + inventoryOutboxCount }]);
+      }
       if (query.includes("AS scans")) {
         if (recoverySnapshotFailure) return Promise.reject(recoverySnapshotFailure);
         return Promise.resolve([
@@ -390,6 +436,7 @@ function mockInvokeForFloor(
             inventory_scans: inventoryOutboxCount,
             boxes: 0,
             exceptions: 0,
+            closes: 0,
           },
         ]);
       }
@@ -531,6 +578,7 @@ async function expandStatusPanelIfCollapsed(language: "en" | "ru" = "en") {
 }
 
 async function mockBackfilledActiveShiftRecovery(pinHash: string) {
+  usesRealDatabase = true;
   const db = new DatabaseSync(":memory:");
   const exec = {
     async run(sql: string, values: unknown[] = []) {
@@ -637,6 +685,7 @@ async function mockBackfilledActiveShiftRecovery(pinHash: string) {
 
   const persistedConfig = {
     machine_id: "m1",
+    tenant_id: "tenant-1",
     device_id: "device-1",
     api_key: "mk_key",
     server_url: "https://api.factory.example",
@@ -665,6 +714,7 @@ async function mockInventoryEntryDatabase(
   suspendQuery: (query: string, values: unknown[]) => boolean = (query) =>
     query.includes("SET active_snapshot_id = staged_snapshot_id"),
 ) {
+  usesRealDatabase = true;
   const db = new DatabaseSync(":memory:");
   const exec = {
     async run(sql: string, values: unknown[] = []) {
@@ -696,6 +746,7 @@ async function mockInventoryEntryDatabase(
   ]);
   const persistedConfig: Record<string, unknown> = {
     machine_id: "m1",
+    tenant_id: "tenant-1",
     device_id: "device-1",
     line_id: "33333333-3333-4333-8333-333333333333",
     line_name: "Line 1",
@@ -743,7 +794,7 @@ async function expectEmptyQueueCredentialRecovery(
 ): Promise<void> {
   await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
   expect(screen.getByTestId("sealed-work-summary").textContent).toBe(
-    "Unsynchronized work is sealed on this station: 0 production scans, 0 inventory scans, 0 boxes, 0 corrections.",
+    "Saved: scans 0, inventory 0, labels 0, boxes 0, exceptions 0, task closures 0.",
   );
   expect(screen.queryByTestId("scanner-status")).toBeNull();
   expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "clear_credential")).toHaveLength(1);
@@ -862,6 +913,13 @@ async function renderActiveShiftForOperatorSwitch(
   invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
     if (cmd === "plugin:sql|select") {
       const { query } = (payload ?? {}) as { query: string; values?: unknown[] };
+      if (
+        query.startsWith("WITH expected(hash,device)") ||
+        query.includes("AS scans") ||
+        (query.includes("AS count") && query.includes("COUNT(*) FROM outbox"))
+      ) {
+        return baseInvoke(cmd, payload);
+      }
       if (query.includes("WITH local_closures")) return Promise.resolve([]);
       if (/FROM operators_mirror\b/.test(query)) {
         return Promise.resolve([
@@ -2020,7 +2078,7 @@ describe("App", () => {
     }
   });
 
-  it("keeps an unmounted inventory page write registered until credential recovery can clean it", async () => {
+  it("waits for an unmounted inventory page write before sealing its retained task", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
     lockdownMock.subscribe.mockImplementation((listener) => {
@@ -2146,7 +2204,19 @@ describe("App", () => {
         expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "clear_credential")).toHaveLength(1),
       );
       await screen.findByTestId("sealed-work-summary");
-      expect(await database.exec.all("SELECT * FROM inventory_task_mirror")).toEqual([]);
+      const retained = await database.exec.all<{ staged_manifest_json: string }>(
+        "SELECT * FROM inventory_task_mirror",
+      );
+      expect(retained).toHaveLength(1);
+      expect(JSON.parse(retained[0]!.staged_manifest_json)).toEqual(manifest);
+      expect(retained[0]).toMatchObject({
+        inventory_id: inventoryId,
+        staged_snapshot_id: snapshotId,
+        staged_content_digest: contentDigest,
+        staged_verified_digest: manifest.combinedDigest,
+        staged_last_page_digest: page.pageDigest,
+        staged_page_json: "[]",
+      });
     } finally {
       database.releasePublication();
       consoleErrorSpy.mockRestore();
@@ -2708,7 +2778,6 @@ describe("App", () => {
     // still advances directly to operator login after a refresh.
     let rustConfig: Record<string, unknown> = {
       machine_id: "m1",
-      device_id: "device-1",
       server_url: "http://localhost:3000",
     };
     invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
@@ -2759,6 +2828,7 @@ describe("App", () => {
       if (cmd === "read_config") {
         return Promise.resolve({
           machine_id: "m1",
+          tenant_id: "tenant-1",
           device_id: "device-1",
           api_key: "mk_key",
           server_url: "http://localhost:3000",
@@ -2831,6 +2901,7 @@ describe("App", () => {
       if (cmd === "read_config") {
         return Promise.resolve({
           machine_id: "m1",
+          tenant_id: "tenant-1",
           device_id: "device-1",
           api_key: "mk_key",
           server_url: "http://localhost:3000",
@@ -2935,7 +3006,7 @@ describe("App", () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const persistedConfig: Record<string, unknown> = {
       machine_id: "m1",
-      device_id: "device-1",
+      device_id: "11111111-1111-4111-8111-111111111111",
       tenant_id: "tenant-1",
       api_key: "old-key",
       server_url: "https://api.factory.example",
@@ -2955,13 +3026,15 @@ describe("App", () => {
       "fetch",
       vi.fn((url: string) => {
         const path = new URL(url).pathname;
-        if (path === "/station/pair") {
+        if (path === "/station/pair/recovery") {
           return Promise.resolve(
             new Response(
               JSON.stringify({
+                version: 1,
                 device: {
-                  id: "device-1",
+                  id: "11111111-1111-4111-8111-111111111111",
                   name: "Packing station",
+                  kind: "station",
                   tenantId: "tenant-1",
                   organizationName: "Factory",
                   line: null,
@@ -3008,7 +3081,7 @@ describe("App", () => {
     expect(screen.getByTestId("server-status").textContent).toBe("Available");
   });
 
-  it("backfills a real legacy config before sync and later handles explicit revocation for the same durable device", async () => {
+  it("keeps unbound legacy work unresolved after a successful current identity lookup", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const persistedConfig: Record<string, unknown> = {
       machine_id: "legacy-machine",
@@ -3065,17 +3138,28 @@ describe("App", () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
-    expect(order.slice(0, 3)).toEqual(["identity", "write-config", "sync"]);
+    await screen.findByText(
+      "The owner of saved data could not be confirmed. Contact support; connecting another device cannot restore it.",
+    );
+    await waitFor(() => expect(backfillWrite).not.toBeNull());
+    expect(order).not.toContain("sync");
+    expect(screen.queryByText("Operator sign-in")).toBeNull();
+    expect(screen.queryByLabelText("Pairing code")).toBeNull();
+    expect(
+      await recoveryMetadata.exec.all("SELECT phase,owner_json FROM station_device_recovery"),
+    ).toEqual([{ phase: "owner_unresolved", owner_json: null }]);
     expect(backfillWrite).toMatchObject({
       machine_id: "legacy-machine",
+      tenant_id: "tenant-legacy",
       device_id: "device-legacy",
       api_key: "legacy-key-not-to-render",
       server_url: "https://api.factory.example",
     });
-    expect(persistedConfig).toEqual({
+    expect(persistedConfig).toMatchObject({
       machine_id: "legacy-machine",
       device_id: "device-legacy",
+      tenant_id: "tenant-legacy",
+      api_key: "legacy-key-not-to-render",
       server_url: "https://api.factory.example",
     });
     expect(outbox).toHaveLength(1);
@@ -3110,7 +3194,7 @@ describe("App", () => {
 
       expect(
         await screen.findByText(
-          "Station identity cannot be updated because no trusted API address is available. Local work and the device key are preserved; contact service support.",
+          "The owner of saved data could not be confirmed. Contact support; connecting another device cannot restore it.",
         ),
       ).toBeDefined();
       expect(screen.queryByLabelText("Pairing code")).toBeNull();
@@ -3180,6 +3264,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(persistedConfig).toMatchObject({
         machine_id: "legacy-machine",
+        tenant_id: "legacy-tenant",
         device_id: "legacy-device",
         api_key: "legacy-key",
         server_url: "https://api.factory.example",
@@ -3189,7 +3274,7 @@ describe("App", () => {
     view.unmount();
   });
 
-  it("keeps cached floor login available while legacy identity is offline and coalesces reconnect retries", async () => {
+  it("keeps unbound work sealed while legacy identity is offline and coalesces reconnect retries", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const persistedConfig: Record<string, unknown> = {
       machine_id: "legacy-machine",
@@ -3214,22 +3299,13 @@ describe("App", () => {
 
     render(<App />);
 
-    const degradedNotice = await screen.findByText(
-      "Station identity update is waiting for a connection. Cached offline work remains available.",
+    await screen.findByText(
+      "The owner of saved data could not be confirmed. Contact support; connecting another device cannot restore it.",
     );
-    const loginFooter = degradedNotice.closest(".station-floor-footer");
-    expect(loginFooter).not.toBeNull();
-    expect(loginFooter?.closest(".operator-login")).not.toBeNull();
-    expect((loginFooter as HTMLElement).style.position).toBe("");
-    expect(screen.getByRole("button", { name: "Use personnel number" })).toBeDefined();
-    await signInAsOperator();
-    const floorFooter = screen
-      .getByText(
-        "Station identity update is waiting for a connection. Cached offline work remains available.",
-      )
-      .closest(".station-floor-footer");
-    expect(floorFooter?.closest(".station-root")).not.toBeNull();
-    expect(floorFooter?.closest(".station-screen-slot")).toBeNull();
+    expect(screen.queryByText("Operator sign-in")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Use personnel number" })).toBeNull();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await act(async () => {});
     expect(outbox).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
@@ -3246,7 +3322,7 @@ describe("App", () => {
     resolveReconnect(new Response("{}", { status: 503 }));
   });
 
-  it("keeps re-pairing unavailable in Setup while a legacy identity request is pending", async () => {
+  it("keeps sign-in and re-pairing unavailable while an unbound legacy identity request is pending", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const persistedConfig: Record<string, unknown> = {
       machine_id: "legacy-machine",
@@ -3272,15 +3348,11 @@ describe("App", () => {
     );
 
     const view = render(<App />);
-    await screen.findByText("Updating station identity. Cached offline work remains available.");
-    await signInAsOperator();
-    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-
-    expect(
-      await screen.findByText(
-        "Re-pairing is unavailable until this legacy station identity is safely updated. Local production records remain preserved; retry the identity update or contact support.",
-      ),
-    ).toBeDefined();
+    await screen.findByText(
+      "The owner of saved data could not be confirmed. Contact support; connecting another device cannot restore it.",
+    );
+    expect(screen.queryByText("Operator sign-in")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Workstation setup" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Re-pair this station" })).toBeNull();
     expect(invokeMock).not.toHaveBeenCalledWith("clear_credential");
     expect(screen.queryByLabelText("Pairing code")).toBeNull();
@@ -3338,7 +3410,12 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const view = render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "Retry identity update" }));
+    await screen.findByText(
+      "The owner of saved data could not be confirmed. Contact support; connecting another device cannot restore it.",
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+    act(() => window.dispatchEvent(new Event("online")));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     view.unmount();
     resolveRetry(
@@ -3421,6 +3498,7 @@ describe("App", () => {
     );
     expect(persistedConfig).toMatchObject({
       machine_id: "legacy-machine",
+      tenant_id: "tenant-legacy",
       device_id: "legacy-device",
       api_key: "legacy-key",
     });
@@ -3428,44 +3506,54 @@ describe("App", () => {
     view.unmount();
   });
 
-  it("holds a rejected legacy identity in stable service recovery without clearing or pairing the queue", async () => {
-    const pinHash = await hashSecret(OPERATOR_PIN);
-    const invoked: string[] = [];
-    const outbox = mockInvokeForFloor(
-      pinHash,
-      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
-      [outboxRow(1)],
-      {
-        machine_id: "legacy-machine",
-        api_key: "rejected-legacy-key",
-        server_url: "https://api.factory.example",
-      },
-      (cmd) => invoked.push(cmd),
-    );
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ message: "revoked" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+  it.each([false, true])(
+    "holds legacy rejection explicit=%s without pairing retained data",
+    async (explicit) => {
+      const pinHash = await hashSecret(OPERATOR_PIN);
+      const invoked: string[] = [];
+      const outbox = mockInvokeForFloor(
+        pinHash,
+        { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+        [outboxRow(1)],
+        {
+          machine_id: "legacy-machine",
+          api_key: "rejected-legacy-key",
+          server_url: "https://api.factory.example",
+        },
+        (cmd) => invoked.push(cmd),
+      );
+      const fetchMock = vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              message: "revoked",
+              ...(explicit ? { code: "STATION_CREDENTIAL_REVOKED" } : {}),
+            }),
+            {
+              status: 401,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+      );
+      vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+      render(<App />);
 
-    expect(
-      await screen.findByText(
-        "This legacy station key could not prove its device identity. Local work is preserved; contact service support before pairing again.",
-      ),
-    ).toBeDefined();
-    window.dispatchEvent(new Event("online"));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(invoked).not.toContain("clear_credential");
-    expect(invoked).not.toContain("write_config");
-    expect(outbox).toHaveLength(1);
-    expect(screen.queryByLabelText("Pairing code")).toBeNull();
-  });
+      expect(
+        await screen.findByText(
+          "The owner of saved data could not be confirmed. Contact support; connecting another device cannot restore it.",
+        ),
+      ).toBeDefined();
+      window.dispatchEvent(new Event("online"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      if (explicit) await waitFor(() => expect(invoked).toContain("clear_credential"));
+      else expect(invoked).not.toContain("clear_credential");
+      expect(invoked).not.toContain("write_config");
+      expect(outbox).toHaveLength(1);
+      expect(screen.queryByLabelText("Pairing code")).toBeNull();
+    },
+  );
 
   it("keeps the legacy queue and key untouched when atomic identity persistence fails", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
@@ -3504,9 +3592,20 @@ describe("App", () => {
 
     expect(
       await screen.findByText(
-        "Station identity update is waiting for a connection. Cached offline work remains available.",
+        "The owner of saved data could not be confirmed. Contact support; connecting another device cannot restore it.",
       ),
     ).toBeDefined();
+    // The unresolved-owner screen precedes the asynchronous identity lookup.
+    // Await the injected disk-full boundary before asserting preserved state.
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("write_config", {
+        cfg: expect.objectContaining({
+          machine_id: "legacy-machine",
+          device_id: "device-legacy",
+          tenant_id: "tenant-legacy",
+        }),
+      }),
+    );
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(persistedConfig).toEqual({
       machine_id: "legacy-machine",
@@ -3521,7 +3620,7 @@ describe("App", () => {
     const outbox = mockInvokeForFloor(
       pinHash,
       { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
-      [outboxRow(1)],
+      [{ ...outboxRow(1), terminal_id: "device-legacy" }],
       {
         machine_id: "legacy-machine",
         device_id: "device-legacy",
@@ -3795,6 +3894,7 @@ describe("App", () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const persistedConfig: Record<string, unknown> = {
       machine_id: "m1",
+      tenant_id: "tenant-1",
       device_id: "device-1",
       api_key: "revoked-key",
       server_url: "https://api.factory.example",
@@ -3836,6 +3936,7 @@ describe("App", () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const persistedConfig: Record<string, unknown> = {
       machine_id: "m1",
+      tenant_id: "tenant-1",
       device_id: "device-1",
       api_key: "revoked-key",
       server_url: "https://api.factory.example",
@@ -3894,6 +3995,7 @@ describe("App", () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const persistedConfig: Record<string, unknown> = {
       machine_id: "m1",
+      tenant_id: "tenant-1",
       device_id: "device-1",
       api_key: "revoked-key",
       server_url: "https://api.factory.example",
@@ -3959,6 +4061,7 @@ describe("App", () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const persistedConfig: Record<string, unknown> = {
       machine_id: "m1",
+      tenant_id: "tenant-1",
       device_id: "device-1",
       api_key: "revoked-key",
       server_url: "https://api.factory.example",
@@ -4006,7 +4109,7 @@ describe("App", () => {
 
     await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
     expect(screen.getByTestId("sealed-work-summary").textContent).toBe(
-      "Unsynchronized work is sealed on this station: 1 production scans, 0 inventory scans, 0 boxes, 0 corrections.",
+      "Saved: scans 1, inventory 0, labels 0, boxes 0, exceptions 0, task closures 0.",
     );
     expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "clear_credential")).toHaveLength(1);
     expect(outbox).toHaveLength(1);
@@ -4071,7 +4174,7 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
     expect(checkedFloorExit).toBe(true);
     expect(screen.getByTestId("sealed-work-summary").textContent).toBe(
-      "Unsynchronized work is sealed on this station: 1 production scans, 1 inventory scans, 0 boxes, 0 corrections.",
+      "Saved: scans 1, inventory 1, labels 0, boxes 0, exceptions 0, task closures 0.",
     );
     expect(invokeMock).toHaveBeenCalledWith("clear_credential");
     expect(outbox).toHaveLength(1);
@@ -4093,6 +4196,7 @@ describe("App", () => {
       [outboxRow(1)],
       {
         machine_id: "m1",
+        tenant_id: "tenant-1",
         device_id: "device-1",
         api_key: "mk_key",
         server_url: "https://api.factory.example",
@@ -4143,6 +4247,7 @@ describe("App", () => {
       if (cmd === "read_config") {
         return Promise.resolve({
           machine_id: "m1",
+          tenant_id: "tenant-1",
           device_id: "device-1",
           api_key: "mk_key",
           server_url: "http://localhost:3000",
@@ -4528,6 +4633,7 @@ describe("App", () => {
         if (cmd === "read_config") {
           return Promise.resolve({
             machine_id: "m1",
+            tenant_id: "tenant-1",
             device_id: "device-1",
             api_key: "mk_key",
             server_url: "http://localhost:3000",
@@ -4657,6 +4763,7 @@ describe("App", () => {
         if (cmd === "read_config") {
           return Promise.resolve({
             machine_id: "m1",
+            tenant_id: "tenant-1",
             device_id: "device-1",
             api_key: "mk_key",
             server_url: "http://localhost:3000",
@@ -4811,6 +4918,7 @@ describe("App", () => {
       if (cmd === "read_config") {
         return Promise.resolve({
           machine_id: "m1",
+          tenant_id: "tenant-1",
           device_id: "device-1",
           api_key: "mk_key",
           server_url: "http://localhost:3000",
@@ -5057,6 +5165,7 @@ describe("App", () => {
         if (cmd === "read_config") {
           return Promise.resolve({
             machine_id: "m1",
+            tenant_id: "tenant-1",
             device_id: "device-1",
             api_key: "mk_key",
             server_url: "http://localhost:3000",
@@ -5190,15 +5299,26 @@ describe("App", () => {
 it("gates startup on the current credential's saved label and resumes a remotely closed shift offline", async () => {
   lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
   const owner = await credentialGenerationOwnership(createCredentialGeneration("mk_key"));
-  const h = await openProductLabelWork("required", owner ?? undefined);
+  const h = await openProductLabelWork("required", owner ?? undefined, true, true);
   await h.exec.run("UPDATE shift_mirror SET status='closed' WHERE id=?", [h.input.shiftId]);
   const pinHash = await hashSecret(OPERATOR_PIN);
-  mockInvokeForFloor(pinHash, {
-    scanner: null,
-    printer: null,
-    printerLanguage: "zpl",
-    verifyPrintedLabel: false,
-  });
+  mockInvokeForFloor(
+    pinHash,
+    {
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    },
+    [],
+    {
+      machine_id: "m1",
+      device_id: h.input.deviceId,
+      tenant_id: "tenant-1",
+      api_key: "mk_key",
+      server_url: "http://localhost:3000",
+    },
+  );
   const baseInvoke = invokeMock.getMockImplementation();
   if (!baseInvoke) throw new Error("floor harness missing");
   invokeMock.mockImplementation((cmd, payload) => {

@@ -451,4 +451,17 @@
     <string name="reprint_unknown_sscc">That SSCC belongs to no box of this shift</string>
     <string name="signal_undone">UNDONE</string>
     <string name="reprint_outcome_unknown">Print outcome unknown — the label is in the queue</string>
+    <string name="recovery_title">Device access paused</string>
+    <string name="recovery_text">Your saved work is retained. Reconnect the same device to continue.</string>
+    <string name="recovery_unresolved_title">Saved data owner is unknown</string>
+    <string name="recovery_unresolved_text">Saved data is sealed. Contact your administrator to investigate the previous connection.</string>
+    <string name="recovery_connect">Reconnect this device</string>
+    <string name="recovery_code_hint">Enter the code issued by your administrator for this same device record.</string>
+    <string name="recovery_summary">Pending: scans %1$d · inventory %2$d · labels %3$d · boxes %4$d · exceptions %5$d · closures %6$d\nConflicts: %7$d · Unknown print result: %8$d</string>
+    <string name="recovery_summary_unknown">Saved record counts are currently unavailable.</string>
+    <string name="recovery_mismatch">The code belongs to a different organization or device. Data is retained. Request a code for the original device record.</string>
+    <string name="recovery_update_required">The server does not support safe recovery. Update the server. Saved work remains retained.</string>
+    <string name="recovery_publication_failed">Connection could not be saved completely. Your work is retained. Retry to finish saving this connection.</string>
+    <string name="recovery_success_title">Connection restored</string>
+    <string name="recovery_success_text">Saved work is awaiting synchronization. Unknown print results require operator review.</string>
 </resources>

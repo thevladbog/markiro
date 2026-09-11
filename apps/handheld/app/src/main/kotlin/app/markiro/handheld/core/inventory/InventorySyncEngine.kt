@@ -1,6 +1,5 @@
 package app.markiro.handheld.core.inventory
 
-import androidx.room.withTransaction
 import app.markiro.handheld.core.network.EventBatchResponseDto
 import app.markiro.handheld.core.network.ProgressPageDto
 import app.markiro.handheld.core.storage.DeviceConfigDao
@@ -79,7 +78,7 @@ class InventorySyncEngine(
             while (true) {
                 withTimeoutOrNull(delayMs) { nudges.receive() }
                 now.value = clock()
-                delayMs = if (drainAll()) {
+                delayMs = if (try { drainAll() } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) { false }) {
                     backoff.reset()
                     heartbeatMs
                 } else {
@@ -131,12 +130,14 @@ class InventorySyncEngine(
         )
     }.getOrNull()
 
-    internal suspend fun drainOnce(task: InventoryTaskEntity): Step {
+    internal suspend fun drainOnce(task: InventoryTaskEntity): Step = try { db.recovery.work { drainOnceOwned(task) } } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) { Step.FAILED }
+
+    private suspend fun drainOnceOwned(task: InventoryTaskEntity): Step {
         val id = task.inventoryId
         val pinned = meta.get(MetaStore.inventoryPin(id))?.let(::parsePin)
         val rows = if (pinned != null) db.inventoryOutboxDao().headThrough(id, pinned.ceilingId, BATCH_SIZE) else db.inventoryOutboxDao().head(id, BATCH_SIZE)
         if (rows.isEmpty()) {
-            if (pinned != null) meta.remove(MetaStore.inventoryPin(id))
+            if (pinned != null) db.recovery.commit { meta.remove(MetaStore.inventoryPin(id)) }
             return Step.EMPTY
         }
         val pin = pinned ?: run {
@@ -146,7 +147,7 @@ class InventorySyncEngine(
             val digest = InventoryBatchCodec.digest(payload)
             val batchId = UUID.randomUUID().toString()
             Pin(batchId, digest, rows.last().id, InventoryBatchCodec.requestJson(batchId, digest, payload)).also {
-                meta.put(MetaStore.inventoryPin(id), pinJson(it))
+                db.recovery.commit { meta.put(MetaStore.inventoryPin(id), pinJson(it)) }
             }
         }
         val result = transport.post("/station/inventories/$id/event-batches", pin.request) as? TransportResult.Ok ?: return Step.FAILED
@@ -155,7 +156,7 @@ class InventorySyncEngine(
         if (!acknowledges(response, task, pin, rows.map { it.eventId })) return Step.FAILED
         val at = clock()
         var quarantined = false
-        db.withTransaction {
+        db.recovery.commit {
             for (outcome in response.outcomes) {
                 db.inventoryEventDao().setServerStatus(outcome.eventId, outcome.status)
                 // A box event can be `applied` for some children and lose others: every lost claim names its winner.
@@ -195,12 +196,14 @@ class InventorySyncEngine(
         }
     }
 
-    internal suspend fun pollProgress(task: InventoryTaskEntity): Boolean {
+    internal suspend fun pollProgress(task: InventoryTaskEntity): Boolean = try { db.recovery.work { pollProgressOwned(task) } } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) { false }
+
+    private suspend fun pollProgressOwned(task: InventoryTaskEntity): Boolean {
         val id = task.inventoryId
         var terminal = db.inventoryTerminalStateDao().get(id)
         if (terminal == null) {
             terminal = InventoryTerminalStateEntity(id, task.snapshotId, null, task.productionDateFrom, 1, null, 0, Iso.format(clock()))
-            db.inventoryTerminalStateDao().upsert(terminal)
+            db.recovery.commit { db.inventoryTerminalStateDao().upsert(terminal) }
         }
         var cursor = terminal.progressCursor
         var revision = terminal.progressResultRevision
@@ -221,7 +224,7 @@ class InventorySyncEngine(
                 return false
             }
             val next = page.nextCursor ?: cursor
-            db.withTransaction {
+            db.recovery.commit {
                 for (item in page.items) {
                     if (item.kind != "claim" && item.kind != "correction") continue
                     val hash = item.codeHash ?: continue
