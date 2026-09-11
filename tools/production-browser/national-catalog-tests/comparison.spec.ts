@@ -117,7 +117,7 @@ for (const width of [390, 1280]) {
     });
     const route = `/catalog/import?sessionId=${id(1)}&preparationId=${id(10)}`;
     await page.goto(
-      `/test/browser/national-catalog-harness.html?lang=ru&route=${encodeURIComponent(route)}`,
+      `/test/browser/national-catalog-harness.html?locale=ru&route=${encodeURIComponent(route)}`,
     );
     const item = page.locator(".mk-nc-review-item");
     const current = item.getByRole("radio", {
