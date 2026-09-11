@@ -5,6 +5,7 @@
     <string name="common_back">Назад</string>
     <string name="common_cancel">Отмена</string>
     <string name="common_retry">Повторить</string>
+    <string name="common_refresh">Обновить</string>
     <string name="common_continue">Продолжить</string>
     <string name="common_backspace">Стереть</string>
     <string name="common_data_as_of">данные на %1$s</string>
@@ -58,9 +59,7 @@
     <string name="hub_sign_out">Выйти</string>
     <string name="hub_tile_shift">Смена</string>
     <string name="hub_tile_inventory">Инвентаризация</string>
-    <string name="hub_tile_check">Проверка кода</string>
     <string name="hub_tile_settings">Настройки</string>
-    <string name="hub_check_status">нажмите триггер</string>
     <string name="hub_printer_not_set">принтер не настроен</string>
     <string name="hub_no_shifts">смен нет</string>
     <string name="hub_no_tasks">заданий нет</string>
@@ -83,8 +82,6 @@
         <item quantity="many">%d сканов в очереди</item>
         <item quantity="other">%d сканов в очереди</item>
     </plurals>
-    <string name="soon_title">В следующем срезе</string>
-    <string name="soon_text">Этот раздел появится в одном из следующих срезов.</string>
     <string name="scanner_source_builtin">встроенный</string>
     <string name="scanner_source_wedge">клавиатурный</string>
     <string name="scanner_source_debug">отладка</string>
@@ -97,6 +94,9 @@
     <string name="theme_light">Светлая</string>
     <string name="theme_system">Как в системе</string>
     <string name="settings_about">ОБ УСТРОЙСТВЕ</string>
+    <string name="settings_vendor">Производитель</string>
+    <!-- A company domain, not copy: the same in every locale. -->
+    <string name="settings_vendor_value" translatable="false">v-b.tech</string>
     <string name="settings_name">Имя</string>
     <string name="settings_server">Сервер</string>
     <string name="settings_version">Версия</string>
@@ -125,7 +125,7 @@
     <string name="scanner_sources">ИСТОЧНИК СКАНОВ</string>
     <string name="scanner_builtin_title">Встроенный сканер</string>
     <string name="scanner_wedge_title">Клавиатурный wedge</string>
-    <string name="scanner_wedge_hint">универсальный запасной путь: сканер печатает код как клавиатура</string>
+    <string name="scanner_wedge_hint">универсальный запасной путь: сканер печатает код как клавиатура. Работает всегда, даже когда выбран встроенный сканер</string>
     <string name="scanner_profiles">ПРОФИЛЬ ВЕНДОРА</string>
     <string name="scanner_action">действие %1$s</string>
     <string name="scanner_test">ТЕСТОВЫЙ СКАН</string>
@@ -159,6 +159,11 @@
     <string name="shifts_update_required_text">Эта смена требует возможности, которой нет в установленной версии. Обновите приложение, используйте станцию или измените политику смены в кабинете.</string>
     <string name="shifts_closed_title">Смена уже закрыта</string>
     <string name="shifts_closed_text">Список обновлён.</string>
+    <string name="shifts_refused_title">Сервер отказал</string>
+    <string name="shifts_refused_text">%1$s · HTTP %2$d · %3$s\n\nСмена не закрыта — дело в другом. Покажите эту строку администратору.</string>
+    <string name="shifts_refused_step_enter">вход в смену</string>
+    <string name="shifts_refused_step_bundle">загрузка данных смены</string>
+    <string name="shifts_refused_no_code">без кода</string>
     <string name="shifts_status_planned">запланирована</string>
     <string name="shifts_status_active">идёт</string>
 

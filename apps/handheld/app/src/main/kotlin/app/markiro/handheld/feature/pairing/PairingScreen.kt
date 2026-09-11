@@ -1,10 +1,9 @@
 package app.markiro.handheld.feature.pairing
 
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,6 +31,7 @@ import app.markiro.handheld.core.design.FullScreenState
 import app.markiro.handheld.core.design.Keypad
 import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.design.MarkiroTheme
+import app.markiro.handheld.core.design.ScreenColumn
 import app.markiro.handheld.core.design.StateAction
 import app.markiro.handheld.core.design.Tone
 import app.markiro.handheld.core.network.PairingError
@@ -64,7 +64,6 @@ fun PairingScreen(state: PairingUi, callbacks: PairingCallbacks) {
                 },
                 primary = if (state.unresolved) null else StateAction(stringResource(R.string.recovery_connect), callbacks.onRetry),
                 tone = Tone.Warn,
-                scrollable = true,
             )
             is PairingUi.Enter -> EnterCode(state, callbacks)
             PairingUi.Binding -> FullScreenState(
@@ -89,7 +88,7 @@ fun PairingScreen(state: PairingUi, callbacks: PairingCallbacks) {
 private fun EnterCode(state: PairingUi.Enter, callbacks: PairingCallbacks) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
+    ScreenColumn(padding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
         Text(stringResource(R.string.pairing_brand), style = t.label, color = c.fg3)
         Text(stringResource(if (state.restoring) R.string.recovery_connect else R.string.pairing_title), style = t.title, color = c.fg1)
         Text(stringResource(if (state.restoring) R.string.recovery_code_hint else R.string.pairing_hint), style = t.body.copy(fontSize = 15.sp), color = c.fg2)

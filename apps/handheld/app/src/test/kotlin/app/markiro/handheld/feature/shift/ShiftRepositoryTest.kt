@@ -1,6 +1,14 @@
 package app.markiro.handheld.feature.shift
 
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
+import app.markiro.handheld.core.storage.reconnectSameDeviceForTest
+import app.markiro.handheld.core.storage.RecoveryBlocked
+import app.markiro.handheld.MainDispatcherRule
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.advanceUntilIdle
+import org.junit.Rule
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -14,6 +22,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
@@ -27,8 +36,10 @@ import org.junit.runner.RunWith
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @RunWith(AndroidJUnit4::class)
 class ShiftRepositoryTest {
+    @get:Rule val main = MainDispatcherRule()
     private lateinit var db: HandheldDatabase
     private lateinit var server: MockWebServer
     private lateinit var api: StationApi
@@ -90,6 +101,7 @@ class ShiftRepositoryTest {
 
     @After
     fun tearDown() {
+        main.cancelAndJoinModels()
         server.shutdown()
         db.close()
     }
@@ -137,6 +149,38 @@ class ShiftRepositoryTest {
         assertEquals(EnterResult.UpdateRequired, repo().enter("s1"))
         server.enqueue(MockResponse().setResponseCode(409).setBody("""{"message":"Closed shifts cannot be entered"}"""))
         assertEquals(EnterResult.Closed, repo().enter("s1"))
+    }
+
+    /**
+     * Every conflict used to become «смена уже закрыта». An operator then stood
+     * in front of a shift the cabinet still lists as open, with nothing on
+     * screen naming the subscription that actually refused them.
+     */
+    @Test
+    fun aConflictCarryingACodeIsNotReportedAsAClosedShift() = runTest {
+        server.enqueue(MockResponse().setResponseCode(409).setBody("""{"code":"subscription_unmanaged","statusCode":409}"""))
+        assertEquals(EnterResult.Refused(EnterStep.ENTER, 409, "subscription_unmanaged"), repo().enter("s1"))
+    }
+
+    /** A refusal that is not a conflict at all was reported as «сервер недоступен». */
+    @Test
+    fun aForbiddenEntryNamesTheServersOwnCode() = runTest {
+        server.enqueue(MockResponse().setResponseCode(403).setBody("""{"code":"subscription_read_only","statusCode":403}"""))
+        assertEquals(EnterResult.Refused(EnterStep.ENTER, 403, "subscription_read_only"), repo().enter("s1"))
+    }
+
+    /**
+     * The device is a participant server-side but has no data to work with. That
+     * is a different fact from a closed shift, and the two were reported the
+     * same because one `catch` covered both calls.
+     */
+    @Test
+    fun aBundleRefusalIsReportedAgainstTheBundleAndEntersNothing() = runTest {
+        server.enqueue(MockResponse().setBody(activeShiftJson))
+        server.enqueue(MockResponse().setResponseCode(404).setBody("""{"message":"Shift product missing"}"""))
+        assertEquals(EnterResult.Refused(EnterStep.BUNDLE, 404, null), repo().enter("s1"))
+        assertNull(db.deviceConfigDao().get()?.activeShiftId)
+        assertNull(db.shiftDao().get("s1"))
     }
 
     @Test
@@ -230,4 +274,106 @@ class ShiftRepositoryTest {
         assertEquals("Вода 0,5", shift.productName)
         assertEquals("Вода", shift.productPrintName)
     }
+    @Test fun delayedBundleCannotReplaceSavedShiftOrSsccPoolUnderNewGeneration() = runTest {
+        val original = ShiftEntityFixtures.bundled("s1").copy(leftAt = 17L)
+        db.shiftDao().upsert(original)
+        val requested = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        api = object : StationApi by api {
+            override suspend fun enter(id: String) = NetworkModule.json().decodeFromString<app.markiro.handheld.core.network.ShiftDto>(activeShiftJson)
+            override suspend fun bundle(id: String): app.markiro.handheld.core.network.ShiftBundleDto {
+                requested.complete(Unit)
+                finish.await()
+                return NetworkModule.json().decodeFromString(aggregationBundleJson)
+            }
+        }
+        val entering = async { runCatching { repo().enter("s1") } }
+        requested.await()
+        db.recovery.reject(db.recovery.token())
+        db.reconnectSameDeviceForTest()
+        finish.complete(Unit)
+        assertTrue(entering.await().exceptionOrNull() is RecoveryBlocked)
+        assertEquals(original, db.shiftDao().get("s1"))
+        assertNull(db.deviceConfigDao().get()?.activeShiftId)
+        assertEquals(0L, db.openHelper.readableDatabase.query("SELECT COUNT(*) FROM sscc_pool").use { it.moveToFirst(); it.getLong(0) })
+    }
+
+    @Test fun delayedNetworkFailureCannotEnterCachedShiftUnderNewGeneration() = runTest {
+        val original = ShiftEntityFixtures.bundled("s1").copy(leftAt = 17L)
+        db.shiftDao().upsert(original)
+        val requested = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        api = object : StationApi by api {
+            override suspend fun enter(id: String): app.markiro.handheld.core.network.ShiftDto {
+                requested.complete(Unit)
+                finish.await()
+                throw java.io.IOException("synthetic offline")
+            }
+        }
+        val entering = async { runCatching { repo().enter("s1") } }
+        requested.await()
+        db.recovery.reject(db.recovery.token())
+        db.reconnectSameDeviceForTest()
+        finish.complete(Unit)
+        assertTrue(entering.await().exceptionOrNull() is RecoveryBlocked)
+        assertEquals(original, db.shiftDao().get("s1"))
+        assertNull(db.deviceConfigDao().get()?.activeShiftId)
+    }
+
+    @Test fun refusedEntryRefreshStaysBoundToTheInitiatingGeneration() = runTest {
+        val cached = ShiftEntityFixtures.bundled("s1")
+        db.shiftDao().upsert(cached)
+        val requested = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        var listCalls = 0
+        api = object : StationApi by api {
+            override suspend fun shifts(status: String?, lineId: String?): app.markiro.handheld.core.network.ShiftListResponse {
+                listCalls++
+                return app.markiro.handheld.core.network.ShiftListResponse(emptyList())
+            }
+            override suspend fun enter(id: String): app.markiro.handheld.core.network.ShiftDto {
+                requested.complete(Unit)
+                finish.await()
+                throw retrofit2.HttpException(retrofit2.Response.error<Any>(403,
+                    """{"code":"subscription_read_only"}""".toResponseBody("application/json".toMediaType())))
+            }
+        }
+        val vm = main.track(ShiftListViewModel(repo(), db.deviceConfigDao(), db.recovery, app.markiro.handheld.core.network.ReachabilityTracker(), flowOf(Unit)))
+        vm.state.first { !it.loading }
+        vm.select(cached)
+        requested.await()
+        db.recovery.reject(db.recovery.token())
+        db.reconnectSameDeviceForTest()
+        finish.complete(Unit)
+        vm.state.first { it.dialog is ShiftDialog.Refused }
+        advanceUntilIdle()
+        assertEquals("The refusal refresh must not adopt the replacement credential", 1, listCalls)
+        assertEquals(cached, db.shiftDao().get("s1"))
+        assertNull(db.deviceConfigDao().get()?.activeShiftId)
+    }
+
+    @Test fun currentGenerationRefusalStillShowsServerReasonAndRefreshesTheList() = runTest {
+        val cached = ShiftEntityFixtures.bundled("s1")
+        db.shiftDao().upsert(cached)
+        var listCalls = 0
+        api = object : StationApi by api {
+            override suspend fun shifts(status: String?, lineId: String?): app.markiro.handheld.core.network.ShiftListResponse {
+                listCalls++
+                return app.markiro.handheld.core.network.ShiftListResponse(emptyList())
+            }
+            override suspend fun enter(id: String): app.markiro.handheld.core.network.ShiftDto =
+                throw retrofit2.HttpException(retrofit2.Response.error<Any>(403,
+                    """{"code":"subscription_read_only"}""".toResponseBody("application/json".toMediaType())))
+        }
+        val vm = main.track(ShiftListViewModel(repo(), db.deviceConfigDao(), db.recovery, app.markiro.handheld.core.network.ReachabilityTracker(), flowOf(Unit)))
+        vm.state.first { !it.loading }
+        vm.select(cached)
+        vm.state.first { it.dialog is ShiftDialog.Refused }
+        advanceUntilIdle()
+        assertEquals(ShiftDialog.Refused(EnterStep.ENTER, 403, "subscription_read_only"), vm.state.value.dialog)
+        assertEquals(2, listCalls)
+        assertEquals(cached, db.shiftDao().get("s1"))
+        assertNull(db.deviceConfigDao().get()?.activeShiftId)
+    }
+
 }

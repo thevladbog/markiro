@@ -7,6 +7,7 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import app.markiro.handheld.core.scan.ScanRouter
 import app.markiro.handheld.feature.hub.RosterRefresher
 import app.markiro.handheld.feature.settings.AppPreferences
@@ -27,6 +28,9 @@ class MainActivity : AppCompatActivity() {
     private val shell: AppShellViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Before `super`: this is what swaps the launch theme for the real one,
+        // and it has to happen while the window is still being set up.
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(preferences.language))
         setContent { MarkiroApp(shell, session, refresher, preferences) }
