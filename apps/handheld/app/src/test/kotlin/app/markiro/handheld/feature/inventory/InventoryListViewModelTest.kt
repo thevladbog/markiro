@@ -51,7 +51,7 @@ class InventoryListViewModelTest {
     private val repack = InventoryTaskDto("i3", "INV-0009", "Сок", null, "repack", "l1", "Линия 2", "2026-08-01", "2026-08-31")
 
     /** Fake gateway: the view model only needs the repository's public surface. */
-    private inner class FakeRepo(private val joinResult: JoinResult = JoinResult.Ok(manifestFor("i1")), var mirror: MirrorResult = MirrorResult.Active) : InventoryGateway {
+    private open inner class FakeRepo(private val joinResult: JoinResult = JoinResult.Ok(manifestFor("i1")), var mirror: MirrorResult = MirrorResult.Active) : InventoryGateway {
         val joins = mutableListOf<Triple<String, Boolean, String?>>()
         override fun observeTasks() = db.inventoryTaskDao().observeAll()
         override suspend fun listTasks(scope: String?) = if (scope == "all") listOf(own, other, repack) else listOf(own, repack)
@@ -125,6 +125,18 @@ class InventoryListViewModelTest {
             assertEquals(InventoryListEvent.Entered("i1"), awaitItem())
         }
         assertEquals(listOf(Triple("i1", false, null)), repo.joins)
+    }
+
+    /**
+     * The failure was swallowed whole: `runCatching { … }.onSuccess { … }` left
+     * the previous list in place and the screen claimed nothing had happened.
+     */
+    @Test
+    fun aRefreshThatNeverReachedTheServerIsReported() = runTest {
+        val repo = object : FakeRepo() {
+            override suspend fun listTasks(scope: String?): List<InventoryTaskDto> = throw IOException("no route")
+        }
+        assertTrue(vm(repo).state.first { !it.loading }.refreshFailed)
     }
 
     @Test
