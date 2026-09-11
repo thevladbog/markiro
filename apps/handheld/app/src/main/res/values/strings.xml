@@ -6,6 +6,8 @@
     <string name="common_cancel">Отмена</string>
     <string name="common_retry">Повторить</string>
     <string name="common_refresh">Обновить</string>
+    <string name="common_refresh_failed">Не удалось обновить список — показаны прежние данные.</string>
+    <string name="common_other_lines_failed">Не удалось загрузить другие линии.</string>
     <string name="common_continue">Продолжить</string>
     <string name="common_backspace">Стереть</string>
     <string name="common_data_as_of">данные на %1$s</string>

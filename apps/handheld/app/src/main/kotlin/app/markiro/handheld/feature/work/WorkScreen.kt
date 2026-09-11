@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import app.markiro.handheld.R
 import app.markiro.handheld.core.design.Banner
 import app.markiro.handheld.core.design.IconAction
+import app.markiro.handheld.core.km.KmCodec
 import app.markiro.handheld.core.design.MarkiroChip
 import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.design.MarkiroTheme
@@ -207,7 +208,7 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                 val verdict = Verdict.fromWireOrNull(event.verdict)
                 Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(Iso.parse(event.scannedAt)?.let { TimeText.hhmm(it) } ?: "", style = t.caption, color = c.fg3)
-                    Text("…" + event.raw.takeLast(8), style = t.code.copy(fontSize = 14.sp), color = c.fg1)
+                    Text(feedTail(event.raw), style = t.code.copy(fontSize = 14.sp), color = c.fg1)
                     Text(
                         verdict?.let { stringResource(it.label()) } ?: event.verdict,
                         style = t.caption,
@@ -336,6 +337,21 @@ private fun LastScanStrip(last: LastScan?) {
             Text(last.tail, style = t.code.copy(fontSize = 16.sp), color = c.fg1)
         }
     }
+}
+
+/**
+ * What the feed shows for one scan: the serial, exactly as the last-scan zone
+ * above it does.
+ *
+ * The raw tail used to be printed instead, and on a real code that is the
+ * crypto signature -- «…593txKP» told an operator nothing and did not
+ * match the value shown two centimetres higher for the same unit. An
+ * unparseable scan keeps its raw tail, because for a rejected code the raw
+ * text is the only thing there is.
+ */
+internal fun feedTail(raw: String): String {
+    val serial = runCatching { KmCodec.parse(raw).serial }.getOrNull() ?: raw
+    return if (serial.length > 8) "…" + serial.takeLast(8) else serial
 }
 
 @Composable

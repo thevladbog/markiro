@@ -101,6 +101,17 @@ android {
         unitTests {
             isIncludeAndroidResources = true
             isReturnDefaultValues = true
+            // Without this a CI failure prints only «java.lang.AssertionError at
+            // Foo.kt:138» -- no message, no stack, and the line is the coroutine
+            // entry rather than the assertion. The report HTML stays on the
+            // runner, so the log is the only thing anyone gets to read.
+            all { test ->
+                test.testLogging {
+                    exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+                    showStackTraces = true
+                    events("failed")
+                }
+            }
         }
     }
     packaging {

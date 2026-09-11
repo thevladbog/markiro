@@ -45,6 +45,9 @@ data class InventoryListUi(
     val ownLineName: String?,
     val listFetchedAt: Long?,
     val dialog: InventoryDialog?,
+    /** See the shift list: a refresh that never reached the server looked exactly like one that did. */
+    val refreshFailed: Boolean = false,
+    val othersFailed: Boolean = false,
 )
 
 sealed interface InventoryListEvent {
@@ -75,6 +78,8 @@ class InventoryListViewModel @Inject constructor(
     private val othersExpanded = MutableStateFlow(false)
     private val othersLoading = MutableStateFlow(false)
     private val fetchedAt = MutableStateFlow<Long?>(null)
+    private val refreshFailed = MutableStateFlow(false)
+    private val othersFailed = MutableStateFlow(false)
     private val dialog = MutableStateFlow<InventoryDialog?>(null)
     private val _events = MutableSharedFlow<InventoryListEvent>(extraBufferCapacity = 1)
     val events: SharedFlow<InventoryListEvent> = _events
@@ -86,22 +91,25 @@ class InventoryListViewModel @Inject constructor(
         Base(active, cfg?.lineName, lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS)
     }
 
-    val state: StateFlow<InventoryListUi> = combine(base, loading, mine, others, othersExpanded, othersLoading, fetchedAt, dialog) { v ->
-        val b = v[0] as Base
-        @Suppress("UNCHECKED_CAST")
-        InventoryListUi(
-            loading = v[1] as Boolean,
-            active = b.active,
-            mine = (v[2] as List<InventoryTaskDto>).filter { it.inventoryId != b.active?.inventoryId },
-            others = v[3] as Map<String, List<InventoryTaskDto>>,
-            othersExpanded = v[4] as Boolean,
-            othersLoading = v[5] as Boolean,
-            reachable = b.reachable,
-            ownLineName = b.ownLineName,
-            listFetchedAt = v[6] as Long?,
-            dialog = v[7] as InventoryDialog?,
-        )
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, InventoryListUi(true, null, emptyList(), emptyMap(), false, false, false, null, null, null))
+    val state: StateFlow<InventoryListUi> =
+        combine(base, loading, mine, others, othersExpanded, othersLoading, fetchedAt, dialog, refreshFailed, othersFailed) { v ->
+            val b = v[0] as Base
+            @Suppress("UNCHECKED_CAST")
+            InventoryListUi(
+                loading = v[1] as Boolean,
+                active = b.active,
+                mine = (v[2] as List<InventoryTaskDto>).filter { it.inventoryId != b.active?.inventoryId },
+                others = v[3] as Map<String, List<InventoryTaskDto>>,
+                othersExpanded = v[4] as Boolean,
+                othersLoading = v[5] as Boolean,
+                reachable = b.reachable,
+                ownLineName = b.ownLineName,
+                listFetchedAt = v[6] as Long?,
+                dialog = v[7] as InventoryDialog?,
+                refreshFailed = v[8] as Boolean,
+                othersFailed = v[9] as Boolean,
+            )
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, InventoryListUi(true, null, emptyList(), emptyMap(), false, false, false, null, null, null))
 
     /**
      * The device's own line, read at the moment it is needed.
@@ -121,10 +129,13 @@ class InventoryListViewModel @Inject constructor(
     fun refresh() {
         launchOwned {
             loading.value = true
-            runCatching { repository.listTasks(null) }.onSuccess {
-                mine.value = it
-                fetchedAt.value = now()
-            }
+            runCatching { repository.listTasks(null) }
+                .onSuccess {
+                    mine.value = it
+                    fetchedAt.value = now()
+                    refreshFailed.value = false
+                }
+                .onFailure { refreshFailed.value = true }
             loading.value = false
         }
     }
@@ -134,9 +145,10 @@ class InventoryListViewModel @Inject constructor(
         othersExpanded.value = true
         othersLoading.value = true
         launchOwned {
-            val all = runCatching { repository.listTasks("all") }.getOrDefault(emptyList())
+            val all = runCatching { repository.listTasks("all") }
+            othersFailed.value = all.isFailure
             val own = ownLineId()
-            others.value = all.filter { it.lineId != own }.groupBy { it.lineName }
+            others.value = all.getOrDefault(emptyList()).filter { it.lineId != own }.groupBy { it.lineName }
             othersLoading.value = false
         }
     }

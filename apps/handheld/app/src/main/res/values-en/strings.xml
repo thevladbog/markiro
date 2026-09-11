@@ -6,6 +6,8 @@
     <string name="common_cancel">Cancel</string>
     <string name="common_retry">Retry</string>
     <string name="common_refresh">Refresh</string>
+    <string name="common_refresh_failed">Could not refresh the list — showing the previous data.</string>
+    <string name="common_other_lines_failed">Could not load the other lines.</string>
     <string name="common_continue">Continue</string>
     <string name="common_backspace">Erase</string>
     <string name="common_data_as_of">data as of %1$s</string>

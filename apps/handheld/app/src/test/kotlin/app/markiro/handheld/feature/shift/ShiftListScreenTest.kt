@@ -93,6 +93,45 @@ class ShiftListScreenTest {
         compose.onNodeWithText("Смена уже закрыта").assertDoesNotExist()
     }
 
+    /**
+     * A refused refresh looked exactly like a successful one, and with the pull
+     * gesture that is worse than before: the spinner turns, the list does not
+     * move, and nothing says why.
+     */
+    @Test
+    fun aFailedRefreshSaysSoInsteadOfLookingLikeSuccess() {
+        compose.setContent {
+            MarkiroTheme {
+                ShiftListScreen(
+                    ShiftListUi(
+                        false, null, listOf(ShiftEntityFixtures.listed("s2")), emptyList(), false, false, 0L,
+                        reachable = true, ownLineName = "Линия 2", dialog = null, refreshFailed = true,
+                    ),
+                    ShiftListCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("Не удалось обновить список", substring = true).assertIsDisplayed()
+    }
+
+    /** An unreachable line lookup used to be indistinguishable from «других смен нет». */
+    @Test
+    fun otherLinesThatCouldNotBeLoadedAreNotShownAsEmpty() {
+        compose.setContent {
+            MarkiroTheme {
+                ShiftListScreen(
+                    ShiftListUi(
+                        false, null, listOf(ShiftEntityFixtures.listed("s2")), emptyList(), othersExpanded = true,
+                        othersLoading = false, listFetchedAt = 0L, reachable = true, ownLineName = "Линия 2",
+                        dialog = null, othersFailed = true,
+                    ),
+                    ShiftListCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("Не удалось загрузить другие линии.").assertIsDisplayed()
+    }
+
     @Test
     fun offlineShowsTheCacheTimeAndTheEmptyState() {
         compose.setContent {

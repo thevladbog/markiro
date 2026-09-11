@@ -45,6 +45,13 @@ data class ShiftListUi(
     val reachable: Boolean,
     val ownLineName: String?,
     val dialog: ShiftDialog?,
+    /**
+     * The last refresh did not reach the server. Without this the screen is
+     * identical either way, and pull-to-refresh is worse than nothing: the
+     * spinner turns, the list does not change, and nothing says why.
+     */
+    val refreshFailed: Boolean = false,
+    val othersFailed: Boolean = false,
 )
 
 sealed interface ShiftListEvent {
@@ -90,6 +97,8 @@ class ShiftListViewModel(
     private val others = MutableStateFlow<List<OtherLine>>(emptyList())
     private val othersExpanded = MutableStateFlow(false)
     private val othersLoading = MutableStateFlow(false)
+    private val refreshFailed = MutableStateFlow(false)
+    private val othersFailed = MutableStateFlow(false)
     private val dialog = MutableStateFlow<ShiftDialog?>(null)
     private val _events = MutableSharedFlow<ShiftListEvent>(extraBufferCapacity = 1)
     val events: SharedFlow<ShiftListEvent> = _events
@@ -101,22 +110,25 @@ class ShiftListViewModel(
         Lists(current, mine, cfg, lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS)
     }
 
-    val state: StateFlow<ShiftListUi> = combine(lists, loading, others, othersExpanded, othersLoading, dialog) { values ->
-        val lists = values[0] as Lists
-        @Suppress("UNCHECKED_CAST")
-        ShiftListUi(
-            loading = values[1] as Boolean,
-            continueShift = lists.current,
-            mine = lists.mine,
-            others = values[2] as List<OtherLine>,
-            othersExpanded = values[3] as Boolean,
-            othersLoading = values[4] as Boolean,
-            listFetchedAt = lists.mine.maxOfOrNull { it.listFetchedAt } ?: lists.current?.listFetchedAt,
-            reachable = lists.reachable,
-            ownLineName = lists.config?.lineName,
-            dialog = values[5] as ShiftDialog?,
-        )
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, ShiftListUi(true, null, emptyList(), emptyList(), false, false, null, false, null, null))
+    val state: StateFlow<ShiftListUi> =
+        combine(lists, loading, others, othersExpanded, othersLoading, dialog, refreshFailed, othersFailed) { values ->
+            val lists = values[0] as Lists
+            @Suppress("UNCHECKED_CAST")
+            ShiftListUi(
+                loading = values[1] as Boolean,
+                continueShift = lists.current,
+                mine = lists.mine,
+                others = values[2] as List<OtherLine>,
+                othersExpanded = values[3] as Boolean,
+                othersLoading = values[4] as Boolean,
+                listFetchedAt = lists.mine.maxOfOrNull { it.listFetchedAt } ?: lists.current?.listFetchedAt,
+                reachable = lists.reachable,
+                ownLineName = lists.config?.lineName,
+                dialog = values[5] as ShiftDialog?,
+                refreshFailed = values[6] as Boolean,
+                othersFailed = values[7] as Boolean,
+            )
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, ShiftListUi(true, null, emptyList(), emptyList(), false, false, null, false, null, null))
 
     init {
         refresh()
@@ -125,7 +137,10 @@ class ShiftListViewModel(
     fun refresh() {
         launchOwned {
             loading.value = true
-            repository.refreshList()
+            // `refreshList` has always returned whether it reached the server;
+            // nobody read it, so a refused or unreachable refresh left the
+            // operator looking at yesterday's list with no sign of it.
+            refreshFailed.value = !repository.refreshList()
             loading.value = false
         }
     }
@@ -135,8 +150,9 @@ class ShiftListViewModel(
         othersExpanded.value = true
         launchOwned {
             othersLoading.value = true
-            val lines = runCatching { repository.otherLines(config.get()?.lineId) }.getOrDefault(emptyList())
-            others.value = lines.map { line ->
+            val lines = runCatching { repository.otherLines(config.get()?.lineId) }
+            othersFailed.value = lines.isFailure
+            others.value = lines.getOrDefault(emptyList()).map { line ->
                 OtherLine(line.id, line.name, runCatching { repository.shiftsOfLine(line.id) }.getOrDefault(emptyList()))
             }
             othersLoading.value = false

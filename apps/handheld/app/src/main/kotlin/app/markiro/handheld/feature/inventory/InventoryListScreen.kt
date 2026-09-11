@@ -15,12 +15,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.WifiOff
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,7 +35,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.markiro.handheld.R
 import app.markiro.handheld.core.design.AppBar
+import app.markiro.handheld.core.design.Banner
 import app.markiro.handheld.core.design.FullScreenState
+import app.markiro.handheld.core.design.IconAction
 import app.markiro.handheld.core.design.MarkiroChip
 import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.design.MarkiroTextButton
@@ -87,6 +93,7 @@ fun errorText(kind: InventoryError): Int = when (kind) {
     InventoryError.REPACK -> R.string.inventory_repack_later
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InventoryListScreen(state: InventoryListUi, cb: InventoryListCallbacks) {
     val c = MarkiroTheme.colors
@@ -152,7 +159,11 @@ fun InventoryListScreen(state: InventoryListUi, cb: InventoryListCallbacks) {
             }
             null -> Unit
         }
-        AppBar(stringResource(R.string.inventory_title), cb.onBack)
+        // Same pair as the shift list: `onRefresh` existed but the only way to
+        // reach it was to hit an error first.
+        AppBar(stringResource(R.string.inventory_title), cb.onBack) {
+            IconAction(Icons.Outlined.Refresh, stringResource(R.string.common_refresh), cb.onRefresh)
+        }
         if (!state.reachable && state.listFetchedAt != null) {
             Text(
                 stringResource(R.string.common_data_as_of, TimeText.hhmm(state.listFetchedAt)),
@@ -161,31 +172,39 @@ fun InventoryListScreen(state: InventoryListUi, cb: InventoryListCallbacks) {
                 modifier = Modifier.padding(horizontal = MarkiroSizes.sp4),
             )
         }
+        if (state.refreshFailed) {
+            Banner(stringResource(R.string.common_refresh_failed), Tone.Warn, Icons.Outlined.CloudOff)
+        }
         if (!state.loading && state.active == null && state.mine.isEmpty() && !state.othersExpanded) {
             FullScreenState(Icons.Outlined.Inventory2, stringResource(R.string.inventory_empty_title), stringResource(R.string.inventory_empty_text))
             return
         }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-            state.active?.let { active ->
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
-                        InventoryCardView(active.card(), onClick = cb.onContinue)
-                        PrimaryButton(stringResource(R.string.common_continue), cb.onContinue)
+        PullToRefreshBox(isRefreshing = state.loading, onRefresh = cb.onRefresh, modifier = Modifier.fillMaxSize()) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
+                state.active?.let { active ->
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+                            InventoryCardView(active.card(), onClick = cb.onContinue)
+                            PrimaryButton(stringResource(R.string.common_continue), cb.onContinue)
+                        }
                     }
                 }
-            }
-            if (state.mine.isNotEmpty()) {
-                item { Text(stringResource(R.string.inventory_my_line), style = t.label, color = c.fg3) }
-                items(state.mine, key = { it.inventoryId }) { task -> InventoryCardView(task.card(state.reachable), onClick = { cb.onSelect(task) }) }
-            }
-            if (state.loading) item { Text(stringResource(R.string.inventory_loading), style = t.caption, color = c.fg3) }
-            if (!state.othersExpanded) {
-                item { MarkiroTextButton(stringResource(R.string.inventory_show_other), cb.onExpandOthers) }
-            } else {
-                item { Text(stringResource(R.string.inventory_other_lines), style = t.label, color = c.fg3) }
-                if (state.othersLoading) item { Text(stringResource(R.string.inventory_loading), style = t.caption, color = c.fg3) }
-                state.others.forEach { (line, tasks) ->
-                    items(tasks, key = { "$line:${it.inventoryId}" }) { task -> InventoryCardView(task.card(state.reachable, line), onClick = { cb.onSelect(task) }) }
+                if (state.mine.isNotEmpty()) {
+                    item { Text(stringResource(R.string.inventory_my_line), style = t.label, color = c.fg3) }
+                    items(state.mine, key = { it.inventoryId }) { task -> InventoryCardView(task.card(state.reachable), onClick = { cb.onSelect(task) }) }
+                }
+                if (state.loading) item { Text(stringResource(R.string.inventory_loading), style = t.caption, color = c.fg3) }
+                if (!state.othersExpanded) {
+                    item { MarkiroTextButton(stringResource(R.string.inventory_show_other), cb.onExpandOthers) }
+                } else {
+                    item { Text(stringResource(R.string.inventory_other_lines), style = t.label, color = c.fg3) }
+                    if (state.othersLoading) item { Text(stringResource(R.string.inventory_loading), style = t.caption, color = c.fg3) }
+                    if (state.othersFailed) {
+                        item { Text(stringResource(R.string.common_other_lines_failed), style = t.caption, color = c.warnFg) }
+                    }
+                    state.others.forEach { (line, tasks) ->
+                        items(tasks, key = { "$line:${it.inventoryId}" }) { task -> InventoryCardView(task.card(state.reachable, line), onClick = { cb.onSelect(task) }) }
+                    }
                 }
             }
         }
