@@ -10,7 +10,7 @@ combined Chestny ZNAK/National Catalog enforcement policy.
 
 1. Back up the production database and record the exact source, migration journal, artifact
    manifest and current client versions using the established protected deployment workflow.
-2. Apply additive migration `0128_commercial_terms.sql`. Keep existing nulls and frozen snapshots;
+2. Apply additive migration `0129_commercial_terms.sql`. Keep existing nulls and frozen snapshots;
    do not derive an annual term from a printed unit or a seller tax regime from legal form.
 3. Deploy the compatible API before updated SaaS clients. Confirm platform authorization,
    capabilities, tenant denial and recovery routes with the normal release checks.
@@ -110,7 +110,7 @@ verified through the affected surface's release checks.
 
 ## Rollback limits
 
-Migration 0128 is additive but loosens resource checks to permit zero and introduces nullable
+Migration 0129 is additive but loosens resource checks to permit zero and introduces nullable
 metadata and frozen period evidence. An older API cannot truthfully serve zero quotas. Do not
 roll back consumers behind an already published zero-quota catalog, drop new columns, rewrite
 snapshots or restore strictly-positive constraints while zero rows exist. Archive/retirement does

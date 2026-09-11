@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { vi } from "vitest";
 
+import { platformCapabilitiesForRole } from "@markiro/platform-contracts";
 import { ThemeProvider } from "@markiro/ui";
 
 import { appRoutes } from "../src/app.js";
@@ -149,45 +150,27 @@ export function jsonResponse(
   });
 }
 
+// Derived from the role map rather than listed: platformPrincipalSchema
+// requires the capability list to match its role exactly, so a hard-coded
+// array turns every future capability into a suite-wide failure.
 export const ACCOUNTANT_ME = {
   userId: "user-1",
   role: "accountant",
-  capabilities: [
-    "tenants.read",
-    "catalog.read",
-    "catalog.write",
-    "billing.read",
-    "billing.write",
-    "audit.read",
-  ],
+  capabilities: [...platformCapabilitiesForRole.accountant],
   twoFactorReady: true,
 } satisfies PlatformPrincipal;
 
 export const SUPPORT_ME = {
   userId: "user-1",
   role: "support",
-  capabilities: ["tenants.read", "tenants.write", "catalog.read", "audit.read", "diagnostics.read"],
+  capabilities: [...platformCapabilitiesForRole.support],
   twoFactorReady: true,
 } satisfies PlatformPrincipal;
 
 export const PLATFORM_ADMIN_ME = {
   userId: "user-1",
   role: "platform_admin",
-  capabilities: [
-    "tenants.read",
-    "tenants.write",
-    "catalog.read",
-    "catalog.write",
-    "billing.read",
-    "billing.write",
-    "platformTeam.write",
-    "audit.read",
-    "diagnostics.read",
-    "reports.read",
-    "reports.create",
-    "reports.download",
-    "reports.identified",
-  ],
+  capabilities: [...platformCapabilitiesForRole.platform_admin],
   twoFactorReady: true,
 } satisfies PlatformPrincipal;
 

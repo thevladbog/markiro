@@ -540,3 +540,25 @@ export {
   catalogEditorContextSchema,
 } from "./catalog.js";
 export type { CommercialReviewIdentity, CatalogPublicationReview } from "./catalog.js";
+export {
+  AGREEMENT_EDITABLE_STATUSES,
+  AGREEMENT_TRANSITIONS,
+  agreementDocumentKindSchema,
+  agreementRequisitesSchema,
+  agreementSignatorySchema,
+  agreementStatusSchema,
+  agreementTermsSchema,
+  isAgreementEditable,
+  isAgreementTransitionAllowed,
+  platformAgreementContracts,
+} from "./agreements.js";
+export type {
+  AgreementDetail,
+  AgreementDocument,
+  AgreementListQuery,
+  AgreementRequisitesInput,
+  AgreementStatus,
+  AgreementSummary,
+  CreateAgreementInput,
+  UpdateAgreementInput,
+} from "./agreements.js";

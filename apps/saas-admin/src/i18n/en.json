@@ -383,7 +383,9 @@
     "empty": "No offers yet",
     "loadError": "Could not load offers",
     "catalogLink": "Catalog",
-    "terms": { "label": "Terms of cooperation" },
+    "terms": {
+      "label": "Terms of cooperation"
+    },
     "requestRetry": {
       "frozen": "The immutable attempt is retained. Inputs and alternative actions stay unavailable until exact retry or request reconciliation.",
       "sending": "Sending the retained attempt. Items, terms, and operation key are locked.",
@@ -499,7 +501,10 @@
       "paid": "Paid",
       "cancelled": "Withdrawn"
     },
-    "modes": { "manual": "After operator decision", "automatic": "Automatically after payment" },
+    "modes": {
+      "manual": "After operator decision",
+      "automatic": "Automatically after payment"
+    },
     "policies": {
       "immediate": "Immediately",
       "after_current": "After current",
@@ -574,7 +579,10 @@
     "createInvoice": "Create invoice",
     "reviseOffer": "Create new revision",
     "issueAct": "Issue act",
-    "filters": { "title": "Request filters", "all": "All" },
+    "filters": {
+      "title": "Request filters",
+      "all": "All"
+    },
     "fields": {
       "number": "Number",
       "tenant": "Tenant",
@@ -600,8 +608,16 @@
       "completed": "Completed",
       "cancelled": "Cancelled"
     },
-    "side": { "tenant": "Tenant", "markiro": "Markiro", "none": "None" },
-    "actor": { "tenant_user": "Tenant", "platform_user": "Markiro", "system": "System" },
+    "side": {
+      "tenant": "Tenant",
+      "markiro": "Markiro",
+      "none": "None"
+    },
+    "actor": {
+      "tenant_user": "Tenant",
+      "platform_user": "Markiro",
+      "system": "System"
+    },
     "event": {
       "created": "Request created",
       "status_changed": "Status changed",
@@ -815,7 +831,10 @@
       "unavailable": "Account not provided",
       "unknown": "Unknown account · •••• {{last4}}",
       "known": "{{label}} · •••• {{last4}} · {{status}}",
-      "statuses": { "active": "active", "archived": "archived" }
+      "statuses": {
+        "active": "active",
+        "archived": "archived"
+      }
     }
   },
   "documents": {
@@ -990,7 +1009,10 @@
       "summary": "Summary",
       "commerceml": "CommerceML"
     },
-    "basis": { "events": "Events in period", "production_date": "Shift production date" },
+    "basis": {
+      "events": "Events in period",
+      "production_date": "Shift production date"
+    },
     "privacy": {
       "identified": "Identified",
       "pseudonymous": "Pseudonymous",
@@ -1008,7 +1030,11 @@
       "failed": "Failed",
       "expired": "Expired"
     },
-    "outcomes": { "ok": "Successful", "warn": "Warning", "error": "Error" },
+    "outcomes": {
+      "ok": "Successful",
+      "warn": "Warning",
+      "error": "Error"
+    },
     "filterStatuses": {
       "planned": "Planned",
       "active": "Active",
@@ -1084,7 +1110,8 @@
     "reports": "Reports",
     "organization": "Our organization",
     "language": "Interface language",
-    "sessionConfirmed": "2FA · session secured"
+    "sessionConfirmed": "2FA · session secured",
+    "agreements": "Agreements"
   },
   "overview": {
     "title": "Operational overview",
@@ -1099,7 +1126,11 @@
       "overdue": "Overdue invoices",
       "overdueHint": "Issued, unpaid, and past due"
     },
-    "severity": { "critical": "Critical", "warning": "Due soon", "attention": "Missing data" },
+    "severity": {
+      "critical": "Critical",
+      "warning": "Due soon",
+      "attention": "Missing data"
+    },
     "decisions": {
       "eyebrow": "Decision queue",
       "title": "Needs attention",
@@ -1110,7 +1141,11 @@
       "tenantLegal": "Legal details · {{tenant}}",
       "operatorLegal": "Our organization · details and accounts"
     },
-    "activity": { "eyebrow": "Journal", "title": "Recent activity", "empty": "No activity yet" },
+    "activity": {
+      "eyebrow": "Journal",
+      "title": "Recent activity",
+      "empty": "No activity yet"
+    },
     "health": {
       "eyebrow": "Infrastructure",
       "title": "Platform health",
@@ -1142,7 +1177,10 @@
         "storage_unavailable": "Unavailable",
         "storage_timeout": "Response delay"
       },
-      "dadata": { "ready": "Connected", "unconfigured": "Not configured" }
+      "dadata": {
+        "ready": "Connected",
+        "unconfigured": "Not configured"
+      }
     }
   },
   "monitoring": {
@@ -1191,7 +1229,11 @@
     "tenant": "Tenant",
     "outcome": "Outcome",
     "empty": "No audit records yet",
-    "outcomes": { "success": "Success", "failed": "Failed", "denied": "Denied" }
+    "outcomes": {
+      "success": "Success",
+      "failed": "Failed",
+      "denied": "Denied"
+    }
   },
   "catalog": {
     "payable": {
@@ -1672,6 +1714,112 @@
       "commercial_line_terms_invalid": "Review the commercial subject and license period.",
       "commercial_subject_required": "Select the commercial subject.",
       "document_name_required": "Enter the document name."
+    }
+  },
+  "agreements": {
+    "title": "Agreements",
+    "description": "Registry of client agreements: requisites, statuses and printable forms.",
+    "create": "New agreement",
+    "createTitle": "New agreement",
+    "createDescription": "Counterparty requisites are pulled from DaData by INN and stay editable.",
+    "createSubmit": "Create agreement",
+    "loadError": "Could not load agreements",
+    "columns": {
+      "number": "Number",
+      "counterparty": "Counterparty",
+      "inn": "INN",
+      "status": "Status",
+      "conclusionDate": "Concluded",
+      "tenant": "Tenant",
+      "documentKind": "Kind",
+      "filename": "File",
+      "size": "Size",
+      "actions": "Actions"
+    },
+    "statuses": {
+      "draft": "Draft",
+      "in_review": "In review",
+      "sent": "Sent",
+      "signed": "Signed",
+      "terminated": "Terminated"
+    },
+    "transitions": {
+      "draft": "Back to draft",
+      "in_review": "Send to review",
+      "sent": "Mark as sent",
+      "signed": "Mark as signed",
+      "terminated": "Terminate"
+    },
+    "documentKinds": {
+      "draft": "Draft",
+      "generated": "Signed copy",
+      "attachment": "Attachment"
+    },
+    "kinds": {
+      "legal_entity": "Legal entity",
+      "sole_proprietor": "Sole proprietor",
+      "self_employed": "Self-employed",
+      "individual": "Individual"
+    },
+    "sections": {
+      "counterparty": "Counterparty",
+      "signatory": "Signatory",
+      "terms": "Terms",
+      "header": "Agreement header",
+      "transitions": "Status",
+      "tenant": "Tenant",
+      "documents": "Documents"
+    },
+    "fields": {
+      "kind": "Entity kind",
+      "name": "Name",
+      "inn": "INN",
+      "kpp": "KPP",
+      "ogrn": "OGRN",
+      "ogrnip": "OGRNIP",
+      "address": "Address",
+      "email": "E-mail",
+      "phone": "Phone",
+      "bankName": "Bank",
+      "bic": "BIC",
+      "settlementAccount": "Settlement account",
+      "correspondentAccount": "Correspondent account",
+      "signatoryPosition": "Signatory position",
+      "signatoryName": "Signatory name",
+      "authorityBasis": "Authority basis",
+      "disputeVenue": "Competent court",
+      "penaltyRate": "Penalty, % per day",
+      "penaltyCap": "Penalty cap, %",
+      "number": "Agreement number",
+      "numberHint": "Leave empty to let the system allocate it",
+      "numberAuto": "МКР-YYYY-NNNN",
+      "conclusionDate": "Conclusion date",
+      "city": "City",
+      "terminationReason": "Termination reason"
+    },
+    "filters": {
+      "status": "Status",
+      "anyStatus": "Any",
+      "search": "Search",
+      "searchPlaceholder": "Number, INN or name",
+      "withoutTenant": "Without tenant"
+    },
+    "list": {
+      "noTenant": "No tenant linked",
+      "empty": "No agreements yet"
+    },
+    "detail": {
+      "frozen": "The agreement is signed: fields are read-only.",
+      "noTransitions": "No further transitions are available.",
+      "linkTenant": "Link {{name}}",
+      "unlinkTenant": "Unlink",
+      "noCandidates": "No tenant matches this INN.",
+      "renderDraft": "Render draft (DOCX)",
+      "download": "Download",
+      "attach": "Attach a file",
+      "deleteAttachment": "Delete",
+      "badAttachmentType": "Only PDF, DOCX, PNG and JPEG are accepted.",
+      "noDocuments": "No documents yet."
     }
   }
 }

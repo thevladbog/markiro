@@ -27,7 +27,8 @@ describe.skipIf(!databaseUrl)("commercial terms additive migration", () => {
     subscriptionId = randomUUID(),
     invoiceId = randomUUID(),
     invoiceLineId = randomUUID(),
-    profileId = randomUUID();
+    profileId = randomUUID(),
+    agreementId = randomUUID();
   const baseline = new Map<string, unknown[]>();
   const tables = [
     "catalog_item_versions",
@@ -38,6 +39,7 @@ describe.skipIf(!databaseUrl)("commercial terms additive migration", () => {
     "operator_billing_profiles",
     "invoices",
     "invoice_lines",
+    "platform_agreements",
   ];
   beforeAll(async () => {
     await maintenancePool.query(`CREATE DATABASE "${databaseName}"`);
@@ -47,7 +49,7 @@ describe.skipIf(!databaseUrl)("commercial terms additive migration", () => {
     await copyMigrationsThroughIndex({
       sourceFolder: migrationsFolder,
       targetFolder: legacyMigrations,
-      lastIncludedIndex: 127,
+      lastIncludedIndex: 128,
     });
     await migrate(drizzle(pool), { migrationsFolder: legacyMigrations });
     await pool.query(
@@ -55,6 +57,15 @@ describe.skipIf(!databaseUrl)("commercial terms additive migration", () => {
     );
     await pool.query(
       "INSERT INTO platform_users (id,name,email,role,status) VALUES ('commercial-admin','Admin','commercial-admin@example.invalid','platform_admin','active')",
+    );
+    await pool.query(
+      "INSERT INTO platform_agreements (id,number,tenant_id,counterparty,contractor,terms,created_by_platform_user_id) VALUES ($1,'МКР-2026-0001','commercial-tenant',$2,$3,$4,'commercial-admin')",
+      [
+        agreementId,
+        JSON.stringify({ kind: "legal_entity", name: "Existing client", literal: "  preserve  " }),
+        JSON.stringify({ kind: "sole_proprietor", name: "Existing seller" }),
+        JSON.stringify({ penaltyRatePercent: "0.1", penaltyCapPercent: "10" }),
+      ],
     );
     await pool.query(
       "INSERT INTO catalog_items (id,code,kind,name_ru,name_en) VALUES ($1,'legacy-plan','plan','Тариф','Plan')",

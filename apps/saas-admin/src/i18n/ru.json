@@ -383,7 +383,9 @@
     "empty": "Предложений пока нет",
     "loadError": "Не удалось загрузить предложения",
     "catalogLink": "Каталог",
-    "terms": { "label": "Условия сотрудничества" },
+    "terms": {
+      "label": "Условия сотрудничества"
+    },
     "requestRetry": {
       "frozen": "Неизменяемая попытка сохранена. Поля и альтернативные действия недоступны до точного повтора или сверки заявки.",
       "sending": "Отправляем сохранённую попытку. Состав, условия и ключ операции заблокированы.",
@@ -499,7 +501,10 @@
       "paid": "Оплачен",
       "cancelled": "Отозван"
     },
-    "modes": { "manual": "После решения оператора", "automatic": "Автоматически после оплаты" },
+    "modes": {
+      "manual": "После решения оператора",
+      "automatic": "Автоматически после оплаты"
+    },
     "policies": {
       "immediate": "Сразу",
       "after_current": "После текущей",
@@ -574,7 +579,10 @@
     "createInvoice": "Создать счёт",
     "reviseOffer": "Создать новую версию",
     "issueAct": "Выпустить акт",
-    "filters": { "title": "Фильтры заявок", "all": "Все" },
+    "filters": {
+      "title": "Фильтры заявок",
+      "all": "Все"
+    },
     "fields": {
       "number": "Номер",
       "tenant": "Тенант",
@@ -600,8 +608,16 @@
       "completed": "Выполнена",
       "cancelled": "Отменена"
     },
-    "side": { "tenant": "Тенант", "markiro": "Маркиро", "none": "Нет" },
-    "actor": { "tenant_user": "Тенант", "platform_user": "Маркиро", "system": "Система" },
+    "side": {
+      "tenant": "Тенант",
+      "markiro": "Маркиро",
+      "none": "Нет"
+    },
+    "actor": {
+      "tenant_user": "Тенант",
+      "platform_user": "Маркиро",
+      "system": "Система"
+    },
     "event": {
       "created": "Заявка создана",
       "status_changed": "Статус изменён",
@@ -815,7 +831,10 @@
       "unavailable": "Счёт не указан",
       "unknown": "Неизвестный счёт · •••• {{last4}}",
       "known": "{{label}} · •••• {{last4}} · {{status}}",
-      "statuses": { "active": "активный", "archived": "архивный" }
+      "statuses": {
+        "active": "активный",
+        "archived": "архивный"
+      }
     }
   },
   "documents": {
@@ -990,7 +1009,10 @@
       "summary": "Сводка",
       "commerceml": "CommerceML"
     },
-    "basis": { "events": "События в периоде", "production_date": "Производственная дата смены" },
+    "basis": {
+      "events": "События в периоде",
+      "production_date": "Производственная дата смены"
+    },
     "privacy": {
       "identified": "С идентификацией",
       "pseudonymous": "Псевдонимный",
@@ -1008,7 +1030,11 @@
       "failed": "Ошибка",
       "expired": "Срок истёк"
     },
-    "outcomes": { "ok": "Успешно", "warn": "С предупреждением", "error": "Ошибка" },
+    "outcomes": {
+      "ok": "Успешно",
+      "warn": "С предупреждением",
+      "error": "Ошибка"
+    },
     "filterStatuses": {
       "planned": "Запланирована",
       "active": "Активна",
@@ -1084,7 +1110,8 @@
     "reports": "Отчёты",
     "organization": "Наша организация",
     "language": "Язык интерфейса",
-    "sessionConfirmed": "2FA · сеанс защищён"
+    "sessionConfirmed": "2FA · сеанс защищён",
+    "agreements": "Договоры"
   },
   "overview": {
     "title": "Операционный обзор",
@@ -1099,7 +1126,11 @@
       "overdue": "Просроченные счета",
       "overdueHint": "Выставлены, не оплачены, срок истёк"
     },
-    "severity": { "critical": "Критично", "warning": "Срок", "attention": "Нужно заполнить" },
+    "severity": {
+      "critical": "Критично",
+      "warning": "Срок",
+      "attention": "Нужно заполнить"
+    },
     "decisions": {
       "eyebrow": "Очередь решений",
       "title": "Требует внимания",
@@ -1146,7 +1177,10 @@
         "storage_unavailable": "Недоступно",
         "storage_timeout": "Задержка ответа"
       },
-      "dadata": { "ready": "Подключена", "unconfigured": "Не настроена" }
+      "dadata": {
+        "ready": "Подключена",
+        "unconfigured": "Не настроена"
+      }
     }
   },
   "monitoring": {
@@ -1195,7 +1229,11 @@
     "tenant": "Тенант",
     "outcome": "Результат",
     "empty": "Записей аудита пока нет",
-    "outcomes": { "success": "Успешно", "failed": "Ошибка", "denied": "Отказано" }
+    "outcomes": {
+      "success": "Успешно",
+      "failed": "Ошибка",
+      "denied": "Отказано"
+    }
   },
   "catalog": {
     "payable": {
@@ -1676,6 +1714,112 @@
       "commercial_line_terms_invalid": "Проверьте предмет продажи и срок лицензии.",
       "commercial_subject_required": "Укажите предмет продажи.",
       "document_name_required": "Укажите название для документов."
+    }
+  },
+  "agreements": {
+    "title": "Договоры",
+    "description": "Реестр договоров с заказчиками: реквизиты, статусы и печатные формы.",
+    "create": "Новый договор",
+    "createTitle": "Новый договор",
+    "createDescription": "Реквизиты контрагента подтягиваются из DaData по ИНН и правятся вручную.",
+    "createSubmit": "Создать договор",
+    "loadError": "Не удалось загрузить договоры",
+    "columns": {
+      "number": "Номер",
+      "counterparty": "Контрагент",
+      "inn": "ИНН",
+      "status": "Статус",
+      "conclusionDate": "Дата заключения",
+      "tenant": "Тенант",
+      "documentKind": "Тип",
+      "filename": "Файл",
+      "size": "Размер",
+      "actions": "Действия"
+    },
+    "statuses": {
+      "draft": "Черновик",
+      "in_review": "На согласовании",
+      "sent": "Отправлен",
+      "signed": "Подписан",
+      "terminated": "Прекращён"
+    },
+    "transitions": {
+      "draft": "Вернуть в черновик",
+      "in_review": "На согласование",
+      "sent": "Отправлен",
+      "signed": "Подписан",
+      "terminated": "Прекратить"
+    },
+    "documentKinds": {
+      "draft": "Проект",
+      "generated": "Подписанный",
+      "attachment": "Вложение"
+    },
+    "kinds": {
+      "legal_entity": "Юридическое лицо",
+      "sole_proprietor": "Индивидуальный предприниматель",
+      "self_employed": "Самозанятый",
+      "individual": "Физическое лицо"
+    },
+    "sections": {
+      "counterparty": "Контрагент",
+      "signatory": "Подписант",
+      "terms": "Условия",
+      "header": "Шапка договора",
+      "transitions": "Статус",
+      "tenant": "Тенант",
+      "documents": "Документы"
+    },
+    "fields": {
+      "kind": "Вид лица",
+      "name": "Наименование",
+      "inn": "ИНН",
+      "kpp": "КПП",
+      "ogrn": "ОГРН",
+      "ogrnip": "ОГРНИП",
+      "address": "Адрес",
+      "email": "E-mail",
+      "phone": "Телефон",
+      "bankName": "Банк",
+      "bic": "БИК",
+      "settlementAccount": "Расчётный счёт",
+      "correspondentAccount": "Корреспондентский счёт",
+      "signatoryPosition": "Должность подписанта",
+      "signatoryName": "Ф. И. О. подписанта",
+      "authorityBasis": "Основание полномочий",
+      "disputeVenue": "Компетентный суд",
+      "penaltyRate": "Неустойка, % в день",
+      "penaltyCap": "Предел неустойки, %",
+      "number": "Номер договора",
+      "numberHint": "Оставьте пустым — номер выдаст система",
+      "numberAuto": "МКР-ГГГГ-НННН",
+      "conclusionDate": "Дата заключения",
+      "city": "Город",
+      "terminationReason": "Основание прекращения"
+    },
+    "filters": {
+      "status": "Статус",
+      "anyStatus": "Любой",
+      "search": "Поиск",
+      "searchPlaceholder": "Номер, ИНН или наименование",
+      "withoutTenant": "Без тенанта"
+    },
+    "list": {
+      "noTenant": "Тенант не привязан",
+      "empty": "Договоров пока нет"
+    },
+    "detail": {
+      "frozen": "Договор подписан: поля больше не редактируются.",
+      "noTransitions": "Дальнейшие переходы не предусмотрены.",
+      "linkTenant": "Привязать {{name}}",
+      "unlinkTenant": "Отвязать",
+      "noCandidates": "Тенантов с таким ИНН не найдено.",
+      "renderDraft": "Сформировать проект (DOCX)",
+      "download": "Скачать",
+      "attach": "Приложить файл",
+      "deleteAttachment": "Удалить",
+      "badAttachmentType": "Допустимы только PDF, DOCX, PNG и JPEG.",
+      "noDocuments": "Документов пока нет."
     }
   }
 }

@@ -458,6 +458,33 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "BillingProfilesController.setTenant": platform(
     "tenant billing profile mutation is guarded by platform billing capabilities",
   ),
+  "PlatformAgreementsController.create": platform(
+    "agreement creation is cross-tenant registry work guarded by the platform agreements.write capability",
+  ),
+  "PlatformAgreementsController.update": platform(
+    "agreement edits are guarded by platform agreements.write and refused once the agreement is signed",
+  ),
+  "PlatformAgreementsController.transition": platform(
+    "status changes are guarded by platform agreements.write and validated against the shared transition table",
+  ),
+  "PlatformAgreementsController.linkTenant": platform(
+    "linking an agreement to a tenant is a platform-operator decision guarded by agreements.write",
+  ),
+  "PlatformAgreementsController.unlinkTenant": platform(
+    "unlinking an agreement from a tenant is a platform-operator decision guarded by agreements.write",
+  ),
+  "PlatformAgreementsController.renderDraft": platform(
+    "draft rendering writes a platform-owned object and is guarded by agreements.write",
+  ),
+  "PlatformAgreementsController.download": platform(
+    "presigned agreement download is guarded by the platform agreements.read capability",
+  ),
+  "PlatformAgreementsController.uploadAttachment": platform(
+    "signed-copy upload is guarded by agreements.write and validated by content type before storage",
+  ),
+  "PlatformAgreementsController.deleteAttachment": platform(
+    "attachment deletion is guarded by agreements.write and refuses generated documents",
+  ),
   "PlatformOffersController.create": platform(
     "platform billing offer creation is guarded by platform capabilities",
   ),

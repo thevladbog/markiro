@@ -63,17 +63,18 @@ describe.skipIf(!databaseUrl)("online offer variant migration", () => {
       [documentId, tenantId, offerId, "a".repeat(64)],
     );
     await pool.query(`
-      CREATE TABLE online_migration_evidence (tag text, transaction_id bigint, blocks_writes boolean);
+      CREATE TABLE online_migration_evidence (tag text, object_identity text, transaction_id bigint, blocks_writes boolean);
       CREATE TABLE online_migration_fault (enabled boolean);
       INSERT INTO online_migration_fault VALUES (true);
       CREATE FUNCTION record_online_migration() RETURNS event_trigger LANGUAGE plpgsql AS $$
       BEGIN
         INSERT INTO online_migration_evidence
-        SELECT tg_tag, txid_current(), EXISTS (
+        SELECT tg_tag, command.object_identity, txid_current(), EXISTS (
           SELECT 1 FROM pg_locks WHERE pid = pg_backend_pid()
           AND relation = 'commercial_offer_documents'::regclass AND granted
           AND mode IN ('AccessExclusiveLock', 'ShareLock', 'ShareRowExclusiveLock')
-        );
+        )
+        FROM pg_event_trigger_ddl_commands() AS command;
         IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'commercial_offer_documents'::regclass
           AND conname = 'commercial_offer_documents_offer_revision_format_uq')
           AND (SELECT enabled FROM online_migration_fault) THEN
@@ -98,7 +99,7 @@ describe.skipIf(!databaseUrl)("online offer variant migration", () => {
       runRuntimeMigrations({ databaseUrl: scratch.toString(), migrationsFolder, log: () => {} });
     await expect(run()).rejects.toThrow();
     const evidence = await pool.query(
-      "SELECT * FROM online_migration_evidence WHERE tag = 'CREATE INDEX'",
+      "SELECT * FROM online_migration_evidence WHERE tag = 'CREATE INDEX' AND object_identity LIKE '%commercial_offer_documents_offer_revision_format_variant_uq%'",
     );
     expect(evidence.rows).toHaveLength(1);
     expect(evidence.rows[0]).toMatchObject({ blocks_writes: false });
@@ -123,8 +124,11 @@ describe.skipIf(!databaseUrl)("online offer variant migration", () => {
     // A failed final transaction reuses the ready index, rather than rebuilding it.
     await expect(run()).rejects.toThrow();
     expect(
-      (await pool.query("SELECT 1 FROM online_migration_evidence WHERE tag='CREATE INDEX'"))
-        .rowCount,
+      (
+        await pool.query(
+          "SELECT 1 FROM online_migration_evidence WHERE tag='CREATE INDEX' AND object_identity LIKE '%commercial_offer_documents_offer_revision_format_variant_uq%'",
+        )
+      ).rowCount,
     ).toBe(1);
     // Reproduce PostgreSQL's INVALID index left by a cancelled concurrent build.
     await pool.query(
@@ -190,8 +194,11 @@ describe.skipIf(!databaseUrl)("online offer variant migration", () => {
       ).rows,
     ).toEqual([{ convalidated: true }, { convalidated: true }]);
     expect(
-      (await pool.query("SELECT 1 FROM online_migration_evidence WHERE tag = 'CREATE INDEX'"))
-        .rowCount,
+      (
+        await pool.query(
+          "SELECT 1 FROM online_migration_evidence WHERE tag = 'CREATE INDEX' AND object_identity LIKE '%commercial_offer_documents_offer_revision_format_variant_uq%'",
+        )
+      ).rowCount,
     ).toBe(2);
   }, 120_000);
 });

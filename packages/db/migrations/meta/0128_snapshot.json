@@ -1,5 +1,5 @@
 {
-  "id": "c412de82-c5be-4bf6-b0f4-64cb229b54a0",
+  "id": "19b41c8d-5de2-421b-b133-3ce49800f527",
   "prevId": "c44120d1-edc3-4ed2-a183-6aca88a7463d",
   "version": "7",
   "dialect": "postgresql",
@@ -9164,6 +9164,376 @@
       },
       "isRLSEnabled": false
     },
+    "public.platform_agreement_documents": {
+      "name": "platform_agreement_documents",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "agreement_id": {
+          "name": "agreement_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "platform_agreement_document_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "filename": {
+          "name": "filename",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "media_type": {
+          "name": "media_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "object_key": {
+          "name": "object_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sha256": {
+          "name": "sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "byte_size": {
+          "name": "byte_size",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "renderer_version": {
+          "name": "renderer_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "uploaded_by_platform_user_id": {
+          "name": "uploaded_by_platform_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "platform_agreement_documents_agreement_idx": {
+          "name": "platform_agreement_documents_agreement_idx",
+          "columns": [
+            {
+              "expression": "agreement_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "platform_agreement_documents_agreement_id_platform_agreements_id_fk": {
+          "name": "platform_agreement_documents_agreement_id_platform_agreements_id_fk",
+          "tableFrom": "platform_agreement_documents",
+          "tableTo": "platform_agreements",
+          "columnsFrom": [
+            "agreement_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "platform_agreement_documents_uploader_fk": {
+          "name": "platform_agreement_documents_uploader_fk",
+          "tableFrom": "platform_agreement_documents",
+          "tableTo": "platform_users",
+          "columnsFrom": [
+            "uploaded_by_platform_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "platform_agreement_documents_object_key_uq": {
+          "name": "platform_agreement_documents_object_key_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "object_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "platform_agreement_documents_checksum_format": {
+          "name": "platform_agreement_documents_checksum_format",
+          "value": "\"platform_agreement_documents\".\"sha256\" ~ '^[0-9a-f]{64}$'"
+        },
+        "platform_agreement_documents_size_positive": {
+          "name": "platform_agreement_documents_size_positive",
+          "value": "\"platform_agreement_documents\".\"byte_size\" > 0"
+        },
+        "platform_agreement_documents_provenance": {
+          "name": "platform_agreement_documents_provenance",
+          "value": "(\"platform_agreement_documents\".\"kind\" = 'attachment' and \"platform_agreement_documents\".\"uploaded_by_platform_user_id\" is not null and \"platform_agreement_documents\".\"renderer_version\" is null) or (\"platform_agreement_documents\".\"kind\" in ('draft', 'generated') and \"platform_agreement_documents\".\"uploaded_by_platform_user_id\" is null and \"platform_agreement_documents\".\"renderer_version\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.platform_agreements": {
+      "name": "platform_agreements",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "number": {
+          "name": "number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "platform_agreement_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "conclusion_date": {
+          "name": "conclusion_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "city": {
+          "name": "city",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "counterparty_inn": {
+          "name": "counterparty_inn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "counterparty": {
+          "name": "counterparty",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contractor": {
+          "name": "contractor",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "terms": {
+          "name": "terms",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "signed_at": {
+          "name": "signed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "signed_snapshot": {
+          "name": "signed_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "terminated_at": {
+          "name": "terminated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "termination_reason": {
+          "name": "termination_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_platform_user_id": {
+          "name": "created_by_platform_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "platform_agreements_status_idx": {
+          "name": "platform_agreements_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "platform_agreements_tenant_idx": {
+          "name": "platform_agreements_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "platform_agreements_counterparty_inn_idx": {
+          "name": "platform_agreements_counterparty_inn_idx",
+          "columns": [
+            {
+              "expression": "counterparty_inn",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "platform_agreements_tenant_fk": {
+          "name": "platform_agreements_tenant_fk",
+          "tableFrom": "platform_agreements",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "platform_agreements_creator_fk": {
+          "name": "platform_agreements_creator_fk",
+          "tableFrom": "platform_agreements",
+          "tableTo": "platform_users",
+          "columnsFrom": [
+            "created_by_platform_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "platform_agreements_number_uq": {
+          "name": "platform_agreements_number_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "number"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "platform_agreements_signed_consistency": {
+          "name": "platform_agreements_signed_consistency",
+          "value": "(\"platform_agreements\".\"status\" in ('signed', 'terminated')) = (\"platform_agreements\".\"signed_snapshot\" is not null and \"platform_agreements\".\"signed_at\" is not null)"
+        },
+        "platform_agreements_terminated_consistency": {
+          "name": "platform_agreements_terminated_consistency",
+          "value": "(\"platform_agreements\".\"status\" = 'terminated') = (\"platform_agreements\".\"terminated_at\" is not null)"
+        },
+        "platform_agreements_termination_reason_consistency": {
+          "name": "platform_agreements_termination_reason_consistency",
+          "value": "(\"platform_agreements\".\"terminated_at\" is null) = (\"platform_agreements\".\"termination_reason\" is null)"
+        },
+        "platform_agreements_inn_format": {
+          "name": "platform_agreements_inn_format",
+          "value": "\"platform_agreements\".\"counterparty_inn\" is null or \"platform_agreements\".\"counterparty_inn\" ~ '^[0-9]{10}$|^[0-9]{12}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.addon_entitlements": {
       "name": "addon_entitlements",
       "schema": "",
@@ -9285,30 +9655,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'draft'"
-        },
-        "document_name_ru": {
-          "name": "document_name_ru",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "document_name_en": {
-          "name": "document_name_en",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "subject": {
-          "name": "subject",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "seller_policy_revision": {
-          "name": "seller_policy_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         },
         "name_ru": {
           "name": "name_ru",
@@ -9451,10 +9797,6 @@
       },
       "policies": {},
       "checkConstraints": {
-        "catalog_item_versions_commercial_metadata_check": {
-          "name": "catalog_item_versions_commercial_metadata_check",
-          "value": "(\"catalog_item_versions\".\"document_name_ru\" is null or length(btrim(\"catalog_item_versions\".\"document_name_ru\")) between 1 and 300) and (\"catalog_item_versions\".\"document_name_en\" is null or length(btrim(\"catalog_item_versions\".\"document_name_en\")) between 1 and 300) and (\"catalog_item_versions\".\"seller_policy_revision\" is null or \"catalog_item_versions\".\"seller_policy_revision\" > 0) and (\"catalog_item_versions\".\"subject\" is null or (\"catalog_item_versions\".\"kind\" in ('plan','addon') and \"catalog_item_versions\".\"subject\" = 'software_license') or (\"catalog_item_versions\".\"kind\" = 'service' and \"catalog_item_versions\".\"subject\" in ('service','development_work')))"
-        },
         "catalog_item_versions_version_positive": {
           "name": "catalog_item_versions_version_positive",
           "value": "\"catalog_item_versions\".\"version\" > 0"
@@ -9757,12 +10099,6 @@
       "name": "commercial_offer_lines",
       "schema": "",
       "columns": {
-        "commercial_terms": {
-          "name": "commercial_terms",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "id": {
           "name": "id",
           "type": "uuid",
@@ -9942,10 +10278,6 @@
       },
       "policies": {},
       "checkConstraints": {
-        "commercial_offer_lines_commercial_terms_check": {
-          "name": "commercial_offer_lines_commercial_terms_check",
-          "value": "\"commercial_offer_lines\".\"commercial_terms\" is null or coalesce((\n    jsonb_typeof(\"commercial_offer_lines\".\"commercial_terms\") = 'object'\n    and \"commercial_offer_lines\".\"commercial_terms\" ?& array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule']\n    and \"commercial_offer_lines\".\"commercial_terms\" - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule'] = '{}'::jsonb\n    and \"commercial_offer_lines\".\"commercial_terms\"->'version' = '1'::jsonb\n    and jsonb_typeof(\"commercial_offer_lines\".\"commercial_terms\"->'documentNameRu') = 'string'\n    and length(btrim(\"commercial_offer_lines\".\"commercial_terms\"->>'documentNameRu')) between 1 and 300\n    and (\"commercial_offer_lines\".\"commercial_terms\"->'documentNameEn' = 'null'::jsonb or (jsonb_typeof(\"commercial_offer_lines\".\"commercial_terms\"->'documentNameEn') = 'string' and length(btrim(\"commercial_offer_lines\".\"commercial_terms\"->>'documentNameEn')) between 1 and 300))\n    and case when jsonb_typeof(\"commercial_offer_lines\".\"commercial_terms\"->'sellerPolicyRevision') = 'number' and (\"commercial_offer_lines\".\"commercial_terms\"->>'sellerPolicyRevision') ~ '^[1-9][0-9]{0,9}$' then (\"commercial_offer_lines\".\"commercial_terms\"->>'sellerPolicyRevision')::numeric <= 2147483647 else false end\n    and ((\"commercial_offer_lines\".\"kind\"::text in ('plan','addon') and \"commercial_offer_lines\".\"commercial_terms\"->>'subject' = 'software_license'\n      and \"commercial_offer_lines\".\"commercial_terms\"->>'billingPeriod' in ('month','year') and \"commercial_offer_lines\".\"commercial_terms\"->>'billingTimezone' = 'Europe/Moscow'\n      and \"commercial_offer_lines\".\"commercial_terms\"->>'activationRule' in ('on_application','after_current') and (\"commercial_offer_lines\".\"kind\" <> 'plan' or \"commercial_offer_lines\".\"quantity\" = 1))\n      or (\"commercial_offer_lines\".\"kind\"::text in ('service','custom') and \"commercial_offer_lines\".\"commercial_terms\"->>'subject' in ('service','development_work')\n      and \"commercial_offer_lines\".\"commercial_terms\"->'billingPeriod' = 'null'::jsonb and \"commercial_offer_lines\".\"commercial_terms\"->'billingTimezone' = 'null'::jsonb and \"commercial_offer_lines\".\"commercial_terms\"->'activationRule' = 'null'::jsonb))\n  ), false)"
-        },
         "commercial_offer_lines_position_positive": {
           "name": "commercial_offer_lines_position_positive",
           "value": "\"commercial_offer_lines\".\"position\" > 0"
@@ -10974,19 +11306,19 @@
         },
         "plan_entitlements_max_lines_positive": {
           "name": "plan_entitlements_max_lines_positive",
-          "value": "\"plan_entitlements\".\"max_lines\" is null or \"plan_entitlements\".\"max_lines\" >= 0"
+          "value": "\"plan_entitlements\".\"max_lines\" is null or \"plan_entitlements\".\"max_lines\" > 0"
         },
         "plan_entitlements_max_stations_positive": {
           "name": "plan_entitlements_max_stations_positive",
-          "value": "\"plan_entitlements\".\"max_stations\" is null or \"plan_entitlements\".\"max_stations\" >= 0"
+          "value": "\"plan_entitlements\".\"max_stations\" is null or \"plan_entitlements\".\"max_stations\" > 0"
         },
         "plan_entitlements_max_kiosks_positive": {
           "name": "plan_entitlements_max_kiosks_positive",
-          "value": "\"plan_entitlements\".\"max_kiosks\" is null or \"plan_entitlements\".\"max_kiosks\" >= 0"
+          "value": "\"plan_entitlements\".\"max_kiosks\" is null or \"plan_entitlements\".\"max_kiosks\" > 0"
         },
         "plan_entitlements_max_cabinet_users_positive": {
           "name": "plan_entitlements_max_cabinet_users_positive",
-          "value": "\"plan_entitlements\".\"max_cabinet_users\" is null or \"plan_entitlements\".\"max_cabinet_users\" >= 0"
+          "value": "\"plan_entitlements\".\"max_cabinet_users\" is null or \"plan_entitlements\".\"max_cabinet_users\" > 0"
         },
         "plan_entitlements_demo_duration_positive": {
           "name": "plan_entitlements_demo_duration_positive",
@@ -11220,12 +11552,6 @@
       "name": "subscription_addons",
       "schema": "",
       "columns": {
-        "commercial_period": {
-          "name": "commercial_period",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "id": {
           "name": "id",
           "type": "uuid",
@@ -11421,10 +11747,6 @@
       },
       "policies": {},
       "checkConstraints": {
-        "subscription_addons_commercial_period_check": {
-          "name": "subscription_addons_commercial_period_check",
-          "value": "\"subscription_addons\".\"commercial_period\" is null or coalesce((\n    jsonb_typeof(\"subscription_addons\".\"commercial_period\") = 'object'\n    and \"subscription_addons\".\"commercial_period\" ?& array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt']\n    and \"subscription_addons\".\"commercial_period\" - array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt'] = '{}'::jsonb\n    and \"subscription_addons\".\"commercial_period\"->>'billingPeriod' in ('month','year') and \"subscription_addons\".\"commercial_period\"->>'billingTimezone' = 'Europe/Moscow'\n    and \"subscription_addons\".\"commercial_period\"->'calendarPolicyVersion' = '1'::jsonb\n    and jsonb_typeof(\"subscription_addons\".\"commercial_period\"->'cycle') = 'number' and (\"subscription_addons\".\"commercial_period\"->>'cycle') ~ '^(0|[1-9][0-9]{0,15})$'\n    and jsonb_typeof(\"subscription_addons\".\"commercial_period\"->'anchorAt') = 'string' and (\"subscription_addons\".\"commercial_period\"->>'anchorAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n    and jsonb_typeof(\"subscription_addons\".\"commercial_period\"->'startsAt') = 'string' and (\"subscription_addons\".\"commercial_period\"->>'startsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n    and jsonb_typeof(\"subscription_addons\".\"commercial_period\"->'endsAt') = 'string' and (\"subscription_addons\".\"commercial_period\"->>'endsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n  ), false)"
-        },
         "subscription_addons_kind_check": {
           "name": "subscription_addons_kind_check",
           "value": "\"subscription_addons\".\"addon_kind\" = 'addon'"
@@ -11589,12 +11911,6 @@
       "name": "tenant_subscriptions",
       "schema": "",
       "columns": {
-        "commercial_period": {
-          "name": "commercial_period",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "id": {
           "name": "id",
           "type": "uuid",
@@ -11808,10 +12124,6 @@
       },
       "policies": {},
       "checkConstraints": {
-        "tenant_subscriptions_commercial_period_check": {
-          "name": "tenant_subscriptions_commercial_period_check",
-          "value": "\"tenant_subscriptions\".\"commercial_period\" is null or coalesce((\n    jsonb_typeof(\"tenant_subscriptions\".\"commercial_period\") = 'object'\n    and \"tenant_subscriptions\".\"commercial_period\" ?& array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt']\n    and \"tenant_subscriptions\".\"commercial_period\" - array['billingPeriod','billingTimezone','calendarPolicyVersion','anchorAt','cycle','startsAt','endsAt'] = '{}'::jsonb\n    and \"tenant_subscriptions\".\"commercial_period\"->>'billingPeriod' in ('month','year') and \"tenant_subscriptions\".\"commercial_period\"->>'billingTimezone' = 'Europe/Moscow'\n    and \"tenant_subscriptions\".\"commercial_period\"->'calendarPolicyVersion' = '1'::jsonb\n    and jsonb_typeof(\"tenant_subscriptions\".\"commercial_period\"->'cycle') = 'number' and (\"tenant_subscriptions\".\"commercial_period\"->>'cycle') ~ '^(0|[1-9][0-9]{0,15})$'\n    and jsonb_typeof(\"tenant_subscriptions\".\"commercial_period\"->'anchorAt') = 'string' and (\"tenant_subscriptions\".\"commercial_period\"->>'anchorAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n    and jsonb_typeof(\"tenant_subscriptions\".\"commercial_period\"->'startsAt') = 'string' and (\"tenant_subscriptions\".\"commercial_period\"->>'startsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n    and jsonb_typeof(\"tenant_subscriptions\".\"commercial_period\"->'endsAt') = 'string' and (\"tenant_subscriptions\".\"commercial_period\"->>'endsAt') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$'\n  ), false)"
-        },
         "tenant_subscriptions_plan_kind_check": {
           "name": "tenant_subscriptions_plan_kind_check",
           "value": "\"tenant_subscriptions\".\"plan_kind\" = 'plan'"
@@ -12359,12 +12671,6 @@
       "name": "invoice_lines",
       "schema": "",
       "columns": {
-        "commercial_terms": {
-          "name": "commercial_terms",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "id": {
           "name": "id",
           "type": "uuid",
@@ -12566,10 +12872,6 @@
       },
       "policies": {},
       "checkConstraints": {
-        "invoice_lines_commercial_terms_check": {
-          "name": "invoice_lines_commercial_terms_check",
-          "value": "\"invoice_lines\".\"commercial_terms\" is null or coalesce((\n    jsonb_typeof(\"invoice_lines\".\"commercial_terms\") = 'object'\n    and \"invoice_lines\".\"commercial_terms\" ?& array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule']\n    and \"invoice_lines\".\"commercial_terms\" - array['version','subject','documentNameRu','documentNameEn','sellerPolicyRevision','billingPeriod','billingTimezone','activationRule'] = '{}'::jsonb\n    and \"invoice_lines\".\"commercial_terms\"->'version' = '1'::jsonb\n    and jsonb_typeof(\"invoice_lines\".\"commercial_terms\"->'documentNameRu') = 'string'\n    and length(btrim(\"invoice_lines\".\"commercial_terms\"->>'documentNameRu')) between 1 and 300\n    and (\"invoice_lines\".\"commercial_terms\"->'documentNameEn' = 'null'::jsonb or (jsonb_typeof(\"invoice_lines\".\"commercial_terms\"->'documentNameEn') = 'string' and length(btrim(\"invoice_lines\".\"commercial_terms\"->>'documentNameEn')) between 1 and 300))\n    and case when jsonb_typeof(\"invoice_lines\".\"commercial_terms\"->'sellerPolicyRevision') = 'number' and (\"invoice_lines\".\"commercial_terms\"->>'sellerPolicyRevision') ~ '^[1-9][0-9]{0,9}$' then (\"invoice_lines\".\"commercial_terms\"->>'sellerPolicyRevision')::numeric <= 2147483647 else false end\n    and ((\"invoice_lines\".\"kind\"::text in ('plan','addon') and \"invoice_lines\".\"commercial_terms\"->>'subject' = 'software_license'\n      and \"invoice_lines\".\"commercial_terms\"->>'billingPeriod' in ('month','year') and \"invoice_lines\".\"commercial_terms\"->>'billingTimezone' = 'Europe/Moscow'\n      and \"invoice_lines\".\"commercial_terms\"->>'activationRule' in ('on_application','after_current') and (\"invoice_lines\".\"kind\" <> 'plan' or \"invoice_lines\".\"quantity\" = 1))\n      or (\"invoice_lines\".\"kind\"::text in ('service','custom') and \"invoice_lines\".\"commercial_terms\"->>'subject' in ('service','development_work')\n      and \"invoice_lines\".\"commercial_terms\"->'billingPeriod' = 'null'::jsonb and \"invoice_lines\".\"commercial_terms\"->'billingTimezone' = 'null'::jsonb and \"invoice_lines\".\"commercial_terms\"->'activationRule' = 'null'::jsonb))\n  ), false)"
-        },
         "invoice_lines_position_positive": {
           "name": "invoice_lines_position_positive",
           "value": "\"invoice_lines\".\"position\" > 0"
@@ -13177,12 +13479,6 @@
       "name": "operator_billing_profiles",
       "schema": "",
       "columns": {
-        "tax_policy": {
-          "name": "tax_policy",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "id": {
           "name": "id",
           "type": "uuid",
@@ -13411,10 +13707,6 @@
       },
       "policies": {},
       "checkConstraints": {
-        "operator_billing_profiles_tax_policy_check": {
-          "name": "operator_billing_profiles_tax_policy_check",
-          "value": "\"operator_billing_profiles\".\"tax_policy\" is null or coalesce((jsonb_typeof(\"operator_billing_profiles\".\"tax_policy\") = 'object' and (\n    (\"operator_billing_profiles\".\"tax_policy\"->>'kind' = 'without_vat' and \"operator_billing_profiles\".\"tax_policy\"->>'regime' in ('npd','other') and \"operator_billing_profiles\".\"tax_policy\" - array['kind','regime'] = '{}'::jsonb)\n    or (\"operator_billing_profiles\".\"tax_policy\"->>'kind' = 'vat' and \"operator_billing_profiles\".\"tax_policy\"->>'regime' = 'other'\n      and \"operator_billing_profiles\".\"tax_policy\" ?& array['allowedRatesBps','defaultRateBps','defaultIncluded']\n      and \"operator_billing_profiles\".\"tax_policy\" - array['kind','regime','allowedRatesBps','defaultRateBps','defaultIncluded'] = '{}'::jsonb\n      and jsonb_typeof(\"operator_billing_profiles\".\"tax_policy\"->'defaultIncluded') = 'boolean'\n      and jsonb_typeof(\"operator_billing_profiles\".\"tax_policy\"->'defaultRateBps') = 'number'\n      and jsonb_typeof(\"operator_billing_profiles\".\"tax_policy\"->'allowedRatesBps') = 'array'\n      and jsonb_path_exists(\"operator_billing_profiles\".\"tax_policy\", '$.allowedRatesBps[*]')\n      and not jsonb_path_exists(\"operator_billing_profiles\".\"tax_policy\", '$.allowedRatesBps[*] ? (@.type() != \"number\" || @ < 0 || @ > 10000 || @ != @.floor())')\n      and (\"operator_billing_profiles\".\"tax_policy\"->'allowedRatesBps') @> jsonb_build_array(\"operator_billing_profiles\".\"tax_policy\"->'defaultRateBps')\n    )\n  )), false)"
-        },
         "operator_billing_profiles_revision_positive": {
           "name": "operator_billing_profiles_revision_positive",
           "value": "\"operator_billing_profiles\".\"revision\" > 0"
@@ -26856,6 +27148,26 @@
         "ready",
         "failed",
         "expired"
+      ]
+    },
+    "public.platform_agreement_document_kind": {
+      "name": "platform_agreement_document_kind",
+      "schema": "public",
+      "values": [
+        "draft",
+        "generated",
+        "attachment"
+      ]
+    },
+    "public.platform_agreement_status": {
+      "name": "platform_agreement_status",
+      "schema": "public",
+      "values": [
+        "draft",
+        "in_review",
+        "sent",
+        "signed",
+        "terminated"
       ]
     },
     "public.catalog_billing_mode": {

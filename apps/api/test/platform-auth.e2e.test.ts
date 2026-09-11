@@ -1,3 +1,4 @@
+import { platformCapabilitiesForRole } from "@markiro/platform-contracts";
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import express from "express";
 import { Controller, Get, type INestApplication } from "@nestjs/common";
@@ -500,13 +501,10 @@ describe.skipIf(!ready)("platform authentication isolation", () => {
     expect(response.body).toEqual({
       userId: platformUserId,
       role: "support",
-      capabilities: [
-        "tenants.read",
-        "tenants.write",
-        "catalog.read",
-        "audit.read",
-        "diagnostics.read",
-      ],
+      // Derived, not listed: the principal schema requires the capability
+      // list to match its role exactly, so a literal array here turns every
+      // future capability into a failure of an unrelated test.
+      capabilities: [...platformCapabilitiesForRole.support],
       twoFactorReady: true,
     });
     expect(response.text).not.toMatch(/secret|backup|session|token/i);

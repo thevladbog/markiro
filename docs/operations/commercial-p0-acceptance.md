@@ -43,7 +43,7 @@ UI browser acceptance and the final full gate are separate recorded results, not
 | 41    | API `subscription-access.guard.test.ts` safe reads and delegated recovery; `subscription-expiry.e2e.test.ts` same-tenant pre-expiry shift recovery, mixed accepted/quarantined subset, kiosk replay and content-bound admission.                                                                  | New recovery policy is P1; no provider/hardware proof.                                                                                           |
 | 42    | API catalog/tenant platform authorization and zero-representation tests; catalog stale review and paid issuance tests; platform route/OpenAPI inventories.                                                                                                                                        | Downgrade and future effective-rights previews are P1.                                                                                           |
 | 43–48 | P0 contracts reject unsupported recurring service combinations.                                                                                                                                                                                                                                   | P2 service accounting; not complete.                                                                                                             |
-| 49    | DB additive migration test compares legacy rows through127 and after128, retaining null quotas and snapshots.                                                                                                                                                                                     | New module-rights migration policy is P1.                                                                                                        |
+| 49    | DB additive migration test compares legacy rows through128 and after129, retaining null quotas and snapshots.                                                                                                                                                                                     | New module-rights migration policy is P1.                                                                                                        |
 | 50    | API `report-commercial-p0-impact.e2e.test.ts` exact annual-label/monthly-period, paid null-end, missing names/policy and frozen-offer tax/amount categories. Paid-period tests reject ambiguous legacy application.                                                                               | Production inventory and approved corrections are external; no inferred periods.                                                                 |
 | 51    | API commercial-version tests preserve opaque history and reject unknown versions; catalog/tenant tests prove real V1/V2 zero negotiation and write denial; offer details use strict negotiated representations; SaaS `commercial-v2.test.ts`.                                                     | Upgrade all affected platform consumers before zero publication; installed-client inventory is external.                                         |
 | 52    | Additive DB migration tests plus [rollback limits](commercial-p0-rollout.md#rollback-limits).                                                                                                                                                                                                     | Data used by newer clients cannot be safely dropped/converted for an older schema. No destructive downgrade was exercised.                       |
@@ -143,3 +143,38 @@ Integration review and scoped re-review are complete with no open Critical/Impor
 The reviewed 135-path PR scope was reconciled against current main, and all 4,052 frozen tracked
 files matched before this final documentation-only record. Remote CI and the external acceptance
 boundaries above remain separate from local verification.
+
+## Agreements integration follow-up
+
+After PR #503 was opened, main advanced to `d6ae5c123` with the agreements registry. Its migration
+0128 and snapshot are preserved exactly. Commercial P0 now uses `0129_commercial_terms.sql`;
+the SQL is byte-identical to the reviewed commercial migration, and its generated snapshot has
+the incoming 0128 snapshot as predecessor. The migration fixture now starts through 0128 and
+also compares an existing agreement row before and after 0129, including its exact JSON values.
+
+Both commercial and agreement translations, exports and routes are retained. The combined
+OpenAPI inventory contains 154 schemas. Earlier publication checks above describe the prior
+integration; follow-up verification is recorded separately for the new main.
+
+Follow-up verification covers all 52 workspace lint/typecheck/test/build tasks and all 13 package
+suites: 766 passing files, 9,006 passed tests and the same four conditional API skips. The forced
+aggregate run stopped after 30 successful tasks with exit 143/SIGTERM during DB tests, without
+an assertion failure; the signal's source remains unknown. All remaining tasks completed in
+separate runs. Two initial SaaS parallel first-render waits timed out; timing diagnostics and
+the full unchanged suite with `--no-file-parallelism` passed 321/321. Assertions, timeouts and
+tracked configuration were not changed. These are combined verification results; the interrupted
+aggregate and initial parallel failures remain recorded.
+
+Production-bundle contracts passed 546/546 after workspace builds settled. The earlier concurrent
+attempt changed DB output mtimes during its immutability check, with identical file contents;
+that failed attempt is retained. Full workspace formatting and final diff checks passed. A fresh
+owned PostgreSQL database exercised the complete migration chain through 0129, including the
+saved-agreement regression and all 22 inventory tests. The four optional infrastructure/provider
+skips retain the boundaries stated above.
+
+The bounded conflict-resolution review found no actionable issues. All 4,082 frozen tracked files
+matched after verification, before this documentation-only record. Earlier actual browser/PDF
+and separate browser-tool results above belong to the preceding publication integration; browser,
+provider, native/Windows and physical acceptance were not repeated for this conflict resolution.
+Detailed task, source-hash and diagnostic records remain in the ignored local
+`.superpowers/sdd/2026-09-11-pr503-conflicts/` evidence directory.

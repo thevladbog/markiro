@@ -30,6 +30,9 @@ import { PlatformCatalogService } from "../src/modules/platform-catalog/platform
 import { OfferDocumentsService } from "../src/modules/platform-offers/offer-documents.service";
 import { OfferWorkspaceService } from "../src/modules/platform-offers/offer-workspace.service";
 import { OfferPreviewService } from "../src/modules/platform-offers/offer-preview.service";
+import { AgreementDocumentsService } from "../src/modules/platform-agreements/agreement-documents.service";
+import { PlatformAgreementsController } from "../src/modules/platform-agreements/platform-agreements.controller";
+import { PlatformAgreementsService } from "../src/modules/platform-agreements/platform-agreements.service";
 import { PlatformOffersController } from "../src/modules/platform-offers/platform-offers.controller";
 import { PlatformOffersService } from "../src/modules/platform-offers/platform-offers.service";
 import { PlatformOperationsController } from "../src/modules/platform-operations/platform-operations.controller";
@@ -120,6 +123,8 @@ async function createPlatformDocument(): Promise<{
     PlatformTenantsService,
     PlatformCatalogService,
     PlatformOffersService,
+    PlatformAgreementsService,
+    AgreementDocumentsService,
     OfferDocumentsService,
     OfferWorkspaceService,
     OfferPreviewService,
@@ -147,6 +152,7 @@ async function createPlatformDocument(): Promise<{
       PlatformCatalogController,
       PlatformSettingsController,
       PlatformOffersController,
+      PlatformAgreementsController,
       BillingController,
       BillingPaymentsController,
       BillingActsController,
@@ -178,7 +184,7 @@ async function createPlatformDocument(): Promise<{
 
 describe("current SaaS platform OpenAPI contracts", () => {
   it("converts all current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(137);
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(154);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }

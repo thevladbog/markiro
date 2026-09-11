@@ -307,3 +307,27 @@ formatting and final diff checks passed. Product source stayed unchanged after t
 only the two reviewed test fixtures changed before final documentation. Integration review and
 scoped re-review found no remaining Critical/Important issue. Exact task/count/hash records remain
 in the ignored publication evidence package; durable results are in the acceptance map.
+
+## PR #503 conflict resolution with agreements
+
+Main advanced to `d6ae5c123` after the initial PR publication. Its agreement migration 0128,
+translations, contracts, role-derived principal fixtures and routes are preserved. The commercial
+migration is now 0129 with unchanged SQL and a regenerated snapshot based on incoming 0128.
+The additive migration fixture starts through 0128 and preserves a saved agreement alongside
+the historical commercial records. Current deployment instructions reference 0129; the earlier
+migration numbers above remain a record of those earlier integrations.
+
+Conflict-resolution checks cover all 52 workspace tasks and 13 package suites: 766 passing files,
+9,006 passed tests and four expected conditional API skips. The forced aggregate stopped after
+30 successful tasks with an unexplained SIGTERM; remaining tasks passed separately. Two initial
+SaaS parallel render waits timed out; diagnostic and full serial runs passed 321/321 without
+source, assertion, timeout or tracked configuration changes. Original interrupted/failed runs
+remain recorded, so this is combined coverage rather than a successful aggregate exit.
+
+Settled production-bundle contracts passed 546/546 after an earlier concurrent DB build changed
+output mtimes during the immutability check. The fresh owned database exercised migration 0129
+and all 22 inventory tests. Formatting and diff checks passed; all 4,082 frozen files matched
+before final documentation. Bounded integration review found no actionable issues. Earlier
+browser/PDF evidence remains separate; this conflict resolution does not claim new browser,
+provider, Windows/native or physical acceptance. See the acceptance map for verification limits
+and the ignored `.superpowers/sdd/2026-09-11-pr503-conflicts/` directory for exact local records.
