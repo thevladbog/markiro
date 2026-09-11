@@ -39,6 +39,10 @@ import type {
   LegalLocale,
   LegalOperatorProfileId,
 } from "../types.js";
+import type {
+  BilingualContent,
+  BilingualSection,
+} from "../documents/tenant-agreement-bilingual.js";
 import {
   MARKIRO_COLORS,
   prepareDataMatrixMedia,
@@ -162,6 +166,173 @@ export async function renderLegalDocxDraft(
   assets: LegalDocxAssets = {},
 ): Promise<Uint8Array> {
   const source = input.content;
+  return renderLegalDocxShell(input, source.title, source.summary, (operator) => [
+    new Paragraph({
+      heading: HeadingLevel.TITLE,
+      children: [new TextRun(source.title)],
+      spacing: { before: 220, after: 140 },
+    }),
+    new Paragraph({
+      style: "DocumentSummary",
+      children: [new TextRun(source.summary)],
+      spacing: { after: 220 },
+    }),
+    createMetadataTable(input, operator),
+    ...source.sections.flatMap((section, index) => {
+      let stepNumber = 0;
+      return [
+        new Paragraph({
+          heading: HeadingLevel.HEADING_1,
+          // The leading section already starts a page.
+          pageBreakBefore: index > 0 && section.startsPage === true,
+          children: [new TextRun(section.heading)],
+        }),
+        ...section.blocks.flatMap((block, blockIndex) => {
+          if (block.kind === "step") {
+            stepNumber += 1;
+            return renderStep(block, stepNumber, input.locale, assets);
+          }
+          // A lead-in must not be stranded on the previous page when the
+          // table it introduces — a form or a signature block — moves on.
+          const keepWithTable = section.blocks[blockIndex + 1]?.kind === "table";
+          return renderBlock(block, input.locale, keepWithTable);
+        }),
+      ];
+    }),
+  ]);
+}
+
+const BILINGUAL_GUTTER = 240;
+const BILINGUAL_COLUMN_WIDTH = Math.floor((CONTENT_WIDTH - BILINGUAL_GUTTER) / 2);
+
+export interface LegalDocxBilingual extends Omit<LegalDocxDraft, "content"> {
+  readonly content: BilingualContent;
+}
+
+/**
+ * The same document printed in two columns, Russian left and English right.
+ * Sections flagged `bilingual: false` — the Russian accounting forms — take
+ * the full width instead of sitting in a half column beside an empty one.
+ */
+export async function renderLegalDocxBilingual(
+  input: LegalDocxBilingual,
+  assets: LegalDocxAssets = {},
+): Promise<Uint8Array> {
+  const source = input.content;
+  return renderLegalDocxShell(input, source.title.ru, source.summary.ru, (operator) => [
+    new Paragraph({
+      heading: HeadingLevel.TITLE,
+      children: [new TextRun(source.title.ru)],
+      spacing: { before: 220, after: 40 },
+    }),
+    new Paragraph({
+      heading: HeadingLevel.TITLE,
+      children: [new TextRun(source.title.en)],
+      spacing: { before: 0, after: 140 },
+    }),
+    new Paragraph({
+      style: "DocumentSummary",
+      children: [new TextRun(source.summary.ru)],
+      spacing: { after: 40 },
+    }),
+    new Paragraph({
+      style: "DocumentSummary",
+      children: [new TextRun(source.summary.en)],
+      spacing: { after: 220 },
+    }),
+    createMetadataTable(input, operator),
+    ...source.sections.flatMap((section, index) =>
+      renderBilingualSection(section, index, input.locale, assets),
+    ),
+  ]);
+}
+
+function renderBilingualSection(
+  section: BilingualSection,
+  index: number,
+  locale: LegalLocale,
+  _assets: LegalDocxAssets,
+): readonly FileChild[] {
+  for (const block of section.ru.blocks) {
+    if (block.kind === "step") {
+      // An instruction screenshot has no meaning in an 8 cm contract column,
+      // and silently overflowing the column is worse than refusing.
+      throw new Error(`Bilingual rendering does not support step blocks (${section.id})`);
+    }
+  }
+
+  const width = section.bilingual ? BILINGUAL_COLUMN_WIDTH : CONTENT_WIDTH;
+
+  const column = (heading: string, blocks: readonly LegalBlock[]): readonly FileChild[] => [
+    new Paragraph({
+      heading: HeadingLevel.HEADING_1,
+      children: [new TextRun(heading)],
+    }),
+    ...blocks.flatMap((block, blockIndex) =>
+      renderBlock(block, locale, blocks[blockIndex + 1]?.kind === "table", width),
+    ),
+  ];
+
+  const cell = (children: readonly FileChild[], size: number): TableCell =>
+    new TableCell({
+      verticalAlign: VerticalAlign.TOP,
+      width: { size, type: WidthType.DXA },
+      margins: { top: 0, bottom: 0, left: 0, right: 0 },
+      children: [...children],
+    });
+
+  const cells = section.bilingual
+    ? [
+        cell(column(section.ru.heading, section.ru.blocks), BILINGUAL_COLUMN_WIDTH),
+        cell([new Paragraph({ children: [] })], BILINGUAL_GUTTER),
+        cell(column(section.en.heading, section.en.blocks), BILINGUAL_COLUMN_WIDTH),
+      ]
+    : [cell(column(section.ru.heading, section.ru.blocks), CONTENT_WIDTH)];
+
+  return [
+    // pageBreakBefore on a paragraph inside a table cell does not break the
+    // page, so a part that must start its own page gets an empty paragraph
+    // ahead of the section table. The leading section already starts a page.
+    ...(index > 0 && section.startsPage === true
+      ? [new Paragraph({ pageBreakBefore: true, spacing: { before: 0, after: 0 }, children: [] })]
+      : []),
+    new Table({
+      width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+      columnWidths: section.bilingual
+        ? [BILINGUAL_COLUMN_WIDTH, BILINGUAL_GUTTER, BILINGUAL_COLUMN_WIDTH]
+        : [CONTENT_WIDTH],
+      layout: TableLayoutType.FIXED,
+      borders: {
+        top: NO_BORDER,
+        bottom: NO_BORDER,
+        left: NO_BORDER,
+        right: NO_BORDER,
+        insideHorizontal: NO_BORDER,
+        insideVertical: NO_BORDER,
+      },
+      rows: [new TableRow({ children: cells })],
+    }),
+    // Word merges tables that touch, so consecutive sections need a spacer.
+    new Paragraph({ spacing: { before: 0, after: 120 }, children: [] }),
+  ];
+}
+
+/**
+ * The page furniture every legal document shares — styles, numbering, header,
+ * footer, page size. Only the body differs between the single-column and the
+ * bilingual renderer, so only the body is passed in.
+ */
+async function renderLegalDocxShell(
+  input: LegalDocxMeta & {
+    readonly classLabel: string;
+    readonly operatorProfileId: LegalOperatorProfileId;
+  },
+  title: string,
+  summary: string,
+  // The metadata table reads the profile's literal values, so the widened
+  // LegalOperatorProfile would not satisfy it.
+  body: (operator: (typeof OPERATOR_PROFILES)[LegalOperatorProfileId]) => readonly FileChild[],
+): Promise<Uint8Array> {
   const operator = OPERATOR_PROFILES[input.operatorProfileId];
   const markSvg = renderMarkiroSymbolSvg();
   const markPng = renderMarkiroSymbolPng();
@@ -169,11 +340,11 @@ export async function renderLegalDocxDraft(
   const classLabel = input.classLabel;
 
   const document = new Document({
-    title: source.title,
+    title,
     subject: `${input.code}/${input.revision}`,
     creator: "Markiro",
     lastModifiedBy: "Markiro legal artifact generator",
-    description: source.summary,
+    description: summary,
     revision: 1,
     features: { updateFields: true },
     styles: createStyles(),
@@ -240,40 +411,7 @@ export async function renderLegalDocxDraft(
             children: [createFooter(input, dataMatrix)],
           }),
         },
-        children: [
-          new Paragraph({
-            heading: HeadingLevel.TITLE,
-            children: [new TextRun(source.title)],
-            spacing: { before: 220, after: 140 },
-          }),
-          new Paragraph({
-            style: "DocumentSummary",
-            children: [new TextRun(source.summary)],
-            spacing: { after: 220 },
-          }),
-          createMetadataTable(input, operator),
-          ...source.sections.flatMap((section, index) => {
-            let stepNumber = 0;
-            return [
-              new Paragraph({
-                heading: HeadingLevel.HEADING_1,
-                // The leading section already starts a page.
-                pageBreakBefore: index > 0 && section.startsPage === true,
-                children: [new TextRun(section.heading)],
-              }),
-              ...section.blocks.flatMap((block, blockIndex) => {
-                if (block.kind === "step") {
-                  stepNumber += 1;
-                  return renderStep(block, stepNumber, input.locale, assets);
-                }
-                // A lead-in must not be stranded on the previous page when the
-                // table it introduces — a form or a signature block — moves on.
-                const keepWithTable = section.blocks[blockIndex + 1]?.kind === "table";
-                return renderBlock(block, input.locale, keepWithTable);
-              }),
-            ];
-          }),
-        ],
+        children: [...body(operator)],
       },
     ],
   });
