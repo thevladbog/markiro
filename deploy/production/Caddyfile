@@ -129,7 +129,7 @@
 		}
 
 		@stationRoot {
-			path /shifts /shifts/planning-config /shifts/product-label-templates /shifts/box-label-templates /products /products/gtin-check
+			path /shifts /shifts/planning-config /shifts/product-label-templates /shifts/box-label-templates /products /products/gtin-check /lines
 			header X-Api-Key *
 		}
 		handle @stationRoot {
@@ -139,7 +139,7 @@
 		}
 
 		@stationRootPreflight {
-			path /shifts /shifts/planning-config /shifts/product-label-templates /shifts/box-label-templates /products /products/gtin-check
+			path /shifts /shifts/planning-config /shifts/product-label-templates /shifts/box-label-templates /products /products/gtin-check /lines
 			method OPTIONS
 		}
 		handle @stationRootPreflight {
@@ -149,7 +149,7 @@
 		}
 
 		@stationShift {
-			path_regexp stationShift ^/shifts/[^/]+/(open|bundle|reference-bundle)$
+			path_regexp stationShift ^/shifts/[^/]+/(open|enter|bundle|reference-bundle|summary)$
 			header X-Api-Key *
 		}
 		handle @stationShift {
@@ -159,7 +159,7 @@
 		}
 
 		@stationShiftPreflight {
-			path_regexp stationShiftPreflight ^/shifts/[^/]+/(open|bundle|reference-bundle)$
+			path_regexp stationShiftPreflight ^/shifts/[^/]+/(open|enter|bundle|reference-bundle|summary)$
 			method OPTIONS
 		}
 		handle @stationShiftPreflight {
