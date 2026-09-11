@@ -197,11 +197,7 @@ export function AgreementDetailPage() {
           page has no update workflow, and an enabled control whose onChange
           is discarded would silently lose the choice. The form is picked on
           the create form. */}
-      <AgreementDocumentFormField
-        value={detail.documentForm}
-        onChange={() => undefined}
-        disabled
-      />
+      <AgreementDocumentFormField value={detail.documentForm} onChange={() => undefined} disabled />
       <Button type="button" onClick={() => render.mutate()} disabled={render.isPending}>
         {t("agreements.detail.renderDraft")}
       </Button>

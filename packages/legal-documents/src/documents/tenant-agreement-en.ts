@@ -200,7 +200,7 @@ function bodySections(fields: TenantAgreementFields): readonly AgreementSection[
         },
         {
           kind: "paragraph",
-          text: '1.4. The "Customer\'s cabinet" (tenant) means the separate area of data and settings of a single Customer within the Markiro service. A tenant is not an independent party to the Agreement. Affiliated companies and other TINs do not automatically obtain access to the Customer\'s data and rights.',
+          text: "1.4. The \"Customer's cabinet\" (tenant) means the separate area of data and settings of a single Customer within the Markiro service. A tenant is not an independent party to the Agreement. Affiliated companies and other TINs do not automatically obtain access to the Customer's data and rights.",
         },
         {
           kind: "paragraph",
@@ -582,27 +582,15 @@ function appendixOneTwoSections(fields: TenantAgreementFields): readonly Agreeme
               "[0 / number / unlimited]",
               "A separate quota; it is not a cash register.",
             ],
-            [
-              "Cabinet lines",
-              "[number / unlimited]",
-              "A blank field does not mean unlimited.",
-            ],
+            ["Cabinet lines", "[number / unlimited]", "A blank field does not mean unlimited."],
             [
               "Cabinet users",
               "[number / unlimited]",
               "The number of operators is not charged by the number of devices.",
             ],
-            [
-              "Code verification, boxes, printing",
-              "[yes / no]",
-              "[agreed operations]",
-            ],
+            ["Code verification, boxes, printing", "[yes / no]", "[agreed operations]"],
             ["Label editor", "[yes / no]", "[limitations, or none]"],
-            [
-              "Stocktaking and repacking",
-              "[yes / no]",
-              "[verified modes and formats]",
-            ],
+            ["Stocktaking and repacking", "[yes / no]", "[verified modes and formats]"],
             ["Chestny ZNAK integration", "[yes / no]", "[list of supported operations]"],
             [
               "Qualified electronic signature agent for Chestny ZNAK",
@@ -1178,10 +1166,7 @@ function appendixThreeFourSections(fields: TenantAgreementFields): readonly Agre
           columns: ["Condition", "Agreed value"],
           columnRatios: [1, 2.4],
           rows: [
-            [
-              "Protected result",
-              "[name of the work/program/template, version and identification]",
-            ],
+            ["Protected result", "[name of the work/program/template, version and identification]"],
             [
               "Author and right holder",
               "[author; who holds the exclusive right; the grounds for using the materials]",
@@ -1190,10 +1175,7 @@ function appendixThreeFourSections(fields: TenantAgreementFields): readonly Agre
               "Previously created components",
               "[list and applicable terms; the exclusive right to them is not alienated]",
             ],
-            [
-              "Rights granted",
-              "[simple non-exclusive licence / another expressly agreed regime]",
-            ],
+            ["Rights granted", "[simple non-exclusive licence / another expressly agreed regime]"],
             [
               "Methods of use",
               "[installation, launch, reproduction, printing, modification and so on — an exact list; without automatic transfer of every method]",
@@ -1400,10 +1382,7 @@ function appendixNineTenSections(fields: TenantAgreementFields): readonly Agreem
               "Composition and period of the data",
               "[objects, reports, period; information excluded and the ground]",
             ],
-            [
-              "Format and identifiers",
-              "[formats, file names, size; checksums where available]",
-            ],
+            ["Format and identifiers", "[formats, file names, size; checksums where available]"],
             [
               "When and how delivered",
               "[date, secure channel; recipient; how long the link remains accessible]",
@@ -1419,10 +1398,7 @@ function appendixNineTenSections(fields: TenantAgreementFields): readonly Agreem
           ],
           columnRatios: [1, 2.4],
           rows: [
-            [
-              "Ground and scope of deletion",
-              "[instruction, categories of data and systems]",
-            ],
+            ["Ground and scope of deletion", "[instruction, categories of data and systems]"],
             ["Principal stores", "[what was deleted; date; method of verification]"],
             [
               "Copies / engaged processors",
@@ -1471,10 +1447,7 @@ export function buildEnAgreementSections(
       ...appendixOneTwoSections(fields),
       ...appendixThreeFourSections(fields),
       ...appendixNineTenSections(fields),
-    ].map((section) => [
-      section.id,
-      section,
-    ]),
+    ].map((section) => [section.id, section]),
   );
   return buildRuAgreementSections(fields).map((section) => translated.get(section.id) ?? section);
 }

@@ -26,30 +26,30 @@ Every translation task uses these renderings. Inconsistent terminology across
 tasks is the main way a multi-task translation goes wrong, so this table is
 binding, not advisory.
 
-| Russian | English |
-| --- | --- |
-| Исполнитель | the Contractor |
-| Заказчик | the Customer |
-| Стороны / Сторона | the Parties / the Party |
-| простая (неисключительная) лицензия | simple (non-exclusive) licence |
-| программа для ЭВМ «Маркиро» | the Markiro computer program |
-| Личный кабинет | the Cabinet |
-| Станция | the Station |
-| Приложение № N | Appendix No. N |
-| Заказ (Приложение № 1) | the Order |
-| Задание (Приложение № 4) | the Assignment |
-| счёт на оплату | invoice |
-| акт | statement |
-| вознаграждение | fee |
-| неустойка | penalty |
-| ГК РФ | the Civil Code of the Russian Federation |
-| персональные данные | personal data |
-| поручение на обработку персональных данных | personal data processing instruction |
-| налог на профессиональный доход (НПД) | tax on professional income |
-| ИНН / КПП / ОГРН / ОГРНИП | TIN / KPP / PSRN / PSRNSP |
-| БИК | BIC |
-| расчётный счёт / корреспондентский счёт | settlement account / correspondent account |
-| простая электронная подпись (ПЭП) | simple electronic signature |
+| Russian                                    | English                                    |
+| ------------------------------------------ | ------------------------------------------ |
+| Исполнитель                                | the Contractor                             |
+| Заказчик                                   | the Customer                               |
+| Стороны / Сторона                          | the Parties / the Party                    |
+| простая (неисключительная) лицензия        | simple (non-exclusive) licence             |
+| программа для ЭВМ «Маркиро»                | the Markiro computer program               |
+| Личный кабинет                             | the Cabinet                                |
+| Станция                                    | the Station                                |
+| Приложение № N                             | Appendix No. N                             |
+| Заказ (Приложение № 1)                     | the Order                                  |
+| Задание (Приложение № 4)                   | the Assignment                             |
+| счёт на оплату                             | invoice                                    |
+| акт                                        | statement                                  |
+| вознаграждение                             | fee                                        |
+| неустойка                                  | penalty                                    |
+| ГК РФ                                      | the Civil Code of the Russian Federation   |
+| персональные данные                        | personal data                              |
+| поручение на обработку персональных данных | personal data processing instruction       |
+| налог на профессиональный доход (НПД)      | tax on professional income                 |
+| ИНН / КПП / ОГРН / ОГРНИП                  | TIN / KPP / PSRN / PSRNSP                  |
+| БИК                                        | BIC                                        |
+| расчётный счёт / корреспондентский счёт    | settlement account / correspondent account |
+| простая электронная подпись (ПЭП)          | simple electronic signature                |
 
 British spelling (`licence` as the noun, `organisation`) throughout, matching
 the existing English instruction set.
@@ -95,11 +95,13 @@ in context: the Russian builder is already 1695 lines and the English one
 will be comparable.
 
 **Files:**
+
 - Modify: `packages/legal-documents/src/documents/tenant-agreement.ts`
 - Create: `packages/legal-documents/src/documents/tenant-agreement-ru.ts`
 - Test: `packages/legal-documents/test/tenant-agreement.test.ts` (unchanged, must keep passing)
 
 **Interfaces:**
+
 - Consumes: `TenantAgreementFields`, `agreementField`, `agreementDate`, `isSoleProprietorOrIndividual` from `./tenant-agreement-fields.js`.
 - Produces: `buildRuAgreementSections(fields: TenantAgreementFields): readonly LegalDocumentLocaleContent["sections"][number][]` from `tenant-agreement-ru.ts`; `buildTenantAgreement(fields, locale)` keeps its current signature and export path.
 
@@ -122,11 +124,20 @@ The Russian file's shape:
 import type { LegalDocumentLocaleContent } from "../types.js";
 import type { TenantAgreementFields } from "./tenant-agreement-fields.js";
 import { agreementDate, agreementField } from "./tenant-agreement-fields.js";
-import { kppCell, partyName, preamble, registryCell, representative, requisitesRows } from "./tenant-agreement-parts.js";
+import {
+  kppCell,
+  partyName,
+  preamble,
+  registryCell,
+  representative,
+  requisitesRows,
+} from "./tenant-agreement-parts.js";
 
 export type AgreementSection = LegalDocumentLocaleContent["sections"][number];
 
-export function buildRuAgreementSections(fields: TenantAgreementFields): readonly AgreementSection[] {
+export function buildRuAgreementSections(
+  fields: TenantAgreementFields,
+): readonly AgreementSection[] {
   // ... the existing section array, moved verbatim
 }
 ```
@@ -186,6 +197,7 @@ becomes safely incremental instead of a single 1700-line leap that cannot be
 reviewed.
 
 **Files:**
+
 - Create: `packages/legal-documents/src/documents/tenant-agreement-en.ts`
 - Create: `packages/legal-documents/src/documents/tenant-agreement-bilingual.ts`
 - Modify: `packages/legal-documents/src/documents/tenant-agreement.ts`
@@ -193,6 +205,7 @@ reviewed.
 - Test: `packages/legal-documents/test/tenant-agreement-bilingual.test.ts`
 
 **Interfaces:**
+
 - Consumes: `buildRuAgreementSections`, `AgreementSection` (Task 1).
 - Produces: `buildEnAgreementSections(fields): readonly AgreementSection[]`; `AGREEMENT_MONOLINGUAL_SECTION_IDS: ReadonlySet<string>`; `pairLocaleContent(ru, en, monolingualSectionIds): BilingualContent`; types `BilingualContent`, `BilingualSection`. Task 5 renders `BilingualContent`; Task 7 calls `pairLocaleContent`.
 
@@ -242,9 +255,7 @@ describe("bilingual agreement", () => {
     it(`pairs the ${label} agreement without structural divergence`, () => {
       const ru = buildTenantAgreement(fields, "ru");
       const en = buildTenantAgreement(fields, "en");
-      expect(() =>
-        pairLocaleContent(ru, en, AGREEMENT_MONOLINGUAL_SECTION_IDS),
-      ).not.toThrow();
+      expect(() => pairLocaleContent(ru, en, AGREEMENT_MONOLINGUAL_SECTION_IDS)).not.toThrow();
     });
   }
 
@@ -487,10 +498,7 @@ export {
   AGREEMENT_MONOLINGUAL_SECTION_IDS,
   pairLocaleContent,
 } from "./documents/tenant-agreement-bilingual.js";
-export type {
-  BilingualContent,
-  BilingualSection,
-} from "./documents/tenant-agreement-bilingual.js";
+export type { BilingualContent, BilingualSection } from "./documents/tenant-agreement-bilingual.js";
 ```
 
 - [ ] **Step 6: Delete the obsolete assertion in the existing test**
@@ -530,10 +538,12 @@ rather than after: translating text that is about to change wastes the work
 and risks the two columns drifting.
 
 **Files:**
+
 - Modify: `packages/legal-documents/src/documents/tenant-agreement-ru.ts`
 - Test: `packages/legal-documents/test/tenant-agreement.test.ts`
 
 **Interfaces:**
+
 - Consumes: `buildRuAgreementSections` (Task 1).
 - Produces: nothing new. Section `dokumenty` gains two `paragraph` blocks.
 
@@ -604,10 +614,12 @@ touches the render path of every published artifact, and a reviewer should be
 able to judge the byte-identity risk on its own.
 
 **Files:**
+
 - Modify: `packages/legal-documents/src/artifacts/docx.ts:593-700`
 - Test: `packages/legal-documents/test/docx.test.ts` (add cases)
 
 **Interfaces:**
+
 - Produces: `legalTableColumnWidths(columnCount, ratios, contentWidth?)` — third parameter defaults to the A4 text column; `renderBlock(block, locale, keepNext?, contentWidth?)`; `renderTable(block, keepNext?, contentWidth?)`.
 
 - [ ] **Step 1: Write the failing test**
@@ -707,11 +719,13 @@ git commit -m "refactor(legal-documents): let legal tables render into a given w
 ### Task 5: The two-column DOCX renderer
 
 **Files:**
+
 - Modify: `packages/legal-documents/src/artifacts/docx.ts`
 - Modify: `packages/legal-documents/src/index.ts`
 - Test: `packages/legal-documents/test/docx-bilingual.test.ts`
 
 **Interfaces:**
+
 - Consumes: `BilingualContent` (Task 2); width-aware `renderBlock` (Task 4).
 - Produces: `renderLegalDocxBilingual(input: LegalDocxBilingual, assets?: LegalDocxAssets): Promise<Uint8Array>` where `LegalDocxBilingual` is `Omit<LegalDocxDraft, "content"> & { readonly content: BilingualContent }`. Task 7 calls it.
 
@@ -796,7 +810,10 @@ byte-identical — the published-artifact cases prove it.
 
 ```ts
 function legalDocxDocument(
-  input: LegalDocxMeta & { readonly classLabel: string; readonly operatorProfileId: LegalOperatorProfileId },
+  input: LegalDocxMeta & {
+    readonly classLabel: string;
+    readonly operatorProfileId: LegalOperatorProfileId;
+  },
   title: string,
   summary: string,
   children: readonly FileChild[],
@@ -872,10 +889,7 @@ function renderBilingualSection(
   const pageBreakBefore = index > 0 && section.startsPage === true;
   const width = section.bilingual ? BILINGUAL_COLUMN_WIDTH : CONTENT_WIDTH;
 
-  const columnChildren = (
-    heading: string,
-    blocks: readonly LegalBlock[],
-  ): readonly FileChild[] => [
+  const columnChildren = (heading: string, blocks: readonly LegalBlock[]): readonly FileChild[] => [
     new Paragraph({
       heading: HeadingLevel.HEADING_1,
       children: [new TextRun(heading)],
@@ -967,11 +981,13 @@ git commit -m "feat(legal-documents): render the agreement in two columns"
 ### Task 6: The `document_form` column
 
 **Files:**
+
 - Modify: `packages/db/src/schema/agreements.ts`
 - Create: `packages/db/migrations/NNNN_<generated>.sql`
 - Test: `packages/db/test/` — the existing agreements schema test
 
 **Interfaces:**
+
 - Produces: `platformAgreementDocumentForm` pgEnum; `platformAgreements.documentForm` column, `notNull`, default `'ru'`.
 
 - [ ] **Step 1: Write the failing test**
@@ -1056,12 +1072,14 @@ git commit -m "feat(db): record the agreement's document form"
 ### Task 7: Contract and API render path
 
 **Files:**
+
 - Modify: `packages/platform-contracts/src/agreements.ts`
 - Modify: `apps/api/src/modules/platform-agreements/platform-agreements.service.ts`
 - Modify: `apps/api/src/modules/platform-agreements/agreement-documents.service.ts`
 - Test: `packages/platform-contracts/test/agreements.test.ts`, `apps/api/test/platform-agreements.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `pairLocaleContent`, `AGREEMENT_MONOLINGUAL_SECTION_IDS`, `renderLegalDocxBilingual` (Tasks 2, 5); `platformAgreements.documentForm` (Task 6).
 - Produces: `agreementDocumentFormSchema = z.enum(["ru", "ru_en"])`; `documentForm` on `agreementSummarySchema`, `agreementDetailSchema`, `createBody` (optional, defaults to `ru`) and `updateBody` (optional).
 
@@ -1069,10 +1087,12 @@ git commit -m "feat(db): record the agreement's document form"
 
 ```ts
 it("accepts both document forms and rejects anything else", () => {
-  expect(platformAgreementContracts.create.body.parse({
-    counterparty: LEGAL_ENTITY,
-    documentForm: "ru_en",
-  }).documentForm).toBe("ru_en");
+  expect(
+    platformAgreementContracts.create.body.parse({
+      counterparty: LEGAL_ENTITY,
+      documentForm: "ru_en",
+    }).documentForm,
+  ).toBe("ru_en");
   expect(() =>
     platformAgreementContracts.create.body.parse({
       counterparty: LEGAL_ENTITY,
@@ -1237,6 +1257,7 @@ git commit -m "feat(api): render the agreement in the form the record asks for"
 ### Task 8: saas-admin form selector
 
 **Files:**
+
 - Modify: `apps/saas-admin/src/pages/agreements/api.ts`
 - Modify: `apps/saas-admin/src/pages/agreements/CreateAgreementPage.tsx`
 - Modify: `apps/saas-admin/src/pages/agreements/AgreementDetailPage.tsx`
@@ -1244,6 +1265,7 @@ git commit -m "feat(api): render the agreement in the form the record asks for"
 - Test: `apps/saas-admin/test/agreements.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `AgreementDocumentForm`, `agreementDocumentFormSchema` (Task 7).
 
 - [ ] **Step 1: Write the failing test**
@@ -1307,7 +1329,11 @@ the column is narrow:
 
 ```tsx
 <Badge tone="neutral">
-  {t(agreement.documentForm === "ru_en" ? "agreements.documentForm.badgeRuEn" : "agreements.documentForm.badgeRu")}
+  {t(
+    agreement.documentForm === "ru_en"
+      ? "agreements.documentForm.badgeRuEn"
+      : "agreements.documentForm.badgeRu",
+  )}
 </Badge>
 ```
 
@@ -1374,6 +1400,7 @@ guards that on every commit.
 4. Add the task's acceptance test, run the suite, commit.
 
 **Files (all four tasks):**
+
 - Modify: `packages/legal-documents/src/documents/tenant-agreement-en.ts`
 - Test: `packages/legal-documents/test/tenant-agreement-bilingual.test.ts`
 
@@ -1394,9 +1421,7 @@ it("translates the body", () => {
   expect(byId.get("predmet")?.heading).toBe("1. Subject matter and structure of the agreement");
   expect(byId.get("tsena")?.heading).toBe("4. Price, settlements and tax status");
   expect(byId.get("rekvizity")?.heading).toBe("12. Requisites and signatures");
-  expect(JSON.stringify(byId.get("dokumenty")?.blocks)).toContain(
-    "the Russian text shall prevail",
-  );
+  expect(JSON.stringify(byId.get("dokumenty")?.blocks)).toContain("the Russian text shall prevail");
   // The preamble carries the agreement number in both columns.
   expect(byId.get("storony")?.heading).toContain("MKR-2026-0001");
 });

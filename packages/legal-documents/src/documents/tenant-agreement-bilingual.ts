@@ -57,7 +57,12 @@ export function pairLocaleContent(
     }
     ruSection.blocks.forEach((ruBlock, blockIndex) => {
       // Non-null: the lengths were compared above.
-      assertSameShape(ruSection.id, blockIndex, ruBlock, enSection.blocks[blockIndex] as LegalBlock);
+      assertSameShape(
+        ruSection.id,
+        blockIndex,
+        ruBlock,
+        enSection.blocks[blockIndex] as LegalBlock,
+      );
     });
 
     return {

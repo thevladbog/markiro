@@ -5,10 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
 
 import { ThemeProvider } from "@markiro/ui";
-import {
-  AGREEMENT_TRANSITIONS,
-  type AgreementDocumentForm,
-} from "@markiro/platform-contracts";
+import { AGREEMENT_TRANSITIONS, type AgreementDocumentForm } from "@markiro/platform-contracts";
 
 import { AgreementDocumentFormField } from "../src/pages/agreements/AgreementDocumentFormField";
 import {

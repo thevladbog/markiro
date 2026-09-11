@@ -69,7 +69,9 @@ describe("bilingual agreement", () => {
 
   it("renders monolingual sections once, across both columns", () => {
     const paired = pair(FILLED);
-    expect(paired.sections.find((section) => section.id === "prilozhenie-5")?.bilingual).toBe(false);
+    expect(paired.sections.find((section) => section.id === "prilozhenie-5")?.bilingual).toBe(
+      false,
+    );
     expect(paired.sections.find((section) => section.id === "storony")?.bilingual).toBe(true);
   });
 
