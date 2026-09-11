@@ -497,6 +497,373 @@ function bodySections(fields: TenantAgreementFields): readonly AgreementSection[
   ];
 }
 
+function appendixOneTwoSections(fields: TenantAgreementFields): readonly AgreementSection[] {
+  const number = agreementField(fields.number, "[number]");
+  const conclusionDate = agreementDate(fields.conclusionDate, "[date of conclusion]");
+
+  return [
+    {
+      id: "prilozhenie-1",
+      heading: "Appendix No. 1. Order for the grant of rights and access",
+      startsPage: true,
+      blocks: [
+        {
+          kind: "paragraph",
+          text: `To agreement No. ${number} of ${conclusionDate}. Order No. [order number] of [date], revision [number]. Contractor: Sole Proprietor Vladislav Sergeevich Bogatyrev, TIN [TIN]. Customer: [name], TIN [TIN].`,
+        },
+        {
+          kind: "table",
+          columns: ["Identification", "Agreed value"],
+          columnRatios: [1, 2.4],
+          rows: [
+            [
+              "Cabinet / tenant ID",
+              "[identifier; on first connection it is stated in the activation notice]",
+            ],
+            [
+              "Organisation and site",
+              "[one TIN; address of the production site; other sites only if expressly listed]",
+            ],
+            [
+              "Plan and revision of its composition",
+              "[Start / Workshop / Production / bespoke]; [code and version]",
+            ],
+            [
+              "Period of use",
+              "From [date, time] inclusive to [date, time] exclusive; time zone Moscow (UTC+3). For a date expressed as “until ... inclusive”, the end is 00:00 of the following day.",
+            ],
+            [
+              "Activation",
+              "[exact date / after the conditions are met]; payment condition: [condition]. The dates are confirmed by notice.",
+            ],
+            ["Territory", "Russian Federation; other: [not applicable / list]"],
+            [
+              "Cabinet owner",
+              "[full name, personal e-mail]; signing authority only under Appendix No. 9.",
+            ],
+          ],
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-1-kvoty",
+      heading: "Appendix No. 1 · 1. Composition of the licence and quotas",
+      blocks: [
+        {
+          kind: "table",
+          columns: ["Resource / capability", "Included / quantity", "Scenario limitation"],
+          columnRatios: [1.5, 1, 2],
+          rows: [
+            [
+              "Working devices: stations + handheld terminals",
+              "[number / unlimited]",
+              "One common quota; replacement without using one slot twice at the same time.",
+            ],
+            [
+              "Dispensing kiosks",
+              "[0 / number / unlimited]",
+              "A separate quota; it is not a cash register.",
+            ],
+            [
+              "Cabinet lines",
+              "[number / unlimited]",
+              "A blank field does not mean unlimited.",
+            ],
+            [
+              "Cabinet users",
+              "[number / unlimited]",
+              "The number of operators is not charged by the number of devices.",
+            ],
+            [
+              "Code verification, boxes, printing",
+              "[yes / no]",
+              "[agreed operations]",
+            ],
+            ["Label editor", "[yes / no]", "[limitations, or none]"],
+            [
+              "Stocktaking and repacking",
+              "[yes / no]",
+              "[verified modes and formats]",
+            ],
+            ["Chestny ZNAK integration", "[yes / no]", "[list of supported operations]"],
+            [
+              "Qualified electronic signature agent for Chestny ZNAK",
+              "[yes / no]",
+              "[the Customer's Windows machine, token and certificate; the private key stays with the Customer]",
+            ],
+            [
+              "Import from the National Catalogue",
+              "[yes / no]",
+              "Only through an enabled Chestny ZNAK integration and the Customer's own connection.",
+            ],
+            [
+              "Standard exchange with 1C / CommerceML",
+              "[yes / no]",
+              "[configuration, version, direction and composition of the exchange]",
+            ],
+            [
+              "Cabinet reports and exports",
+              "[yes / no]",
+              "[list of reports and machine-readable formats]",
+            ],
+            ["Public API", "[yes / no]", "[available operations and technical profile]"],
+            [
+              "Handheld terminal application",
+              "[yes / no / pilot]",
+              "[version, models, verified modes]",
+            ],
+            [
+              "Pallets / other capabilities",
+              "[none / list]",
+              "Future features are not included by the name of a plan alone.",
+            ],
+          ],
+          caption:
+            "Blank or mutually exclusive fields are agreed before activation. A commercial quota of “unlimited” does not override the agreed technical measures protecting the service or the limitations of external systems.",
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-1-voznagrazhdenie",
+      heading: "Appendix No. 1 · 2. Fee",
+      blocks: [
+        {
+          kind: "table",
+          columns: ["Item", "Period / unit", "Qty", "Price, RUB", "Amount, RUB"],
+          columnRatios: [3.4, 1.1, 0.7, 1, 1],
+          rows: [
+            [
+              "Right to use the Markiro computer program, plan “[name]”, [period]",
+              "[month / year / period]",
+              "[number]",
+              "[amount]",
+              "[amount]",
+            ],
+            [
+              "Additional right: [name of functionality / resource], [period]",
+              "[unit]",
+              "[number]",
+              "[amount]",
+              "[amount]",
+            ],
+            ["TOTAL", "—", "—", "—", "[amount]"],
+          ],
+          caption:
+            "Without VAT: the Contractor applies the tax on professional income; the ground is part 9 of article 2 of Federal Law No. 422-FZ of 27 November 2018.",
+        },
+        {
+          kind: "paragraph",
+          text: "Payment terms: [100% prepayment / another arrangement]. Invoice No. [number] of [date]. Payment due: [date / five working days]. The cost of services and works is not included in the licence amount, except for the obligations expressly stated below. For a pilot, instead of a price the following must be stated expressly: “The licence is granted free of charge”; an agreed term is mandatory in that case.",
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-1-podgotovka",
+      heading: "Appendix No. 1 · 3. Preparation and verified conditions",
+      blocks: [
+        {
+          kind: "table",
+          columns: ["Parameter", "Agreed value"],
+          columnRatios: [1, 2.4],
+          rows: [
+            [
+              "Equipment and operating system",
+              "[models of stations/handheld terminals, scanners, printers; versions of the operating system and client software]",
+            ],
+            [
+              "Products and external operations",
+              "[product groups, Chestny ZNAK operations, 1C versions, test scenarios]",
+            ],
+            [
+              "Documents and data export",
+              "[list of available documents and machine-readable formats, for example CSV/JSON; methods of receipt]",
+            ],
+            [
+              "Technical limitations",
+              "[profile and version: file size, parallel tasks, request rate; or a separately agreed description]",
+            ],
+            [
+              "Retention period for working data",
+              "[period / until the purpose is achieved]; the Customer keeps the sources of any mandatory archive itself.",
+            ],
+            [
+              "Backup and recovery",
+              "[frequency; retention of copies; method and period of recovery testing; RPO/RTO where agreed]",
+            ],
+            ["Additional services", "[not ordered / assignment number from Appendix No. 4]"],
+            [
+              "Retainer support",
+              "[not ordered / package, price, period, included minutes, schedule; a separate assignment]",
+            ],
+          ],
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-1-izmeneniya",
+      heading: "Appendix No. 1 · 4. Amendments and special terms",
+      blocks: [
+        {
+          kind: "paragraph",
+          text: "Order being amended: [none / number]. Date of amendment: [date]. Credit for the unused part: [formula and amount / not applicable]. Future device quota and the devices selected for retention: [particulars]. Other agreed departures from the Agreement: [none / list stating the clauses amended].",
+        },
+        {
+          kind: "paragraph",
+          text: "Versions of the instructions and agreed materials: [identifiers / list of attached files]. Pilot features and acceptance limitations: [none / list]. Updates to the website do not replace the signed composition of this order.",
+        },
+        SIGNATURES,
+      ],
+    },
+    {
+      id: "prilozhenie-2",
+      heading: "Appendix No. 2. Support and wind-down regulations",
+      startsPage: true,
+      blocks: [
+        {
+          kind: "paragraph",
+          text: `To agreement No. ${number} of ${conclusionDate}. These regulations apply to all of the Customer's orders unless an individual order provides otherwise.`,
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-2-podderzhka",
+      heading: "Appendix No. 2 · 1. Support and updates",
+      blocks: [
+        {
+          kind: "paragraph",
+          text: "2-A.1. Basic support covers receiving error reports, diagnosing a confirmed Markiro defect and informing the Customer of the resolution. Bespoke process configuration, data preparation, additional training and the development of functionality are paid for only under a separate assignment. An initial report of a suspected error is not an order for a chargeable service.",
+        },
+        {
+          kind: "table",
+          columns: ["Condition", "Basic rule"],
+          columnRatios: [1, 2.4],
+          rows: [
+            ["Channel", "hello@v-b.tech; other agreed channel: [address / not applicable]."],
+            [
+              "Hours for handling requests",
+              "Monday to Friday, 10:00-18:00 Moscow time, excluding Russian public holidays.",
+            ],
+            [
+              "First substantive reply",
+              "Within one support working day of receiving the request. This is not a promise to fix the issue within one day.",
+            ],
+            [
+              "Content of a request",
+              "Cabinet, version, time, description of the operation and the error, request identifier; without passwords, private keys or excessive personal data.",
+            ],
+            [
+              "Priority",
+              "A stoppage of an agreed process and a risk of data loss are dealt with ahead of questions of convenience and new features.",
+            ],
+            [
+              "Time to resolve",
+              "Following diagnosis, a workaround and an estimate are communicated; a binding separate SLA applies only if one has been signed.",
+            ],
+            [
+              "Updates",
+              "The versions and fixes included in the order. Material process changes are notified in advance; an unscheduled update is permitted to remove a security threat.",
+            ],
+          ],
+        },
+        {
+          kind: "paragraph",
+          text: "2-A.2. Round-the-clock cover, a guaranteed availability percentage, on-site attendance and a specific restoration time are not promised by default. Particular metrics apply only under a completed and signed order. This does not release the Contractor from the obligation to perform within the agreed scope.",
+        },
+        {
+          kind: "paragraph",
+          text: "2-A.3. Planned works capable of interrupting agreed operations are, where possible, carried out outside the Customer's production window with at least one working day's notice. Where emergency protection is required, notice is given without undue delay. A change of version must not silently widen the data transmitted or enable a new chargeable module.",
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-2-sreda",
+      heading: "Appendix No. 2 · 2. Responsibility for the working environment",
+      blocks: [
+        {
+          kind: "paragraph",
+          text: "2-A.4. The Customer provides serviceable devices, consumables, a network, lawful licences for the operating system, 1C and cryptographic tools, and access to external systems. The Contractor agrees the supported combinations of equipment and versions before launch. An unverified model or mode is documented as a pilot rather than as unconditionally supported.",
+        },
+        {
+          kind: "paragraph",
+          text: "2-A.5. Backup of server data and the recovery procedure are recorded in the order before the production launch. The safety of data not yet synchronised from a device also depends on local storage: the Customer does not reinstall the client or clear the database while a queue remains undelivered without agreed recovery. The Contractor does not require such a queue to be deleted in order to resolve a licensing problem.",
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-2-okonchanie",
+      heading: "Appendix No. 2 · 3. End or reduction of access",
+      blocks: [
+        {
+          kind: "table",
+          columns: ["Action", "After the paid period ends"],
+          columnRatios: [1, 2.4],
+          rows: [
+            [
+              "New shift, stocktake, new device",
+              "Not permitted unless a renewal or new temporary access has been agreed.",
+            ],
+            [
+              "A previously permitted assignment",
+              "Up to 72 hours — a limited safe completion within the recorded assignment; without opening new assignments or extending an old shift without limit.",
+            ],
+            [
+              "Accumulated event queue",
+              "For 30 calendar days, the transmission and reconciliation of facts already recorded are permitted. Disputed events are retained for reconciliation rather than accepted unchecked.",
+            ],
+            [
+              "An external request begun before the end",
+              "The result of that same request may still be received where lawful authority exists. A new request is not created in the guise of a repeat.",
+            ],
+            [
+              "History and standard export",
+              "For up to 30 calendar days — reading and receiving data in the agreed format. If the interface is unavailable, the Contractor provides the agreed export by another secure means.",
+            ],
+            [
+              "Previously imported cards",
+              "Not deleted merely because Chestny ZNAK or the National Catalogue has been disconnected; further external updating requires valid access.",
+            ],
+            [
+              "A compromised key",
+              "Immediate restriction on security grounds; recovery on confirmed identification rather than through the unsafe key.",
+            ],
+          ],
+        },
+        {
+          kind: "paragraph",
+          text: "2-B.1. The 72-hour period is a contractual completion window, not a fresh full right to use the program. The list of permitted assignments and devices is fixed as at the moment the period ends. After the window closes, previously recorded data may be saved, transmitted and reconciled, but production may not continue in an indefinitely open shift.",
+        },
+        {
+          kind: "paragraph",
+          text: "2-B.2. A loss of connection does not of itself extend the licence. The application shows the time remaining and preserves the queue. If the technical implementation temporarily fails to provide a safe standard path, the Contractor arranges an agreed manual path for extracting or receiving the data without destroying it and without granting new commercial rights.",
+        },
+        {
+          kind: "paragraph",
+          text: "2-B.3. Before a quota is reduced the Parties determine which devices are retained and how the rest are wound down. Data already recorded is not deleted in order to bring the counter down to the quota. The Customer is not required to buy a licence again merely to obtain the standard export of its own data provided for here.",
+        },
+      ],
+    },
+    {
+      id: "prilozhenie-2-vygruzka",
+      heading: "Appendix No. 2 · 4. Export and deletion",
+      blocks: [
+        {
+          kind: "paragraph",
+          text: "2-B.4. Within 30 days after the end, the Customer receives the standard export in the formats listed in the order. It does not include the server source code, other cabinets' data or internal secrets. Where another lawful instruction exists, the agreed procedure of Appendix No. 3 applies; personal data is not retained contrary to a mandatory requirement to delete it.",
+        },
+        {
+          kind: "paragraph",
+          text: "2-B.5. Once the agreed purpose of returning the data has been achieved, the instruction terminates; deletion is carried out under Appendix No. 3 and the fact is recorded in form No. 10. This procedure does not mean that Markiro is obliged to store the whole of the Customer's production for every possible regulatory period. The Customer keeps the archives it needs in advance.",
+        },
+        {
+          kind: "paragraph",
+          text: "Special amendments to these regulations: [none / agreed description and reference to the order].",
+        },
+        SIGNATURES,
+      ],
+    },
+  ];
+}
+
 /**
  * The English sections of the standard Markiro client agreement.
  *
@@ -514,7 +881,10 @@ export function buildEnAgreementSections(
   fields: TenantAgreementFields,
 ): readonly AgreementSection[] {
   const translated = new Map<string, AgreementSection>(
-    bodySections(fields).map((section) => [section.id, section]),
+    [...bodySections(fields), ...appendixOneTwoSections(fields)].map((section) => [
+      section.id,
+      section,
+    ]),
   );
   return buildRuAgreementSections(fields).map((section) => translated.get(section.id) ?? section);
 }

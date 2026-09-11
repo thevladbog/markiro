@@ -97,6 +97,22 @@ describe("bilingual agreement", () => {
     expect(blank).not.toContain("[полное наименование юридического лица / ИП]");
   });
 
+  it("translates appendices 1 and 2", () => {
+    const byId = new Map(
+      buildTenantAgreement(FILLED, "en").sections.map((section) => [section.id, section]),
+    );
+    expect(byId.get("prilozhenie-1")?.heading).toBe(
+      "Appendix No. 1. Order for the grant of rights and access",
+    );
+    expect(byId.get("prilozhenie-2")?.heading).toBe(
+      "Appendix No. 2. Support and wind-down regulations",
+    );
+    // The appendix refers back to its own agreement, so the number is filled…
+    expect(JSON.stringify(byId.get("prilozhenie-1")?.blocks)).toContain("МКР-2026-0001");
+    // …while the order's own number stays a placeholder: it is assigned later.
+    expect(JSON.stringify(byId.get("prilozhenie-1")?.blocks)).toContain("[order number]");
+  });
+
   it("throws when a section is missing from one side", () => {
     const en = buildTenantAgreement(FILLED, "en");
     expect(() =>
