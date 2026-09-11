@@ -49,7 +49,13 @@ describe("closeCurrentBox", () => {
   beforeEach(async () => {
     exec = makeExec(new DatabaseSync(":memory:"));
     await applyMigrations(exec);
-    deps = { exec, issuerPrefix: ISSUER_PREFIX, now: () => new Date(ISO).getTime() };
+    deps = {
+      exec,
+      issuerPrefix: ISSUER_PREFIX,
+      palletBoxCapacity: null,
+      terminalId: "dev-1",
+      now: () => new Date(ISO).getTime(),
+    };
   });
 
   it("burns a serial and builds a valid SSCC", async () => {

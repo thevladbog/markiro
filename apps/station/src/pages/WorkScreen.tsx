@@ -1044,7 +1044,16 @@ export function WorkScreen({
       const impl =
         closeCurrentBoxProp ??
         ((sid: string, operatorId: string | null) =>
-          closeCurrentBoxLib({ exec, issuerPrefix: reservedIssuerPrefix }, sid, operatorId));
+          closeCurrentBoxLib(
+            // Pallets (slice 06d) are not wired into this screen yet -- a
+            // later task threads the shift's own `palletBoxCapacity`
+            // through and consumes `result.pallet` to print its label.
+            // Passing null here keeps this call site's behaviour exactly
+            // what it was before `CloseBoxDeps` grew these fields.
+            { exec, issuerPrefix: reservedIssuerPrefix, palletBoxCapacity: null, terminalId },
+            sid,
+            operatorId,
+          ));
 
       let result: CloseBoxResult;
       try {
