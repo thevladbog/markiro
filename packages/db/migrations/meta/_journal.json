@@ -925,6 +925,13 @@
       "when": 1789141275916,
       "tag": "0131_drop_legacy_pallet_capacity",
       "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1789156030903,
+      "tag": "0132_quarantine_pallet_record_kinds",
+      "breakpoints": true
     }
   ]
 }

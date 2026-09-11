@@ -633,9 +633,20 @@ export const stationSyncQuarantine = pgTable(
     ),
     index("station_sync_quarantine_tenant_time_idx").on(t.tenantId, t.quarantinedAt),
     check("station_sync_quarantine_digest_check", sql`${t.payloadDigest} ~ '^[0-9a-f]{64}$'`),
+    // Every record kind `/station/scans` can deny MUST appear here. A kind the
+    // ingest path denies but this CHECK rejects does not merely fail to
+    // quarantine: the insert raises 23514 and 500s the whole batch, and the
+    // station's drain retries a 5xx forever. The alternative the API took
+    // before 06d -- dropping the unlistable kind with only a log line -- is
+    // worse still: `sync_batches` stores a digest, never the body, and the
+    // drain acks and DELETEs its outbox rows unconditionally, so a physically
+    // labelled pallet's closure would be lost with no recoverable record
+    // anywhere. Widening this is additive and safe against an
+    // already-installed station, whose `isDeniedStationRecord` FILTERS
+    // unrecognised kinds rather than throwing.
     check(
       "station_sync_quarantine_record_kind_check",
-      sql`${t.recordKind} IN ('item', 'box', 'exception', 'product_label_event')`,
+      sql`${t.recordKind} IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception')`,
     ),
     check("station_sync_quarantine_record_index_check", sql`${t.recordIndex} >= 0`),
     check("station_sync_quarantine_reason_check", sql`char_length(${t.reason}) BETWEEN 1 AND 64`),

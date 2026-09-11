@@ -1,0 +1,2 @@
+ALTER TABLE "station_sync_quarantine" DROP CONSTRAINT "station_sync_quarantine_record_kind_check";--> statement-breakpoint
+ALTER TABLE "station_sync_quarantine" ADD CONSTRAINT "station_sync_quarantine_record_kind_check" CHECK ("station_sync_quarantine"."record_kind" IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception'));
