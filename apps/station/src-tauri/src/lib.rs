@@ -26,6 +26,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            app.manage(scanner::manager(app.handle().clone()));
             if let Some(window) = app.get_webview_window("main") {
                 window.set_icon(STATION_ICON.clone())?;
             }
@@ -53,7 +54,8 @@ pub fn run() {
             commands::exit_lockdown,
             power::set_system_awake,
             scanner::list_serial_ports,
-            scanner::open_scanner,
+            scanner::configure_scanners,
+            scanner::get_scanner_connections,
             scanner::close_scanner,
             printer::print_bytes,
             printer::list_usb_printers,
