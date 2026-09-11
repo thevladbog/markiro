@@ -75,6 +75,10 @@ const DESCRIPTION_BY_CODE = {
     ru: "Печатная инструкция менеджера: каталог продукции, карточка товара, ГТИН и его владелец, доведение карточки до статуса «Активен», фотография и вывод товара из оборота.",
     en: "Printable manager instruction: the product catalog, the product card, GTIN ownership, completing a card so it becomes active, the photo, and retiring a product.",
   },
+  "MKR-INS-11": {
+    ru: "Печатная инструкция менеджера: загрузка товаров из Национального каталога Честного знака, проверка полей и фотографии перед добавлением, результат операции и связь карточки товара с ЧЗ.",
+    en: "Printable manager instruction: importing products from the Chestny Znak National Catalog, reviewing fields and photos before applying, the operation result, and the product's link to its Chestny Znak card.",
+  },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 
 export interface LegalDocumentPageDefinition {
