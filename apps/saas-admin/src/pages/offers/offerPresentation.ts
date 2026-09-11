@@ -1,3 +1,4 @@
+import { commercialErrorKey } from "../documents/commercialError.js";
 import { ApiRequestError } from "../../api/client.js";
 
 export function offerMoney(value: string, locale: string) {
@@ -32,5 +33,5 @@ export function offerErrorKey(error: unknown): string {
     )
       return `offerWorkspace.errors.${error.code}`;
   }
-  return "offerWorkspace.errors.action";
+  return commercialErrorKey(error, "offerWorkspace.errors.action");
 }

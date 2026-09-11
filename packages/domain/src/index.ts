@@ -1,11 +1,23 @@
 export { gs1CheckDigit, hasValidCheckDigit } from "./gs1/check-digit.js";
 export { DomainError } from "./errors.js";
+export {
+  commercialTaxDefaults,
+  isCommercialTaxAllowed,
+  resolveCommercialPeriod,
+} from "./commercial-terms.js";
+export type {
+  CommercialBillingPeriod,
+  CommercialPeriod,
+  CommercialTax,
+  SellerTaxPolicy,
+} from "./commercial-terms.js";
 export * from "./product-attributes/index.js";
 export { gtinMatchesPrefix, isValidGtin, normalizeToGtin14 } from "./gs1/gtin.js";
 export { parseImportGtins } from "./catalog/national-catalog.js";
 export { canonicalizeKm, kmHash, kmKey, MAX_KM_UTF8_BYTES, parseKm } from "./gs1/km.js";
 export type { ParsedKm } from "./gs1/km.js";
 export * from "./product-labels/contracts.js";
+export { buildProductLabelFixtures } from "./product-labels/fixtures.js";
 export * from "./product-labels/history.js";
 export * from "./product-labels/km.js";
 export * from "./product-labels/state.js";

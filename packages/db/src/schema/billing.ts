@@ -1,3 +1,4 @@
+import { commercialLineTermsCheck, sellerTaxPolicyCheck } from "./commercial-checks.js";
 import { sql } from "drizzle-orm";
 import {
   boolean,
@@ -111,6 +112,7 @@ const profileColumns = {
 export const operatorBillingProfiles = pgTable(
   "operator_billing_profiles",
   {
+    taxPolicy: jsonb("tax_policy"),
     id: uuid("id").primaryKey().defaultRandom(),
     revision: integer("revision").notNull(),
     isCurrent: boolean("is_current").notNull().default(true),
@@ -121,6 +123,7 @@ export const operatorBillingProfiles = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check("operator_billing_profiles_tax_policy_check", sellerTaxPolicyCheck(table.taxPolicy)),
     unique("operator_billing_profiles_revision_uq").on(table.revision),
     uniqueIndex("operator_billing_profiles_current_uq")
       .on(table.isCurrent)
@@ -320,6 +323,7 @@ export const invoices = pgTable(
 export const invoiceLines = pgTable(
   "invoice_lines",
   {
+    commercialTerms: jsonb("commercial_terms"),
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: text("tenant_id").notNull(),
     invoiceId: uuid("invoice_id").notNull(),
@@ -344,6 +348,10 @@ export const invoiceLines = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check(
+      "invoice_lines_commercial_terms_check",
+      commercialLineTermsCheck(table.commercialTerms, table.kind, table.quantity),
+    ),
     unique("invoice_lines_tenant_id_uq").on(table.tenantId, table.id),
     unique("invoice_lines_tenant_invoice_id_uq").on(table.tenantId, table.invoiceId, table.id),
     unique("invoice_lines_invoice_position_uq").on(table.invoiceId, table.position),

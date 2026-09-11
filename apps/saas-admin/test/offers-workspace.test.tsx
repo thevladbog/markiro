@@ -1,7 +1,7 @@
 import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { OfferWorkspace } from "@markiro/platform-contracts";
+import type { OfferWorkspaceV2 as OfferWorkspace } from "@markiro/platform-contracts";
 import {
   ACCOUNTANT_ME,
   TENANT_ID,
@@ -53,6 +53,7 @@ function workspace(): OfferWorkspace {
           priceOverrideReason: null,
           lineTotal: "12500.50",
           activationPolicy: null,
+          commercialTerms: null,
           createdAt: NOW,
         },
       ],
@@ -183,6 +184,37 @@ afterEach(() => {
 });
 
 describe("offers workspace", () => {
+  it("shows frozen annual license names, localized period and activation in the negotiated workspace", async () => {
+    const data = workspace();
+    const line = data.offer.lines[0]!;
+    Object.assign(line, {
+      kind: "plan",
+      unit: "year",
+      quantity: 1,
+      catalogVersionId: "a2111111-1111-4111-8111-111111111111",
+      activationPolicy: "after_current",
+      commercialTerms: {
+        version: 1,
+        subject: "software_license",
+        documentNameRu: "Сохраненная лицензия",
+        documentNameEn: "Frozen license",
+        sellerPolicyRevision: 1,
+        billingPeriod: "year",
+        billingTimezone: "Europe/Moscow",
+        activationRule: "after_current",
+      },
+    });
+    install(data);
+    renderSaasApp({ initialEntry: `/offers/${ID}` });
+    await screen.findByText("Сохраненная лицензия");
+    expect(screen.queryByText("year")).toBeNull();
+    expect(screen.getAllByText(/год/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/После окончания текущего срока/)).toBeDefined();
+    const workspaceFetch = vi
+      .mocked(fetch)
+      .mock.calls.find(([path]) => String(path).endsWith("/workspace"));
+    expect(new Headers(workspaceFetch?.[1]?.headers).get("X-Markiro-Commercial-Version")).toBe("2");
+  });
   it("locks competing actions until the exact ambiguous payment attempt succeeds", async () => {
     const data = workspace();
     data.actions = { ...data.actions, pay: true, revise: true, cancel: true, createInvoice: true };

@@ -1,12 +1,20 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, Req } from "@nestjs/common";
 import { ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
-import { platformCommercialContracts } from "@markiro/platform-contracts";
+import {
+  platformCommercialContracts,
+  platformCommercialV2Contracts,
+} from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
 import {
   PlatformApiProtectedCreated,
   PlatformApiProtectedOk,
 } from "../../platform-http/platform-openapi";
+import {
+  commercialBody,
+  commercialResponse,
+  isCommercialV2,
+} from "../../platform-http/commercial-version";
 import { parsePlatformResponse } from "../../platform-http/platform-response";
 import { ZodValidationPipe } from "../../zod.pipe";
 import { BillingService } from "./billing.service";
@@ -14,11 +22,9 @@ import { BillingDocumentsService } from "./billing-documents.service";
 import { BillingApplicationService } from "./billing-application.service";
 import {
   applyInvoiceSchema,
-  createInvoiceSchema,
   invoicePrintGenerationSchema,
   invoiceIdSchema,
   type ApplyInvoiceDto,
-  type CreateInvoiceDto,
   type InvoicePrintGenerationDto,
 } from "./dto";
 
@@ -49,11 +55,19 @@ export class BillingController {
 
   @Get(":id")
   @ApiOperation({ summary: "Get an invoice" })
-  @PlatformApiProtectedOk({ response: platformCommercialContracts.invoices.detail.response })
+  @PlatformApiProtectedOk({
+    response: platformCommercialContracts.invoices.detail.response,
+    commercialV2: platformCommercialV2Contracts.invoices.detail,
+  })
   @RequirePlatformCapabilities("billing.read")
-  async get(@Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
-    return parsePlatformResponse(
+  async get(
+    @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string,
+    @Req() req?: RequestWithPlatformPrincipal,
+  ) {
+    return commercialResponse(
+      isCommercialV2(req ?? {}),
       platformCommercialContracts.invoices.detail.response,
+      platformCommercialV2Contracts.invoices.detail.response,
       await this.billing.get(id),
     );
   }
@@ -63,15 +77,21 @@ export class BillingController {
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.invoices.create.body,
     response: platformCommercialContracts.invoices.create.response,
+    commercialV2: platformCommercialV2Contracts.invoices.create,
   })
   @RequirePlatformCapabilities("billing.write")
-  async create(
-    @Req() req: RequestWithPlatformPrincipal,
-    @Body(new ZodValidationPipe(createInvoiceSchema)) body: CreateInvoiceDto,
-  ) {
+  async create(@Req() req: RequestWithPlatformPrincipal, @Body() body: unknown) {
     return parsePlatformResponse(
       platformCommercialContracts.invoices.create.response,
-      await this.billing.create(req.platformPrincipal!, body),
+      await this.billing.create(
+        req.platformPrincipal!,
+        commercialBody(
+          isCommercialV2(req)
+            ? platformCommercialV2Contracts.invoices.create.body
+            : platformCommercialContracts.invoices.create.body,
+          body,
+        ),
+      ),
     );
   }
 

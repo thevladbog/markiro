@@ -28,9 +28,16 @@ apps/
               not stop a line and the box is already numbered and reported.
               Box closures are acknowledged UNCONDITIONALLY, unlike the station's
               conditional ack: nothing in a handheld closure payload can change after
-              the box closes, because print state never leaves the device. Adding the
-              station's scan-the-label-back print verification would bring the
-              conditional rule back with it)
+              the box closes, because print state never leaves the device.
+              Product-label events are the opposite and acknowledged PER EVENT,
+              because the server answers each with a receipt and may quarantine one.
+              The device advertises validation-dm-duplicate-v1, so it may enter a
+              shift whose validation policy prints a duplicate: one job at a time,
+              bytes prepared once and replayed rather than re-rendered, and an
+              unknown delivery resolved by scanning the printed sticker under either
+              policy. Those jobs carry NO credential ownership, unlike the station's,
+              because revoking a handheld wipes its database -- a rule that holds only
+              while DeviceWipe names both tables)
   kiosk/      React 19 + Vite 8 + IndexedDB — offline-first self-service
               pickup kiosk (installable PWA), paired to the api by device token
   landing/    Astro 7 — marketing site
@@ -238,6 +245,21 @@ selected bank-account snapshots, so later profile edits or account archival cann
 already-issued document. A tenant and Markiro each have one legal profile and may have multiple
 bank accounts with one active default. DaData is an optional suggestion adapter for organizations,
 addresses, and banks; it never makes a suggestion authoritative or blocks manual entry.
+
+Commercial P0 adds explicit catalog document names, seller-policy revisions and frozen line terms.
+Resource quotas distinguish zero (not included), positive limits and null (unlimited); trial days
+remain positive or null. Paid license intervals use the original calendar anchor in Europe/Moscow,
+not the display unit or quantity as a period multiplier. Invoice and direct accepted-offer
+application share lifecycle and sold-line ownership; repeated application cannot grant twice.
+Issued bytes and historical snapshots remain unchanged after catalog or seller edits.
+
+Updated platform clients negotiate `X-Markiro-Commercial-Version: 2`; legacy positive/null
+representations remain strict and truthful, and unrepresentable zero values fail with
+`client_update_required`. Review and issuance revalidate the current seller revision. Calculated
+invoice/offer amounts fail with `commercial_amount_out_of_range` before overflowing money columns.
+See the [rollout and recovery guide](operations/commercial-p0-rollout.md) for additive migration,
+client order, read-only impact reporting and rollback limits. This P0 does not enable P1 module
+or offline licensing enforcement and does not implement P2 recurring services.
 
 Bank imports retain the bounded source row as reconciliation evidence, while the public match and
 audit contracts expose only the payer account's last four digits and whether it is a known active,

@@ -1,11 +1,16 @@
 import { z } from "zod";
 
-import { platformUuidSchema } from "./primitives.js";
+import { platformTimestampSchema, platformUuidSchema } from "./primitives.js";
 import { assignableCatalogResponseSchema, assignableCatalogVersionSchema } from "./tenants.js";
 
 const POSTGRES_INTEGER_MAX = 2_147_483_647;
 const positivePostgresIntegerSchema = z.number().int().positive().max(POSTGRES_INTEGER_MAX);
 const nullablePositiveIntegerSchema = positivePostgresIntegerSchema.nullable();
+import {
+  catalogCommercialMetadataShape,
+  resourceQuotaSchema,
+  sellerTaxPolicySchema,
+} from "./commercial-terms.js";
 
 export const catalogMachineCodeSchema = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 export const catalogItemReferenceSchema = z.union([platformUuidSchema, catalogMachineCodeSchema]);
@@ -13,14 +18,23 @@ export const catalogVersionIdSchema = platformUuidSchema;
 
 export const planEntitlementsSchema = z
   .object({
-    maxLines: nullablePositiveIntegerSchema,
-    maxStations: nullablePositiveIntegerSchema,
-    maxKiosks: nullablePositiveIntegerSchema,
-    maxCabinetUsers: nullablePositiveIntegerSchema,
+    maxLines: resourceQuotaSchema,
+    maxStations: resourceQuotaSchema,
+    maxKiosks: resourceQuotaSchema,
+    maxCabinetUsers: resourceQuotaSchema,
     labelEditorEnabled: z.boolean(),
     publicApiEnabled: z.boolean(),
     palletsEnabled: z.boolean(),
     demoDurationDays: nullablePositiveIntegerSchema,
+  })
+  .strict();
+
+export const legacyPlanEntitlementsSchema = planEntitlementsSchema
+  .extend({
+    maxLines: nullablePositiveIntegerSchema,
+    maxStations: nullablePositiveIntegerSchema,
+    maxKiosks: nullablePositiveIntegerSchema,
+    maxCabinetUsers: nullablePositiveIntegerSchema,
   })
   .strict();
 
@@ -54,7 +68,7 @@ const planVersionCreateSchema = versionFieldsSchema
   .extend({
     billingMode: z.literal("recurring"),
     billingPeriod: z.enum(["month", "year"]),
-    plan: planEntitlementsSchema,
+    plan: legacyPlanEntitlementsSchema,
   })
   .strict();
 
@@ -109,7 +123,7 @@ export const catalogVersionPatchSchema = z
       .optional(),
     vatRateBps: z.number().int().min(0).max(10_000).nullable().optional(),
     vatIncluded: z.boolean().optional(),
-    plan: planEntitlementsSchema.optional(),
+    plan: legacyPlanEntitlementsSchema.optional(),
     addon: addonPayloadSchema.optional(),
     service: z.object({}).strict().optional(),
   })
@@ -231,3 +245,138 @@ export type CatalogVersionPatch = z.output<typeof catalogVersionPatchSchema>;
 export type SetDefaultDemoPlan = z.output<typeof setDefaultDemoPlanSchema>;
 export type DefaultDemoPlanResponse = z.output<typeof defaultDemoPlanResponseSchema>;
 export type ArchiveCatalogItemResponse = z.output<typeof archiveCatalogItemResponseSchema>;
+
+// Existing wire contracts remain V1 until a caller explicitly negotiates V2.
+export const legacyCatalogVersionCreateSchema = catalogVersionCreateSchema;
+export const legacyCatalogVersionPatchSchema = catalogVersionPatchSchema;
+export const legacyCatalogVersionSchema = catalogVersionSchema;
+export const legacyPlatformCatalogContracts = platformCatalogContracts;
+const optionalMetadataShape = {
+  documentNameRu: catalogCommercialMetadataShape.documentNameRu.optional(),
+  documentNameEn: catalogCommercialMetadataShape.documentNameEn.optional(),
+  subject: catalogCommercialMetadataShape.subject.optional(),
+  sellerPolicyRevision: catalogCommercialMetadataShape.sellerPolicyRevision.optional(),
+};
+const licenseSubject = catalogCommercialMetadataShape.subject
+  .unwrap()
+  .extract(["software_license"])
+  .nullable();
+const serviceSubject = catalogCommercialMetadataShape.subject
+  .unwrap()
+  .extract(["service", "development_work"])
+  .nullable();
+export const catalogVersionCreateV2Schema = z.union([
+  planVersionCreateSchema.extend({
+    ...optionalMetadataShape,
+    subject: licenseSubject.optional(),
+    plan: planEntitlementsSchema,
+  }),
+  addonVersionCreateSchema.extend({ ...optionalMetadataShape, subject: licenseSubject.optional() }),
+  serviceVersionCreateSchema.extend({
+    ...optionalMetadataShape,
+    subject: serviceSubject.optional(),
+  }),
+]);
+export const catalogVersionPatchV2Schema = catalogVersionPatchSchema
+  .safeExtend({ ...optionalMetadataShape, plan: planEntitlementsSchema.optional() })
+  .superRefine((value, ctx) => {
+    const recurring =
+      value.plan !== undefined || value.addon !== undefined || value.subject === "software_license";
+    const service =
+      value.service !== undefined ||
+      value.subject === "service" ||
+      value.subject === "development_work";
+    if (
+      (recurring && (value.billingMode === "one_time" || value.billingPeriod === null)) ||
+      (service &&
+        (value.billingMode === "recurring" ||
+          (value.billingPeriod !== undefined && value.billingPeriod !== null))) ||
+      (value.billingMode === "one_time" && value.billingPeriod != null) ||
+      (value.billingMode === "recurring" && value.billingPeriod === null)
+    )
+      ctx.addIssue({ code: "custom", message: "Kind and billing period must agree" });
+
+    if (
+      (value.plan || value.addon) &&
+      value.subject != null &&
+      value.subject !== "software_license"
+    )
+      ctx.addIssue({ code: "custom", path: ["subject"], message: "License subject required" });
+    if (value.service && value.subject === "software_license")
+      ctx.addIssue({ code: "custom", path: ["subject"], message: "Service subject required" });
+  });
+export const catalogVersionV2Schema = z.discriminatedUnion("kind", [
+  planVersionResponseSchema.safeExtend({
+    ...catalogCommercialMetadataShape,
+    subject: licenseSubject,
+    plan: planEntitlementsSchema,
+  }),
+  addonVersionResponseSchema.safeExtend({
+    ...catalogCommercialMetadataShape,
+    subject: licenseSubject,
+    addon: addonPayloadSchema,
+  }),
+  serviceVersionResponseSchema.safeExtend({
+    ...catalogCommercialMetadataShape,
+    subject: serviceSubject,
+  }),
+]);
+export const catalogVersionListResponseV2Schema = z
+  .object({ items: z.array(catalogVersionV2Schema) })
+  .strict();
+export const commercialReviewIdentitySchema = z
+  .object({
+    catalogVersionId: catalogVersionIdSchema,
+    draftUpdatedAt: platformTimestampSchema,
+    sellerPolicyRevision: z.number().int().nonnegative(),
+  })
+  .strict();
+export const catalogPublicationReviewSchema = z
+  .object({
+    identity: commercialReviewIdentitySchema,
+    errors: z.array(z.object({ code: z.string(), path: z.string() }).strict()),
+  })
+  .strict();
+export const catalogEditorContextSchema = z
+  .object({
+    sellerPolicyRevision: z.number().int().nonnegative(),
+    taxPolicy: sellerTaxPolicySchema.nullable(),
+    taxDefaults: z
+      .object({ vatRateBps: z.number().int().nullable(), vatIncluded: z.boolean() })
+      .strict()
+      .nullable(),
+    canWrite: z.boolean(),
+  })
+  .strict();
+export type CommercialReviewIdentity = z.output<typeof commercialReviewIdentitySchema>;
+export type CatalogPublicationReview = z.output<typeof catalogPublicationReviewSchema>;
+export const platformCatalogV2Contracts = {
+  ...platformCatalogContracts,
+  editorContext: { response: catalogEditorContextSchema },
+  reviewVersion: { params: catalogVersionParamsSchema, response: catalogPublicationReviewSchema },
+  list: { response: catalogVersionListResponseV2Schema },
+  listVersions: { params: catalogItemParamsSchema, response: catalogVersionListResponseV2Schema },
+  getVersion: { params: catalogVersionParamsSchema, response: catalogVersionV2Schema },
+  createVersion: {
+    params: catalogMachineCodeParamsSchema,
+    body: catalogVersionCreateV2Schema,
+    response: catalogVersionV2Schema.refine((v) => v.status === "draft"),
+  },
+  updateVersion: {
+    params: catalogVersionParamsSchema,
+    body: catalogVersionPatchV2Schema,
+    response: catalogVersionV2Schema.refine((v) => v.status === "draft"),
+  },
+  publishVersion: {
+    params: catalogVersionParamsSchema,
+    body: commercialReviewIdentitySchema,
+    response: catalogVersionV2Schema.refine((v) => v.status === "published"),
+  },
+  retireVersion: {
+    params: catalogVersionParamsSchema,
+    response: catalogVersionV2Schema.refine((v) => v.status === "retired"),
+  },
+} as const;
+export type CatalogVersionV2 = z.output<typeof catalogVersionV2Schema>;
+export type CatalogVersionCreateV2 = z.output<typeof catalogVersionCreateV2Schema>;
+export type CatalogVersionPatchV2 = z.output<typeof catalogVersionPatchV2Schema>;

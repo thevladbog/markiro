@@ -34,7 +34,9 @@ class PairingViewModelTest {
         val gateway = object : PairingGateway {
             override suspend fun redeem(serverUrl: String, code: String) = redeem(serverUrl, code)
         }
-        return PairingViewModel(gateway, store, scans, initialServerUrl = "https://admin.markiro.app", serverEditable = false)
+        return main.track(
+            PairingViewModel(gateway, store, scans, initialServerUrl = "https://admin.markiro.app", serverEditable = false),
+        )
     }
 
     @Test

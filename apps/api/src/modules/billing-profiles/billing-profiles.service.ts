@@ -1,7 +1,11 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { billingContactSchema } from "@markiro/platform-contracts";
+import {
+  billingContactSchema,
+  sellerTaxPolicySchema,
+  type SellerTaxPolicy,
+} from "@markiro/platform-contracts";
 import type { ZodType } from "zod";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
@@ -40,9 +44,10 @@ export class BillingProfilesService {
 
   async setOperator(
     principal: PlatformPrincipal,
-    input: OperatorBillingProfileInput,
+    input: OperatorBillingProfileInput & { taxPolicy?: SellerTaxPolicy | null },
   ): Promise<OperatorBillingProfileRecord> {
     return this.db.transaction(async (tx) => {
+      await lockSellerPolicy(tx);
       const [current] = await tx
         .select()
         .from(schema.operatorBillingProfiles)
@@ -58,6 +63,10 @@ export class BillingProfilesService {
         .insert(schema.operatorBillingProfiles)
         .values({
           ...profileValues(input, principal.userId, current),
+          taxPolicy:
+            input.taxPolicy === undefined
+              ? (current?.taxPolicy ?? null)
+              : sellerTaxPolicySchema.nullable().parse(input.taxPolicy),
           revision: (current?.revision ?? 0) + 1,
           isCurrent: true,
         })
@@ -239,4 +248,30 @@ function parseContactField<T>(schema: ZodType<T>, value: unknown): T | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export type SellerPolicyTransaction = Parameters<Db["transaction"]>[0] extends (
+  arg: infer T,
+) => unknown
+  ? T
+  : never;
+/** Acquire before reading the current seller revision; also used by publication and issuance. */
+export async function lockSellerPolicy(tx: SellerPolicyTransaction): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended('commercial-seller-policy', 0))`,
+  );
+}
+export async function readSellerPolicy(tx: Pick<Db, "select">) {
+  const [seller] = await tx
+    .select({
+      revision: schema.operatorBillingProfiles.revision,
+      taxPolicy: schema.operatorBillingProfiles.taxPolicy,
+    })
+    .from(schema.operatorBillingProfiles)
+    .where(eq(schema.operatorBillingProfiles.isCurrent, true))
+    .limit(1);
+  return {
+    revision: seller?.revision ?? 0,
+    taxPolicy: sellerTaxPolicySchema.nullable().parse(seller?.taxPolicy ?? null),
+  };
 }

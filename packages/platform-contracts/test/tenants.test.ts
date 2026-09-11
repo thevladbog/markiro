@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { assignableCatalogResponseSchema, platformTenantContracts } from "../src/index.js";
+import {
+  assignableCatalogResponseSchema,
+  platformTenantContracts,
+  platformTenantV2Contracts,
+} from "../src/index.js";
 
 const LEGACY_TENANT_ID = "legacy_better_auth_org";
 const PLAN_VERSION_ID = "11111111-1111-4111-8111-111111111111";
@@ -236,5 +240,131 @@ describe("platform tenant contracts", () => {
       startsAt: "2026-08-11T18:08:42.158Z",
       endsAt: null,
     });
+  });
+});
+
+describe("nested commercial V2 tenant terms", () => {
+  const metadata = {
+    documentNameRu: null,
+    documentNameEn: null,
+    subject: null,
+    sellerPolicyRevision: null,
+  };
+  const subscription = {
+    id: SUBSCRIPTION_ID,
+    tenantId: LEGACY_TENANT_ID,
+    planVersionId: PLAN_VERSION_ID,
+    status: "active",
+    startsAt: "2026-08-11T18:08:42.158Z",
+    endsAt: null,
+    source: "manual",
+    createdByPlatformUserId: null,
+    createdAt: "2026-08-11T18:08:42.158Z",
+    updatedAt: "2026-08-11T18:08:42.158Z",
+    commercialPeriod: null,
+    planVersion: { ...planVersion, ...metadata },
+  };
+  const { entitlements: _entitlements, ...baseVersion } = planVersion;
+  void _entitlements;
+  const addon = {
+    id: "51111111-1111-4111-8111-111111111111",
+    subscriptionId: SUBSCRIPTION_ID,
+    addonVersionId: ADDON_VERSION_ID,
+    quantity: 2,
+    startsAt: "2026-08-11T18:08:42.158Z",
+    endsAt: null,
+    status: "active",
+    source: "manual",
+    commercialPeriod: null,
+    addonVersion: {
+      ...baseVersion,
+      ...metadata,
+      id: ADDON_VERSION_ID,
+      kind: "addon",
+      effects: [{ entitlementKey: "stations", quotaIncrement: 1, featureEnabled: false }],
+    },
+  };
+  const detail = {
+    tenant: {
+      id: LEGACY_TENANT_ID,
+      name: "Производство",
+      slug: "legacy-factory",
+      createdAt: "2026-08-11T18:08:42.158Z",
+    },
+    subscriptionStatus: "active",
+    ownerActivation: null,
+    currentSubscription: subscription,
+    scheduledSubscription: null,
+    activeAddons: [addon],
+    scheduledAddons: [],
+    usage: { cabinetUsers: 1, kiosks: 0, lines: 0, stations: 0 },
+    events: [],
+  };
+  const contract = platformTenantV2Contracts.detail.response;
+  it("preserves nullable historical metadata with valid recurring license terms", () => {
+    expect(contract.parse(detail)).toEqual(detail);
+    expect(
+      contract.safeParse({
+        ...detail,
+        currentSubscription: {
+          ...subscription,
+          planVersion: {
+            ...subscription.planVersion,
+            subject: "software_license",
+            billingPeriod: "year",
+          },
+        },
+        activeAddons: [
+          {
+            ...addon,
+            addonVersion: {
+              ...addon.addonVersion,
+              subject: "software_license",
+              billingPeriod: "year",
+            },
+          },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+  it.each([
+    { subject: "development_work" },
+    { subject: "service" },
+    { billingMode: "one_time" },
+    { billingPeriod: null },
+    { kind: "service" },
+  ])("rejects inconsistent nested plan conditions %j", (invalid) => {
+    expect(
+      contract.safeParse({
+        ...detail,
+        currentSubscription: {
+          ...subscription,
+          planVersion: { ...subscription.planVersion, ...invalid },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      contract.safeParse({
+        ...detail,
+        currentSubscription: null,
+        scheduledSubscription: {
+          ...subscription,
+          planVersion: { ...subscription.planVersion, ...invalid },
+        },
+      }).success,
+    ).toBe(false);
+  });
+  it.each([
+    { subject: "development_work" },
+    { subject: "service" },
+    { billingMode: "one_time" },
+    { billingPeriod: null },
+    { kind: "service" },
+  ])("rejects inconsistent nested addon conditions %j", (invalid) => {
+    const invalidAddon = { ...addon, addonVersion: { ...addon.addonVersion, ...invalid } };
+    expect(contract.safeParse({ ...detail, activeAddons: [invalidAddon] }).success).toBe(false);
+    expect(
+      contract.safeParse({ ...detail, activeAddons: [], scheduledAddons: [invalidAddon] }).success,
+    ).toBe(false);
   });
 });

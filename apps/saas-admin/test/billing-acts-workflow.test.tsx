@@ -52,6 +52,7 @@ const invoiceDetail = {
       tenantId: TENANT_ID,
       invoiceId: INVOICE_ID,
       position: 1,
+      commercialTerms: null,
       kind: "service",
       catalogVersionId: "11111111-1111-4111-8111-111111111111",
       catalogKind: "service",

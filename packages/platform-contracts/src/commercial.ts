@@ -1,3 +1,9 @@
+import {
+  commercialLineTermsSchema,
+  isCommercialPlanSequenceValid,
+  sellerTaxPolicySchema,
+  validateCommercialLineKind,
+} from "./commercial-terms.js";
 import { z } from "zod";
 
 import {
@@ -2044,3 +2050,155 @@ export type DadataSuggestionStatus = z.output<typeof dadataSuggestionStatusSchem
 export type DadataAddressSuggestion = z.output<typeof dadataAddressSuggestionSchema>;
 export type DadataOrganizationSuggestion = z.output<typeof dadataOrganizationSuggestionSchema>;
 export type DadataBankSuggestion = z.output<typeof dadataBankSuggestionSchema>;
+
+// V2 is opt-in; existing named contracts above retain the legacy wire shape.
+export const legacyOperatorBillingProfileInputSchema = operatorBillingProfileInputSchema;
+export const legacyOperatorBillingProfileSchema = operatorBillingProfileSchema.strict();
+export const operatorBillingProfileInputV2Schema = z.union(
+  currentBillingProfileInputSchema.options.map((option) =>
+    option.extend({ taxPolicy: sellerTaxPolicySchema.nullable().optional() }),
+  ),
+);
+export const operatorBillingProfileV2Schema = operatorBillingProfileSchema
+  .extend({ taxPolicy: sellerTaxPolicySchema.nullable() })
+  .strict();
+export const legacyOfferCreateSchema = offerCreateSchema;
+export const legacyOfferLineSchema = offerLineSchema;
+export const legacyOfferDetailSchema = offerDetailSchema;
+export const legacyInvoiceCreateSchema = invoiceCreateSchema;
+export const legacyInvoiceLineSchema = invoiceLineSchema;
+export const legacyInvoiceDetailSchema = invoiceDetailSchema;
+export const legacyPlatformCommercialContracts = platformCommercialContracts;
+export const offerCreateLineV2Schema = offerCreateLineSchema
+  .extend({ commercialTerms: commercialLineTermsSchema.nullable().optional() })
+  .superRefine(validateCommercialLineKind)
+  .refine((line) => line.kind !== "plan" || line.quantity === 1, {
+    path: ["quantity"],
+    message: "A plan line quantity must be one",
+  });
+export const invoiceCreateLineV2Schema = invoiceCreateLineSchema
+  .extend({ commercialTerms: commercialLineTermsSchema.nullable().optional() })
+  .superRefine(validateCommercialLineKind)
+  .refine((line) => line.kind !== "plan" || line.quantity === 1, {
+    path: ["quantity"],
+    message: "A plan line quantity must be one",
+  });
+export const offerCreateV2Schema = offerCreateSchema.extend({
+  lines: z.array(offerCreateLineV2Schema).min(1).max(100).refine(isCommercialPlanSequenceValid, {
+    message: "A sale supports one plan or two ordered plans: on_application then after_current",
+  }),
+});
+export const invoiceCreateV2Schema = z.union(
+  invoiceCreateSchema.options.map((option) =>
+    option.extend({
+      lines: z
+        .array(invoiceCreateLineV2Schema)
+        .min(1)
+        .max(100)
+        .refine(isCommercialPlanSequenceValid, {
+          message:
+            "A sale supports one plan or two ordered plans: on_application then after_current",
+        }),
+    }),
+  ),
+);
+export const offerLineV2Schema = z
+  .union(
+    offerLineSchema.options.map((option) =>
+      option.extend({ commercialTerms: commercialLineTermsSchema.nullable() }),
+    ),
+  )
+  .superRefine(validateCommercialLineKind);
+export const invoiceLineV2Schema = z
+  .union(
+    invoiceLineSchema.options.map((option) =>
+      option.extend({ commercialTerms: commercialLineTermsSchema.nullable() }),
+    ),
+  )
+  .superRefine(validateCommercialLineKind);
+export const offerDetailV2Schema = z.union(
+  offerDetailSchema.options.map((option) => option.extend({ lines: z.array(offerLineV2Schema) })),
+);
+export const invoiceDetailV2Schema = z
+  .union(
+    invoiceDetailSchema.options.map((option) =>
+      option.extend({ lines: z.array(invoiceLineV2Schema) }),
+    ),
+  )
+  .superRefine((invoice, ctx) => {
+    const legacy = invoiceDetailSchema.safeParse({
+      ...invoice,
+      lines: invoice.lines.map(({ commercialTerms: _terms, ...line }) => {
+        void _terms;
+        return line;
+      }),
+    });
+    if (!legacy.success)
+      for (const issue of legacy.error.issues)
+        ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
+  });
+export const offerServiceLineV2Schema = offerServiceLineSchema
+  .safeExtend({ commercialTerms: commercialLineTermsSchema.nullable() })
+  .superRefine(validateCommercialLineKind);
+export const offerServiceDetailV2Schema = offerServiceDetailSchema.extend({
+  lines: z.array(offerServiceLineV2Schema),
+});
+export const invoiceServiceLineV2Schema = invoiceServiceLineSchema
+  .safeExtend({ commercialTerms: commercialLineTermsSchema.nullable() })
+  .superRefine(validateCommercialLineKind);
+export const invoiceServiceDetailV2Schema = invoiceServiceDetailSchema.extend({
+  lines: z.array(invoiceServiceLineV2Schema),
+});
+export type OperatorBillingProfileV2 = z.output<typeof operatorBillingProfileV2Schema>;
+export type OperatorBillingProfileInputV2 = z.output<typeof operatorBillingProfileInputV2Schema>;
+export type CreateOfferV2 = z.output<typeof offerCreateV2Schema>;
+export type CreateInvoiceV2 = z.output<typeof invoiceCreateV2Schema>;
+export type OfferLineV2 = z.output<typeof offerLineV2Schema>;
+export type InvoiceLineV2 = z.output<typeof invoiceLineV2Schema>;
+export type OfferDetailV2 = z.output<typeof offerDetailV2Schema>;
+export type InvoiceDetailV2 = z.output<typeof invoiceDetailV2Schema>;
+
+export const platformBillingRequestOfferCreateV2Schema = offerCreateV2Schema
+  .omit({ tenantId: true })
+  .extend({ idempotencyKey: platformUuidSchema })
+  .strict();
+export const platformCommercialV2Contracts = {
+  ...platformCommercialContracts,
+  billingRequests: {
+    ...platformCommercialContracts.billingRequests,
+    createOffer: {
+      ...platformCommercialContracts.billingRequests.createOffer,
+      body: platformBillingRequestOfferCreateV2Schema,
+    },
+  },
+  billingProfiles: {
+    ...platformCommercialContracts.billingProfiles,
+    operator: {
+      get: { response: operatorBillingProfileV2Schema.nullable() },
+      set: { body: operatorBillingProfileInputV2Schema, response: operatorBillingProfileV2Schema },
+    },
+  },
+  offers: {
+    ...platformCommercialContracts.offers,
+    detail: { params: offerIdSchema, response: offerDetailV2Schema },
+    create: {
+      body: offerCreateV2Schema,
+      response: draftOfferDetailSchema.extend({ lines: z.array(offerLineV2Schema) }),
+    },
+    revise: { params: offerIdSchema, body: offerReviseSchema, response: offerDetailV2Schema },
+    publish: {
+      params: offerIdSchema,
+      body: platformCommercialContracts.offers.publish.body,
+      response: publishedOfferWithDocumentsSchema.extend({ lines: z.array(offerLineV2Schema) }),
+    },
+    cancel: {
+      params: offerIdSchema,
+      response: cancelledOfferDetailSchema.extend({ lines: z.array(offerLineV2Schema) }),
+    },
+  },
+  invoices: {
+    ...platformCommercialContracts.invoices,
+    detail: { params: invoiceIdSchema, response: invoiceDetailV2Schema },
+    create: { body: invoiceCreateV2Schema, response: draftInvoiceCreateResponseSchema },
+  },
+} as const;

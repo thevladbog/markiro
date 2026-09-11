@@ -8,21 +8,27 @@ import {
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
-  platformCatalogContracts,
+  platformCatalogV2Contracts as platformCatalogContracts,
+  catalogVersionCreateV2Schema,
+  type CommercialReviewIdentity,
+  type CatalogPublicationReview,
   type AddonEffect,
   type ArchiveCatalogItemResponse,
-  type CatalogVersion,
-  type CatalogVersionCreate,
-  type CatalogVersionListResponse,
-  type CatalogVersionPatch,
+  type CatalogVersionV2 as CatalogVersion,
+  type CatalogVersionCreateV2 as CatalogVersionCreate,
+  type CatalogVersionPatchV2 as CatalogVersionPatch,
   type DefaultDemoPlanResponse,
   type PlanEntitlements,
   type SetDefaultDemoPlan,
 } from "@markiro/platform-contracts";
+import { commercialTaxDefaults, isCommercialTaxAllowed } from "@markiro/domain";
+import { lockSellerPolicy, readSellerPolicy } from "../billing-profiles/billing-profiles.service";
+import { assertLegacyCommercialRepresentation } from "../../platform-http/commercial-version";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 
+type CatalogVersionListResponse = { items: CatalogVersion[] };
 type CatalogItemRow = typeof schema.catalogItems.$inferSelect;
 type CatalogVersionRow = typeof schema.catalogItemVersions.$inferSelect;
 type CatalogItemKind = CatalogItemRow["kind"];
@@ -86,7 +92,10 @@ export class PlatformCatalogService {
     principal: PlatformPrincipal,
     itemRef: string,
     input: CatalogVersionCreate,
+    legacy = false,
   ): Promise<CatalogVersion> {
+    input = catalogVersionCreateV2Schema.parse(input);
+    if (legacy) assertLegacyCommercialRepresentation(input);
     const kind = kindForInput(input);
     try {
       return await this.db.transaction(async (tx) => {
@@ -125,7 +134,11 @@ export class PlatformCatalogService {
             nameEn: input.nameEn,
             descriptionRu: input.descriptionRu ?? null,
             descriptionEn: input.descriptionEn ?? null,
-            unit: input.unit,
+            documentNameRu: input.documentNameRu ?? null,
+            documentNameEn: input.documentNameEn ?? null,
+            subject: input.subject ?? null,
+            sellerPolicyRevision: input.sellerPolicyRevision ?? null,
+            unit: input.billingMode === "recurring" ? input.billingPeriod : input.unit,
             billingMode: input.billingMode,
             billingPeriod: input.billingPeriod ?? null,
             unitPrice: input.unitPrice,
@@ -147,6 +160,7 @@ export class PlatformCatalogService {
     itemRef: string,
     versionId: string,
     input: CatalogVersionPatch,
+    legacy = false,
   ): Promise<CatalogVersion> {
     try {
       return await this.db.transaction(async (tx) => {
@@ -156,9 +170,33 @@ export class PlatformCatalogService {
         if (found.version.status !== "draft") {
           throw new ConflictException({ code: "catalog_version_immutable" });
         }
+        const currentDto = await this.toDto(found.item, found.version, true, tx);
+        if (legacy) assertLegacyCommercialRepresentation(currentDto);
         validateEffectForKind(found.item.kind, input);
-        const changes: Record<string, unknown> = { updatedAt: sql`now()` };
+        const merged = { ...currentDto, ...input };
+        const responseFields = new Set([
+          "id",
+          "catalogItemId",
+          "catalogItemCode",
+          "version",
+          "status",
+          "publishedAt",
+          "publishedByPlatformUserId",
+          "kind",
+        ]);
+        const candidate = Object.fromEntries(
+          Object.entries(merged).filter(([key]) => !responseFields.has(key)),
+        );
+        const parsed = catalogVersionCreateV2Schema.safeParse(candidate);
+        if (!parsed.success) throw new BadRequestException({ code: "catalog_version_invalid" });
+        const changes: Record<string, unknown> = {
+          updatedAt: sql`greatest(clock_timestamp(), date_trunc('milliseconds', updated_at) + interval '1 millisecond')`,
+        };
         copyDefined(changes, input, [
+          "documentNameRu",
+          "documentNameEn",
+          "subject",
+          "sellerPolicyRevision",
           "nameRu",
           "nameEn",
           "descriptionRu",
@@ -169,6 +207,7 @@ export class PlatformCatalogService {
           "unitPrice",
           "vatIncluded",
         ]);
+        if (found.item.kind !== "service") changes.unit = parsed.data.billingPeriod;
         if (input.vatRateBps !== undefined) changes.vatRate = toVatRate(input.vatRateBps);
         const [version] = await tx
           .update(schema.catalogItemVersions)
@@ -190,9 +229,16 @@ export class PlatformCatalogService {
     principal: PlatformPrincipal,
     itemRef: string,
     versionId: string,
+    identity?: CommercialReviewIdentity,
   ): Promise<CatalogVersion> {
+    if (!identity) throw new ConflictException({ code: "client_update_required" });
     try {
       return await this.db.transaction(async (tx) => {
+        await lockSellerPolicy(tx);
+        const item = await this.findItem(itemRef, tx);
+        if (!item) throw new NotFoundException({ code: "catalog_item_not_found" });
+        await this.lockItem(tx, item.id);
+        await this.lockVersion(tx, versionId);
         const found = await this.findVersion(itemRef, versionId, tx);
         if (!found) throw new NotFoundException({ code: "catalog_version_not_found" });
         if (found.item.status === "archived")
@@ -200,10 +246,20 @@ export class PlatformCatalogService {
         if (found.version.status !== "draft") {
           throw new ConflictException({ code: "catalog_version_immutable" });
         }
+        const review = await this.publicationReview(tx, found.item, found.version);
+        if (
+          identity.catalogVersionId !== review.identity.catalogVersionId ||
+          identity.draftUpdatedAt !== review.identity.draftUpdatedAt ||
+          identity.sellerPolicyRevision !== review.identity.sellerPolicyRevision
+        )
+          throw new ConflictException({ code: "commercial_review_stale" });
+        if (review.errors.length)
+          throw new BadRequestException({ code: "commercial_review_invalid" });
         await this.assertCompleteEffects(tx, found.version);
         const [version] = await tx
           .update(schema.catalogItemVersions)
           .set({
+            sellerPolicyRevision: review.identity.sellerPolicyRevision,
             status: "published",
             publishedAt: sql`now()`,
             publishedByPlatformUserId: principal.userId,
@@ -241,12 +297,17 @@ export class PlatformCatalogService {
     principal: PlatformPrincipal,
     itemRef: string,
     versionId: string,
+    legacy = false,
   ): Promise<CatalogVersion> {
     try {
       return await this.db.transaction(async (tx) => {
         await this.lockVersion(tx, versionId);
         const found = await this.findVersion(itemRef, versionId, tx);
         if (!found) throw new NotFoundException({ code: "catalog_version_not_found" });
+        if (legacy)
+          assertLegacyCommercialRepresentation(
+            await this.toDto(found.item, found.version, true, tx),
+          );
         if (found.version.status !== "published") {
           throw new ConflictException({ code: "catalog_version_not_published" });
         }
@@ -402,6 +463,67 @@ export class PlatformCatalogService {
     }
   }
 
+  async editorContext(principal: PlatformPrincipal) {
+    const seller = await readSellerPolicy(this.db);
+    return {
+      sellerPolicyRevision: seller.revision,
+      taxPolicy: seller.taxPolicy,
+      taxDefaults: seller.taxPolicy ? commercialTaxDefaults(seller.taxPolicy) : null,
+      canWrite: principal.capabilities.includes("catalog.write"),
+    };
+  }
+
+  async review(
+    _principal: PlatformPrincipal,
+    itemRef: string,
+    versionId: string,
+  ): Promise<CatalogPublicationReview> {
+    return this.db.transaction(async (tx) => {
+      await lockSellerPolicy(tx);
+      const item = await this.findItem(itemRef, tx);
+      if (!item) throw new NotFoundException({ code: "catalog_item_not_found" });
+      await this.lockItem(tx, item.id);
+      await this.lockVersion(tx, versionId);
+      const found = await this.findVersion(itemRef, versionId, tx);
+      if (!found) throw new NotFoundException({ code: "catalog_version_not_found" });
+      if (found.version.status !== "draft")
+        throw new ConflictException({ code: "catalog_version_immutable" });
+      return this.publicationReview(tx, found.item, found.version);
+    });
+  }
+
+  private async publicationReview(
+    tx: CatalogTransaction,
+    item: CatalogItemRow,
+    version: CatalogVersionRow,
+  ): Promise<CatalogPublicationReview> {
+    const seller = await readSellerPolicy(tx);
+    const errors: CatalogPublicationReview["errors"] = [];
+    if (!seller.taxPolicy)
+      errors.push({ code: "seller_tax_policy_unconfigured", path: "sellerPolicyRevision" });
+    if (!version.documentNameRu?.trim())
+      errors.push({ code: "document_name_required", path: "documentNameRu" });
+    if (!version.subject) errors.push({ code: "commercial_subject_required", path: "subject" });
+    if (
+      seller.taxPolicy &&
+      !isCommercialTaxAllowed(seller.taxPolicy, {
+        vatRateBps: version.vatRate === null ? null : Math.round(Number(version.vatRate) * 100),
+        vatIncluded: version.vatIncluded,
+      })
+    )
+      errors.push({ code: "seller_tax_policy_violation", path: "vatRateBps" });
+    // Strict DTO validation also rejects unknown effects and inconsistent stored kind/period.
+    await this.toDto(item, version, true, tx);
+    return {
+      identity: {
+        catalogVersionId: version.id,
+        draftUpdatedAt: version.updatedAt.toISOString(),
+        sellerPolicyRevision: seller.revision,
+      },
+      errors,
+    };
+  }
+
   private async findItem(
     itemRef: string,
     db: Pick<Db, "select"> = this.db,
@@ -543,6 +665,10 @@ export class PlatformCatalogService {
     db: Pick<Db, "select"> = this.db,
   ): Promise<CatalogVersion> {
     const common = {
+      documentNameRu: version.documentNameRu,
+      documentNameEn: version.documentNameEn,
+      subject: version.subject,
+      sellerPolicyRevision: version.sellerPolicyRevision,
       id: version.id,
       catalogItemId: item.id,
       catalogItemCode: item.code,

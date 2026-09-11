@@ -4,15 +4,15 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { test as base, expect } from "@playwright/test";
 import type { Route } from "@playwright/test";
-import type { PrintDocumentModel } from "../../../apps/api/src/modules/billing/print-document-model.js";
+import type { PrintDocumentModel } from "../../../apps/api/dist/modules/billing/print-document-model.js";
 import {
   commercialDocumentListItemSchema,
   offerPreviewSchema,
   offerRegistryQuerySchema,
   offerRegistrySchema,
-  offerWorkspaceSchema,
+  offerWorkspaceV2Schema,
   platformCapabilitiesForRole,
-  platformCommercialContracts,
+  platformCommercialV2Contracts as platformCommercialContracts,
   tenantListItemSchema,
 } from "../../../packages/platform-contracts/src/index.js";
 
@@ -126,7 +126,7 @@ function party(fullName: string, inn: string) {
   };
 }
 export function makeWorkspace() {
-  return offerWorkspaceSchema.parse({
+  return offerWorkspaceV2Schema.parse({
     offer: {
       id: ID,
       tenantId: tenant.id,
@@ -169,6 +169,7 @@ export function makeWorkspace() {
         priceOverrideReason: null,
         lineTotal: "6250.25",
         activationPolicy: null,
+        commercialTerms: null,
         createdAt: NOW,
       })),
     },
@@ -317,7 +318,7 @@ export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
           total: query.search === "missing" ? 0 : gallery ? galleryRows.length : 68,
         });
       } else if (url.pathname === `/api/platform/offers/${ID}/workspace` && method === "GET")
-        json = offerWorkspaceSchema.parse(fixture.workspace);
+        json = offerWorkspaceV2Schema.parse(fixture.workspace);
       else if (url.pathname === `/api/platform/offers/${ID}/preview` && method === "GET") {
         await fixture.preview.promise;
         json = offerPreviewSchema.parse({ html: previewHtml, fingerprint });

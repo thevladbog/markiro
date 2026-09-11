@@ -156,6 +156,16 @@ function SubscriptionCard({
         />
       </div>
       <dl className="tenant-facts">
+        {subscription.commercialPeriod ? (
+          <div>
+            <dt>{t("commercial.purchasedPeriod")}</dt>
+            <dd>
+              {t(`catalog.units.${subscription.commercialPeriod.billingPeriod}`)} ·{" "}
+              {formatDate(subscription.commercialPeriod.startsAt, language)} —{" "}
+              {formatDate(subscription.commercialPeriod.endsAt, language)}
+            </dd>
+          </div>
+        ) : null}
         <div>
           <dt>{t("tenants.detail.subscription.source")}</dt>
           <dd>{t(`tenants.sources.${subscription.source}`)}</dd>
@@ -209,6 +219,7 @@ function AddonList({
                   label={t(`tenants.addonStatus.${addon.status}`)}
                 />
                 <span>
+                  {addon.commercialPeriod ? `${t("commercial.purchasedPeriod")}: ` : ""}
                   {formatDate(addon.startsAt, language)} — {formatDate(addon.endsAt, language)}
                 </span>
                 <span>{t(`tenants.sources.${addon.source}`)}</span>

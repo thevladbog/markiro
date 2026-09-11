@@ -149,8 +149,8 @@
     <string name="shifts_join_other_text">%1$s · %2$s. Your line: %3$s.</string>
     <string name="shifts_enter">Enter</string>
     <string name="shifts_entering">Entering the shift…</string>
-    <string name="shifts_update_required_title">This shift requires printing a Data Matrix duplicate</string>
-    <string name="shifts_update_required_text">Duplicate printing is not available on the handheld yet. Use a station or change the shift policy in the cabinet.</string>
+    <string name="shifts_update_required_title">This shift needs a newer handheld</string>
+    <string name="shifts_update_required_text">It requires a capability this build does not have. Update the app, use a station, or change the shift policy in the cabinet.</string>
     <string name="shifts_closed_title">The shift is already closed</string>
     <string name="shifts_closed_text">The list has been refreshed.</string>
     <string name="shifts_status_planned">planned</string>
@@ -379,4 +379,30 @@
     <string name="label_queue_unknown_skipped">Skipped: the result is unknown</string>
     <string name="label_queue_deferred">Set aside</string>
     <string name="label_queue_resolve">The label printed</string>
+
+    <!-- Duplicate Data Matrix printing -->
+    <string name="duplicate_failed_title">The duplicate did not print</string>
+    <string name="duplicate_unknown_title">Unclear whether the duplicate came out</string>
+    <string name="duplicate_unknown_scan_hint">Look at the printer. If a label came out, scan it and the unit is done.</string>
+    <string name="duplicate_unknown_cause">Reason: %1$s</string>
+    <string name="duplicate_rejected_title">Verification failed</string>
+    <string name="duplicate_rejected_mismatch">That is another unit\'s code. Scan the label that just came out.</string>
+    <string name="duplicate_rejected_invalid">The code will not read. Try again or reprint.</string>
+    <string name="duplicate_retry">Print again</string>
+    <string name="duplicate_scan_again">Scan again</string>
+    <string name="duplicate_dismiss">Dismiss</string>
+    <string name="duplicate_reprint_not_printed">Reprint: never printed</string>
+    <string name="duplicate_reprint_damaged">Reprint: damaged</string>
+    <string name="duplicate_reprint_lost">Reprint: lost</string>
+    <string name="duplicate_reason_printer_changed">The printer changed after the label was prepared</string>
+    <string name="duplicate_reason_code_incomplete">The code has no crypto tail, so it cannot be duplicated</string>
+    <string name="duplicate_reason_bytes_gone">The shift is closed; there is nothing left to reprint</string>
+    <string name="duplicate_reason_attempt_in_flight">Still printing</string>
+    <string name="duplicate_reason_policy_incomplete">The shift carries no template snapshot; refresh it in the cabinet</string>
+    <string name="duplicate_unprepared_hint">The unit is accepted and will reach the server. Print its label once the cause is cleared.</string>
+    <string name="duplicate_printing">Printing the duplicate…</string>
+    <string name="duplicate_awaiting_verification">Scan the label that came out</string>
+    <string name="duplicate_busy">A duplicate is printing</string>
+    <string name="duplicate_blocked">Deal with the duplicate first</string>
+    <string name="work_close_duplicates_outstanding">%1$d duplicate(s) unresolved. The shift will close and the events still sync.</string>
 </resources>

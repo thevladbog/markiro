@@ -3,6 +3,7 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDb, schema } from "@markiro/db";
+import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -191,8 +192,23 @@ describe.skipIf(!databaseUrl)("stale commercial family after a real 0094 to 0096
       response: { code: "offer_version_stale" },
       status: 409,
     });
-    const sourceInvoice = await billing.create(actor, invoiceInput(currentOfferId));
-    expect(sourceInvoice).toMatchObject({ sourceOfferId: currentOfferId });
+    // Historical empty offers cannot be silently reinterpreted as a new whole-offer sale.
+    await expect(billing.create(actor, invoiceInput(currentOfferId))).rejects.toMatchObject({
+      response: { code: "offer_invoice_lines_mismatch" },
+      status: 409,
+    });
+    expect(
+      await connection.db
+        .select()
+        .from(schema.commercialOfferLines)
+        .where(eq(schema.commercialOfferLines.offerId, currentOfferId)),
+    ).toEqual([]);
+    expect(
+      await connection.db
+        .select()
+        .from(schema.invoices)
+        .where(eq(schema.invoices.sourceOfferId, currentOfferId)),
+    ).toEqual([]);
     await expect(
       platformOffers.pay(actor, currentOfferId, randomUUID(), {
         amount: "200.00",
