@@ -17,6 +17,8 @@ class ShiftCloser(private val db: HandheldDatabase, private val clock: () -> Lon
         val plan: Int?,
         val reasonRequired: Boolean,
         val alreadyClosed: Boolean,
+        /** Duplicate labels still unresolved. Closing warns about them; it never waits. */
+        val outstandingDuplicates: Int = 0,
     )
 
     suspend fun preview(shiftId: String): Preview? {
@@ -31,6 +33,7 @@ class ShiftCloser(private val db: HandheldDatabase, private val clock: () -> Lon
             plan = shift.plannedQty,
             reasonRequired = reasonRequired(shift.plannedQty, accepted),
             alreadyClosed = db.shiftCloseDao().forShift(shiftId) != null,
+            outstandingDuplicates = db.productLabelJobDao().outstandingCount(shiftId),
         )
     }
 

@@ -63,10 +63,19 @@ fun CloseScreen(step: CloseStep, cb: CloseCallbacks) {
             CloseStep.Loading -> FullScreenState(Icons.Outlined.Sync, "", "", tone = Tone.Info)
             is CloseStep.Confirm -> {
                 AppBar(stringResource(R.string.work_close), cb.onCancel)
+                // An unresolved duplicate is said out loud and closes anyway.
+                // Blocking a shift close on a printer would stop a line over a
+                // sticker; the events still sync afterwards.
+                val text = stringResource(R.string.close_confirm_text, step.preview.accepted, step.preview.errors, step.preview.duplicates) +
+                    if (step.preview.outstandingDuplicates > 0) {
+                        "\n\n" + stringResource(R.string.work_close_duplicates_outstanding, step.preview.outstandingDuplicates)
+                    } else {
+                        ""
+                    }
                 FullScreenState(
                     Icons.Outlined.Factory,
                     stringResource(R.string.close_confirm_title),
-                    stringResource(R.string.close_confirm_text, step.preview.accepted, step.preview.errors, step.preview.duplicates),
+                    text,
                     primary = StateAction(stringResource(R.string.close_action), cb.onConfirm),
                     secondary = StateAction(stringResource(R.string.common_cancel), cb.onCancel),
                 )

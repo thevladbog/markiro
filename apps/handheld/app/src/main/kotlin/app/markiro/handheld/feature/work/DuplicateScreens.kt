@@ -1,0 +1,158 @@
+package app.markiro.handheld.feature.work
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import app.markiro.handheld.R
+import app.markiro.handheld.core.design.MarkiroSizes
+import app.markiro.handheld.core.design.MarkiroTextButton
+import app.markiro.handheld.core.design.MarkiroTheme
+import app.markiro.handheld.core.design.PrimaryButton
+import app.markiro.handheld.core.design.SecondaryButton
+import app.markiro.handheld.core.design.Tone
+import app.markiro.handheld.core.design.tone
+import app.markiro.handheld.core.duplicate.DuplicateReason
+import app.markiro.handheld.core.duplicate.ReprintReason
+
+/**
+ * The full-screen states a duplicate gets, and only these three.
+ *
+ * A duplicate prints on EVERY unit, not every twentieth, so the ordinary path
+ * stays in the last-scan zone and nothing takes over the screen. These are the
+ * three where the line has stopped anyway and a person has to decide.
+ */
+sealed interface DuplicateStep {
+    data object Idle : DuplicateStep
+
+    /** Nothing was printed and we know why. */
+    data class Failed(val jobId: String, val reason: String) : DuplicateStep
+
+    /** The bytes may or may not have reached the printer. */
+    data class Unknown(val jobId: String, val cause: String) : DuplicateStep
+
+    /** The scanned sticker was not this unit's, or would not read. */
+    data class Rejected(val jobId: String, val mismatch: Boolean) : DuplicateStep
+
+    fun jobId(): String? = when (this) {
+        is Failed -> jobId
+        is Unknown -> jobId
+        is Rejected -> jobId
+        Idle -> null
+    }
+}
+
+data class DuplicateCallbacks(
+    val onRetry: () -> Unit = {},
+    val onReprint: (String) -> Unit = {},
+    val onScanAgain: () -> Unit = {},
+    val onDismiss: () -> Unit = {},
+)
+
+/** The operator-facing name for a duplicate failure. Never a raw code. */
+fun duplicateReasonLabel(reason: String): Int = when (reason) {
+    DuplicateReason.NO_PAPER -> R.string.print_reason_no_paper
+    DuplicateReason.HEAD_OPEN -> R.string.print_reason_head_open
+    DuplicateReason.UNREACHABLE -> R.string.print_reason_unreachable
+    DuplicateReason.TRANSPORT_FAILED -> R.string.print_reason_transport_failed
+    DuplicateReason.PRINTER_UNCONFIGURED -> R.string.print_reason_printer_unconfigured
+    DuplicateReason.PRINTER_CHANGED -> R.string.duplicate_reason_printer_changed
+    DuplicateReason.TEMPLATE_MISSING -> R.string.print_reason_template_missing
+    DuplicateReason.TEMPLATE_INVALID -> R.string.print_reason_template_invalid
+    DuplicateReason.RENDER_FAILED -> R.string.print_reason_render_failed
+    DuplicateReason.CODE_INCOMPLETE -> R.string.duplicate_reason_code_incomplete
+    DuplicateReason.BYTES_GONE -> R.string.duplicate_reason_bytes_gone
+    DuplicateReason.ATTEMPT_IN_FLIGHT -> R.string.duplicate_reason_attempt_in_flight
+    else -> R.string.print_reason_other
+}
+
+@Composable
+fun DuplicateScreen(step: DuplicateStep, cb: DuplicateCallbacks) {
+    val c = MarkiroTheme.colors
+    val t = MarkiroTheme.type
+    val tone = c.tone(if (step is DuplicateStep.Failed) Tone.Err else Tone.Warn)
+    Column(
+        Modifier.fillMaxSize().background(tone.bg).padding(MarkiroSizes.sp4),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        when (step) {
+            DuplicateStep.Idle -> Unit
+
+            is DuplicateStep.Failed -> {
+                Text(stringResource(R.string.duplicate_failed_title), style = t.title, color = tone.fg, textAlign = TextAlign.Center)
+                Text(
+                    stringResource(duplicateReasonLabel(step.reason)),
+                    style = t.strong,
+                    color = c.fg1,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = MarkiroSizes.sp2),
+                )
+                Spacer(Modifier.padding(MarkiroSizes.sp2))
+                PrimaryButton(stringResource(R.string.duplicate_retry), cb.onRetry)
+                ReprintReasons(cb)
+            }
+
+            is DuplicateStep.Unknown -> {
+                Text(stringResource(R.string.duplicate_unknown_title), style = t.title, color = tone.fg, textAlign = TextAlign.Center)
+                // The scan leads, not the reprint. Under a `none` policy this is
+                // the only place a verification scan is ever offered, so the
+                // screen has to say what the trigger pull will do.
+                Text(
+                    stringResource(R.string.duplicate_unknown_scan_hint),
+                    style = t.strong,
+                    color = c.fg1,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = MarkiroSizes.sp2),
+                )
+                Text(
+                    stringResource(R.string.duplicate_unknown_cause, step.cause),
+                    style = t.caption,
+                    color = c.fg2,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = MarkiroSizes.sp1),
+                )
+                Spacer(Modifier.padding(MarkiroSizes.sp2))
+                ReprintReasons(cb)
+            }
+
+            is DuplicateStep.Rejected -> {
+                Text(stringResource(R.string.duplicate_rejected_title), style = t.title, color = tone.fg, textAlign = TextAlign.Center)
+                Text(
+                    stringResource(
+                        if (step.mismatch) R.string.duplicate_rejected_mismatch else R.string.duplicate_rejected_invalid,
+                    ),
+                    style = t.strong,
+                    color = c.fg1,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = MarkiroSizes.sp2),
+                )
+                Spacer(Modifier.padding(MarkiroSizes.sp2))
+                PrimaryButton(stringResource(R.string.duplicate_scan_again), cb.onScanAgain)
+                ReprintReasons(cb)
+            }
+        }
+        Spacer(Modifier.padding(MarkiroSizes.sp1))
+        MarkiroTextButton(stringResource(R.string.duplicate_dismiss), cb.onDismiss)
+    }
+}
+
+/** Three reasons, because the cabinet tells them apart and an operator can too. */
+@Composable
+private fun ReprintReasons(cb: DuplicateCallbacks) {
+    Column(Modifier.fillMaxWidth().padding(top = MarkiroSizes.sp2), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SecondaryButton(stringResource(R.string.duplicate_reprint_not_printed), { cb.onReprint(ReprintReason.NOT_PRINTED) })
+        SecondaryButton(stringResource(R.string.duplicate_reprint_damaged), { cb.onReprint(ReprintReason.DAMAGED) })
+        SecondaryButton(stringResource(R.string.duplicate_reprint_lost), { cb.onReprint(ReprintReason.LOST) })
+    }
+}

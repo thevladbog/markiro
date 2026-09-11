@@ -51,6 +51,10 @@ interface ProductLabelJobDao {
     )
     suspend fun purgeSettled(shiftId: String)
 
+    /** What the close screen warns about; it never blocks on them. */
+    @Query("SELECT COUNT(*) FROM product_label_jobs WHERE shiftId = :shiftId AND status <> 'completed'")
+    suspend fun outstandingCount(shiftId: String): Int
+
     @Query("DELETE FROM product_label_jobs")
     suspend fun clear()
 }

@@ -71,6 +71,9 @@ import app.markiro.handheld.feature.work.ConflictsViewModel
 import app.markiro.handheld.feature.work.BoxCloseCallbacks
 import app.markiro.handheld.feature.work.BoxCloseScreen
 import app.markiro.handheld.feature.work.BoxCloseStep
+import app.markiro.handheld.feature.work.DuplicateCallbacks
+import app.markiro.handheld.feature.work.DuplicateScreen
+import app.markiro.handheld.feature.work.DuplicateStep
 import app.markiro.handheld.feature.work.LabelQueueCallbacks
 import app.markiro.handheld.feature.work.LabelQueueScreen
 import app.markiro.handheld.feature.work.LabelQueueViewModel
@@ -229,6 +232,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                 val vm: WorkViewModel = hiltViewModel()
                 val state by vm.state.collectAsStateWithLifecycle()
                 val closeStep by vm.closeStep.collectAsStateWithLifecycle()
+                val duplicateStep by vm.duplicateStep.collectAsStateWithLifecycle()
                 val shiftId = entry.arguments?.getString("shiftId").orEmpty()
                 WorkScreen(
                     state,
@@ -257,6 +261,20 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                             onDefer = vm::deferLabel,
                             onConfirmPrinted = vm::confirmPrinted,
                             onDismiss = vm::dismissClose,
+                        ),
+                    )
+                }
+                // Only the three states where a person has to decide. The ordinary
+                // path stays in the last-scan zone, because a duplicate prints on
+                // every unit and a takeover per scan would be unusable.
+                if (duplicateStep != DuplicateStep.Idle) {
+                    DuplicateScreen(
+                        duplicateStep,
+                        DuplicateCallbacks(
+                            onRetry = vm::retryDuplicate,
+                            onReprint = vm::reprintDuplicate,
+                            onScanAgain = vm::dismissDuplicate,
+                            onDismiss = vm::dismissDuplicate,
                         ),
                     )
                 }

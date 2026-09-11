@@ -9,6 +9,12 @@ import app.markiro.handheld.core.box.BoxRepository
 import app.markiro.handheld.core.box.CloseBox
 import app.markiro.handheld.core.box.CloseResult
 import app.markiro.handheld.core.box.PrintOutcome
+import app.markiro.handheld.core.duplicate.DuplicateJobs
+import app.markiro.handheld.core.duplicate.DuplicateMatch
+import app.markiro.handheld.core.duplicate.DuplicateOutcome
+import app.markiro.handheld.core.duplicate.DuplicateSend
+import app.markiro.handheld.core.duplicate.JobStatus
+import app.markiro.handheld.core.duplicate.Verification
 import app.markiro.handheld.core.km.Verdict
 import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.scan.ScanEvents
@@ -19,6 +25,7 @@ import app.markiro.handheld.core.signal.Signaller
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.ScanEventEntity
 import app.markiro.handheld.core.storage.ShiftEntity
+import app.markiro.handheld.core.util.Iso
 import app.markiro.handheld.core.sync.SyncEngine
 import app.markiro.handheld.core.sync.SyncState
 import app.markiro.handheld.feature.shift.ShiftRepository
@@ -92,7 +99,21 @@ data class WorkUi(
     val box: BoxUi? = null,
     /** Closed boxes on this device whose label is not resolved, across every shift. */
     val unprintedLabels: Int = 0,
+    /** Present only in a shift whose validation policy prints a duplicate. */
+    val duplicate: DuplicateUi? = null,
 )
+
+/**
+ * The duplicate's progress, in the last-scan zone rather than over the screen: a
+ * duplicate prints on EVERY unit, so a full-screen state per scan would be
+ * unusable. `awaitingVerification` is the one an operator cannot guess -- without
+ * it they scan the next product, are told it is the wrong code, and have no idea
+ * why.
+ */
+data class DuplicateUi(val printing: Boolean, val awaitingVerification: Boolean)
+
+/** Shown instead of a code tail when a scan was refused rather than read. */
+private const val BLOCKED_TAIL = "—"
 
 private const val REACHABLE_WINDOW_MS = 2 * 60 * 1000L
 private const val TEAM_REFRESH_MS = 60_000L
@@ -112,6 +133,7 @@ class WorkViewModel(
     private val boxes: BoxRepository,
     private val closer: CloseBox,
     private val boxPrinter: BoxPrinter,
+    private val duplicates: DuplicateJobs,
     /** One tick per team refresh; tests pass a single tick so virtual time never loops. */
     private val teamTicks: Flow<Unit> = flow {
         while (true) {
@@ -135,9 +157,10 @@ class WorkViewModel(
         boxes: BoxRepository,
         closer: CloseBox,
         boxPrinter: BoxPrinter,
+        duplicates: DuplicateJobs,
     ) : this(
         handle, db, recorder, scans, { signaller.play(it) }, sync, session, reachability, team, repository,
-        boxes, closer, boxPrinter,
+        boxes, closer, boxPrinter, duplicates,
     )
 
     val shiftId: String = checkNotNull(handle["shiftId"])
@@ -149,6 +172,10 @@ class WorkViewModel(
 
     private val _closeStep = MutableStateFlow<BoxCloseStep>(BoxCloseStep.Idle)
     val closeStep: StateFlow<BoxCloseStep> = _closeStep
+
+    private val _duplicateStep = MutableStateFlow<DuplicateStep>(DuplicateStep.Idle)
+    val duplicateStep: StateFlow<DuplicateStep> = _duplicateStep
+    private val duplicateUi = MutableStateFlow<DuplicateUi?>(null)
 
     private data class Counters(val mine: Int, val errors: Int, val duplicates: Int)
 
@@ -170,6 +197,7 @@ class WorkViewModel(
         session.state,
         boxUi,
         boxes.observeUnprintedCount(),
+        duplicateUi,
     ) { values ->
         val shift = values[0] as ShiftEntity?
         val c = values[2] as Counters
@@ -192,6 +220,7 @@ class WorkViewModel(
             operatorId = operator?.operatorId,
             box = values[8] as BoxUi?,
             unprintedLabels = values[9] as Int,
+            duplicate = values[10] as DuplicateUi?,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, WorkUi(null, null, 0, null, 0, 0, 0, emptyList(), SyncState(), false, null))
 
@@ -200,6 +229,14 @@ class WorkViewModel(
         // the first scan means the operator meets the validation layout and the
         // grid appears from nowhere.
         viewModelScope.launch { showCurrentBox() }
+        // A send the app died inside is unknown, never resumed. Emitting the
+        // event is an obligation: the domain accepts only `sent` or
+        // `delivery_unknown` out of `sending`, so a job left there across a
+        // restart would be frozen -- no reprint, no verification, nothing.
+        viewModelScope.launch {
+            duplicates.demoteInterrupted()
+            refreshDuplicate()
+        }
         // Each scan is handled inside its own guard. A failure on one -- a print
         // that throws, a template that will not render -- must not take the
         // collector down with it: the app would keep looking alive while silently
@@ -223,6 +260,10 @@ class WorkViewModel(
     private suspend fun onScan(raw: String) {
         val shift = db.shiftDao().get(shiftId) ?: return
         if (shift.productGtin14 == null || shift.status == "closed") return
+        // In a duplicate shift the open job decides what this scan IS, before
+        // anything else looks at it. Getting this wrong means an operator scans
+        // a sticker and the app counts it as a new unit.
+        if (shift.validationPrintMode == "duplicate_dm" && routeDuplicateScan(raw)) return
         // A scan arriving while the close screen is up belongs to the NEXT box, and
         // `currentBox` gives it exactly that: the closed row is no longer open. It
         // is deliberately not dropped -- an operator whose unit vanished with no
@@ -242,6 +283,11 @@ class WorkViewModel(
             return
         }
         signals.play(Signaller.forVerdict(outcome.verdict))
+        // Only an ACCEPTED unit gets a label. A duplicate of a code this device
+        // already holds would put a second sticker on one physical item.
+        if (shift.validationPrintMode == "duplicate_dm" && outcome.verdict == Verdict.OK) {
+            printDuplicate(shift, raw)
+        }
     }
 
     private suspend fun refreshBox(boxId: String, capacity: Int) {
@@ -350,6 +396,139 @@ class WorkViewModel(
         firstSeenAt = firstSeenAt,
         at = scannedAt,
     )
+
+    /**
+     * Reads a scan against the open job, and reports whether it was consumed.
+     *
+     * | Open job                        | The scan is             |
+     * | ------------------------------- | ----------------------- |
+     * | none, or the last one completed | a new unit (false)      |
+     * | prepared or sending             | refused -- «идёт печать» |
+     * | awaiting_verification           | the verification        |
+     * | delivery_unknown                | the verification        |
+     * | failed_before_send              | refused -- reprint or fix |
+     *
+     * A refusal is a verdict with its own words and the error signal, never a
+     * silently dropped scan: an operator whose unit vanished with no sound and
+     * no count has no way to know it needs scanning again.
+     */
+    private suspend fun routeDuplicateScan(raw: String): Boolean {
+        val job = duplicates.openJob(shiftId) ?: return false
+        return when (job.status) {
+            JobStatus.PREPARED, JobStatus.SENDING -> {
+                last.value = LastScan(Verdict.INVALID, BLOCKED_TAIL, null, Iso.format(System.currentTimeMillis()))
+                signals.play(SignalKind.ERROR)
+                true
+            }
+            JobStatus.AWAITING_VERIFICATION -> {
+                verifyScan(job.jobId, raw)
+                true
+            }
+            JobStatus.ATTENTION -> {
+                // Only an unknown delivery is answerable by looking at the
+                // printer. Nothing was printed in the other case, so there is
+                // nothing to scan.
+                if (job.attemptState == app.markiro.handheld.core.duplicate.AttemptState.DELIVERY_UNKNOWN) {
+                    verifyScan(job.jobId, raw)
+                } else {
+                    last.value = LastScan(Verdict.INVALID, BLOCKED_TAIL, null, Iso.format(System.currentTimeMillis()))
+                    signals.play(SignalKind.ERROR)
+                }
+                true
+            }
+            else -> false
+        }
+    }
+
+    private suspend fun verifyScan(jobId: String, raw: String) {
+        when (duplicates.verify(jobId, raw)) {
+            DuplicateMatch.MATCH -> {
+                _duplicateStep.value = DuplicateStep.Idle
+                signals.play(SignalKind.OK)
+            }
+            // A rejected verification means to the operator what an error means:
+            // that scan did not count, do it again. No new signal for it.
+            DuplicateMatch.MISMATCH -> {
+                _duplicateStep.value = DuplicateStep.Rejected(jobId, mismatch = true)
+                signals.play(SignalKind.ERROR)
+            }
+            DuplicateMatch.INVALID -> {
+                _duplicateStep.value = DuplicateStep.Rejected(jobId, mismatch = false)
+                signals.play(SignalKind.ERROR)
+            }
+        }
+        refreshDuplicate()
+        sync.nudge()
+    }
+
+    /** Prepares and sends this unit's duplicate; the screen only opens if it goes wrong. */
+    private suspend fun printDuplicate(shift: ShiftEntity, raw: String) {
+        duplicateUi.value = DuplicateUi(printing = true, awaitingVerification = false)
+        val operator = session.state.value.operator
+        val hash = app.markiro.handheld.core.km.KmCodec.hash(app.markiro.handheld.core.km.KmCodec.canonicalize(raw))
+        when (val prepared = duplicates.accept(shift, raw, hash, operator?.operatorId.orEmpty(), operator?.name)) {
+            is DuplicateOutcome.Refused -> {
+                _duplicateStep.value = DuplicateStep.Failed("", prepared.reason)
+                refreshDuplicate()
+                return
+            }
+            is DuplicateOutcome.Prepared -> when (val sent = duplicates.send(prepared.jobId)) {
+                DuplicateSend.Sent -> _duplicateStep.value = DuplicateStep.Idle
+                is DuplicateSend.Failed -> _duplicateStep.value = DuplicateStep.Failed(prepared.jobId, sent.reason)
+                is DuplicateSend.Unknown -> _duplicateStep.value = DuplicateStep.Unknown(prepared.jobId, sent.cause)
+            }
+        }
+        refreshDuplicate()
+        sync.nudge()
+    }
+
+    private suspend fun refreshDuplicate() {
+        val job = duplicates.openJob(shiftId)
+        duplicateUi.value = DuplicateUi(
+            printing = job?.status == JobStatus.PREPARED || job?.status == JobStatus.SENDING,
+            awaitingVerification = job?.status == JobStatus.AWAITING_VERIFICATION ||
+                job?.attemptState == app.markiro.handheld.core.duplicate.AttemptState.DELIVERY_UNKNOWN,
+        )
+    }
+
+    /** An explicit second send, chosen by a person who has looked at the printer. */
+    fun retryDuplicate() {
+        val jobId = _duplicateStep.value.jobId()?.takeIf { it.isNotEmpty() } ?: return
+        viewModelScope.launch {
+            _duplicateStep.value = DuplicateStep.Idle
+            when (val sent = duplicates.send(jobId)) {
+                DuplicateSend.Sent -> Unit
+                is DuplicateSend.Failed -> _duplicateStep.value = DuplicateStep.Failed(jobId, sent.reason)
+                is DuplicateSend.Unknown -> _duplicateStep.value = DuplicateStep.Unknown(jobId, sent.cause)
+            }
+            refreshDuplicate()
+            sync.nudge()
+        }
+    }
+
+    fun reprintDuplicate(reason: String) {
+        val jobId = _duplicateStep.value.jobId()?.takeIf { it.isNotEmpty() } ?: return
+        viewModelScope.launch {
+            when (val outcome = duplicates.reprint(jobId, reason)) {
+                is DuplicateOutcome.Refused -> _duplicateStep.value = DuplicateStep.Failed(jobId, outcome.reason)
+                is DuplicateOutcome.Prepared -> {
+                    _duplicateStep.value = DuplicateStep.Idle
+                    when (val sent = duplicates.send(jobId)) {
+                        DuplicateSend.Sent -> Unit
+                        is DuplicateSend.Failed -> _duplicateStep.value = DuplicateStep.Failed(jobId, sent.reason)
+                        is DuplicateSend.Unknown -> _duplicateStep.value = DuplicateStep.Unknown(jobId, sent.cause)
+                    }
+                }
+            }
+            refreshDuplicate()
+            sync.nudge()
+        }
+    }
+
+    /** Closes the screen without settling anything; the job stays outstanding. */
+    fun dismissDuplicate() {
+        _duplicateStep.value = DuplicateStep.Idle
+    }
 
     fun leave() {
         viewModelScope.launch { repository?.leave(shiftId) }
