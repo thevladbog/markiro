@@ -148,6 +148,91 @@ const nullableStableFieldValueOpenApiSchema: SchemaObject = {
   oneOf: [{ type: "string" }, { type: "integer", minimum: 1 }, nullOpenApiSchema],
 };
 
+const attributeConditionOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["attributeId", "operator", "value"],
+  properties: {
+    attributeId: { type: "string" },
+    operator: { type: "string", enum: ["equals", "includes"] },
+    value: { oneOf: [{ type: "string" }, { type: "boolean" }] },
+  },
+};
+
+const categorySchemaDefinitionOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["formatVersion", "categoryId", "scopeKey", "attributes"],
+  properties: {
+    formatVersion: { type: "integer", enum: [2] },
+    categoryId: { type: "string" },
+    scopeKey: { type: "string" },
+    attributes: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "label",
+          "valueType",
+          "multiplicity",
+          "unit",
+          "requirementRules",
+          "presetMode",
+          "presets",
+        ],
+        properties: {
+          id: { type: "string" },
+          label: { type: "string" },
+          valueType: {
+            type: "string",
+            enum: ["string", "string_list", "decimal", "boolean", "date", "enum", "enum_list"],
+          },
+          multiplicity: { type: "string", enum: ["one", "many"] },
+          unit: {
+            oneOf: [
+              {
+                type: "object",
+                additionalProperties: false,
+                required: ["canonical", "allowed"],
+                properties: {
+                  canonical: { type: "string" },
+                  allowed: { type: "array", minItems: 1, items: { type: "string" } },
+                },
+              },
+              nullOpenApiSchema,
+            ],
+          },
+          requirementRules: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["layer", "level", "when"],
+              properties: {
+                layer: { type: "string", enum: ["code_ordering", "circulation"] },
+                level: { type: "string", enum: ["mandatory", "recommended", "optional"] },
+                when: { oneOf: [attributeConditionOpenApiSchema, nullOpenApiSchema] },
+              },
+            },
+          },
+          presetMode: { type: "string", enum: ["none", "suggested", "restricted"] },
+          presets: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["value", "label"],
+              properties: { value: { type: "string" }, label: { type: "string" } },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
 export const productReadinessOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -177,7 +262,7 @@ export const productReadinessOpenApiSchema: SchemaObject = {
 export const regulatoryProfileOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["productId", "binding", "values", "egaisCodes", "pendingProposalCount"],
+  required: ["productId", "binding", "definition", "values", "egaisCodes", "pendingProposalCount"],
   properties: {
     productId: { type: "string", format: "uuid" },
     binding: {
@@ -201,6 +286,7 @@ export const regulatoryProfileOpenApiSchema: SchemaObject = {
         updatedAt: { type: "string", format: "date-time" },
       },
     },
+    definition: { oneOf: [categorySchemaDefinitionOpenApiSchema, nullOpenApiSchema] },
     values: {
       type: "array",
       items: {

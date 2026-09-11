@@ -637,7 +637,6 @@ describe("CatalogPage", () => {
             boxCapacity: null,
             palletCapacity: null,
             unitPrice: null,
-            egaisCode: null,
             shelfLifeDays: null,
             defaultCounterpartyId: "cp1",
           }),
@@ -829,7 +828,6 @@ describe("CatalogPage", () => {
         boxCapacity: null,
         palletCapacity: null,
         unitPrice: null,
-        egaisCode: null,
         shelfLifeDays: null,
         defaultCounterpartyId: null,
       });
@@ -848,6 +846,8 @@ describe("CatalogPage", () => {
     let didCreate = false;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
+      if (path === "/api/chz-product-groups")
+        return jsonResponse(200, { items: [{ code: 15, alias: "beer", name: "Пиво" }] });
       if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
       if (path === "/api/products" && init?.method === "POST") {
         didCreate = true;
@@ -857,13 +857,17 @@ describe("CatalogPage", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    const user = userEvent.setup();
     renderPage();
     await screen.findByText("Каталог пуст");
 
     fireEvent.click(screen.getAllByRole("button", { name: "Добавить продукт" })[0]!);
     await screen.findByText("Новый продукт");
 
-    // Assert the new inputs are rendered
+    expect(screen.queryByLabelText("Код ЕГАИС")).toBeNull();
+    await user.click(screen.getByRole("combobox", { name: "Группа продукции" }));
+    await user.click(await screen.findByRole("option", { name: "Пиво" }));
+    // Assert the category-applicable inputs are rendered
     expect(screen.getByLabelText("Наименование для печати")).toBeDefined();
     expect(screen.getByLabelText("Цена за шт., ₽")).toBeDefined();
     expect(screen.getByLabelText("Код ЕГАИС")).toBeDefined();
@@ -889,7 +893,7 @@ describe("CatalogPage", () => {
             gtin: "4006381333931",
             name: "Напиток",
             printName: "Дикий Крест Особый 5%",
-            chzProductGroupCode: null,
+            chzProductGroupCode: 15,
             boxCapacity: null,
             palletCapacity: null,
             unitPrice: "52.00",
@@ -1006,12 +1010,22 @@ describe("CatalogPage", () => {
     const priced = {
       ...DRAFT_PRODUCT,
       id: "p6",
+      chzProductGroupCode: 15,
       unitPrice: "52.00",
       egaisCode: "EG-123",
       shelfLifeDays: 90,
     };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
+      if (path.endsWith("/regulatory-profile"))
+        return jsonResponse(200, {
+          productId: priced.id,
+          binding: null,
+          definition: null,
+          values: [],
+          egaisCodes: [],
+          pendingProposalCount: 0,
+        });
       if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
       if (path === `/api/products/${priced.id}` && init?.method === "PATCH") {
         return jsonResponse(200, priced);
@@ -1028,7 +1042,7 @@ describe("CatalogPage", () => {
 
     // The edit form must seed from the product being edited, not render blank.
     expect((screen.getByLabelText("Цена за шт., ₽") as HTMLInputElement).value).toBe("52.00");
-    expect((screen.getByLabelText("Код ЕГАИС") as HTMLInputElement).value).toBe("EG-123");
+    expect(((await screen.findByLabelText("Код ЕГАИС")) as HTMLInputElement).value).toBe("EG-123");
     expect((screen.getByLabelText("Срок годности, дней") as HTMLInputElement).value).toBe("90");
     expect(screen.queryByLabelText("Шаблон этикетки по умолчанию")).toBeNull();
 

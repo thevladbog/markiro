@@ -64,6 +64,37 @@ for (const width of [390, 1280]) {
       } else if (["/api/counterparties", "/api/pickup-orders"].includes(path)) body = { items: [] };
       else if (path === "/api/chz-product-groups")
         body = { items: [{ code: 8, alias: "milk", name: "Молочная продукция" }] };
+      else if (path === `/api/products/${product.id}/regulatory-profile`)
+        body = {
+          productId: product.id,
+          binding: null,
+          definition: null,
+          values: [],
+          egaisCodes: [],
+          pendingProposalCount: 0,
+        };
+      else if (path === `/api/products/${product.id}/readiness`)
+        body = {
+          productId: product.id,
+          dimensions: [
+            {
+              dimension: "production",
+              state: "not_ready",
+              reasons: [
+                { code: "PRODUCTION_BOX_CAPACITY_REQUIRED" },
+                { code: "PRODUCTION_PALLET_CAPACITY_REQUIRED" },
+              ],
+              recommendations: [],
+            },
+            ...["code_ordering", "circulation"].map((dimension) => ({
+              dimension,
+              state: "not_ready",
+              reasons: [{ code: "CATEGORY_NOT_CONFIRMED" }],
+              recommendations: [],
+            })),
+            { dimension: "egais", state: "not_applicable", reasons: [], recommendations: [] },
+          ],
+        };
       else if (path.endsWith("/capabilities")) body = capabilitiesFixture;
       else if (path.includes("/applies/")) body = result;
       else if (path.includes("/import-sessions/")) body = sessionFixture;
@@ -99,6 +130,11 @@ for (const width of [390, 1280]) {
     await expect(importedPhoto).toHaveJSProperty("complete", true);
     await expect(importedPhoto).toHaveJSProperty("naturalWidth", 120);
     await expect(importedPhoto).toHaveJSProperty("naturalHeight", 120);
+    const readiness = dialog.getByRole("region", { name: "Готовность", exact: true });
+    for (const dimension of ["Производство", "Заказ кодов", "Ввод в оборот", "ЕГАИС"])
+      await expect(readiness.getByText(dimension, { exact: true })).toBeVisible();
+    await expect(readiness).toContainText("Подтвердите категорию Национального каталога.");
+    await expect(dialog.getByRole("button", { name: "Выбрать категорию" })).toBeVisible();
     expect(errors).toEqual([]);
   });
 }

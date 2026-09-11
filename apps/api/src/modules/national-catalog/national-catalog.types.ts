@@ -118,6 +118,23 @@ export interface NationalCatalogProductAttribute {
   multiplier: number | null;
 }
 
+/**
+ * Product responses expose a numeric attribute's source unit in `attr_value_type`.
+ * Current normalized cards retain that field as `valueType`; older compact card
+ * snapshots retained it as `unit`. Read either representation without deriving a
+ * unit from the attribute label or from the target schema.
+ */
+export function nationalCatalogProductAttributeUnit(attribute: unknown): string | null {
+  if (attribute === null || typeof attribute !== "object" || Array.isArray(attribute)) return null;
+  const record = attribute as Record<string, unknown>;
+  if (Object.hasOwn(record, "unit")) {
+    return typeof record.unit === "string" || record.unit === null ? record.unit : null;
+  }
+  return typeof record.valueType === "string" || record.valueType === null
+    ? record.valueType
+    : null;
+}
+
 export interface NationalCatalogProductImage {
   sourceId: string;
   url: string;

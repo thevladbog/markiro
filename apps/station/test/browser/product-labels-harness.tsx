@@ -54,8 +54,9 @@ const exec: SqlExecutor = {
 const hardware: HardwareContract = {
   listScannerPorts: async () => [],
   listUsbPrinters: async () => [],
-  openScanner: async () => {},
+  configureScanners: async () => {},
   closeScanner: async () => {},
+  onScannerConnections: async () => () => {},
   onScannerStatus: async () => () => {},
   onScan: async (listener) => {
     listeners.add(listener);
