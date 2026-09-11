@@ -71,11 +71,19 @@ class SyncEngine(
             // «Очередь 0» while a closure sat unsent, and a queue that has
             // stopped moving would never read as stuck.
             db.boxDao().observeUnackedCount(),
+            // So is a product-label event, for the same reason.
+            db.productLabelEventDao().observeUnackedCount(),
             db.conflictDao().count(),
             lastSuccess,
             now,
-        ) { scans, boxes, conflicts, last, at ->
-            val pending = scans + boxes
+        ) { values ->
+            val scans = values[0] as Int
+            val boxes = values[1] as Int
+            val labels = values[2] as Int
+            val conflicts = values[3] as Int
+            val last = values[4] as Long?
+            val at = values[5] as Long
+            val pending = scans + boxes + labels
             val since = last ?: startedAt
             SyncState(pending = pending, lastSuccessAt = last, stuck = pending > 0 && at - since > STUCK_AFTER_MS, conflicts = conflicts)
         }.stateIn(scope, SharingStarted.Eagerly, SyncState())
@@ -139,8 +147,17 @@ class SyncEngine(
         // and lost. Those boxes ride the next batch.
         val boxLimit = if (pendingCeiling != null) meta.get(MetaStore.SYNC_PENDING_BOX_COUNT)?.toIntOrNull() ?: 0 else MAX_BOX_CLOSURES
         val boxRows = if (boxLimit == 0) emptyList() else db.boxDao().unacked(boxLimit)
-        // An empty outbox with unacknowledged boxes is not empty.
-        if (rows.isEmpty() && boxRows.isEmpty()) {
+        // Product-label events follow the same pinning rule for the same reason:
+        // a batch whose id is already fixed must carry the set it chose and no
+        // more, or an event added since gets answered `alreadyApplied` and lost.
+        val labelLimit = if (pendingCeiling != null) {
+            meta.get(MetaStore.SYNC_PENDING_LABEL_COUNT)?.toIntOrNull() ?: 0
+        } else {
+            MAX_PRODUCT_LABEL_EVENTS
+        }
+        val labelRows = if (labelLimit == 0) emptyList() else db.productLabelEventDao().unacked(labelLimit)
+        // An empty outbox with unacknowledged boxes or events is not empty.
+        if (rows.isEmpty() && boxRows.isEmpty() && labelRows.isEmpty()) {
             if (pendingCeiling != null) clearPending()
             return Step.EMPTY
         }
@@ -150,15 +167,21 @@ class SyncEngine(
             // The box set is folded in. Without it, a box closing while this batch
             // awaits acknowledgement would be resent under an id the server has
             // already applied, and the closure would vanish silently.
-            val id = "${cfg.deviceId}:${meta.installId()}:$maxId:${boxSignature(boxIds)}"
+            val id = "${cfg.deviceId}:${meta.installId()}:$maxId:${idSignature(boxIds)}:${idSignature(labelRows.map { it.eventId })}"
             meta.put(MetaStore.SYNC_PENDING_CEILING, maxId.toString())
             meta.put(MetaStore.SYNC_PENDING_BOX_COUNT, boxIds.size.toString())
+            meta.put(MetaStore.SYNC_PENDING_LABEL_COUNT, labelRows.size.toString())
             meta.put(MetaStore.SYNC_PENDING_BATCH_ID, id)
             id
         }
         val body = json.encodeToString(
             SyncBatchRequest.serializer(),
-            SyncBatchRequest(batchId, rows.map { it.toItem(cfg.deviceId) }, boxRows.map { it.toClosure(cfg.deviceId) }),
+            SyncBatchRequest(
+                batchId,
+                rows.map { it.toItem(cfg.deviceId) },
+                boxRows.map { it.toClosure(cfg.deviceId) },
+                labelRows.map { json.parseToJsonElement(it.payloadJson) },
+            ),
         )
         val result = transport.post("/station/scans", body) as? TransportResult.Ok ?: return Step.FAILED
         if (result.code !in 200..299) return Step.FAILED
@@ -176,9 +199,19 @@ class SyncEngine(
             // When print verification is added, the station's conditional ack has to
             // come back with it.
             if (boxIds.isNotEmpty()) db.boxDao().markAcked(boxIds, Iso.format(at))
+            // NOT unconditional, unlike the boxes above: the server answers per
+            // event and may quarantine one. Acknowledging everything sent would
+            // drop an event it never took.
+            parsed.receipt?.let { receipt ->
+                if (receipt.accepted.isNotEmpty()) db.productLabelEventDao().markAcked(receipt.accepted, Iso.format(at))
+                for ((eventId, code) in receipt.quarantined) {
+                    db.productLabelEventDao().markQuarantined(eventId, code, Iso.format(at))
+                }
+            }
             db.metaDao().remove(MetaStore.SYNC_PENDING_BATCH_ID)
             db.metaDao().remove(MetaStore.SYNC_PENDING_CEILING)
             db.metaDao().remove(MetaStore.SYNC_PENDING_BOX_COUNT)
+            db.metaDao().remove(MetaStore.SYNC_PENDING_LABEL_COUNT)
             parsed.denied?.let { db.metaDao().put(MetaEntity(MetaStore.SYNC_LAST_DENIED, it)) }
             db.metaDao().put(MetaEntity(MetaStore.SYNC_LAST_SUCCESS_AT, at.toString()))
         }
@@ -190,11 +223,12 @@ class SyncEngine(
         meta.remove(MetaStore.SYNC_PENDING_BATCH_ID)
         meta.remove(MetaStore.SYNC_PENDING_CEILING)
         meta.remove(MetaStore.SYNC_PENDING_BOX_COUNT)
+        meta.remove(MetaStore.SYNC_PENDING_LABEL_COUNT)
     }
 
     /** Short and stable: one set always signs the same, a different set never does. */
-    private fun boxSignature(boxIds: List<String>): String =
-        if (boxIds.isEmpty()) "0" else "${boxIds.size}-${boxIds.joinToString(",").hashCode().toUInt().toString(16)}"
+    private fun idSignature(ids: List<String>): String =
+        if (ids.isEmpty()) "0" else "${ids.size}-${ids.joinToString(",").hashCode().toUInt().toString(16)}"
 
     private fun BoxEntity.toClosure(deviceId: String) = BoxClosureDto(
         boxId = boxId,
@@ -205,7 +239,16 @@ class SyncEngine(
         operatorId = operatorId,
     )
 
-    private class BatchResponse(val applied: Int, val alreadyApplied: Boolean, val conflicts: List<BatchConflictDto>, val denied: String?)
+    private class BatchResponse(
+        val applied: Int,
+        val alreadyApplied: Boolean,
+        val conflicts: List<BatchConflictDto>,
+        val denied: String?,
+        val receipt: ProductLabelReceipt?,
+    )
+
+    /** Per-event outcomes. Absent when the batch carried no events, or on an older server. */
+    private class ProductLabelReceipt(val accepted: List<String>, val quarantined: List<Pair<String, String>>)
 
     /** The station's shape guard: a captive portal answering 200 must never ack a batch. */
     private fun parseBatchResponse(body: String): BatchResponse? {
@@ -216,7 +259,20 @@ class SyncEngine(
             .mapNotNull { runCatching { json.decodeFromJsonElement(BatchConflictDto.serializer(), it) }.getOrNull() }
             .filter { it.winningScannedAt != null && Iso.parse(it.winningScannedAt) != null }
         val denied = obj["denied"]?.takeIf { it !is JsonNull }?.toString()
-        return BatchResponse(applied, alreadyApplied, conflicts, denied)
+        return BatchResponse(applied, alreadyApplied, conflicts, denied, parseReceipt(obj))
+    }
+
+    private fun parseReceipt(obj: kotlinx.serialization.json.JsonObject): ProductLabelReceipt? {
+        val receipt = obj["productLabelReceipt"]?.takeIf { it !is JsonNull }?.jsonObject ?: return null
+        val accepted = receipt["acceptedEventIds"]?.jsonArray.orEmpty()
+            .mapNotNull { it.jsonPrimitive.takeIf { p -> p.isString }?.content }
+        val quarantined = receipt["quarantined"]?.jsonArray.orEmpty().mapNotNull { record ->
+            val o = runCatching { record.jsonObject }.getOrNull() ?: return@mapNotNull null
+            val id = o["eventId"]?.jsonPrimitive?.takeIf { it.isString }?.content ?: return@mapNotNull null
+            val code = o["code"]?.jsonPrimitive?.takeIf { it.isString }?.content ?: return@mapNotNull null
+            id to code
+        }
+        return ProductLabelReceipt(accepted, quarantined)
     }
 
     private suspend fun drainCloses(): Boolean {
@@ -279,6 +335,9 @@ class SyncEngine(
 
         /** The server's own `MAX_BOX_CLOSURES_PER_SYNC_BATCH`. */
         const val MAX_BOX_CLOSURES = 50
+
+        /** The server's own `MAX_PRODUCT_LABEL_EVENTS`. */
+        const val MAX_PRODUCT_LABEL_EVENTS = 100
         const val RECONCILE_PAGE = 200
         const val HEARTBEAT_MS = 15_000L
         const val STUCK_AFTER_MS = 15 * 60 * 1000L
