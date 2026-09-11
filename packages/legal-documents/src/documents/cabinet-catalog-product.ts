@@ -513,7 +513,7 @@ export const CABINET_CATALOG_PRODUCT_CONTENT = {
                   "After “Do not use” that GTIN can be entered in a new card — the old one stays in history.",
               },
               {
-                term: "The “Chestny Znak” column is empty",
+                term: "The “Chestny ZNAK” column is empty",
                 detail:
                   "The card is not linked to the National Catalog, or the information has not arrived yet. Linking is covered by the instruction on importing from the National Catalog.",
               },
