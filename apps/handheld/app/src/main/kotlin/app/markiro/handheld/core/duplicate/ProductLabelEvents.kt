@@ -1,6 +1,10 @@
 package app.markiro.handheld.core.duplicate
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 class ProductLabelTransitionException(message: String) : Exception(message)
 
@@ -8,13 +12,12 @@ class ProductLabelTransitionException(message: String) : Exception(message)
 const val PRODUCT_LABEL_PROTOCOL = "validation-dm-duplicate-v1"
 
 /**
- * One wire event.
+ * One event, as this device holds it.
  *
  * The domain models these as a discriminated union with a strict object per
- * kind. One nullable-field class is what kotlinx.serialization encodes without a
- * custom serializer; the nulls are omitted by the encoder's default, so the JSON
- * carries exactly the fields its kind declares and nothing the server would
- * reject.
+ * kind; one nullable-field class is what Kotlin can project over without a
+ * custom serializer. It is NOT the wire shape -- see `toWireJson`, which builds
+ * exactly the fields each kind declares.
  */
 @Serializable
 data class ProductLabelEvent(
@@ -40,6 +43,44 @@ data class ProductLabelEvent(
     val errorCode: String? = null,
     val scannedPayloadDigest: String? = null,
 )
+
+/**
+ * The exact object the server expects for this event's kind.
+ *
+ * Built by hand rather than by the serializer because the two disagree about
+ * null: the schema is a strict object PER KIND, so `prepared` must carry
+ * `reason` even when it is null, while `sending` must not carry it at all.
+ * Automatic encoding omits every null and would drop the first, or encode
+ * every field and add the second.
+ */
+fun ProductLabelEvent.toWireJson(): JsonObject = buildJsonObject {
+    put("eventId", eventId)
+    put("jobId", jobId)
+    put("attemptId", attemptId)
+    put("sequence", sequence)
+    put("shiftId", shiftId)
+    put("codeHash", codeHash)
+    put("acceptedAt", acceptedAt)
+    put("policyRevision", policyRevision)
+    put("templateDigest", templateDigest)
+    put("payloadDigest", payloadDigest)
+    put("operatorId", operatorId)
+    put("occurredAt", occurredAt)
+    put("kind", kind)
+    when (kind) {
+        EventKind.PREPARED -> {
+            put("attemptNo", requireNotNull(attemptNo))
+            if (reason == null) put("reason", JsonNull) else put("reason", reason)
+            put("language", requireNotNull(language))
+            put("dpi", requireNotNull(dpi))
+            put("bytesDigest", requireNotNull(bytesDigest))
+        }
+        EventKind.FAILED_BEFORE_SEND, EventKind.DELIVERY_UNKNOWN -> put("errorCode", requireNotNull(errorCode))
+        EventKind.VERIFIED -> put("scannedPayloadDigest", requireNotNull(scannedPayloadDigest))
+        EventKind.VERIFICATION_REJECTED -> put("reason", requireNotNull(reason))
+        else -> Unit
+    }
+}
 
 /** Immutable origin and print context alongside the current attempt's state. */
 data class ProductLabelProjection(
