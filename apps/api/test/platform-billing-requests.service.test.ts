@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { createDb, schema, type Db } from "@markiro/db";
-import type { CreateInvoiceDto } from "@markiro/platform-contracts";
+import type { CreateInvoiceV2 as CreateInvoiceDto } from "@markiro/platform-contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { BillingActsService } from "../src/modules/billing-acts/billing-acts.service";
@@ -136,6 +136,13 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     });
     await connection.db.insert(schema.operatorBillingProfiles).values({
       ...profileValues(actorId, 1, "ООО Маркиро", "7707083893", "773601001", "1027700132195"),
+      taxPolicy: {
+        kind: "vat",
+        regime: "other",
+        allowedRatesBps: [2000],
+        defaultRateBps: 2000,
+        defaultIncluded: true,
+      },
     });
     await connection.db.insert(schema.tenantBillingProfiles).values({
       tenantId: tenantA,
@@ -672,7 +679,22 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     });
 
     const offerKey = randomUUID();
-    const offerInput = requestOfferInput(offerKey);
+    const offerInput = {
+      ...requestOfferInput(offerKey),
+      lines: [
+        {
+          ...invoiceInput(tenantA).lines[0]!,
+          kind: "service" as const,
+          nameRu: "Разовая услуга",
+          nameEn: "One-time service",
+          unit: "услуга",
+          descriptionRu: null,
+          descriptionEn: null,
+          catalogVersionId: null,
+          activationPolicy: null,
+        },
+      ],
+    };
     const firstOffer = await requests.createOffer(actor, created.id, offerInput);
     await expect(requests.createOffer(actor, created.id, offerInput)).resolves.toEqual(firstOffer);
     await offers.publish(actor, firstOffer.offerId);
@@ -1080,12 +1102,54 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
         tenantId: tenantA,
         familyId,
         revision: 1,
-        status: "published",
+        total: "100.00",
+        status: "draft",
         number: `KP-SOURCE-${randomUUID()}`,
         publishedAt: new Date(),
         createdByPlatformUserId: actorId,
       })
       .returning();
+    const sourceLine = invoiceInput(tenantA).lines[0]!;
+    await connection.db.insert(schema.commercialOfferLines).values({
+      tenantId: tenantA,
+      offerId: published!.id,
+      position: 1,
+      kind: "service",
+      nameRu: "Разовая услуга",
+      nameEn: "One-time service",
+      quantity: 1,
+      unit: "услуга",
+      agreedUnitPrice: "100.00",
+      lineTotal: "100.00",
+      vatRate: "20.00",
+      vatIncluded: true,
+      commercialTerms: sourceLine.commercialTerms,
+    });
+    await connection.db
+      .update(schema.commercialOffers)
+      .set({ status: "published" })
+      .where(eq(schema.commercialOffers.id, published!.id));
+    const frozenSourceLines = await connection.db
+      .select()
+      .from(schema.commercialOfferLines)
+      .where(eq(schema.commercialOfferLines.offerId, published!.id));
+    await connection.db.insert(schema.commercialOfferPrintSnapshots).values({
+      tenantId: tenantA,
+      offerId: published!.id,
+      revision: 1,
+      number: published!.number!,
+      publishedAt: published!.publishedAt!,
+      sellerSnapshot: {},
+      buyerSnapshot: {},
+      linesSnapshot: frozenSourceLines.map((line) => ({
+        ...line,
+        lineSubtotal: "83.33",
+        lineVat: "16.67",
+      })),
+      subtotal: "83.33",
+      vatTotal: "16.67",
+      total: "100.00",
+    });
     await connection.db.insert(schema.commercialOfferDecisions).values({
       tenantId: tenantA,
       offerId: published!.id,
@@ -1493,9 +1557,10 @@ function invoiceInput(tenantId: string): CreateInvoiceDto {
         quantity: 1,
         unit: "услуга",
         agreedUnitPrice: "100.00",
-        vatRateBps: null,
-        vatIncluded: false,
+        vatRateBps: 2000,
+        vatIncluded: true,
         activationPolicy: null,
+        commercialTerms: serviceTerms("Разовая услуга", "One-time service"),
       },
     ],
   };
@@ -1519,6 +1584,7 @@ function requestOfferInput(idempotencyKey: string) {
         vatRateBps: 2000,
         vatIncluded: true,
         activationPolicy: null,
+        commercialTerms: serviceTerms("Настройка", "Setup"),
       },
     ],
   };
@@ -1615,4 +1681,17 @@ async function countRequestAudits(db: Db, requestId: string) {
 function quoteIdentifier(identifier: string): string {
   if (!/^[a-z_][a-z0-9_]*$/.test(identifier)) throw new Error("Unsafe database identifier");
   return `"${identifier}"`;
+}
+
+function serviceTerms(documentNameRu: string, documentNameEn: string) {
+  return {
+    version: 1 as const,
+    subject: "service" as const,
+    documentNameRu,
+    documentNameEn,
+    sellerPolicyRevision: 1,
+    billingPeriod: null,
+    billingTimezone: null,
+    activationRule: null,
+  };
 }

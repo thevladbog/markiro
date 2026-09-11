@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { createDb, schema } from "@markiro/db";
-import type { CreateInvoiceDto } from "@markiro/platform-contracts";
+import type { CreateInvoiceV2 as CreateInvoiceDto } from "@markiro/platform-contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { BillingService } from "../src/modules/billing/billing.service";
@@ -71,7 +71,7 @@ describe.skipIf(!databaseUrl)("commercial document readiness", () => {
     expect(await invoiceStatus(draft.id)).toBe("draft");
 
     await connection.db.insert(schema.operatorBillingProfiles).values(
-      profileValues({
+      sellerProfileValues({
         fullName: "ООО Маркиро",
         inn: "7707083893",
         kpp: "773601001",
@@ -171,7 +171,7 @@ describe.skipIf(!databaseUrl)("commercial document readiness", () => {
       .where(eq(schema.operatorBillingProfiles.isCurrent, true));
     if (!seller) {
       await connection.db.insert(schema.operatorBillingProfiles).values(
-        profileValues({
+        sellerProfileValues({
           fullName: "ООО Маркиро",
           inn: "7707083893",
           kpp: "773601001",
@@ -208,6 +208,16 @@ describe.skipIf(!databaseUrl)("commercial document readiness", () => {
         {
           kind: "custom",
           catalogVersionId: null,
+          commercialTerms: {
+            version: 1,
+            subject: "service",
+            documentNameRu: "Разовая услуга",
+            documentNameEn: "One-time service",
+            sellerPolicyRevision: 1,
+            billingPeriod: null,
+            billingTimezone: null,
+            activationRule: null,
+          },
           nameRu: "Разовая услуга",
           nameEn: "One-time service",
           quantity: 1,
@@ -245,6 +255,10 @@ describe.skipIf(!databaseUrl)("commercial document readiness", () => {
       confirmedAt: isConfirmed ? new Date() : null,
       createdByPlatformUserId: actorId,
     };
+  }
+
+  function sellerProfileValues(...args: Parameters<typeof profileValues>) {
+    return { ...profileValues(...args), taxPolicy: { kind: "without_vat", regime: "other" } };
   }
 
   function accountValues(label: string, suffix: string) {

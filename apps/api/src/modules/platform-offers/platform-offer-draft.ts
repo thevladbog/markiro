@@ -1,8 +1,13 @@
 import { BadRequestException } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import {
+  freezeCommercialLineTerms,
+  assertCommercialPlanSequence,
+} from "../billing/commercial-line-terms";
+import type { CommercialLineTerms } from "@markiro/platform-contracts";
 import type { CreateOfferDto } from "./dto";
-import { calculateOfferTotals } from "./offer-totals";
+import { calculateOfferAmounts } from "./offer-totals";
 import { normalizeOfferTerms } from "./offer-terms";
 
 type OfferDraftExecutor = Pick<Db, "insert" | "select">;
@@ -12,6 +17,7 @@ export async function createOfferDraft(
   actorUserId: string,
   input: CreateOfferDto,
 ): Promise<string> {
+  assertCommercialPlanSequence(input.lines);
   let termsMarkdown: string | null;
   try {
     termsMarkdown = normalizeOfferTerms(input.termsMarkdown).markdown;
@@ -21,7 +27,7 @@ export async function createOfferDraft(
     }
     throw error;
   }
-  const total = calculateOfferTotals(
+  const total = calculateOfferAmounts(
     input.lines.map((line) => ({
       quantity: line.quantity,
       unitPrice: line.agreedUnitPrice,
@@ -32,6 +38,7 @@ export async function createOfferDraft(
   const validatedLines: Array<{
     line: CreateOfferDto["lines"][number];
     catalogUnitPrice: string | null;
+    commercialTerms: CommercialLineTerms | null;
     priceOverrideReason: string | null;
   }> = [];
   for (const line of input.lines) {
@@ -39,15 +46,16 @@ export async function createOfferDraft(
       if (line.kind !== "service") {
         throw new BadRequestException({ code: "offer_catalog_version_invalid" });
       }
-      validatedLines.push({ line, catalogUnitPrice: null, priceOverrideReason: null });
+      validatedLines.push({
+        line,
+        catalogUnitPrice: null,
+        priceOverrideReason: null,
+        commercialTerms: freezeCommercialLineTerms(undefined, line),
+      });
       continue;
     }
     const [version] = await tx
-      .select({
-        kind: schema.catalogItemVersions.kind,
-        status: schema.catalogItemVersions.status,
-        unitPrice: schema.catalogItemVersions.unitPrice,
-      })
+      .select()
       .from(schema.catalogItemVersions)
       .where(eq(schema.catalogItemVersions.id, line.catalogVersionId))
       .for("share");
@@ -61,9 +69,13 @@ export async function createOfferDraft(
     validatedLines.push({
       line,
       catalogUnitPrice: version.unitPrice,
+      commercialTerms: freezeCommercialLineTerms(version, line),
       priceOverrideReason: line.agreedUnitPrice === version.unitPrice ? null : priceOverrideReason,
     });
   }
+  assertCommercialPlanSequence(
+    validatedLines.map(({ line, commercialTerms }) => ({ ...line, commercialTerms })),
+  );
   const [offer] = await tx
     .insert(schema.commercialOffers)
     .values({
@@ -79,29 +91,32 @@ export async function createOfferDraft(
     .returning({ id: schema.commercialOffers.id });
   if (!offer) throw new Error("offer insert failed");
   await tx.insert(schema.commercialOfferLines).values(
-    validatedLines.map(({ line, catalogUnitPrice, priceOverrideReason }, index) => ({
-      tenantId: input.tenantId,
-      offerId: offer.id,
-      position: index + 1,
-      kind: line.kind,
-      catalogVersionId: line.catalogVersionId ?? null,
-      nameRu: line.nameRu,
-      nameEn: line.nameEn,
-      descriptionRu: line.descriptionRu ?? null,
-      descriptionEn: line.descriptionEn ?? null,
-      quantity: line.quantity,
-      unit: line.unit,
-      catalogUnitPrice,
-      agreedUnitPrice: line.agreedUnitPrice,
-      vatRate:
-        line.vatRateBps === null || line.vatRateBps === undefined
-          ? null
-          : String(line.vatRateBps / 100),
-      vatIncluded: line.vatIncluded,
-      priceOverrideReason,
-      activationPolicy: line.kind === "plan" ? (line.activationPolicy ?? "immediately") : null,
-      lineTotal: (Number(line.agreedUnitPrice) * line.quantity).toFixed(2),
-    })),
+    validatedLines.map(
+      ({ line, catalogUnitPrice, priceOverrideReason, commercialTerms }, index) => ({
+        tenantId: input.tenantId,
+        offerId: offer.id,
+        position: index + 1,
+        kind: line.kind,
+        catalogVersionId: line.catalogVersionId ?? null,
+        commercialTerms,
+        nameRu: commercialTerms?.documentNameRu ?? line.nameRu,
+        nameEn: commercialTerms?.documentNameEn ?? line.nameEn,
+        descriptionRu: line.descriptionRu ?? null,
+        descriptionEn: line.descriptionEn ?? null,
+        quantity: line.quantity,
+        unit: commercialTerms?.billingPeriod ?? line.unit,
+        catalogUnitPrice,
+        agreedUnitPrice: line.agreedUnitPrice,
+        vatRate:
+          line.vatRateBps === null || line.vatRateBps === undefined
+            ? null
+            : String(line.vatRateBps / 100),
+        vatIncluded: line.vatIncluded,
+        priceOverrideReason,
+        activationPolicy: line.kind === "plan" ? (line.activationPolicy ?? "immediately") : null,
+        lineTotal: total.lines[index]?.lineTotal ?? "0.00",
+      }),
+    ),
   );
   return offer.id;
 }

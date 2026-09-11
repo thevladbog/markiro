@@ -1,3 +1,5 @@
+import { getCatalogEditorContext } from "../catalog/api.js";
+import { commercialErrorKey, commercialIssuanceError } from "../documents/commercialError.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -55,6 +57,11 @@ export function InvoiceDetailPage() {
     queryFn: () => getInvoice(invoiceId),
     enabled: Boolean(invoiceId),
   });
+  const sellerContext = useQuery({
+    queryKey: ["platform", "catalog", "editor-context"],
+    queryFn: getCatalogEditorContext,
+    enabled: canWrite && detail.data?.status === "draft",
+  });
   const [bankReference, setBankReference] = useState("");
   const [paymentKey] = useState(() => crypto.randomUUID());
   const paymentPayload = useRef<RecordInvoicePaymentInput | null>(null);
@@ -89,6 +96,10 @@ export function InvoiceDetailPage() {
   const issue = useMutation({
     mutationFn: () => issueInvoice(invoiceId, printVariant),
     onSuccess: refresh,
+    onError: () => {
+      void sellerContext.refetch();
+      void detail.refetch();
+    },
   });
   const withdraw = useMutation({
     mutationFn: () => cancelInvoice(invoiceId),
@@ -185,6 +196,10 @@ export function InvoiceDetailPage() {
     );
   }
   const invoice = detail.data;
+  const reviewError =
+    invoice.status === "draft" && sellerContext.data
+      ? commercialIssuanceError(invoice.lines, sellerContext.data)
+      : null;
   const state = flowState(invoice);
   const manualDecisionMissing = pendingLines.some(
     (line) =>
@@ -242,6 +257,15 @@ export function InvoiceDetailPage() {
           />
         }
       />
+      {reviewError ? <Alert tone="error">{t(`commercial.errors.${reviewError}`)}</Alert> : null}
+      {sellerContext.isError && invoice.status === "draft" ? (
+        <Alert tone="error">{t("catalog.reviewError")}</Alert>
+      ) : null}
+      {issue.error ? (
+        <Alert tone="error">
+          {t(commercialErrorKey(issue.error, "billing.documents.renderError"))}
+        </Alert>
+      ) : null}
       <p className="invoice-tenant-link">
         <span>{t("billing.tenant")}</span>
         <Link to={`/tenants/${invoice.tenantId}`}>{invoice.tenantName}</Link>
@@ -303,11 +327,25 @@ export function InvoiceDetailPage() {
                       <strong>{line.nameRu}</strong>
                       {line.descriptionRu ? <small>{line.descriptionRu}</small> : null}
                       <small>
-                        {line.kind} · {line.quantity} {line.unit}
+                        {line.kind} · {line.quantity}{" "}
+                        {line.commercialTerms?.subject === "software_license" &&
+                        line.commercialTerms.billingPeriod
+                          ? t(`catalog.units.${line.commercialTerms.billingPeriod}`)
+                          : line.unit}
                       </small>
                     </td>
                     <td>
-                      {line.activationPolicy ? t(`billing.policies.${line.activationPolicy}`) : "—"}
+                      {line.commercialTerms?.billingPeriod ? (
+                        <>
+                          <span>{t(`catalog.units.${line.commercialTerms.billingPeriod}`)}</span>
+                          <br />
+                          {t(`commercial.activation.${line.commercialTerms.activationRule}`)}
+                        </>
+                      ) : line.activationPolicy ? (
+                        t(`billing.policies.${line.activationPolicy}`)
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td>
                       <StatusChip
@@ -476,7 +514,11 @@ export function InvoiceDetailPage() {
             <p>{t("billing.draftActionsHelp")}</p>
           </div>
           <div className="invoice-action-buttons">
-            <Button loading={issue.isPending} onClick={() => issue.mutate()}>
+            <Button
+              loading={issue.isPending}
+              disabled={issue.isPending || !sellerContext.data || Boolean(reviewError)}
+              onClick={() => issue.mutate()}
+            >
               {t("billing.issue")}
             </Button>
             <Button variant="destructive" onClick={() => setConfirmDelete(true)}>

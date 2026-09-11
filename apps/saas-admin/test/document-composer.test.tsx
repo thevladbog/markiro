@@ -7,8 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
 import {
-  platformCatalogContracts,
-  type CatalogVersion,
+  platformCatalogV2Contracts,
+  type CatalogVersionV2 as CatalogVersion,
   type OperatorBankAccount,
 } from "@markiro/platform-contracts";
 
@@ -37,6 +37,10 @@ const plan = {
   id: "21111111-1111-4111-8111-111111111111",
   catalogItemId: "31111111-1111-4111-8111-111111111111",
   catalogItemCode: "plan-basic",
+  documentNameRu: null,
+  documentNameEn: null,
+  subject: null,
+  sellerPolicyRevision: null,
   kind: "plan",
   version: 3,
   status: "published",
@@ -181,6 +185,55 @@ async function selectCombobox(
 }
 
 describe("DocumentComposer", () => {
+  it("localizes structured license units while preserving literal legacy and service units", async () => {
+    await i18n.changeLanguage("ru");
+    const current = createLineFromCatalog(
+      {
+        ...plan,
+        unit: "year",
+        billingPeriod: "year",
+        subject: "software_license",
+        documentNameRu: "Лицензия",
+        sellerPolicyRevision: 2,
+      },
+      "annual",
+    );
+    renderComposer({
+      initialDraft: {
+        tenantId: tenant.id,
+        applicationMode: "automatic",
+        date: "",
+        lines: [
+          current,
+          { ...createLineFromCatalog(plan, "legacy"), unit: "legacy-unit" },
+          { ...createLineFromCatalog(service, "service"), unit: "service-unit" },
+        ],
+      },
+    });
+    expect(screen.getByText("plan-basic · v3 · Год")).toBeDefined();
+    expect(screen.getByText("plan-basic · v3 · legacy-unit")).toBeDefined();
+    expect(screen.getByText("service-launch · v3 · service-unit")).toBeDefined();
+  });
+
+  it("keeps frozen offer VAT in an invoice preview and disables source line editing", async () => {
+    await i18n.changeLanguage("ru");
+    renderComposer({
+      initialDraft: {
+        tenantId: tenant.id,
+        sourceOfferId: "51111111-1111-4111-8111-111111111111",
+        sourceTotal: "0.03",
+        applicationMode: "automatic",
+        date: "",
+        lines: [{ ...createLineFromCatalog(plan, "frozen"), agreedUnitPrice: "0.03" }],
+      },
+    });
+    expect(screen.getByText("0.02 ₽")).toBeDefined();
+    expect(screen.getByText("0.01 ₽")).toBeDefined();
+    expect(screen.getByText("0.03 ₽")).toBeDefined();
+    expect((screen.getByLabelText("Цена Базовый тариф") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByRole("combobox", { name: "Добавить позицию" })).toBeNull();
+  });
+
   it("preselects the default seller account and submits an explicit replacement", async () => {
     await i18n.changeLanguage("ru");
     const user = userEvent.setup();
@@ -221,7 +274,7 @@ describe("DocumentComposer", () => {
     void _unitPrice;
     void _vatRateBps;
     void _vatIncluded;
-    const parsed = platformCatalogContracts.list.response.parse({ items: [redacted] });
+    const parsed = platformCatalogV2Contracts.list.response.parse({ items: [redacted] });
 
     expect(parsed.items[0]?.descriptionRu).toBeNull();
     expect(parsed.items[0]).not.toHaveProperty("unitPrice");
@@ -236,7 +289,7 @@ describe("DocumentComposer", () => {
     await user.type(screen.getByLabelText("Срок оплаты"), "2026-09-01");
     await selectCombobox(user, "Добавить позицию", "v3", "Базовый тариф · plan-basic · v3");
     await selectCombobox(user, "Добавить позицию", "plan-basic", "Базовый тариф · plan-basic · v3");
-    expect((screen.getByLabelText("Количество Базовый тариф") as HTMLInputElement).value).toBe("2");
+    expect((screen.getByLabelText("Количество Базовый тариф") as HTMLInputElement).value).toBe("1");
 
     await user.click(screen.getByRole("button", { name: "Добавить отдельной строкой" }));
     await selectCombobox(user, "Добавить позицию", "plan-basic", "Базовый тариф · plan-basic · v3");
@@ -251,9 +304,9 @@ describe("DocumentComposer", () => {
     expect(container.querySelector("select:not([aria-hidden])")).toBeNull();
     expect(container.querySelector(".document-lines-table")?.getAttribute("tabindex")).toBe("0");
     expect(screen.getAllByRole("combobox", { name: /Политика активации/ })).toHaveLength(3);
-    expect(screen.getByText("400.10 ₽")).toBeDefined();
-    expect(screen.getByText("80.00 ₽")).toBeDefined();
-    expect(screen.getByText("480.10 ₽")).toBeDefined();
+    expect(screen.getByText("300.10 ₽")).toBeDefined();
+    expect(screen.getByText("60.00 ₽")).toBeDefined();
+    expect(screen.getByText("360.10 ₽")).toBeDefined();
 
     await user.click(
       screen.getAllByRole("combobox", { name: "Политика активации Базовый тариф" })[1]!,
@@ -336,7 +389,7 @@ describe("DocumentComposer", () => {
             version: plan.version,
             nameRu: plan.nameRu,
             nameEn: plan.nameEn,
-            quantity: 2,
+            quantity: 1,
             unit: plan.unit,
             agreedUnitPrice: "120.00",
             vatRateBps: 2000,
@@ -383,11 +436,11 @@ describe("DocumentComposer", () => {
       screen.getByRole("combobox", { name: "Политика активации Базовый тариф" }).textContent,
     ).toContain("После текущего");
     await user.click(screen.getByRole("combobox", { name: "Политика активации Базовый тариф" }));
-    expect(screen.getByRole("option", { name: "Немедленно" })).toBeDefined();
+    expect(screen.getByRole("option", { name: "При применении оплаты" })).toBeDefined();
     expect(screen.getByRole("option", { name: "После текущего" })).toBeDefined();
     expect(screen.queryByRole("option", { name: "Вручную" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Политика активации Запуск" })).toBeNull();
-    expect((screen.getByLabelText("Количество Базовый тариф") as HTMLInputElement).value).toBe("2");
+    expect((screen.getByLabelText("Количество Базовый тариф") as HTMLInputElement).value).toBe("1");
     expect((screen.getByLabelText("Цена Дополнительные линии") as HTMLInputElement).value).toBe(
       "100.00",
     );

@@ -102,11 +102,11 @@ describe("SaaS admin custom controls", () => {
     await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
     expect(visibleNativeSelects()).toEqual([]);
 
-    const unit = screen.getByRole("combobox", { name: "Единица учёта" });
+    const unit = screen.getByRole("combobox", { name: "Период лицензии" });
     expect(unit.tagName).toBe("BUTTON");
     await user.click(unit);
     await user.keyboard("{End}{Enter}");
-    expect(unit.textContent).toContain("Другое");
+    expect(unit.textContent).toContain("Год");
   });
 
   it("renders tenant status filtering without a native select", async () => {

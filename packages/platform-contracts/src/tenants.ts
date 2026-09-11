@@ -1,3 +1,8 @@
+import {
+  catalogCommercialMetadataShape,
+  commercialPeriodSchema,
+  resourceQuotaSchema,
+} from "./commercial-terms.js";
 import { z } from "zod";
 import {
   platformMoneySchema,
@@ -406,3 +411,87 @@ export type AssignAddonInput = z.input<typeof assignAddonSchema>;
 export type AssignAddonDto = z.output<typeof assignAddonSchema>;
 export type AddonAssignmentResult = z.output<typeof addonAssignmentResponseSchema>;
 export type AddonAssignmentResponse = z.output<typeof addonAssignmentResponseSchema>;
+
+export const legacyAssignableCatalogVersionSchema = assignableCatalogVersionSchema;
+export const legacyAssignableCatalogResponseSchema = assignableCatalogResponseSchema;
+export const legacyTenantDetailSchema = tenantDetailSchema;
+export const legacyPlatformTenantContracts = platformTenantContracts;
+const planEntitlementsV2Schema = planEntitlementsSchema
+  .extend({
+    maxLines: resourceQuotaSchema,
+    maxStations: resourceQuotaSchema,
+    maxKiosks: resourceQuotaSchema,
+    maxCabinetUsers: resourceQuotaSchema,
+  })
+  .strict();
+export const assignableCatalogVersionV2Schema = assignableCatalogVersionSchema
+  .safeExtend({ ...catalogCommercialMetadataShape, plan: planEntitlementsV2Schema.optional() })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      value.subject != null &&
+      (value.kind === "service") === (value.subject === "software_license")
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["subject"],
+        message: "Subject must match catalog kind",
+      });
+    if (
+      value.kind === "service"
+        ? value.billingMode !== "one_time" ||
+          value.billingPeriod !== null ||
+          !value.service ||
+          value.plan !== undefined ||
+          value.addon !== undefined
+        : value.billingMode !== "recurring" ||
+          value.billingPeriod === null ||
+          value.service !== undefined ||
+          (value.kind === "plan"
+            ? !value.plan || value.addon !== undefined
+            : !value.addon || value.plan !== undefined)
+    )
+      ctx.addIssue({ code: "custom", message: "Catalog kind, period and effects must agree" });
+    const keys = value.addon?.effects.map((effect) => effect.key) ?? [];
+    if (new Set(keys).size !== keys.length)
+      ctx.addIssue({
+        code: "custom",
+        path: ["addon", "effects"],
+        message: "Effect keys must be unique",
+      });
+  });
+export const assignableCatalogResponseV2Schema = z
+  .object({ items: z.array(assignableCatalogVersionV2Schema) })
+  .strict();
+const recurringLicenseVersionFields = {
+  ...catalogCommercialMetadataShape,
+  subject: z.literal("software_license").nullable(),
+  billingMode: z.literal("recurring"),
+  billingPeriod: z.enum(["month", "year"]),
+};
+export const tenantSubscriptionV2Schema = tenantSubscriptionSchema.extend({
+  commercialPeriod: commercialPeriodSchema.nullable(),
+  planVersion: detailPlanVersionSchema.extend({
+    ...recurringLicenseVersionFields,
+    entitlements: planEntitlementsV2Schema.nullable(),
+  }),
+});
+export const tenantSubscriptionAddonV2Schema = tenantSubscriptionAddonSchema.extend({
+  commercialPeriod: commercialPeriodSchema.nullable(),
+  addonVersion: detailAddonVersionSchema.extend(recurringLicenseVersionFields),
+});
+export const tenantDetailV2Schema = tenantDetailSchema.extend({
+  currentSubscription: tenantSubscriptionV2Schema.nullable(),
+  scheduledSubscription: tenantSubscriptionV2Schema.nullable(),
+  activeAddons: z.array(tenantSubscriptionAddonV2Schema),
+  scheduledAddons: z.array(tenantSubscriptionAddonV2Schema),
+});
+export type AssignableCatalogVersionV2 = z.output<typeof assignableCatalogVersionV2Schema>;
+export type TenantSubscriptionV2 = z.output<typeof tenantSubscriptionV2Schema>;
+export type TenantSubscriptionAddonV2 = z.output<typeof tenantSubscriptionAddonV2Schema>;
+export type TenantDetailV2 = z.output<typeof tenantDetailV2Schema>;
+
+export const platformTenantV2Contracts = {
+  ...platformTenantContracts,
+  detail: { params: tenantParamsSchema, response: tenantDetailV2Schema },
+} as const;

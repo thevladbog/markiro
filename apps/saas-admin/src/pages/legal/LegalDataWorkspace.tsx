@@ -6,7 +6,8 @@ import type {
   BillingProfile,
   BillingProfileInput,
   DadataSuggestionStatus,
-  OperatorBillingProfileInput,
+  OperatorBillingProfileInputV2 as OperatorBillingProfileInput,
+  OperatorBillingProfileV2,
 } from "@markiro/platform-contracts";
 import { Alert, Card } from "@markiro/ui";
 
@@ -28,7 +29,7 @@ export function LegalDataWorkspace({
   onArchive,
 }: {
   scope: "operator" | "tenant";
-  profile: BillingProfile | null;
+  profile: BillingProfile | OperatorBillingProfileV2 | null;
   accounts: BankAccount[];
   dadataStatus: DadataSuggestionStatus;
   canWrite: boolean;

@@ -250,6 +250,7 @@ describe("invoice editor route", () => {
   );
   it("creates a standalone sourced invoice without inventing a request ID", async () => {
     const offer = publishedOffer({
+      total: "12500.50",
       lines: [
         {
           id: "a1111111-1111-4111-8111-111111111111",
@@ -270,6 +271,16 @@ describe("invoice editor route", () => {
           vatIncluded: false,
           priceOverrideReason: null,
           activationPolicy: null,
+          commercialTerms: {
+            version: 1,
+            subject: "service",
+            documentNameRu: "Настройка линии",
+            documentNameEn: "Line setup",
+            sellerPolicyRevision: 1,
+            billingPeriod: null,
+            billingTimezone: null,
+            activationRule: null,
+          },
           lineTotal: "12500.50",
           createdAt: CREATED_AT,
         },
@@ -305,7 +316,27 @@ describe("invoice editor route", () => {
     expect(await screen.findByText("Настройка линии")).toBeDefined();
     await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
     await waitFor(() => expect(api.calls()).toHaveLength(1));
-    expect(api.calls()[0]?.body).toMatchObject({ sourceOfferId: OFFER_ID, tenantId: TENANT_ID });
+    expect(api.calls()[0]?.body).toMatchObject({
+      sourceOfferId: OFFER_ID,
+      tenantId: TENANT_ID,
+      lines: [
+        expect.objectContaining({
+          quantity: 2,
+          agreedUnitPrice: "6250.25",
+          vatRateBps: null,
+          commercialTerms: {
+            version: 1,
+            subject: "service",
+            documentNameRu: "Настройка линии",
+            documentNameEn: "Line setup",
+            sellerPolicyRevision: 1,
+            billingPeriod: null,
+            billingTimezone: null,
+            activationRule: null,
+          },
+        }),
+      ],
+    });
     expect(api.calls()[0]?.body).not.toHaveProperty("sourceRequestId");
   });
   it.each([true, false])(
@@ -433,7 +464,33 @@ describe("invoice editor route", () => {
   });
 
   it("latches forbidden when accepted-offer invoice authority is revoked on create", async () => {
-    const offer = publishedOffer({ lines: [] });
+    const offer = publishedOffer({
+      lines: [
+        {
+          id: "41111111-1111-4111-8111-111111111111",
+          tenantId: TENANT_ID,
+          offerId: OFFER_ID,
+          position: 1,
+          kind: "service",
+          catalogVersionId: SERVICE.id,
+          nameRu: SERVICE.nameRu,
+          nameEn: SERVICE.nameEn,
+          descriptionRu: null,
+          descriptionEn: null,
+          quantity: 1,
+          unit: SERVICE.unit,
+          catalogUnitPrice: SERVICE.unitPrice,
+          agreedUnitPrice: "1.00",
+          priceOverrideReason: null,
+          vatRate: null,
+          vatIncluded: false,
+          activationPolicy: null,
+          lineTotal: "1.00",
+          commercialTerms: null,
+          createdAt: CREATED_AT,
+        },
+      ],
+    });
     const api = installInvoiceEditorApi({
       createStatus: 403,
       offer,
@@ -455,7 +512,6 @@ describe("invoice editor route", () => {
     const user = userEvent.setup();
 
     await screen.findByRole("button", { name: "Создать черновик счёта" });
-    await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
     await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
 
     expect(
@@ -515,6 +571,7 @@ describe("invoice editor route", () => {
           applicationMode: "automatic",
           lines: [
             {
+              commercialTerms: null,
               kind: "plan",
               catalogVersionId: PUBLISHED_PLAN.id,
               nameRu: "Базовый",
@@ -529,6 +586,7 @@ describe("invoice editor route", () => {
               activationPolicy: "immediate",
             },
             {
+              commercialTerms: null,
               kind: "addon",
               catalogVersionId: ADDON.id,
               nameRu: "Дополнительная станция",
@@ -543,6 +601,7 @@ describe("invoice editor route", () => {
               activationPolicy: "immediate",
             },
             {
+              commercialTerms: null,
               kind: "service",
               catalogVersionId: SERVICE.id,
               nameRu: "Внедрение",
@@ -588,7 +647,7 @@ describe("invoice editor route", () => {
     );
   });
 
-  it("preserves mismatched and legacy offer snapshots as literal custom invoice lines", async () => {
+  it("preserves mismatched source lines and blocks invalid historical plan quantity for review", async () => {
     const offer = publishedOffer({
       lines: [
         {
@@ -596,6 +655,7 @@ describe("invoice editor route", () => {
           tenantId: TENANT_ID,
           offerId: OFFER_ID,
           position: 1,
+          commercialTerms: null,
           kind: "plan",
           catalogVersionId: PUBLISHED_PLAN.id,
           nameRu: "Индивидуальный тариф",
@@ -618,6 +678,7 @@ describe("invoice editor route", () => {
           tenantId: TENANT_ID,
           offerId: OFFER_ID,
           position: 2,
+          commercialTerms: null,
           kind: "service",
           catalogVersionId: null,
           nameRu: "Архивная настройка",
@@ -640,6 +701,7 @@ describe("invoice editor route", () => {
           tenantId: TENANT_ID,
           offerId: OFFER_ID,
           position: 3,
+          commercialTerms: null,
           kind: "addon",
           catalogVersionId: ADDON.id,
           nameRu: "Архивное дополнение",
@@ -684,61 +746,12 @@ describe("invoice editor route", () => {
 
     await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
 
-    expect(api.calls()[0]?.body).toEqual({
-      tenantId: TENANT_ID,
-      idempotencyKey: expect.stringMatching(UUID_V4),
-      sourceOfferId: OFFER_ID,
-      sourceRequestId: REQUEST_ID,
-      dueDate: null,
-      applicationMode: "automatic",
-      lines: [
-        {
-          kind: "custom",
-          catalogVersionId: null,
-          nameRu: "Индивидуальный тариф",
-          nameEn: "Custom plan",
-          descriptionRu: null,
-          descriptionEn: null,
-          quantity: 3,
-          unit: "month",
-          catalogUnitPrice: null,
-          agreedUnitPrice: "321.00",
-          vatRateBps: 2000,
-          vatIncluded: true,
-          activationPolicy: null,
-        },
-        {
-          kind: "custom",
-          catalogVersionId: null,
-          nameRu: "Архивная настройка",
-          nameEn: "Legacy setup",
-          descriptionRu: null,
-          descriptionEn: null,
-          quantity: 2,
-          unit: "project",
-          catalogUnitPrice: null,
-          agreedUnitPrice: "10.00",
-          vatRateBps: 113,
-          vatIncluded: false,
-          activationPolicy: null,
-        },
-        {
-          kind: "custom",
-          catalogVersionId: null,
-          nameRu: "Архивное дополнение",
-          nameEn: "Legacy addon",
-          descriptionRu: null,
-          descriptionEn: null,
-          quantity: 4,
-          unit: "station",
-          catalogUnitPrice: null,
-          agreedUnitPrice: "45.00",
-          vatRateBps: null,
-          vatIncluded: false,
-          activationPolicy: null,
-        },
-      ],
-    });
+    expect(api.calls()).toEqual([]);
+    expect(screen.getAllByText("Количество тарифа должно быть равно 1.").length).toBeGreaterThan(0);
+    expect(
+      (screen.getByLabelText("Количество Индивидуальный тариф") as HTMLInputElement).disabled,
+    ).toBe(true);
+    expect(screen.queryByRole("combobox", { name: "Добавить позицию" })).toBeNull();
   });
 });
 

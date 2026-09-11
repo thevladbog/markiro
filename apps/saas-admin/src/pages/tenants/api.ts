@@ -2,21 +2,23 @@ import {
   assignAddonSchema,
   assignPlanSchema,
   createTenantSchema,
-  platformTenantContracts,
+  platformTenantV2Contracts,
+  COMMERCIAL_VERSION_HEADER,
+  COMMERCIAL_VERSION,
   platformTenantIdSchema,
-  platformCatalogContracts,
+  platformCatalogV2Contracts,
   platformCommercialContracts,
-  type AssignableCatalogVersion,
+  type AssignableCatalogVersionV2 as AssignableCatalogVersion,
   type AssignAddonInput,
   type AssignPlanInput,
   type CreateTenantInput,
   type DetailPlanVersion,
-  type TenantDetail,
+  type TenantDetailV2 as TenantDetail,
   type TenantListItem,
   type TenantListQuery,
   type TenantListResponse,
-  type TenantSubscription,
-  type TenantSubscriptionAddon,
+  type TenantSubscriptionV2 as TenantSubscription,
+  type TenantSubscriptionAddonV2 as TenantSubscriptionAddon,
   type TenantSubscriptionStatus,
   type BankAccountArchiveInput,
   type BankAccountInput,
@@ -49,14 +51,16 @@ export async function listTenants(query: TenantListQuery): Promise<TenantListRes
   const params = new URLSearchParams({ page: String(query.page), limit: String(query.limit) });
   if (query.status) params.set("status", query.status);
   return platformApiFetch(`/tenants?${params.toString()}`, {
-    responseSchema: platformTenantContracts.list.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformTenantV2Contracts.list.response,
   });
 }
 
 export async function createTenant(input: CreateTenantInput) {
   const validated = createTenantSchema.parse(input);
   return platformApiFetch("/tenants", {
-    responseSchema: platformTenantContracts.create.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformTenantV2Contracts.create.response,
     method: "POST",
     body: JSON.stringify(validated),
   });
@@ -65,14 +69,16 @@ export async function createTenant(input: CreateTenantInput) {
 export async function getTenant(tenantId: string): Promise<TenantDetail> {
   const validatedId = platformTenantIdSchema.parse(tenantId);
   return platformApiFetch(`/tenants/${validatedId}`, {
-    responseSchema: platformTenantContracts.detail.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformTenantV2Contracts.detail.response,
   });
 }
 
 export async function renewOwnerActivation(tenantId: string) {
   const validatedId = platformTenantIdSchema.parse(tenantId);
   return platformApiFetch(`/tenants/${validatedId}/owner-activation/renew`, {
-    responseSchema: platformTenantContracts.renewActivation.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformTenantV2Contracts.renewActivation.response,
     method: "POST",
     body: "{}",
   });
@@ -80,7 +86,8 @@ export async function renewOwnerActivation(tenantId: string) {
 
 export async function listAssignableCatalogVersions() {
   return platformApiFetch("/catalog/items", {
-    responseSchema: platformCatalogContracts.list.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCatalogV2Contracts.list.response,
   });
 }
 
@@ -88,7 +95,8 @@ export async function assignTenantPlan(tenantId: string, input: AssignPlanInput)
   const validatedId = platformTenantIdSchema.parse(tenantId);
   const validated = assignPlanSchema.parse(input);
   return platformApiFetch(`/tenants/${validatedId}/subscription/plan`, {
-    responseSchema: platformTenantContracts.assignPlan.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformTenantV2Contracts.assignPlan.response,
     method: "POST",
     body: JSON.stringify(validated),
   });
@@ -98,7 +106,8 @@ export async function assignTenantAddon(tenantId: string, input: AssignAddonInpu
   const validatedId = platformTenantIdSchema.parse(tenantId);
   const validated = assignAddonSchema.parse(input);
   return platformApiFetch(`/tenants/${validatedId}/subscription/addons`, {
-    responseSchema: platformTenantContracts.assignAddon.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformTenantV2Contracts.assignAddon.response,
     method: "POST",
     body: JSON.stringify(validated),
   });

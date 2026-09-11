@@ -1,5 +1,16 @@
 export { gs1CheckDigit, hasValidCheckDigit } from "./gs1/check-digit.js";
 export { DomainError } from "./errors.js";
+export {
+  commercialTaxDefaults,
+  isCommercialTaxAllowed,
+  resolveCommercialPeriod,
+} from "./commercial-terms.js";
+export type {
+  CommercialBillingPeriod,
+  CommercialPeriod,
+  CommercialTax,
+  SellerTaxPolicy,
+} from "./commercial-terms.js";
 export * from "./product-attributes/index.js";
 export { gtinMatchesPrefix, isValidGtin, normalizeToGtin14 } from "./gs1/gtin.js";
 export { parseImportGtins } from "./catalog/national-catalog.js";

@@ -1,5 +1,7 @@
 import {
-  platformCommercialContracts,
+  platformCommercialV2Contracts,
+  COMMERCIAL_VERSION_HEADER,
+  COMMERCIAL_VERSION,
   type PlatformBillingRequestCommentDto,
   type PlatformBillingRequestLinkDto,
   type PlatformBillingRequestLinkTargetQueryDto,
@@ -19,7 +21,7 @@ export type BillingRequestLinkTarget = Awaited<
 >["items"][number];
 
 export function billingRequestListPath(query: PlatformBillingRequestListQueryDto): string {
-  const parsed = platformCommercialContracts.billingRequests.list.query.parse(query);
+  const parsed = platformCommercialV2Contracts.billingRequests.list.query.parse(query);
   const search = new URLSearchParams();
   if (parsed.tenantId) search.set("tenantId", parsed.tenantId);
   if (parsed.status) search.set("status", parsed.status);
@@ -30,14 +32,16 @@ export function billingRequestListPath(query: PlatformBillingRequestListQueryDto
 
 export function listBillingRequests(query: PlatformBillingRequestListQueryDto = {}) {
   return platformApiFetch(billingRequestListPath(query), {
-    responseSchema: platformCommercialContracts.billingRequests.list.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.billingRequests.list.response,
   });
 }
 
 export function getBillingRequest(id: string) {
-  const requestId = platformCommercialContracts.billingRequests.detail.params.parse(id);
+  const requestId = platformCommercialV2Contracts.billingRequests.detail.params.parse(id);
   return platformApiFetch(`/billing/requests/${requestId}`, {
-    responseSchema: platformCommercialContracts.billingRequests.detail.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.billingRequests.detail.response,
   });
 }
 
@@ -46,30 +50,33 @@ export function listBillingRequestLinkTargets(
   query: PlatformBillingRequestLinkTargetQueryDto,
   signal?: AbortSignal,
 ) {
-  const requestId = platformCommercialContracts.billingRequests.linkTargets.params.parse(id);
-  const parsed = platformCommercialContracts.billingRequests.linkTargets.query.parse(query);
+  const requestId = platformCommercialV2Contracts.billingRequests.linkTargets.params.parse(id);
+  const parsed = platformCommercialV2Contracts.billingRequests.linkTargets.query.parse(query);
   const search = new URLSearchParams({ type: parsed.type, q: parsed.q });
   return platformApiFetch(`/billing/requests/${requestId}/link-targets?${search}`, {
-    responseSchema: platformCommercialContracts.billingRequests.linkTargets.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.billingRequests.linkTargets.response,
     ...(signal ? { signal } : {}),
   });
 }
 
 export function createBillingRequestOffer(id: string, input: PlatformBillingRequestOfferCreateDto) {
-  const requestId = platformCommercialContracts.billingRequests.createOffer.params.parse(id);
-  const body = platformCommercialContracts.billingRequests.createOffer.body.parse(input);
+  const requestId = platformCommercialV2Contracts.billingRequests.createOffer.params.parse(id);
+  const body = platformCommercialV2Contracts.billingRequests.createOffer.body.parse(input);
   return platformApiFetch(`/billing/requests/${requestId}/offer`, {
-    responseSchema: platformCommercialContracts.billingRequests.createOffer.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.billingRequests.createOffer.response,
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
 export function commentBillingRequest(id: string, input: PlatformBillingRequestCommentDto) {
-  const requestId = platformCommercialContracts.billingRequests.comment.params.parse(id);
-  const body = platformCommercialContracts.billingRequests.comment.body.parse(input);
+  const requestId = platformCommercialV2Contracts.billingRequests.comment.params.parse(id);
+  const body = platformCommercialV2Contracts.billingRequests.comment.body.parse(input);
   return platformApiFetch(`/billing/requests/${requestId}/comments`, {
-    responseSchema: platformCommercialContracts.billingRequests.comment.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.billingRequests.comment.response,
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -79,20 +86,22 @@ export function transitionBillingRequest(
   id: string,
   input: PlatformBillingRequestStatusMutationDto,
 ) {
-  const requestId = platformCommercialContracts.billingRequests.status.params.parse(id);
-  const body = platformCommercialContracts.billingRequests.status.body.parse(input);
+  const requestId = platformCommercialV2Contracts.billingRequests.status.params.parse(id);
+  const body = platformCommercialV2Contracts.billingRequests.status.body.parse(input);
   return platformApiFetch(`/billing/requests/${requestId}/status`, {
-    responseSchema: platformCommercialContracts.billingRequests.status.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.billingRequests.status.response,
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
 export function linkBillingRequest(id: string, input: PlatformBillingRequestLinkDto) {
-  const requestId = platformCommercialContracts.billingRequests.link.params.parse(id);
-  const body = platformCommercialContracts.billingRequests.link.body.parse(input);
+  const requestId = platformCommercialV2Contracts.billingRequests.link.params.parse(id);
+  const body = platformCommercialV2Contracts.billingRequests.link.body.parse(input);
   return platformApiFetch(`/billing/requests/${requestId}/links`, {
-    responseSchema: platformCommercialContracts.billingRequests.link.response,
+    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    responseSchema: platformCommercialV2Contracts.billingRequests.link.response,
     method: "POST",
     body: JSON.stringify(body),
   });

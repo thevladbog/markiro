@@ -3,7 +3,7 @@ import { schema, type Db } from "@markiro/db";
 import {
   SIGNED_PRINT_SELLER_TAX_ID,
   offerWorkspaceBankAccountSchema,
-  offerWorkspacePartySchema,
+  offerWorkspacePartyV2Schema,
   type OfferRegistryQuery,
   type PlatformPrincipal,
 } from "@markiro/platform-contracts";
@@ -396,7 +396,7 @@ function escapeLikePattern(value: string) {
 }
 
 function parseParty(value: unknown) {
-  const parsed = offerWorkspacePartySchema.safeParse(value);
+  const parsed = offerWorkspacePartyV2Schema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
 

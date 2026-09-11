@@ -31,6 +31,14 @@ describe("new offer issue VAT breakdown", () => {
       expect.objectContaining({ response: { code: "offer_total_inconsistent" } }),
     );
   });
+  it("uses the persisted commercial money range in previews", () => {
+    expect(() =>
+      calculateOfferBreakdown(
+        [{ agreedUnitPrice: "1000000000000.00", quantity: 1, vatRate: null, vatIncluded: false }],
+        "1000000000000.00",
+      ),
+    ).toThrow(expect.objectContaining({ response: { code: "commercial_amount_out_of_range" } }));
+  });
   it.each(["90071992547409.92", "1e2", "-1.00", "1.001"])(
     "rejects unsafe money %s",
     (agreedUnitPrice) => {

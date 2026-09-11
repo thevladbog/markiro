@@ -322,6 +322,13 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
       revision: 1,
       kind: "legal_entity",
       fullName: "Markiro Operator",
+      taxPolicy: {
+        kind: "vat",
+        regime: "other",
+        allowedRatesBps: [2000],
+        defaultRateBps: 2000,
+        defaultIncluded: true,
+      },
       displayName: "Markiro",
       inn: "7707083893",
       kpp: "773601001",
@@ -380,6 +387,16 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
       kind: "service",
       nameRu: "Настройка",
       nameEn: "Setup",
+      commercialTerms: {
+        version: 1,
+        subject: "service",
+        documentNameRu: "Настройка",
+        documentNameEn: "Setup",
+        sellerPolicyRevision: 1,
+        billingPeriod: null,
+        billingTimezone: null,
+        activationRule: null,
+      },
       descriptionRu: "Снимок строки",
       descriptionEn: "Line snapshot",
       quantity: 2,
@@ -613,7 +630,7 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
         tenantId,
         familyId: cancelledFamilyId,
         revision: 1,
-        status: "published",
+        status: "draft",
         number: `KP-CANCELLED-FAMILY-${randomUUID()}`,
         total: "100.00",
         publishedAt: new Date(),
@@ -621,6 +638,11 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
         createdByPlatformUserId: actorId,
       })
       .returning();
+    await insertExplicitServiceLine(connection.db, tenantId, first!.id);
+    await connection.db
+      .update(schema.commercialOffers)
+      .set({ status: "published" })
+      .where(eq(schema.commercialOffers.id, first!.id));
     await connection.db.insert(schema.commercialOfferDecisions).values({
       tenantId,
       offerId: first!.id,
@@ -632,19 +654,10 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
     const secondDraft = await service.revise(revisionActor, first!.id, {
       idempotencyKey: randomUUID(),
     });
-    await connection.db.insert(schema.commercialOfferLines).values({
-      tenantId,
-      offerId: secondDraft.id,
-      position: 1,
-      kind: "service",
-      nameRu: "Услуга",
-      nameEn: "Service",
-      quantity: 1,
-      unit: "шт",
-      agreedUnitPrice: "100.00",
-      vatRate: null,
-      vatIncluded: true,
+    expect(secondDraft.lines).toHaveLength(1);
+    expect(secondDraft.lines[0]).toMatchObject({
       lineTotal: "100.00",
+      commercialTerms: { subject: "service" },
     });
     await service.publish(revisionActor, secondDraft.id);
     await service.cancel(revisionActor, secondDraft.id);
@@ -692,7 +705,7 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
         tenantId,
         familyId: randomUUID(),
         revision: 1,
-        status: "published",
+        status: "draft",
         number: `KP-MIXED-INVOICE-${randomUUID()}`,
         total: "100.00",
         publishedAt: new Date(),
@@ -700,6 +713,33 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
         createdByPlatformUserId: actorId,
       })
       .returning();
+    await connection.db.insert(schema.commercialOfferLines).values({
+      tenantId,
+      offerId: invoiceOffer!.id,
+      position: 1,
+      kind: "service",
+      nameRu: "Разовая услуга",
+      nameEn: "One-time service",
+      quantity: 1,
+      unit: "услуга",
+      agreedUnitPrice: "100.00",
+      vatIncluded: false,
+      lineTotal: "100.00",
+      commercialTerms: {
+        version: 1,
+        subject: "service",
+        documentNameRu: "Разовая услуга",
+        documentNameEn: "One-time service",
+        sellerPolicyRevision: 1,
+        billingPeriod: null,
+        billingTimezone: null,
+        activationRule: null,
+      },
+    });
+    await connection.db
+      .update(schema.commercialOffers)
+      .set({ status: "published" })
+      .where(eq(schema.commercialOffers.id, invoiceOffer!.id));
     const [invoiceOutcome, acceptOutcome] = await Promise.allSettled([
       billing.create(revisionActor, {
         ...invoiceInput(tenantId),
@@ -772,7 +812,24 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
       const draft = await service.create(revisionActor, {
         tenantId,
         expiresAt: expiresAt?.toISOString() ?? null,
-        lines: [{ ...inputLine, kind: "service", catalogVersionId: null, activationPolicy: null }],
+        lines: [
+          {
+            ...inputLine,
+            kind: "service",
+            catalogVersionId: null,
+            activationPolicy: null,
+            commercialTerms: {
+              version: 1,
+              subject: "service",
+              documentNameRu: "Услуга",
+              documentNameEn: "Service",
+              sellerPolicyRevision: 1,
+              billingPeriod: null,
+              billingTimezone: null,
+              activationRule: null,
+            },
+          },
+        ],
       });
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(now);
@@ -820,10 +877,7 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
           const paid = await service.pay(revisionActor, draft.id, key, payment);
           expect(paid.fulfilments).toHaveLength(1);
           vi.setSystemTime(new Date(now.getTime() + 1000));
-          await expect(service.pay(revisionActor, draft.id, key, payment)).resolves.toEqual({
-            paymentId: paid.paymentId,
-            fulfilments: [],
-          });
+          await expect(service.pay(revisionActor, draft.id, key, payment)).resolves.toEqual(paid);
           await expect(
             connection.db
               .select()
@@ -908,22 +962,8 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
         },
       ])
       .returning();
-    await connection.db.insert(schema.commercialOfferLines).values(
-      [firstDraft!, secondDraft!].map((offer) => ({
-        tenantId: offer.tenantId,
-        offerId: offer.id,
-        position: 1,
-        kind: "service" as const,
-        nameRu: "Услуга",
-        nameEn: "Service",
-        quantity: 1,
-        unit: "шт",
-        agreedUnitPrice: "100.00",
-        vatRate: null,
-        vatIncluded: true,
-        lineTotal: "100.00",
-      })),
-    );
+    await insertExplicitServiceLine(connection.db, tenantId, firstDraft!.id);
+    await insertExplicitServiceLine(connection.db, secondTenantId, secondDraft!.id);
     await connection.pool.query(`
       CREATE FUNCTION task6_offer_publish_delay() RETURNS trigger
       LANGUAGE plpgsql AS $$
@@ -1041,4 +1081,31 @@ function invoiceInput(tenantId: string) {
       },
     ],
   };
+}
+
+async function insertExplicitServiceLine(db: Db, tenantId: string, offerId: string) {
+  await db.insert(schema.commercialOfferLines).values({
+    tenantId,
+    offerId,
+    position: 1,
+    kind: "service",
+    nameRu: "Услуга",
+    nameEn: "Service",
+    quantity: 1,
+    unit: "service",
+    agreedUnitPrice: "100.00",
+    lineTotal: "100.00",
+    vatRate: "20.00",
+    vatIncluded: true,
+    commercialTerms: {
+      version: 1,
+      subject: "service",
+      documentNameRu: "Услуга",
+      documentNameEn: "Service",
+      sellerPolicyRevision: 1,
+      billingPeriod: null,
+      billingTimezone: null,
+      activationRule: null,
+    },
+  });
 }

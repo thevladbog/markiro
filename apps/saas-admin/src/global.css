@@ -3651,6 +3651,18 @@ textarea {
   }
 }
 
+/* Catalog drawers have their own available width, independent of the desktop viewport. */
+.version-panel .version-panel__grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+.version-panel .effect-rail {
+  border-top: 1px solid var(--line-strong);
+  border-left: 0;
+}
+.catalog-form .form-grid--four {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+
 /* Offers: a compact ledger and a document-first detail surface. */
 .offers-page,
 .offer-detail {
