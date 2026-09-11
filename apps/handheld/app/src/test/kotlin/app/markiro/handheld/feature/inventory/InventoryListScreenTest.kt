@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -46,6 +47,41 @@ class InventoryListScreenTest {
         assertEquals("i2", selected)
         compose.onNodeWithText("с переупаковкой: в следующем срезе").assertIsDisplayed()
         compose.onNode(hasText("INV-0009")).assertIsNotEnabled()
+    }
+
+    /**
+     * `onRefresh` was already wired, but the only way an operator could reach it
+     * was to hit an error first -- the list itself offered nothing.
+     */
+    @Test
+    fun theAppBarOffersRefresh() {
+        var refreshed = false
+        compose.setContent {
+            MarkiroTheme {
+                InventoryListScreen(
+                    InventoryListUi(false, null, listOf(check), emptyMap(), false, false, true, "Линия 2", 0L, null),
+                    InventoryListCallbacks(onRefresh = { refreshed = true }),
+                )
+            }
+        }
+        compose.onNodeWithContentDescription("Обновить").performClick()
+        assertEquals(true, refreshed)
+    }
+
+    @Test
+    fun aFailedRefreshSaysSoInsteadOfLookingLikeSuccess() {
+        compose.setContent {
+            MarkiroTheme {
+                InventoryListScreen(
+                    InventoryListUi(
+                        false, null, listOf(check), emptyMap(), false, false, true, "Линия 2", 0L, null,
+                        refreshFailed = true,
+                    ),
+                    InventoryListCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("Не удалось обновить список", substring = true).assertIsDisplayed()
     }
 
     @Test

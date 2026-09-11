@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Factory
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Report
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.markiro.handheld.R
 import app.markiro.handheld.core.design.AppBar
+import app.markiro.handheld.core.design.Banner
 import app.markiro.handheld.core.design.FullScreenState
 import app.markiro.handheld.core.design.IconAction
 import app.markiro.handheld.core.design.MarkiroChip
@@ -194,6 +196,11 @@ fun ShiftListScreen(state: ShiftListUi, cb: ShiftListCallbacks) {
                 modifier = Modifier.padding(horizontal = MarkiroSizes.sp4),
             )
         }
+        // The device can be reachable and the refresh still refused; without this
+        // the pull gesture turns a spinner and changes nothing, silently.
+        if (state.refreshFailed) {
+            Banner(stringResource(R.string.common_refresh_failed), Tone.Warn, Icons.Outlined.CloudOff)
+        }
         if (!state.loading && state.continueShift == null && state.mine.isEmpty() && !state.othersExpanded) {
             FullScreenState(Icons.Outlined.Factory, stringResource(R.string.shifts_empty_title), stringResource(R.string.shifts_empty_text))
             return
@@ -222,6 +229,10 @@ fun ShiftListScreen(state: ShiftListUi, cb: ShiftListCallbacks) {
                 } else {
                     item { Text(stringResource(R.string.shifts_other_lines), style = t.label, color = c.fg3) }
                     if (state.othersLoading) item { Text(stringResource(R.string.shifts_loading), style = t.caption, color = c.fg3) }
+                    // A failed lookup used to be indistinguishable from «нет смен».
+                    if (state.othersFailed) {
+                        item { Text(stringResource(R.string.common_other_lines_failed), style = t.caption, color = c.warnFg) }
+                    }
                     state.others.forEach { line ->
                         items(line.shifts, key = { "${line.id}:${it.id}" }) { dto ->
                             ShiftCardView(dto.card(state.reachable, line.name), onClick = { cb.onSelectOther(dto, line.name) })
