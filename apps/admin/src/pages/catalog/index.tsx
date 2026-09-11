@@ -326,7 +326,15 @@ export function CatalogPage() {
         title: t("pages.catalog.table.name"),
         wrap: true,
         width: "26%",
-        render: (row) => <span className="mk-catalog-product-name">{row.name}</span>,
+        render: (row) => (
+          <Link
+            className="mk-catalog-product-name"
+            to={`${row.id}/edit`}
+            state={{ catalogBackground: true }}
+          >
+            {row.name}
+          </Link>
+        ),
       },
       {
         key: "productGroup",
@@ -490,9 +498,11 @@ export function CatalogPage() {
             products: data ?? [],
             productsPending: isPending,
             productsError: isError,
+            productsAvailable: data !== undefined,
             counterparties,
             counterpartiesPending,
             counterpartiesError,
+            counterpartiesAvailable: counterpartiesData !== undefined,
             retryPanelData,
           } satisfies CatalogPanelContext
         }

@@ -37,7 +37,10 @@ import {
   type NationalCatalogStableFieldMapping,
 } from "./national-catalog-proposal.service";
 import type { DbTx, ImportItemRow, ImportSessionRow } from "./national-catalog-import.types";
-import type { NationalCatalogProduct } from "./national-catalog.types";
+import {
+  nationalCatalogProductAttributeUnit,
+  type NationalCatalogProduct,
+} from "./national-catalog.types";
 import { hashContent } from "./national-catalog-preparation-state";
 
 type ProductRow = typeof schema.products.$inferSelect;
@@ -444,7 +447,11 @@ export async function buildImportPreview(
             attribute.gtin === null ||
             (isValidGtin(attribute.gtin) && normalizeToGtin14(attribute.gtin) === item.gtin14),
         )
-        .map((attribute) => ({ id: attribute.id, value: attribute.value, unit: null })),
+        .map((attribute) => ({
+          id: attribute.id,
+          value: attribute.value,
+          unit: nationalCatalogProductAttributeUnit(attribute),
+        })),
       sourceName: source.name,
       stableMappings,
       currentStableFields: new Map<

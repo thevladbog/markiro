@@ -2465,6 +2465,30 @@ body,
   background: var(--surface-card);
 }
 
+.setup-card--scanner-config {
+  overflow-y: auto;
+}
+
+.setup-split--scanners > .setup-card--check {
+  overflow-y: auto;
+  align-content: safe center;
+}
+
+.setup-scanner-row {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: var(--sp-3) 0 0;
+  gap: var(--sp-3);
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.setup-scanner-row legend {
+  padding: 0 var(--sp-2) 0 0;
+  font: var(--floor-body-strong);
+}
+
 .setup-card--printer-config {
   overflow-y: auto;
   padding: var(--sp-3);

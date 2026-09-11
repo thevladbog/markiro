@@ -22,12 +22,13 @@ describe("hardware scan source", () => {
     const hw: HardwareContract = {
       listScannerPorts: async () => [],
       listUsbPrinters: async () => [],
-      openScanner: async () => {},
+      configureScanners: async () => {},
       closeScanner: async () => {},
       onScan: async (listener) => {
         emit = listener;
         return unsubscribe;
       },
+      onScannerConnections: async () => () => {},
       onScannerStatus: async () => () => {},
       print: async () => {},
     };
@@ -51,9 +52,10 @@ describe("scanner status subscription", () => {
     const hw: HardwareContract = {
       listScannerPorts: async () => [],
       listUsbPrinters: async () => [],
-      openScanner: async () => {},
+      configureScanners: async () => {},
       closeScanner: async () => {},
       onScan: async () => () => {},
+      onScannerConnections: async () => () => {},
       onScannerStatus: async (listener) => {
         emit = listener;
         return unsubscribe;

@@ -82,6 +82,11 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
   to system/serial/network printers. The internal hardware module mirrors the
   idento-agent HTTP contract (`/scan/consume`, `/print`, discovery) so it can
   be extracted into a standalone agent later without touching the UI.
+- **Multiple COM scanners:** every saved port has an independent reader and
+  reconnect loop. Any scanner can feed the existing scan queue without operator
+  switching; one failed port does not stop the others. Local settings retain
+  compatibility with the legacy single-scanner configuration. See
+  [runtime and acceptance](acceptance/station-multiple-com-scanners.md).
 - **Local DB:** SQLite via `tauri-plugin-sql`, accessed with
   `drizzle-orm/sqlite-proxy`; schema defined in `packages/db`, mirrors the
   server's shift entities (shift, codes, scan journal, boxes, pallets).
@@ -421,6 +426,17 @@ production access, CDN hosts and live recovery acceptance remain unverified.
 [The import runbook](runbooks/national-catalog-import.md) defines operational and
 rollout boundaries; [delivery evidence](evidence/national-catalog-import/delivery-verification.md)
 records current local verification separately from external acceptance.
+
+Product cards render regulatory attributes from the profile's pinned schema definition.
+Production, code-ordering, circulation and EGAIS readiness remain separate. Category
+binding/change requires an explicit preview and confirmed value transfer; operational
+base fields and category attributes use separate saves. Background read failures preserve
+cached cards and unsaved drafts; a conflict reload fetches the current revision before
+an explicit discard. Read-only cabinet access opens the same product route in view mode.
+National Catalog numeric values retain the exact supported source unit across preview,
+apply, observation and reviewed baselines; missing or unsupported units are not inferred.
+[Catalog delivery evidence](evidence/catalog-category-readiness.md) records local checks
+and the remaining live schema/assortment acceptance for groups 23, 33 and 35.
 
 A confirmed link binds tenant, provider environment, card, canonical GTIN and revision.
 GTIN equality only offers a link. One card may expose several GTINs. New import

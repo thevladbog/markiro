@@ -871,6 +871,26 @@ describe("NationalCatalogClient", () => {
     ]);
   });
 
+  it("preserves the exact provider attr_value_type used as a numeric source unit", async () => {
+    const payload = structuredClone(productPayload);
+    payload.result[0]!.good_attrs[0]!.attr_value = "50";
+    payload.result[0]!.good_attrs[0]!.attr_value_type = "мл";
+    const client = new NationalCatalogClient(
+      dependencies(async () => new Response(JSON.stringify(payload), { status: 200 })),
+    );
+
+    await expect(client.getFeedProducts(auth, ["0000000000001"])).resolves.toMatchObject({
+      status: "ok",
+      value: {
+        products: [
+          {
+            attributes: [expect.objectContaining({ value: "50", valueType: "мл" })],
+          },
+        ],
+      },
+    });
+  });
+
   it("uses the singular documented GTIN selector for one-card reads", async () => {
     const calls: string[] = [];
     const client = new NationalCatalogClient(

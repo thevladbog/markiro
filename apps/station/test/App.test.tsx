@@ -1,3 +1,4 @@
+import type { ScannerConnection } from "../src/lib/hardware.js";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { DatabaseSync } from "node:sqlite";
 import { StrictMode } from "react";
@@ -73,11 +74,16 @@ vi.mock("@tauri-apps/plugin-sql", () => {
 const hardwareMock = vi.hoisted(() => ({
   listScannerPorts: vi.fn<() => Promise<string[]>>(async () => []),
   listUsbPrinters: vi.fn<() => Promise<{ name: string; port: string }[]>>(async () => []),
-  openScanner: vi.fn<(port: string, baud: number) => Promise<void>>(async () => {}),
+  configureScanners: vi.fn<(scanners: { port: string; baud: number }[]) => Promise<void>>(
+    async () => {},
+  ),
   closeScanner: vi.fn<() => Promise<void>>(async () => {}),
+  onScannerConnections: vi.fn<
+    (listener: (connections: ScannerConnection[]) => void) => Promise<() => void>
+  >(async () => () => {}),
   onScan: vi.fn<(listener: (raw: string) => void) => Promise<() => void>>(async () => () => {}),
   onScannerStatus: vi.fn<
-    (listener: (status: "connected" | "disconnected") => void) => Promise<() => void>
+    (listener: (status: "connected" | "partial" | "disconnected") => void) => Promise<() => void>
   >(async () => () => {}),
   print: vi.fn<(target: unknown, bytes: Uint8Array) => Promise<void>>(async () => {}),
 }));
@@ -149,9 +155,10 @@ afterEach(() => {
   vi.unstubAllEnvs();
   hardwareMock.listScannerPorts.mockReset().mockResolvedValue([]);
   hardwareMock.listUsbPrinters.mockReset().mockResolvedValue([]);
-  hardwareMock.openScanner.mockReset().mockResolvedValue(undefined);
+  hardwareMock.configureScanners.mockReset().mockResolvedValue(undefined);
   hardwareMock.closeScanner.mockReset().mockResolvedValue(undefined);
   hardwareMock.onScan.mockReset().mockResolvedValue(() => {});
+  hardwareMock.onScannerConnections.mockReset().mockResolvedValue(() => {});
   hardwareMock.onScannerStatus.mockReset().mockResolvedValue(() => {});
   hardwareMock.print.mockReset().mockResolvedValue(undefined);
   lockdownMock.start.mockReset().mockReturnValue(() => {});
@@ -3628,14 +3635,14 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("scanner-status").textContent).toBe("Connected"));
   });
 
-  it("closes the scanner session before opening it (Finding 2 ordering the reconciliation effect depends on)", async () => {
+  it("reconciles the scanner selection after Setup without globally closing healthy readers", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const calls: string[] = [];
     hardwareMock.closeScanner.mockImplementation(async () => {
       calls.push("close");
     });
-    hardwareMock.openScanner.mockImplementation(async () => {
-      calls.push("open");
+    hardwareMock.configureScanners.mockImplementation(async () => {
+      calls.push("configure");
     });
     mockInvokeForFloor(pinHash, {
       scanner: { port: "COM3", baud: 9600 },
@@ -3651,32 +3658,22 @@ describe("App", () => {
 
     render(<App />);
     await signInAsOperator();
-    await waitFor(() => expect(calls).toContain("open"));
+    await waitFor(() => expect(calls).toContain("configure"));
 
-    // The boot run's own close(es)-then-open pair is done settling by now --
-    // clear it so what follows reflects ONLY the second, reconciling run
-    // that leaving Setup triggers. Without this reset, the boot run
-    // unconditionally pushes "close" at index 0 before its own "no scanner
-    // configured yet" early return, so `calls.indexOf("close")` is always 0
-    // and `< calls.indexOf("open")` can never fail -- even an implementation
-    // that opened before closing in the RECONCILING run would still pass,
-    // because the boot run's leading close always wins the index race.
+    // Observe only reconciliation triggered by leaving Setup. A global close
+    // would interrupt every healthy port and must never be used here.
     calls.length = 0;
 
-    // Leave Setup with the scanner configuration unchanged -- the
-    // `sessionEpoch` bump this triggers re-runs the effect even though
-    // port/baud did not change, and that reconciling run is what must
-    // close before it opens.
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
     const done = await screen.findByRole("button", { name: "Done" });
     await waitFor(() => expect((done as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(done);
 
-    await waitFor(() => expect(calls).toContain("open"));
-    expect(calls).toEqual(["close", "open"]);
+    await waitFor(() => expect(calls).toContain("configure"));
+    expect(calls).toEqual(["configure"]);
   });
 
-  it("regression (Finding 2): leaving Setup with an unchanged scanner configuration reopens the session", async () => {
+  it("leaving Setup reconciles the saved scanner configuration even when unchanged", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     mockInvokeForFloor(pinHash, {
       scanner: { port: "COM3", baud: 9600 },
@@ -3693,8 +3690,10 @@ describe("App", () => {
     render(<App />);
     await signInAsOperator();
 
-    await waitFor(() => expect(hardwareMock.openScanner).toHaveBeenCalledWith("COM3", 9600));
-    const openCallsBeforeSetup = hardwareMock.openScanner.mock.calls.length;
+    await waitFor(() =>
+      expect(hardwareMock.configureScanners).toHaveBeenCalledWith([{ port: "COM3", baud: 9600 }]),
+    );
+    const openCallsBeforeSetup = hardwareMock.configureScanners.mock.calls.length;
 
     // Open Setup, re-pick the SAME port (already selected) and press Done
     // without changing anything -- an identical `HardwareConfig` value, but a
@@ -3710,7 +3709,9 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     await waitFor(() =>
-      expect(hardwareMock.openScanner.mock.calls.length).toBeGreaterThan(openCallsBeforeSetup),
+      expect(hardwareMock.configureScanners.mock.calls.length).toBeGreaterThan(
+        openCallsBeforeSetup,
+      ),
     );
   });
 
@@ -4206,7 +4207,9 @@ describe("App", () => {
 
     render(<App />);
     await signInAsOperator();
-    await waitFor(() => expect(hardwareMock.openScanner).toHaveBeenCalledWith("COM3", 9600));
+    await waitFor(() =>
+      expect(hardwareMock.configureScanners).toHaveBeenCalledWith([{ port: "COM3", baud: 9600 }]),
+    );
 
     // Reach Setup, manually connect a different port with the screen's own
     // "Connect scanner" button (not Done), then leave via Back -- the config
@@ -4220,19 +4223,21 @@ describe("App", () => {
       target: { value: "COM9" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Connect scanner" }));
-    await waitFor(() => expect(hardwareMock.openScanner).toHaveBeenCalledWith("COM9", 9600));
+    await waitFor(() =>
+      expect(hardwareMock.configureScanners).toHaveBeenCalledWith([{ port: "COM9", baud: 9600 }]),
+    );
 
-    const openCallsBeforeBack = hardwareMock.openScanner.mock.calls.length;
+    const openCallsBeforeBack = hardwareMock.configureScanners.mock.calls.length;
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
 
     await waitFor(() =>
-      expect(hardwareMock.openScanner.mock.calls.length).toBeGreaterThan(openCallsBeforeBack),
+      expect(hardwareMock.configureScanners.mock.calls.length).toBeGreaterThan(openCallsBeforeBack),
     );
-    expect(hardwareMock.openScanner).toHaveBeenLastCalledWith("COM3", 9600);
+    expect(hardwareMock.configureScanners).toHaveBeenLastCalledWith([{ port: "COM3", baud: 9600 }]);
   });
 
-  it("regression (Finding 1): reconfiguring a connected scanner to a port whose open fails must not leave the status bar reading Connected", async () => {
-    // This test deliberately makes `openScanner` reject, which the App.tsx
+  it("regression (Finding 1): a failed scanner configuration request must not leave the status bar reading Connected", async () => {
+    // This test deliberately makes `configureScanners` reject, which the App.tsx
     // reconciliation effect logs via `console.error` (Finding 5) -- expected,
     // and already covered by the assertions below, so it is silenced here
     // rather than left to print a stack trace into otherwise-pristine test
@@ -4261,11 +4266,11 @@ describe("App", () => {
           statusListener = null;
         });
       });
-      // COM3 (the boot configuration) opens fine; COM9 (what Setup will be
-      // reconfigured to, below) fails -- mirroring the Rust `Io(NotFound)`
-      // fast path for a port that does not exist.
-      hardwareMock.openScanner.mockImplementation((port) => {
-        if (port === "COM9") return Promise.reject(new Error("No such file or directory"));
+      // Simulate an IPC/configuration failure. Missing physical ports are
+      // handled by Rust reconnect and reported through connection snapshots.
+      hardwareMock.configureScanners.mockImplementation((scanners) => {
+        if (scanners.some((scanner) => scanner.port === "COM9"))
+          return Promise.reject(new Error("No such file or directory"));
         return Promise.resolve(undefined);
       });
       hardwareMock.listScannerPorts.mockResolvedValue(["COM9"]);
@@ -4292,7 +4297,9 @@ describe("App", () => {
       });
       fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
-      await waitFor(() => expect(hardwareMock.openScanner).toHaveBeenCalledWith("COM9", 9600));
+      await waitFor(() =>
+        expect(hardwareMock.configureScanners).toHaveBeenCalledWith([{ port: "COM9", baud: 9600 }]),
+      );
       // The invariant this whole indicator exists for: never green for a
       // scanner that did not actually open.
       expect(screen.getByTestId("scanner-status").textContent).not.toBe("Connected");
@@ -5229,4 +5236,40 @@ it("gates startup on the current credential's saved label and resumes a remotely
     await Promise.resolve();
     h.close();
   }
+});
+
+it("starts all stored COM ports and reports partial availability", async () => {
+  lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+  const pinHash = await hashSecret(OPERATOR_PIN);
+  mockInvokeForFloor(pinHash, {
+    scanner: { port: "COM3", baud: 9600 },
+    scanners: [
+      { port: "COM3", baud: 9600 },
+      { port: "COM4", baud: 115200 },
+    ],
+    printer: null,
+    printerLanguage: "zpl",
+    verifyPrintedLabel: false,
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+  );
+  let publishStatus: (status: ScannerStatus) => void = () => {};
+  hardwareMock.onScannerStatus.mockImplementation(async (listener) => {
+    publishStatus = listener;
+    return () => {};
+  });
+  render(<App />);
+  await signInAsOperator();
+  await waitFor(() =>
+    expect(hardwareMock.configureScanners).toHaveBeenCalledWith([
+      { port: "COM3", baud: 9600 },
+      { port: "COM4", baud: 115200 },
+    ]),
+  );
+  act(() => publishStatus("partial"));
+  expect(screen.getByTestId("scanner-status").textContent).toBe("Some scanners disconnected");
+  act(() => publishStatus("connected"));
+  expect(screen.getByTestId("scanner-status").textContent).toBe("Connected");
 });

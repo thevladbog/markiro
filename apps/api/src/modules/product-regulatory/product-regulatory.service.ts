@@ -41,6 +41,7 @@ export class ProductRegulatoryService {
         ),
       )
       .limit(1);
+    const definition = binding ? await this.pinnedDefinition(binding.schemaVersionId) : null;
     const values = await this.writer.currentValues(this.db, tenantId, productId);
     const egaisCodes = await this.db
       .select({
@@ -70,10 +71,21 @@ export class ProductRegulatoryService {
     return {
       productId,
       binding: binding ?? null,
+      definition,
       values,
       egaisCodes,
       pendingProposalCount: pending?.value ?? 0,
     };
+  }
+
+  private async pinnedDefinition(schemaVersionId: string) {
+    const [row] = await this.db
+      .select({ definition: schema.nationalCatalogSchemaVersions.definition })
+      .from(schema.nationalCatalogSchemaVersions)
+      .where(eq(schema.nationalCatalogSchemaVersions.id, schemaVersionId))
+      .limit(1);
+    if (!row) throw new NotFoundException("Pinned category schema not found");
+    return parseCategorySchemaDefinition(row.definition);
   }
 
   async getCategoryOptions(tenantId: string, productId: string) {

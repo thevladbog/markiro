@@ -165,3 +165,56 @@ describe("hardware config", () => {
     expect((await loadHardwareConfig(exec)).printer).toBeNull();
   });
 });
+
+describe("multiple COM scanner configuration", () => {
+  it("loads every stored scanner with its own speed", async () => {
+    const exec = await makeExec();
+    await exec.run("INSERT INTO station_meta (key,value) VALUES (?,?)", [
+      "hardware_config",
+      JSON.stringify({
+        ...CONFIG,
+        scanners: [
+          { port: "COM3", baud: 9600 },
+          { port: "COM4", baud: 115200 },
+        ],
+      }),
+    ]);
+    expect((await loadHardwareConfig(exec)).scanners).toEqual([
+      { port: "COM3", baud: 9600 },
+      { port: "COM4", baud: 115200 },
+    ]);
+  });
+
+  it("an explicit empty list clears the legacy scanner instead of resurrecting it", async () => {
+    const exec = await makeExec();
+    await exec.run("INSERT INTO station_meta (key,value) VALUES (?,?)", [
+      "hardware_config",
+      JSON.stringify({ ...CONFIG, scanners: [] }),
+    ]);
+    const config = await loadHardwareConfig(exec);
+    expect(config.scanners).toEqual([]);
+    expect(config.scanner).toBeNull();
+  });
+
+  it("keeps valid ports when another persisted entry is malformed or duplicated", async () => {
+    const exec = await makeExec();
+    await exec.run("INSERT INTO station_meta (key,value) VALUES (?,?)", [
+      "hardware_config",
+      JSON.stringify({
+        ...CONFIG,
+        scanners: [
+          { port: "com3", baud: 9600 },
+          { port: "COM3", baud: 115200 },
+          { port: "COM4", baud: 115200 },
+          { port: "  ", baud: 9600 },
+          { port: "COM5", baud: 0 },
+          { port: "COM6", baud: 1.5 },
+        ],
+      }),
+    ]);
+    expect((await loadHardwareConfig(exec)).scanners).toEqual([
+      { port: "COM3", baud: 9600 },
+      { port: "COM4", baud: 115200 },
+    ]);
+  });
+});
