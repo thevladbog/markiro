@@ -58,6 +58,7 @@ export {
 } from "./labels/model.js";
 export {
   isBoxLabelTemplateEligible,
+  isPalletLabelTemplateEligible,
   labelTemplateUsesField,
   resolveBoxLabelTemplateDefault,
 } from "./labels/eligibility.js";

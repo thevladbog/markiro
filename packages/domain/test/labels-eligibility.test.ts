@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isBoxLabelTemplateEligible,
+  isPalletLabelTemplateEligible,
   labelTemplateUsesField,
   resolveBoxLabelTemplateDefault,
   type LabelTemplateSpec,
@@ -29,6 +30,48 @@ describe("isBoxLabelTemplateEligible", () => {
     expect(isBoxLabelTemplateEligible({ enabled: false, chzProductGroupCodes: [15] }, 15)).toBe(
       false,
     );
+  });
+
+  it("never accepts a pallet-purpose template", () => {
+    expect(
+      isBoxLabelTemplateEligible(
+        { purpose: "pallet", enabled: true, chzProductGroupCodes: null },
+        15,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("isPalletLabelTemplateEligible", () => {
+  it("accepts an enabled universal pallet template for any category, including an unknown one", () => {
+    const template = { purpose: "pallet" as const, enabled: true, chzProductGroupCodes: null };
+    expect(isPalletLabelTemplateEligible(template, 15)).toBe(true);
+    expect(isPalletLabelTemplateEligible(template, null)).toBe(true);
+  });
+
+  it("accepts a scoped pallet template only for a listed category", () => {
+    const template = { purpose: "pallet" as const, enabled: true, chzProductGroupCodes: [15, 22] };
+    expect(isPalletLabelTemplateEligible(template, 15)).toBe(true);
+    expect(isPalletLabelTemplateEligible(template, 8)).toBe(false);
+    expect(isPalletLabelTemplateEligible(template, null)).toBe(false);
+  });
+
+  it("never accepts a disabled pallet template", () => {
+    expect(
+      isPalletLabelTemplateEligible(
+        { purpose: "pallet", enabled: false, chzProductGroupCodes: null },
+        15,
+      ),
+    ).toBe(false);
+  });
+
+  it("never accepts a box-purpose template", () => {
+    expect(
+      isPalletLabelTemplateEligible(
+        { purpose: "box", enabled: true, chzProductGroupCodes: null },
+        15,
+      ),
+    ).toBe(false);
   });
 });
 

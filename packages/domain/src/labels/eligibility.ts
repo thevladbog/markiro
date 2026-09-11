@@ -27,6 +27,22 @@ export function isBoxLabelTemplateEligible(
   );
 }
 
+/**
+ * Same enabled + category-scope rule as `isBoxLabelTemplateEligible`, gated
+ * on `purpose === "pallet"` instead of `"box"` (slice 06d's pallet labels).
+ */
+export function isPalletLabelTemplateEligible(
+  template: BoxLabelTemplateEligibility,
+  chzProductGroupCode: number | null,
+): boolean {
+  if (!template.enabled || (template.purpose !== undefined && template.purpose !== "pallet"))
+    return false;
+  if (template.chzProductGroupCodes === null) return true;
+  return (
+    chzProductGroupCode !== null && template.chzProductGroupCodes.includes(chzProductGroupCode)
+  );
+}
+
 export type BoxLabelTemplateDefaultSource = "category" | "organization";
 
 export interface BoxLabelTemplateDefault {

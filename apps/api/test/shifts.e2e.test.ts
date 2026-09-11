@@ -772,7 +772,10 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     expect(res.body.message).toEqual(expect.stringContaining("box capacity"));
   });
 
-  it("POST /shifts: palletsEnabled without an effective palletBoxCapacity is rejected with 400", async () => {
+  // Reconciled onto assertPalletConfiguration (task 8): a pallet-specific
+  // capacity rule now lives in exactly one place and answers 422, not the
+  // 400 a since-removed duplicate check in assertCapacityRules used to.
+  it("POST /shifts: palletsEnabled without an effective palletBoxCapacity is rejected with 422", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
     await setDefaultBoxLabelTemplate(agent, orgId);
@@ -792,7 +795,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
         palletsEnabled: true,
         palletBoxCapacity: null,
       })
-      .expect(400);
+      .expect(422);
 
     expect(res.body.message).toEqual(expect.stringContaining("boxes-per-pallet count"));
   });

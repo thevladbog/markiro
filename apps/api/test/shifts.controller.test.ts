@@ -28,6 +28,7 @@ const shiftFixture: ShiftDto = {
   counterpartyName: null,
   ssccIssuerCounterpartyId: null,
   boxLabelTemplateId: null,
+  palletLabelTemplateId: null,
   plannedQty: null,
   plannedDate: "2026-08-14",
   productionDate: "2026-08-13",

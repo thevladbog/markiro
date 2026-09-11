@@ -623,4 +623,112 @@ describe.skipIf(!ready)("label-templates e2e", () => {
     });
     await agent.delete(`/label-templates/${template.id}`).expect(409);
   });
+
+  // ---------------------------------------------------------------------
+  // Pallet-purpose templates (slice 06d). The admin create/update route
+  // still only accepts "box"/"product_duplicate" (pallet templates are
+  // provisioned automatically), so these fixtures seed purpose: "pallet"
+  // directly -- mirroring the box defaults suite above, one FK/conflict
+  // family at a time.
+  // ---------------------------------------------------------------------
+
+  async function createPalletTemplate(
+    tenantId: string,
+    overrides: Partial<typeof schema.labelTemplates.$inferInsert> = {},
+  ): Promise<{ id: string }> {
+    const id = randomUUID();
+    await db.insert(schema.labelTemplates).values({
+      id,
+      tenantId,
+      name: "Pallet Template",
+      purpose: "pallet",
+      spec: VALID_SPEC,
+      ...overrides,
+    });
+    return { id };
+  }
+
+  it("DELETE /label-templates/:id returns 409 if it is the organisation pallet default", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const template = await createPalletTemplate(orgId);
+    await db
+      .insert(schema.orgProfiles)
+      .values({ tenantId: orgId, defaultPalletLabelTemplateId: template.id })
+      .onConflictDoUpdate({
+        target: schema.orgProfiles.tenantId,
+        set: { defaultPalletLabelTemplateId: template.id },
+      });
+
+    const deleted = await agent.delete(`/label-templates/${template.id}`).expect(409);
+    expect(deleted.body.message).toBe(
+      "Label template is referenced by an organization default, product, shift, or inventory",
+    );
+  });
+
+  it("answers 409 when deleting a template that is a category pallet default", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const template = await createPalletTemplate(orgId);
+    await db.insert(schema.orgPalletLabelTemplateDefaults).values({
+      tenantId: orgId,
+      chzProductGroupCode: 15,
+      templateId: template.id,
+    });
+    await agent.delete(`/label-templates/${template.id}`).expect(409);
+  });
+
+  it("refuses to disable or narrow a template that is the organisation pallet default", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const template = await createPalletTemplate(orgId);
+    await db
+      .insert(schema.orgProfiles)
+      .values({ tenantId: orgId, defaultPalletLabelTemplateId: template.id })
+      .onConflictDoUpdate({
+        target: schema.orgProfiles.tenantId,
+        set: { defaultPalletLabelTemplateId: template.id },
+      });
+
+    const disable = await agent
+      .patch(`/label-templates/${template.id}`)
+      .send({ enabled: false })
+      .expect(409);
+    expect(disable.body).toMatchObject({
+      code: "LABEL_TEMPLATE_IS_DEFAULT",
+      organizationDefault: true,
+      categoryDefaults: [],
+    });
+
+    const narrow = await agent
+      .patch(`/label-templates/${template.id}`)
+      .send({ chzProductGroupCodes: [15] })
+      .expect(409);
+    expect(narrow.body.organizationDefault).toBe(true);
+  });
+
+  it("refuses to scope a category pallet default away from its category, but allows widening", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const template = await createPalletTemplate(orgId, { chzProductGroupCodes: [15, 22] });
+    await db.insert(schema.orgPalletLabelTemplateDefaults).values({
+      tenantId: orgId,
+      chzProductGroupCode: 15,
+      templateId: template.id,
+    });
+
+    const drop = await agent
+      .patch(`/label-templates/${template.id}`)
+      .send({ chzProductGroupCodes: [22] })
+      .expect(409);
+    expect(drop.body).toMatchObject({ organizationDefault: false, categoryDefaults: [15] });
+
+    await agent.patch(`/label-templates/${template.id}`).send({ enabled: false }).expect(409);
+
+    const widened = await agent
+      .patch(`/label-templates/${template.id}`)
+      .send({ chzProductGroupCodes: null })
+      .expect(200);
+    expect(widened.body.chzProductGroupCodes).toBeNull();
+  });
 });

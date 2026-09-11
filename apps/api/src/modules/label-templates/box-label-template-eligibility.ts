@@ -74,6 +74,42 @@ export async function resolveDefaultBoxLabelTemplate(
   });
 }
 
+/**
+ * Category default (when the product has a group) → organisation default →
+ * none. Mirrors `resolveDefaultBoxLabelTemplate` exactly, reading the pallet
+ * counterparts of its two source tables (`org_pallet_label_template_defaults`
+ * and `org_profiles.default_pallet_label_template_id`) -- the same
+ * category-then-organisation-then-none rule applies to both label kinds, so
+ * `resolveBoxLabelTemplateDefault`'s generic resolution is reused as-is.
+ */
+export async function resolveDefaultPalletLabelTemplate(
+  db: EligibilityDb,
+  tenantId: string,
+  chzProductGroupCode: number | null,
+): Promise<BoxLabelTemplateDefault> {
+  const [profile] = await db
+    .select({ defaultPalletLabelTemplateId: schema.orgProfiles.defaultPalletLabelTemplateId })
+    .from(schema.orgProfiles)
+    .where(eq(schema.orgProfiles.tenantId, tenantId));
+  let categoryDefaultId: string | null = null;
+  if (chzProductGroupCode !== null) {
+    const [category] = await db
+      .select({ templateId: schema.orgPalletLabelTemplateDefaults.templateId })
+      .from(schema.orgPalletLabelTemplateDefaults)
+      .where(
+        and(
+          eq(schema.orgPalletLabelTemplateDefaults.tenantId, tenantId),
+          eq(schema.orgPalletLabelTemplateDefaults.chzProductGroupCode, chzProductGroupCode),
+        ),
+      );
+    categoryDefaultId = category?.templateId ?? null;
+  }
+  return resolveBoxLabelTemplateDefault({
+    categoryDefaultId,
+    organizationDefaultId: profile?.defaultPalletLabelTemplateId ?? null,
+  });
+}
+
 export interface LabelTemplateDefaultUsage {
   organizationDefault: boolean;
   /** Product-group codes whose category default is this template, ascending. */
@@ -100,6 +136,31 @@ export async function findLabelTemplateDefaultUsage(
     );
   return {
     organizationDefault: profile?.defaultBoxLabelTemplateId === templateId,
+    categoryDefaults: rows.map((row) => row.code).sort((a, b) => a - b),
+  };
+}
+
+/** Pallet counterpart of `findLabelTemplateDefaultUsage`, same shape. */
+export async function findPalletLabelTemplateDefaultUsage(
+  db: EligibilityDb,
+  tenantId: string,
+  templateId: string,
+): Promise<LabelTemplateDefaultUsage> {
+  const [profile] = await db
+    .select({ defaultPalletLabelTemplateId: schema.orgProfiles.defaultPalletLabelTemplateId })
+    .from(schema.orgProfiles)
+    .where(eq(schema.orgProfiles.tenantId, tenantId));
+  const rows = await db
+    .select({ code: schema.orgPalletLabelTemplateDefaults.chzProductGroupCode })
+    .from(schema.orgPalletLabelTemplateDefaults)
+    .where(
+      and(
+        eq(schema.orgPalletLabelTemplateDefaults.tenantId, tenantId),
+        eq(schema.orgPalletLabelTemplateDefaults.templateId, templateId),
+      ),
+    );
+  return {
+    organizationDefault: profile?.defaultPalletLabelTemplateId === templateId,
     categoryDefaults: rows.map((row) => row.code).sort((a, b) => a - b),
   };
 }

@@ -76,6 +76,13 @@ export const createShiftSchema = z.object({
    * opts out; aggregation-mode validation then rejects the null snapshot.
    */
   boxLabelTemplateId: z.string().uuid().nullable().optional(),
+  /**
+   * Omitted snapshots the organisation's current pallet default when pallets
+   * are enabled; explicit null opts out (see the pallet resolution block in
+   * ShiftsService.createShift). Meaningless when pallets are not enabled --
+   * the service never resolves a default in that case.
+   */
+  palletLabelTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),
   productionDate: productionDateSchema.nullable().optional(),
@@ -97,6 +104,8 @@ export const updateShiftSchema = z.object({
   ssccIssuerCounterpartyId: z.string().uuid().nullable().optional(),
   /** Updates the existing snapshot only when explicitly present. */
   boxLabelTemplateId: z.string().uuid().nullable().optional(),
+  /** Updates the existing pallet-label snapshot only when explicitly present. */
+  palletLabelTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),
   productionDate: productionDateSchema.nullable().optional(),
@@ -148,6 +157,7 @@ export interface ShiftDto {
   /** Whose numbers this shift's boxes carry; null means the tenant's own organisation. */
   ssccIssuerCounterpartyId: string | null;
   boxLabelTemplateId: string | null;
+  palletLabelTemplateId: string | null;
   plannedQty: number | null;
   plannedDate: string | null;
   productionDate: string | null;
@@ -274,6 +284,14 @@ export interface ShiftBundleDto {
    * falls back to the retired item-label compatibility slot.
    */
   boxLabelTemplate: { id: string; name: string; spec: LabelTemplateSpec } | null;
+  /**
+   * The shift's pallet-label snapshot, resolved from
+   * `shift.palletLabelTemplateId`. Null exactly when that snapshot is null --
+   * a shift without pallets, or one whose tenant configured no pallet
+   * template. A device that gets null cannot render a pallet label and says
+   * so rather than printing an empty one.
+   */
+  palletLabelTemplate: { id: string; name: string; spec: LabelTemplateSpec } | null;
   counterpartyGln: string | null;
   operators: OperatorMirrorRecord[];
   /**
@@ -355,6 +373,7 @@ export const createShiftOpenApiSchema = {
     counterpartyId: nullableUuidOpenApiSchema,
     ssccIssuerCounterpartyId: nullableUuidOpenApiSchema,
     boxLabelTemplateId: nullableUuidOpenApiSchema,
+    palletLabelTemplateId: nullableUuidOpenApiSchema,
     plannedQty: nullablePositiveIntegerOpenApiSchema,
     plannedDate: nullableDateOpenApiSchema,
     productionDate: productionDateOpenApiSchema,
@@ -375,6 +394,7 @@ export const updateShiftOpenApiSchema = {
     counterpartyId: nullableUuidOpenApiSchema,
     ssccIssuerCounterpartyId: nullableUuidOpenApiSchema,
     boxLabelTemplateId: nullableUuidOpenApiSchema,
+    palletLabelTemplateId: nullableUuidOpenApiSchema,
     plannedQty: nullablePositiveIntegerOpenApiSchema,
     plannedDate: nullableDateOpenApiSchema,
     productionDate: productionDateOpenApiSchema,
@@ -504,6 +524,7 @@ const shiftRequiredFields = [
   "counterpartyName",
   "ssccIssuerCounterpartyId",
   "boxLabelTemplateId",
+  "palletLabelTemplateId",
   "plannedQty",
   "plannedDate",
   "productionDate",
@@ -539,6 +560,7 @@ export const shiftOpenApiSchema = {
     counterpartyName: { type: "string", nullable: true },
     ssccIssuerCounterpartyId: nullableUuidOpenApiSchema,
     boxLabelTemplateId: nullableUuidOpenApiSchema,
+    palletLabelTemplateId: nullableUuidOpenApiSchema,
     plannedQty: nullablePositiveIntegerOpenApiSchema,
     plannedDate: nullableDateOpenApiSchema,
     productionDate: productionDateOpenApiSchema,
@@ -706,6 +728,7 @@ const shiftBundleRequiredFields = [
   "product",
   "labelTemplate",
   "boxLabelTemplate",
+  "palletLabelTemplate",
   "counterpartyGln",
   "operators",
   "sscc",
@@ -723,6 +746,7 @@ export const shiftBundleOpenApiSchema = {
     product: stationBundleProductOpenApiSchema,
     labelTemplate: { type: "string", nullable: true, enum: [null] },
     boxLabelTemplate: boxLabelTemplateOpenApiSchema,
+    palletLabelTemplate: boxLabelTemplateOpenApiSchema,
     counterpartyGln: { type: "string", nullable: true },
     operators: { type: "array", items: operatorMirrorOpenApiSchema },
     sscc: ssccBundleOpenApiSchema,

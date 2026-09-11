@@ -80,6 +80,7 @@ const SHIFT_ROW: typeof schema.shifts.$inferSelect = {
   boxCapacity: 10,
   palletBoxCapacity: null,
   palletsEnabled: false,
+  palletLabelTemplateId: null,
   createdFrom: "admin",
   numberMonthKey: "AUG26",
   numberSeq: 1,
