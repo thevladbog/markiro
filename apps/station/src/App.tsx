@@ -304,6 +304,7 @@ export function App() {
   );
   const [legacyIdentityState, setLegacyIdentityState] = useState<LegacyIdentityState>(null);
   const legacyIdentityAttempt = useRef<Promise<unknown> | null>(null);
+  const rejectedLegacyIdentityOrigin = useRef<StationConfig | null>(null);
   const recoveryCleanupStarted = useRef<CredentialRejectedEvent | null>(null);
   const floorWorkRegistry = useMemo(() => createFloorWorkRegistry(), []);
   const operatorRetirement = useRef<FloorWorkRetirement | null>(null);
@@ -691,6 +692,8 @@ export function App() {
   const attemptLegacyIdentity = useCallback(() => {
     if (
       !config ||
+      configRef.current !== config ||
+      rejectedLegacyIdentityOrigin.current === config ||
       !client ||
       !legacyApiUrl ||
       config.deviceId ||
@@ -721,6 +724,12 @@ export function App() {
       .catch(async (error: unknown) => {
         if (!configTransitions.current.isCurrent(generation) || configRef.current !== origin) {
           return;
+        }
+        // A queued resolving effect can run after finally releases the attempt,
+        // before React commits rejection. Fence this origin synchronously, even
+        // if credential cleanup fails, without blocking a later config origin.
+        if (error instanceof StationApiError && error.status === 401) {
+          rejectedLegacyIdentityOrigin.current = origin;
         }
         if (isStationCredentialRejection(error)) {
           try {

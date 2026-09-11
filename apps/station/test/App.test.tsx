@@ -1,7 +1,7 @@
 import type { ScannerConnection } from "../src/lib/hardware.js";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { DatabaseSync } from "node:sqlite";
-import { StrictMode } from "react";
+import { Profiler, StrictMode } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { openRecoveryMetadata } from "./support/recovery-metadata.js";
 
@@ -3507,52 +3507,114 @@ describe("App", () => {
     view.unmount();
   });
 
-  it.each([false, true])(
-    "holds legacy rejection explicit=%s without pairing retained data",
-    async (explicit) => {
+  it.each([
+    [false, false],
+    [true, false],
+    [true, true],
+  ])(
+    "holds legacy rejection explicit=%s cleanupFailure=%s without pairing retained data",
+    async (explicit, cleanupFailure) => {
       const pinHash = await hashSecret(OPERATOR_PIN);
       const invoked: string[] = [];
+      const persistedConfig: Record<string, unknown> = {
+        machine_id: "legacy-machine",
+        api_key: "rejected-legacy-key",
+        server_url: "https://api.factory.example",
+      };
       const outbox = mockInvokeForFloor(
         pinHash,
         { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
         [outboxRow(1)],
-        {
-          machine_id: "legacy-machine",
-          api_key: "rejected-legacy-key",
-          server_url: "https://api.factory.example",
+        persistedConfig,
+        (cmd) => {
+          invoked.push(cmd);
+          if (cleanupFailure && cmd === "clear_credential") {
+            throw new Error("simulated credential cleanup failure");
+          }
         },
-        (cmd) => invoked.push(cmd),
       );
-      const fetchMock = vi.fn(
-        async () =>
-          new Response(
-            JSON.stringify({
-              message: "revoked",
-              ...(explicit ? { code: "STATION_CREDENTIAL_REVOKED" } : {}),
-            }),
-            {
-              status: 401,
-              headers: { "Content-Type": "application/json" },
-            },
-          ),
+      const originalQueue = JSON.stringify(outbox);
+      const requestPaths: string[] = [];
+      const responseGate = deferred<void>();
+      // Keep the real fixture hash, but settle cleanup in the same microtask
+      // turn as the response so native WebCrypto latency cannot hide the race.
+      const ownershipHash = await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode("markiro:station-credential-owner:v1\0rejected-legacy-key"),
       );
+      const digestSpy = vi.spyOn(crypto.subtle, "digest").mockResolvedValue(ownershipHash);
+      const readTime = performance.now.bind(performance);
+      let schedulerElapsed = 0;
+      const clockSpy = vi
+        .spyOn(performance, "now")
+        .mockImplementation(() => readTime() + schedulerElapsed);
+      const fetchMock = vi.fn(async (url: string) => {
+        requestPaths.push(new URL(url).pathname);
+        await responseGate.promise;
+        return new Response(
+          JSON.stringify({
+            message: "revoked",
+            ...(explicit ? { code: "STATION_CREDENTIAL_REVOKED" } : {}),
+          }),
+          { status: 401, headers: { "Content-Type": "application/json" } },
+        );
+      });
       vi.stubGlobal("fetch", fetchMock);
 
-      render(<App />);
+      const view = render(
+        <Profiler
+          id="legacy-rejection"
+          onRender={() => {
+            if (requestPaths.length === 1) {
+              responseGate.resolve();
+              // End this scheduler slice at the resolving render's commit.
+              // Rejection settles before its queued passive effect runs; no
+              // wall-clock sleep or CPU load is needed to exercise that order.
+              schedulerElapsed += 20;
+            }
+          }}
+        >
+          <App />
+        </Profiler>,
+      );
 
-      expect(
-        await screen.findByText(
-          "The owner of saved data could not be confirmed. Contact support; connecting another device cannot restore it.",
-        ),
-      ).toBeDefined();
-      window.dispatchEvent(new Event("online"));
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      if (explicit) await waitFor(() => expect(invoked).toContain("clear_credential"));
-      else expect(invoked).not.toContain("clear_credential");
-      expect(invoked).not.toContain("write_config");
-      expect(outbox).toHaveLength(1);
-      expect(screen.queryByLabelText("Pairing code")).toBeNull();
+      try {
+        expect(
+          await screen.findByText(
+            "The owner of saved data could not be confirmed. Contact support; connecting another device cannot restore it.",
+          ),
+        ).toBeDefined();
+        window.dispatchEvent(new Event("online"));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (explicit) await waitFor(() => expect(invoked).toContain("clear_credential"));
+        // The bootstrap copy is already visible before rejection has settled.
+        // Flush its pending effects before asserting the final request count.
+        await act(async () => {});
+        await act(async () => {
+          window.dispatchEvent(new Event("online"));
+        });
+        expect(fetchMock, JSON.stringify({ requestPaths })).toHaveBeenCalledTimes(1);
+        expect(requestPaths).toEqual(["/station/identity"]);
+        if (explicit) expect(invoked.filter((cmd) => cmd === "clear_credential")).toHaveLength(1);
+        else expect(invoked).not.toContain("clear_credential");
+        if (explicit && !cleanupFailure) expect(persistedConfig).not.toHaveProperty("api_key");
+        else expect(persistedConfig.api_key).toBe("rejected-legacy-key");
+        if (cleanupFailure) {
+          expect(
+            screen.getByText(
+              "Local work is sealed, but station recovery could not be completed. Retry or contact support.",
+            ),
+          ).toBeDefined();
+        }
+        expect(invoked).not.toContain("write_config");
+        expect(outbox).toHaveLength(1);
+        expect(JSON.stringify(outbox)).toBe(originalQueue);
+        expect(screen.queryByLabelText("Pairing code")).toBeNull();
+      } finally {
+        view.unmount();
+        digestSpy.mockRestore();
+        clockSpy.mockRestore();
+      }
     },
   );
 
