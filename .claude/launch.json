@@ -38,6 +38,12 @@
       "port": 5473
     },
     {
+      "name": "saas-admin",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@markiro/saas-admin", "dev", "--port", "5473", "--strictPort"],
+      "port": 5473
+    },
+    {
       "name": "station",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@markiro/station", "dev"],
