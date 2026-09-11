@@ -3535,6 +3535,17 @@ export const STATION_MIGRATIONS: string[] = [
      reason TEXT NOT NULL,
      occurred_at TEXT NOT NULL
    );`,
+  // Mirrors `box_exception_disassemble_local`'s shape exactly: the durable
+  // exception fact and its local side effect land in the SAME INSERT
+  // statement, so a crash between them cannot queue the fact for sync (which
+  // retires the pallet server-side) while leaving the local row not yet
+  // marked disassembled (Task 12 review finding 1).
+  `CREATE TRIGGER IF NOT EXISTS pallet_exception_disassemble_local
+     AFTER INSERT ON pallet_exceptions_mirror
+     WHEN NEW.kind = 'disassemble'
+     BEGIN
+       UPDATE pallets_mirror SET disassembled_at = NEW.occurred_at WHERE pallet_id = NEW.pallet_id;
+     END;`,
 ];
 
 export interface StationMigrationEntry {

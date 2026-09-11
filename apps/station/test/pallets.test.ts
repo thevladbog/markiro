@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
+import type { BoxPrintErrorCode } from "../src/lib/boxes.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import {
   closePallet,
@@ -110,9 +111,9 @@ describe("pallets", () => {
 
   it("does not let a double close overwrite an already-assigned SSCC", async () => {
     const p = await openPallet(exec, "s1", "t1", iso(0));
-    await closePallet(exec, p, "103460068200000004", iso(1), "op1");
+    expect(await closePallet(exec, p, "103460068200000004", iso(1), "op1")).toBe(true);
 
-    await closePallet(exec, p, "103460068200000011", iso(2), "op2");
+    expect(await closePallet(exec, p, "103460068200000011", iso(2), "op2")).toBe(false);
 
     const rows = await exec.all<{ sscc: string; closed_at: string; closed_by: string | null }>(
       "SELECT sscc, closed_at, closed_by FROM pallets_mirror WHERE pallet_id = ?",
@@ -139,6 +140,42 @@ describe("pallets", () => {
     expect(rows).toEqual([{ print_state: "printed", print_error_code: null }]);
   });
 
+  describe("markPalletPrintFailed", () => {
+    const errorCodes = [
+      "template_missing",
+      "printer_unconfigured",
+      "render_failed",
+      "transport_failed",
+    ] as const satisfies readonly BoxPrintErrorCode[];
+    type MissingErrorCode = Exclude<BoxPrintErrorCode, (typeof errorCodes)[number]>;
+    const allErrorCodesCovered: MissingErrorCode extends never ? true : never = true;
+    void allErrorCodesCovered;
+
+    it.each(errorCodes)("persists the sanitized %s failure", async (code) => {
+      const p = await openPallet(exec, "s1", "t1", iso(0));
+      await closePallet(exec, p, "103460068200000004", iso(1), "op1");
+
+      await markPalletPrintFailed(exec, p, code);
+
+      const rows = await exec.all<{ print_state: string; print_error_code: string | null }>(
+        "SELECT print_state, print_error_code FROM pallets_mirror WHERE pallet_id = ?",
+        [p],
+      );
+      expect(rows).toEqual([{ print_state: "pending", print_error_code: code }]);
+    });
+
+    // Review finding 4: `code` must be the shared `BoxPrintErrorCode` union,
+    // not a bare `string`. Without that narrowing this call would typecheck
+    // and the `@ts-expect-error` below would go unused, which itself is a
+    // typecheck failure -- so this test fails without the fix.
+    it("rejects an unknown print error code at the type level", () => {
+      const call = () =>
+        // @ts-expect-error markPalletPrintFailed only accepts a known BoxPrintErrorCode, not an arbitrary string
+        markPalletPrintFailed(exec, "p1", "not_a_real_code");
+      void call;
+    });
+  });
+
   it("queues a disassembly with its reason", async () => {
     const p = await openPallet(exec, "s1", "t1", iso(0));
     await closePallet(exec, p, "103460068200000004", iso(1), "op1");
@@ -158,6 +195,30 @@ describe("pallets", () => {
       [p],
     );
     expect(pallet!.disassembled_at).not.toBeNull();
+  });
+
+  // Review finding 1: before the fix, `disassemblePallet` applied this
+  // update itself as a second, non-atomic statement. This test bypasses
+  // `disassemblePallet` entirely -- a raw INSERT into
+  // `pallet_exceptions_mirror` -- to prove the local side effect now comes
+  // from the `pallet_exception_disassemble_local` trigger alone, landing in
+  // the same statement as the fact. It would fail without that migration.
+  it("marks the pallet disassembled from the exception insert alone", async () => {
+    const p = await openPallet(exec, "s1", "t1", iso(0));
+    await closePallet(exec, p, "103460068200000004", iso(1), "op1");
+
+    await exec.run(
+      `INSERT INTO pallet_exceptions_mirror
+         (kind, pallet_id, shift_id, terminal_id, operator_id, reason, occurred_at)
+       VALUES ('disassemble', ?, 's1', 't1', 'op1', 'повреждён поддон', ?)`,
+      [p, iso(2)],
+    );
+
+    const [pallet] = await exec.all<{ disassembled_at: string | null }>(
+      "SELECT disassembled_at FROM pallets_mirror WHERE pallet_id = ?",
+      [p],
+    );
+    expect(pallet!.disassembled_at).toBe(iso(2));
   });
 
   it("queues a reprint with its reason and does not disassemble the pallet", async () => {
@@ -191,7 +252,7 @@ describe("pallets", () => {
       await closePallet(exec, older, "103460068200000004", iso(5), "op1");
       await markPalletPrintFailed(exec, older, "printer_unconfigured");
 
-      expect(await findUnresolvedPalletPrint(exec, "s1")).toEqual({
+      expect(await findUnresolvedPalletPrint(exec, "s1", "t1")).toEqual({
         palletId: older,
         sscc: "103460068200000004",
         boxCount: 1,
@@ -206,7 +267,7 @@ describe("pallets", () => {
       await closePallet(exec, p, "103460068200000004", iso(1), "op1");
       await markPalletPrinted(exec, p);
 
-      expect(await findUnresolvedPalletPrint(exec, "s1")).toBeNull();
+      expect(await findUnresolvedPalletPrint(exec, "s1", "t1")).toBeNull();
     });
 
     it("does not restore print recovery for a disassembled pallet", async () => {
@@ -221,7 +282,18 @@ describe("pallets", () => {
         occurredAt: iso(2),
       });
 
-      expect(await findUnresolvedPalletPrint(exec, "s1")).toBeNull();
+      expect(await findUnresolvedPalletPrint(exec, "s1", "t1")).toBeNull();
+    });
+
+    // Review finding 2: the 06d spec has two terminals in one shift each
+    // building their own pallet. Without scoping on `terminal_id`, terminal
+    // t2's operator would be prompted to print terminal t1's pending label.
+    it("does not surface another terminal's unresolved print", async () => {
+      const p = await openPallet(exec, "s1", "t1", iso(0));
+      await closePallet(exec, p, "103460068200000004", iso(1), "op1");
+
+      expect(await findUnresolvedPalletPrint(exec, "s1", "t2")).toBeNull();
+      expect((await findUnresolvedPalletPrint(exec, "s1", "t1"))?.palletId).toBe(p);
     });
   });
 

@@ -1,3 +1,4 @@
+import type { BoxPrintErrorCode } from "./boxes.js";
 import type { SqlExecutor } from "./mirror.js";
 
 /**
@@ -33,7 +34,7 @@ export interface UnresolvedPalletPrint {
    */
   closedAt: string;
   state: "pending" | "printed";
-  errorCode: string | null;
+  errorCode: BoxPrintErrorCode | null;
 }
 
 /**
@@ -119,6 +120,12 @@ export async function joinPallet(
  * recovery -- and guards on `closed_at IS NULL` so a double close can never
  * rewrite an already-assigned SSCC: a serial that has already reached a
  * printed label and is then overwritten is unrecoverable.
+ *
+ * Returns whether THIS call performed the close (the `markPrintVerified`/
+ * `markPrintSkipped` precedent in `boxes.ts`), not void: the guard above can
+ * legitimately no-op on a genuine double close, and a caller that trusted an
+ * unpersisted serial in that case could hand a label a serial the database
+ * never stored.
  */
 export async function closePallet(
   exec: SqlExecutor,
@@ -126,14 +133,16 @@ export async function closePallet(
   sscc: string,
   closedAt: string,
   operatorId: string | null,
-): Promise<void> {
-  await exec.run(
+): Promise<boolean> {
+  const rows = await exec.all<{ pallet_id: string }>(
     `UPDATE pallets_mirror
         SET sscc = ?, closed_at = ?, closed_by = ?,
             print_state = 'pending', print_error_code = NULL
-      WHERE pallet_id = ? AND closed_at IS NULL`,
+      WHERE pallet_id = ? AND closed_at IS NULL
+      RETURNING pallet_id`,
     [sscc, closedAt, operatorId, palletId],
   );
+  return rows.length === 1;
 }
 
 /** Records successful output for this already-numbered pallet. */
@@ -150,7 +159,7 @@ export async function markPalletPrinted(exec: SqlExecutor, palletId: string): Pr
 export async function markPalletPrintFailed(
   exec: SqlExecutor,
   palletId: string,
-  code: string,
+  code: BoxPrintErrorCode,
 ): Promise<void> {
   await exec.run(
     `UPDATE pallets_mirror
@@ -171,12 +180,12 @@ export interface ReasonedPalletActionInput {
 
 /**
  * Queues one pallet exception fact for the sync engine to drain, the pallet
- * equivalent of `box-exceptions-mirror.ts`'s `insertException`. Unlike that
- * table, `pallet_exceptions_mirror` has no `AFTER INSERT` trigger applying a
- * local side effect (there is only one local side effect here -- see
- * `disassemblePallet` -- and it does not apply to every kind), so callers
- * that need one apply it themselves, in the same function, right after this
- * insert.
+ * equivalent of `box-exceptions-mirror.ts`'s `insertException`. For a
+ * `disassemble` fact, the `pallet_exception_disassemble_local` AFTER INSERT
+ * trigger (`packages/db/src/sqlite/migrations.ts`) applies the matching
+ * local side effect in the SAME statement -- mirroring
+ * `box_exception_disassemble_local` -- so callers never need a second write
+ * to keep the two in sync.
  */
 async function insertPalletException(
   exec: SqlExecutor,
@@ -200,22 +209,20 @@ async function insertPalletException(
 }
 
 /**
- * Retires a pallet: queues the exception fact and marks the mirror row
- * disassembled, so it drops out of print recovery and can never be
- * reprinted or disassembled again through this path. The server
- * independently voids the pallet's SSCC forever, the same way it does for a
- * disassembled box (see `boxes.ts`'s `disassembleBox` doc comment) -- a
- * re-palletized stack is a brand-new pallet row with a brand-new SSCC.
+ * Retires a pallet: queues the exception fact, which the
+ * `pallet_exception_disassemble_local` trigger atomically pairs with marking
+ * the mirror row disassembled in the same INSERT (see `insertPalletException`
+ * above), so it drops out of print recovery and can never be reprinted or
+ * disassembled again through this path. The server independently voids the
+ * pallet's SSCC forever, the same way it does for a disassembled box (see
+ * `boxes.ts`'s `disassembleBox` doc comment) -- a re-palletized stack is a
+ * brand-new pallet row with a brand-new SSCC.
  */
 export async function disassemblePallet(
   exec: SqlExecutor,
   input: ReasonedPalletActionInput,
 ): Promise<void> {
   await insertPalletException(exec, "disassemble", input);
-  await exec.run(`UPDATE pallets_mirror SET disassembled_at = ? WHERE pallet_id = ?`, [
-    input.occurredAt,
-    input.palletId,
-  ]);
 }
 
 /** Queues an unchanged label reprint for a closed pallet. */
@@ -227,12 +234,18 @@ export async function reprintPallet(
 }
 
 /**
- * Returns the oldest unresolved label for this shift, or null if none is
- * pending -- the pallet equivalent of `boxes.ts`'s `findUnresolvedBoxPrint`.
+ * Returns the oldest unresolved label for this shift AND terminal, or null
+ * if none is pending -- the pallet equivalent of `boxes.ts`'s
+ * `findUnresolvedBoxPrint`, scoped the same way: a device's mirror can hold
+ * pallet rows under more than one `terminal_id` over time (re-enrollment,
+ * see `openBox`'s doc comment), and the 06d spec has two terminals in one
+ * shift each building their own pallet, so an unscoped query would surface
+ * another workstation's unresolved print to the wrong operator.
  */
 export async function findUnresolvedPalletPrint(
   exec: SqlExecutor,
   shiftId: string,
+  terminalId: string | null,
 ): Promise<UnresolvedPalletPrint | null> {
   const rows = await exec.all<{
     pallet_id: string;
@@ -240,7 +253,7 @@ export async function findUnresolvedPalletPrint(
     box_count: number;
     closed_at: string;
     print_state: "pending" | "printed";
-    print_error_code: string | null;
+    print_error_code: BoxPrintErrorCode | null;
   }>(
     `SELECT p.pallet_id AS pallet_id, p.sscc AS sscc,
             (SELECT COUNT(*) FROM boxes_mirror b
@@ -248,13 +261,13 @@ export async function findUnresolvedPalletPrint(
             p.closed_at AS closed_at,
             p.print_state AS print_state, p.print_error_code AS print_error_code
        FROM pallets_mirror p
-      WHERE p.shift_id = ?
+      WHERE p.shift_id = ? AND p.terminal_id IS ?
         AND p.closed_at IS NOT NULL AND p.sscc IS NOT NULL
         AND p.disassembled_at IS NULL
         AND p.print_state = 'pending'
       ORDER BY p.closed_at ASC, p.pallet_id ASC
       LIMIT 1`,
-    [shiftId],
+    [shiftId, terminalId],
   );
   const row = rows[0];
   if (!row) return null;

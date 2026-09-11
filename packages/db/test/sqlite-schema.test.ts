@@ -2482,4 +2482,60 @@ describe("pallet mirror", () => {
       { id: 2, kind: "reprint" },
     ]);
   });
+
+  // Task 12 review finding 1: without `pallet_exception_disassemble_local`,
+  // queuing the exception fact never touches `pallets_mirror` at all -- this
+  // is the DB-level proof that the trigger, not application code, is what
+  // makes the two effects land in one atomic INSERT.
+  it("marks a pallet disassembled atomically through its exception trigger", () => {
+    const db = migratedDb();
+    db.prepare(
+      `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+       VALUES ('p1', 's1', 't1', '2026-09-11T07:00:00.000Z')`,
+    ).run();
+
+    db.prepare(
+      `INSERT INTO pallet_exceptions_mirror (kind, pallet_id, shift_id, terminal_id, operator_id, reason, occurred_at)
+       VALUES ('disassemble', 'p1', 's1', 't1', 'op1', 'повреждён поддон', '2026-09-11T08:00:00.000Z')`,
+    ).run();
+
+    expect(
+      db.prepare("SELECT disassembled_at FROM pallets_mirror WHERE pallet_id = 'p1'").get(),
+    ).toEqual({ disassembled_at: "2026-09-11T08:00:00.000Z" });
+  });
+
+  it("leaves other pallets untouched when one is disassembled", () => {
+    const db = migratedDb();
+    db.prepare(
+      `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+       VALUES ('p1', 's1', 't1', '2026-09-11T07:00:00.000Z'),
+              ('p2', 's1', 't1', '2026-09-11T07:01:00.000Z')`,
+    ).run();
+
+    db.prepare(
+      `INSERT INTO pallet_exceptions_mirror (kind, pallet_id, shift_id, terminal_id, operator_id, reason, occurred_at)
+       VALUES ('disassemble', 'p1', 's1', 't1', 'op1', 'повреждён поддон', '2026-09-11T08:00:00.000Z')`,
+    ).run();
+
+    expect(
+      db.prepare("SELECT disassembled_at FROM pallets_mirror WHERE pallet_id = 'p2'").get(),
+    ).toEqual({ disassembled_at: null });
+  });
+
+  it("does not mark a pallet disassembled for a queued reprint", () => {
+    const db = migratedDb();
+    db.prepare(
+      `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+       VALUES ('p1', 's1', 't1', '2026-09-11T07:00:00.000Z')`,
+    ).run();
+
+    db.prepare(
+      `INSERT INTO pallet_exceptions_mirror (kind, pallet_id, shift_id, terminal_id, operator_id, reason, occurred_at)
+       VALUES ('reprint', 'p1', 's1', 't1', 'op1', 'этикетка испорчена', '2026-09-11T08:00:00.000Z')`,
+    ).run();
+
+    expect(
+      db.prepare("SELECT disassembled_at FROM pallets_mirror WHERE pallet_id = 'p1'").get(),
+    ).toEqual({ disassembled_at: null });
+  });
 });
