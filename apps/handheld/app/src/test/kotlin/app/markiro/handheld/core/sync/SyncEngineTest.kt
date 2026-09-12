@@ -107,7 +107,8 @@ class SyncEngineTest {
         assertEquals("/station/scans", request.path)
         val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
         val installId = MetaStore(db.metaDao()).installId()
-        assertEquals("dev-1:$installId:3:0:0", body.getValue("batchId").jsonPrimitive.content)
+        // deviceId:installId:maxId:boxSignature:palletSignature:labelSignature
+        assertEquals("dev-1:$installId:3:0:0:0", body.getValue("batchId").jsonPrimitive.content)
         val items = body.getValue("items").jsonArray
         assertEquals(3, items.size)
         assertEquals("dev-1", items[0].jsonObject.getValue("terminalId").jsonPrimitive.content)
