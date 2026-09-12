@@ -39,7 +39,18 @@ per tenant and effective boundary, tenant-scoped selected membership and a
 separate immutable event journal. It creates no initial choices and rewrites no
 device, work or commercial records. The selected set and confirmed preview
 receipt are committed together; replacing the current selection preserves every
-earlier receipt. Apply the migration before serving retention routes.
+earlier receipt. Complete migration 0139 before deploying any code that reads
+`workingDeviceRetentionSelections`, including the existing replacement paths;
+merely keeping retention routes disabled does not satisfy this prerequisite.
+
+The retention release changes replacement fingerprints incompatibly, even when
+there are no retention selections. Existing prepared replacement items become
+`needsReview`; existing unconfirmed previews and their retries receive stale
+conflicts and require a fresh review. Historical successful confirmation receipts
+remain available unchanged.
+
+Migration 0140 adds the tenant/device membership index used by ordered selection
+reads. Apply it through the same deployment migration flow.
 
 Before rollout, save a database backup through the existing production procedure.
 Apply the migration through the existing immutable-image deployment workflow.

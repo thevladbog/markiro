@@ -706,6 +706,203 @@ describe.skipIf(!process.env.DATABASE_URL)("device retention temporal intent", (
       service.confirm(f.tenantId, { requestId: fresh.requestId, previewId: fresh.id }, f.actor),
     ).rejects.toMatchObject({ status: 409 });
   });
+  it("replays subscription switches, source scopes and invitation expiry with authoritative snapshot parity", async () => {
+    const f = await fixture();
+    const invitationEnds = new Date(f.boundary.getTime() - 20_000);
+    await db.insert(schema.invitation).values({
+      id: randomUUID(),
+      organizationId: f.tenantId,
+      email: `${randomUUID()}@example.invalid`,
+      role: "member",
+      status: "pending",
+      expiresAt: invitationEnds,
+      inviterId: f.actor.id,
+    });
+    await grant(
+      f,
+      f.current.subscriptionId,
+      [{ key: "handheld", featureEnabled: true }],
+      new Date(f.boundary.getTime() + 60_000),
+      ["nk.lookup.v1"],
+    );
+    await grant(
+      f,
+      f.future.subscriptionId,
+      [{ key: "handheld", featureEnabled: true }],
+      new Date(f.boundary.getTime() + 60_000),
+    );
+    const queries: string[] = [];
+    const observedDb = drizzle(connection.pool, {
+      logger: {
+        logQuery(query) {
+          queries.push(query);
+        },
+      },
+    });
+    const resolver = new EntitlementsService(observedDb, "managed_only");
+    await observedDb.transaction(
+      async (tx) => {
+        const evaluate = await resolver.loadSnapshotTimeline(f.tenantId, tx);
+        for (const date of [
+          new Date(invitationEnds.getTime() - 1),
+          invitationEnds,
+          new Date(f.boundary.getTime() - 1),
+          f.boundary,
+          new Date(f.boundary.getTime() + 60_000),
+        ]) {
+          queries.length = 0;
+          const projected = await evaluate(date);
+          expect(queries).toEqual([]);
+          const independent = await resolver.resolveSnapshotInTransaction(f.tenantId, tx, date);
+          expect(projected).toEqual(independent);
+        }
+      },
+      { isolationLevel: "repeatable read" },
+    );
+  });
+  it.each(["plan", "addon"] as const)(
+    "retains malformed %s rejection in timeline evaluation",
+    async (kind) => {
+      const f = await fixture();
+      let versionId = f.current.planVersionId;
+      if (kind === "addon") {
+        versionId = await createPublishedAddon(db, [{ entitlementKey: "stations", increment: 1 }]);
+        await db.insert(schema.subscriptionAddons).values({
+          tenantId: f.tenantId,
+          subscriptionId: f.current.subscriptionId,
+          addonVersionId: versionId,
+          quantity: 1,
+          source: "manual",
+          status: "active",
+        });
+      }
+      const [version] = await db
+        .select()
+        .from(schema.catalogItemVersions)
+        .where(eq(schema.catalogItemVersions.id, versionId));
+      if (!version) throw new Error("Missing version");
+      const draftId = randomUUID();
+      await db
+        .insert(schema.catalogItemVersions)
+        .values({ ...version, id: draftId, version: 2, status: "draft", publishedAt: null });
+      if (kind === "plan")
+        await db
+          .update(schema.tenantSubscriptions)
+          .set({ planVersionId: draftId })
+          .where(eq(schema.tenantSubscriptions.id, f.current.subscriptionId));
+      else
+        await db
+          .update(schema.subscriptionAddons)
+          .set({ addonVersionId: draftId })
+          .where(eq(schema.subscriptionAddons.addonVersionId, versionId));
+      await db.transaction(async (tx) => {
+        const evaluate = await entitlements.loadSnapshotTimeline(f.tenantId, tx);
+        await expect(evaluate(new Date())).rejects.toMatchObject({
+          name: "SubscriptionEntitlementsInvalidException",
+        });
+        await expect(
+          entitlements.resolveSnapshotInTransaction(f.tenantId, tx),
+        ).rejects.toMatchObject({ name: "SubscriptionEntitlementsInvalidException" });
+      });
+    },
+  );
+  it("bounds SQL reads across forty irrelevant dates and finds the last reducing date", async () => {
+    const f = await fixture();
+    const current = await plainTimeline(f);
+    const now = new Date();
+    const ending = new Date(now.getTime() + 100_000);
+    await grant(f, current.subscriptionId, [{ key: "stations", quotaIncrement: 2 }], ending);
+    const queries: string[] = [];
+    const observedDb = drizzle(connection.pool, {
+      logger: {
+        logQuery(query) {
+          queries.push(query);
+        },
+      },
+    });
+    const reader = new DeviceRetentionService(
+      observedDb,
+      new EntitlementsService(observedDb, "managed_only"),
+      new PlatformAuditService(),
+    );
+    const initial = await reader.inspect(f.tenantId, f.actor);
+    const baseline = queries.length;
+    const addonVersionId = await createPublishedAddon(db, [
+      { entitlementKey: "lines", increment: 1 },
+    ]);
+    await db.insert(schema.subscriptionAddons).values(
+      Array.from({ length: 40 }, (_, index) => ({
+        tenantId: f.tenantId,
+        subscriptionId: current.subscriptionId,
+        addonVersionId,
+        quantity: 1,
+        source: "manual" as const,
+        status: "active" as const,
+        startsAt: new Date(now.getTime() - 1000),
+        endsAt: new Date(now.getTime() + (index + 1) * 1000),
+      })),
+    );
+    queries.length = 0;
+    const result = await reader.inspect(f.tenantId, f.actor);
+    expect(result.observation?.boundary.effectiveAt).toBe(ending.toISOString());
+    expect(result.observation?.future.candidate.quotas.stations.limit).toBe(
+      initial.observation?.future.candidate.quotas.stations.limit,
+    );
+    expect(queries.length).toBeLessThanOrEqual(baseline + 3);
+  });
+  it.each(["boundary", "next-change"])(
+    "classifies a preview crossing %s during facts work as stale",
+    async (kind) => {
+      const f = await fixture();
+      const inspection = await service.inspect(f.tenantId, f.actor);
+      if (!inspection.observation) throw new Error("Missing observation");
+      let cutoff = f.boundary;
+      if (kind === "next-change") {
+        cutoff = new Date(Date.now() + 10_000);
+        const addonVersionId = await createPublishedAddon(db, [
+          { entitlementKey: "lines", increment: 1 },
+        ]);
+        await db.insert(schema.subscriptionAddons).values({
+          tenantId: f.tenantId,
+          subscriptionId: f.current.subscriptionId,
+          addonVersionId,
+          quantity: 1,
+          source: "manual",
+          status: "active",
+          startsAt: new Date(Date.now() - 1000),
+          endsAt: cutoff,
+        });
+      }
+      const current = await service.inspect(f.tenantId, f.actor);
+      if (!current.observation) throw new Error("Missing observation");
+      const original = entitlements.resolveSnapshotInTransaction.bind(entitlements);
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const read = vi
+        .spyOn(entitlements, "resolveSnapshotInTransaction")
+        .mockImplementation(async (...args) => {
+          const result = await original(...args);
+          vi.setSystemTime(cutoff);
+          return result;
+        });
+      try {
+        await expect(
+          service.preview(
+            f.tenantId,
+            {
+              requestId: randomUUID(),
+              boundaryKey: current.observation.boundary.key,
+              selectedDeviceIds: [],
+              expectedRevision: 0,
+              reason: "Review",
+            },
+            f.actor,
+          ),
+        ).rejects.toMatchObject({ status: 409, response: { code: "device_retention_stale" } });
+      } finally {
+        read.mockRestore();
+      }
+    },
+  );
   it("inspection is a read-only snapshot and does not wait for writer device locks", async () => {
     const f = await fixture(),
       queries: string[] = [];

@@ -430,3 +430,35 @@ it("shows the translated licensing load error", async () => {
   );
   expect(await screen.findByText("Не удалось загрузить учёт рабочих устройств.")).toBeDefined();
 });
+
+it("binds retention inspection to the route tenant when pool response names another tenant", async () => {
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.endsWith("/retention")) return response(RETENTION);
+      if (url.endsWith("/replacements")) return response({ canPrepare: false, items: [] });
+      return response({ ...POOL, tenantId: "wrong-tenant" });
+    }),
+  );
+  render(
+    <I18nextProvider i18n={i18n}>
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <ThemeProvider defaultTheme="light">
+          <DeviceLicensingPanel tenantId="tenant-1" canWrite />
+        </ThemeProvider>
+      </QueryClientProvider>
+    </I18nextProvider>,
+  );
+  await screen.findByText("ТСД резерв · ТСД");
+  const { waitFor } = await import("@testing-library/react");
+  await waitFor(() =>
+    expect(urls.filter((url) => url.endsWith("/retention"))).toEqual([
+      expect.stringContaining("/tenants/tenant-1/device-licensing/retention"),
+    ]),
+  );
+});

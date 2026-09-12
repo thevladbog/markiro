@@ -77,6 +77,13 @@ describe.skipIf(!databaseUrl)("working device retention forward migration", () =
       log: () => undefined,
     });
   }, 120_000);
+  it("installs the tenant/device index for ordered membership reads", async () => {
+    const result = await pool.query<{ indexdef: string }>(
+      "SELECT indexdef FROM pg_indexes WHERE tablename = 'working_device_retention_members' AND indexname = 'working_device_retention_members_tenant_device_idx'",
+    );
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]?.indexdef).toContain("USING btree (tenant_id, device_id)");
+  });
   afterAll(async () => {
     await pool.end();
     // pool.end() can resolve before the socket closes; FORCE races that shutdown.

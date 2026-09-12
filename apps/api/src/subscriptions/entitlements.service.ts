@@ -1,7 +1,12 @@
 import type { EntitlementSnapshotV1 } from "@markiro/platform-contracts";
 import { countWorkingDeviceUsage } from "./working-device-assignments";
 import { projectEntitlements } from "./entitlement-projection";
-import { readEntitlementFacts, entitlementDigest } from "./entitlement-snapshot-reader";
+import {
+  readEntitlementFacts,
+  entitlementDigest,
+  loadEntitlementTimeline,
+  type EntitlementTimeline,
+} from "./entitlement-snapshot-reader";
 import { NationalCatalogCapabilitiesService } from "../modules/national-catalog/national-catalog-capabilities.service";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { and, asc, count, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
@@ -66,10 +71,20 @@ export class EntitlementsService {
     tenantId: string,
     tx: SubscriptionTransaction,
     at = new Date(),
+    timeline?: EntitlementTimeline,
+    baseUsage?: EntitlementUsage,
   ) {
-    const current = await this.resolve(tenantId, tx, at);
-    const usage = await this.usage(tenantId, tx, at);
-    const facts = await readEntitlementFacts(tx, current);
+    const current = await this.resolve(tenantId, tx, at, timeline);
+    const usage =
+      baseUsage && timeline
+        ? {
+            ...baseUsage,
+            cabinetUsers:
+              baseUsage.cabinetUsers +
+              timeline.invitations.filter((row) => row.expiresAt > at).length,
+          }
+        : await this.usage(tenantId, tx, at);
+    const facts = await readEntitlementFacts(tx, current, timeline);
     const input = { current, usage, at, enforcementMode: this.enforcementMode, ...facts };
     return {
       ...facts,
@@ -77,6 +92,18 @@ export class EntitlementsService {
       snapshot: projectEntitlements(input),
       usageFingerprint: entitlementDigest(usage),
     };
+  }
+
+  async loadSnapshotTimeline(
+    tenantId: string,
+    tx: SubscriptionTransaction,
+    loaded?: EntitlementTimeline,
+  ) {
+    const timeline = loaded ?? (await loadEntitlementTimeline(tx, tenantId));
+    const at = new Date();
+    const usage = await this.usage(tenantId, tx, at, timeline.invitations);
+    usage.cabinetUsers -= timeline.invitations.filter((row) => row.expiresAt > at).length;
+    return (at: Date) => this.resolveSnapshotInTransaction(tenantId, tx, at, timeline, usage);
   }
 
   async observeConnectivity(snapshot: EntitlementSnapshotV1): Promise<EntitlementSnapshotV1> {
@@ -102,12 +129,15 @@ export class EntitlementsService {
     tenantId: string,
     executor: EntitlementsExecutor = this.db,
     at = new Date(),
+    timeline?: EntitlementTimeline,
   ): Promise<EffectiveEntitlements> {
-    const subscriptions = await executor
-      .select()
-      .from(schema.tenantSubscriptions)
-      .where(eq(schema.tenantSubscriptions.tenantId, tenantId))
-      .orderBy(asc(schema.tenantSubscriptions.createdAt), asc(schema.tenantSubscriptions.id));
+    const subscriptions =
+      timeline?.subscriptions ??
+      (await executor
+        .select()
+        .from(schema.tenantSubscriptions)
+        .where(eq(schema.tenantSubscriptions.tenantId, tenantId))
+        .orderBy(asc(schema.tenantSubscriptions.createdAt), asc(schema.tenantSubscriptions.id)));
 
     if (subscriptions.length === 0) {
       return {
@@ -123,8 +153,14 @@ export class EntitlementsService {
     if (effective.length > 1) throw new SubscriptionEntitlementsInvalidException();
     const selected = effective[0];
     if (selected) {
-      const plan = await this.planEntitlements(executor, selected.planVersionId);
-      const contributors = await this.contributorsFor(executor, tenantId, selected.id, at);
+      const plan = await this.planEntitlements(executor, selected.planVersionId, timeline);
+      const contributors = await this.contributorsFor(
+        executor,
+        tenantId,
+        selected.id,
+        at,
+        timeline,
+      );
       return {
         tenantId,
         access: "managed",
@@ -143,7 +179,7 @@ export class EntitlementsService {
     const pending = subscriptions.filter((row) => row.status === "pending_activation");
     if (pending.length > 1) throw new SubscriptionEntitlementsInvalidException();
     if (pending[0]) {
-      await this.planEntitlements(executor, pending[0].planVersionId);
+      await this.planEntitlements(executor, pending[0].planVersionId, timeline);
       return readOnlyEntitlements(tenantId, pending[0], "pending_activation");
     }
 
@@ -157,7 +193,7 @@ export class EntitlementsService {
       )
       .sort((left, right) => right.endsAt!.getTime() - left.endsAt!.getTime());
     if (ended[0]) {
-      await this.planEntitlements(executor, ended[0].planVersionId);
+      await this.planEntitlements(executor, ended[0].planVersionId, timeline);
       return readOnlyEntitlements(tenantId, ended[0], "expired");
     }
 
@@ -174,6 +210,7 @@ export class EntitlementsService {
     tenantId: string,
     executor: EntitlementsExecutor = this.db,
     at = new Date(),
+    pendingInvitations?: EntitlementTimeline["invitations"],
   ): Promise<EntitlementUsage> {
     const [lines] = await executor
       .select({ value: count() })
@@ -188,16 +225,18 @@ export class EntitlementsService {
       .select({ value: count() })
       .from(schema.member)
       .where(eq(schema.member.organizationId, tenantId));
-    const [invitations] = await executor
-      .select({ value: count() })
-      .from(schema.invitation)
-      .where(
-        and(
-          eq(schema.invitation.organizationId, tenantId),
-          eq(schema.invitation.status, "pending"),
-          gt(schema.invitation.expiresAt, at),
-        ),
-      );
+    const [invitations] = pendingInvitations
+      ? [{ value: pendingInvitations.filter((row) => row.expiresAt > at).length }]
+      : await executor
+          .select({ value: count() })
+          .from(schema.invitation)
+          .where(
+            and(
+              eq(schema.invitation.organizationId, tenantId),
+              eq(schema.invitation.status, "pending"),
+              gt(schema.invitation.expiresAt, at),
+            ),
+          );
     return {
       lines: lines?.value ?? 0,
       stations,
@@ -308,31 +347,46 @@ export class EntitlementsService {
     return action();
   }
 
-  private async planEntitlements(executor: EntitlementsExecutor, versionId: string) {
-    const [row] = await executor
-      .select({
-        versionId: schema.catalogItemVersions.id,
-        maxLines: schema.planEntitlements.maxLines,
-        maxStations: schema.planEntitlements.maxStations,
-        maxKiosks: schema.planEntitlements.maxKiosks,
-        maxCabinetUsers: schema.planEntitlements.maxCabinetUsers,
-        labelEditorEnabled: schema.planEntitlements.labelEditorEnabled,
-        publicApiEnabled: schema.planEntitlements.publicApiEnabled,
-        palletsEnabled: schema.planEntitlements.palletsEnabled,
-      })
-      .from(schema.catalogItemVersions)
-      .innerJoin(
-        schema.planEntitlements,
-        eq(schema.planEntitlements.catalogVersionId, schema.catalogItemVersions.id),
-      )
-      .where(
-        and(
-          eq(schema.catalogItemVersions.id, versionId),
-          eq(schema.catalogItemVersions.kind, "plan"),
-          inArray(schema.catalogItemVersions.status, ["published", "retired"]),
-        ),
-      )
-      .limit(1);
+  private async planEntitlements(
+    executor: EntitlementsExecutor,
+    versionId: string,
+    timeline?: EntitlementTimeline,
+  ) {
+    const [row] = timeline
+      ? timeline.plans.filter(
+          (plan) =>
+            plan.catalogVersionId === versionId &&
+            timeline.versions.some(
+              (version) =>
+                version.id === versionId &&
+                version.kind === "plan" &&
+                ["published", "retired"].includes(version.status),
+            ),
+        )
+      : await executor
+          .select({
+            versionId: schema.catalogItemVersions.id,
+            maxLines: schema.planEntitlements.maxLines,
+            maxStations: schema.planEntitlements.maxStations,
+            maxKiosks: schema.planEntitlements.maxKiosks,
+            maxCabinetUsers: schema.planEntitlements.maxCabinetUsers,
+            labelEditorEnabled: schema.planEntitlements.labelEditorEnabled,
+            publicApiEnabled: schema.planEntitlements.publicApiEnabled,
+            palletsEnabled: schema.planEntitlements.palletsEnabled,
+          })
+          .from(schema.catalogItemVersions)
+          .innerJoin(
+            schema.planEntitlements,
+            eq(schema.planEntitlements.catalogVersionId, schema.catalogItemVersions.id),
+          )
+          .where(
+            and(
+              eq(schema.catalogItemVersions.id, versionId),
+              eq(schema.catalogItemVersions.kind, "plan"),
+              inArray(schema.catalogItemVersions.status, ["published", "retired"]),
+            ),
+          )
+          .limit(1);
     if (!row) throw new SubscriptionEntitlementsInvalidException();
     return {
       quotas: {
@@ -354,52 +408,75 @@ export class EntitlementsService {
     tenantId: string,
     subscriptionId: string,
     at: Date,
+    timeline?: EntitlementTimeline,
   ): Promise<EntitlementContributor[]> {
-    const addons = await executor
-      .select({
-        id: schema.subscriptionAddons.id,
-        versionId: schema.subscriptionAddons.addonVersionId,
-        quantity: schema.subscriptionAddons.quantity,
-        status: schema.subscriptionAddons.status,
-        startsAt: schema.subscriptionAddons.startsAt,
-      })
-      .from(schema.subscriptionAddons)
-      .where(
-        and(
-          eq(schema.subscriptionAddons.tenantId, tenantId),
-          eq(schema.subscriptionAddons.subscriptionId, subscriptionId),
-          inArray(schema.subscriptionAddons.status, ["active", "scheduled"]),
-          or(
-            isNull(schema.subscriptionAddons.startsAt),
-            sql`${schema.subscriptionAddons.startsAt} <= ${at}`,
-          ),
-          or(isNull(schema.subscriptionAddons.endsAt), gt(schema.subscriptionAddons.endsAt, at)),
-        ),
-      )
-      .orderBy(asc(schema.subscriptionAddons.id));
+    const addons = timeline
+      ? timeline.additions
+          .filter(
+            (row) =>
+              row.subscriptionId === subscriptionId &&
+              ["active", "scheduled"].includes(row.status) &&
+              (row.startsAt === null || row.startsAt <= at) &&
+              (row.endsAt === null || row.endsAt > at),
+          )
+          .map((row) => ({ ...row, versionId: row.addonVersionId }))
+      : await executor
+          .select({
+            id: schema.subscriptionAddons.id,
+            versionId: schema.subscriptionAddons.addonVersionId,
+            quantity: schema.subscriptionAddons.quantity,
+            status: schema.subscriptionAddons.status,
+            startsAt: schema.subscriptionAddons.startsAt,
+          })
+          .from(schema.subscriptionAddons)
+          .where(
+            and(
+              eq(schema.subscriptionAddons.tenantId, tenantId),
+              eq(schema.subscriptionAddons.subscriptionId, subscriptionId),
+              inArray(schema.subscriptionAddons.status, ["active", "scheduled"]),
+              or(
+                isNull(schema.subscriptionAddons.startsAt),
+                sql`${schema.subscriptionAddons.startsAt} <= ${at}`,
+              ),
+              or(
+                isNull(schema.subscriptionAddons.endsAt),
+                gt(schema.subscriptionAddons.endsAt, at),
+              ),
+            ),
+          )
+          .orderBy(asc(schema.subscriptionAddons.id));
 
     const contributors: EntitlementContributor[] = [];
     for (const addon of addons) {
       if (addon.status === "scheduled" && addon.startsAt === null) {
         throw new SubscriptionEntitlementsInvalidException();
       }
-      const [version] = await executor
-        .select({ id: schema.catalogItemVersions.id })
-        .from(schema.catalogItemVersions)
-        .where(
-          and(
-            eq(schema.catalogItemVersions.id, addon.versionId),
-            eq(schema.catalogItemVersions.kind, "addon"),
-            inArray(schema.catalogItemVersions.status, ["published", "retired"]),
-          ),
-        )
-        .limit(1);
+      const [version] = timeline
+        ? timeline.versions.filter(
+            (row) =>
+              row.id === addon.versionId &&
+              row.kind === "addon" &&
+              ["published", "retired"].includes(row.status),
+          )
+        : await executor
+            .select({ id: schema.catalogItemVersions.id })
+            .from(schema.catalogItemVersions)
+            .where(
+              and(
+                eq(schema.catalogItemVersions.id, addon.versionId),
+                eq(schema.catalogItemVersions.kind, "addon"),
+                inArray(schema.catalogItemVersions.status, ["published", "retired"]),
+              ),
+            )
+            .limit(1);
       if (!version) throw new SubscriptionEntitlementsInvalidException();
-      const effects = await executor
-        .select()
-        .from(schema.addonEntitlements)
-        .where(eq(schema.addonEntitlements.catalogVersionId, addon.versionId))
-        .orderBy(asc(schema.addonEntitlements.entitlementKey));
+      const effects = timeline
+        ? timeline.effects.filter((row) => row.catalogVersionId === addon.versionId)
+        : await executor
+            .select()
+            .from(schema.addonEntitlements)
+            .where(eq(schema.addonEntitlements.catalogVersionId, addon.versionId))
+            .orderBy(asc(schema.addonEntitlements.entitlementKey));
       if (effects.length === 0) throw new SubscriptionEntitlementsInvalidException();
       const quotas: Partial<Record<QuantitativeEntitlementKey, number>> = {};
       const features: FeatureEntitlementKey[] = [];
