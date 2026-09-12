@@ -892,8 +892,37 @@ export const boxes = pgTable(
      * is retired: excluded from "active" listings, and its `sscc` is never
      * reissued — a box re-packed after disassembly is a brand-new row with
      * a brand-new SSCC through the ordinary `SsccService.allocate` path.
+     *
+     * This is the OPERATOR'S OWN ACCOUNT of when it happened: the station
+     * path writes the device-supplied `occurredAt` of the `disassemble`
+     * exception, from a terminal that may have been offline for a whole
+     * shift and whose clock has no skew bound. It belongs in the audit trail
+     * and is what the cabinet displays — it must NEVER be ordered against a
+     * server instant. Use `disassemblyReceivedAt` for that.
      */
     disassembledAt: timestamp("disassembled_at", { withTimezone: true }),
+    /**
+     * Server-assigned `now()` at the SAME statement that sets
+     * `disassembledAt`, for exactly the reason `closureReceivedAt` exists
+     * next to `closedAt`. The pallet list's `contentsChangedAfterClose`
+     * ("a member box came off this pallet AFTER it was closed and labelled"
+     * — the only way a manager learns a labelled pallet left the factory a
+     * box short) compares THIS column against `pallets.closureReceivedAt`,
+     * itself a server `now()`. Comparing the device's `disassembledAt`
+     * against a server instant is comparing two unrelated clocks: a station
+     * running behind makes a box that genuinely came off after the closure
+     * compare as before it, and the flag silently stays false.
+     *
+     * Also the key that matches a `box_items.removedAt` released BY this
+     * disassembly (`emptyBox`'s own server `now()`, written in the same
+     * transaction, so the two values are equal to the microsecond — `now()`
+     * is `transaction_timestamp()`), which is how the box report tells an
+     * item the disassembly released from one another scan displaced.
+     *
+     * Backfilled by migration 0133 from the `disassemble` exception's own
+     * server-assigned `recorded_at`; see that file for the reasoning.
+     */
+    disassemblyReceivedAt: timestamp("disassembly_received_at", { withTimezone: true }),
     /**
      * The pallet this box stands on, or null. Set in the box-closure
      * statement itself — a box's membership and its closure are one fact —
@@ -1036,9 +1065,10 @@ export const pallets = pgTable(
     /**
      * Server-assigned `now()` at the SAME statement that sets
      * `closedAt`/`sscc`. `contentsChangedAfterClose` compares a member box's
-     * `disassembledAt` against THIS column, never `closedAt`: the latter is a
-     * device clock with no skew bound, so comparing two clocks would report a
-     * change that did not happen, or miss one that did.
+     * `disassemblyReceivedAt` against THIS column. BOTH sides must be
+     * server-assigned: `closedAt` is a device clock with no skew bound, and
+     * so is `boxes.disassembledAt`, so an ordering that takes either of them
+     * would report a change that did not happen, or miss one that did.
      */
     closureReceivedAt: timestamp("closure_received_at", { withTimezone: true }),
     printVerifiedAt: timestamp("print_verified_at", { withTimezone: true }),

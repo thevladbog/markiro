@@ -58,16 +58,24 @@ export class PalletsService {
      * box_items.removed_at is null`, exactly as `BoxesService`'s own
      * `itemCount` does, because `box_items` rows are never deleted.
      *
-     * `contentsChangedAfterClose` is `coalesce(bool_or(boxes.disassembled_at
-     * > pallets.closure_received_at), false)`, compared against the
-     * PALLET's own server-assigned `closureReceivedAt` -- never the
-     * device-supplied `closedAt` -- for the identical clock-skew reason
-     * `BoxesService.listBoxes`'s own flag documents. `bool_or` returns SQL
-     * NULL (not false) for an untouched pallet, one with zero member boxes,
-     * or one that has not closed yet; `coalesce` turns that into `false` in
-     * the statement itself, before Drizzle's row mapper ever sees it (see
-     * BoxesService.listBoxes's own comment on `mapResultRow`'s short
-     * circuit).
+     * `contentsChangedAfterClose` is
+     * `coalesce(bool_or(boxes.disassembly_received_at >
+     * pallets.closure_received_at), false)`. BOTH sides are SERVER-assigned
+     * `now()`, and that is the whole point: this flag is the only way a
+     * manager learns that a closed, labelled pallet -- which can no longer
+     * be corrected -- left the factory a box short, and an ordering is only
+     * meaningful between two readings of ONE clock. `boxes.disassembledAt`
+     * is as unusable here as `pallets.closedAt` is: both are device
+     * timestamps from a station or handheld that may have been offline for a
+     * whole shift, with no skew bound anywhere in the ingest. A station clock
+     * running behind the server would make a box that genuinely came off
+     * after the closure compare as before it, leaving the flag silently
+     * false; one running ahead invents the opposite. Neither is detectable
+     * afterwards. `bool_or` returns SQL NULL (not false) for an untouched
+     * pallet, one with zero member boxes, or one that has not closed yet;
+     * `coalesce` turns that into `false` in the statement itself, before
+     * Drizzle's row mapper ever sees it (see BoxesService.listBoxes's own
+     * comment on `mapResultRow`'s short circuit).
      *
      * `GROUP BY pallets.id` alone is valid Postgres for the same reason
      * BoxesService's query groups by `boxes.id` alone: grouping by a
@@ -96,7 +104,7 @@ export class PalletsService {
             Number,
           ),
         contentsChangedAfterClose:
-          sql<boolean>`coalesce(bool_or(${schema.boxes.disassembledAt} > ${schema.pallets.closureReceivedAt}), false)`.mapWith(
+          sql<boolean>`coalesce(bool_or(${schema.boxes.disassemblyReceivedAt} > ${schema.pallets.closureReceivedAt}), false)`.mapWith(
             Boolean,
           ),
       })

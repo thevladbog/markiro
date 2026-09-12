@@ -1798,9 +1798,20 @@ export class StationScansService {
           // sscc.e2e.test.ts's "disassemble retires an SSCC for good" test,
           // which locks that existing property down against this new
           // caller.
+          //
+          // `disassembledAt` is the operator's own account of when this
+          // happened, from a device clock with no skew bound;
+          // `disassemblyReceivedAt` is the server's own `now()`, written in
+          // the SAME statement for exactly the reason `closureReceivedAt`
+          // sits next to `closedAt`. Every ordering against another server
+          // instant -- the pallet list's `contentsChangedAfterClose`, and
+          // the `removedAt` `emptyBox` just wrote in this same transaction
+          // (`now()` is `transaction_timestamp()`, so the two are equal to
+          // the microsecond) -- uses the received instant, never the
+          // device's.
           const retiredBoxes = await tx
             .update(schema.boxes)
-            .set({ disassembledAt: new Date(ex.occurredAt) })
+            .set({ disassembledAt: new Date(ex.occurredAt), disassemblyReceivedAt: sql`now()` })
             .where(
               and(
                 eq(schema.boxes.tenantId, tenantId),

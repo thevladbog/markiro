@@ -61,6 +61,15 @@ export class BoxesService {
    * device clock). `closureReceivedAt` and `displacedAt` are both
    * server-assigned, so they are always measured on the SAME clock.
    *
+   * That "both server-assigned" half was re-verified when the PALLET list's
+   * own flag turned out to be ordering a DEVICE timestamp against
+   * `closure_received_at` (Task 24): every writer of `box_items.displaced_at`
+   * -- the ownership-race branches in `StationScansService` and
+   * `displaceBoxMembership` in box-membership.ts -- sets it with SQL `now()`,
+   * never a value off the wire, so THIS flag never had the defect. Any new
+   * writer must keep that true; a device-supplied `displacedAt` would
+   * reintroduce it here silently.
+   *
    * `GROUP BY boxes.id` alone (not every selected `boxes.*` column) is valid
    * Postgres: grouping by a table's primary key lets every other column of
    * that same table be selected ungrouped, since the key already determines

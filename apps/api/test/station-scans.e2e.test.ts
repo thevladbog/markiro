@@ -1036,6 +1036,14 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     // into `boxes.sscc` unchanged.
     const SSCC = "123456789012345675";
     const ISO = "2026-07-29T11:00:00.000Z";
+    /**
+     * A `disassemble`'s device-supplied `occurredAt`, deliberately a fixed
+     * instant well in the PAST rather than `new Date()`: nothing in the
+     * ingest bounds a box exception's clock skew, and the disassembly tests
+     * below assert that the device's account and the server's own received
+     * instant are two separate, separately-stored facts.
+     */
+    const DISASSEMBLE_OCCURRED_AT = "2026-07-28T11:00:00.000Z";
 
     beforeEach(async () => {
       agent = request.agent(app!.getHttpServer());
@@ -2733,14 +2741,29 @@ describe.skipIf(!ready)("station-scans e2e", () => {
               terminalId: "t1",
               operatorId: null,
               reason: "packed for wrong customer",
-              occurredAt: new Date().toISOString(),
+              // A device clock a day behind the server, which is what a
+              // terminal that spent a shift offline actually sends. The
+              // assertions below pin what each of the two timestamps means.
+              occurredAt: DISASSEMBLE_OCCURRED_AT,
             },
           ],
         });
         expect(res.body.applied).toBe(0);
 
         const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
-        expect(box?.disassembledAt).not.toBeNull();
+        // The operator's own account, kept verbatim for the audit trail.
+        expect(box?.disassembledAt?.toISOString()).toBe(DISASSEMBLE_OCCURRED_AT);
+        // The SERVER's own instant, assigned in the same statement -- the one
+        // `contentsChangedAfterClose` orders against `pallets.closure_
+        // received_at`, and the only one that can be. It is emphatically NOT
+        // the device's: a station whose clock runs behind would otherwise
+        // make a box that came off a closed pallet compare as having come off
+        // before the pallet closed, silently clearing the only warning a
+        // manager gets that a labelled pallet left the factory a box short.
+        expect(box?.disassemblyReceivedAt).not.toBeNull();
+        expect(box!.disassemblyReceivedAt!.getTime()).toBeGreaterThan(
+          Date.parse(DISASSEMBLE_OCCURRED_AT),
+        );
         // The sscc string itself is kept -- historical record; only
         // disassembledAt marks retirement.
         expect(box?.sscc).toBe(SSCC);
@@ -2753,6 +2776,20 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           .where(and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.boxId, boxId)));
         expect(items).toHaveLength(2);
         expect(items.every((i) => i.removedAt !== null)).toBe(true);
+        // Both writes happen in ONE transaction and `now()` is
+        // `transaction_timestamp()`, so the release instant and the retirement
+        // instant are the same value to the microsecond. That exact equality
+        // is what the box report uses to tell an item THIS disassembly
+        // released from one another terminal's scan displaced; against the
+        // device-supplied `disassembledAt` it never held on this path, and a
+        // station-disassembled box printed its form with no contents at all.
+        expect(
+          items.every((i) => i.removedAt!.getTime() === box!.disassemblyReceivedAt!.getTime()),
+        ).toBe(true);
+        // And the form a manager actually prints proves it end to end: both
+        // codes are still on it, one DataMatrix each.
+        const report = await agent.get(`/code-search/boxes/${boxId}/report`).expect(200);
+        expect(report.text.match(/class="dm-box"/g)).toHaveLength(2);
 
         const registryRows = await db
           .select()

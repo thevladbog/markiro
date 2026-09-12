@@ -43,6 +43,8 @@ describe.skipIf(!ready)("pallets e2e", () => {
   let shiftId: string;
   let operatorId: string;
   let palletSscc: string;
+  /** A second serial from the SAME allocated block, for the clock-skew pallet. */
+  let skewPalletSscc: string;
   /** box1: 20 items, none ever touched until the exception test below. */
   const BOX1_ITEM_COUNT = 20;
   /** box2: 15 items -- the brief's "short box". Disassembled in the last test. */
@@ -138,6 +140,7 @@ describe.skipIf(!ready)("pallets e2e", () => {
       .get(SsccService)
       .allocate(tenantId, ISSUER_PREFIX, PALLET_EXTENSION_DIGIT, stationDeviceId, 5);
     palletSscc = buildSscc(PALLET_EXTENSION_DIGIT, ISSUER_PREFIX, block.fromSerial);
+    skewPalletSscc = buildSscc(PALLET_EXTENSION_DIGIT, ISSUER_PREFIX, block.fromSerial + 1);
 
     const box1Items = Array.from({ length: BOX1_ITEM_COUNT }, (_, i) =>
       item(`b1-${i}`, "b1", new Date(ITEM_BASE + i * 1000).toISOString()),
@@ -320,24 +323,25 @@ describe.skipIf(!ready)("pallets e2e", () => {
     const before = await agent.get(`/pallets?shiftId=${shiftId}`).expect(200);
     const beforePallet = before.body.items[0];
 
-    // `contentsChangedAfterClose` compares this box exception's DEVICE-supplied
-    // `occurredAt` against the pallet's SERVER-assigned `closureReceivedAt`
-    // (`now()`, captured in `beforeAll` when the pallet closed) -- two
-    // independent clock reads, exactly as production compares a device's own
-    // clock against the server's. A bare `new Date()` here is NOT safe: this
-    // repo's dev/test Postgres runs in a Docker container, which on macOS gets
-    // its own virtualized clock that can drift from the host process running
-    // this test, and the drift measurably widens under the CPU load a full
-    // `pnpm turbo test` run puts on the machine. Reproduced directly: a full
-    // gate run recorded `boxes.disassembled_at` (this test's `new Date()`)
-    // landing 8.9ms BEFORE `pallets.closure_received_at` (Postgres's `now()`
-    // for the SAME pallet's earlier closure), flipping this exact assertion to
-    // `false`, even though the disassembly happened several HTTP round trips
-    // -- and therefore strictly later in real, causal, application-level time
-    // -- after the closure. A generous forward buffer keeps this test
-    // asserting the comparison's LOGIC rather than betting on sub-second
-    // agreement between two different machines' clocks.
-    const occurredAt = new Date(Date.now() + 60_000).toISOString();
+    // A station clock running BADLY BEHIND the server: this disassembly is
+    // reported with a device `occurredAt` half a day before the pallet even
+    // closed, which is what a terminal that spent a shift offline with a
+    // drifted clock actually sends. The flag must still be `true` -- the
+    // server received the disassembly after it received the closure, and that
+    // is the only ordering it can trust. `contentsChangedAfterClose` compares
+    // two SERVER instants (`boxes.disassembly_received_at` against
+    // `pallets.closure_received_at`), so the device's account of the time is
+    // irrelevant to it by construction.
+    //
+    // This used to be `Date.now() + 60_000`: a forward buffer papering over
+    // the flag ordering a DEVICE timestamp against a server one. The dev
+    // Postgres runs in Docker on macOS, whose virtualized clock drifts from
+    // the host under load, and a full gate run recorded this test's own
+    // `new Date()` landing 8.9ms BEFORE the pallet's `closure_received_at`
+    // and flipping the assertion -- an accidental simulation of the real
+    // production hazard. The buffer is gone because the comparison no longer
+    // has two clocks in it.
+    const occurredAt = BOX_CLOSED_AT;
 
     await request(app!.getHttpServer())
       .post("/station/scans")
@@ -369,6 +373,78 @@ describe.skipIf(!ready)("pallets e2e", () => {
     expect(pallet.boxCount).toBe(beforePallet.boxCount - 1);
     expect(pallet.unitCount).toBe(beforePallet.unitCount - BOX2_ITEM_COUNT);
     expect(pallet.contentsChangedAfterClose).toBe(true);
+    // The operator's own account of when it happened survives untouched in
+    // the audit trail -- it is just not what the ordering above reads.
+    const box = await agent.get(`/boxes?shiftId=${shiftId}`).expect(200);
+    const b2 = (box.body.items as { sscc: string; disassembledAt: string | null }[]).find(
+      (row) => row.sscc === "00123460682000000102",
+    );
+    expect(b2?.disassembledAt).toBe(BOX_CLOSED_AT);
+  });
+
+  /**
+   * The other direction, on its OWN pallet so the shared one above is left
+   * alone: a box that came off BEFORE the pallet closed, reported by a device
+   * whose clock runs AHEAD. Nothing changed after this pallet was closed and
+   * labelled -- the server had already retired the box when the closure
+   * arrived -- so the flag must stay `false`. Ordering the device's own
+   * `occurredAt` against the server's `closure_received_at` would raise it,
+   * telling a manager a correctly-built pallet left the factory short.
+   */
+  it("does not flag a pallet whose box came off before it closed, on a device clock running ahead", async () => {
+    await postBatch({ items: [item("b4-0", "b4", new Date(ITEM_BASE + 600_000).toISOString())] });
+    await postBatch({
+      boxes: [
+        {
+          boxId: "b4",
+          shiftId,
+          terminalId: "t1",
+          sscc: "123460682000000104",
+          closedAt: BOX_CLOSED_AT,
+          operatorId,
+          devicePalletId: "p2",
+        },
+      ],
+    });
+    await postBatch({
+      exceptions: [
+        {
+          kind: "disassemble",
+          boxId: "b4",
+          codeHash: null,
+          shiftId,
+          terminalId: "t1",
+          operatorId: null,
+          reason: "снят до закрытия паллеты",
+          // Half a day into the future, as a device whose clock runs ahead
+          // would report it -- and, crucially, LATER than the server instant
+          // of the pallet closure posted immediately below.
+          occurredAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
+        },
+      ],
+    });
+    await postBatch({
+      pallets: [
+        {
+          palletId: "p2",
+          shiftId,
+          terminalId: "t1",
+          sscc: skewPalletSscc,
+          closedAt: PALLET_CLOSED_AT,
+          operatorId,
+          printVerifiedAt: null,
+          printSkippedAt: null,
+        },
+      ],
+    });
+
+    const res = await agent.get(`/pallets?shiftId=${shiftId}`).expect(200);
+    const pallet = (
+      res.body.items as { sscc: string; boxCount: number; contentsChangedAfterClose: boolean }[]
+    ).find((row) => row.sscc === `00${skewPalletSscc}`);
+    expect(pallet).toBeDefined();
+    expect(pallet?.boxCount).toBe(0);
+    expect(pallet?.contentsChangedAfterClose).toBe(false);
   });
 
   it("rejects a station api-key", async () => {

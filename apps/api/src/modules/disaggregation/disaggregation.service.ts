@@ -331,9 +331,14 @@ export class DisaggregationService {
 
         // Same mechanics as the station's "disassemble" branch
         // (station-scans.service.ts): retire the box, release its live items.
+        // Both timestamps are written here even though a cabinet document has
+        // no device clock to disagree with: `disassemblyReceivedAt` is the
+        // column every server-instant ordering reads, and leaving it null on
+        // this path would make the pallet list's `contentsChangedAfterClose`
+        // blind to a box a Disaggregation document took off a closed pallet.
         await tx
           .update(schema.boxes)
-          .set({ disassembledAt: sql`now()` })
+          .set({ disassembledAt: sql`now()`, disassemblyReceivedAt: sql`now()` })
           .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.id, boxIds)));
         await tx
           .update(schema.boxItems)
@@ -526,9 +531,14 @@ export class DisaggregationService {
               eq(schema.boxItems.tenantId, tenantId),
               inArray(schema.boxItems.boxId, boxIds),
               isNull(schema.boxItems.displacedAt),
+              // `disassembly_received_at`, not `disassembled_at`: the items a
+              // disassembly released carry that same transaction's server
+              // `now()`, which a station-originated disassembly's
+              // DEVICE-supplied `disassembled_at` does not match (Task 24).
+              // See `CodeSearchService.boxReportData` for the full reasoning.
               or(
                 isNull(schema.boxItems.removedAt),
-                eq(schema.boxItems.removedAt, schema.boxes.disassembledAt),
+                eq(schema.boxItems.removedAt, schema.boxes.disassemblyReceivedAt),
               ),
             ),
           )

@@ -1049,6 +1049,16 @@ export class CodeSearchService {
    * `reportData` contents query: displaced items are excluded, and removed
    * items are kept only when their removal WAS the box's disassembly — so a
    * disassembled box still prints the contents it had at disassembly time.
+   *
+   * "Was the box's disassembly" is `removed_at = disassembly_received_at`,
+   * NOT `= disassembled_at` (Task 24). Both disassembly paths release the
+   * items with `removedAt = now()` in the same transaction that retires the
+   * box, and `now()` is `transaction_timestamp()`, so the equality is exact —
+   * but only against the SERVER-assigned instant. Against `disassembledAt`
+   * it silently held for a cabinet Disaggregation document (server `now()`
+   * on both sides) and silently failed for every station-originated
+   * disassembly, whose `disassembledAt` is the device's own `occurredAt`,
+   * printing a station-disassembled box's form with no contents at all.
    */
   async boxReportData(tenantId: string, boxId: string): Promise<BoxReportData> {
     const [box] = await this.db
@@ -1121,7 +1131,7 @@ export class CodeSearchService {
           isNull(schema.boxItems.displacedAt),
           or(
             isNull(schema.boxItems.removedAt),
-            eq(schema.boxItems.removedAt, schema.boxes.disassembledAt),
+            eq(schema.boxItems.removedAt, schema.boxes.disassemblyReceivedAt),
           ),
         ),
       )
