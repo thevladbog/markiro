@@ -3,6 +3,7 @@ import {
   check,
   foreignKey,
   integer,
+  index,
   jsonb,
   pgTable,
   text,
@@ -93,6 +94,7 @@ export const workingDeviceRetentionMembers = pgTable(
     deviceId: uuid("device_id").notNull(),
   },
   (t) => [
+    index("working_device_retention_members_tenant_device_idx").on(t.tenantId, t.deviceId),
     unique("working_device_retention_members_selection_device_uq").on(t.selectionId, t.deviceId),
     foreignKey({
       name: "working_device_retention_members_tenant_selection_fk",

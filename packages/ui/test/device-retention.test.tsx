@@ -53,6 +53,7 @@ function observation(): DeviceRetentionObservation {
 }
 function setup({
   saved = false,
+  selections,
   attempt = structuredClone(emptyDeviceRetentionAttempt),
   facts = observation(),
   currentShadow = { awaitingSelection: false, affectedDeviceIds: [], enforced: false },
@@ -61,6 +62,7 @@ function setup({
   canSelect = true,
 }: {
   saved?: boolean;
+  selections?: DeviceRetentionInspection["selections"];
   attempt?: DeviceRetentionAttempt;
   facts?: DeviceRetentionObservation;
   currentShadow?: DeviceRetentionInspection["currentShadow"];
@@ -81,9 +83,9 @@ function setup({
   const inspection: DeviceRetentionInspection = {
     canSelect,
     observation: observationAvailable ? facts : null,
-    selections: saved
-      ? [{ selection: receipt.selection, needsReview: true, boundaryReached: false }]
-      : [],
+    selections:
+      selections ??
+      (saved ? [{ selection: receipt.selection, needsReview: true, boundaryReached: false }] : []),
     currentShadow,
   };
   const store = { value: attempt };
@@ -322,4 +324,37 @@ it.each([
   ).toBe(showsCount);
   expect(screen.queryByText("deviceRetention.awaitingSelection") !== null).toBe(showsAwaiting);
   expect(screen.getByText("deviceRetention.noBoundary")).toBeTruthy();
+});
+
+it("starts blank at the stored date revision when a different boundary key shares the date", async () => {
+  const facts = observation();
+  facts.boundary.key = "b".repeat(64);
+  const view = setup({ saved: true, facts });
+  expect(screen.queryByRole("button", { name: "deviceRetention.edit" })).toBeNull();
+  fireEvent.change(screen.getByRole("textbox", { name: "deviceRetention.reason" }), {
+    target: { value: "New boundary" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "deviceRetention.preview" }));
+  await screen.findByRole("button", { name: "deviceRetention.save" });
+  expect(view.preview).toHaveBeenCalledWith(
+    expect.objectContaining({ expectedRevision: 1, selectedDeviceIds: [] }),
+  );
+});
+it("edits the highest same-key revision regardless of response order", () => {
+  const selections: DeviceRetentionInspection["selections"] = [1, 3, 2].map((revision) => ({
+    selection: {
+      id: ID,
+      revision,
+      preparedAt: "2026-09-30T23:59:01.000Z",
+      selectedDeviceIds: revision === 3 ? [] : [ID],
+      observation: observation(),
+    },
+    needsReview: false,
+    boundaryReached: false,
+  }));
+  const view = setup({ selections });
+  fireEvent.click(screen.getByRole("button", { name: "deviceRetention.edit" }));
+  expect(view.store.value).toMatchObject({ expectedRevision: 3, ids: [] });
+  fireEvent.click(screen.getByRole("button", { name: "deviceRetention.blank" }));
+  expect(view.store.value.expectedRevision).toBe(3);
 });

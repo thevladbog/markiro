@@ -40,3 +40,11 @@ describe("device retention storage schema", () => {
     ).toContain("selection_id,device_id");
   });
 });
+
+it("indexes tenant membership reads in device order", () => {
+  expect(
+    getTableConfig(schema.workingDeviceRetentionMembers).indexes.map((index) =>
+      index.config.columns.map((column) => ("name" in column ? column.name : "")).join(","),
+    ),
+  ).toContain("tenant_id,device_id");
+});

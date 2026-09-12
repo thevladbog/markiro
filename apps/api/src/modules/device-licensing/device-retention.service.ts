@@ -237,6 +237,7 @@ export class DeviceRetentionService {
           facts.nextChangeAt ? Date.parse(facts.nextChangeAt) : Infinity,
         ),
       );
+      if (expiresAt <= at) conflict("stale");
       const id = randomUUID();
       const result = deviceRetentionPreviewSchema.safeParse({
         id,

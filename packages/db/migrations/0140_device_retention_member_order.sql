@@ -1,0 +1,1 @@
+CREATE INDEX "working_device_retention_members_tenant_device_idx" ON "working_device_retention_members" USING btree ("tenant_id","device_id");

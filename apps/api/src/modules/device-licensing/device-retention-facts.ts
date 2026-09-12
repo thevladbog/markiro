@@ -9,7 +9,10 @@ import {
 import type { EntitlementsService } from "../../subscriptions/entitlements.service";
 import type { SubscriptionTransaction } from "../../subscriptions/entitlements.types";
 import { evaluateEntitlementOperation } from "../../subscriptions/entitlement-projection";
-import { entitlementRegistryFingerprint } from "../../subscriptions/entitlement-snapshot-reader";
+import {
+  entitlementRegistryFingerprint,
+  loadEntitlementTimeline,
+} from "../../subscriptions/entitlement-snapshot-reader";
 import {
   assignmentConsistent,
   assignmentOccupied,
@@ -51,61 +54,18 @@ export async function readDeviceRetentionFacts(
     .where(eq(d.tenantId, tenantId))
     .orderBy(asc(d.id));
   const occupied = pool.filter((row) => assignmentOccupied(row.device, row.assignment));
-  const subscriptions = await tx
-    .select()
-    .from(schema.tenantSubscriptions)
-    .where(eq(schema.tenantSubscriptions.tenantId, tenantId))
-    .orderBy(asc(schema.tenantSubscriptions.id));
-  const addons = await tx
-    .select()
-    .from(schema.subscriptionAddons)
-    .where(eq(schema.subscriptionAddons.tenantId, tenantId))
-    .orderBy(asc(schema.subscriptionAddons.id));
-  const sources = await tx
-    .select()
-    .from(schema.entitlementSources)
-    .where(eq(schema.entitlementSources.tenantId, tenantId))
-    .orderBy(asc(schema.entitlementSources.id));
+  const timeline = await loadEntitlementTimeline(tx, tenantId);
+  const { additions: addons, rows: sources, versions, plans, effects, policies } = timeline;
+  const subscriptions = [...timeline.subscriptions].sort((a, b) => a.id.localeCompare(b.id));
   const versionIds = [
     ...new Set([
       ...subscriptions.map((row) => row.planVersionId),
       ...addons.map((row) => row.addonVersionId),
     ]),
   ].sort();
-  const versions = versionIds.length
-    ? await tx
-        .select()
-        .from(schema.catalogItemVersions)
-        .where(inArray(schema.catalogItemVersions.id, versionIds))
-        .orderBy(asc(schema.catalogItemVersions.id))
-    : [];
-  const plans = versionIds.length
-    ? await tx
-        .select()
-        .from(schema.planEntitlements)
-        .where(inArray(schema.planEntitlements.catalogVersionId, versionIds))
-        .orderBy(asc(schema.planEntitlements.catalogVersionId))
-    : [];
-  const effects = versionIds.length
-    ? await tx
-        .select()
-        .from(schema.addonEntitlements)
-        .where(inArray(schema.addonEntitlements.catalogVersionId, versionIds))
-        .orderBy(
-          asc(schema.addonEntitlements.catalogVersionId),
-          asc(schema.addonEntitlements.entitlementKey),
-        )
-    : [];
   const policyIds = [
     ...new Set(versions.flatMap((row) => (row.lifecyclePolicyId ? [row.lifecyclePolicyId] : []))),
   ].sort();
-  const policies = policyIds.length
-    ? await tx
-        .select()
-        .from(schema.entitlementLifecyclePolicies)
-        .where(inArray(schema.entitlementLifecyclePolicies.id, policyIds))
-        .orderBy(asc(schema.entitlementLifecyclePolicies.id))
-    : [];
   const credentialIds = pool.flatMap((row) => (row.device.apiKeyId ? [row.device.apiKeyId] : []));
   const k = schema.apikey;
   const credentials = credentialIds.length
@@ -143,7 +103,8 @@ export async function readDeviceRetentionFacts(
     .from(o)
     .where(eq(o.tenantId, tenantId))
     .orderBy(asc(o.id));
-  const current = await entitlements.resolveSnapshotInTransaction(tenantId, tx, at);
+  const evaluate = await entitlements.loadSnapshotTimeline(tenantId, tx, timeline);
+  const current = await evaluate(at);
   const dates = [
     ...new Set(
       [
@@ -162,12 +123,8 @@ export async function readDeviceRetentionFacts(
   const hasHandheld = occupied.some((row) => row.device.kind === "handheld");
   let boundary: { effectiveAt: string; key: string; future: EntitlementSnapshotV1 } | null = null;
   for (const time of dates) {
-    const before = await entitlements.resolveSnapshotInTransaction(
-      tenantId,
-      tx,
-      new Date(time - 1),
-    );
-    const after = await entitlements.resolveSnapshotInTransaction(tenantId, tx, new Date(time));
+    const before = await evaluate(new Date(time - 1));
+    const after = await evaluate(new Date(time));
     if (
       !retentionReduction(
         retentionConditions(before.snapshot),

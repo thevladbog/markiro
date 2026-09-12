@@ -981,6 +981,13 @@
       "when": 1789229692516,
       "tag": "0139_device_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1789235060857,
+      "tag": "0140_device_retention_member_order",
+      "breakpoints": true
     }
   ]
 }

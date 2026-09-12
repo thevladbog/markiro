@@ -65,40 +65,106 @@ export function safeSource(row: PlatformEntitlementSource): EntitlementSource {
     endsAt: row.endsAt,
   });
 }
-/** Reads only on the caller's transaction; no independent query/transaction escapes. */
-export async function readEntitlementFacts(
-  tx: EntitlementsExecutor,
-  current: EffectiveEntitlements,
-) {
-  const tenantId = current.tenantId;
+/** Coherent transaction inputs shared by every date in a temporal projection. */
+export async function loadEntitlementTimeline(tx: EntitlementsExecutor, tenantId: string) {
   const subscriptions = await tx
     .select()
     .from(schema.tenantSubscriptions)
-    .where(eq(schema.tenantSubscriptions.tenantId, tenantId));
+    .where(eq(schema.tenantSubscriptions.tenantId, tenantId))
+    .orderBy(asc(schema.tenantSubscriptions.createdAt), asc(schema.tenantSubscriptions.id));
   const additions = await tx
     .select()
     .from(schema.subscriptionAddons)
-    .where(
-      and(
-        eq(schema.subscriptionAddons.tenantId, tenantId),
-        inArray(schema.subscriptionAddons.status, ["active", "scheduled"]),
-      ),
-    )
+    .where(eq(schema.subscriptionAddons.tenantId, tenantId))
     .orderBy(asc(schema.subscriptionAddons.id));
   const rows = await tx
     .select()
     .from(schema.entitlementSources)
     .where(eq(schema.entitlementSources.tenantId, tenantId))
     .orderBy(asc(schema.entitlementSources.id));
+  const ids = [
+    ...new Set([
+      ...subscriptions.map((row) => row.planVersionId),
+      ...additions.map((row) => row.addonVersionId),
+    ]),
+  ];
+  const versions = ids.length
+    ? await tx
+        .select()
+        .from(schema.catalogItemVersions)
+        .where(inArray(schema.catalogItemVersions.id, ids))
+        .orderBy(asc(schema.catalogItemVersions.id))
+    : [];
+  const plans = ids.length
+    ? await tx
+        .select()
+        .from(schema.planEntitlements)
+        .where(inArray(schema.planEntitlements.catalogVersionId, ids))
+        .orderBy(asc(schema.planEntitlements.catalogVersionId))
+    : [];
+  const effects = ids.length
+    ? await tx
+        .select()
+        .from(schema.addonEntitlements)
+        .where(inArray(schema.addonEntitlements.catalogVersionId, ids))
+        .orderBy(
+          asc(schema.addonEntitlements.catalogVersionId),
+          asc(schema.addonEntitlements.entitlementKey),
+        )
+    : [];
+  const policyIds = versions.flatMap((row) =>
+    row.lifecyclePolicyId ? [row.lifecyclePolicyId] : [],
+  );
+  const policies = policyIds.length
+    ? await tx
+        .select()
+        .from(schema.entitlementLifecyclePolicies)
+        .where(inArray(schema.entitlementLifecyclePolicies.id, policyIds))
+        .orderBy(asc(schema.entitlementLifecyclePolicies.id))
+    : [];
+  const invitations = await tx
+    .select({ expiresAt: schema.invitation.expiresAt })
+    .from(schema.invitation)
+    .where(
+      and(eq(schema.invitation.organizationId, tenantId), eq(schema.invitation.status, "pending")),
+    );
+  const [revision] = await tx
+    .select()
+    .from(schema.entitlementRevisions)
+    .where(eq(schema.entitlementRevisions.tenantId, tenantId));
+  return {
+    subscriptions,
+    additions,
+    rows,
+    versions,
+    plans,
+    effects,
+    policies,
+    invitations,
+    revision,
+  };
+}
+export type EntitlementTimeline = Awaited<ReturnType<typeof loadEntitlementTimeline>>;
+/** Reads only on the caller's transaction; no independent query/transaction escapes. */
+export async function readEntitlementFacts(
+  tx: EntitlementsExecutor,
+  current: EffectiveEntitlements,
+  loaded?: EntitlementTimeline,
+) {
+  const tenantId = current.tenantId;
+  const timeline = loaded ?? (await loadEntitlementTimeline(tx, tenantId));
+  const { subscriptions, rows, invitations, revision } = timeline;
+  const additions = timeline.additions.filter((row) =>
+    ["active", "scheduled"].includes(row.status),
+  );
   const sourceDetails = rows.map(platformSource);
   const sources: EntitlementSource[] = [];
   const versionIds = new Set<string>();
   if (current.subscription) versionIds.add(current.subscription.planVersionId);
   if (current.access === "managed" && current.subscription) {
-    const [plan] = await tx
-      .select()
-      .from(schema.planEntitlements)
-      .where(eq(schema.planEntitlements.catalogVersionId, current.subscription.planVersionId));
+    const plan = timeline.plans.find(
+      (row) => row.catalogVersionId === current.subscription?.planVersionId,
+    );
     if (!plan) throw new SubscriptionEntitlementsInvalidException();
     sources.push(
       entitlementSourceSchema.parse({
@@ -133,23 +199,17 @@ export async function readEntitlementFacts(
       (row) => row.subscriptionId === current.subscription?.id,
     )) {
       versionIds.add(addon.addonVersionId);
-      const [version] = await tx
-        .select()
-        .from(schema.catalogItemVersions)
-        .where(
-          and(
-            eq(schema.catalogItemVersions.id, addon.addonVersionId),
-            eq(schema.catalogItemVersions.kind, "addon"),
-            inArray(schema.catalogItemVersions.status, ["published", "retired"]),
-          ),
-        );
+      const version = timeline.versions.find(
+        (row) =>
+          row.id === addon.addonVersionId &&
+          row.kind === "addon" &&
+          ["published", "retired"].includes(row.status),
+      );
       if (!version || (addon.status === "scheduled" && !addon.startsAt))
         throw new SubscriptionEntitlementsInvalidException();
-      const effects = await tx
-        .select()
-        .from(schema.addonEntitlements)
-        .where(eq(schema.addonEntitlements.catalogVersionId, addon.addonVersionId))
-        .orderBy(asc(schema.addonEntitlements.entitlementKey));
+      const effects = timeline.effects.filter(
+        (row) => row.catalogVersionId === addon.addonVersionId,
+      );
       if (!effects.length) throw new SubscriptionEntitlementsInvalidException();
       sources.push(
         entitlementSourceSchema.parse({
@@ -179,34 +239,11 @@ export async function readEntitlementFacts(
       .filter((row) => row.subscriptionId === current.subscription?.id && row.revokedAt === null)
       .map(safeSource),
   );
-  const invitations = await tx
-    .select({ expiresAt: schema.invitation.expiresAt })
-    .from(schema.invitation)
-    .where(
-      and(eq(schema.invitation.organizationId, tenantId), eq(schema.invitation.status, "pending")),
-    );
-  const [revision] = await tx
-    .select()
-    .from(schema.entitlementRevisions)
-    .where(eq(schema.entitlementRevisions.tenantId, tenantId));
-  const versions = versionIds.size
-    ? await tx
-        .select({
-          id: schema.catalogItemVersions.id,
-          policyId: schema.catalogItemVersions.lifecyclePolicyId,
-        })
-        .from(schema.catalogItemVersions)
-        .where(inArray(schema.catalogItemVersions.id, [...versionIds]))
-        .orderBy(asc(schema.catalogItemVersions.id))
-    : [];
+  const versions = timeline.versions
+    .filter((row) => versionIds.has(row.id))
+    .map((row) => ({ id: row.id, policyId: row.lifecyclePolicyId }));
   const policyIds = versions.flatMap((version) => (version.policyId ? [version.policyId] : []));
-  const policies = policyIds.length
-    ? await tx
-        .select()
-        .from(schema.entitlementLifecyclePolicies)
-        .where(inArray(schema.entitlementLifecyclePolicies.id, policyIds))
-        .orderBy(asc(schema.entitlementLifecyclePolicies.id))
-    : [];
+  const policies = timeline.policies.filter((row) => policyIds.includes(row.id));
   const policyFacts = policies.map((policy) => ({
     id: policy.id,
     version: policy.version,
