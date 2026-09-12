@@ -296,7 +296,23 @@ test("own partial feed, cross-page choices, link-only and draft, independent pho
     .getByLabel(t.manualName, { exact: true })
     .fill("Йогурт фермерский натуральный 3,5 %, 500 г");
   await expect(page.getByRole("button", { name: t.apply, exact: true })).toBeDisabled();
-  await newProduct.getByLabel(t.initialCategory, { exact: true }).selectOption(id(500));
+  const initialCategory = newProduct.getByRole("combobox", {
+    name: t.initialCategory,
+    exact: true,
+  });
+  await initialCategory.click();
+  const categorySearch = page.getByRole("searchbox", {
+    name: ru.pages.catalog.regulatory.categorySearch,
+    exact: true,
+  });
+  await categorySearch.fill("молоч");
+  await expect(page.getByRole("option")).toHaveCount(1);
+  const categoryOption = page.getByRole("option", { name: "Молочная продукция", exact: true });
+  await expect(categoryOption).toBeVisible();
+  await categorySearch.press("ArrowDown");
+  await expect(categoryOption).toBeFocused();
+  await categoryOption.press("Enter");
+  await expect(initialCategory).toContainText("Молочная продукция");
   await newProduct
     .getByRole("radio", { name: `${t.fields.name} — ${t.proposedColumn}`, exact: true })
     .click();
