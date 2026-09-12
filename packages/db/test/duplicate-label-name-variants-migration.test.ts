@@ -6,8 +6,8 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  buildDuplicateLabelTemplates,
   buildLegacyDuplicateLabelTemplates,
+  buildPreviousDuplicateLabelTemplates,
   productLabelValueDigest,
 } from "@markiro/domain";
 
@@ -152,7 +152,11 @@ describe.skipIf(!databaseUrl)("duplicate label name variants migration", () => {
         }>("SELECT id,tenant_id,name,purpose,enabled,spec FROM label_templates ORDER BY id")
       ).rows;
     const first = await readTemplates();
-    const presets = buildDuplicateLabelTemplates();
+    // What 0125 itself writes, which is NOT today's stock layout: 0141 later
+    // replaced it with the full-width name. Asserting against the current
+    // presets would make this suite fail every time the stock layout moves,
+    // and would stop describing the migration it is named after.
+    const presets = buildPreviousDuplicateLabelTemplates();
     const shortSpec = presets.find((row) => row.name === shortName)?.spec;
     expect(shortSpec).toBeDefined();
     for (const entry of entries) {
