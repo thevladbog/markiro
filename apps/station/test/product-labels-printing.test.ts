@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   sendPreparedProductLabel,
   verifyProductLabel,
+  skipProductLabelVerification,
   prepareProductLabelReprint,
 } from "../src/lib/product-labels/printing.js";
 import { appendProductLabelEvent, readProductLabelJob } from "../src/lib/product-labels/store.js";
@@ -27,6 +28,90 @@ describe("product label printing", () => {
       attemptId,
       raw,
     });
+
+  const skip = (attemptId = work.input.preparedEvent.attemptId) =>
+    skipProductLabelVerification(work.exec, {
+      ...work.actor,
+      credentialOwnership: work.input.credentialOwnership,
+      jobId: work.input.jobId,
+      attemptId,
+    });
+
+  it("journals an explicit skip atomically, survives restart and never marks the label verified", async () => {
+    await sendPreparedProductLabel(work.deps, work.input.jobId);
+    expect(await skip("stale-attempt")).toBe(false);
+    expect(await skip()).toBe(true);
+    expect(await skip()).toBe(false);
+    expect(await verify(work.input.raw)).toBe("stale");
+    work.restart();
+    const job = await stored();
+    expect(job?.projection).toMatchObject({
+      status: "completed",
+      verificationOutcome: "skipped",
+      attemptState: "sent",
+    });
+    expect(job?.canonicalRaw).toBe(work.input.canonicalRaw);
+    expect(job?.bytesBase64).toBe(work.input.bytesBase64);
+    expect(job?.attempts[0]).toMatchObject({ state: "sent", verifiedAt: null, verifiedBy: null });
+    const events = await work.exec.all<{ event_json: string }>(
+      "SELECT event_json FROM product_label_events ORDER BY sequence",
+    );
+    expect(events).toHaveLength(4);
+    expect(JSON.parse(events[3]?.event_json ?? "null")).toMatchObject({
+      kind: "verification_skipped",
+      operatorId: work.actor.operatorId,
+      jobId: work.input.jobId,
+      shiftId: work.input.shiftId,
+      sequence: 4,
+      occurredAt: new Date(Date.parse(work.input.acceptedAt) + 3000).toISOString(),
+      codeHash: work.input.preparedEvent.codeHash,
+      payloadDigest: work.input.preparedEvent.payloadDigest,
+      policyRevision: work.input.preparedEvent.policyRevision,
+    });
+    expect(await work.exec.all("SELECT * FROM product_label_outbox")).toHaveLength(4);
+    expect(
+      await restoreProductLabelWork(work.exec, work.input.credentialOwnership, work.actor),
+    ).toBeNull();
+    await prepareProductLabelReprint(work.exec, {
+      ...work.actor,
+      credentialOwnership: work.input.credentialOwnership,
+      shiftId: work.input.shiftId,
+      jobId: work.input.jobId,
+      reason: "damaged",
+    });
+    expect((await stored())?.projection.verificationOutcome).toBe("pending");
+  });
+
+  it("refuses skip before sending or after unknown delivery", async () => {
+    expect(await skip()).toBe(false);
+    work.print.mockRejectedValueOnce(new Error("disconnected"));
+    await sendPreparedProductLabel(work.deps, work.input.jobId);
+    expect(await skip()).toBe(false);
+  });
+
+  it("does not skip when the active shift disappears between reading and committing", async () => {
+    await sendPreparedProductLabel(work.deps, work.input.jobId);
+    const run = work.exec.run;
+    work.exec.run = async (sql, params) => {
+      if (sql.includes("INSERT INTO product_label_event_commands"))
+        await run("UPDATE shift_mirror SET status='closed'");
+      return run(sql, params);
+    };
+    expect(await skip()).toBe(false);
+    expect((await stored())?.projection.verificationOutcome).toBe("pending");
+  });
+
+  it("keeps verification pending when the skip outbox write fails", async () => {
+    await sendPreparedProductLabel(work.deps, work.input.jobId);
+    await work.exec.run(
+      "CREATE TRIGGER skip_fault BEFORE INSERT ON product_label_outbox BEGIN SELECT RAISE(ABORT,'skip fault'); END",
+    );
+    await expect(skip()).rejects.toThrow("skip fault");
+    expect((await stored())?.projection.verificationOutcome).toBe("pending");
+    expect(await work.exec.all("SELECT * FROM product_label_events")).toHaveLength(3);
+    await work.exec.run("DROP TRIGGER skip_fault");
+    expect(await skip()).toBe(true);
+  });
 
   it("persists sending before transport, then waits for required verification", async () => {
     work.print.mockImplementation(async () => {

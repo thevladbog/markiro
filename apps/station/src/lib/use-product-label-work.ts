@@ -15,6 +15,7 @@ import {
   prepareProductLabelReprint,
   sendPreparedProductLabel,
   verifyProductLabel,
+  skipProductLabelVerification,
 } from "./product-labels/printing.js";
 import { restoreProductLabelWork } from "./product-labels/recovery.js";
 import {
@@ -250,6 +251,36 @@ export function createProductLabelWork(options: ProductLabelWorkOptions) {
       }).catch(() => {
         publish({ error: "storage" });
         return "stale";
+      });
+    },
+    async skip(jobId: string, attemptId: string): Promise<boolean> {
+      const job = state.job;
+      if (
+        !current() ||
+        pending ||
+        verificationPaused ||
+        !state.ready ||
+        state.closed ||
+        state.error ||
+        !job ||
+        job.jobId !== jobId ||
+        job.attemptId !== attemptId ||
+        job.status !== "awaiting_verification" ||
+        job.ownershipConflict
+      )
+        return false;
+      return run(async () => {
+        const applied = await skipProductLabelVerification(exec, {
+          ...options.getPrinting(),
+          credentialOwnership,
+          jobId,
+          attemptId,
+        });
+        await refresh(jobId);
+        return applied;
+      }).catch((error: unknown) => {
+        publish({ error: "storage" });
+        throw error;
       });
     },
     async resumePrepared() {

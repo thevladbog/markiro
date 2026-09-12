@@ -98,6 +98,11 @@ export const STATION_PREFLIGHTS = Object.freeze([
     headers: "content-type,x-api-key,x-station-capabilities",
   },
   {
+    path: "/shifts/pallet-label-templates",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
     path: "/shifts/cors-probe/open",
     method: "POST",
     headers: "content-type,x-api-key,x-station-capabilities",

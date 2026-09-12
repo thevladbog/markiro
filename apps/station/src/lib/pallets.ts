@@ -17,6 +17,7 @@ export interface DevicePallet {
   terminalId: string | null;
   openedAt: string;
   boxCount: number;
+  lastBoxSscc: string | null;
 }
 
 export interface UnresolvedPalletPrint {
@@ -75,11 +76,15 @@ export async function currentPallet(
     terminal_id: string | null;
     opened_at: string;
     box_count: number;
+    last_box_sscc: string | null;
   }>(
     `SELECT p.pallet_id AS pallet_id, p.shift_id AS shift_id, p.terminal_id AS terminal_id,
             p.opened_at AS opened_at,
             (SELECT COUNT(*) FROM boxes_mirror b
-              WHERE b.pallet_id = p.pallet_id AND b.disassembled_at IS NULL) AS box_count
+              WHERE b.pallet_id = p.pallet_id AND b.disassembled_at IS NULL) AS box_count,
+            (SELECT b.sscc FROM boxes_mirror b
+              WHERE b.pallet_id = p.pallet_id AND b.disassembled_at IS NULL
+              ORDER BY b.closed_at DESC, b.rowid DESC LIMIT 1) AS last_box_sscc
        FROM pallets_mirror p
       WHERE p.shift_id = ? AND p.terminal_id IS ? AND p.closed_at IS NULL
       ORDER BY p.opened_at ASC
@@ -94,7 +99,33 @@ export async function currentPallet(
     terminalId: row.terminal_id,
     openedAt: row.opened_at,
     boxCount: Number(row.box_count),
+    lastBoxSscc: row.last_box_sscc ?? null,
   };
+}
+
+export interface PalletBoxSummary {
+  boxId: string;
+  sscc: string;
+  closedAt: string;
+}
+
+/** Membership is read locally, with the same shift/terminal boundary as the pallet itself. */
+export async function listPalletBoxes(
+  exec: SqlExecutor,
+  shiftId: string,
+  terminalId: string | null,
+  palletId: string,
+): Promise<PalletBoxSummary[]> {
+  const rows = await exec.all<{ box_id: string; sscc: string; closed_at: string }>(
+    `SELECT b.box_id, b.sscc, b.closed_at FROM boxes_mirror b
+     JOIN pallets_mirror p ON p.pallet_id=b.pallet_id
+     WHERE p.pallet_id=? AND p.shift_id=? AND p.terminal_id IS ?
+       AND p.disassembled_at IS NULL AND b.disassembled_at IS NULL
+       AND b.closed_at IS NOT NULL AND b.sscc IS NOT NULL
+     ORDER BY b.closed_at DESC, b.rowid DESC`,
+    [palletId, shiftId, terminalId],
+  );
+  return rows.map((row) => ({ boxId: row.box_id, sscc: row.sscc, closedAt: row.closed_at }));
 }
 
 /**

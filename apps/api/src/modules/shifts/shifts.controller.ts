@@ -63,6 +63,7 @@ import {
   listShiftsQuerySchema,
   listShiftsOpenApiSchema,
   shiftBoxLabelTemplatesOpenApiSchema,
+  shiftPalletLabelTemplatesOpenApiSchema,
   shiftBundleOpenApiSchema,
   shiftOpenApiSchema,
   shiftPlanningConfigOpenApiSchema,
@@ -75,6 +76,7 @@ import {
   type ListShiftsQueryDto,
   type ListShiftsResponseDto,
   type ShiftBoxLabelTemplatesDto,
+  type ShiftPalletLabelTemplatesDto,
   type ShiftBundleDto,
   type ShiftDto,
   type ShiftPlanningConfigDto,
@@ -180,6 +182,27 @@ export class ShiftsController {
     query: BoxLabelTemplateProductQueryDto,
   ): Promise<ShiftBoxLabelTemplatesDto> {
     return this.shiftsService.listBoxLabelTemplates(req.tenantId!, query.productId);
+  }
+
+  @Get("pallet-label-templates")
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "List pallet label template options",
+    description:
+      "Template summaries only; a station receives a template spec exclusively through the shift bundle. " +
+      "With `productId` only templates eligible for that product's category are returned; without it, every enabled template.",
+  })
+  @ApiCabinetOrStationAuth()
+  @ApiZodQuery(boxLabelTemplateProductQuerySchema)
+  @ApiOkResponse({ schema: shiftPalletLabelTemplatesOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 429)
+  async listPalletLabelTemplates(
+    @Req() req: RequestWithTenant,
+    @Query(new ZodValidationPipe(boxLabelTemplateProductQuerySchema))
+    query: BoxLabelTemplateProductQueryDto,
+  ): Promise<ShiftPalletLabelTemplatesDto> {
+    return this.shiftsService.listPalletLabelTemplates(req.tenantId!, query.productId);
   }
 
   @Get(":id/product-labels")

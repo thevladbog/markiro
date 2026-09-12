@@ -13,6 +13,7 @@ import {
 import {
   sendPreparedProductLabel,
   verifyProductLabel,
+  skipProductLabelVerification,
 } from "../src/lib/product-labels/printing.js";
 import { readProductLabelJob } from "../src/lib/product-labels/store.js";
 import { createSyncEngine, BACKOFF_START_MS, type SyncEngine } from "../src/lib/sync.js";
@@ -98,6 +99,32 @@ describe("product label sync", () => {
     productLabelReceipt: receipt(body.productLabelEvents ?? []),
   });
 
+  it("retains a skipped verification across restart and sends the exact audit event", async () => {
+    await sendPreparedProductLabel(work.deps, work.input.jobId);
+    expect(
+      await skipProductLabelVerification(work.exec, {
+        ...work.actor,
+        jobId: work.input.jobId,
+        attemptId: work.input.preparedEvent.attemptId,
+        credentialOwnership: work.input.credentialOwnership,
+      }),
+    ).toBe(true);
+    const before = await pending();
+    expect(before.at(-1)?.event).toMatchObject({
+      kind: "verification_skipped",
+      operatorId: work.input.operatorId,
+    });
+    work.restart();
+    expect(await pending()).toEqual(before);
+    const post = client((body) => {
+      expect(body.productLabelEvents).toEqual(before.map((row) => row.event));
+      return response(body);
+    });
+    const sync = engine(post);
+    sync.nudge();
+    await sync.idle();
+    expect(await pending()).toEqual([]);
+  });
   it("restores an exact pinned key-A batch under verified same-device key B without changing evidence", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const config = {

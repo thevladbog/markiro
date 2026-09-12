@@ -258,6 +258,13 @@ export interface ShiftBoxLabelTemplatesDto {
   defaultSource: BoxLabelTemplateDefaultSource | null;
 }
 
+/** Spec-free pallet options for the Station picker. Capacity stays on the product card. */
+export interface ShiftPalletLabelTemplatesDto {
+  items: ShiftBoxLabelTemplateOptionDto[];
+  defaultPalletLabelTemplateId: string | null;
+  defaultSource: BoxLabelTemplateDefaultSource | null;
+}
+
 /**
  * Legacy fields retained only on station bundles during a rolling deployment.
  *
@@ -426,33 +433,46 @@ export const shiftPlanningConfigOpenApiSchema: SchemaObject = {
   },
 };
 
+const shiftLabelTemplateItemsOpenApiSchema: SchemaObject = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: false,
+    required: ["id", "name", "widthMm", "heightMm", "dpi", "language"],
+    properties: {
+      id: { type: "string", format: "uuid" },
+      name: { type: "string" },
+      widthMm: { type: "number", minimum: 0 },
+      heightMm: { type: "number", minimum: 0 },
+      dpi: {
+        type: "integer",
+        enum: [203, 300],
+        description:
+          "Authoring resolution. Informational only: the station prints at its own printer's resolution, falling back to this value for box labels only when no printer resolution is configured.",
+      },
+      language: { type: "string", enum: ["zpl", "tspl"] },
+    },
+  },
+};
+
 export const shiftBoxLabelTemplatesOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
   required: ["items", "defaultBoxLabelTemplateId", "defaultSource"],
   properties: {
-    items: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["id", "name", "widthMm", "heightMm", "dpi", "language"],
-        properties: {
-          id: { type: "string", format: "uuid" },
-          name: { type: "string" },
-          widthMm: { type: "number", minimum: 0 },
-          heightMm: { type: "number", minimum: 0 },
-          dpi: {
-            type: "integer",
-            enum: [203, 300],
-            description:
-              "Authoring resolution. Informational only: the station prints at its own printer's resolution, falling back to this value for box labels only when no printer resolution is configured.",
-          },
-          language: { type: "string", enum: ["zpl", "tspl"] },
-        },
-      },
-    },
+    items: shiftLabelTemplateItemsOpenApiSchema,
     defaultBoxLabelTemplateId: nullableUuidOpenApiSchema,
+    defaultSource: defaultSourceOpenApiSchema,
+  },
+};
+
+export const shiftPalletLabelTemplatesOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items", "defaultPalletLabelTemplateId", "defaultSource"],
+  properties: {
+    items: shiftLabelTemplateItemsOpenApiSchema,
+    defaultPalletLabelTemplateId: nullableUuidOpenApiSchema,
     defaultSource: defaultSourceOpenApiSchema,
   },
 };

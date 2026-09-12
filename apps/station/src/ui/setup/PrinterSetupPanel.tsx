@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Select } from "@markiro/ui";
 import type { PrintTarget, UsbPrinterInfo } from "../../lib/hardware.js";
@@ -65,6 +66,7 @@ export function PrinterSetupPanel({
   onTestPrint,
 }: PrinterSetupPanelProps) {
   const { t } = useTranslation();
+  const dpiHintId = useId();
   const transportChoices: { value: PrinterTransport; label: string }[] = [
     { value: "none", label: t("setup.transportNone") },
     { value: "tcp", label: t("setup.transportTcp") },
@@ -201,7 +203,7 @@ export function PrinterSetupPanel({
           <Select
             size="floor"
             label={t("setup.printerResolution")}
-            hint={t("setup.printerDpiHint")}
+            aria-describedby={dpiHintId}
             value={printerDpi?.toString() ?? ""}
             disabled={disabled || transport === "none"}
             options={[
@@ -227,12 +229,15 @@ export function PrinterSetupPanel({
       </section>
 
       <section
-        className="setup-card setup-card--check"
         aria-label={t("setup.printerCheckTitle")}
         data-testid="printer-check"
+        className="setup-card setup-card--check setup-card--printer-check"
       >
         <h2 className="setup-card__title">{t("setup.printerCheckTitle")}</h2>
         <p className="setup-card__hint">{t("setup.printerCheckHint")}</p>
+        <p id={dpiHintId} className="setup-card__dpi-hint">
+          {t("setup.printerDpiHint")}
+        </p>
         <Button size="floor" disabled={!printReady} onClick={onTestPrint}>
           {t("setup.testPrint")}
         </Button>
