@@ -84,6 +84,19 @@ export async function headHandheldObject({ client, bucket, key }) {
   }
 }
 
+function isPreconditionFailed(error) {
+  return error?.name === "PreconditionFailed" || error?.$metadata?.httpStatusCode === 412;
+}
+
+/**
+ * `IfNoneMatch: "*"` makes «immutable» the storage's rule rather than ours.
+ *
+ * The caller reads the key first, but a read followed by a write is not
+ * atomic, and the window is exactly where an overwritten release would come
+ * from. When the precondition does fail, an object whose digest already
+ * matches is a re-run and fine; a different digest is a version being quietly
+ * rewritten, and that must stop the release rather than move a pointer at it.
+ */
 export async function putHandheldImmutableObject({
   client,
   bucket,
@@ -97,16 +110,25 @@ export async function putHandheldImmutableObject({
   if (actual !== expectedSha256) {
     throw new Error(`immutable handheld checksum does not match bytes: ${key}`);
   }
-  await client.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: body,
-      ContentType: contentType,
-      CacheControl: IMMUTABLE_CACHE_CONTROL,
-      Metadata: { [SHA256_METADATA]: expectedSha256 },
-    }),
-  );
+  try {
+    await client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        CacheControl: IMMUTABLE_CACHE_CONTROL,
+        IfNoneMatch: "*",
+        Metadata: { [SHA256_METADATA]: expectedSha256 },
+      }),
+    );
+  } catch (error) {
+    if (!isPreconditionFailed(error)) throw error;
+    const published = await headHandheldObject({ client, bucket, key });
+    if (published !== expectedSha256) {
+      throw new Error(`immutable handheld object already exists with different bytes: ${key}`);
+    }
+  }
 }
 
 export async function putHandheldObject({ client, bucket, key, body, contentType }) {

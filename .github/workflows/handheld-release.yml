@@ -100,6 +100,18 @@ jobs:
           java-version: "17"
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
 
+      # Before the key exists on the runner. `pnpm install` runs whatever
+      # lifecycle scripts the dependency tree carries, and there is no reason
+      # for any of them to run in a process that can read a signing key or an
+      # object-storage credential.
+      - name: Install publishing dependencies
+        if: ${{ inputs.publish }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+
       - name: Restore the signing key
         shell: bash
         env:
@@ -155,9 +167,17 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # The key has done its job the moment the signature is proven. Nothing
+      # below needs it, so it goes before publication runs at all.
+      - name: Discard the signing key
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/handheld.jks"
+
       # Publication runs only after the signature has been proven, and it moves
       # the channel pointer last: a pointer moved first sends every terminal to
-      # a 404 for as long as the upload takes.
+      # a 404 for as long as the upload takes. The storage credential is scoped
+      # to this one command and to no build step.
       - name: Publish to the channel
         if: ${{ inputs.publish }}
         working-directory: ${{ github.workspace }}
@@ -170,8 +190,7 @@ jobs:
           YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
-          corepack enable
-          pnpm install --frozen-lockfile
+          test ! -f "$RUNNER_TEMP/handheld.jks"
           node tools/handheld-release/publish.mjs \
             "$RUNNER_TEMP/out/markiro-tsd-${{ inputs.version_name }}.apk" \
             "${{ inputs.version_name }}" \
@@ -184,11 +203,6 @@ jobs:
             cat "$RUNNER_TEMP/published.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Discard the signing key
-        if: always()
-        shell: bash
-        run: rm -f "$RUNNER_TEMP/handheld.jks"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

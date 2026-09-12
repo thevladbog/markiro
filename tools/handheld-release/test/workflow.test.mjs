@@ -47,12 +47,43 @@ test("publication happens only after the signature is proven", () => {
   assert.equal(steps[published].if, "${{ inputs.publish }}");
 });
 
-test("the signing key is gone before the artifact is uploaded anywhere", () => {
+test("the signing key is gone before anything else runs on the runner", () => {
   const discard = stepIndex("Discard the signing key");
   const upload = steps.findIndex((step) =>
     (step.uses ?? "").startsWith("actions/upload-artifact@"),
   );
   assert.ok(discard < upload, "the key must not still be on the runner during an upload");
+  // Nothing below the signature check needs the key, and publication least of
+  // all. The publish step re-checks at runtime, because an ordering rule that
+  // only exists in a test is one refactor away from being untrue.
+  assert.ok(discard < stepIndex("Publish to the channel"));
+  assert.match(
+    steps[stepIndex("Publish to the channel")].run,
+    /test ! -f "\$RUNNER_TEMP\/handheld\.jks"/,
+  );
+});
+
+test("dependencies are installed before the key or the storage credential exist", () => {
+  // `pnpm install` runs whatever lifecycle scripts the dependency tree carries;
+  // `.npmrc` does not disable them. None of that should run in a process that
+  // can read a signing key.
+  const install = stepIndex("Install publishing dependencies");
+  assert.ok(install >= 0, "publishing dependencies must be installed in their own step");
+  assert.ok(install < stepIndex("Restore the signing key"));
+  assert.equal(steps[install].env, undefined, "the install step must carry no secrets");
+  for (const step of steps) {
+    if (!step.run?.includes("pnpm install")) continue;
+    assert.equal(step.name, "Install publishing dependencies", "only one step may install");
+  }
+});
+
+test("the object-storage credential reaches the publish step and nothing else", () => {
+  const credential = "YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY";
+  const carriers = steps.filter((step) => Object.keys(step.env ?? {}).includes(credential));
+  assert.deepEqual(
+    carriers.map((step) => step.name),
+    ["Publish to the channel"],
+  );
 });
 
 test("publishing refuses an empty set of release notes", () => {

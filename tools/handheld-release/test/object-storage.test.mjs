@@ -90,6 +90,59 @@ test("an immutable put whose bytes do not match its digest never reaches storage
   assert.equal(sent.length, 0);
 });
 
+test("an immutable put asks storage to refuse an overwrite", async () => {
+  const sent = [];
+  const store = createHandheldObjectStore({
+    env,
+    Client: class {
+      async send(command) {
+        sent.push(command.input);
+      }
+    },
+  });
+  const body = Buffer.from("apk");
+  const sha256 = createHash("sha256").update(body).digest("hex");
+  await store.putImmutable("handheld/stable/releases/0.2.0/x.apk", body, "application/x", sha256);
+  // Read-then-write is not atomic, and that window is exactly where an
+  // overwritten release would come from.
+  assert.equal(sent[0].IfNoneMatch, "*");
+});
+
+test("a version already published with the same bytes is a re-run, with different bytes it stops the release", async () => {
+  const precondition = Object.assign(new Error("exists"), { name: "PreconditionFailed" });
+  const body = Buffer.from("apk");
+  const sha256 = createHash("sha256").update(body).digest("hex");
+  const storeWith = (publishedSha256) =>
+    createHandheldObjectStore({
+      env,
+      Client: class {
+        async send(command) {
+          if (command.constructor.name === "PutObjectCommand") throw precondition;
+          return { Metadata: { "handheld-sha256": publishedSha256 } };
+        }
+      },
+    });
+
+  await assert.doesNotReject(() =>
+    storeWith(sha256).putImmutable(
+      "handheld/stable/releases/0.2.0/x.apk",
+      body,
+      "application/x",
+      sha256,
+    ),
+  );
+  await assert.rejects(
+    () =>
+      storeWith("c".repeat(64)).putImmutable(
+        "handheld/stable/releases/0.2.0/x.apk",
+        body,
+        "application/x",
+        sha256,
+      ),
+    /already exists with different bytes/,
+  );
+});
+
 test("read-back is over the public URL a terminal uses, not over the S3 API", async () => {
   const bytes = Buffer.from("published");
   const sha256 = createHash("sha256").update(bytes).digest("hex");

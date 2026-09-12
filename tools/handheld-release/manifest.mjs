@@ -33,6 +33,15 @@ export function handheldChannelBaseUrl(channel) {
   return `${HANDHELD_PUBLIC_BASE_URL}/handheld/${assertHandheldChannel(channel)}`;
 }
 
+export function handheldApkName(versionName) {
+  return `markiro-tsd-${versionName}.apk`;
+}
+
+/** The one URL a given version may be published at, spelled out rather than matched by prefix. */
+export function handheldArtifactUrl({ channel, versionName }) {
+  return `${handheldChannelBaseUrl(channel)}/releases/${versionName}/${handheldApkName(versionName)}`;
+}
+
 export function assertValidHandheldManifest(manifest, { channel = "stable" } = {}) {
   assertHandheldChannel(channel);
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest))
@@ -49,11 +58,21 @@ export function assertValidHandheldManifest(manifest, { channel = "stable" } = {
   if (typeof sourceSha !== "string" || !COMMIT.test(sourceSha)) invalid("sourceSha");
   if (typeof notes !== "string" || notes.trim().length === 0) invalid("notes");
   if (typeof releasedAt !== "string" || Number.isNaN(Date.parse(releasedAt))) invalid("releasedAt");
-  // Not merely https and not merely the right host: the artifact a channel
-  // points at has to live inside that channel, or `stable` could be pointed at
-  // an unaccepted `beta` build by a single mistyped input.
-  if (typeof url !== "string" || !url.startsWith(`${handheldChannelBaseUrl(channel)}/`)) {
-    invalid("url is outside the channel it is published to");
+  // The exact URL this version may live at, compared after normalisation --
+  // not a prefix test. A prefix accepts
+  // `…/handheld/stable/../beta/markiro-tsd-0.2.0.apk`, which starts inside
+  // `stable` and resolves inside `beta`, and this validator also runs on
+  // manifests read back from storage, where the URL decides what a terminal
+  // downloads.
+  if (typeof url !== "string") invalid("url");
+  let normalized;
+  try {
+    normalized = new URL(url).href;
+  } catch {
+    invalid("url is not a URL");
+  }
+  if (normalized !== handheldArtifactUrl({ channel, versionName })) {
+    invalid("url is not the artifact this version publishes to");
   }
   return manifest;
 }

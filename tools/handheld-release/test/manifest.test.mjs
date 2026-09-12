@@ -5,6 +5,7 @@ import {
   assertSupersedes,
   buildHandheldManifest,
   HANDHELD_CHANNELS,
+  handheldArtifactUrl,
   handheldChannelBaseUrl,
   parseHandheldManifest,
 } from "../manifest.mjs";
@@ -84,6 +85,34 @@ test("the download URL must live under the channel it is published to", () => {
     buildHandheldManifest({ ...valid, url: "http://releases.markiro.app/handheld/stable/x.apk" }),
   );
   assert.throws(() => buildHandheldManifest({ ...valid, url: "https://example.test/x.apk" }));
+});
+
+test("a URL that resolves out of its channel is rejected, not merely one that looks wrong", () => {
+  // `../beta` starts inside `stable` and lands inside `beta`. A prefix test
+  // accepts it, and this validator also runs on manifests read back from
+  // storage, where the URL is what a terminal downloads.
+  for (const url of [
+    "https://releases.markiro.app/handheld/stable/releases/../../beta/releases/0.2.0/markiro-tsd-0.2.0.apk",
+    "https://releases.markiro.app/handheld/stable/releases/0.2.0/../../../beta/releases/0.2.0/markiro-tsd-0.2.0.apk",
+    "https://releases.markiro.app/handheld/stable/releases/0.2.0/markiro-tsd-0.2.0.apk/extra",
+    "https://releases.markiro.app/handheld/stable/releases/0.3.0/markiro-tsd-0.3.0.apk",
+    "https://releases.markiro.app/handheld/stable/releases/0.2.0/other.apk",
+    "https://releases.markiro.app@evil.test/handheld/stable/releases/0.2.0/markiro-tsd-0.2.0.apk",
+    "not a url",
+  ]) {
+    assert.throws(() => buildHandheldManifest({ ...valid, url }), undefined, `accepted ${url}`);
+  }
+});
+
+test("the artifact URL is derived, so a manifest and its object cannot drift apart", () => {
+  assert.equal(
+    handheldArtifactUrl({ channel: "stable", versionName: "0.2.0" }),
+    "https://releases.markiro.app/handheld/stable/releases/0.2.0/markiro-tsd-0.2.0.apk",
+  );
+  assert.equal(
+    buildHandheldManifest(valid).url,
+    handheldArtifactUrl({ channel: "stable", versionName: "0.2.0" }),
+  );
 });
 
 test("a beta manifest is accepted under the beta channel", () => {
