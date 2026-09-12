@@ -22,7 +22,11 @@ import type {
   UpdateDocumentDto,
 } from "./dto";
 import { resolveLineTargets } from "./line-validation";
-import type { DisaggregationReportCode, DisaggregationReportData } from "./report";
+import type {
+  DisaggregationReportBox,
+  DisaggregationReportCode,
+  DisaggregationReportData,
+} from "./report";
 
 const PAGE_SIZE = 50;
 
@@ -552,6 +556,63 @@ export class DisaggregationService {
       }
     }
 
+    // A pallet line's contents are its member BOXES, not unit codes: taking a
+    // pallet apart takes boxes off a stack without opening any of them. Only
+    // `boxId` was ever resolved above, so a pallet line printed an empty
+    // contents block beneath a correct unit count -- the same silent-emptying
+    // shape that once hit «Состав короба».
+    const boxesByPalletId = new Map<string, DisaggregationReportBox[]>();
+    if (includeContents) {
+      const palletIds = [
+        ...new Set(printable.map((line) => line.palletId).filter((p): p is string => p !== null)),
+      ];
+      if (palletIds.length > 0) {
+        const memberRows = await this.db
+          .select({
+            palletId: schema.boxes.palletId,
+            sscc: schema.boxes.sscc,
+            closedAt: schema.boxes.closedAt,
+            boxId: schema.boxes.id,
+            // The same live predicate the box lines use, so a pallet's total
+            // and its members' counts cannot disagree on one page.
+            codeCount:
+              sql<number>`count(${schema.boxItems.codeHash}) filter (where ${schema.boxItems.displacedAt} is null and ${schema.boxItems.removedAt} is null)`.mapWith(
+                Number,
+              ),
+          })
+          .from(schema.boxes)
+          .leftJoin(
+            schema.boxItems,
+            and(
+              eq(schema.boxItems.tenantId, schema.boxes.tenantId),
+              eq(schema.boxItems.boxId, schema.boxes.id),
+            ),
+          )
+          .where(
+            and(
+              eq(schema.boxes.tenantId, tenantId),
+              inArray(schema.boxes.palletId, palletIds),
+              // Membership is never cleared, so a box taken off the pallet
+              // before this document still carries `pallet_id`. It is not part
+              // of what this act disaggregated.
+              isNull(schema.boxes.disassembledAt),
+            ),
+          )
+          .groupBy(schema.boxes.palletId, schema.boxes.id, schema.boxes.sscc, schema.boxes.closedAt)
+          .orderBy(schema.boxes.closedAt, schema.boxes.id);
+        for (const member of memberRows) {
+          if (member.palletId === null) continue;
+          const entry = {
+            sscc: member.sscc === null ? null : formatSsccWithAi(member.sscc),
+            codeCount: member.codeCount,
+          };
+          const bucket = boxesByPalletId.get(member.palletId);
+          if (bucket) bucket.push(entry);
+          else boxesByPalletId.set(member.palletId, [entry]);
+        }
+      }
+    }
+
     return {
       docNo: row.docNo,
       status: row.status,
@@ -569,6 +630,7 @@ export class DisaggregationService {
         productName: line.productName,
         codeCount: line.codeCount,
         codes: line.boxId ? (codesByBoxId.get(line.boxId) ?? []) : [],
+        boxes: line.palletId ? (boxesByPalletId.get(line.palletId) ?? []) : [],
       })),
     };
   }

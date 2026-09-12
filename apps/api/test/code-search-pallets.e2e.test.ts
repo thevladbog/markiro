@@ -283,6 +283,37 @@ describe.skipIf(!ready)("code search pallet card e2e", () => {
     await agent.get("/code-search/pallets/not-a-uuid").expect(400);
   });
 
+  describe("printed contents form", () => {
+    it("renders the pallet with its member boxes", async () => {
+      const res = await agent
+        .get(`/code-search/pallets/${palletId}/report`)
+        .query({ timeZone: "Europe/Moscow" })
+        .expect(200)
+        .expect("Content-Type", /text\/html/);
+      expect(res.text).toContain("Состав паллеты");
+      // Its own SSCC, and both member boxes underneath.
+      expect(res.text).toContain("(00)");
+      expect(res.text.match(/<tr class="rep-code-row">/g)?.length).toBe(2);
+      // The sum across boxes, not one box's figure.
+      expect(res.text).toContain("коробов — 2");
+    });
+
+    it("is denied to a station api-key and across tenants", async () => {
+      await request(app!.getHttpServer())
+        .get(`/code-search/pallets/${palletId}/report`)
+        .set("x-api-key", stationKey)
+        .expect(403);
+      const other = request.agent(app!.getHttpServer());
+      await signUpAndActivate(other);
+      await other.get(`/code-search/pallets/${palletId}/report`).expect(404);
+    });
+
+    it("404s for an unknown pallet and 400s for a malformed id", async () => {
+      await agent.get(`/code-search/pallets/${randomUUID()}/report`).expect(404);
+      await agent.get("/code-search/pallets/not-a-uuid/report").expect(400);
+    });
+  });
+
   /** MUTATES the shared fixture -- from here on b2 is off the stack. */
   it("keeps a disassembled member box listed, flagged with its own timestamp", async () => {
     await postBatch({

@@ -2672,6 +2672,7 @@
       },
       "palletCard": {
         "noSscc": "Без SSCC",
+        "printAction": "Распечатать",
         "status": {
           "open": "Открыта",
           "closed": "Закрыта",
