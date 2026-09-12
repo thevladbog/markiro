@@ -3952,3 +3952,25 @@ textarea {
   font: var(--text-h3);
   margin-bottom: var(--sp-2);
 }
+
+/* The agreements forms had no layout of their own, so every field sat flush
+   against the next one. Same grid and gap as the rest of the commerce pages. */
+.agreement-form {
+  display: grid;
+  gap: 16px;
+}
+
+.agreement-form h3 {
+  margin: 8px 0 0;
+}
+
+.agreement-requisites {
+  display: grid;
+  gap: 12px;
+}
+
+.agreement-transitions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

@@ -310,6 +310,12 @@ export class AgreementDocumentsService {
       verificationUrl: REGISTRY_URL,
       classLabel,
       operatorProfileId: "operator-2026-08-15" as const,
+      // A contract is identified by its own number. The document code, the
+      // revision and the verification URL are registry concepts it does not
+      // have, so the metadata table is dropped rather than filled with them.
+      identityLabel: agreement.number,
+      showMetadata: false,
+      showSummary: false,
     };
 
     if (agreement.documentForm === "ru_en") {

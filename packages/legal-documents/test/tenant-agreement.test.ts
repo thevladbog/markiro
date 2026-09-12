@@ -92,6 +92,46 @@ describe("buildTenantAgreement", () => {
     expect(text).toContain("[Старт / Цех / Производство / индивидуальный]");
   });
 
+  it("reads the representative as a clause, not a comma-separated list", () => {
+    const text = flatten({
+      customer: ORG_CUSTOMER,
+      signatory: {
+        position: "Генерального директора",
+        fullName: "Иванова Ивана Ивановича",
+        authorityBasis: "Устава",
+      },
+    });
+    expect(text).toContain(
+      "в лице Генерального директора Иванова Ивана Ивановича, действующего на основании Устава",
+    );
+    // The old join produced "в лице Генеральный директор, Иванов И. И., Устав".
+    expect(text).not.toContain("Иванова Ивана Ивановича, Устава");
+  });
+
+  it("names both parties in the appendices instead of leaving placeholders", () => {
+    const text = flatten({ number: "МКР-2026-0001", customer: ORG_CUSTOMER });
+    // Appendix 3 is the processing instruction; the customer is the operator
+    // there, so leaving it blank made the appendix meaningless.
+    expect(text).toContain("3-А.1. Заказчик — ООО «Пример», ИНН 7701234567");
+    expect(text).toContain("Заказчик: ООО «Пример», ИНН 7701234567");
+    expect(text).not.toContain("[наименование, ИНН, адрес]");
+  });
+
+  it("starts the requisites on their own page", () => {
+    const section = buildTenantAgreement({ customer: ORG_CUSTOMER }, "ru").sections.find(
+      (candidate) => candidate.id === "rekvizity",
+    );
+    // A page break through the signature block strands a signature.
+    expect(section?.startsPage).toBe(true);
+  });
+
+  it("fills appendix 4.3 with the standard model rather than empty brackets", () => {
+    const text = flatten({ customer: ORG_CUSTOMER });
+    expect(text).toContain("Исключительное право остаётся у Исполнителя");
+    expect(text).toContain("Простая (неисключительная) лицензия");
+    expect(text).toContain("Передача результата и полная оплата задания");
+  });
+
   it("states that the Russian text prevails and that the forms stay Russian", () => {
     const text = flatten({ customer: ORG_CUSTOMER });
     expect(text).toContain("преимущественную силу имеет русский текст");
