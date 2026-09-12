@@ -380,6 +380,9 @@ describe.skipIf(!process.env.DATABASE_URL)("device replacement preparation", () 
     expect(result.items.map((item) => item.needsReview)).toEqual([false, false]);
     expect(resolve).toHaveBeenCalledTimes(1);
     expect(
+      queries.filter((query) => query.includes('from "working_device_retention_selections"')),
+    ).toHaveLength(1);
+    expect(
       queries.filter(
         (query) =>
           query.includes('"station_devices"."name"') &&

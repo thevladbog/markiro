@@ -22,6 +22,7 @@ export default defineConfig({
     "./src/schema/entitlements.ts",
     "./src/schema/device-licensing.ts",
     "./src/schema/device-replacements.ts",
+    "./src/schema/device-retention.ts",
     "./src/schema/billing.ts",
     "./src/schema/tenant-billing.ts",
     "./src/schema/shift-exports.ts",

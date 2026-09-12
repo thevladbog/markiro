@@ -1,3 +1,6 @@
+import { DeviceRetentionService } from "./device-retention.service";
+import { DeviceRetentionController } from "./device-retention.controller";
+import { PlatformDeviceRetentionController } from "./platform-device-retention.controller";
 import { DeviceReplacementService } from "./device-replacement.service";
 import { DeviceReplacementController } from "./device-replacement.controller";
 import { PlatformDeviceReplacementController } from "./platform-device-replacement.controller";
@@ -11,11 +14,13 @@ import { PlatformDeviceLicensingController } from "./platform-device-licensing.c
 @Module({
   imports: [PlatformAuditModule],
   controllers: [
+    DeviceRetentionController,
+    PlatformDeviceRetentionController,
     DeviceReplacementController,
     PlatformDeviceReplacementController,
     DeviceLicensingController,
     PlatformDeviceLicensingController,
   ],
-  providers: [DeviceReplacementService, DeviceLicensingService],
+  providers: [DeviceRetentionService, DeviceReplacementService, DeviceLicensingService],
 })
 export class DeviceLicensingModule {}

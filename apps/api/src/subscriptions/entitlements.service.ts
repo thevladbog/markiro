@@ -62,8 +62,11 @@ export class EntitlementsService {
   }
 
   /** Internal operation-owner entry; caller owns coherent isolation and all locks. */
-  async resolveSnapshotInTransaction(tenantId: string, tx: SubscriptionTransaction) {
-    const at = new Date();
+  async resolveSnapshotInTransaction(
+    tenantId: string,
+    tx: SubscriptionTransaction,
+    at = new Date(),
+  ) {
     const current = await this.resolve(tenantId, tx, at);
     const usage = await this.usage(tenantId, tx, at);
     const facts = await readEntitlementFacts(tx, current);

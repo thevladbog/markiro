@@ -1,3 +1,4 @@
+import type { DeviceRetentionInspection } from "@markiro/platform-contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -131,6 +132,13 @@ function stubFetch({
 
     const override = await onRequest?.(path, init);
     if (override) return override;
+    if (path === "/api/device-licensing/retention")
+      return jsonResponse(200, {
+        canSelect: false,
+        observation: null,
+        selections: [],
+        currentShadow: { awaitingSelection: false, affectedDeviceIds: [], enforced: false },
+      } satisfies DeviceRetentionInspection);
     if (path === "/api/device-licensing/replacements")
       return jsonResponse(200, { canPrepare: false, items: [] });
     if (path === "/api/device-licensing")
@@ -580,7 +588,10 @@ describe("one-time pairing reveal", () => {
     await user.click(await screen.findByRole("button", { name: "Сформировать код" }));
     await user.click(await screen.findByRole("button", { name: "Скопировать" }));
 
-    expect((await screen.findByRole("alert")).textContent).toContain("Не удалось скопировать код");
+    expect(
+      (await within(screen.getByRole("dialog", { name: "Привязка киоска" })).findByRole("alert"))
+        .textContent,
+    ).toContain("Не удалось скопировать код");
     expect(screen.getByText("1234 5678")).toBeDefined();
   });
 });

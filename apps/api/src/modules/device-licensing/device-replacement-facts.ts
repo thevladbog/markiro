@@ -1,6 +1,8 @@
+import { lockDeviceLicensingFacts } from "./device-licensing-fact-locks";
+import { readDeviceLicensingWork } from "./device-licensing-work";
 import { ConflictException, NotFoundException } from "@nestjs/common";
 import { schema } from "@markiro/db";
-import { and, asc, eq, inArray, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import {
   deviceReplacementObservationSchema,
   type DeviceReplacementTarget,
@@ -42,6 +44,8 @@ export function createDeviceReplacementListFactReader(
   return async (deviceId: string, target: DeviceReplacementTarget) => {
     tenantFacts ??= (async () => ({
       rows: await readDevicePool(tx, tenantId),
+      retentions: await readRetentionIdentities(tx, tenantId),
+      work: await readDeviceLicensingWork(tx, tenantId),
       facts: await entitlements.resolveSnapshotInTransaction(tenantId, tx),
     }))();
     // Device and target facts are never cached by device ID alone.
@@ -56,7 +60,18 @@ export function createDeviceReplacementListFactReader(
   };
 }
 
+async function readRetentionIdentities(tx: SubscriptionTransaction, tenantId: string) {
+  const r = schema.workingDeviceRetentionSelections;
+  return tx
+    .select({ id: r.id, revision: r.revision, effectiveAt: r.effectiveAt, previewId: r.previewId })
+    .from(r)
+    .where(eq(r.tenantId, tenantId))
+    .orderBy(asc(r.id));
+}
+
 type ReadOnlyTenantFacts = {
+  work: Awaited<ReturnType<typeof readDeviceLicensingWork>>;
+  retentions: Awaited<ReturnType<typeof readRetentionIdentities>>;
   rows: Awaited<ReturnType<typeof readDevicePool>>;
   facts: Awaited<ReturnType<EntitlementsService["resolveSnapshotInTransaction"]>>;
 };
@@ -69,6 +84,7 @@ export async function readDeviceReplacementFacts(
   entitlements: EntitlementsService,
   readOnlyFacts?: ReadOnlyTenantFacts,
 ) {
+  if (!readOnlyFacts) await lockDeviceLicensingFacts(tx, tenantId);
   const rows = readOnlyFacts?.rows ?? (await readDevicePool(tx, tenantId));
   const source = rows.find((row) => row.device.id === deviceId);
   if (!source) throw new NotFoundException();
@@ -122,112 +138,26 @@ export async function readDeviceReplacementFacts(
       })
       .from(schema.apikey)
       .where(eq(schema.apikey.id, apiKeyId));
-  const credential = device.apiKeyId
-    ? ((
-        await (readOnlyFacts
-          ? credentialQuery(device.apiKeyId)
-          : credentialQuery(device.apiKeyId).for("share"))
-      )[0] ?? null)
-    : null;
-  const shifts = await tx
-    .selectDistinct({
-      id: schema.shifts.id,
-      status: schema.shifts.status,
-      closeOwner: schema.shifts.stationCloseOwnerDeviceId,
-    })
-    .from(schema.shifts)
-    .leftJoin(
-      schema.shiftDeviceParticipants,
-      and(
-        eq(schema.shiftDeviceParticipants.tenantId, schema.shifts.tenantId),
-        eq(schema.shiftDeviceParticipants.shiftId, schema.shifts.id),
-      ),
-    )
-    .where(
-      and(
-        eq(schema.shifts.tenantId, tenantId),
-        ne(schema.shifts.status, "closed"),
-        or(
-          eq(schema.shifts.stationCloseOwnerDeviceId, deviceId),
-          eq(schema.shiftDeviceParticipants.deviceId, deviceId),
-        ),
-      ),
-    )
-    .orderBy(asc(schema.shifts.id));
-  const ip = schema.inventoryDeviceParticipants;
-  const inventories = await tx
-    .select({
-      id: schema.inventories.id,
-      status: schema.inventories.status,
-      participantId: ip.id,
-      pendingEventCount: ip.pendingEventCount,
-      openBoxCount: ip.openBoxCount,
-      leftAt: ip.leftAt,
-    })
-    .from(schema.inventories)
-    .innerJoin(
-      ip,
-      and(eq(ip.tenantId, schema.inventories.tenantId), eq(ip.inventoryId, schema.inventories.id)),
-    )
-    .where(
-      and(
-        eq(schema.inventories.tenantId, tenantId),
-        eq(ip.deviceId, deviceId),
-        notInArray(schema.inventories.status, ["completed", "cancelled"]),
-      ),
-    )
-    .orderBy(asc(schema.inventories.id), asc(ip.id));
-  const jobs = await tx
-    .select({
-      id: schema.productLabelJobs.jobId,
-      latestSequence: schema.productLabelJobs.latestSequence,
-      payloadDigest: schema.productLabelJobs.payloadDigest,
-      projection: schema.productLabelJobs.projection,
-    })
-    .from(schema.productLabelJobs)
-    .where(
-      and(
-        eq(schema.productLabelJobs.tenantId, tenantId),
-        eq(schema.productLabelJobs.deviceId, deviceId),
-      ),
-    )
-    .orderBy(asc(schema.productLabelJobs.jobId));
-  const quarantine = await tx
-    .select({
-      id: schema.stationSyncQuarantine.id,
-      batchId: schema.stationSyncQuarantine.batchId,
-      recordKind: schema.stationSyncQuarantine.recordKind,
-      recordIndex: schema.stationSyncQuarantine.recordIndex,
-      payloadDigest: schema.stationSyncQuarantine.payloadDigest,
-    })
-    .from(schema.stationSyncQuarantine)
-    .where(
-      and(
-        eq(schema.stationSyncQuarantine.tenantId, tenantId),
-        eq(schema.stationSyncQuarantine.terminalId, deviceId),
-      ),
-    )
-    .orderBy(asc(schema.stationSyncQuarantine.id));
+  const credential = device.apiKeyId ? ((await credentialQuery(device.apiKeyId))[0] ?? null) : null;
+  const work = readOnlyFacts?.work ?? (await readDeviceLicensingWork(tx, tenantId));
+  const shifts = [
+    ...new Map(
+      work.shifts
+        .filter((row) => row.owner === deviceId || row.deviceId === deviceId)
+        .map((row) => [row.id, { id: row.id, status: row.status, closeOwner: row.owner }]),
+    ).values(),
+  ];
+  const inventories = work.inventories
+    .filter((row) => row.deviceId === deviceId)
+    .map(({ deviceId: _, ...row }) => row);
+  const jobs = work.jobs
+    .filter((row) => row.deviceId === deviceId)
+    .map(({ deviceId: _, ...row }) => row);
+  const quarantine = work.quarantine
+    .filter((row) => row.deviceId === deviceId)
+    .map(({ deviceId: _, ...row }) => row);
   const facts =
     readOnlyFacts?.facts ?? (await entitlements.resolveSnapshotInTransaction(tenantId, tx));
-  if (!readOnlyFacts && facts.versionIds.length)
-    await tx
-      .select({ id: schema.catalogItemVersions.id })
-      .from(schema.catalogItemVersions)
-      .where(inArray(schema.catalogItemVersions.id, facts.versionIds))
-      .orderBy(asc(schema.catalogItemVersions.id))
-      .for("share");
-  if (!readOnlyFacts && facts.policyIds.length)
-    await tx
-      .select({ id: schema.entitlementLifecyclePolicies.id })
-      .from(schema.entitlementLifecyclePolicies)
-      .where(inArray(schema.entitlementLifecyclePolicies.id, facts.policyIds))
-      .orderBy(asc(schema.entitlementLifecyclePolicies.id))
-      .for("share");
-  if (!readOnlyFacts)
-    await tx.execute(
-      sql`select tenant_id from entitlement_revisions where tenant_id=${tenantId} for update`,
-    );
   const occupied = assignmentOccupied(device, assignment);
   const usage = rows.filter((row) => assignmentOccupied(row.device, row.assignment)).length;
   const limit = facts.snapshot.current.quotas.stations.limit;
@@ -271,7 +201,9 @@ export async function readDeviceReplacementFacts(
     localData: { journals: "unknown", outbox: "unknown", printWork: "unknown" },
     execution: { available: false, reasons },
   });
+  const retentions = readOnlyFacts?.retentions ?? (await readRetentionIdentities(tx, tenantId));
   const fingerprint = replacementDigest({
+    retentions,
     credential,
     priorPairing,
     authenticatedLegacyObservation,

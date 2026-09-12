@@ -34,6 +34,13 @@ rerun the same runtime migration command. It resumes validation without replayin
 0135 or losing history. Separate SQL files alone do not provide this boundary:
 the ordinary Drizzle migrator groups pending files in one transaction.
 
+Migration `0137_device_retention` adds retention previews, one current selection
+per tenant and effective boundary, tenant-scoped selected membership and a
+separate immutable event journal. It creates no initial choices and rewrites no
+device, work or commercial records. The selected set and confirmed preview
+receipt are committed together; replacing the current selection preserves every
+earlier receipt. Apply the migration before serving retention routes.
+
 Before rollout, save a database backup through the existing production procedure.
 Apply the migration through the existing immutable-image deployment workflow.
 Compare each tenant's pre-migration `station_devices WHERE revoked_at IS NULL`
@@ -115,8 +122,60 @@ Historical successful receipts retain their original result after cancellation.
 Use the ordinary licensing permissions: cabinet `credentials.manage`; platform
 `tenants.read` for inspection and both `tenants.write` and `billing.write` for
 changes. Read-only subscription status does not block preparation or cancellation.
-These routes grant no enrollment or production authority. Device retention
-selection at a quota reduction remains the next separate delivery.
+These routes grant no enrollment or production authority.
+
+## Retention selection at a reduction
+
+The retention owner prepares an explicit complete set of working devices for the
+nearest known future reduction. The server derives its exact boundary from dated
+subscription, add-on and entitlement-source terms. A pending activation without a
+date is not a scheduled reduction. Preview shows current and future rights,
+occupied devices, known server work, existing ordered services and unknown local
+queues. An included handheld module alone does not establish permission for
+handheld work: use the server's per-device eligibility and execution reasons.
+It is a calculation of proposed rights, not evidence that new enforcement has
+been enabled.
+
+Cabinet writes require both `credentials.manage` and `billing.request`. Platform
+writes require `tenants.write` and `billing.write`; platform readers can inspect
+without changing the choice. A read-only subscription or missing lifecycle policy
+does not prevent saving intent, and does not prevent existing catalog sales.
+
+The user supplies every retained device explicitly. Zero capacity permits an
+empty set; unlimited capacity does not require a quota choice. Foreign, released,
+duplicate or future-ineligible devices cannot be retained. Neither selected nor
+unselected devices are deleted, revoked, re-paired or moved to another slot.
+
+Preview and confirmation use one immutable request identity. After an ambiguous
+response, retry the same intent with that identity; edits must wait for recovery.
+A deterministic conflict requires fresh inspection, preview and explicit
+confirmation. Cabinet and platform edit the same revision for the same boundary,
+so a concurrent selection cannot silently replace another operator's choice.
+If an old selected device becomes unavailable or disappears, explicitly start a
+blank selection at the saved revision and review the new complete set. Inspection
+never silently removes old selected IDs; original observations remain available.
+
+Inspection uses a read-only repeatable-read snapshot. Mutation owners read current
+facts after acquiring their quota, timeline and fact locks; a wait for another
+operation must not pin an older snapshot. Preview freshness includes revisions,
+while the saved intent's semantic comparison ignores ordinary passage of time
+and scheduled-to-active lifecycle bookkeeping. It still detects changed terms,
+device assignments and replacement preparations.
+
+Inspect saved selections for stale pool or commercial facts and elapsed
+boundaries. Their original observations and successful receipts remain historical
+facts. Reaching the date does not automatically apply this preparation. An
+awaiting-selection calculation is displayed separately from actual device access;
+the server never chooses a subset automatically. If no valid choice applies, the
+affected pool is explicitly shown as awaiting selection; a valid reached choice
+with unselected devices is a different diagnostic state. P1C/P1D still own offline grant
+durations, admission transitions and activation of commercial restrictions.
+
+Before accepting the delivery, verify server-derived plan/add-on/source boundaries,
+empty and full sets, tenant and actor isolation, concurrent revisions, unchanged
+receipts after lost responses and preservation of all operational and financial
+rows. Local browser fixtures verify interface behavior separately from live API,
+deployment and physical-device acceptance.
 
 ## Recovery boundary
 

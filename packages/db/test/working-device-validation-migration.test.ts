@@ -130,7 +130,14 @@ describe.skipIf(!databaseUrl)("working-device constraint validation upgrade", ()
       { conname: "working_device_events_action_check", convalidated: true },
       { conname: "working_device_events_replacement_check", convalidated: true },
     ]);
-    expect((await latest()).rows).toEqual([{ hash: validationMigration?.hash }]);
+    expect((await latest()).rows).toEqual([{ hash: migrations.at(-1)?.hash }]);
+    expect(
+      (
+        await pool.query("SELECT hash FROM drizzle.__drizzle_migrations WHERE hash=$1", [
+          validationMigration?.hash,
+        ])
+      ).rows,
+    ).toEqual([{ hash: validationMigration?.hash }]);
     expect((await pool.query("SELECT * FROM working_device_events ORDER BY id")).rows).toEqual(
       before,
     );
