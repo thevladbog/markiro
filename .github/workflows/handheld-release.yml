@@ -1,7 +1,8 @@
 name: Build handheld release
 
-# Produces a signed APK and stops there. Publication to a store is a separate,
-# deliberate act: this workflow only makes the artifact and proves what it is.
+# Produces a signed APK and, only when asked, publishes it to the channel the
+# terminals poll. Building is the safe default: a run that merely produces an
+# artifact changes nothing anyone is downloading.
 
 on:
   workflow_dispatch:
@@ -11,13 +12,29 @@ on:
         required: true
         type: string
       version_code:
-        description: Monotonic integer; a store refuses an upload that does not grow it
+        description: Monotonic integer; a terminal refuses an update that does not grow it
         required: true
         type: string
       owner_confirmation:
         description: Type BUILD-HANDHELD-RELEASE; only the repository owner may dispatch
         required: true
         type: string
+      publish:
+        description: Publish to the channel terminals poll. Leave off to only build the artifact.
+        required: false
+        type: boolean
+        default: false
+      channel:
+        description: Which channel to publish to
+        required: false
+        type: choice
+        default: stable
+        options: [stable, beta]
+      notes:
+        description: Russian release notes shown beside the update; required to publish
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -41,6 +58,8 @@ jobs:
           RELEASE_OWNER: ${{ github.repository_owner }}
           VERSION_NAME: ${{ inputs.version_name }}
           VERSION_CODE: ${{ inputs.version_code }}
+          PUBLISH: ${{ inputs.publish }}
+          NOTES: ${{ inputs.notes }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
@@ -55,6 +74,12 @@ jobs:
           # comparison below inside shell arithmetic.
           printf '%s' "$VERSION_CODE" | grep -Eq '^[1-9][0-9]{0,9}$'
           test "$VERSION_CODE" -le 2147483647
+          # Refused here rather than after the key is on the runner: a build
+          # published with nothing to say about it is how a line ends up asking
+          # the office what changed.
+          if [ "$PUBLISH" = "true" ]; then
+            test -n "$(printf '%s' "$NOTES" | tr -d '[:space:]')"
+          fi
 
   release:
     if: github.ref == 'refs/heads/main'
@@ -127,6 +152,36 @@ jobs:
             echo 'Signing certificate:'
             echo '```'
             "$APKSIGNER" verify --print-certs "$APK" | grep -i 'digest\|DN'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Publication runs only after the signature has been proven, and it moves
+      # the channel pointer last: a pointer moved first sends every terminal to
+      # a 404 for as long as the upload takes.
+      - name: Publish to the channel
+        if: ${{ inputs.publish }}
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        env:
+          MARKIRO_HANDHELD_RELEASE_NOTES: ${{ inputs.notes }}
+          YANDEX_STATION_RELEASE_ENDPOINT: https://storage.yandexcloud.net
+          YANDEX_STATION_RELEASE_BUCKET: ${{ vars.YANDEX_STATION_RELEASE_BUCKET }}
+          YANDEX_STATION_RELEASE_ACCESS_KEY_ID: ${{ secrets.YANDEX_STATION_RELEASE_ACCESS_KEY_ID }}
+          YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+          node tools/handheld-release/publish.mjs \
+            "$RUNNER_TEMP/out/markiro-tsd-${{ inputs.version_name }}.apk" \
+            "${{ inputs.version_name }}" \
+            "${{ inputs.version_code }}" \
+            "${{ inputs.channel }}" | tee "$RUNNER_TEMP/published.txt"
+          {
+            echo
+            echo "Опубликовано в канал \`${{ inputs.channel }}\`:"
+            echo '```'
+            cat "$RUNNER_TEMP/published.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

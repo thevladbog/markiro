@@ -15,6 +15,7 @@ test("every repository workflow has an explicit reviewed event scope", () => {
     "deploy-production.yml": ["workflow_dispatch"],
     "deploy-vbtech-production.yml": ["workflow_dispatch"],
     "diagnose-production.yml": ["workflow_dispatch"],
+    "handheld-release.yml": ["workflow_dispatch"],
     "provision-platform-admin.yml": ["workflow_dispatch"],
     "release-images.yml": ["push"],
     "signer-download-repair.yml": ["workflow_dispatch"],

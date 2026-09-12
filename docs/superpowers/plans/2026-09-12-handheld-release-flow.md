@@ -49,6 +49,11 @@ Not code, and nothing below runs without them:
       `MARKIRO_HANDHELD_KEY_ALIAS`, `MARKIRO_HANDHELD_KEY_PASSWORD` to it.
 - [ ] Store the `.jks` and its passwords offline, in two places.
 
+## Status
+
+Tasks 1–4 are implemented (`tools/handheld-release/`, wired into
+`.github/workflows/handheld-release.yml`). Tasks 5–9 are not started.
+
 ## What already exists
 
 `.github/workflows/handheld-release.yml` (PR #521) builds, signs, proves the
@@ -71,7 +76,7 @@ stops there on purpose. This plan continues from that artifact.
 The manifest is the contract between the workflow and the app, and both sides
 must refuse a malformed one rather than guess.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 import { test } from "node:test";
@@ -103,19 +108,19 @@ test("a versionCode that is not a positive int32 is refused", () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `node --test tools/handheld-release/test/manifest.test.mjs`
 Expected: FAIL, `Cannot find module '../manifest.mjs'`.
 
-- [ ] **Step 3: Implement `manifest.mjs`**
+- [x] **Step 3: Implement `manifest.mjs`**
 
 A plain object, validated field by field. `url` must be `https:` and under the
 release origin. `sha256` is 64 lowercase hex. `bytes` is a positive integer.
 `sourceSha` is 40 hex — it is what ties an installed build back to a commit.
 
-- [ ] **Step 4: Run the test to green.**
-- [ ] **Step 5: Commit** — `feat(handheld-release): pin the update manifest contract`.
+- [x] **Step 4: Run the test to green.**
+- [x] **Step 5: Commit** — `feat(handheld-release): pin the update manifest contract`.
 
 ---
 
@@ -134,7 +139,7 @@ The dispatcher types `version_code` by hand. A repeat or a decrease produces an
 APK that no installed terminal will accept, and nothing today notices until a
 device refuses it in a factory.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 test("publishing must raise the versionCode", () => {
@@ -150,8 +155,8 @@ test("the first release supersedes nothing", () => {
 });
 ```
 
-- [ ] **Step 2–4:** fail, implement, green.
-- [ ] **Step 5: Commit.**
+- [x] **Step 2–4:** fail, implement, green.
+- [x] **Step 5: Commit.**
 
 ---
 
@@ -176,14 +181,14 @@ Layout, mirroring the station's:
 | `handheld/<channel>/<versionName>/manifest.json`                 | immutable               |
 | `handheld/<channel>/latest.json`                                 | the pointer, moved last |
 
-- [ ] **Step 1: Write the failing test** with a fake S3 client recording puts.
+- [x] **Step 1: Write the failing test** with a fake S3 client recording puts.
       Assert: the APK and its immutable manifest are written **before**
       `latest.json`, and that a failure writing either leaves `latest.json`
       untouched. A pointer moved first would send every terminal to a 404.
-- [ ] **Step 2: Run it and watch it fail.**
-- [ ] **Step 3: Implement**, refusing to overwrite an existing immutable key.
-- [ ] **Step 4: Green.**
-- [ ] **Step 5: Commit.**
+- [x] **Step 2: Run it and watch it fail.**
+- [x] **Step 3: Implement**, refusing to overwrite an existing immutable key.
+- [x] **Step 4: Green.**
+- [x] **Step 5: Commit.**
 
 ---
 
@@ -194,17 +199,17 @@ Layout, mirroring the station's:
 - Modify: `.github/workflows/handheld-release.yml`
 - Modify: `apps/handheld/README.md`
 
-- [ ] **Step 1:** Add a `publish` input (`false` by default) so the workflow can
+- [x] **Step 1:** Add a `publish` input (`false` by default) so the workflow can
       still produce an artifact without publishing. A release that only builds is
       the safe default.
-- [ ] **Step 2:** After «Prove the artifact is signed», add a step that fetches
+- [x] **Step 2:** After «Prove the artifact is signed», add a step that fetches
       the current `latest.json`, runs `assertSupersedes`, then `publish.mjs`.
-- [ ] **Step 3:** Publish credentials come from the `handheld-release`
+- [x] **Step 3:** Publish credentials come from the `handheld-release`
       environment, never from repo-wide secrets. Reuse the station publisher's
       key only if it is scoped to the same bucket; otherwise the owner adds a new
       one.
-- [ ] **Step 4:** Print the published URL and sha256 into the job summary.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4:** Print the published URL and sha256 into the job summary.
+- [x] **Step 5: Commit.**
 
 **Owner step, once:** grant the publisher key write access to the `handheld/`
 prefix (`infra/yandex/modules/station-releases/`, wired in
