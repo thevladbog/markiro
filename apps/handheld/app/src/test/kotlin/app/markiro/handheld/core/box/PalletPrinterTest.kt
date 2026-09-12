@@ -166,6 +166,40 @@ class PalletPrinterTest {
         assertEquals(60, pallets.itemCount("pal-1"))
     }
 
+    /**
+     * The defect that reached a printed label: a box taken off the stack still
+     * counted toward `qty.boxes`, while `qty` had already dropped its units --
+     * so the label overstated boxes and understated units at once, and a clerk
+     * counting boxes against it at goods-in found one missing.
+     *
+     * Asserted on what the printer actually asked to be rasterized, not on a
+     * count queried beside it: the two counts are composed inside
+     * `PalletPrinter`, and this is the only place their agreement is visible.
+     */
+    @Test
+    fun aDisassembledBoxIsOffTheStackAndOffTheLabelsBoxCount() = runTest {
+        val transport = FakeTransport()
+        seedShift()
+        seedClosedPallet(boxes = 3, unitsPerBox = 20)
+        // The retirement and the release of that box's codes are one
+        // transaction in `ExceptionEngine.disassemble`; both are applied here.
+        db.boxDao().markDisassembled("box-0", "2026-09-10T09:00:00.000Z")
+        db.codeDao().deleteInBox("box-0")
+
+        val rendered = mutableListOf<String>()
+        val printer = PalletPrinter(
+            db,
+            PalletRepository(db, palletLock),
+            LabelRenderer(RasterizeText { text, _ -> rendered += text; RasterResult("AA", 1, 1, 8, 8) }),
+            transport,
+        )
+        assertEquals(PrintOutcome.Printed, printer.print("pal-1"))
+        // Two boxes stand on the pallet and carry 40 units between them.
+        assertTrue(rendered.toString(), rendered.contains("2 кор."))
+        assertTrue(rendered.toString(), rendered.contains("40 шт."))
+        assertTrue(rendered.toString(), !rendered.contains("3 кор."))
+    }
+
     @Test
     fun aPalletThatDoesNotExistFailsAsAPalletNotAsABox() = runTest {
         val transport = FakeTransport()
