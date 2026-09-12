@@ -1,5 +1,7 @@
 package app.markiro.handheld.core.inventory
 
+import app.markiro.handheld.core.storage.reconnectSameDeviceForTest
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -15,6 +17,9 @@ import app.markiro.handheld.core.storage.InventoryOutboxEntity
 import app.markiro.handheld.core.storage.InventoryTerminalStateEntity
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.sync.SyncTransport
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,6 +70,7 @@ class InventorySyncEngineTest {
         )
         db.inventoryTaskDao().upsert(InventoryFixtures.task("i1", snapshotId = snap))
         db.inventoryTerminalStateDao().upsert(InventoryTerminalStateEntity("i1", snap, "op-1", "2026-08-20", 4, null, 0, "t"))
+        db.initializeRecoveryForTest()
     }
 
     @After
@@ -75,9 +81,9 @@ class InventorySyncEngineTest {
     }
 
     private fun engine(): InventorySyncEngine {
-        val client = OkHttpClient.Builder().addInterceptor(RevocationInterceptor(bus, Json { ignoreUnknownKeys = true })).build()
+        val client = OkHttpClient.Builder().addInterceptor(RevocationInterceptor(bus, db.recovery, Json { ignoreUnknownKeys = true })).build()
         return InventorySyncEngine(
-            db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(client) { server.url("/").toString() }, NetworkModule.strictJson(),
+            db, MetaStore(db), db.deviceConfigDao(), SyncTransport(app.markiro.handheld.core.network.GenerationCallFactory(client, db.recovery)) { server.url("/").toString() }, NetworkModule.strictJson(),
             engineScope, clock = { clock },
         )
     }
@@ -270,4 +276,50 @@ class InventorySyncEngineTest {
             awaitItem()
         }
     }
+    @Test fun recoveryResendsPinnedInventoryBytesAndAppliesExactEventAcknowledgements() = runTest {
+        val saved = event(1)
+        val e = engine()
+        server.enqueue(MockResponse().setResponseCode(401).setBody("""{"code":"STATION_CREDENTIAL_REVOKED"}"""))
+        assertFalse(e.drainAll())
+        val original = server.takeRequest().body.readUtf8()
+        val pin = db.metaDao().get(MetaStore.inventoryPin("i1"))
+        assertEquals(saved, db.inventoryEventDao().get("e1"))
+        db.reconnectSameDeviceForTest()
+        assertEquals(pin, db.metaDao().get(MetaStore.inventoryPin("i1")))
+        server.enqueue(MockResponse().setBody(response(original, listOf(outcome("e1", "replay", "BATCH_REPLAY")))))
+        server.enqueue(progress())
+        assertTrue(e.drainAll())
+        val retry = server.takeRequest()
+        assertEquals(original, retry.body.readUtf8())
+        assertEquals("restored-synthetic-key", retry.getHeader("x-api-key"))
+        server.takeRequest()
+        assertEquals(0, db.inventoryOutboxDao().count("i1"))
+        assertEquals("replay", db.inventoryEventDao().get("e1")?.serverStatus)
+        assertNull(db.metaDao().get(MetaStore.inventoryPin("i1")))
+    }
+
+    @Test fun lateInventoryAcknowledgementKeepsOriginalEventAndPinnedRequest() = runTest {
+        val saved = event(1)
+        val arrived = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                val body = request.body.readUtf8()
+                arrived.complete(Unit)
+                runBlocking { release.await() }
+                return MockResponse().setBody(response(body, listOf(outcome("e1", "replay", "BATCH_REPLAY"))))
+            }
+        }
+        val oldRequest = async { engine().drainAll() }
+        arrived.await()
+        val pin = db.metaDao().get(MetaStore.inventoryPin("i1"))
+        db.recovery.reject(db.recovery.token())
+        db.reconnectSameDeviceForTest()
+        release.complete(Unit)
+        assertFalse(oldRequest.await())
+        assertEquals(saved, db.inventoryEventDao().get("e1"))
+        assertEquals(1, db.inventoryOutboxDao().count("i1"))
+        assertEquals(pin, db.metaDao().get(MetaStore.inventoryPin("i1")))
+    }
+
 }

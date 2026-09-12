@@ -470,4 +470,17 @@
     <string name="reprint_unknown_sscc">Этот SSCC не принадлежит коробу этой смены</string>
     <string name="signal_undone">ОТМЕНЁН</string>
     <string name="reprint_outcome_unknown">Результат печати неизвестен — этикетка в очереди</string>
+    <string name="recovery_title">Доступ к устройству приостановлен</string>
+    <string name="recovery_text">Накопленные данные сохранены. Для продолжения подключите прежнее устройство заново.</string>
+    <string name="recovery_unresolved_title">Не удалось определить владельца данных</string>
+    <string name="recovery_unresolved_text">Данные сохранены и закрыты для отправки. Обратитесь к администратору для проверки прежнего подключения.</string>
+    <string name="recovery_connect">Подключить прежнее устройство</string>
+    <string name="recovery_code_hint">Введите код, выданный администратором для этой же записи устройства.</string>
+    <string name="recovery_summary">Ожидают отправки: сканы %1$d · инвентаризация %2$d · этикетки %3$d · короба %4$d · исключения %5$d · закрытия %6$d\nКонфликты: %7$d · Неизвестный результат печати: %8$d</string>
+    <string name="recovery_summary_unknown">Количество сохранённых записей пока недоступно.</string>
+    <string name="recovery_mismatch">Код относится к другой организации или устройству. Данные сохранены. Нужен код прежней записи устройства.</string>
+    <string name="recovery_update_required">Сервер не поддерживает безопасное восстановление. Требуется обновление сервера. Данные сохранены.</string>
+    <string name="recovery_publication_failed">Не удалось завершить подключение. Данные сохранены. Повторите попытку, чтобы завершить сохранение полученного подключения.</string>
+    <string name="recovery_success_title">Подключение восстановлено</string>
+    <string name="recovery_success_text">Данные ожидают синхронизации. Печать с неизвестным результатом требует проверки оператором.</string>
 </resources>

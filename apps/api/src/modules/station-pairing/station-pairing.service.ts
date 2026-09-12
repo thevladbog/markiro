@@ -1,3 +1,4 @@
+import type { StationRecoveryIdentity } from "@markiro/platform-contracts";
 import {
   Inject,
   InternalServerErrorException,
@@ -36,6 +37,7 @@ const MINT_ATTEMPTS = 5;
 export interface RedeemOptions {
   includeSubscription?: boolean;
   handheldClient?: boolean;
+  expectedRecoveryIdentity?: StationRecoveryIdentity;
 }
 
 class StationPairingException extends UnauthorizedException {
@@ -45,6 +47,17 @@ class StationPairingException extends UnauthorizedException {
 }
 
 class PairClaimLostError extends Error {}
+
+function matchesRecoveryIdentity(
+  station: { tenantId: string; id: string; kind: string },
+  expected: StationRecoveryIdentity,
+): boolean {
+  return (
+    station.tenantId === expected.tenantId &&
+    station.id === expected.deviceId &&
+    station.kind === expected.kind
+  );
+}
 
 interface StationPairAuditContext {
   tenantId: string | null;
@@ -301,6 +314,13 @@ export class StationPairingService {
       );
     if (!station) throw new StationPairingException("PAIR_INVALID");
 
+    if (
+      options.expectedRecoveryIdentity &&
+      !matchesRecoveryIdentity(station, options.expectedRecoveryIdentity)
+    ) {
+      throw new StationPairingException("PAIR_RECOVERY_MISMATCH");
+    }
+
     // A handheld code must be redeemed by the handheld app and a station code
     // by the station. The code stays live and its attempt counter untouched:
     // this is a client mix-up, not a guess. The per-source rate limit above
@@ -332,6 +352,9 @@ export class StationPairingService {
         this.entitlements.withQuotaLock(tx, candidate.tenantId, "stations", async () => {
           const [lockedStation] = await tx
             .select({
+              id: schema.stationDevices.id,
+              tenantId: schema.stationDevices.tenantId,
+              kind: schema.stationDevices.kind,
               apiKeyId: schema.stationDevices.apiKeyId,
               revokedAt: schema.stationDevices.revokedAt,
             })
@@ -345,6 +368,15 @@ export class StationPairingService {
             .for("update");
           if (!lockedStation) throw new PairClaimLostError();
           auditContext.action = lockedStation.apiKeyId === null ? "station.pair" : "station.repair";
+          if (
+            options.expectedRecoveryIdentity &&
+            !matchesRecoveryIdentity(lockedStation, options.expectedRecoveryIdentity)
+          ) {
+            throw new StationPairingException("PAIR_RECOVERY_MISMATCH");
+          }
+          if ((lockedStation.kind === "handheld") !== (options.handheldClient ?? false)) {
+            throw new StationPairingException("PAIR_KIND_MISMATCH");
+          }
 
           const completePairing = async () => {
             const [claimed] = await tx

@@ -31,12 +31,13 @@ sealed interface SignInUi {
 
 @HiltViewModel
 class SignInViewModel @Inject constructor(
+    private val recovery: app.markiro.handheld.core.storage.DeviceRecovery,
     private val auth: OperatorAuth,
     private val session: SessionHolder,
     scans: ScanEvents,
 ) : ViewModel() {
     /** Test seam: scans as a bare flow. */
-    constructor(auth: OperatorAuth, session: SessionHolder, scans: Flow<ScanEvent>) : this(auth, session, ScanRouterAdapter(scans))
+    constructor(recovery: app.markiro.handheld.core.storage.DeviceRecovery, auth: OperatorAuth, session: SessionHolder, scans: Flow<ScanEvent>) : this(recovery, auth, session, ScanRouterAdapter(scans))
 
     private val _state = MutableStateFlow<SignInUi>(initial())
     val state: StateFlow<SignInUi> = _state
@@ -83,11 +84,13 @@ class SignInViewModel @Inject constructor(
             is SignInUi.Pin -> {
                 if (s.pin.length < 4) return
                 viewModelScope.launch {
+                    val token = recovery.token()
                     val operator = auth.byLogin(s.login, s.pin)
+                    if (!recovery.valid(token)) return@launch
                     if (operator == null) {
                         _state.update { p -> if (p is SignInUi.Pin) p.copy(pin = "", error = SignInError.WRONG_PIN) else p }
                     } else {
-                        session.signIn(operator)
+                        recovery.guard(token) { session.signIn(operator) }
                     }
                 }
             }
@@ -122,9 +125,11 @@ class SignInViewModel @Inject constructor(
 
     fun onScan(raw: String) {
         viewModelScope.launch {
+            val token = recovery.token()
             val operator = auth.byBadge(raw)
+            if (!recovery.valid(token)) return@launch
             if (operator != null) {
-                session.signIn(operator)
+                recovery.guard(token) { session.signIn(operator) }
             } else {
                 _state.update { s ->
                     when (s) {

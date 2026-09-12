@@ -1,6 +1,5 @@
 package app.markiro.handheld.core.box
 
-import androidx.room.withTransaction
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.SsccRangeEntity
 import kotlinx.coroutines.sync.Mutex
@@ -48,10 +47,12 @@ class SsccPool(private val db: HandheldDatabase) {
      * was lost or restored from a stale copy from reissuing serials that are
      * already on printed labels.
      */
-    suspend fun addRange(range: ServerRange) = mutex.withLock {
+    suspend fun addRange(range: ServerRange) = db.recovery.commit { addRangeOwned(range) }
+
+    private suspend fun addRangeOwned(range: ServerRange) = mutex.withLock {
         val dao = db.ssccPoolDao()
         val seeded = range.consumedThroughSerial?.plus(1) ?: range.fromSerial
-        db.withTransaction {
+        db.recovery.commit {
             dao.insertIgnore(
                 SsccRangeEntity(
                     issuerPrefix = range.issuerPrefix,
@@ -72,7 +73,9 @@ class SsccPool(private val db: HandheldDatabase) {
      * block left in place keeps winning over the replacement an admin just cut,
      * and the reseeded number would never reach a label.
      */
-    suspend fun dropRanges(issuerPrefix: String, extensionDigit: Int, fromSerials: List<Long>) {
+    suspend fun dropRanges(issuerPrefix: String, extensionDigit: Int, fromSerials: List<Long>) = db.recovery.commit { dropRangesOwned(issuerPrefix, extensionDigit, fromSerials) }
+
+    private suspend fun dropRangesOwned(issuerPrefix: String, extensionDigit: Int, fromSerials: List<Long>) {
         if (fromSerials.isEmpty()) return
         mutex.withLock { db.ssccPoolDao().drop(issuerPrefix, extensionDigit, fromSerials) }
     }
@@ -88,10 +91,12 @@ class SsccPool(private val db: HandheldDatabase) {
      * being wrong here is two boxes sharing an SSCC, which the server cannot
      * repair — but no test proves it load-bearing, so do not read one as doing so.
      */
-    suspend fun burn(issuerPrefix: String, extensionDigit: Int): Long? = mutex.withLock {
+    suspend fun burn(issuerPrefix: String, extensionDigit: Int): Long? = db.recovery.commit { burnOwned(issuerPrefix, extensionDigit) }
+
+    private suspend fun burnOwned(issuerPrefix: String, extensionDigit: Int): Long? = mutex.withLock {
         val dao = db.ssccPoolDao()
-        db.withTransaction {
-            val range = dao.lowestWithRoom(issuerPrefix, extensionDigit) ?: return@withTransaction null
+        db.recovery.commit {
+            val range = dao.lowestWithRoom(issuerPrefix, extensionDigit) ?: return@commit null
             dao.setCursor(issuerPrefix, extensionDigit, range.fromSerial, range.nextSerial + 1)
             range.nextSerial
         }

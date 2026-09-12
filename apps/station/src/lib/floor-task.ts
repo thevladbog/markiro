@@ -1,3 +1,4 @@
+import { credentialOwnsRetainedWork } from "./device-recovery.js";
 import { z } from "zod";
 
 import {
@@ -259,7 +260,11 @@ export async function readPersistedInventoryFloorTask(
       if (
         expectedOwnership === null ||
         !("credentialOwnership" in parsed.data) ||
-        parsed.data.credentialOwnership !== expectedOwnership
+        !(await credentialOwnsRetainedWork(
+          exec,
+          expectedOwnership,
+          parsed.data.credentialOwnership,
+        ))
       ) {
         return null;
       }

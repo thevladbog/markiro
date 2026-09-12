@@ -6,8 +6,10 @@ import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.network.ShiftDto
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.DeviceConfigEntity
+import app.markiro.handheld.core.storage.DeviceRecovery
 import app.markiro.handheld.core.storage.ShiftEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -65,14 +67,16 @@ private data class Lists(val current: ShiftEntity?, val mine: List<ShiftEntity>,
 class ShiftListViewModel(
     private val repository: ShiftRepository,
     private val config: DeviceConfigDao,
+    private val recovery: DeviceRecovery,
     reachability: ReachabilityTracker,
     /** Re-evaluates the reachability window while nothing else changes; tests pass a single tick. */
     tick: Flow<Unit>,
 ) : ViewModel() {
     @Inject
-    constructor(repository: ShiftRepository, config: DeviceConfigDao, reachability: ReachabilityTracker) : this(
+    constructor(repository: ShiftRepository, config: DeviceConfigDao, recovery: DeviceRecovery, reachability: ReachabilityTracker) : this(
         repository,
         config,
+        recovery,
         reachability,
         flow {
             while (true) {
@@ -81,6 +85,12 @@ class ShiftListViewModel(
             }
         },
     )
+
+    private val generation = recovery.token()
+
+    private fun launchOwned(block: suspend CoroutineScope.() -> Unit) = viewModelScope.launch {
+        recovery.work(generation) { block() }
+    }
 
     private val now: () -> Long = System::currentTimeMillis
     private val loading = MutableStateFlow(true)
@@ -125,7 +135,7 @@ class ShiftListViewModel(
     }
 
     fun refresh() {
-        viewModelScope.launch {
+        launchOwned {
             loading.value = true
             // `refreshList` has always returned whether it reached the server;
             // nobody read it, so a refused or unreachable refresh left the
@@ -138,7 +148,7 @@ class ShiftListViewModel(
     fun expandOthers() {
         if (othersExpanded.value) return
         othersExpanded.value = true
-        viewModelScope.launch {
+        launchOwned {
             othersLoading.value = true
             val lines = runCatching { repository.otherLines(config.get()?.lineId) }
             othersFailed.value = lines.isFailure
@@ -175,7 +185,7 @@ class ShiftListViewModel(
     }
 
     private fun enter(shiftId: String, fallback: ShiftDto?) {
-        viewModelScope.launch {
+        launchOwned {
             dialog.value = ShiftDialog.Entering
             when (val result = repository.enter(shiftId)) {
                 EnterResult.Ok -> {

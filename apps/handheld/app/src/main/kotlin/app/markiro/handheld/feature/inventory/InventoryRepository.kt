@@ -1,6 +1,5 @@
 package app.markiro.handheld.feature.inventory
 
-import androidx.room.withTransaction
 import app.markiro.handheld.core.inventory.InventoryBundleMirror
 import app.markiro.handheld.core.inventory.MirrorResult
 import app.markiro.handheld.core.network.ErrorBody
@@ -68,8 +67,10 @@ class InventoryRepository(
         if (e.code() == 404) null else throw e
     }
 
-    override suspend fun join(task: InventoryTaskDto, operatorId: String, confirmDifferentLine: Boolean, barcode: String?): JoinResult = try {
-        JoinResult.Ok(api.joinInventory(task.inventoryId, JoinInventoryRequest(operatorId, barcode, confirmDifferentLine.takeIf { it })))
+    override suspend fun join(task: InventoryTaskDto, operatorId: String, confirmDifferentLine: Boolean, barcode: String?): JoinResult = db.recovery.work { joinOwned(task, operatorId, confirmDifferentLine, barcode) }
+
+    private suspend fun joinOwned(task: InventoryTaskDto, operatorId: String, confirmDifferentLine: Boolean, barcode: String?): JoinResult = try {
+        JoinResult.Ok(api.joinInventory(task.inventoryId, JoinInventoryRequest(operatorId, barcode, confirmDifferentLine.takeIf { it })).copy(recoveryGeneration = app.markiro.handheld.core.storage.DeviceRecovery.generationContext.get()))
     } catch (e: HttpException) {
         when (errorCode(e)) {
             "INVENTORY_NOT_RUNNING" -> JoinResult.NotRunning
@@ -82,28 +83,37 @@ class InventoryRepository(
         JoinResult.Unavailable
     }
 
-    override suspend fun manifest(inventoryId: String): InventoryManifestDto = api.inventoryManifest(inventoryId)
+    override suspend fun manifest(inventoryId: String): InventoryManifestDto = db.recovery.work {
+        api.inventoryManifest(inventoryId).copy(recoveryGeneration = app.markiro.handheld.core.storage.DeviceRecovery.generationContext.get())
+    }
 
-    override suspend fun download(manifest: InventoryManifestDto, onProgress: suspend (Int, Int) -> Unit): MirrorResult =
-        mirror.mirror(manifest, onProgress)
+    override suspend fun download(manifest: InventoryManifestDto, onProgress: suspend (Int, Int) -> Unit): MirrorResult = db.recovery.work { downloadOwned(manifest, onProgress) }
 
-    override suspend fun activate(inventoryId: String) {
+    private suspend fun downloadOwned(manifest: InventoryManifestDto, onProgress: suspend (Int, Int) -> Unit): MirrorResult =
+        if (manifest.recoveryGeneration?.let { db.recovery.valid(it) } != true) throw app.markiro.handheld.core.storage.RecoveryBlocked()
+        else mirror.mirror(manifest, onProgress)
+
+    override suspend fun activate(inventoryId: String) = db.recovery.commit { activateOwned(inventoryId) }
+
+    private suspend fun activateOwned(inventoryId: String) {
         val now = clock()
-        db.withTransaction {
+        db.recovery.commit {
             db.inventoryTaskDao().setJoinedAt(inventoryId, now)
             db.deviceConfigDao().get()?.let { db.deviceConfigDao().upsert(it.copy(activeInventoryId = inventoryId)) }
         }
     }
 
     /** The server refuses a leave with queued events; the caller drains first. */
-    override suspend fun leave(inventoryId: String): LeaveResult {
+    override suspend fun leave(inventoryId: String): LeaveResult = db.recovery.work { leaveOwned(inventoryId) }
+
+    private suspend fun leaveOwned(inventoryId: String): LeaveResult {
         val queued = db.inventoryOutboxDao().count(inventoryId)
         if (queued > 0) return LeaveResult.Pending(queued)
         return try {
             val response = api.leaveInventory(inventoryId, LeaveInventoryRequest(0, 0))
             if (response.outcome != "left") return LeaveResult.Failed
             val now = clock()
-            db.withTransaction {
+            db.recovery.commit {
                 db.inventoryTaskDao().setLeftAt(inventoryId, now)
                 db.deviceConfigDao().get()?.let {
                     if (it.activeInventoryId == inventoryId) db.deviceConfigDao().upsert(it.copy(activeInventoryId = null))

@@ -1,0 +1,371 @@
+[
+  {
+    "name": "handheld-v1",
+    "valid": true,
+    "response": {
+      "version": 1,
+      "device": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "Synthetic handheld",
+        "kind": "handheld",
+        "tenantId": "tenant-existing",
+        "organizationName": "Factory",
+        "line": null
+      },
+      "credential": {
+        "apiKey": "synthetic-fixture-key",
+        "serverUrl": "https://api.example.test"
+      },
+      "operators": [
+        {
+          "operatorId": "op1",
+          "name": "Operator",
+          "login": "401",
+          "role": "operator",
+          "pinHash": "synthetic-verifier",
+          "badgeHash": null,
+          "active": true
+        }
+      ]
+    }
+  },
+  {
+    "name": "version-2",
+    "valid": false,
+    "response": {
+      "version": 2,
+      "device": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "Synthetic handheld",
+        "kind": "handheld",
+        "tenantId": "tenant-existing",
+        "organizationName": "Factory",
+        "line": null
+      },
+      "credential": {
+        "apiKey": "synthetic-fixture-key",
+        "serverUrl": "https://api.example.test"
+      },
+      "operators": [
+        {
+          "operatorId": "op1",
+          "name": "Operator",
+          "login": "401",
+          "role": "operator",
+          "pinHash": "synthetic-verifier",
+          "badgeHash": null,
+          "active": true
+        }
+      ]
+    }
+  },
+  {
+    "name": "extra-root",
+    "valid": false,
+    "response": {
+      "version": 1,
+      "device": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "Synthetic handheld",
+        "kind": "handheld",
+        "tenantId": "tenant-existing",
+        "organizationName": "Factory",
+        "line": null
+      },
+      "credential": {
+        "apiKey": "synthetic-fixture-key",
+        "serverUrl": "https://api.example.test"
+      },
+      "operators": [
+        {
+          "operatorId": "op1",
+          "name": "Operator",
+          "login": "401",
+          "role": "operator",
+          "pinHash": "synthetic-verifier",
+          "badgeHash": null,
+          "active": true
+        }
+      ],
+      "unexpected": true
+    }
+  },
+  {
+    "name": "extra-device",
+    "valid": false,
+    "response": {
+      "version": 1,
+      "device": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "Synthetic handheld",
+        "kind": "handheld",
+        "tenantId": "tenant-existing",
+        "organizationName": "Factory",
+        "line": null,
+        "unexpected": true
+      },
+      "credential": {
+        "apiKey": "synthetic-fixture-key",
+        "serverUrl": "https://api.example.test"
+      },
+      "operators": [
+        {
+          "operatorId": "op1",
+          "name": "Operator",
+          "login": "401",
+          "role": "operator",
+          "pinHash": "synthetic-verifier",
+          "badgeHash": null,
+          "active": true
+        }
+      ]
+    }
+  },
+  {
+    "name": "wrong-kind",
+    "valid": false,
+    "response": {
+      "version": 1,
+      "device": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "Synthetic handheld",
+        "kind": "kiosk",
+        "tenantId": "tenant-existing",
+        "organizationName": "Factory",
+        "line": null
+      },
+      "credential": {
+        "apiKey": "synthetic-fixture-key",
+        "serverUrl": "https://api.example.test"
+      },
+      "operators": [
+        {
+          "operatorId": "op1",
+          "name": "Operator",
+          "login": "401",
+          "role": "operator",
+          "pinHash": "synthetic-verifier",
+          "badgeHash": null,
+          "active": true
+        }
+      ]
+    }
+  },
+  {
+    "name": "bad-device-id",
+    "valid": false,
+    "response": {
+      "version": 1,
+      "device": {
+        "id": "not-a-uuid",
+        "name": "Synthetic handheld",
+        "kind": "handheld",
+        "tenantId": "tenant-existing",
+        "organizationName": "Factory",
+        "line": null
+      },
+      "credential": {
+        "apiKey": "synthetic-fixture-key",
+        "serverUrl": "https://api.example.test"
+      },
+      "operators": [
+        {
+          "operatorId": "op1",
+          "name": "Operator",
+          "login": "401",
+          "role": "operator",
+          "pinHash": "synthetic-verifier",
+          "badgeHash": null,
+          "active": true
+        }
+      ]
+    }
+  },
+  {
+    "name": "empty-key",
+    "valid": false,
+    "response": {
+      "version": 1,
+      "device": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "Synthetic handheld",
+        "kind": "handheld",
+        "tenantId": "tenant-existing",
+        "organizationName": "Factory",
+        "line": null
+      },
+      "credential": {
+        "apiKey": "",
+        "serverUrl": "https://api.example.test"
+      },
+      "operators": [
+        {
+          "operatorId": "op1",
+          "name": "Operator",
+          "login": "401",
+          "role": "operator",
+          "pinHash": "synthetic-verifier",
+          "badgeHash": null,
+          "active": true
+        }
+      ]
+    }
+  },
+  {
+    "name": "bad-url",
+    "valid": false,
+    "response": {
+      "version": 1,
+      "device": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "Synthetic handheld",
+        "kind": "handheld",
+        "tenantId": "tenant-existing",
+        "organizationName": "Factory",
+        "line": null
+      },
+      "credential": {
+        "apiKey": "synthetic-fixture-key",
+        "serverUrl": "relative"
+      },
+      "operators": [
+        {
+          "operatorId": "op1",
+          "name": "Operator",
+          "login": "401",
+          "role": "operator",
+          "pinHash": "synthetic-verifier",
+          "badgeHash": null,
+          "active": true
+        }
+      ]
+    }
+  },
+  {
+    "name": "extra-operator",
+    "valid": false,
+    "response": {
+      "version": 1,
+      "device": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "Synthetic handheld",
+        "kind": "handheld",
+        "tenantId": "tenant-existing",
+        "organizationName": "Factory",
+        "line": null
+      },
+      "credential": {
+        "apiKey": "synthetic-fixture-key",
+        "serverUrl": "https://api.example.test"
+      },
+      "operators": [
+        {
+          "operatorId": "op1",
+          "name": "Operator",
+          "login": "401",
+          "role": "operator",
+          "pinHash": "synthetic-verifier",
+          "badgeHash": null,
+          "active": true,
+          "secret": "bad"
+        }
+      ]
+    }
+  },
+  {
+    "name": "missing-required-nullable-line",
+    "valid": false,
+    "response": {
+      "version": 1,
+      "device": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "Synthetic handheld",
+        "kind": "handheld",
+        "tenantId": "tenant-existing",
+        "organizationName": "Factory"
+      },
+      "credential": {
+        "apiKey": "synthetic-fixture-key",
+        "serverUrl": "https://api.example.test"
+      },
+      "operators": [
+        {
+          "operatorId": "op1",
+          "name": "Operator",
+          "login": "401",
+          "role": "operator",
+          "pinHash": "synthetic-verifier",
+          "badgeHash": null,
+          "active": true
+        }
+      ]
+    }
+  },
+  {
+    "name": "subscription-v1",
+    "valid": true,
+    "response": {
+      "version": 1,
+      "device": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "Synthetic handheld",
+        "kind": "handheld",
+        "tenantId": "tenant-existing",
+        "organizationName": "Factory",
+        "line": null
+      },
+      "credential": {
+        "apiKey": "synthetic-fixture-key",
+        "serverUrl": "https://api.example.test"
+      },
+      "operators": [
+        {
+          "operatorId": "op1",
+          "name": "Operator",
+          "login": "401",
+          "role": "operator",
+          "pinHash": "synthetic-verifier",
+          "badgeHash": null,
+          "active": true
+        }
+      ],
+      "subscription": {
+        "access": "managed",
+        "status": "active",
+        "startsAt": null,
+        "endsAt": null
+      }
+    }
+  },
+  {
+    "name": "explicit-null-subscription",
+    "valid": false,
+    "response": {
+      "version": 1,
+      "device": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "Synthetic handheld",
+        "kind": "handheld",
+        "tenantId": "tenant-existing",
+        "organizationName": "Factory",
+        "line": null
+      },
+      "credential": {
+        "apiKey": "synthetic-fixture-key",
+        "serverUrl": "https://api.example.test"
+      },
+      "operators": [
+        {
+          "operatorId": "op1",
+          "name": "Operator",
+          "login": "401",
+          "role": "operator",
+          "pinHash": "synthetic-verifier",
+          "badgeHash": null,
+          "active": true
+        }
+      ],
+      "subscription": null
+    }
+  }
+]

@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import app.markiro.handheld.core.storage.DeviceRecovery
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
@@ -42,7 +44,14 @@ class LabelQueueViewModel @Inject constructor(
     private val exceptions: ExceptionEngine,
     private val session: SessionHolder,
     private val config: DeviceConfigDao,
+    private val recovery: DeviceRecovery,
 ) : ViewModel() {
+    private val generation = recovery.token()
+
+    private fun launchOwned(block: suspend CoroutineScope.() -> Unit) = viewModelScope.launch {
+        recovery.work(generation) { block() }
+    }
+
     private val printing = MutableStateFlow(false)
     private val busy = AtomicBoolean(false)
 
@@ -104,7 +113,7 @@ class LabelQueueViewModel @Inject constructor(
      */
     private fun runPrint(work: suspend () -> Unit) {
         if (!busy.compareAndSet(false, true)) return
-        viewModelScope.launch {
+        launchOwned {
             printing.value = true
             try {
                 work()
@@ -117,6 +126,6 @@ class LabelQueueViewModel @Inject constructor(
 
     /** The operator looked at the printer and says the label is there. Nothing is sent. */
     fun resolveUnknown(boxId: String) {
-        viewModelScope.launch { printer.resolveUnknownAsPrinted(boxId) }
+        launchOwned { printer.resolveUnknownAsPrinted(boxId) }
     }
 }

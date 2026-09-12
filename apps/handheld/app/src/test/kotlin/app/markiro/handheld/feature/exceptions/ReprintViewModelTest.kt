@@ -1,5 +1,7 @@
 package app.markiro.handheld.feature.exceptions
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
+import app.markiro.handheld.core.storage.reconnectSameDeviceForTest
 import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -29,9 +31,11 @@ import app.markiro.handheld.feature.signin.SessionHolder
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.advanceUntilIdle
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Rule
@@ -91,6 +95,7 @@ class ReprintViewModelTest {
                 language = "zpl", dpi = 203, selected = true, lastStatus = null, lastSeenAt = null,
             ),
         )
+        db.initializeRecoveryForTest()
     }
 
     @After
@@ -212,4 +217,17 @@ class ReprintViewModelTest {
         vm.state.first { it.done }
         assertEquals(1, db.boxExceptionDao().queued().size)
     }
+    @Test fun retainedReprintSelectionCannotExecuteUnderReplacementCredential() = runTest {
+        closedBox("box-1", sscc, "2026-09-11T07:30:00.000Z")
+        val vm = vm()
+        vm.state.first { it.last != null }
+        vm.chooseLast()
+        db.recovery.reject(db.recovery.token())
+        db.reconnectSameDeviceForTest()
+        vm.chooseReason(ReprintReason.entries.first())
+        advanceUntilIdle()
+        assertEquals(0, db.boxExceptionDao().unackedCount())
+        assertTrue(transport.sent.isEmpty())
+    }
+
 }

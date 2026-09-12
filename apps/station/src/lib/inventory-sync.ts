@@ -1,3 +1,5 @@
+import { credentialOwnsRetainedWork } from "./device-recovery.js";
+import { deviceRecoveryAllowsWork } from "./device-recovery.js";
 import { parseInventoryProgressPage, type InventoryProgressPage } from "@markiro/domain";
 
 import {
@@ -111,7 +113,11 @@ export async function applyInventoryProgressPage(
     typeof pointer.credentialOwnership !== "string" ||
     !/^[0-9a-f]{64}$/.test(pointer.credentialOwnership) ||
     (expected.credentialOwnership !== undefined &&
-      expected.credentialOwnership !== pointer.credentialOwnership) ||
+      !(await credentialOwnsRetainedWork(
+        exec,
+        expected.credentialOwnership,
+        pointer.credentialOwnership,
+      ))) ||
     !("activationId" in pointer) ||
     typeof pointer.activationId !== "string" ||
     pointer.activationId.length === 0 ||
@@ -242,6 +248,7 @@ export function createInventorySyncEngine(deps: InventorySyncEngineDeps): Invent
       do {
         requested = false;
         if (stopped || paused || generation.sealed) break;
+        if (!(await deviceRecoveryAllowsWork(deps.exec, generation))) break;
         const preparationLease = acquireCredentialCommitLease(generation);
         if (!preparationLease) break;
         let batch;
@@ -262,6 +269,7 @@ export function createInventorySyncEngine(deps: InventorySyncEngineDeps): Invent
           batch.request,
         );
         if (stopped || paused || generation.sealed) break;
+        if (!(await deviceRecoveryAllowsWork(deps.exec, generation))) break;
         const commitLease = acquireCredentialCommitLease(generation);
         if (!commitLease) break;
         try {
@@ -302,6 +310,7 @@ export function createInventorySyncEngine(deps: InventorySyncEngineDeps): Invent
       if (stopped || paused || generation.sealed || !deps.client.get) return Promise.resolve();
       const startedEpoch = epoch;
       progressFlight = (async () => {
+        if (!(await deviceRecoveryAllowsWork(deps.exec, generation))) return;
         const rows = await deps.exec.all<{
           device_id: string;
           progress_cursor: string | null;
@@ -408,7 +417,8 @@ export async function leaveInventoryTask(deps: LeaveInventoryTaskDeps): Promise<
     !("activationId" in pointer) ||
     typeof pointer.activationId !== "string" ||
     !("credentialOwnership" in pointer) ||
-    pointer.credentialOwnership !== expectedOwnership
+    typeof pointer.credentialOwnership !== "string" ||
+    !(await credentialOwnsRetainedWork(deps.exec, expectedOwnership, pointer.credentialOwnership))
   ) {
     throw new Error("inventory floor task ownership changed");
   }

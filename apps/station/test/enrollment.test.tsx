@@ -1,27 +1,43 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { openRecoveryMetadata } from "./support/recovery-metadata.js";
 
 const invokeMock = vi.fn();
+let recoveryMetadata: Awaited<ReturnType<typeof openRecoveryMetadata>>;
 const pairingMock = vi.hoisted(() => ({
   redeemStationPairing: vi.fn(),
+  redeemStationRecovery: vi.fn(),
   persistStationProvisioning: vi.fn(),
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invokeMock(...args) }));
 vi.mock("../src/lib/pairing.js", () => pairingMock);
+vi.mock("../src/lib/sqlite.js", () => ({
+  tauriExecutor: {
+    run: (query: string, values?: unknown[]) => recoveryMetadata.exec.run(query, values),
+    all: (query: string, values?: unknown[]) => recoveryMetadata.exec.all(query, values),
+  },
+}));
 
 import i18n from "../src/i18n/index.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import { Enrollment } from "../src/pages/Enrollment.js";
+import type * as PairingModule from "../src/lib/pairing.js";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
 
+beforeEach(async () => {
+  recoveryMetadata = await openRecoveryMetadata();
+});
+
 afterEach(() => {
+  recoveryMetadata.close();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   invokeMock.mockReset();
   pairingMock.redeemStationPairing.mockReset();
+  pairingMock.redeemStationRecovery.mockReset();
   pairingMock.persistStationProvisioning.mockReset();
 });
 
@@ -162,15 +178,22 @@ describe("Enrollment", () => {
       serverUrl: "https://retained.factory.example",
       operators: [],
     };
-    pairingMock.redeemStationPairing.mockResolvedValue({ ok: true, provisioning });
+    pairingMock.redeemStationRecovery.mockResolvedValue({ ok: true, provisioning });
     pairingMock.persistStationProvisioning.mockResolvedValue(undefined);
 
+    const expectedOwner = {
+      serverOrigin: "https://retained.factory.example",
+      tenantId: "tenant-1",
+      deviceId: "device-1",
+      kind: "station" as const,
+    };
     render(
       <Enrollment
         machineId="machine-1"
         onEnrolled={() => {}}
         pairingServerUrl="https://retained.factory.example"
         expectedDeviceId="device-1"
+        expectedOwner={expectedOwner}
       />,
     );
 
@@ -178,15 +201,20 @@ describe("Enrollment", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
 
     await waitFor(() =>
-      expect(pairingMock.redeemStationPairing).toHaveBeenCalledWith(
+      expect(pairingMock.redeemStationRecovery).toHaveBeenCalledWith(
         "https://retained.factory.example",
         "12345678",
+        expectedOwner,
         expect.any(AbortSignal),
       ),
     );
     expect(pairingMock.persistStationProvisioning).toHaveBeenCalledWith(
       provisioning,
-      expect.objectContaining({ machineId: "machine-1", expectedDeviceId: "device-1" }),
+      expect.objectContaining({
+        machineId: "machine-1",
+        expectedDeviceId: "device-1",
+        expectedOwner,
+      }),
     );
     expect(screen.queryByRole("button", { name: "Service setup" })).toBeNull();
   });
@@ -600,3 +628,109 @@ describe("Enrollment", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("write_config", expect.anything());
   });
 });
+
+it.each([false, true])(
+  "retries failed recovery publication without restart (published=%s)",
+  async (published) => {
+    const { initializeDeviceRecovery, sealDeviceRecovery, readDeviceRecovery } =
+      await import("../src/lib/device-recovery.js");
+    const { createCredentialGeneration } = await import("../src/lib/credential-recovery.js");
+    const actualPairing = await vi.importActual<typeof PairingModule>("../src/lib/pairing.js");
+    const original = {
+      machineId: "machine-1",
+      deviceId: "device-1",
+      tenantId: "tenant-1",
+      serverUrl: "https://api.factory.example",
+      apiKey: "key-a",
+    };
+    const saved = await initializeDeviceRecovery(recoveryMetadata.exec, original);
+    if (!saved.owner) throw new Error("missing owner");
+    await sealDeviceRecovery(recoveryMetadata.exec, original, createCredentialGeneration("key-a"));
+    let disk = original;
+    let fail = true;
+    invokeMock.mockImplementation(
+      async (
+        command: string,
+        args?: {
+          cfg?: {
+            machine_id: string;
+            device_id: string;
+            tenant_id: string;
+            server_url: string;
+            api_key: string;
+          };
+        },
+      ) => {
+        if (command === "read_config")
+          return {
+            machine_id: disk.machineId,
+            device_id: disk.deviceId,
+            tenant_id: disk.tenantId,
+            server_url: disk.serverUrl,
+            api_key: disk.apiKey,
+          };
+        if (command === "write_config" && args?.cfg) {
+          if (!fail || published)
+            disk = {
+              machineId: args.cfg.machine_id,
+              deviceId: args.cfg.device_id,
+              tenantId: args.cfg.tenant_id,
+              serverUrl: args.cfg.server_url,
+              apiKey: args.cfg.api_key,
+            };
+          if (fail) {
+            fail = false;
+            throw new Error("publication interrupted");
+          }
+        }
+      },
+    );
+    const result = {
+      ok: true,
+      provisioning: {
+        ...original,
+        apiKey: "key-b",
+        deviceName: "Station",
+        organizationName: "Factory",
+        operators: [],
+      },
+    };
+    pairingMock.redeemStationRecovery.mockResolvedValueOnce(result);
+    if (!published)
+      pairingMock.redeemStationRecovery.mockResolvedValueOnce({ ok: false, error: "invalid" });
+    pairingMock.redeemStationRecovery.mockResolvedValue({
+      ...result,
+      provisioning: { ...result.provisioning, apiKey: "key-c" },
+    });
+    pairingMock.persistStationProvisioning.mockImplementation(
+      actualPairing.persistStationProvisioning,
+    );
+    const onEnrolled = vi.fn();
+    render(
+      <Enrollment
+        machineId="machine-1"
+        expectedOwner={saved.owner}
+        pairingServerUrl={original.serverUrl}
+        onEnrolled={onEnrolled}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Try again" })).toBeDefined());
+    expect((await readDeviceRecovery(recoveryMetadata.exec))?.phase).toBe("restoring");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    if (!published) {
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Enter a new code" })).toBeDefined(),
+      );
+      expect((await readDeviceRecovery(recoveryMetadata.exec))?.phase).toBe("sealed");
+      fireEvent.click(screen.getByRole("button", { name: "Enter a new code" }));
+      fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "87654321" } });
+      fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
+    }
+    await waitFor(() => expect(onEnrolled).toHaveBeenCalledOnce(), { timeout: 1500 });
+    expect((await readDeviceRecovery(recoveryMetadata.exec))?.phase).toBe("active");
+    expect(disk.apiKey).toBe(published ? "key-b" : "key-c");
+    expect(pairingMock.redeemStationRecovery).toHaveBeenCalledTimes(published ? 1 : 3);
+  },
+);

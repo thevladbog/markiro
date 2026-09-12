@@ -1,6 +1,5 @@
 package app.markiro.handheld.core.inventory
 
-import androidx.room.withTransaction
 import app.markiro.handheld.core.network.InventoryBundleCodeDto
 import app.markiro.handheld.core.network.InventoryBundlePageDto
 import app.markiro.handheld.core.network.InventoryManifestDto
@@ -27,7 +26,9 @@ class InventoryBundleMirror(
     private val pageSize: Int = PAGE_SIZE,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    suspend fun mirror(manifest: InventoryManifestDto, onProgress: suspend (staged: Int, total: Int) -> Unit): MirrorResult {
+    suspend fun mirror(manifest: InventoryManifestDto, onProgress: suspend (staged: Int, total: Int) -> Unit): MirrorResult = db.recovery.work { mirrorOwned(manifest, onProgress) }
+
+    private suspend fun mirrorOwned(manifest: InventoryManifestDto, onProgress: suspend (staged: Int, total: Int) -> Unit): MirrorResult {
         if (manifest.mode == "repack") return MirrorResult.Repack
         if (manifest.snapshotRevision != 1 || manifest.productionDateFrom > manifest.productionDateTo || manifest.mode != "check") {
             return MirrorResult.Invalid("manifest")
@@ -37,12 +38,12 @@ class InventoryBundleMirror(
         if (existing != null && existing.snapshotId == manifest.snapshotId && existing.state == "active" &&
             existing.contentDigest == manifest.contentDigest
         ) {
-            db.inventoryTaskDao().setJoinedAt(id, clock())
+            db.recovery.commit { db.inventoryTaskDao().setJoinedAt(id, clock()) }
             return MirrorResult.Active
         }
         var task = existing
         if (task == null || task.snapshotId != manifest.snapshotId || task.contentDigest != manifest.contentDigest || task.state != "staging") {
-            task = db.withTransaction {
+            task = db.recovery.commit {
                 existing?.let { old ->
                     db.inventorySnapshotCodeDao().deleteSnapshot(old.snapshotId)
                     if (old.snapshotId != manifest.snapshotId) {
@@ -67,7 +68,7 @@ class InventoryBundleMirror(
             val rows = page.items.map { it.toEntity(manifest.snapshotId) }
             staged += rows.size
             val next = page.nextCursor
-            db.withTransaction {
+            db.recovery.commit {
                 db.inventorySnapshotCodeDao().insertAll(rows)
                 db.inventoryTaskDao().setStaging(id, next ?: cursor, staged)
             }
@@ -108,15 +109,19 @@ class InventoryBundleMirror(
         return item.protected == protected && item.expected == expected
     }
 
-    private suspend fun discard(manifest: InventoryManifestDto, reason: String): MirrorResult {
-        db.withTransaction {
+    private suspend fun discard(manifest: InventoryManifestDto, reason: String): MirrorResult = db.recovery.commit { discardOwned(manifest, reason) }
+
+    private suspend fun discardOwned(manifest: InventoryManifestDto, reason: String): MirrorResult {
+        db.recovery.commit {
             db.inventorySnapshotCodeDao().deleteSnapshot(manifest.snapshotId)
             db.inventoryTaskDao().setStaging(manifest.inventoryId, null, 0)
         }
         return MirrorResult.Invalid(reason)
     }
 
-    private suspend fun publish(manifest: InventoryManifestDto): MirrorResult {
+    private suspend fun publish(manifest: InventoryManifestDto): MirrorResult = db.recovery.work { publishOwned(manifest) }
+
+    private suspend fun publishOwned(manifest: InventoryManifestDto): MirrorResult {
         val digest = ContentDigest()
         var after = ""
         var count = 0
@@ -129,7 +134,7 @@ class InventoryBundleMirror(
         }
         if (count != manifest.codeCount || digest.finish() != manifest.contentDigest) return discard(manifest, "content digest")
         val expectedCount = db.inventorySnapshotCodeDao().countExpected(manifest.snapshotId)
-        db.inventoryTaskDao().activate(manifest.inventoryId, expectedCount, clock())
+        db.recovery.commit { db.inventoryTaskDao().activate(manifest.inventoryId, expectedCount, clock()) }
         return MirrorResult.Active
     }
 

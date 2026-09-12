@@ -1,0 +1,120 @@
+[
+  {
+    "name": "handheld-v1",
+    "valid": true,
+    "request": {
+      "version": 1,
+      "code": "12345678",
+      "expected": {
+        "tenantId": "tenant-existing",
+        "deviceId": "00000000-0000-4000-8000-000000000001",
+        "kind": "handheld"
+      }
+    }
+  },
+  {
+    "name": "version-2",
+    "valid": false,
+    "request": {
+      "version": 2,
+      "code": "12345678",
+      "expected": {
+        "tenantId": "tenant-existing",
+        "deviceId": "00000000-0000-4000-8000-000000000001",
+        "kind": "handheld"
+      }
+    }
+  },
+  {
+    "name": "extra-root",
+    "valid": false,
+    "request": {
+      "version": 1,
+      "code": "12345678",
+      "expected": {
+        "tenantId": "tenant-existing",
+        "deviceId": "00000000-0000-4000-8000-000000000001",
+        "kind": "handheld"
+      },
+      "unexpected": true
+    }
+  },
+  {
+    "name": "extra-identity",
+    "valid": false,
+    "request": {
+      "version": 1,
+      "code": "12345678",
+      "expected": {
+        "tenantId": "tenant-existing",
+        "deviceId": "00000000-0000-4000-8000-000000000001",
+        "kind": "handheld",
+        "unexpected": true
+      }
+    }
+  },
+  {
+    "name": "wrong-kind",
+    "valid": false,
+    "request": {
+      "version": 1,
+      "code": "12345678",
+      "expected": {
+        "tenantId": "tenant-existing",
+        "deviceId": "00000000-0000-4000-8000-000000000001",
+        "kind": "kiosk"
+      }
+    }
+  },
+  {
+    "name": "bad-device-id",
+    "valid": false,
+    "request": {
+      "version": 1,
+      "code": "12345678",
+      "expected": {
+        "tenantId": "tenant-existing",
+        "deviceId": "not-a-uuid",
+        "kind": "handheld"
+      }
+    }
+  },
+  {
+    "name": "empty-tenant",
+    "valid": false,
+    "request": {
+      "version": 1,
+      "code": "12345678",
+      "expected": {
+        "tenantId": "",
+        "deviceId": "00000000-0000-4000-8000-000000000001",
+        "kind": "handheld"
+      }
+    }
+  },
+  {
+    "name": "short-code",
+    "valid": false,
+    "request": {
+      "version": 1,
+      "code": "123",
+      "expected": {
+        "tenantId": "tenant-existing",
+        "deviceId": "00000000-0000-4000-8000-000000000001",
+        "kind": "handheld"
+      }
+    }
+  },
+  {
+    "name": "missing-version",
+    "valid": false,
+    "request": {
+      "code": "12345678",
+      "expected": {
+        "tenantId": "tenant-existing",
+        "deviceId": "00000000-0000-4000-8000-000000000001",
+        "kind": "handheld"
+      }
+    }
+  }
+]

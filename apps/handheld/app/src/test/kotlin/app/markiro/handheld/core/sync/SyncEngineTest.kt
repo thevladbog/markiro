@@ -1,5 +1,7 @@
 package app.markiro.handheld.core.sync
 
+import app.markiro.handheld.core.storage.reconnectSameDeviceForTest
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -14,6 +16,9 @@ import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.OutboxEntity
 import app.markiro.handheld.core.storage.ShiftCloseEntity
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -66,6 +71,7 @@ class SyncEngineTest {
                 lineName = "Линия 2", kind = "handheld", serverUrl = server.url("/").toString(), pairedAt = 1L,
             ),
         )
+        db.initializeRecoveryForTest()
     }
 
     @After
@@ -76,10 +82,10 @@ class SyncEngineTest {
     }
 
     private fun engine(): SyncEngine {
-        val client = OkHttpClient.Builder().addInterceptor(RevocationInterceptor(bus, Json { ignoreUnknownKeys = true })).build()
-        val transport = SyncTransport(client) { server.url("/").toString() }
+        val client = OkHttpClient.Builder().addInterceptor(RevocationInterceptor(bus, db.recovery, Json { ignoreUnknownKeys = true })).build()
+        val transport = SyncTransport(app.markiro.handheld.core.network.GenerationCallFactory(client, db.recovery)) { server.url("/").toString() }
         return SyncEngine(
-            db = db, meta = MetaStore(db.metaDao()), config = db.deviceConfigDao(), transport = transport, json = strict,
+            db = db, meta = MetaStore(db), config = db.deviceConfigDao(), transport = transport, json = strict,
             scope = engineScope, clock = { clock },
         )
     }
@@ -106,7 +112,7 @@ class SyncEngineTest {
         val request = server.takeRequest()
         assertEquals("/station/scans", request.path)
         val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
-        val installId = MetaStore(db.metaDao()).installId()
+        val installId = MetaStore(db).installId()
         // Device, install, outbox ceiling, then one signature per side channel:
         // boxes, product-label events, operator corrections. A different set
         // must never sign the same, so this stays an exact comparison.
@@ -377,4 +383,71 @@ class SyncEngineTest {
         e.tick()
         assertTrue(e.state.first { it.stuck }.stuck)
     }
+    @Test fun recoveryResendsExactBoxAndScanBatchThenTheOriginalClosure() = runTest {
+        outbox("exact\u001dscan")
+        closedBox("saved-box", "346006820000000012")
+        db.shiftCloseDao().insert(ShiftCloseEntity("saved-close", "s1", "op-1", 10, 8, 1, "material_shortage", "2026-09-10T12:00:00.000Z", "pending", null, null))
+        val e = engine()
+        server.enqueue(MockResponse().setResponseCode(401).setBody("""{"code":"STATION_CREDENTIAL_REVOKED"}"""))
+        assertFalse(e.drainAll())
+        val original = server.takeRequest().body.readUtf8()
+        assertNull(db.boxDao().get("saved-box")?.ackedAt)
+        db.reconnectSameDeviceForTest()
+        server.enqueue(ok(1))
+        server.enqueue(MockResponse().setBody("""{"outcome":"accepted"}"""))
+        assertTrue(e.drainAll())
+        val retry = server.takeRequest()
+        assertEquals(original, retry.body.readUtf8())
+        assertEquals("restored-synthetic-key", retry.getHeader("x-api-key"))
+        val closure = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertEquals("saved-close", closure.getValue("eventId").jsonPrimitive.content)
+        assertNotNull(db.boxDao().get("saved-box")?.ackedAt)
+        assertEquals("accepted", db.shiftCloseDao().forShift("s1")?.state)
+    }
+
+    @Test fun lateSuccessfulBatchCannotAcknowledgeUnderTheRestoredGeneration() = runTest {
+        outbox("saved")
+        closedBox("saved-box", "346006820000000012")
+        val arrived = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                arrived.complete(Unit)
+                runBlocking { release.await() }
+                return ok(1)
+            }
+        }
+        val e = engine()
+        val oldRequest = async { e.drainAll() }
+        arrived.await()
+        val pin = db.metaDao().get(MetaStore.SYNC_PENDING_BATCH_ID)
+        db.recovery.reject(db.recovery.token())
+        db.reconnectSameDeviceForTest()
+        release.complete(Unit)
+        assertFalse(oldRequest.await())
+        assertEquals(1, db.outboxDao().head(5).size)
+        assertNull(db.boxDao().get("saved-box")?.ackedAt)
+        assertEquals(pin, db.metaDao().get(MetaStore.SYNC_PENDING_BATCH_ID))
+    }
+
+    @Test fun lateSuccessfulCloseCannotAcknowledgeUnderTheRestoredGeneration() = runTest {
+        db.shiftCloseDao().insert(ShiftCloseEntity("saved-close", "s1", "op-1", 10, 8, 1, "material_shortage", "2026-09-10T12:00:00.000Z", "pending", null, null))
+        val arrived = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                arrived.complete(Unit)
+                runBlocking { release.await() }
+                return MockResponse().setBody("""{"outcome":"accepted"}""")
+            }
+        }
+        val oldRequest = async { engine().drainAll() }
+        arrived.await()
+        db.recovery.reject(db.recovery.token())
+        db.reconnectSameDeviceForTest()
+        release.complete(Unit)
+        assertFalse(oldRequest.await())
+        assertEquals("pending", db.shiftCloseDao().forShift("s1")?.state)
+    }
+
 }

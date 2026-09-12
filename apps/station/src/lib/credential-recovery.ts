@@ -12,6 +12,10 @@ export interface SealedWorkSummary {
   productLabels: number;
   boxes: number;
   exceptions: number;
+  closes?: number;
+  conflicts?: number;
+  quarantinedLabels?: number;
+  unknownPrints?: number;
   total: number;
 }
 
@@ -62,6 +66,8 @@ interface CredentialGenerationLifecycle {
   activeCommits: number;
   rejectionPublished: boolean;
   ownership: Promise<string> | null;
+  persistSealing: ((generation: CredentialGeneration) => Promise<void>) | undefined;
+  sealingIntent: Promise<void> | null;
   settle: Promise<void> | null;
   resolveSettle: (() => void) | null;
 }
@@ -77,12 +83,17 @@ async function digestCredentialOwnership(credential: string): Promise<string> {
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export function createCredentialGeneration(credential?: string): CredentialGeneration {
+export function createCredentialGeneration(
+  credential?: string,
+  persistSealing?: (generation: CredentialGeneration) => Promise<void>,
+): CredentialGeneration {
   const lifecycle: CredentialGenerationLifecycle = {
     phase: "active",
     activeCommits: 0,
     rejectionPublished: false,
     ownership: credential === undefined ? null : digestCredentialOwnership(credential),
+    persistSealing,
+    sealingIntent: null,
     settle: null,
     resolveSettle: null,
   };
@@ -155,6 +166,7 @@ export async function sealCredentialGeneration(generation: CredentialGeneration)
   if (first) {
     lifecycle.phase = "sealing";
     lifecycle.rejectionPublished = true;
+
     if (lifecycle.activeCommits === 0) {
       lifecycle.phase = "sealed";
     } else {
@@ -162,6 +174,14 @@ export async function sealCredentialGeneration(generation: CredentialGeneration)
         lifecycle.resolveSettle = resolve;
       });
     }
+  }
+  if (!lifecycle.sealingIntent && lifecycle.persistSealing)
+    lifecycle.sealingIntent = lifecycle.persistSealing(generation);
+  try {
+    if (lifecycle.sealingIntent) await lifecycle.sealingIntent;
+  } catch (error) {
+    lifecycle.sealingIntent = null;
+    throw error;
   }
   if (lifecycle.settle) await lifecycle.settle;
   return first;
@@ -177,8 +197,11 @@ export async function rejectCredentialGeneration(
   event: CredentialRejectedEvent,
   onCredentialRejected?: (event: CredentialRejectedEvent) => void,
 ): Promise<void> {
-  if (await sealCredentialGeneration(event.generation)) {
-    onCredentialRejected?.(event);
+  const first = !event.generation.rejectionPublished;
+  try {
+    await sealCredentialGeneration(event.generation);
+  } finally {
+    if (first) onCredentialRejected?.(event);
   }
 }
 
@@ -343,6 +366,10 @@ export async function readSealedWorkSummary(
     product_labels: number;
     boxes: number;
     exceptions: number;
+    closes: number;
+    conflicts: number;
+    quarantined_labels: number;
+    unknown_prints: number;
   }>(
     `SELECT
        (SELECT COUNT(*) FROM outbox) AS scans,
@@ -350,8 +377,14 @@ export async function readSealedWorkSummary(
        (SELECT COUNT(*) FROM product_label_outbox) AS product_labels,
        (SELECT COUNT(*) FROM boxes_mirror
          WHERE closed_at IS NOT NULL AND acked_at IS NULL) AS boxes,
-       (SELECT COUNT(*) FROM box_exceptions_mirror) AS exceptions`,
+       (SELECT COUNT(*) FROM box_exceptions_mirror) AS exceptions,
+       (SELECT COUNT(*) FROM shift_close_outbox) AS closes,
+       (SELECT COUNT(*) FROM conflicts_mirror)+(SELECT COUNT(*) FROM inventory_conflicts_mirror) AS conflicts,
+       (SELECT COUNT(*) FROM product_label_receipts WHERE outcome='quarantined') AS quarantined_labels,
+       (SELECT COUNT(*) FROM product_label_jobs WHERE json_extract(projection_json,'$.attemptState') IN ('sending','delivery_unknown'))+
+       (SELECT COUNT(*) FROM inventory_repack_print_attempts WHERE state='printing') AS unknown_prints`,
   );
+  if (!rows[0]) throw new Error("Recovery summary unavailable");
   const scans = rows[0]?.scans ?? 0;
   const inventoryScans = rows[0]?.inventory_scans ?? 0;
   const productLabels = rows[0]?.product_labels ?? 0;
@@ -363,7 +396,11 @@ export async function readSealedWorkSummary(
     productLabels,
     boxes,
     exceptions,
-    total: scans + inventoryScans + productLabels + boxes + exceptions,
+    closes: rows[0]?.closes ?? 0,
+    conflicts: rows[0]?.conflicts ?? 0,
+    quarantinedLabels: rows[0]?.quarantined_labels ?? 0,
+    unknownPrints: rows[0]?.unknown_prints ?? 0,
+    total: scans + inventoryScans + productLabels + boxes + exceptions + (rows[0]?.closes ?? 0),
   };
 }
 
@@ -371,6 +408,7 @@ interface ClearRejectedCredentialStateDeps {
   exec: SqlExecutor;
   clearCredential: () => Promise<void>;
   credentialGeneration?: CredentialGeneration;
+  preserveRecoveryContext?: boolean;
 }
 
 /**
@@ -389,6 +427,7 @@ export async function clearRejectedCredentialState({
   exec,
   clearCredential,
   credentialGeneration,
+  preserveRecoveryContext = false,
 }: ClearRejectedCredentialStateDeps): Promise<void> {
   const rejectedOwnership = credentialGeneration
     ? await credentialGenerationOwnership(credentialGeneration)
@@ -403,6 +442,7 @@ export async function clearRejectedCredentialState({
   // read gate, then strictly clears both slots and the selector; no deletion
   // failure is swallowed.
   await purgeOperatorsMirror(exec);
+  if (preserveRecoveryContext) return;
   await exec.run("DELETE FROM shift_mirror");
   await exec.run("DELETE FROM product_mirror");
   await clearStationProductImages(exec);

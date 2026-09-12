@@ -1,5 +1,7 @@
 package app.markiro.handheld.feature.work
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
+import app.markiro.handheld.core.storage.reconnectSameDeviceForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -74,6 +76,7 @@ class LabelQueueViewModelTest {
                 language = "zpl", dpi = 203, selected = true, lastStatus = null, lastSeenAt = null,
             ),
         )
+        db.initializeRecoveryForTest()
     }
 
     @After
@@ -93,13 +96,14 @@ class LabelQueueViewModelTest {
         ),
     )
 
-    private fun model() = main.track(
+    private fun model(config: app.markiro.handheld.core.storage.DeviceConfigDao = db.deviceConfigDao()) = main.track(
         LabelQueueViewModel(
             BoxRepository(db),
             BoxPrinter(db, BoxRepository(db), LabelRenderer(RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) }), transport),
             ExceptionEngine(db),
             session,
-            db.deviceConfigDao(),
+            config,
+            db.recovery,
         ),
     )
 
@@ -219,4 +223,29 @@ class LabelQueueViewModelTest {
         db.shiftDao().get("s1")!!.let { db.shiftDao().upsert(it.copy(status = "closed")) }
         assertEquals(1, model().state.first { it.items.isNotEmpty() }.items.size)
     }
+    @Test fun delayedAuditLookupCannotReprintUnderReplacementCredential() = runTest {
+        box("b1", "046800899000000018", BoxPrint.UNKNOWN)
+        val lookup = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val resume = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val config = object : app.markiro.handheld.core.storage.DeviceConfigDao by db.deviceConfigDao() {
+            override suspend fun get(): app.markiro.handheld.core.storage.DeviceConfigEntity? {
+                val saved = db.deviceConfigDao().get()
+                lookup.complete(Unit)
+                resume.await()
+                return saved
+            }
+        }
+        val vm = model(config)
+        vm.state.first { it.items.size == 1 }
+        vm.printOne("b1")
+        lookup.await()
+        db.recovery.reject(db.recovery.token())
+        db.reconnectSameDeviceForTest()
+        resume.complete(Unit)
+        vm.state.first { !it.printing }
+        assertTrue(transport.printed.isEmpty())
+        assertEquals(0, db.boxExceptionDao().unackedCount())
+        assertEquals(BoxPrint.UNKNOWN, db.boxDao().get("b1")?.printState)
+    }
+
 }

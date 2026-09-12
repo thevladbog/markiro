@@ -1,5 +1,7 @@
 package app.markiro.handheld.feature.inventory
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
+import app.markiro.handheld.core.storage.reconnectSameDeviceForTest
 import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -75,6 +77,7 @@ class InventoryWorkViewModelTest {
                 InventoryFixtures.code("snap", hash("A3"), serial = "A3", date = "2026-08-20"),
             ),
         )
+        db.initializeRecoveryForTest()
     }
 
     @After
@@ -99,7 +102,7 @@ class InventoryWorkViewModelTest {
 
     private fun vm(): InventoryWorkViewModel {
         val engine = InventorySyncEngine(
-            db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" }, NetworkModule.strictJson(),
+            db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" }, NetworkModule.strictJson(),
             engineScope,
         )
         return main.track(
@@ -171,4 +174,21 @@ class InventoryWorkViewModelTest {
         assertEquals("2026-08-20", after.activeDate)
         assertNull(after.held)
     }
+    @Test fun heldScanAndDateRemainOwnedByOriginalGeneration() = runTest {
+        val vm = vm()
+        advanceUntilIdle()
+        scans.tryEmit(ScanEvent(raw("A1"), null, "debug", 0))
+        vm.state.first { it.progress.verified == 1 }
+        scans.tryEmit(ScanEvent(raw("A2"), null, "debug", 0))
+        vm.state.first { it.held != null }
+        val saved = db.inventoryTaskDao().get("i1")
+        val pending = db.openHelper.readableDatabase.query("SELECT COUNT(*) FROM inventory_outbox").use { it.moveToFirst(); it.getLong(0) }
+        db.recovery.reject(db.recovery.token())
+        db.reconnectSameDeviceForTest()
+        vm.applyDateAndAccept()
+        advanceUntilIdle()
+        assertEquals(saved, db.inventoryTaskDao().get("i1"))
+        assertEquals(pending, db.openHelper.readableDatabase.query("SELECT COUNT(*) FROM inventory_outbox").use { it.moveToFirst(); it.getLong(0) })
+    }
+
 }
