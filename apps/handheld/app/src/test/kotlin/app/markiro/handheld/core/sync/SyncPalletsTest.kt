@@ -16,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -252,5 +253,15 @@ class SyncPalletsTest {
         assertEquals(0, bodyOf(server.takeRequest()).getValue("pallets").jsonArray.size)
         // It rides the next batch instead.
         assertEquals(listOf("p1"), palletIdsOf(bodyOf(server.takeRequest())))
+    }
+
+    @Test
+    fun theQueueIndicatorCountsPalletClosuresToo() = runTest {
+        // The identical defect SyncEngineTest's theQueueIndicatorCountsClosuresNotJustScans
+        // already guards for boxes: a closed pallet waiting to be reported is
+        // queued work. Leaving it out of `pending` shows «Очередь 0» while a
+        // physically labelled pallet still sits unsent.
+        closedPallet("p1")
+        assertEquals(1, engine().state.first { it.pending == 1 }.pending)
     }
 }

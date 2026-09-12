@@ -70,9 +70,12 @@ class SyncEngine(
     /**
      * Everything this device still owes the server.
      *
-     * A box closure is queued work too, and so is a product-label event.
-     * Counting only scans showed «Очередь 0» while a closure sat unsent, and a
-     * queue that had stopped moving would never read as stuck.
+     * A box closure is queued work too, and so is a product-label event -- and
+     * so is a pallet closure. Counting only scans showed «Очередь 0» while a
+     * closure sat unsent, and a queue that had stopped moving would never read
+     * as stuck; pallets reintroduce the identical gap if left out, and unlike a
+     * box, a pallet the operator forgets about while this reads clear is a
+     * physically labelled unit the server never learns about.
      *
      * Summed in its own flow so the state below stays a FOUR-argument combine:
      * the vararg overload infers one element type across every flow, which for
@@ -82,8 +85,9 @@ class SyncEngine(
     private val pending: Flow<Int> = combine(
         db.outboxDao().count(),
         db.boxDao().observeUnackedCount(),
+        db.palletDao().observeUnackedCount(),
         db.productLabelEventDao().observeUnackedCount(),
-    ) { scans, boxes, labels -> scans + boxes + labels }
+    ) { scans, boxes, pallets, labels -> scans + boxes + pallets + labels }
 
     val state: StateFlow<SyncState> =
         combine(pending, db.conflictDao().count(), lastSuccess, now) { owed, conflicts, last, at ->
@@ -407,7 +411,14 @@ class SyncEngine(
     companion object {
         const val BATCH_SIZE = 100
 
-        /** The server's own `MAX_BOX_CLOSURES_PER_SYNC_BATCH`. */
+        /**
+         * The server's own `MAX_BOX_CLOSURES_PER_SYNC_BATCH` (`@markiro/domain`,
+         * `packages/domain/src/sync/limits.ts`). See `MAX_PALLET_CLOSURES` below
+         * for why this is a hand-copied literal and how it is kept from
+         * drifting: `SyncLimitsFixturesTest` asserts this value against
+         * `sync-limits-fixtures.json`, generated from the shared constant by
+         * `pnpm --filter @markiro/domain fixtures:sync-limits`.
+         */
         const val MAX_BOX_CLOSURES = 50
 
         /**
@@ -421,16 +432,31 @@ class SyncEngine(
          * retry, wedging pallets, boxes AND item delivery on that device
          * forever (the drain never drops data). Kotlin cannot import a
          * TypeScript constant, so this is a second literal, not a shared one --
-         * flagged rather than silently added a second time. A fixture generated
-         * from `limits.ts` (the way `fixtures:km`/`fixtures:inventory` already
-         * generate checked Android test resources from TypeScript) or a parity
-         * unit test asserting this value against the domain package would keep
-         * the two from drifting; neither exists yet.
+         * flagged rather than silently added a second time. Kept from drifting
+         * by `SyncLimitsFixturesTest`, which asserts this value (and
+         * `MAX_BOX_CLOSURES`, `MAX_SYNC_BATCH_ID_CHARS`) against
+         * `sync-limits-fixtures.json` -- generated from `limits.ts` by
+         * `pnpm --filter @markiro/domain fixtures:sync-limits`, the same way
+         * `fixtures:km`/`fixtures:inventory` already generate checked Android
+         * test resources from TypeScript. `test/sync-limits-fixtures.test.ts`
+         * fails if that JSON is regenerated but not committed.
          */
         const val MAX_PALLET_CLOSURES = 20
 
         /** The server's own `MAX_PRODUCT_LABEL_EVENTS`. */
         const val MAX_PRODUCT_LABEL_EVENTS = 100
+
+        /**
+         * The server's own `MAX_SYNC_BATCH_ID_CHARS` (`@markiro/domain`,
+         * `packages/domain/src/sync/limits.ts`) -- the bound the batch-id
+         * construction comment in `drainOnce` argues this device's id stays
+         * under, fully loaded, by folding each channel into a short signature
+         * rather than concatenating raw ids. Hand-copied for the same reason
+         * and kept from drifting the same way `MAX_BOX_CLOSURES` and
+         * `MAX_PALLET_CLOSURES` are: see `SyncLimitsFixturesTest`.
+         */
+        const val MAX_SYNC_BATCH_ID_CHARS = 200
+
         const val RECONCILE_PAGE = 200
         const val HEARTBEAT_MS = 15_000L
         const val STUCK_AFTER_MS = 15 * 60 * 1000L

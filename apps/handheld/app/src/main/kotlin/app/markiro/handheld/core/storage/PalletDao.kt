@@ -63,6 +63,10 @@ interface PalletDao {
     @Query("SELECT * FROM pallets WHERE closedAt IS NOT NULL AND ackedAt IS NULL ORDER BY closedAt, palletId LIMIT :limit")
     suspend fun unacked(limit: Int): List<PalletEntity>
 
+    /** Closures still owed to the server; the sync indicator counts these too. */
+    @Query("SELECT COUNT(*) FROM pallets WHERE closedAt IS NOT NULL AND ackedAt IS NULL")
+    fun observeUnackedCount(): Flow<Int>
+
     @Query("UPDATE pallets SET ackedAt = :at WHERE palletId IN (:palletIds)")
     suspend fun markAcked(palletIds: List<String>, at: String)
 
