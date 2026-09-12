@@ -54,12 +54,16 @@ resource "yandex_storage_bucket_iam_binding" "publisher_uploader" {
   members = ["serviceAccount:${yandex_iam_service_account.station_release_publisher.id}"]
 }
 
-# The bucket serves two products from one identity: the Station terminal app
-# under station/*, and the Chestny ZNAK signer agent under signer/*. They share
-# a service account and a static access key, so splitting the grants into
-# per-product statements would buy no independent revocation — there is nothing
-# to revoke separately. Both prefixes are listed on each statement instead, and
-# anything outside them stays denied.
+# The bucket serves three products from one identity: the Station terminal app
+# under station/*, the Chestny ZNAK signer agent under signer/*, and the Android
+# handheld under handheld/*. They share a service account and a static access
+# key, so splitting the grants into per-product statements would buy no
+# independent revocation — there is nothing to revoke separately. Every prefix is
+# listed on each statement instead, and anything outside them stays denied.
+#
+# Each prefix must appear on the PUBLIC read statement as well as the publisher
+# one. A prefix that can be written but not read publishes into the dark: the
+# upload succeeds, the release reports success, and no device can fetch it.
 resource "yandex_storage_bucket_policy" "releases" {
   bucket = yandex_storage_bucket.releases.bucket
   policy = jsonencode({
@@ -73,6 +77,7 @@ resource "yandex_storage_bucket_policy" "releases" {
         Resource = [
           "arn:aws:s3:::${yandex_storage_bucket.releases.bucket}/station/*",
           "arn:aws:s3:::${yandex_storage_bucket.releases.bucket}/signer/*",
+          "arn:aws:s3:::${yandex_storage_bucket.releases.bucket}/handheld/*",
         ]
       },
       {
@@ -83,6 +88,7 @@ resource "yandex_storage_bucket_policy" "releases" {
         Resource = [
           "arn:aws:s3:::${yandex_storage_bucket.releases.bucket}/station/*",
           "arn:aws:s3:::${yandex_storage_bucket.releases.bucket}/signer/*",
+          "arn:aws:s3:::${yandex_storage_bucket.releases.bucket}/handheld/*",
         ]
       },
       {
@@ -93,7 +99,7 @@ resource "yandex_storage_bucket_policy" "releases" {
         Resource  = ["arn:aws:s3:::${yandex_storage_bucket.releases.bucket}"]
         Condition = {
           StringLike = {
-            "s3:prefix" = ["station/*", "signer/*"]
+            "s3:prefix" = ["station/*", "signer/*", "handheld/*"]
           }
         }
       },
