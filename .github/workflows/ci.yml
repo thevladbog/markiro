@@ -100,6 +100,12 @@ jobs:
       - run: pnpm test:dependency-guard
       - run: pnpm test:indexnow
       - run: pnpm test:rospatent
+      - run: pnpm test:handheld-release:contract
+      # The CI policy suite guards this very file -- the reviewed workflow list,
+      # the classifier's job gating, the trigger scopes. It was in the repository
+      # but in no workflow, so a workflow added without registering it stayed
+      # green for as long as nobody ran the guard by hand.
+      - run: pnpm test:ci-policy
       - run: pnpm turbo lint typecheck build --concurrency=1 --force
 
   verify-api-tests:
