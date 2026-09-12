@@ -24,6 +24,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -71,6 +72,16 @@ class ShiftRepositoryTest {
     private val palletShiftJson = aggregationShiftJson
         .replace("\"palletBoxCapacity\":null", "\"palletBoxCapacity\":20")
         .replace("\"palletsEnabled\":false", "\"palletsEnabled\":true")
+
+    /**
+     * Pallets OFF, but `palletBoxCapacity` populated anyway -- exactly what
+     * `GET /shifts` legitimately sends once a product has prefilled it
+     * (migration 0130) and pallets were never turned on for this shift. The
+     * cabinet needs the raw column, so the server does not gate it; the
+     * device must.
+     */
+    private val listOnlyPalletCapacityJson = aggregationShiftJson
+        .replace("\"palletBoxCapacity\":null", "\"palletBoxCapacity\":12")
 
     /**
      * A pallets-enabled shift as the server sends it (06d): a SECOND serial
@@ -272,6 +283,23 @@ class ShiftRepositoryTest {
         // print name, so a refresh must not replace what gets printed.
         assertEquals("Вода 0,5", shift.productName)
         assertEquals("Вода", shift.productPrintName)
+    }
+
+    @Test
+    fun refreshingTheListNeverTurnsOnThePalletGateForAPalletsOffShift() = runTest {
+        // `CloseBox.kt` and `WorkViewModel.kt` both read this shift's
+        // `palletBoxCapacity` column as THE pallets-on signal -- there is no
+        // separate flag on that read path. `GET /shifts` returns the column
+        // ungated (the cabinet needs the raw value), so storing it verbatim
+        // would flip that local signal on for a shift whose pallets are off,
+        // and the device would show the full-screen pallet refusal overlay
+        // for a shift that never asked for one.
+        server.enqueue(MockResponse().setBody("""{"items":[$listOnlyPalletCapacityJson]}"""))
+        assertTrue(repo().refreshList())
+
+        val shift = db.shiftDao().get("s1")!!
+        assertFalse(shift.palletsEnabled)
+        assertNull(shift.palletBoxCapacity)
     }
 
     // -- The pallet stream (06d). Nothing below seeds a pool row or a template

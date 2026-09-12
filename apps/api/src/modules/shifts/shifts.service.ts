@@ -49,6 +49,7 @@ import type {
   CreateShiftDto,
   ListShiftsQueryDto,
   ListShiftsResponseDto,
+  PalletTemplateResolution,
   ShiftBoxLabelTemplateOptionDto,
   ShiftBoxLabelTemplatesDto,
   ShiftBundleDto,
@@ -755,6 +756,10 @@ export class ShiftsService {
     assertPalletConfiguration({ mode: data.mode, palletsEnabled, boxCapacity, palletBoxCapacity });
     this.assertCapacityRules(data.mode, boxCapacity);
     this.assertBoxTemplateRule(data.mode, boxLabelTemplateId);
+    // A fresh shift has no prior state: `palletsEnabled` here IS the moment
+    // pallets are enabled, so this always applies -- unlike the update path,
+    // there is no "operator already cleared it" history to preserve.
+    this.assertPalletTemplateRule(palletsEnabled, palletLabelTemplateId);
 
     const monthKey = shiftMonthKey(data.plannedDate ?? new Date().toISOString().slice(0, 10));
 
@@ -1107,6 +1112,18 @@ export class ShiftsService {
         assertPalletConfiguration({ mode, palletsEnabled, boxCapacity, palletBoxCapacity });
         this.assertCapacityRules(mode, boxCapacity);
         this.assertBoxTemplateRule(mode, boxLabelTemplateId);
+        // Scoped to the same off -> ON transition as the default resolution
+        // just above, not to every update: an operator who explicitly clears
+        // the template on a shift whose pallets are already on keeps that as
+        // their own decision (see the comment above), and a later unrelated
+        // PATCH must not be rejected for a state that update itself did not
+        // create. This is what closes the gap: previously the resolve
+        // attempt right above could quietly settle on `null` (now that a
+        // tenant can clear its own default) and nothing refused it, so
+        // pallets went live with no template to print a label from.
+        if (palletsEnabled && !current.palletsEnabled) {
+          this.assertPalletTemplateRule(palletsEnabled, palletLabelTemplateId);
+        }
 
         const [updated] = await tx
           .update(schema.shifts)
@@ -1769,6 +1786,41 @@ export class ShiftsService {
       throw new UnprocessableEntityException({
         code: resolution.code,
         message: "Aggregation shifts require a box label template",
+      });
+    }
+  }
+
+  /**
+   * Same shape as `resolveBoxTemplate`, for `palletLabelTemplateId`. Unlike
+   * the box rule, this is NOT called unconditionally on every request: an
+   * operator can still explicitly clear the template on a shift whose
+   * pallets are already on (see the update-path comment above
+   * `resolveDefaultPalletLabelTemplate`), and a later unrelated PATCH must
+   * not be turned into a 422 by that earlier, deliberate choice. Callers
+   * invoke this only at the moment pallets are being newly ENABLED -- create,
+   * or the update path's off -> ON transition -- which is exactly where
+   * migration 0130 used to guarantee a resolvable default and, since the I6
+   * fix let a tenant clear its own, no longer does.
+   */
+  private resolvePalletTemplate(
+    palletsEnabled: boolean,
+    palletLabelTemplateId: string | null,
+  ): PalletTemplateResolution {
+    if (palletsEnabled && palletLabelTemplateId === null) {
+      return { ok: false, code: "PALLET_LABEL_TEMPLATE_REQUIRED" };
+    }
+    return { ok: true, palletLabelTemplateId };
+  }
+
+  private assertPalletTemplateRule(
+    palletsEnabled: boolean,
+    palletLabelTemplateId: string | null,
+  ): void {
+    const resolution = this.resolvePalletTemplate(palletsEnabled, palletLabelTemplateId);
+    if (!resolution.ok) {
+      throw new UnprocessableEntityException({
+        code: resolution.code,
+        message: "Pallets require a pallet label template",
       });
     }
   }

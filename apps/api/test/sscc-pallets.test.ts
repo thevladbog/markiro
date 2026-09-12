@@ -101,6 +101,21 @@ describe.skipIf(!ready)("pallet serial blocks in the shift bundle (Task 7)", () 
       .send({ defaultBoxLabelTemplateId: boxLabelTemplateId })
       .expect(200);
 
+    // Every test below opens a pallets-enabled shift, and the shift service
+    // now refuses to enable pallets with no resolvable pallet label template.
+    const palletLabelTemplateId = randomUUID();
+    await db.insert(schema.labelTemplates).values({
+      id: palletLabelTemplateId,
+      tenantId,
+      name: "Pallet bundle test pallet template",
+      purpose: "pallet",
+      spec: { widthMm: 100, heightMm: 150, dpi: 203, language: "zpl", elements: [] },
+    });
+    await agent
+      .put("/org/profile")
+      .send({ defaultPalletLabelTemplateId: palletLabelTemplateId })
+      .expect(200);
+
     const product = await agent
       .post("/products")
       .send({

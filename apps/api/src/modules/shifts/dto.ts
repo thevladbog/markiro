@@ -25,6 +25,11 @@ export type BoxTemplateResolution =
   | { ok: true; boxLabelTemplateId: string | null }
   | { ok: false; code: "BOX_LABEL_TEMPLATE_REQUIRED" };
 
+/** Same shape as `BoxTemplateResolution`, for `palletLabelTemplateId`. */
+export type PalletTemplateResolution =
+  | { ok: true; palletLabelTemplateId: string | null }
+  | { ok: false; code: "PALLET_LABEL_TEMPLATE_REQUIRED" };
+
 export type StationCloseAccess =
   { kind: "single_device"; ownerDeviceId: string } | { kind: "admin_only" };
 

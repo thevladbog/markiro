@@ -44,7 +44,15 @@ fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
     plannedDate = plannedDate,
     productionDate = productionDate,
     boxCapacity = boxCapacity,
-    palletBoxCapacity = palletBoxCapacity,
+    // The station and the handheld both read this same Room column as the
+    // pallets-ON signal (CloseBox.kt, WorkViewModel.kt) because the server's
+    // own signal, `palletsEnabled`, is a separate field they would otherwise
+    // have to thread through every read site. `GET /shifts` returns
+    // `palletBoxCapacity` UNGATED -- the cabinet needs the raw column -- so
+    // storing it verbatim here would let a plain list refresh turn the local
+    // signal on for a shift whose pallets are off, and the device would show
+    // the full-screen pallet refusal overlay for a shift that never asked for one.
+    palletBoxCapacity = if (palletsEnabled) palletBoxCapacity else null,
     palletsEnabled = palletsEnabled,
     validationPrintMode = validationPrint.mode,
     closePolicyKind = stationCloseAccess?.kind,

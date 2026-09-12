@@ -244,6 +244,7 @@ describe.skipIf(!ready)("shift pallet configuration (task 8)", () => {
 
   it("prefills the box count from the product", async () => {
     const { agent, tenantId, productId } = await setupOrg();
+    await setOrgDefaultPalletTemplate(tenantId, await seedPalletLabelTemplate(tenantId));
     const createShift = (overrides: Record<string, unknown>) =>
       postShift(agent, productId, overrides);
     const createProduct = (overrides: Partial<typeof schema.products.$inferInsert>) =>
@@ -256,6 +257,29 @@ describe.skipIf(!ready)("shift pallet configuration (task 8)", () => {
       palletsEnabled: true,
     });
     expect(shift.palletBoxCapacity).toBe(12);
+  });
+
+  it("refuses to create a pallets-on shift when no pallet label template resolves", async () => {
+    // Migration 0130 used to seed every organisation a default, so this state
+    // was unreachable. Since the I6 fix a tenant can clear its own default
+    // (and never set a category one), and nothing stopped a shift from being
+    // created pallets-ON with no template to print a pallet label from -- the
+    // device burns a serial and only then refuses TEMPLATE_MISSING.
+    const { agent, productId } = await setupOrg();
+    const createShift = (overrides: Record<string, unknown>) =>
+      postShift(agent, productId, overrides);
+
+    await expect(
+      createShift({
+        mode: "aggregation",
+        palletsEnabled: true,
+        boxCapacity: 20,
+        palletBoxCapacity: 12,
+      }),
+    ).rejects.toMatchObject({
+      status: 422,
+      body: { code: "PALLET_LABEL_TEMPLATE_REQUIRED" },
+    });
   });
 
   it("resolves the pallet template by category, then organisation, then none", async () => {
@@ -449,6 +473,28 @@ describe.skipIf(!ready)("shift pallet configuration (task 8)", () => {
     expect((byCategory.body as ShiftLike).palletLabelTemplateId).toBe(categoryTemplateId);
   });
 
+  it("refuses to PATCH-enable pallets when no pallet label template resolves", async () => {
+    // Same gap as create, reached through the update path's off -> ON
+    // transition: with no organisation or category default configured, the
+    // resolve attempt above settles on null and nothing used to refuse it.
+    const { agent, productId } = await setupOrg();
+    const planned = await postShift(agent, productId, {
+      mode: "aggregation",
+      palletsEnabled: false,
+    });
+    expect(planned.palletLabelTemplateId).toBeNull();
+
+    const res = await agent
+      .patch(`/shifts/${planned.id}`)
+      .send({ palletsEnabled: true, palletBoxCapacity: 12 })
+      .expect(422);
+    expect(res.body.code).toBe("PALLET_LABEL_TEMPLATE_REQUIRED");
+
+    // The shift is left untouched: still planned, pallets still off.
+    const stillPlanned = await agent.get(`/shifts/${planned.id}`).expect(200);
+    expect((stillPlanned.body as { palletsEnabled: boolean }).palletsEnabled).toBe(false);
+  });
+
   it("does not resurrect a cleared pallet template on a later unrelated update", async () => {
     // The other half of the rule above: resolution happens at the off -> ON
     // transition only. An operator who deliberately cleared the template on a
@@ -483,6 +529,7 @@ describe.skipIf(!ready)("shift pallet configuration (task 8)", () => {
     // must fail loudly rather than hand a terminal an unfulfillable
     // configuration -- see assertPalletConfiguration's call in openShift.
     const { agent, tenantId, productId } = await setupOrg();
+    await setOrgDefaultPalletTemplate(tenantId, await seedPalletLabelTemplate(tenantId));
     const created = await agent
       .post("/shifts")
       .send({ productId, mode: "aggregation", palletsEnabled: true, palletBoxCapacity: 12 })
