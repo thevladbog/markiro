@@ -209,11 +209,12 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     state,
                     onTile = { tile ->
                         when (tile) {
-                            HubTile.SHIFT -> state.activeShiftId?.let { nav.navigate(Routes.work(it)) } ?: nav.navigate(Routes.SHIFTS)
+                            HubTile.SHIFT -> nav.navigate(Routes.SHIFTS)
                             HubTile.INVENTORY -> state.activeInventoryId?.let { nav.navigate(Routes.inventoryWork(it)) } ?: nav.navigate(Routes.INVENTORY)
                             HubTile.SETTINGS -> nav.navigate(Routes.SETTINGS)
                         }
                     },
+                    onContinueShift = { nav.navigate(Routes.work(it)) },
                     onSignOut = vm::signOut,
                     onLabelQueue = { nav.navigate(Routes.LABEL_QUEUE) },
                 )

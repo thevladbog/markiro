@@ -54,6 +54,11 @@
     <string name="signin_number_short">no. %1$s</string>
     <string name="signin_pin">PIN</string>
 
+    <string name="hub_active_shift">ACTIVE SHIFT</string>
+    <string name="hub_active_shift_title">Shift %1$s</string>
+    <string name="hub_active_shift_aggregation">aggregation</string>
+    <string name="hub_active_shift_local">On this handheld</string>
+    <string name="hub_active_shift_continue">Continue</string>
     <string name="hub_network">Network</string>
     <string name="hub_offline">Offline</string>
     <string name="hub_queue">Queue %1$d</string>

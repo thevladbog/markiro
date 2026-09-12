@@ -27,6 +27,25 @@ Requires JDK 17 and the Android SDK (platform 35); point `local.properties` at i
 
   Settings → Сканер also has a text field that submits a scan.
 
+## Active shift on the hub
+
+The joined, locally cached shift appears above the mode tiles with its product,
+line, mode and progress. **Continue** resumes that shift; the **Shift** tile opens
+all available shifts. Leaving or locally closing the shift removes the card.
+
+The card uses the work screen's accepted-unit counter: the larger of the server's
+`acceptedUnits` and this handheld's accepted code count. A server snapshot carries
+its fetch time and survives a failed refresh while the hub remains open. Without
+that total (including aggregation summaries, which report closed-box output), the
+card explicitly says **On this handheld**. It never substitutes a box count for
+units or invents a terminal count from the operator roster. A missing/non-positive
+plan hides the percentage and bar; exceeding the plan keeps the real count and
+percentage while capping the bar at 100%.
+
+Summary requests run every 30 seconds while the hub is observed and stop after a
+five-second subscriber grace period. The card is immediately usable from local
+data while the first request is pending or the device is offline.
+
 ## Shift walk-through against the local API
 
 1. In the cabinet create a product with a GTIN, a line and a validation shift on that

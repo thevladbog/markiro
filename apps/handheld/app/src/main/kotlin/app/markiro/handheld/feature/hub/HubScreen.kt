@@ -48,7 +48,7 @@ import app.markiro.handheld.core.design.Tone
 import app.markiro.handheld.core.util.TimeText
 
 @Composable
-fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, onLabelQueue: () -> Unit = {}) {
+fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, onLabelQueue: () -> Unit = {}, onContinueShift: (String) -> Unit = { onTile(HubTile.SHIFT) }) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
@@ -99,6 +99,9 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                     }
                     IconAction(Icons.AutoMirrored.Outlined.Logout, stringResource(R.string.hub_sign_out), onSignOut)
                 }
+                state.activeShift?.let { active ->
+                    ActiveShiftCard(active, onContinue = { onContinueShift(active.shift.id) })
+                }
                 val stamp = state.countsAt?.takeIf { !state.reachable }
                     ?.let { " · " + stringResource(R.string.common_data_as_of, TimeText.hhmm(it)) }
                     .orEmpty()
@@ -107,10 +110,10 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                         Tile(
                             Icons.Outlined.Factory,
                             stringResource(R.string.hub_tile_shift),
-                            state.continueShiftNumber?.let { stringResource(R.string.hub_shift_continue, it) } ?: (shiftsLabel(state.shifts) + stamp),
+                            shiftsLabel(state.shifts) + stamp,
                             { onTile(HubTile.SHIFT) },
                             modifier,
-                            statusTone = if (state.continueShiftNumber != null) Tone.Ok else Tone.Neutral,
+                            statusTone = Tone.Neutral,
                         )
                     },
                     { modifier ->
