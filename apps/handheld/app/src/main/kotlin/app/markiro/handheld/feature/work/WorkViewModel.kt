@@ -364,9 +364,10 @@ class WorkViewModel(
         val capacity = shift.boxCapacity ?: 0
         if (box != null) refreshBox(box.boxId, capacity)
         if (box != null && outcome.verdict == Verdict.OK && capacity > 0 && boxes.itemCount(box.boxId) >= capacity) {
-            // The box's own signal, not one more accepted unit.
-            signals.play(SignalKind.BOX_DONE)
-            closeAndPrint(shift)
+            // The box's own signal is decided inside `closeAndPrint`, once the close
+            // result is known -- see the comment there for why it cannot be played
+            // here, before that result exists.
+            closeAndPrint(shift, signalBoxDone = true)
             return
         }
         signals.play(Signaller.forVerdict(outcome.verdict))
@@ -434,7 +435,13 @@ class WorkViewModel(
         }
     }
 
-    private suspend fun closeAndPrint(shift: ShiftEntity) {
+    /**
+     * @param signalBoxDone Whether a box completing here, on its own, is worth its
+     * own signal. True from the scan that filled it (`onScan`); false from a
+     * manual «Закрыть короб досрочно» (`closeEarly`), which -- pre-existing,
+     * unrelated to this fix -- plays no signal of its own either way.
+     */
+    private suspend fun closeAndPrint(shift: ShiftEntity, signalBoxDone: Boolean = false) {
         when (val result = closer.close(shiftId, shift.ssccIssuerPrefix, session.state.value.operator?.operatorId)) {
             is CloseResult.Closed -> {
                 val closed = ClosedBoxUi(
@@ -443,6 +450,16 @@ class WorkViewModel(
                     sscc = result.sscc,
                     itemCount = result.itemCount,
                 )
+                // Exactly one completion signal per scan. When this same close also
+                // brings the shift's pallet to capacity (`result.pallet` below), the
+                // pallet's own completion supersedes the box's rather than following
+                // it -- both play the identical `BOX_DONE` pattern, so playing it
+                // twice for one scan is not a second signal an operator can read, it
+                // is one signal stuttering. That is why this waits for `result`
+                // instead of playing from `onScan` before the close even happens: only
+                // here is it known whether a pallet closed too.
+                val palletAlsoClosed = result.pallet is ClosePalletResult.Closed
+                if (signalBoxDone && !palletAlsoClosed) signals.play(SignalKind.BOX_DONE)
                 _closeStep.value = BoxCloseStep.Printing(closed)
                 showCurrentBox()
                 // The box's own membership join already happened inside `closer.close`
@@ -457,9 +474,10 @@ class WorkViewModel(
                 // never a box confirmation followed by a separate, easy-to-miss
                 // pallet event. `result.pallet` is null when this box did not bring
                 // any pallet to capacity; anything else means one attempted to close
-                // and either did (`Closed`) or refused for a reason the operator must
-                // see -- a dry pool here is otherwise completely silent, because the
-                // BOX still closed and printed just fine.
+                // and either did (`Closed`, its own signal already played above) or
+                // refused for a reason the operator must see -- a dry pool here is
+                // otherwise completely silent, because the BOX still closed and
+                // printed just fine.
                 when (val palletResult = result.pallet) {
                     is ClosePalletResult.Closed -> handleClosedPallet(palletResult)
                     null -> Unit

@@ -58,7 +58,7 @@ fun LabelQueueScreen(state: LabelQueueUi, cb: LabelQueueCallbacks) {
             return@Column
         }
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
-            items(state.items, key = { it.boxId }) { item ->
+            items(state.items, key = { it.id }) { item ->
                 Column(Modifier.fillMaxWidth().padding(horizontal = MarkiroSizes.sp4, vertical = MarkiroSizes.sp2)) {
                     Row(
                         Modifier.fillMaxWidth(),
@@ -95,13 +95,13 @@ fun LabelQueueScreen(state: LabelQueueUi, cb: LabelQueueCallbacks) {
                         Row(horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
                             SecondaryButton(
                                 stringResource(R.string.label_queue_resolve),
-                                { cb.onResolveUnknown(item.boxId) },
+                                { cb.onResolveUnknown(item.id) },
                                 enabled = !state.printing,
                             )
-                            MarkiroTextButton(stringResource(R.string.label_queue_print_one), { cb.onPrintOne(item.boxId) })
+                            MarkiroTextButton(stringResource(R.string.label_queue_print_one), { cb.onPrintOne(item.id) })
                         }
                     } else {
-                        MarkiroTextButton(stringResource(R.string.label_queue_print_one), { cb.onPrintOne(item.boxId) })
+                        MarkiroTextButton(stringResource(R.string.label_queue_print_one), { cb.onPrintOne(item.id) })
                     }
                 }
             }

@@ -21,7 +21,8 @@ import javax.inject.Inject
 enum class LabelKind { BOX, PALLET }
 
 data class LabelQueueItem(
-    val boxId: String,
+    /** The box's or pallet's own id, whichever `kind` says this row is. */
+    val id: String,
     val sscc: String,
     val closedAt: String,
     val printState: String,
@@ -87,12 +88,12 @@ class LabelQueueViewModel @Inject constructor(
     fun printAll() = runPrint {
         for (item in state.value.items) {
             if (item.skippedByPrintAll) continue
-            print(item.boxId)
+            print(item.id)
         }
     }
 
     private suspend fun print(id: String) {
-        when (state.value.items.firstOrNull { it.boxId == id }?.kind ?: LabelKind.BOX) {
+        when (state.value.items.firstOrNull { it.id == id }?.kind ?: LabelKind.BOX) {
             LabelKind.BOX -> printer.print(id)
             LabelKind.PALLET -> palletPrinter.print(id)
         }
@@ -118,7 +119,7 @@ class LabelQueueViewModel @Inject constructor(
 
     /** The operator looked at the printer and says the label is there. Nothing is sent. */
     fun resolveUnknown(id: String) {
-        val kind = state.value.items.firstOrNull { it.boxId == id }?.kind ?: LabelKind.BOX
+        val kind = state.value.items.firstOrNull { it.id == id }?.kind ?: LabelKind.BOX
         viewModelScope.launch {
             when (kind) {
                 LabelKind.BOX -> printer.resolveUnknownAsPrinted(id)

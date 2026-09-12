@@ -210,12 +210,33 @@ class WorkViewModelPalletTest {
         val step = vm.palletCloseStep.first { it is PalletCloseStep.Printed } as PalletCloseStep.Printed
         assertEquals(2, step.pallet.boxCount)
         // Pallet completion mirrors box completion (brief 10 §6): the SAME
-        // signal, never a new one.
-        assertTrue(played.contains(SignalKind.BOX_DONE))
+        // signal, never a new one. Two scans closed two boxes here, and only the
+        // SECOND one also closed the pallet -- so the count must be exactly 2
+        // (one per completion), not 3, which is what a stray extra play on the
+        // pallet-closing scan would produce.
+        assertEquals(2, played.count { it == SignalKind.BOX_DONE })
         assertEquals(1, db.palletDao().unacked(10).size)
         // The strip resets against the shift's own capacity rather than vanishing.
         val pallet = vm.state.first { it.pallet?.boxCount == 0 }.pallet!!
         assertEquals(2, pallet.capacity)
+    }
+
+    @Test
+    fun oneScanClosingBothTheBoxAndItsPalletPlaysTheCompletionSignalOnlyOnce() = runTest {
+        // A shift where a box IS a pallet (both capacities are 1): the single scan
+        // that fills the box also brings the pallet to capacity, so `closeAndPrint`
+        // sees both outcomes at once. Before the fix, `onScan` played `BOX_DONE` for
+        // the box and `handleClosedPallet` played it again for the pallet -- two
+        // plays inside one scan, which is not a signal an operator watching the
+        // stack (not the screen) can read as "done". This asserts the play COUNT,
+        // not mere presence: a `.contains(...)` check cannot tell one play from two.
+        aggregatingWithPallets(boxCapacity = 1, palletBoxCapacity = 1)
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        vm.palletCloseStep.first { it is PalletCloseStep.Printed }
+        assertEquals(1, played.count { it == SignalKind.BOX_DONE })
     }
 
     @Test

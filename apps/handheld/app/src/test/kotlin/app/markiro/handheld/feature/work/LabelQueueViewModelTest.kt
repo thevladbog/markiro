@@ -114,7 +114,7 @@ class LabelQueueViewModelTest {
         box("b2", "046800899000000025", BoxPrint.PRINTED)
         box("b3", "046800899000000032", BoxPrint.DEFERRED)
         val items = model().state.first { it.items.size == 2 }.items
-        assertEquals(listOf("b1", "b3"), items.map { it.boxId })
+        assertEquals(listOf("b1", "b3"), items.map { it.id })
     }
 
     @Test
@@ -171,7 +171,7 @@ class LabelQueueViewModelTest {
         pallet("p1", "146800899000000012", PalletPrint.FAILED)
         pallet("p2", "146800899000000029", PalletPrint.PRINTED)
         val items = model().state.first { it.items.size == 1 }.items
-        assertEquals(listOf("p1"), items.map { it.boxId })
+        assertEquals(listOf("p1"), items.map { it.id })
         assertEquals(LabelKind.PALLET, items.single().kind)
     }
 
