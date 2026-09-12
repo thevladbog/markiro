@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { parseScannedSscc } from "@markiro/domain";
@@ -6,6 +7,7 @@ import type { BoxPrintErrorCode } from "../lib/boxes.js";
 import type { ScanSource } from "../lib/scan-source.js";
 
 export interface PrintVerificationProps {
+  destination?: ReactNode;
   /** The bare 18-digit SSCC the operator should scan off the printed label. */
   expected: string;
   /** Fires the instant a scan matches `expected`. */
@@ -40,6 +42,7 @@ function presentSscc(value: string): string {
  */
 export function PrintVerification({
   expected,
+  destination,
   onVerified,
   onReprint,
   onSkip,
@@ -149,6 +152,7 @@ export function PrintVerification({
       }
     >
       <div className="print-verification">
+        {destination}
         <section className="print-verification__stage" aria-label={t("box.printExpected")}>
           <div className="print-verification__scanner" aria-hidden="true">
             <span />
@@ -180,9 +184,11 @@ export function PrintVerification({
                     ? "box.printRecovery.errors.templateMissing"
                     : reprintError === "printer_unconfigured"
                       ? "box.printRecovery.errors.printerUnconfigured"
-                      : reprintError === "render_failed"
-                        ? "box.printRecovery.errors.renderFailed"
-                        : "box.printRecovery.errors.transportFailed",
+                      : reprintError === "persistence_failed"
+                        ? "printerRouting.storageFailed"
+                        : reprintError === "render_failed"
+                          ? "box.printRecovery.errors.renderFailed"
+                          : "box.printRecovery.errors.transportFailed",
                 )}
               />
             ) : null}

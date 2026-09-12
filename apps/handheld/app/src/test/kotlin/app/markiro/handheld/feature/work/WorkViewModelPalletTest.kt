@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.work
 
+import app.markiro.handheld.core.print.upsertAssigned
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
@@ -144,7 +145,7 @@ class WorkViewModelPalletTest {
         SsccPool(db).addRange(ServerRange(PREFIX, SsccPool.BOX_EXTENSION_DIGIT, 1, 200, null))
         SsccPool(db).addRange(ServerRange(PREFIX, SsccPool.PALLET_EXTENSION_DIGIT, 1, 200, null))
         if (withPrinter) {
-            db.printerDao().upsert(
+            db.printerDao().upsertAssigned(
                 PrinterEntity(
                     id = "p1", name = "Zebra", transport = "wifi", address = "127.0.0.1:9100",
                     language = "zpl", dpi = 203, selected = true, lastStatus = null, lastSeenAt = null,
@@ -330,6 +331,27 @@ class WorkViewModelPalletTest {
         assertEquals(PalletCloseStep.Idle, vm.palletCloseStep.value)
         // Confirming resolves it without sending anything more.
         assertEquals(sentSoFar, transport.sent)
+    }
+
+    @Test
+    fun explicitlyReroutingAnUnknownPalletRetainsTheReprintAudit() = runTest {
+        aggregatingWithPallets(boxCapacity = 1, palletBoxCapacity = 1)
+        transport.outcome = SendOutcome.Unknown("link lost")
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        val unknown = vm.palletCloseStep.first { it is PalletCloseStep.Unknown } as PalletCloseStep.Unknown
+        db.printerDao().upsert(PrinterEntity("replacement", "Replacement", "wifi", "replacement:9100", "zpl", 203, false, null, null))
+        transport.outcome = SendOutcome.Delivered
+        vm.retryPalletPrint("replacement")
+        vm.palletCloseStep.first { it is PalletCloseStep.Printed }
+        val audit = db.palletExceptionDao().queued().single()
+        assertEquals("reprint", audit.kind)
+        assertEquals(unknown.pallet.palletId, audit.palletId)
+        assertEquals("s1", audit.shiftId)
+        assertEquals("op-1", audit.operatorId)
+        assertEquals("dev-1", audit.terminalId)
+        assertEquals(app.markiro.handheld.core.exceptions.ReprintReason.PRINT_OUTCOME_UNKNOWN.audit, audit.reason)
     }
 
     @Test

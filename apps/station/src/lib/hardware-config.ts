@@ -1,5 +1,6 @@
 import type { PrintTarget } from "./hardware.js";
 import type { SqlExecutor } from "./mirror.js";
+import { parsePrinterRouting, type PrinterRouting } from "./printer-routing.js";
 
 /** The printer's command language. PDF output is a later slice. */
 export type PrinterLanguage = "zpl" | "tspl";
@@ -15,6 +16,8 @@ export interface SerialScannerConfig {
 }
 
 export interface HardwareConfig {
+  /** When present, explicit assignments replace the legacy single printer. */
+  printerRouting?: PrinterRouting;
   /** Legacy first port, retained for existing settings and older Station builds. */
   scanner: SerialScannerConfig | null;
   /** Authoritative when present, including an empty list. Stored locally/offline. */
@@ -114,6 +117,9 @@ export async function loadHardwareConfig(exec: SqlExecutor): Promise<HardwareCon
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const scanners = Array.isArray(parsed.scanners) ? parseScanners(parsed.scanners) : undefined;
     return {
+      ...(parsed.printerRouting === undefined
+        ? {}
+        : { printerRouting: parsePrinterRouting(parsed.printerRouting) }),
       scanner: scanners ? (scanners[0] ?? null) : parseScanner(parsed.scanner),
       ...(scanners ? { scanners } : {}),
       printer: parsePrinter(parsed.printer),

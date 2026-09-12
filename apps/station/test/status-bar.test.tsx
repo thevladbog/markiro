@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { StatusBar } from "../src/ui/StatusBar.js";
@@ -218,6 +218,60 @@ describe("StatusBar", () => {
       />,
     );
     expect(screen.getByTestId("printer-status").textContent).toBe("Not configured");
+  });
+
+  it("opens the printer list from an explicit routing summary", () => {
+    let opened = false;
+    render(
+      <StatusBar
+        stationName="Station"
+        lineName={null}
+        operatorName="Operator"
+        shiftLabel={null}
+        serverReachability="reachable"
+        scanner="keyboard"
+        printerConfigured
+        syncPending={0}
+        syncStuck={false}
+        conflicts={0}
+        printerSummary={{
+          label: "2 / 3",
+          detail: "Box: Zebra; Duplicate: TSC; Pallet: Not assigned",
+        }}
+        onOpenPrinters={() => {
+          opened = true;
+        }}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Printers: Box: Zebra; Duplicate: TSC; Pallet: Not assigned",
+      }),
+    );
+    expect(opened).toBe(true);
+  });
+
+  it("keeps an incomplete routing summary visible during work without claiming all printers ready", () => {
+    render(
+      <StatusBar
+        stationName="Station"
+        lineName={null}
+        operatorName="Operator"
+        shiftLabel="Shift"
+        serverReachability="reachable"
+        scanner="keyboard"
+        printerConfigured
+        syncPending={0}
+        syncStuck={false}
+        conflicts={0}
+        printerSummary={{ label: "2 / 3", detail: "Pallet: Not assigned", complete: false }}
+      />,
+    );
+    const value = screen.getByTestId("printer-status");
+    expect(value.textContent).toBe("2 / 3");
+    expect(value.closest(".station-status-pill")?.getAttribute("data-value-shown")).toBe("true");
+    expect(value.closest(".station-status-pill")?.getAttribute("data-tone")).toBe("neutral");
+    expect(value.getAttribute("aria-label")).toBe("Pallet: Not assigned");
   });
 
   it("reports a configured printer as configured, not connected (a printer cannot be proven alive without printing)", () => {

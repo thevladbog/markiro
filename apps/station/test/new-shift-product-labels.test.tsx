@@ -180,25 +180,45 @@ it.each(["required", "none"])(
   },
 );
 
-it("does not create a printing shift with an unconfigured printer and offers settings", async () => {
-  const h = await setup({ hardware: DEFAULT_HARDWARE_CONFIG });
-  await waitFor(() =>
-    expect(screen.getByLabelText("Print duplicate Data Matrix").hasAttribute("disabled")).toBe(
-      false,
-    ),
-  );
-  fireEvent.click(screen.getByLabelText("Print duplicate Data Matrix"));
-  fireEvent.click(screen.getByRole("button", { name: "Select a template" }));
-  fireEvent.click(await screen.findByRole("button", { name: /Product label/ }));
-  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
-  fireEvent.click(screen.getByRole("button", { name: "Start" }));
-  await screen.findByText(
-    "Configure the printer and its resolution before starting duplicate printing.",
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Printer settings" }));
-  expect(h.onSetup).toHaveBeenCalledTimes(1);
-  expect(h.requests).toEqual([]);
-});
+it.each([
+  DEFAULT_HARDWARE_CONFIG,
+  {
+    ...hardware,
+    printerRouting: {
+      printers: [
+        {
+          id: "box",
+          name: "Box labels",
+          target: { kind: "usb" as const, printer: "Existing printer" },
+          language: "zpl" as const,
+          dpi: 203 as const,
+        },
+      ],
+      assignments: { box: "box", duplicate: null, pallet: "box" },
+    },
+  },
+])(
+  "does not create a printing shift with an unassigned duplicate printer and offers settings",
+  async (config) => {
+    const h = await setup({ hardware: config });
+    await waitFor(() =>
+      expect(screen.getByLabelText("Print duplicate Data Matrix").hasAttribute("disabled")).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByLabelText("Print duplicate Data Matrix"));
+    fireEvent.click(screen.getByRole("button", { name: "Select a template" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Product label/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await screen.findByText(
+      "Configure the printer and its resolution before starting duplicate printing.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Printer settings" }));
+    expect(h.onSetup).toHaveBeenCalledTimes(1);
+    expect(h.requests).toEqual([]);
+  },
+);
 
 it("keeps printing disabled when the server does not offer the protocol", async () => {
   const h = await setup({ protocol: false });

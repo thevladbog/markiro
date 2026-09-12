@@ -2,12 +2,17 @@ import { waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { createProductLabelWork } from "../src/lib/use-product-label-work.js";
 import { openProductLabelWork } from "./support/product-label-work.js";
+import { sendPreparedProductLabel } from "../src/lib/product-labels/printing.js";
+import type { PrinterProfile } from "../src/lib/printer-routing.js";
 import {
   createCredentialGeneration,
   sealCredentialGeneration,
 } from "../src/lib/credential-recovery.js";
 const resources: Awaited<ReturnType<typeof openProductLabelWork>>[] = [];
-async function setup(verification: "none" | "required" = "required") {
+async function setup(
+  verification: "none" | "required" = "required",
+  printers: PrinterProfile[] = [],
+) {
   const h = await openProductLabelWork(verification);
   resources.push(h);
   const generation = createCredentialGeneration("test-label-key");
@@ -17,6 +22,7 @@ async function setup(verification: "none" | "required" = "required") {
     credentialOwnership: h.input.credentialOwnership,
     generation,
     getPrinting: () => h.deps,
+    printers: () => printers,
     prepare: async () => h.input,
   });
   await work.open();
@@ -26,6 +32,31 @@ afterEach(() => {
   for (const h of resources.splice(0)) h.close();
 });
 describe("product label floor controller", () => {
+  it("cannot replace a prepared destination from a stale controller while another send owns it", async () => {
+    const replacement: PrinterProfile = {
+      id: "new",
+      name: "Replacement",
+      target: { kind: "tcp", host: "10.0.0.2", port: 9100 },
+      language: "zpl",
+      dpi: 203,
+    };
+    const { h, work } = await setup("required", [replacement]);
+    let release = () => {};
+    h.print.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const sending = sendPreparedProductLabel(h.deps, h.input.jobId);
+    await waitFor(() => expect(h.print).toHaveBeenCalledOnce());
+    try {
+      await expect(work.changePreparedPrinter(replacement)).rejects.toThrow();
+    } finally {
+      release();
+      await sending;
+    }
+  });
   it("serializes a skip with scanning and unlocks only after the durable commit", async () => {
     const { h, work, generation } = await setup();
     await work.resumePrepared();

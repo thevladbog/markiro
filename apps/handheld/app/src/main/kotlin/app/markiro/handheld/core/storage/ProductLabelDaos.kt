@@ -53,6 +53,7 @@ interface ProductLabelJobDao {
     suspend fun purgeSettled(shiftId: String) {
         val jobIds = settledJobIds(shiftId)
         if (jobIds.isEmpty()) return
+        deleteDestinationsOf(jobIds)
         deleteEventsOf(jobIds)
         deleteJobs(jobIds)
     }
@@ -69,6 +70,7 @@ interface ProductLabelJobDao {
     suspend fun purgeSettledEverywhere() {
         val jobIds = settledJobIdsEverywhere()
         if (jobIds.isEmpty()) return
+        deleteDestinationsOf(jobIds)
         deleteEventsOf(jobIds)
         deleteJobs(jobIds)
     }
@@ -79,6 +81,9 @@ interface ProductLabelJobDao {
             "AND ackedAt IS NULL AND quarantineCode IS NULL)",
     )
     suspend fun settledJobIdsEverywhere(): List<String>
+
+    @Query("DELETE FROM print_destinations WHERE purpose = 'duplicate' AND jobId IN (:jobIds)")
+    suspend fun deleteDestinationsOf(jobIds: List<String>)
 
     @Query("DELETE FROM product_label_events WHERE jobId IN (:jobIds)")
     suspend fun deleteEventsOf(jobIds: List<String>)

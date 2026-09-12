@@ -9,6 +9,7 @@ import {
   type ProductLabelEventBase,
 } from "@markiro/domain";
 import { z } from "zod";
+import { readPrintDestination } from "../print-destinations.js";
 import type { SqlExecutor } from "../mirror.js";
 import type {
   ProductLabelJobView,
@@ -113,8 +114,15 @@ export async function readProductLabelJob(
     !z.iso.datetime().safeParse(row.updated_at).success
   )
     invalidStoredJob();
+  const printer = await readPrintDestination(exec, {
+    scope: input.credentialOwnership,
+    purpose: "duplicate",
+    jobId,
+    attemptId: projection.attemptId,
+  });
   return {
     ...input,
+    ...(printer ? { printer } : {}),
     projection,
     attempts,
     ownershipConflict: row.ownership_conflict === 1,
@@ -137,6 +145,7 @@ export async function hasUnresolvedProductLabelJob(
 
 export function presentProductLabelJob(job: StoredProductLabelJob): ProductLabelJobView {
   return {
+    ...(job.printer ? { printer: job.printer } : {}),
     jobId: job.jobId,
     shiftId: job.shiftId,
     codeSuffix: Array.from(job.serial).slice(-6).join(""),

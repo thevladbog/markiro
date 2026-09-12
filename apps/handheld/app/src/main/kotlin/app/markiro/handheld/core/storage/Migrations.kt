@@ -271,3 +271,20 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_pallet_exceptions_ackedAt` ON `pallet_exceptions` (`ackedAt`)")
     }
 }
+
+/** Only the shipped selected profile receives roles. Jobs and print outcomes remain untouched. */
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `printer_assignments` (`purpose` TEXT NOT NULL, `printerId` TEXT, PRIMARY KEY(`purpose`))")
+        for (purpose in listOf("box", "duplicate", "pallet")) {
+            db.execSQL("INSERT OR IGNORE INTO printer_assignments (purpose, printerId) VALUES (?, (SELECT id FROM printers WHERE selected = 1 ORDER BY id LIMIT 1))", arrayOf(purpose))
+        }
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `print_destinations` (`purpose` TEXT NOT NULL, `jobId` TEXT NOT NULL, `attemptId` TEXT NOT NULL, " +
+                "`printer_id` TEXT NOT NULL, `printer_name` TEXT NOT NULL, `printer_transport` TEXT NOT NULL, " +
+                "`printer_address` TEXT NOT NULL, `printer_language` TEXT NOT NULL, `printer_dpi` INTEGER NOT NULL, " +
+                "`printer_selected` INTEGER NOT NULL, `printer_lastStatus` TEXT, `printer_lastSeenAt` INTEGER, " +
+                "PRIMARY KEY(`purpose`, `jobId`, `attemptId`))",
+        )
+    }
+}

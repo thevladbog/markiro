@@ -384,7 +384,6 @@ for (const locale of ["ru", "en"])
       expect(bounds && bounds.y + bounds.height).toBeLessThanOrEqual(800);
       const footer = await page.getByTestId("setup-footer").boundingBox();
       expect(footer && footer.y + footer.height).toBeLessThanOrEqual(800);
-      await expect(page.getByRole("checkbox").locator("..")).toBeInViewport({ ratio: 1 });
       await expect(
         page.getByTestId("setup-footer").getByRole("button", {
           name: locale === "ru" ? "Готово" : "Done",
@@ -417,7 +416,6 @@ test("printer settings remain usable on the existing 1024 by 768 floor viewport"
       await label.locator("span").evaluate((span) => span.scrollWidth <= span.clientWidth),
     ).toBe(true);
   }
-  await expect(page.getByRole("checkbox").locator("..")).toBeInViewport({ ratio: 1 });
   const footer = await page.getByTestId("setup-footer").boundingBox();
   expect(footer && footer.y + footer.height).toBeLessThanOrEqual(768);
   await expect(page.getByRole("button", { name: "Done", exact: true })).toBeEnabled();
@@ -615,4 +613,197 @@ for (const locale of ["ru", "en"])
         expect(write).not.toHaveProperty("boxCapacity");
       }
       expect(unexpected).toEqual([]);
+    });
+
+for (const width of [1024, 1280])
+  for (const locale of ["ru", "en"])
+    for (const theme of ["light", "dark"])
+      test(`printer routing list and editor fit ${width} ${locale} ${theme}`, async ({
+        page,
+      }, info) => {
+        const height = width === 1024 ? 768 : 800;
+        await page.setViewportSize({ width, height });
+        await page.addInitScript((theme) => localStorage.setItem("markiro.theme", theme), theme);
+        await page.goto(`${station}/?gallery=1&state=setup-printers&locale=${locale}`);
+        const routing = page.getByTestId("printer-routing");
+        await expect(routing).toBeVisible();
+        const header = page.getByRole("banner");
+        await expect(
+          header.getByRole("button", { name: /^(Сменить оператора|Change operator)$/ }),
+        ).toBeInViewport({ ratio: 1 });
+        for (const button of await header.getByRole("button").all())
+          expect((await button.boundingBox())?.height).toBeGreaterThanOrEqual(64);
+        const printerSummary = header.getByRole("button", { name: /^(Принтеры|Printers):/ });
+        await expect(printerSummary).toBeInViewport({ ratio: 1 });
+        await expect(printerSummary).toContainText("3 / 3");
+        expect((await printerSummary.boundingBox())?.height).toBeGreaterThanOrEqual(64);
+        expect(await header.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+          true,
+        );
+        const labels =
+          locale === "ru"
+            ? (["Короб", "Дубль кода", "Паллета"] as const)
+            : (["Box", "Code duplicate", "Pallet"] as const);
+        for (const label of labels) {
+          const select = routing.getByRole("combobox", { name: label, exact: true });
+          await expect(select).toBeInViewport({ ratio: 1 });
+          expect((await select.boundingBox())?.height).toBeGreaterThanOrEqual(64);
+        }
+        const verify = page
+          .getByRole("checkbox", {
+            name:
+              locale === "ru"
+                ? "Проверять этикетку короба обратным сканированием"
+                : "Verify each box label by scanning it back",
+          })
+          .locator("..");
+        await expect(verify).toBeInViewport({ ratio: 1 });
+        expect((await verify.boundingBox())?.height).toBeGreaterThanOrEqual(64);
+        const routingBounds = await routing.boundingBox();
+        const verifyBounds = await verify.boundingBox();
+        expect(routingBounds).not.toBeNull();
+        expect(verifyBounds).not.toBeNull();
+        expect(verifyBounds?.y).toBeGreaterThanOrEqual(
+          (routingBounds?.y ?? 0) + (routingBounds?.height ?? 0) + 8,
+        );
+        await expect(
+          routing.getByRole("button", { name: /^(Edit|Настроить) / }).nth(1),
+        ).toBeInViewport({ ratio: 1 });
+        const edit = routing.getByRole("button", { name: /^(Edit|Настроить) / }).first();
+        await expect(edit).toBeInViewport({ ratio: 1 });
+        expect(
+          await routing
+            .locator("h3")
+            .evaluateAll((headings) =>
+              headings.every((heading) => heading.scrollWidth <= heading.clientWidth),
+            ),
+        ).toBe(true);
+        expect(
+          await routing.evaluate((element) => element.scrollWidth <= element.clientWidth),
+        ).toBe(true);
+        const footer = page.getByTestId("setup-footer");
+        await expect(footer).toBeInViewport({ ratio: 1 });
+        expect(
+          await page
+            .getByTestId("setup-result")
+            .evaluate((element) => element.scrollHeight <= element.clientHeight),
+        ).toBe(true);
+        for (const button of await footer.getByRole("button").all())
+          expect((await button.boundingBox())?.height).toBeGreaterThanOrEqual(64);
+        await page.screenshot({
+          path: info.outputPath(`printer-routes-${width}-${locale}-${theme}.png`),
+        });
+        await routing.getByRole("combobox", { name: labels[2], exact: true }).selectOption("");
+        await expect(routing.getByRole("combobox", { name: labels[2], exact: true })).toHaveValue(
+          "",
+        );
+        await edit.click();
+        const name = page.getByRole("textbox", {
+          name: locale === "ru" ? "Название принтера" : "Printer name",
+          exact: true,
+        });
+        await expect(name).toBeInViewport({ ratio: 1 });
+        const dpi = page.getByRole("combobox", {
+          name: locale === "ru" ? "Разрешение принтера" : "Printer resolution",
+          exact: true,
+        });
+        await expect(dpi).toBeInViewport({ ratio: 1 });
+        await expect(footer).toBeInViewport({ ratio: 1 });
+        await page.screenshot({
+          path: info.outputPath(`printer-editor-${width}-${locale}-${theme}.png`),
+        });
+        await page
+          .getByRole("button", {
+            name: locale === "ru" ? "Сохранить принтер" : "Save printer",
+            exact: true,
+          })
+          .click();
+        await expect(routing.getByRole("combobox", { name: labels[2], exact: true })).toHaveValue(
+          "",
+        );
+        expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(height);
+      });
+
+for (const variant of ["empty", "many"])
+  test(`printer routing ${variant} list scrolls without moving footer`, async ({ page }, info) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto(`${station}/?gallery=1&state=setup-printers-${variant}&locale=ru`);
+    const routing = page.getByTestId("printer-routing");
+    await expect(routing).toBeVisible();
+    const footer = page.getByTestId("setup-footer");
+    const before = await footer.boundingBox();
+    if (variant === "many") {
+      const rows = routing.locator(".setup-printer-row");
+      await expect(rows).toHaveCount(9);
+      await rows.last().getByRole("button").scrollIntoViewIfNeeded();
+      await expect(rows.last().getByRole("button")).toBeInViewport({ ratio: 1 });
+      expect(
+        await routing
+          .locator("h3")
+          .evaluateAll((headings) =>
+            headings.every((heading) => heading.scrollWidth <= heading.clientWidth),
+          ),
+      ).toBe(true);
+    } else {
+      await expect(routing.getByRole("combobox", { name: "Короб", exact: true })).toHaveValue("");
+      await expect(
+        routing.getByRole("button", { name: "Добавить принтер", exact: true }),
+      ).toBeEnabled();
+    }
+    expect(await footer.boundingBox()).toEqual(before);
+    await expect(footer).toBeInViewport({ ratio: 1 });
+    await page.screenshot({ path: info.outputPath(`printer-routes-${variant}-1024-ru.png`) });
+  });
+
+for (const locale of ["ru", "en"])
+  for (const theme of ["light", "dark"])
+    test(`printer recovery expanded choice fits 1024 ${locale} ${theme}`, async ({
+      page,
+    }, info) => {
+      await page.setViewportSize({ width: 1024, height: 768 });
+      await page.addInitScript((theme) => localStorage.setItem("markiro.theme", theme), theme);
+      await page.goto(`${station}/?gallery=1&state=printer-recovery-box&locale=${locale}`);
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      const footer = dialog.locator("footer");
+      const initialFooter = await footer.boundingBox();
+      const change = dialog.getByRole("button", {
+        name: locale === "ru" ? "Сменить принтер" : "Change printer",
+        exact: true,
+      });
+      await change.click();
+      const select = dialog.getByRole("combobox", {
+        name: locale === "ru" ? "Выберите принтер" : "Choose a printer",
+        exact: true,
+      });
+      await expect(select).toBeInViewport({ ratio: 1 });
+      await expect(select.locator("option")).toHaveCount(4);
+      expect((await select.boundingBox())?.height).toBeGreaterThanOrEqual(64);
+      const apply = dialog.getByRole("button", {
+        name: locale === "ru" ? "Использовать для этой этикетки" : "Use for this label",
+        exact: true,
+      });
+      await expect(apply).toBeDisabled();
+      await select.selectOption("gallery-printer-2");
+      await expect(apply).toBeEnabled();
+      for (const button of await dialog.getByRole("button").all()) {
+        await expect(button).toBeInViewport({ ratio: 1 });
+        expect((await button.boundingBox())?.height).toBeGreaterThanOrEqual(64);
+      }
+      await expect(footer).toBeInViewport({ ratio: 1 });
+      expect(await footer.boundingBox()).toEqual(initialFooter);
+      expect(
+        await dialog
+          .locator(".printer-destination")
+          .evaluate((element) => element.scrollWidth <= element.clientWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: info.outputPath(`printer-recovery-1024-${locale}-${theme}.png`),
+      });
+      await apply.click();
+      await expect(change).toBeVisible();
+      await expect(dialog.locator(".printer-destination strong")).toContainText(
+        locale === "ru" ? "Zebra у паллетизатора" : "Zebra at palletizer",
+      );
+      await expect(dialog.getByRole("alert")).toBeVisible();
     });

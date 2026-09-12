@@ -5,12 +5,14 @@ import {
   verifyProductLabel,
   skipProductLabelVerification,
   prepareProductLabelReprint,
+  changePreparedProductLabelPrinter,
 } from "../src/lib/product-labels/printing.js";
 import { appendProductLabelEvent, readProductLabelJob } from "../src/lib/product-labels/store.js";
 import { openProductLabelWork } from "./support/product-label-work.js";
 import { recordProductLabelAcceptance } from "../src/lib/product-labels/acceptance.js";
 import { productLabelAcceptanceFixture, seedProductLabelShift } from "./support/product-labels.js";
 import { restoreProductLabelWork } from "../src/lib/product-labels/recovery.js";
+import { bindPrintDestination, readPrintDestination } from "../src/lib/print-destinations.js";
 
 describe("product label printing", () => {
   let work: Awaited<ReturnType<typeof openProductLabelWork>>;
@@ -127,6 +129,110 @@ describe("product label printing", () => {
     expect(
       await work.exec.all("SELECT event_json FROM product_label_events ORDER BY sequence"),
     ).toHaveLength(3);
+  });
+
+  it("sends saved bytes to the prepared destination after assignment changes and restart", async () => {
+    const original = {
+      id: "duplicate",
+      name: "Small labels",
+      target: { kind: "tcp" as const, host: "10.0.0.42", port: 9100 },
+      language: "zpl" as const,
+      dpi: 203 as const,
+    };
+    await bindPrintDestination(
+      work.exec,
+      {
+        scope: work.input.credentialOwnership,
+        purpose: "duplicate",
+        jobId: work.input.jobId,
+        attemptId: work.input.preparedEvent.attemptId,
+      },
+      original,
+    );
+    work.restart();
+    work.deps.target = { kind: "usb", printer: "Pallet printer" };
+    work.deps.language = "tspl";
+    work.deps.dpi = 300;
+    const result = await sendPreparedProductLabel(work.deps, work.input.jobId);
+    expect(result.status).toBe("awaiting_verification");
+    expect(work.print).toHaveBeenCalledExactlyOnceWith(
+      original.target,
+      new Uint8Array(Buffer.from(work.input.bytesBase64, "base64")),
+    );
+  });
+
+  it("pins a legacy reprint at explicit preparation and keeps historical attempts unbound", async () => {
+    await sendPreparedProductLabel(work.deps, work.input.jobId);
+    await work.exec.run("DELETE FROM printer_destinations");
+    const printer = {
+      id: "duplicate",
+      name: "Small labels",
+      target: { kind: "tcp" as const, host: "10.0.0.42", port: 9100 },
+      language: "zpl" as const,
+      dpi: 203 as const,
+    };
+    const attemptId = await prepareProductLabelReprint(work.exec, {
+      ...work.actor,
+      credentialOwnership: work.input.credentialOwnership,
+      jobId: work.input.jobId,
+      shiftId: work.input.shiftId,
+      reason: "damaged",
+      fallbackPrinter: printer,
+    });
+    const key = {
+      scope: work.input.credentialOwnership,
+      purpose: "duplicate" as const,
+      jobId: work.input.jobId,
+      attemptId,
+    };
+    expect(await readPrintDestination(work.exec, key)).toEqual(printer);
+    expect(
+      await readPrintDestination(work.exec, {
+        ...key,
+        attemptId: work.input.preparedEvent.attemptId,
+      }),
+    ).toBeNull();
+    work.restart();
+    work.deps.target = { kind: "usb", printer: "Changed assignment" };
+    work.print.mockClear();
+    await sendPreparedProductLabel(work.deps, work.input.jobId);
+    expect(work.print).toHaveBeenCalledExactlyOnceWith(
+      printer.target,
+      new Uint8Array(Buffer.from(work.input.bytesBase64, "base64")),
+    );
+  });
+
+  it("allows an explicit compatible prepared choice without printing or changing bytes", async () => {
+    const printer = {
+      id: "replacement",
+      name: "Replacement",
+      target: { kind: "usb" as const, printer: "Spare" },
+      language: "zpl" as const,
+      dpi: 203 as const,
+    };
+    await expect(
+      changePreparedProductLabelPrinter(
+        work.exec,
+        work.input.credentialOwnership,
+        work.input.jobId,
+        work.input.preparedEvent.attemptId,
+        { ...printer, dpi: 300 },
+      ),
+    ).rejects.toThrow("Incompatible");
+    await changePreparedProductLabelPrinter(
+      work.exec,
+      work.input.credentialOwnership,
+      work.input.jobId,
+      work.input.preparedEvent.attemptId,
+      printer,
+    );
+    expect(work.print).not.toHaveBeenCalled();
+    expect((await stored())?.bytesBase64).toBe(work.input.bytesBase64);
+    await sendPreparedProductLabel(work.deps, work.input.jobId);
+    expect(work.print).toHaveBeenCalledExactlyOnceWith(
+      printer.target,
+      new Uint8Array(Buffer.from(work.input.bytesBase64, "base64")),
+    );
   });
 
   it("a double click or retry cannot send twice", async () => {

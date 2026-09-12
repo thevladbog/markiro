@@ -13,6 +13,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
@@ -47,6 +49,9 @@ import app.markiro.handheld.feature.printer.PrinterErrorCallbacks
 import app.markiro.handheld.feature.printer.PrinterErrorScreen
 import app.markiro.handheld.feature.printer.PrinterListCallbacks
 import app.markiro.handheld.feature.printer.PrinterListScreen
+import app.markiro.handheld.feature.printer.PrinterAssignmentsScreen
+import app.markiro.handheld.feature.printer.PrinterChoiceScreen
+import app.markiro.handheld.core.print.PrintPurpose
 import app.markiro.handheld.feature.printer.PrinterViewModel
 import app.markiro.handheld.feature.printer.TestPrintCallbacks
 import app.markiro.handheld.feature.printer.TestPrintScreen
@@ -103,6 +108,7 @@ object Routes {
     const val SCANNER = "settings/scanner"
     const val PRINTER_GRAPH = "settings/printer-graph"
     const val PRINTER = "settings/printer"
+    const val PRINTER_ASSIGNMENTS = "settings/printer/assignments"
     const val PRINTER_ADD = "settings/printer/add"
     const val PRINTER_BLUETOOTH = "settings/printer/bluetooth"
     const val PRINTER_TEST = "settings/printer/test"
@@ -261,6 +267,11 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                 val closeStep by vm.closeStep.collectAsStateWithLifecycle()
                 val palletCloseStep by vm.palletCloseStep.collectAsStateWithLifecycle()
                 val duplicateStep by vm.duplicateStep.collectAsStateWithLifecycle()
+                val profiles by vm.printerProfiles.collectAsStateWithLifecycle()
+                val destinations by vm.printDestinations.collectAsStateWithLifecycle()
+                val duplicateJob by vm.duplicateJob.collectAsStateWithLifecycle()
+                var choosingPrinter by remember { mutableStateOf<PrintPurpose?>(null) }
+                var duplicateReplacement by remember(duplicateStep.jobId()) { mutableStateOf<String?>(null) }
                 val planPrompt by vm.planPrompt.collectAsStateWithLifecycle()
                 val shiftId = entry.arguments?.getString("shiftId").orEmpty()
                 WorkScreen(
@@ -286,15 +297,13 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     BoxCloseScreen(
                         closeStep,
                         BoxCloseCallbacks(
-                            onRetry = vm::retryPrint,
-                            onOtherPrinter = {
-                                vm.deferLabel()
-                                nav.navigate(Routes.PRINTER_GRAPH)
-                            },
+                            onRetry = { vm.retryPrint() },
+                            onOtherPrinter = { choosingPrinter = PrintPurpose.BOX },
                             onDefer = vm::deferLabel,
                             onConfirmPrinted = vm::confirmPrinted,
                             onDismiss = vm::dismissClose,
                         ),
+                        destinationLabel = destinations.firstOrNull { it.purpose == "box" && it.attemptId == "initial" && it.jobId == closeStep.closedBox()?.boxId }?.printer?.name,
                     )
                 }
                 // Drawn AFTER the box's own overlay, so it takes the top of the
@@ -307,15 +316,13 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     PalletCloseScreen(
                         palletCloseStep,
                         PalletCloseCallbacks(
-                            onRetry = vm::retryPalletPrint,
-                            onOtherPrinter = {
-                                vm.deferPalletLabel()
-                                nav.navigate(Routes.PRINTER_GRAPH)
-                            },
+                            onRetry = { vm.retryPalletPrint() },
+                            onOtherPrinter = { choosingPrinter = PrintPurpose.PALLET },
                             onDefer = vm::deferPalletLabel,
                             onConfirmPrinted = vm::confirmPalletPrinted,
                             onDismiss = vm::dismissPalletClose,
                         ),
+                        destinationLabel = destinations.firstOrNull { it.purpose == "pallet" && it.attemptId == "initial" && it.jobId == palletCloseStep.closedPallet()?.palletId }?.printer?.name,
                     )
                 }
                 // Verification owns the full screen while the work route keeps receiving scans.
@@ -324,12 +331,29 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         duplicateStep,
                         DuplicateCallbacks(
                             onRetry = vm::retryDuplicate,
-                            onReprint = vm::reprintDuplicate,
+                            onReprint = { reason -> vm.reprintDuplicate(reason, duplicateReplacement); duplicateReplacement = null },
+                            onOtherPrinter = { choosingPrinter = PrintPurpose.DUPLICATE },
                             onScanAgain = vm::dismissDuplicate,
                             onDismiss = vm::dismissDuplicate,
                             onSkip = vm::skipDuplicateVerification,
                         ),
+                        destinationLabel = destinations.firstOrNull { it.purpose == "duplicate" && it.jobId == duplicateStep.jobId() }?.printer?.name,
+                        replacementLabel = profiles.firstOrNull { it.id == duplicateReplacement }?.name,
                     )
+                }
+                choosingPrinter?.let { purpose ->
+                    val candidates = if (purpose == PrintPurpose.DUPLICATE) profiles.filter {
+                        it.language == duplicateJob?.language && it.dpi == duplicateJob?.dpi
+                    } else profiles
+                    PrinterChoiceScreen(purpose, candidates, null, { choosingPrinter = null }, allowUnassigned = false,
+                        onManage = { nav.navigate(Routes.PRINTER_GRAPH) }) { id ->
+                        if (id != null) when (purpose) {
+                            PrintPurpose.BOX -> vm.retryPrint(id)
+                            PrintPurpose.PALLET -> vm.retryPalletPrint(id)
+                            PrintPurpose.DUPLICATE -> duplicateReplacement = id
+                        }
+                        choosingPrinter = null
+                    }
                 }
                 // Last of the three overlays: a box close or a duplicate is about
                 // the unit in the operator's hand and must win over a prompt about
@@ -401,6 +425,8 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         onPrintOne = vm::printOne,
                         onPrintAll = vm::printAll,
                         onResolveUnknown = vm::resolveUnknown,
+                        onReroute = vm::reroute,
+                        onManagePrinters = { nav.navigate(Routes.PRINTER_GRAPH) },
                     ),
                 )
             }
@@ -503,9 +529,11 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         state,
                         PrinterListCallbacks(
                             onBack = { nav.popBackStack() },
-                            onSelect = vm::select,
-                            onTest = {
-                                vm.printTest()
+                            onAssignments = { nav.navigate(Routes.PRINTER_ASSIGNMENTS) },
+                            onEdit = { id -> vm.startEdit(id); nav.navigate(Routes.PRINTER_ADD) },
+                            onTest = { id ->
+                                vm.select(id)
+                                vm.printTest(id)
                                 nav.navigate(Routes.PRINTER_TEST)
                             },
                             onAdd = {
@@ -514,6 +542,11 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                             },
                         ),
                     )
+                }
+                composable(Routes.PRINTER_ASSIGNMENTS) { entry ->
+                    val vm = printerViewModel(nav, entry)
+                    val state by vm.state.collectAsStateWithLifecycle()
+                    PrinterAssignmentsScreen(state, { nav.popBackStack() }, vm::assign)
                 }
                 composable(Routes.PRINTER_ADD) { entry ->
                     val vm = printerViewModel(nav, entry)
@@ -540,6 +573,8 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                             AddPrinterCallbacks(
                                 onBack = { nav.popBackStack() },
                                 onTransport = vm::setTransport,
+                                onName = vm::editName,
+                                onRemove = { form.id?.let(vm::remove); nav.popBackStack() },
                                 onHost = vm::editHost,
                                 onPort = vm::editPort,
                                 onLanguage = vm::setLanguage,
@@ -559,16 +594,14 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     val vm = printerViewModel(nav, entry)
                     val state by vm.state.collectAsStateWithLifecycle()
                     LaunchedEffect(Unit) { vm.loadPairedDevices() }
+                    LaunchedEffect(vm) { vm.saved.collect { nav.popBackStack(Routes.PRINTER, inclusive = false) } }
                     BluetoothPairScreen(
                         state,
                         BluetoothPairCallbacks(
                             onBack = { nav.popBackStack() },
                             onGrant = { vm.loadPairedDevices() },
                             onSearchAgain = { vm.loadPairedDevices() },
-                            onPick = { device ->
-                                vm.pickPairedDevice(device)
-                                nav.popBackStack(Routes.PRINTER, inclusive = false)
-                            },
+                            onPick = vm::pickPairedDevice,
                         ),
                     )
                 }

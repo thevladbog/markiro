@@ -1920,13 +1920,18 @@ describe("App", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Configure printer" }));
       expect(await screen.findByRole("heading", { name: "Workstation setup" })).toBeDefined();
-      fireEvent.click(await screen.findByRole("tab", { name: "Printer" }));
+      fireEvent.click(await screen.findByRole("tab", { name: "Printers" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Add printer" }));
+      fireEvent.change(screen.getByLabelText("Printer name"), {
+        target: { value: "Inventory printer" },
+      });
       const tcp = await screen.findByRole("radio", { name: "Network (TCP)" });
       await waitFor(() => expect((tcp as HTMLInputElement).disabled).toBe(false));
       fireEvent.click(tcp);
       fireEvent.change(screen.getByLabelText("Printer address"), {
         target: { value: "10.0.0.7" },
       });
+      fireEvent.click(screen.getByRole("button", { name: "Save printer" }));
       fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
       expect(await screen.findByText("Label was not printed")).toBeDefined();

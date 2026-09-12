@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.box
 
+import app.markiro.handheld.core.print.upsertAssigned
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -99,7 +100,7 @@ class PalletPrinterTest {
             ),
         )
         if (withPrinter) {
-            db.printerDao().upsert(
+            db.printerDao().upsertAssigned(
                 PrinterEntity(
                     id = "p1", name = "Zebra", transport = "wifi", address = "127.0.0.1:9100",
                     language = "zpl", dpi = 203, selected = true, lastStatus = null, lastSeenAt = null,
@@ -130,6 +131,16 @@ class PalletPrinterTest {
                 db.codeDao().insert(CodeEntity("h-$box-$it", "s1", "04680089900000", "$box-$it", "t", "box-$box"))
             }
         }
+    }
+
+    @Test
+    fun palletRoutingNeverFallsBackToTheConfiguredBoxPrinter() = runTest {
+        seedShift()
+        seedClosedPallet()
+        db.printerDao().assign(app.markiro.handheld.core.print.PrinterAssignmentEntity("pallet", null))
+        val transport = FakeTransport()
+        assertEquals(PrintOutcome.Failed(PrintReason.PRINTER_UNCONFIGURED), printer(transport).print("pal-1"))
+        assertEquals(null, transport.sent)
     }
 
     @Test
@@ -252,7 +263,7 @@ class PalletPrinterTest {
         seedClosedPallet()
         printer(transport).print("pal-1")
         val first = transport.sent!!.toString(Charsets.ISO_8859_1)
-        printer(transport).print("pal-1")
+        printer(transport).print("pal-1", reprint = true)
         assertEquals(first, transport.sent!!.toString(Charsets.ISO_8859_1))
     }
 
@@ -270,7 +281,7 @@ class PalletPrinterTest {
         assertEquals("link lost", afterSend.printReason)
         palletPrinter.defer("pal-1")
         val afterDefer = db.palletDao().get("pal-1")!!
-        assertEquals(PalletPrint.DEFERRED, afterDefer.printState)
+        assertEquals(PalletPrint.UNKNOWN, afterDefer.printState)
         assertEquals("link lost", afterDefer.printReason)
     }
 }

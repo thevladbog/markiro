@@ -123,10 +123,27 @@ that, by decoding the finished symbol with ZXing's decoder and expecting the mar
 its leading GS1 flag and every separator intact. What no test here can show is whether a printed
 symbol scans: module size against a real print head and real scanner optics is hardware validation.
 
-Printers live only on this device, in the `printers` table, following the rule stated in
-`apps/station/src/lib/hardware-config.ts`. Settings, then «Принтер», adds one over Wi-Fi by address
-or over Bluetooth from the paired devices, and prints a test label carrying a Cyrillic line and an
-SSCC barcode, which is the pair that can actually go wrong.
+Printers live only on this device. Settings → «Принтеры» keeps named Wi-Fi and Bluetooth
+profiles with their language and DPI. The hub and settings name the purposes affected by a known
+printer refusal; test and production status from an old snapshot cannot overwrite an edited endpoint.
+«Назначения» selects a printer independently for **Короб**,
+**Дубль кода**, and **Паллета**. One printer may serve all three. Adding a profile never changes
+assignments; «Не назначен» never falls back to another profile. Test printing belongs to the
+explicitly opened profile and leaves all three assignments intact.
+
+Room v12 adds `printer_assignments` and `print_destinations`. On upgrade, only the previously
+selected profile receives all three purposes once; other saved profiles and queued work survive.
+Without a selected profile, all purposes remain unassigned. A destination is saved before a new
+attempt can send. Changing, removing or reassigning a profile preserves prepared work's saved name,
+address, language and DPI. «Другой принтер» in recovery explicitly replaces one label's destination;
+previous snapshots remain local. Old jobs without a destination bind only when explicitly resumed. A job interrupted after preparing
+its bytes returns to «Этикетка подготовлена» with an explicit Continue action; it never sends on startup.
+Completed duplicate destinations are removed only with that job’s existing fully-settled retention
+transaction. Recovery observes only the current labels, rather than loading the historical job list.
+Status and output on a normalized physical endpoint are serialized, including profile tests.
+
+The profile test label carries Cyrillic text and an SSCC barcode. A test retry keeps its original
+profile snapshot even if that profile is edited while the outcome is unknown.
 
 A send has three outcomes and the last two differ in a way that matters: refused means nothing was
 printed and we know it, unknown means the bytes may or may not have arrived. Nothing resends from
@@ -183,8 +200,10 @@ use separate counters with labels above their values.
 **The bytes are prepared once and replayed**, never re-rendered — the opposite of the
 box label, which re-renders because «Другой принтер» may speak another language. The
 server holds a digest of these exact bytes and the domain refuses a reprint that alters
-them, which is also why a printer whose language or dpi no longer matches fails
-*before* sending (`printer_changed`) rather than printing something the digest disowns.
+them. A prepared attempt keeps the destination that produced those bytes. Changing an assignment
+therefore affects future jobs. An explicit replacement in recovery must match the saved language
+and DPI or fails before sending (`printer_changed`); choosing a replacement still requires the
+existing reprint reason. Unknown delivery can never be retried by an ordinary send.
 
 **An unknown delivery is resolved by scanning the sticker**, under either policy — the
 domain accepts `verified` out of `delivery_unknown` even when verification is `none`.
@@ -238,7 +257,10 @@ already on the server; the physical label is a debt the operator can see and set
 belongs to the device rather than to a shift, so it survives leaving one and closing one, and
 «Напечатать все» skips anything whose last attempt is `unknown` — a bulk retry there could put a
 second label on a box the server has accepted. A print the app died inside is read as `unknown` at
-startup, never resumed.
+startup, never resumed. Deferring an unknown outcome keeps it unknown, so it remains excluded
+from bulk retries. The bulk sender also checks the current persisted state at the send boundary.
+A new explicit reprint of a completed box uses the current box assignment; retries of pending
+labels retain their original destination until the operator chooses another printer.
 
 `closedAt` is persisted on the box row and is the label's date source. A reprint the next morning
 must carry the same «Дата производства» and «Годен до» as the first attempt, or one SSCC ends up on

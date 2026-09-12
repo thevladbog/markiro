@@ -47,6 +47,7 @@ import { TaskSelection } from "../pages/TaskSelection.js";
 import { UpdateCenter } from "../pages/UpdateCenter.js";
 import { WorkstationSetup } from "../pages/WorkstationSetup.js";
 import { BadgeScanIllustration } from "../ui/BadgeScanIllustration.js";
+import { PrinterDestination } from "../ui/PrinterDestination.js";
 import { BoxPrintRecovery } from "../ui/BoxPrintRecovery.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { FloorShell } from "../ui/FloorShell.js";
@@ -183,6 +184,7 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
   // inventory have header controls WITHOUT the shift-tied collapsed bar/label.
   const withActiveShiftControls =
     headerVariant !== null ||
+    fixture.kind === "setup" ||
     fixture.kind === "shift" ||
     fixture.kind === "inventory" ||
     rendersActiveShiftWorkScreen;
@@ -208,7 +210,7 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
               pending: false,
               error: headerVariant === "window-error" ? "exit" : null,
             }}
-            activeShift
+            activeShift={fixture.kind !== "setup"}
             onEnter={() => undefined}
             onExit={() => undefined}
             onDismissError={() => undefined}
@@ -227,11 +229,21 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
         lineName={headerVariant ? copy.longLine : copy.line}
         operatorName={headerVariant ? copy.longOperator : copy.operator}
         shiftLabel={
-          headerVariant ? copy.longShift : fixture.kind === "inventory" ? null : copy.shift
+          headerVariant
+            ? copy.longShift
+            : fixture.kind === "inventory" || fixture.kind === "setup"
+              ? null
+              : copy.shift
         }
         serverReachability={syncVariant === "offline" ? "unreachable" : "reachable"}
         scanner="connected"
-        printerConfigured
+        printerConfigured={fixture.kind !== "setup" || fixture.variant !== "printers-empty"}
+        {...(fixture.kind === "setup"
+          ? {
+              printerSummary: galleryPrinterSummary(fixture.variant, request.locale),
+              onOpenPrinters: () => undefined,
+            }
+          : {})}
         syncPending={syncVariant === "stuck" ? 18 : syncVariant === "offline" ? 7 : 0}
         syncStuck={syncVariant === "stuck"}
         conflicts={fixture.kind === "conflicts" ? 4 : 0}
@@ -286,7 +298,7 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
         <BoxFixture locale={locale} />
       );
     case "box-print-recovery":
-      return <BoxPrintRecoveryFixture variant={fixture.variant} />;
+      return <BoxPrintRecoveryFixture variant={fixture.variant} locale={locale} />;
     case "serial-recovery":
       return <SerialRecoveryFixture locale={locale} />;
     case "exception":
@@ -1572,6 +1584,8 @@ function ProductLabelFixture({ variant, locale }: { variant: string; locale: Gal
   // Visual-only fixture: production components receive safe views, never credentials or a transport.
   const work: ProductLabelWork = {
     getSnapshot: () => state,
+    printers: () => [],
+    changePreparedPrinter: async () => {},
     subscribe: () => () => {},
     setVerificationPaused: () => {},
     checkPrinter: () => {},
@@ -1877,7 +1891,9 @@ function BoxFixture({ locale }: { locale: GalleryLocale }) {
 
 const GALLERY_RECOVERY_SSCC = "046012345600000016";
 
-function BoxPrintRecoveryFixture({ variant }: { variant: string }) {
+function BoxPrintRecoveryFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
+  const printers = useMemo(() => galleryPrinterProfiles("printers", locale), [locale]);
+  const [printer, setPrinter] = useState(printers[0] ?? null);
   const rootRef = useRef<HTMLDivElement>(null);
   const errorCode = galleryRecoveryErrorCode(variant);
 
@@ -1891,6 +1907,21 @@ function BoxPrintRecoveryFixture({ variant }: { variant: string }) {
   return (
     <div ref={rootRef} className="gallery-production-recovery">
       <BoxPrintRecovery
+        {...(variant === "printer-destination"
+          ? {
+              destination: (
+                <PrinterDestination
+                  purpose="box"
+                  printer={printer}
+                  printers={printers}
+                  onChoose={(next) => {
+                    setPrinter(next);
+                    return Promise.resolve();
+                  }}
+                />
+              ),
+            }
+          : {})}
         sscc={GALLERY_RECOVERY_SSCC}
         errorCode={errorCode}
         pending={false}
@@ -1906,6 +1937,7 @@ function galleryRecoveryErrorCode(variant: string): BoxPrintErrorCode {
   if (variant === "template_missing") return "template_missing";
   if (variant === "printer_unconfigured") return "printer_unconfigured";
   if (variant === "render_failed") return "render_failed";
+  if (variant === "persistence_failed") return "persistence_failed";
   return "transport_failed";
 }
 
@@ -2186,12 +2218,68 @@ const GALLERY_SETUP_HARDWARE_CONFIG: HardwareConfig = {
 /** Answers exactly the `station_meta` query `loadHardwareConfig` issues (see
  * hardware-config.ts), so the real `WorkstationSetup` starts pre-configured
  * with a demo scanner and TCP printer without any local persistence. */
-function gallerySetupExecutor(): SqlExecutor {
+function galleryPrinterProfiles(variant: string, locale: GalleryLocale) {
+  const printerNames =
+    locale === "ru"
+      ? [
+          "Zebra у конвейера — короба готовой продукции",
+          "TSC у оператора — дубли кодов товара",
+          "Zebra у паллетизатора — отгрузка на склад",
+        ]
+      : [
+          "Zebra at conveyor — finished product boxes",
+          "TSC at operator — product code duplicates",
+          "Zebra at palletizer — warehouse shipments",
+        ];
+  const printers: NonNullable<HardwareConfig["printerRouting"]>["printers"] = Array.from(
+    { length: variant === "printers-empty" ? 0 : variant === "printers-many" ? 9 : 3 },
+    (_, index) => ({
+      id: `gallery-printer-${index}`,
+      name:
+        printerNames[index] ??
+        `${locale === "ru" ? "Резервный принтер" : "Spare printer"} ${index + 1} — ${"Warehouse-".repeat(4)}`,
+      target: { kind: "tcp", host: `192.168.10.${20 + index}`, port: 9100 },
+      language: index === 1 ? "tspl" : "zpl",
+      dpi: index === 1 ? 300 : 203,
+    }),
+  );
+  return printers;
+}
+
+function galleryPrinterSummary(variant: string, locale: GalleryLocale) {
+  const printers = galleryPrinterProfiles(variant, locale);
+  const t = i18n.getFixedT(locale);
+  return {
+    label: `${printers.length === 0 ? 0 : 3} / 3`,
+    detail: (["box", "duplicate", "pallet"] as const)
+      .map((purpose, index) => {
+        const printer = printers[variant.startsWith("printers") ? index : 0];
+        return `${t(`setup.printPurpose.${purpose}`)}: ${printer?.name ?? t("setup.printerNotAssigned")}`;
+      })
+      .join(" · "),
+  };
+}
+
+function gallerySetupExecutor(variant = "scanner", locale: GalleryLocale = "ru"): SqlExecutor {
+  const printers = galleryPrinterProfiles(variant, locale);
+  const config: HardwareConfig = variant.startsWith("printers")
+    ? {
+        ...GALLERY_SETUP_HARDWARE_CONFIG,
+        printerRouting: {
+          printers,
+          assignments: {
+            box: printers[0]?.id ?? null,
+            duplicate: printers[1]?.id ?? null,
+            pallet: printers[2]?.id ?? null,
+          },
+        },
+      }
+    : GALLERY_SETUP_HARDWARE_CONFIG;
   return {
     run: () => Promise.resolve(),
     all<T>(sql: string): Promise<T[]> {
       if (sql.includes("station_meta")) {
-        return Promise.resolve([{ value: JSON.stringify(GALLERY_SETUP_HARDWARE_CONFIG) }] as T[]);
+        return Promise.resolve([{ value: JSON.stringify(config) }] as T[]);
       }
       return Promise.resolve([]);
     },
@@ -2209,7 +2297,7 @@ function SetupFixture({ tab, locale }: { tab: string; locale: GalleryLocale }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const scanListenerRef = useRef<((raw: string) => void) | null>(null);
   const hw = useMemo(() => gallerySetupHardware(scanListenerRef), []);
-  const exec = useMemo(gallerySetupExecutor, []);
+  const exec = useMemo(() => gallerySetupExecutor(tab, locale), [tab, locale]);
   const [sound, setSound] = useState<SoundSettings>({ muted: false, volume: 0.7 });
 
   useLayoutEffect(() => {
@@ -2223,7 +2311,7 @@ function SetupFixture({ tab, locale }: { tab: string; locale: GalleryLocale }) {
     // print rendering its label bytes).
     const steps: (() => boolean)[] = [];
     if (tab !== "scanner") {
-      const label = tab === "printer" ? t("setup.printer") : t("setup.sound");
+      const label = tab.startsWith("printer") ? t("setup.printer") : t("setup.sound");
       steps.push(() => {
         const button = Array.from(root.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find(
           (candidate) => candidate.textContent?.trim() === label,
@@ -2245,6 +2333,12 @@ function SetupFixture({ tab, locale }: { tab: string; locale: GalleryLocale }) {
       });
     }
     if (tab === "printer") {
+      steps.push(() => {
+        const button = root.querySelector<HTMLButtonElement>(".setup-printer-row button");
+        if (!button || button.disabled) return false;
+        button.click();
+        return true;
+      });
       steps.push(() => {
         const button = Array.from(root.querySelectorAll<HTMLButtonElement>("button")).find(
           (candidate) => candidate.textContent?.trim() === t("setup.testPrint"),

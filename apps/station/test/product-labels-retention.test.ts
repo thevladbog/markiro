@@ -39,6 +39,7 @@ describe("retiring delivered local print payloads", () => {
     expect(await purgeCompletedProductLabelJobs(h.exec, h.input.credentialOwnership)).toBe(0);
     await h.exec.run("UPDATE shift_mirror SET status='closed'");
     expect(await purgeCompletedProductLabelJobs(h.exec, "other-owner")).toBe(0);
+    expect(await h.exec.all("SELECT * FROM printer_destinations")).toHaveLength(1);
     expect(await purgeCompletedProductLabelJobs(h.exec, h.input.credentialOwnership)).toBe(1);
     expect(await purgeCompletedProductLabelJobs(h.exec, h.input.credentialOwnership)).toBe(0);
     for (const table of [
@@ -47,6 +48,7 @@ describe("retiring delivered local print payloads", () => {
       "product_label_events",
       "product_label_event_commands",
       "product_label_receipts",
+      "printer_destinations",
     ]) {
       expect(await h.exec.all(`SELECT * FROM ${table}`)).toEqual([]);
     }

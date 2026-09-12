@@ -7,8 +7,13 @@ import app.markiro.handheld.core.label.LabelRenderException
 import app.markiro.handheld.core.label.LabelRenderer
 import app.markiro.handheld.core.label.LabelSpecCodec
 import app.markiro.handheld.core.label.PrinterLanguage
+import app.markiro.handheld.core.print.PrintDestinations
+import app.markiro.handheld.core.print.PrintPurpose
+import app.markiro.handheld.core.print.assigned
 import app.markiro.handheld.core.print.NotReadyReason
 import app.markiro.handheld.core.print.PrinterStatus
+import app.markiro.handheld.core.print.statusRemembered
+import app.markiro.handheld.core.print.sendRemembered
 import app.markiro.handheld.core.print.PrinterTransport
 import app.markiro.handheld.core.print.SendOutcome
 import app.markiro.handheld.core.storage.HandheldDatabase
@@ -99,7 +104,7 @@ class DuplicateJobs(
      * accepted rather than halfway through it.
      */
     suspend fun preflight(shift: ShiftEntity): String? {
-        db.printerDao().selected() ?: return DuplicateReason.PRINTER_UNCONFIGURED
+        db.printerDao().assigned(PrintPurpose.DUPLICATE) ?: return DuplicateReason.PRINTER_UNCONFIGURED
         val template = shift.duplicateTemplate ?: return DuplicateReason.TEMPLATE_MISSING
         // Every event quotes the policy revision and the template digest. A row
         // missing either cannot produce one, and finding that out inside the
@@ -168,7 +173,7 @@ class DuplicateJobs(
         if (db.productLabelJobDao().openJob(shift.id) != null) {
             return DuplicateOutcome.Refused(DuplicateReason.JOB_OUTSTANDING)
         }
-        val printer = db.printerDao().selected() ?: return DuplicateOutcome.Refused(DuplicateReason.PRINTER_UNCONFIGURED)
+        val printer = db.printerDao().assigned(PrintPurpose.DUPLICATE) ?: return DuplicateOutcome.Refused(DuplicateReason.PRINTER_UNCONFIGURED)
         val template = shift.duplicateTemplate ?: return DuplicateOutcome.Refused(DuplicateReason.TEMPLATE_MISSING)
         val spec = try {
             LabelSpecCodec.parse(template)
@@ -218,6 +223,7 @@ class DuplicateJobs(
         val projection = applyProductLabelEvent(null, event, verification)
 
         db.recovery.commit {
+            PrintDestinations(db).retain(PrintPurpose.DUPLICATE, jobId, attemptId, printer)
             db.productLabelJobDao().insert(
                 ProductLabelJobEntity(
                     jobId = jobId,
@@ -256,27 +262,36 @@ class DuplicateJobs(
      * printer that no longer matches could never be reprinted afterwards -- the
      * refusal here is what keeps it out of that dead end.
      */
-    suspend fun send(jobId: String): DuplicateSend = db.recovery.printing { sendOwned(jobId) }
+    suspend fun send(jobId: String, resumeLegacy: Boolean = false): DuplicateSend = db.recovery.printing { sendOwned(jobId, resumeLegacy) }
 
-    private suspend fun sendOwned(jobId: String): DuplicateSend = mutex.withLock {
+    private suspend fun sendOwned(jobId: String, resumeLegacy: Boolean): DuplicateSend = mutex.withLock {
         val job = db.productLabelJobDao().get(jobId) ?: return DuplicateSend.Failed(DuplicateReason.RENDER_FAILED)
+        if (job.attemptState != AttemptState.PREPARED) return DuplicateSend.Failed(DuplicateReason.ATTEMPT_IN_FLIGHT)
         val bytes = job.bytesBase64?.let { Base64.decode(it, Base64.NO_WRAP) }
             ?: return fail(job, DuplicateReason.RENDER_FAILED)
-        val printer = db.printerDao().selected() ?: return fail(job, DuplicateReason.PRINTER_UNCONFIGURED)
+        val destinations = PrintDestinations(db)
+        val printer = destinations.get(PrintPurpose.DUPLICATE, jobId, job.attemptId)
+            ?: if (resumeLegacy) {
+                val candidate = db.printerDao().assigned(PrintPurpose.DUPLICATE)
+                    ?: return fail(job, DuplicateReason.PRINTER_UNCONFIGURED)
+                if (candidate.language != job.language || candidate.dpi != job.dpi) return fail(job, DuplicateReason.PRINTER_CHANGED)
+                destinations.retain(PrintPurpose.DUPLICATE, jobId, job.attemptId, candidate)
+            } else null
+        if (printer == null) return fail(job, DuplicateReason.PRINTER_UNCONFIGURED)
         if (printer.language != job.language || printer.dpi != job.dpi) {
             return fail(job, DuplicateReason.PRINTER_CHANGED)
         }
 
         // Asked before sending, so a refusal carries the printer's own reason
         // rather than a generic timeout.
-        val status = transport.status(printer)
+        val status = transport.statusRemembered(printer, db.printerDao(), db.recovery)
         if (status is PrinterStatus.NotReady) return fail(job, status.reason.wire())
 
         val sending = append(job, EventKind.SENDING)
         if (!db.recovery.valid(checkNotNull(app.markiro.handheld.core.storage.DeviceRecovery.generationContext.get()))) {
             throw app.markiro.handheld.core.storage.RecoveryBlocked()
         }
-        return when (val outcome = transport.send(printer, bytes)) {
+        return when (val outcome = transport.sendRemembered(printer, bytes, db.printerDao(), db.recovery)) {
             SendOutcome.Delivered -> {
                 append(sending, EventKind.SENT)
                 db.productLabelJobDao().setLastFailure(job.jobId, null)
@@ -364,10 +379,22 @@ class DuplicateJobs(
      * whose bytes retention has dropped can no longer be reprinted at all
      * rather than being re-rendered into a symbol the stored digest disowns.
      */
-    suspend fun reprint(jobId: String, reason: String): DuplicateOutcome = db.recovery.commit { reprintOwned(jobId, reason) }
+    suspend fun reprint(jobId: String, reason: String, replacementPrinterId: String? = null): DuplicateOutcome = db.recovery.commit { reprintOwned(jobId, reason, replacementPrinterId) }
 
-    private suspend fun reprintOwned(jobId: String, reason: String): DuplicateOutcome = mutex.withLock {
-        val job = db.productLabelJobDao().get(jobId) ?: return DuplicateOutcome.Refused(DuplicateReason.BYTES_GONE)
+    private suspend fun reprintOwned(jobId: String, reason: String, replacementPrinterId: String?): DuplicateOutcome = mutex.withLock {
+        var job = db.productLabelJobDao().get(jobId) ?: return DuplicateOutcome.Refused(DuplicateReason.BYTES_GONE)
+        if (reason !in setOf(ReprintReason.NOT_PRINTED, ReprintReason.DAMAGED, ReprintReason.LOST)) {
+            return DuplicateOutcome.Refused(DuplicateReason.POLICY_INCOMPLETE)
+        }
+        val destinations = PrintDestinations(db)
+        val target = if (replacementPrinterId != null) db.printerDao().get(replacementPrinterId)
+            else destinations.get(PrintPurpose.DUPLICATE, jobId, job.attemptId) ?: db.printerDao().assigned(PrintPurpose.DUPLICATE)
+        if (target == null) return DuplicateOutcome.Refused(DuplicateReason.PRINTER_UNCONFIGURED)
+        if (target.language != job.language || target.dpi != job.dpi) return DuplicateOutcome.Refused(DuplicateReason.PRINTER_CHANGED)
+        // A refused status query never sent bytes; an explicit replacement closes that unsent attempt first.
+        if (replacementPrinterId != null && job.attemptState == AttemptState.PREPARED) {
+            job = append(job, EventKind.FAILED_BEFORE_SEND, errorCode = DuplicateReason.PRINTER_CHANGED)
+        }
         if (job.bytesBase64 == null) return DuplicateOutcome.Refused(DuplicateReason.BYTES_GONE)
         if (job.attemptState == AttemptState.PREPARED || job.attemptState == AttemptState.SENDING) {
             return DuplicateOutcome.Refused(DuplicateReason.ATTEMPT_IN_FLIGHT)
@@ -396,6 +423,7 @@ class DuplicateJobs(
         )
         val projection = applyProductLabelEvent(job.toProjection(), event, job.verification)
         db.recovery.commit {
+            destinations.retain(PrintPurpose.DUPLICATE, jobId, event.attemptId, target)
             db.productLabelJobDao().update(
                 job.copy(
                     latestSequence = projection.latestSequence,

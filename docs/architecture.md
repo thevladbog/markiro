@@ -105,6 +105,16 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
 
 ### Product Data Matrix duplicate labels
 
+Station and handheld keep local printer profiles with separate box, product-duplicate
+and pallet assignments. One profile can serve several purposes. Existing single-printer
+settings migrate to all three assignments; an explicit unassigned purpose has no
+fallback. A prepared label retains its printer snapshot independently of later settings
+changes. Recovery may explicitly select a replacement; duplicate labels require the
+saved language/DPI and replay their original bytes with a reprint reason. Sends are
+serialized per physical endpoint, including test labels. Local destination metadata
+retires with the existing print-job retention rules and never enters server event digests.
+See [device printer routing](superpowers/specs/2026-09-13-device-printer-routing-design.md).
+
 A validation shift can print one duplicate of the full product Data Matrix on its
 outer packaging. This does not create another product unit, SSCC or aggregation.
 The administrator or station operator chooses `validationPrint` before activation:

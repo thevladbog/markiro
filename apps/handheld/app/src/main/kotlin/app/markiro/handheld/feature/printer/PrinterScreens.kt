@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -19,6 +20,10 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,15 +48,21 @@ import app.markiro.handheld.core.print.DiscoveredPrinter
 import app.markiro.handheld.core.print.NotReadyReason
 import app.markiro.handheld.core.print.PRINTER_TIMEOUT_MS
 import app.markiro.handheld.core.print.PrinterEntity
+import app.markiro.handheld.core.print.PrintPurpose
+import app.markiro.handheld.core.print.PrinterRouting
 
 data class PrinterListCallbacks(
     val onBack: () -> Unit = {},
     val onSelect: (String) -> Unit = {},
-    val onTest: () -> Unit = {},
+    val onTest: (String) -> Unit = {},
+    val onAssignments: () -> Unit = {},
+    val onEdit: (String) -> Unit = {},
     val onAdd: () -> Unit = {},
 )
 
 data class AddPrinterCallbacks(
+    val onName: (String) -> Unit = {},
+    val onRemove: () -> Unit = {},
     val onBack: () -> Unit = {},
     val onTransport: (TransportKind) -> Unit = {},
     val onHost: (String) -> Unit = {},
@@ -81,66 +92,127 @@ data class PrinterErrorCallbacks(
     val onEdit: () -> Unit = {},
 )
 
+private fun printerStatusLabel(status: String?): Int? = when (status) {
+    "no_paper" -> R.string.printer_no_paper
+    "head_open" -> R.string.printer_head_open
+    "unreachable" -> R.string.print_reason_unreachable
+    "other" -> R.string.printer_not_ready
+    "unknown" -> R.string.printer_test_unknown_title
+    else -> null
+}
+
+fun purposeLabel(purpose: PrintPurpose): Int = when (purpose) {
+    PrintPurpose.BOX -> R.string.printer_purpose_box
+    PrintPurpose.DUPLICATE -> R.string.printer_purpose_duplicate
+    PrintPurpose.PALLET -> R.string.printer_purpose_pallet
+}
+
 @Composable
 fun PrinterListScreen(state: PrinterUi, cb: PrinterListCallbacks) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    Column(Modifier.fillMaxSize().background(c.surfacePage).verticalScroll(rememberScrollState())) {
-        AppBar(stringResource(R.string.printer_title), cb.onBack)
-        Column(
-            Modifier.padding(horizontal = MarkiroSizes.sp4),
-            verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2),
-        ) {
-            state.selected?.let { printer ->
-                Text(stringResource(R.string.printer_selected), style = t.label, color = c.fg3)
-                PrinterRow(printer, selected = true, onClick = {})
-            }
-            val others = state.printers.filterNot { it.selected }
-            if (others.isNotEmpty()) {
-                Text(stringResource(R.string.printer_available), style = t.label, color = c.fg3)
-                others.forEach { printer ->
-                    PrinterRow(printer, selected = false, onClick = { cb.onSelect(printer.id) })
+    val routing = PrinterRouting(state.printers, state.assignments)
+    Column(Modifier.fillMaxSize().background(c.surfacePage)) {
+        AppBar(stringResource(R.string.printers_title), cb.onBack)
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = MarkiroSizes.sp4),
+            verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+            Text(stringResource(R.string.printer_profiles_hint), style = t.caption, color = c.fg2)
+            if (state.printers.isEmpty()) Text(stringResource(R.string.printer_profiles_empty), style = t.body, color = c.fg2)
+            state.printers.forEach { printer ->
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(MarkiroSizes.radius))
+                    .background(c.surfaceCard).border(1.dp, c.line, RoundedCornerShape(MarkiroSizes.radius))
+                    .padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(printer.name, style = t.strong, color = c.fg1)
+                    Text("${if (printer.transport == "bluetooth") "Bluetooth" else "Wi-Fi"} · ${printer.address}", style = t.caption, color = c.fg2)
+                    Text(stringResource(R.string.printer_language_dpi_value, printer.language.uppercase(), printer.dpi), style = t.caption, color = c.fg3)
+                    printerStatusLabel(printer.lastStatus)?.let { label -> Text(stringResource(label), style = t.caption, color = c.tone(Tone.Err).fg) }
+                    val purposes = PrintPurpose.entries.filter { routing.resolve(it)?.id == printer.id }
+                    Text(if (purposes.isEmpty()) stringResource(R.string.printer_no_purposes)
+                        else purposes.map { stringResource(purposeLabel(it)) }.joinToString(" · "), style = t.caption, color = c.accent)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ProfileAction(stringResource(R.string.printer_edit), Modifier.weight(1f)) { cb.onEdit(printer.id) }
+                        ProfileAction(stringResource(R.string.printer_test_short), Modifier.weight(1f)) { cb.onTest(printer.id) }
+                    }
                 }
             }
-            state.selected?.let { printer ->
-                SettingRow(
-                    stringResource(R.string.printer_language_and_dpi),
-                    stringResource(R.string.printer_language_dpi_value, printer.language.uppercase(), printer.dpi),
-                ) {}
-                PrimaryButton(stringResource(R.string.printer_test), cb.onTest)
-            }
-            MarkiroTextButton(stringResource(R.string.printer_add_by_address), cb.onAdd)
+        }
+        Column(Modifier.fillMaxWidth().padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            PrimaryButton(stringResource(R.string.printer_assignments), cb.onAssignments)
+            SecondaryButton(stringResource(R.string.printer_add_by_address), cb.onAdd)
         }
     }
 }
 
 @Composable
-private fun PrinterRow(printer: PrinterEntity, selected: Boolean, onClick: () -> Unit) {
+private fun ProfileAction(label: String, modifier: Modifier, onClick: () -> Unit) {
+    Box(modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(MarkiroSizes.radius))
+        .background(MarkiroTheme.colors.surfacePanel).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Text(label, style = MarkiroTheme.type.label, color = MarkiroTheme.colors.fg1)
+    }
+}
+
+@Composable
+fun PrinterAssignmentsScreen(state: PrinterUi, onBack: () -> Unit, onAssign: (PrintPurpose, String?) -> Unit) {
+    var choosing by remember { mutableStateOf<PrintPurpose?>(null) }
+    val current = choosing
+    val routing = PrinterRouting(state.printers, state.assignments)
+    if (current != null) {
+        PrinterChoiceScreen(current, state.printers, routing.resolve(current)?.id, { choosing = null }) {
+            onAssign(current, it)
+            choosing = null
+        }
+        return
+    }
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    val shape = RoundedCornerShape(MarkiroSizes.radius)
-    Row(
-        Modifier.fillMaxWidth().clip(shape).background(c.surfaceCard)
-            .border(1.dp, if (selected) c.accent else c.line, shape)
-            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3),
-    ) {
-        Box(
-            Modifier.size(22.dp).clip(CircleShape).border(2.dp, if (selected) c.accent else c.lineStrong, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) { if (selected) Box(Modifier.size(10.dp).clip(CircleShape).background(c.accent)) }
-        Column(Modifier.weight(1f)) {
-            Text(printer.name, style = t.body, color = c.fg1)
-            Text(
-                listOfNotNull(
-                    if (printer.transport == "bluetooth") "Bluetooth" else "Wi-Fi",
-                    printer.address,
-                    printer.lastStatus,
-                ).joinToString(" · "),
-                style = t.caption,
-                color = c.fg2,
-            )
+    Column(Modifier.fillMaxSize().background(c.surfacePage)) {
+        AppBar(stringResource(R.string.printer_assignments), onBack)
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(MarkiroSizes.sp4),
+            verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
+            Text(stringResource(R.string.printer_assignments_hint), style = t.body, color = c.fg2)
+            PrintPurpose.entries.forEach { purpose ->
+                val printer = routing.resolve(purpose)
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(MarkiroSizes.radius)).background(c.surfaceCard)
+                    .border(1.dp, c.line, RoundedCornerShape(MarkiroSizes.radius)).clickable { choosing = purpose }
+                    .padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(stringResource(purposeLabel(purpose)), style = t.label, color = c.fg3)
+                    Text(printer?.name ?: stringResource(R.string.printer_unassigned), style = t.strong,
+                        color = if (printer == null) c.tone(Tone.Warn).fg else c.fg1)
+                    printer?.let { Text(it.address, style = t.caption, color = c.fg2) }
+                    printerStatusLabel(printer?.lastStatus)?.let { label -> Text(stringResource(label), style = t.caption, color = c.tone(Tone.Err).fg) }
+                    Text(stringResource(R.string.printer_choose), style = t.caption, color = c.fg2)
+                }
+            }
+        }
+    }
+}
+
+/** Used both by assignment settings and by explicit recovery of a single label. */
+@Composable
+fun PrinterChoiceScreen(
+    purpose: PrintPurpose,
+    printers: List<PrinterEntity>,
+    selectedId: String?,
+    onBack: () -> Unit,
+    allowUnassigned: Boolean = true,
+    onManage: (() -> Unit)? = null,
+    onPick: (String?) -> Unit,
+) {
+    val c = MarkiroTheme.colors
+    Column(Modifier.fillMaxSize().background(c.surfacePage)) {
+        AppBar(stringResource(purposeLabel(purpose)), onBack)
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(MarkiroSizes.sp4),
+            verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+            if (!allowUnassigned) Text(stringResource(if (purpose == PrintPurpose.DUPLICATE) R.string.printer_duplicate_compatible else R.string.printer_recovery_hint),
+                style = MarkiroTheme.type.caption, color = c.fg2)
+            if (allowUnassigned) ChoiceRow(stringResource(R.string.printer_unassigned), stringResource(R.string.printer_no_fallback), selectedId == null) { onPick(null) }
+            if (printers.isEmpty()) Text(stringResource(R.string.printer_profiles_empty), style = MarkiroTheme.type.body, color = c.fg2)
+            printers.forEach { printer ->
+                ChoiceRow(printer.name, "${printer.address} · ${printer.language.uppercase()} ${printer.dpi} dpi", printer.id == selectedId) { onPick(printer.id) }
+            }
+        }
+        if (onManage != null) Column(Modifier.padding(MarkiroSizes.sp4)) {
+            SecondaryButton(stringResource(R.string.printers_title), onManage)
         }
     }
 }
@@ -149,22 +221,17 @@ private fun PrinterRow(printer: PrinterEntity, selected: Boolean, onClick: () ->
 fun AddPrinterScreen(form: AddPrinterForm, cb: AddPrinterCallbacks) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    Column(Modifier.fillMaxSize().background(c.surfacePage).verticalScroll(rememberScrollState())) {
-        AppBar(stringResource(R.string.printer_add_title), cb.onBack)
+    Column(Modifier.fillMaxSize().background(c.surfacePage)) {
+        AppBar(stringResource(if (form.id == null) R.string.printer_add_title else R.string.printer_edit), cb.onBack)
         Column(
-            Modifier.padding(horizontal = MarkiroSizes.sp4),
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = MarkiroSizes.sp4),
             verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2),
         ) {
-            ChoiceRow(
-                stringResource(R.string.printer_transport_wifi),
-                stringResource(R.string.printer_transport_wifi_hint),
-                form.transport == TransportKind.WIFI,
-            ) { cb.onTransport(TransportKind.WIFI) }
-            ChoiceRow(
-                stringResource(R.string.printer_transport_bluetooth),
-                stringResource(R.string.printer_transport_bluetooth_hint),
-                form.transport == TransportKind.BLUETOOTH,
-            ) { cb.onBluetooth() }
+            Field(stringResource(R.string.printer_name), form.name, Modifier.fillMaxWidth(), cb.onName)
+            Segmented(listOf(stringResource(R.string.printer_transport_wifi) to TransportKind.WIFI,
+                stringResource(R.string.printer_transport_bluetooth) to TransportKind.BLUETOOTH), form.transport) {
+                if (it == TransportKind.BLUETOOTH) cb.onBluetooth() else cb.onTransport(it)
+            }
 
             if (form.transport == TransportKind.WIFI) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
@@ -184,7 +251,10 @@ fun AddPrinterScreen(form: AddPrinterForm, cb: AddPrinterCallbacks) {
             form.error?.let { reason ->
                 Text(stringResource(reasonLabel(reason)), style = t.strong, color = c.tone(Tone.Err).fg)
             }
-            PrimaryButton(stringResource(R.string.printer_check), cb.onCheck, enabled = !form.checking)
+        }
+        Column(Modifier.fillMaxWidth().padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            PrimaryButton(stringResource(R.string.printer_check), cb.onCheck, enabled = !form.checking && form.host.isNotBlank())
+            if (form.id != null) MarkiroTextButton(stringResource(R.string.printer_remove), cb.onRemove)
         }
     }
 }
@@ -199,6 +269,7 @@ fun BluetoothPairScreen(state: PrinterUi, cb: BluetoothPairCallbacks) {
             Modifier.padding(horizontal = MarkiroSizes.sp4),
             verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2),
         ) {
+            if (state.addressConflict) Text(stringResource(R.string.printer_address_exists), style = t.body, color = c.tone(Tone.Err).fg)
             if (state.permissionNeeded) {
                 Text(stringResource(R.string.printer_bluetooth_permission), style = t.body, color = c.fg2)
                 PrimaryButton(stringResource(R.string.printer_bluetooth_grant), cb.onGrant)
@@ -336,7 +407,7 @@ private fun ChoiceRow(label: String, sub: String, selected: Boolean, onClick: ()
             Modifier.size(22.dp).clip(CircleShape).border(2.dp, if (selected) c.accent else c.lineStrong, CircleShape),
             contentAlignment = Alignment.Center,
         ) { if (selected) Box(Modifier.size(10.dp).clip(CircleShape).background(c.accent)) }
-        Column {
+        Column(Modifier.weight(1f)) {
             Text(label, style = t.body, color = c.fg1)
             Text(sub, style = t.caption, color = c.fg2)
         }

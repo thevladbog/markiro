@@ -43,6 +43,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -256,6 +258,15 @@ class WorkViewModel(
     private val duplicateUi = MutableStateFlow<DuplicateUi?>(null)
 
     /** Boxes and pallets share one debt: an operator settling labels should not care which one a row is. */
+    val printerProfiles = db.printerDao().observeAll().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val printDestinations = combine(closeStep, palletCloseStep, duplicateStep) { box, pallet, duplicate ->
+        Triple(box.closedBox()?.boxId, pallet.closedPallet()?.palletId, duplicate.jobId())
+    }.distinctUntilChanged().flatMapLatest { (boxId, palletId, duplicateId) ->
+        db.printerDao().observeActiveDestinations(boxId, palletId, duplicateId)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val duplicateJob = db.productLabelJobDao().observeOpen(shiftId).stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     private val unprintedLabels = combine(boxes.observeUnprintedCount(), pallets.observeUnprintedCount()) { b, p -> b + p }
 
     /**
@@ -532,7 +543,7 @@ class WorkViewModel(
         }
     }
 
-    private suspend fun attempt(closed: ClosedBoxUi): BoxCloseStep = when (val printed = boxPrinter.print(closed.boxId)) {
+    private suspend fun attempt(closed: ClosedBoxUi, replacementPrinterId: String? = null, explicitRetry: Boolean = false): BoxCloseStep = when (val printed = boxPrinter.print(closed.boxId, replacementPrinterId, allowUnknown = explicitRetry)) {
         PrintOutcome.Printed -> BoxCloseStep.Printed(closed)
         is PrintOutcome.Failed -> BoxCloseStep.Failed(closed, printed.reason)
         is PrintOutcome.Unknown -> BoxCloseStep.Unknown(closed, printed.cause)
@@ -590,19 +601,30 @@ class WorkViewModel(
         sync.nudge()
     }
 
-    private suspend fun attemptPalletPrint(closed: ClosedPalletUi): PalletCloseStep =
-        when (val printed = palletPrinter.print(closed.palletId)) {
+    private suspend fun attemptPalletPrint(closed: ClosedPalletUi, replacementPrinterId: String? = null, explicitRetry: Boolean = false): PalletCloseStep =
+        when (val printed = palletPrinter.print(closed.palletId, replacementPrinterId, allowUnknown = explicitRetry)) {
             PrintOutcome.Printed -> PalletCloseStep.Printed(closed)
             is PrintOutcome.Failed -> PalletCloseStep.Failed(closed, printed.reason)
             is PrintOutcome.Unknown -> PalletCloseStep.Unknown(closed, printed.cause)
         }
 
     /** An explicit second send, chosen by a person who has looked at the printer. */
-    fun retryPalletPrint() {
+    private val retryingPallet = AtomicBoolean(false)
+    fun retryPalletPrint(replacementPrinterId: String? = null) {
         val closed = _palletCloseStep.value.closedPallet() ?: return
+        if (!retryingPallet.compareAndSet(false, true)) return
         viewModelScope.launch { db.recovery.work(generation) {
-            _palletCloseStep.value = PalletCloseStep.Printing(closed)
-            _palletCloseStep.value = attemptPalletPrint(closed)
+            try {
+                val row = db.palletDao().get(closed.palletId)
+                if (row?.printState == app.markiro.handheld.core.storage.PalletPrint.UNKNOWN) {
+                    exceptions.reprintPallet(row.shiftId, row.palletId, ReprintReason.PRINT_OUTCOME_UNKNOWN,
+                        session.state.value.operator?.operatorId, db.deviceConfigDao().get()?.deviceId)
+                }
+                _palletCloseStep.value = PalletCloseStep.Printing(closed)
+                _palletCloseStep.value = attemptPalletPrint(closed, replacementPrinterId, explicitRetry = true)
+            } finally {
+                retryingPallet.set(false)
+            }
         } }
     }
 
@@ -640,7 +662,7 @@ class WorkViewModel(
     }
 
     /** An explicit second send, chosen by a person who has looked at the printer. */
-    fun retryPrint() {
+    fun retryPrint(replacementPrinterId: String? = null) {
         val closed = _closeStep.value.closedBox() ?: return
         // Two taps would both read the same `unknown` state before the first
         // print updated it, and each would write its own reprint fact.
@@ -649,7 +671,7 @@ class WorkViewModel(
             try {
                 auditIfOutcomeUnknown(closed.boxId)
                 _closeStep.value = BoxCloseStep.Printing(closed)
-                _closeStep.value = attempt(closed)
+                _closeStep.value = attempt(closed, replacementPrinterId, explicitRetry = true)
             } finally {
                 retrying.set(false)
             }
@@ -731,6 +753,7 @@ class WorkViewModel(
         return when (job.status) {
             JobStatus.PREPARED, JobStatus.SENDING -> {
                 refuse()
+                if (job.status == JobStatus.PREPARED) restoreDuplicateStep()
                 true
             }
             JobStatus.AWAITING_VERIFICATION -> {
@@ -781,6 +804,7 @@ class WorkViewModel(
             // `prepared` -- «нет бумаги» is no event at all. The job row is the
             // only record that it needs a person.
             job.lastFailure != null -> DuplicateStep.Failed(job.jobId, job.lastFailure)
+            job.attemptState == app.markiro.handheld.core.duplicate.AttemptState.PREPARED -> DuplicateStep.ReadyToResume(job.jobId)
             else -> _duplicateStep.value
         }
     }
@@ -825,10 +849,13 @@ class WorkViewModel(
                 refreshDuplicate()
                 return
             }
-            is DuplicateOutcome.Prepared -> when (val sent = duplicates.send(prepared.jobId)) {
-                DuplicateSend.Sent -> _duplicateStep.value = DuplicateStep.Idle
-                is DuplicateSend.Failed -> _duplicateStep.value = DuplicateStep.Failed(prepared.jobId, sent.reason)
-                is DuplicateSend.Unknown -> _duplicateStep.value = DuplicateStep.Unknown(prepared.jobId, sent.cause)
+            is DuplicateOutcome.Prepared -> {
+                _duplicateStep.value = DuplicateStep.Sending(prepared.jobId)
+                when (val sent = duplicates.send(prepared.jobId)) {
+                    DuplicateSend.Sent -> _duplicateStep.value = DuplicateStep.Idle
+                    is DuplicateSend.Failed -> _duplicateStep.value = DuplicateStep.Failed(prepared.jobId, sent.reason)
+                    is DuplicateSend.Unknown -> _duplicateStep.value = DuplicateStep.Unknown(prepared.jobId, sent.cause)
+                }
             }
         }
         refreshDuplicate()
@@ -852,9 +879,9 @@ class WorkViewModel(
     fun retryDuplicate() {
         val jobId = _duplicateStep.value.jobId() ?: return
         viewModelScope.launch { db.recovery.work(generation) {
-            _duplicateStep.value = DuplicateStep.Idle
-            when (val sent = duplicates.send(jobId)) {
-                DuplicateSend.Sent -> Unit
+            _duplicateStep.value = DuplicateStep.Sending(jobId)
+            when (val sent = duplicates.send(jobId, resumeLegacy = true)) {
+                DuplicateSend.Sent -> _duplicateStep.value = DuplicateStep.Idle
                 is DuplicateSend.Failed -> _duplicateStep.value = DuplicateStep.Failed(jobId, sent.reason)
                 is DuplicateSend.Unknown -> _duplicateStep.value = DuplicateStep.Unknown(jobId, sent.cause)
             }
@@ -863,15 +890,15 @@ class WorkViewModel(
         } }
     }
 
-    fun reprintDuplicate(reason: String) {
+    fun reprintDuplicate(reason: String, replacementPrinterId: String? = null) {
         val jobId = _duplicateStep.value.jobId() ?: return
         viewModelScope.launch { db.recovery.work(generation) {
-            when (val outcome = duplicates.reprint(jobId, reason)) {
+            when (val outcome = duplicates.reprint(jobId, reason, replacementPrinterId)) {
                 is DuplicateOutcome.Refused -> _duplicateStep.value = DuplicateStep.Failed(jobId, outcome.reason)
                 is DuplicateOutcome.Prepared -> {
-                    _duplicateStep.value = DuplicateStep.Idle
+                    _duplicateStep.value = DuplicateStep.Sending(jobId)
                     when (val sent = duplicates.send(jobId)) {
-                        DuplicateSend.Sent -> Unit
+                        DuplicateSend.Sent -> _duplicateStep.value = DuplicateStep.Idle
                         is DuplicateSend.Failed -> _duplicateStep.value = DuplicateStep.Failed(jobId, sent.reason)
                         is DuplicateSend.Unknown -> _duplicateStep.value = DuplicateStep.Unknown(jobId, sent.cause)
                     }

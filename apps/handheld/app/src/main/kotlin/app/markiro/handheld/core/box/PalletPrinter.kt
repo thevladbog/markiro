@@ -4,8 +4,13 @@ import app.markiro.handheld.core.label.LabelRenderException
 import app.markiro.handheld.core.label.LabelRenderer
 import app.markiro.handheld.core.label.LabelSpecCodec
 import app.markiro.handheld.core.label.PrinterLanguage
+import app.markiro.handheld.core.print.PrintDestinations
+import app.markiro.handheld.core.print.assigned
+import app.markiro.handheld.core.print.PrintPurpose
 import app.markiro.handheld.core.print.NotReadyReason
 import app.markiro.handheld.core.print.PrinterStatus
+import app.markiro.handheld.core.print.statusRemembered
+import app.markiro.handheld.core.print.sendRemembered
 import app.markiro.handheld.core.print.PrinterTransport
 import app.markiro.handheld.core.print.SendOutcome
 import app.markiro.handheld.core.storage.HandheldDatabase
@@ -32,15 +37,29 @@ class PalletPrinter(
     private val renderer: LabelRenderer,
     private val transport: PrinterTransport,
 ) {
-    suspend fun print(palletId: String): PrintOutcome = db.recovery.printing { printOwned(palletId) }
+    suspend fun print(palletId: String, replacementPrinterId: String? = null, allowUnknown: Boolean = false, reprint: Boolean = false): PrintOutcome = db.recovery.printing {
+        if (replacementPrinterId != null) {
+            val replacement = db.printerDao().get(replacementPrinterId)
+                ?: return@printing PrintOutcome.Failed(PrintReason.PRINTER_UNCONFIGURED)
+            PrintDestinations(db).replace(PrintPurpose.PALLET, palletId, "initial", replacement)
+        }
+        printOwned(palletId, allowUnknown, reprint, replacementPrinterId != null)
+    }
 
-    private suspend fun printOwned(palletId: String): PrintOutcome {
+    private suspend fun printOwned(palletId: String, allowUnknown: Boolean, reprint: Boolean, replaced: Boolean): PrintOutcome {
         val pallet = db.palletDao().get(palletId) ?: return fail(palletId, PrintReason.PALLET_MISSING)
+        if (pallet.printState == PalletPrint.PRINTED && !reprint && !replaced) return PrintOutcome.Printed
+        if (pallet.printState == PalletPrint.UNKNOWN && !allowUnknown) return PrintOutcome.Unknown(pallet.printReason ?: "interrupted")
         val closedAt = pallet.closedAt ?: return fail(palletId, PrintReason.PALLET_OPEN)
         val sscc = pallet.sscc ?: return fail(palletId, PrintReason.PALLET_OPEN)
         val shift = db.shiftDao().get(pallet.shiftId) ?: return fail(palletId, PrintReason.SHIFT_MISSING)
         val templateJson = shift.palletLabelTemplateSpec ?: return fail(palletId, PrintReason.TEMPLATE_MISSING)
-        val printer = db.printerDao().selected() ?: return fail(palletId, PrintReason.PRINTER_UNCONFIGURED)
+        val destinations = PrintDestinations(db)
+        if (reprint && pallet.printState == PalletPrint.PRINTED && !replaced) {
+            val current = db.printerDao().assigned(PrintPurpose.PALLET) ?: return fail(palletId, PrintReason.PRINTER_UNCONFIGURED)
+            destinations.replace(PrintPurpose.PALLET, palletId, "initial", current)
+        }
+        val printer = destinations.retain(PrintPurpose.PALLET, palletId) ?: return fail(palletId, PrintReason.PRINTER_UNCONFIGURED)
 
         val spec = try {
             LabelSpecCodec.parse(templateJson)
@@ -51,7 +70,7 @@ class PalletPrinter(
         // Asked before sending, so a refusal carries the printer's own reason
         // rather than a generic timeout -- the only reason «Нет бумаги» can
         // exist as a state at all.
-        val status = transport.status(printer)
+        val status = transport.statusRemembered(printer, db.printerDao(), db.recovery)
         if (status is PrinterStatus.NotReady) return fail(palletId, status.reason.wire())
 
         val fields = palletLabelFields(
@@ -82,7 +101,7 @@ class PalletPrinter(
         if (!db.recovery.valid(checkNotNull(app.markiro.handheld.core.storage.DeviceRecovery.generationContext.get()))) {
             throw app.markiro.handheld.core.storage.RecoveryBlocked()
         }
-        return when (val outcome = transport.send(printer, document)) {
+        return when (val outcome = transport.sendRemembered(printer, document, db.printerDao(), db.recovery)) {
             SendOutcome.Delivered -> {
                 pallets.setPrintState(palletId, PalletPrint.PRINTED, null)
                 PrintOutcome.Printed
@@ -110,8 +129,11 @@ class PalletPrinter(
      */
     suspend fun defer(palletId: String) = db.recovery.commit { deferOwned(palletId) }
 
-    private suspend fun deferOwned(palletId: String) =
-        pallets.setPrintState(palletId, PalletPrint.DEFERRED, db.palletDao().get(palletId)?.printReason)
+    private suspend fun deferOwned(palletId: String) {
+        val row = db.palletDao().get(palletId) ?: return
+        if (row.printState == PalletPrint.UNKNOWN) return
+        pallets.setPrintState(palletId, PalletPrint.DEFERRED, row.printReason)
+    }
 
     private suspend fun fail(palletId: String, reason: String): PrintOutcome.Failed = db.recovery.commit { failOwned(palletId, reason) }
 

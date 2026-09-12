@@ -109,7 +109,7 @@ class ReprintViewModel @Inject constructor(
                 // the outcome told the operator the job reached a printer that
                 // was never configured -- and the deferred-label queue is where
                 // an unprinted label actually belongs.
-                _state.value = when (val outcome = printer.print(target.boxId)) {
+                _state.value = when (val outcome = printer.print(target.boxId, allowUnknown = true, reprint = true)) {
                     PrintOutcome.Printed -> _state.value.copy(done = true, error = null)
                     is PrintOutcome.Failed -> _state.value.copy(selected = null, error = printReasonLabel(outcome.reason))
                     is PrintOutcome.Unknown -> _state.value.copy(selected = null, error = R.string.reprint_outcome_unknown)

@@ -16,6 +16,26 @@ export const stationMeta = sqliteTable("station_meta", {
   value: text("value"),
 });
 
+/** Printer snapshots are local metadata, excluded from print-event digests and sync. */
+export const printerDestinations = sqliteTable(
+  "printer_destinations",
+  {
+    scope: text("scope").notNull(),
+    purpose: text("purpose", { enum: ["box", "duplicate", "pallet"] }).notNull(),
+    jobId: text("job_id").notNull(),
+    attemptId: text("attempt_id").notNull(),
+    profileJson: text("profile_json").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.scope, table.purpose, table.jobId, table.attemptId] }),
+    check(
+      "printer_destinations_purpose_check",
+      sql`${table.purpose} IN ('box', 'duplicate', 'pallet')`,
+    ),
+    check("printer_destinations_profile_json_check", sql`json_valid(${table.profileJson})`),
+  ],
+);
+
 /**
  * Local mirror of operators for OFFLINE PIN/badge login. Seeded from the
  * shift bundle (Task 9); the credential columns hold PBKDF2 PHC verifiers

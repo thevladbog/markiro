@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { saveHardwareConfig, type HardwareConfig } from "../src/lib/hardware-config.js";
@@ -46,7 +46,16 @@ function hardware(overrides: Partial<HardwareContract> = {}): HardwareContract {
 }
 
 async function selectSetupTab(name: "Scanner" | "Printer" | "Sound") {
-  fireEvent.click(await screen.findByRole("tab", { name }));
+  fireEvent.click(await screen.findByRole("tab", { name: name === "Printer" ? "Printers" : name }));
+  if (name === "Printer") {
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Add printer" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    const edit = screen.queryAllByRole("button", { name: /^Edit / })[0];
+    fireEvent.click(edit ?? screen.getByRole("button", { name: "Add printer" }));
+  }
 }
 
 async function chooseScannerPort(value: string) {
@@ -491,7 +500,7 @@ describe("WorkstationSetup", () => {
       />,
     );
 
-    await selectSetupTab("Printer");
+    fireEvent.click(await screen.findByRole("tab", { name: "Printers" }));
     fireEvent.click(screen.getByRole("button", { name: "Re-pair this station" }));
 
     expect(onResetCredential).not.toHaveBeenCalled();
@@ -588,7 +597,8 @@ describe("WorkstationSetup", () => {
     fireEvent.change(screen.getByLabelText("Printer address"), {
       target: { value: "10.0.0.7" },
     });
-    fireEvent.click(screen.getByLabelText("Verify each printed label by scanning it back"));
+    fireEvent.click(screen.getByRole("button", { name: "Save printer" }));
+    fireEvent.click(screen.getByLabelText("Verify each box label by scanning it back"));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
@@ -612,9 +622,9 @@ describe("WorkstationSetup", () => {
     );
 
     await screen.findByText("COM3");
-    await selectSetupTab("Printer");
+    fireEvent.click(await screen.findByRole("tab", { name: "Printers" }));
     const checkbox = screen.getByLabelText(
-      "Verify each printed label by scanning it back",
+      "Verify each box label by scanning it back",
     ) as HTMLInputElement;
     expect(checkbox.disabled).toBe(true);
 
@@ -704,7 +714,9 @@ describe("WorkstationSetup", () => {
 
     await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
     const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
-    expect(saved).toEqual({ ...stored, scanners: [stored.scanner], printerDpi: null });
+    expect(saved).toEqual(
+      expect.objectContaining({ ...stored, scanners: [stored.scanner], printerDpi: null }),
+    );
   });
 
   it("renders the no-scanner option even when the discovered port list is empty (Finding 1)", async () => {
@@ -1070,7 +1082,9 @@ describe("WorkstationSetup", () => {
 
     await waitFor(() => expect(onConfigChange).toHaveBeenCalled());
     const saved = onConfigChange.mock.calls.at(-1)![0] as HardwareConfig;
-    expect(saved).toEqual({ ...stored, scanners: [stored.scanner], printerDpi: null });
+    expect(saved).toEqual(
+      expect.objectContaining({ ...stored, scanners: [stored.scanner], printerDpi: null }),
+    );
   });
 
   it("rejects a baud of 0 instead of persisting it as a working scanner baud (PR12 round 2, Finding 1)", async () => {
@@ -1136,9 +1150,7 @@ describe("WorkstationSetup", () => {
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     expect(
-      await screen.findByText(
-        'Enter the required printer connection details, or choose "No printer".',
-      ),
+      await screen.findByText("Enter the required printer connection details, or cancel editing."),
     ).toBeDefined();
     expect(onConfigChange).not.toHaveBeenCalled();
   });
@@ -1161,7 +1173,7 @@ describe("WorkstationSetup", () => {
     expect(screen.queryByLabelText("Mute")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(screen.getByRole("tabpanel", { name: "Printer" })).toBeDefined();
+    expect(screen.getByRole("tabpanel", { name: "Printers" })).toBeDefined();
     expect(screen.queryByLabelText("Baud rate")).toBeNull();
 
     await selectSetupTab("Sound");
@@ -1501,6 +1513,176 @@ it("removes a saved secondary port without losing the remaining scanner", async 
       expect.objectContaining({
         scanner: { port: "COM3", baud: 9600 },
         scanners: [{ port: "COM3", baud: 9600 }],
+      }),
+    ),
+  );
+});
+
+describe("printer profiles and assignments", () => {
+  it("adds three profiles, retains assignments during test printing, and reloads explicit routes", async () => {
+    const exec = await storedHardwareExec({
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    });
+    const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
+    const props = {
+      hw: hardware({ print }),
+      exec,
+      sound: { muted: false, volume: 1 },
+      onSoundChange: () => {},
+      onConfigChange: vi.fn(),
+      onDone: () => {},
+    };
+    const view = render(<WorkstationSetup {...props} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Printers" }));
+    for (const [name, host] of [
+      ["Boxes", "10.0.0.1"],
+      ["Duplicates", "10.0.0.2"],
+      ["Pallets", "10.0.0.3"],
+    ]) {
+      fireEvent.click(await screen.findByRole("button", { name: "Add printer" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Printer name" }), {
+        target: { value: name },
+      });
+      fireEvent.click(screen.getByRole("radio", { name: "Network (TCP)" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Printer address" }), {
+        target: { value: host },
+      });
+      fireEvent.change(screen.getByRole("combobox", { name: "Printer resolution" }), {
+        target: { value: "300" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save printer" }));
+    }
+    const boxes = screen.getByRole("combobox", { name: "Box" }) as HTMLSelectElement;
+    const boxId = boxes.value;
+    const duplicateId = Array.from(boxes.options).find((o) => o.text === "Duplicates")?.value;
+    const palletId = Array.from(boxes.options).find((o) => o.text === "Pallets")?.value;
+    expect(duplicateId).toBeTypeOf("string");
+    expect(palletId).toBeTypeOf("string");
+    expect(
+      (screen.getByRole("combobox", { name: "Code duplicate" }) as HTMLSelectElement).value,
+    ).toBe(boxId);
+    fireEvent.change(screen.getByRole("combobox", { name: "Code duplicate" }), {
+      target: { value: duplicateId },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Pallet" }), {
+      target: { value: palletId },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Edit Duplicates" }));
+    fireEvent.click(screen.getByRole("button", { name: "Test print" }));
+    await waitFor(() =>
+      expect(print).toHaveBeenCalledWith(
+        { kind: "tcp", host: "10.0.0.2", port: 9100 },
+        expect.any(Uint8Array),
+      ),
+    );
+    expect(new TextDecoder().decode(print.mock.calls[0]?.[1])).toContain("^PW685");
+    fireEvent.click(screen.getByRole("button", { name: "Save printer" }));
+    expect((screen.getByRole("combobox", { name: "Box" }) as HTMLSelectElement).value).toBe(boxId);
+    fireEvent.change(screen.getByRole("combobox", { name: "Pallet" }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() =>
+      expect(props.onConfigChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          printerRouting: {
+            printers: expect.arrayContaining([
+              expect.objectContaining({ name: "Boxes" }),
+              expect.objectContaining({ name: "Duplicates" }),
+              expect.objectContaining({ name: "Pallets" }),
+            ]),
+            assignments: { box: boxId, duplicate: duplicateId, pallet: null },
+          },
+        }),
+      ),
+    );
+    view.unmount();
+    render(<WorkstationSetup {...props} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Printers" }));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("combobox", { name: "Code duplicate" }) as HTMLSelectElement).value,
+      ).toBe(duplicateId),
+    );
+    expect((screen.getByRole("combobox", { name: "Pallet" }) as HTMLSelectElement).value).toBe("");
+    expect(screen.getByRole("button", { name: "Edit Pallets" })).toBeDefined();
+  });
+});
+
+it("rejects a duplicate endpoint, preserves edits by ID, and removes only the requested profile and its assignments", async () => {
+  const printers = [
+    {
+      id: "box-printer",
+      name: "Boxes",
+      target: { kind: "tcp" as const, host: "box.local", port: 9100 },
+      language: "zpl" as const,
+      dpi: 203 as const,
+    },
+    {
+      id: "duplicate-printer",
+      name: "Duplicates",
+      target: { kind: "serial" as const, port: "COM9", baud: 9600 },
+      language: "tspl" as const,
+      dpi: 300 as const,
+    },
+  ];
+  const exec = await storedHardwareExec({
+    scanner: null,
+    printer: null,
+    printerLanguage: "zpl",
+    verifyPrintedLabel: false,
+    printerRouting: {
+      printers,
+      assignments: { box: "box-printer", duplicate: "duplicate-printer", pallet: "box-printer" },
+    },
+  });
+  const onConfigChange = vi.fn();
+  render(
+    <WorkstationSetup
+      hw={hardware()}
+      exec={exec}
+      sound={{ muted: false, volume: 1 }}
+      onSoundChange={() => {}}
+      onConfigChange={onConfigChange}
+      onDone={() => {}}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("tab", { name: "Printers" }));
+  await screen.findByRole("button", { name: "Edit Boxes" });
+  fireEvent.click(screen.getByRole("button", { name: "Add printer" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Network (TCP)" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Printer address" }), {
+    target: { value: "BOX.LOCAL." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save printer" }));
+  expect(screen.getByRole("alert").textContent).toContain("already used by Boxes");
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit Duplicates" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Printer name" }), {
+    target: { value: "Units" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save printer" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit Boxes" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove printer" }));
+  const dialog = screen.getByRole("dialog", { name: "Remove this printer?" });
+  expect(dialog.textContent).toContain("Prepared print jobs keep their saved destination");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Remove printer" }));
+  expect(screen.queryByRole("button", { name: "Edit Boxes" })).toBeNull();
+  expect((screen.getByRole("combobox", { name: "Box" }) as HTMLSelectElement).value).toBe("");
+  expect((screen.getByRole("combobox", { name: "Pallet" }) as HTMLSelectElement).value).toBe("");
+  expect(
+    (screen.getByRole("combobox", { name: "Code duplicate" }) as HTMLSelectElement).value,
+  ).toBe("duplicate-printer");
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  await waitFor(() =>
+    expect(onConfigChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        printer: null,
+        printerRouting: {
+          printers: [{ ...printers[1], name: "Units" }],
+          assignments: { box: null, duplicate: "duplicate-printer", pallet: null },
+        },
       }),
     ),
   );

@@ -184,6 +184,7 @@ interface RenderWorkOptions {
     language: PrinterLanguage;
     print: (target: PrintTarget, bytes: Uint8Array) => Promise<void>;
   } | null;
+  palletPrinting?: RenderWorkOptions["printing"];
   source?: ScanSource;
 }
 
@@ -196,6 +197,7 @@ function renderWork(overrides: RenderWorkOptions = {}) {
     issuerPrefix = TEST_ISSUER_PREFIX,
     onCloseShift,
     printing,
+    palletPrinting,
     source = manualSource(),
   } = overrides;
 
@@ -217,6 +219,7 @@ function renderWork(overrides: RenderWorkOptions = {}) {
       palletBoxCapacity={palletBoxCapacity}
       verifyPrintedLabel={false}
       {...(printing !== undefined ? { printing } : {})}
+      {...(palletPrinting !== undefined ? { palletPrinting } : {})}
     />,
   );
 }
@@ -514,6 +517,35 @@ describe("WorkScreen pallet early close", () => {
     ).toBeDefined();
   });
 
+  it("never uses the box printer when the pallet assignment is explicitly empty", async () => {
+    const exec = makeExec();
+    await seedShift(exec, {
+      shiftId: "s1",
+      palletBoxCapacity: 12,
+      palletLabelTemplateSpec: PALLET_LABEL_SPEC,
+    });
+    await seedPallet(exec, { palletId: "p1", shiftId: "s1", terminalId: "dev-1", boxCount: 3 });
+    await addRange(exec, {
+      issuerPrefix: TEST_ISSUER_PREFIX,
+      extensionDigit: PALLET_EXTENSION_DIGIT,
+      fromSerial: 1,
+      toSerial: 200,
+    });
+    const print = vi.fn(async () => {});
+    renderWork({
+      exec,
+      palletBoxCapacity: 12,
+      printing: { target: PRINT_TARGET, language: "zpl", print },
+      palletPrinting: null,
+    });
+    await screen.findByText(i18n.t("pallet.progress", { boxes: 3, capacity: 12 }));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("work.more") }));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.earlyClose") }));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("box.confirmAction") }));
+    await screen.findByText(i18n.t("box.printRecovery.errors.printerUnconfigured"));
+    expect(print).not.toHaveBeenCalled();
+  });
+
   it("actually closes the pallet and prints its label once confirmed", async () => {
     const exec = makeExec();
     await seedShift(exec, {
@@ -536,7 +568,8 @@ describe("WorkScreen pallet early close", () => {
     renderWork({
       exec,
       palletBoxCapacity: 12,
-      printing: { target: PRINT_TARGET, language: "zpl", print },
+      printing: { target: PRINT_TARGET, language: "zpl", print: vi.fn() },
+      palletPrinting: { target: { kind: "usb", printer: "Pallet labels" }, language: "zpl", print },
     });
     await screen.findByText(i18n.t("pallet.progress", { boxes: 3, capacity: 12 }));
 
@@ -547,6 +580,8 @@ describe("WorkScreen pallet early close", () => {
     expect(await screen.findByText(i18n.t("pallet.closed"))).toBeDefined();
     await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(i18n.t("pallet.printed"))).toBeDefined();
+    expect(printJobs[0]?.target).toEqual({ kind: "usb", printer: "Pallet labels" });
+    expect(await screen.findByText("Pallet labels")).toBeDefined();
 
     const rows = await exec.all<{ print_state: string; closed_at: string | null }>(
       "SELECT print_state, closed_at FROM pallets_mirror WHERE pallet_id = 'p1'",

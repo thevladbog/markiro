@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.duplicate
 
+import app.markiro.handheld.core.print.upsertAssigned
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -74,7 +75,7 @@ class DuplicateVerifyTest {
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java)
             .allowMainThreadQueries().build()
         transport = FakeTransport()
-        db.printerDao().upsert(
+        db.printerDao().upsertAssigned(
             PrinterEntity(
                 id = "p1", name = "Zebra", transport = "wifi", address = "10.0.0.1:9100",
                 language = "zpl", dpi = 203, selected = true, lastStatus = null, lastSeenAt = null,

@@ -566,7 +566,7 @@
     "duplicateScannerPort": "Port {{port}} is selected more than once.",
     "multipleScannersHint": "All saved ports work together. Use any scanner without switching. Connections restore automatically.",
     "testScanHint": "Scan any code to test the connection.",
-    "printer": "Printer",
+    "printer": "Printers",
     "printerTransport": "Printer connection",
     "transportNone": "No printer",
     "transportTcp": "Network (TCP)",
@@ -587,7 +587,7 @@
     "testPrintHint": "Send a test label after choosing the printer connection.",
     "testPrintSent": "Test label sent to the printer.",
     "noPrinterHint": "Choose a connection when this workstation prints labels.",
-    "verifyPrintedLabel": "Verify each printed label by scanning it back",
+    "verifyPrintedLabel": "Verify each box label by scanning it back",
     "sound": "Sound",
     "repairTitle": "Station pairing",
     "repairHint": "Use this only when a service user needs to pair this same station again. The device key will be removed; local production records stay on this station.",
@@ -608,7 +608,7 @@
     "resetCredentialConfirmAction": "Remove credentials and re-pair",
     "done": "Done",
     "invalidNumber": "Enter a valid number in the allowed range.",
-    "printerFieldRequired": "Enter the required printer connection details, or choose \"No printer\".",
+    "printerFieldRequired": "Enter the required printer connection details, or cancel editing.",
     "failed": "Action failed. Check the connection and try again.",
     "connectionTitle": "Connection",
     "scannerCheckTitle": "Scanner check",
@@ -624,7 +624,30 @@
     "scannerCheckWaiting": "No scan received yet",
     "printerResolution": "Printer resolution",
     "printerResolutionUnknown": "Not configured",
-    "printerDpiHint": "Every label prints at this resolution. Until it is set, box labels print at the template's resolution and duplicate printing is unavailable."
+    "printerDpiHint": "Every label prints at this resolution. Until it is set, box labels print at the template's resolution and duplicate printing is unavailable.",
+    "savedPrinters": "Printers on this station",
+    "addPrinter": "Add printer",
+    "printersEmpty": "Add a printer, then choose which labels it prints. You can use one printer for all three types.",
+    "printerUnassigned": "No label types assigned",
+    "editNamedPrinter": "Edit {{name}}",
+    "editPrinter": "Edit",
+    "printerAssignments": "Label destinations",
+    "printerNotAssigned": "Not assigned",
+    "printerRoutingHint": "Assignments apply to future labels. Prepared print jobs keep their original printer.",
+    "defaultPrinterName": "Printer {{number}}",
+    "printerNameRequired": "Enter a printer name.",
+    "duplicatePrinter": "This connection is already used by {{name}}. Edit that printer or choose it in the assignments.",
+    "printerName": "Printer name",
+    "testPrintSentTo": "Test label sent to {{name}}. Scan the printed code to check it.",
+    "removePrinter": "Remove printer",
+    "savePrinter": "Save printer",
+    "removePrinterTitle": "Remove this printer?",
+    "removePrinterDetail": "“{{name}}” will be removed from this station. Its label types will be left unassigned. Prepared print jobs keep their saved destination.",
+    "printPurpose": {
+      "box": "Box",
+      "duplicate": "Code duplicate",
+      "pallet": "Pallet"
+    }
   },
   "conflicts": {
     "title": "Codes claimed elsewhere",
@@ -859,5 +882,16 @@
     "labelProblem": "Label problem",
     "scanTitle": "Scan the printed label",
     "skipHint": "Skipping is recorded in the journal. The label remains unverified."
+  },
+  "printerRouting": {
+    "destination": "Label printer",
+    "legacyDestination": "No printer saved for this label yet",
+    "changePrinter": "Change printer",
+    "selectPrinter": "Choose a printer",
+    "useForLabel": "Use for this label",
+    "cancel": "Cancel",
+    "changeFailed": "Could not save the printer. Choose again.",
+    "loading": "Loading printer…",
+    "storageFailed": "Could not save the print job. Please try again."
   }
 }

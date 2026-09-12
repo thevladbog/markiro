@@ -11,6 +11,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import app.markiro.handheld.core.print.PrintPurpose
+import app.markiro.handheld.feature.printer.PrinterChoiceScreen
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -32,6 +38,8 @@ data class LabelQueueCallbacks(
     val onBack: () -> Unit = {},
     val onPrintOne: (String) -> Unit = {},
     val onPrintAll: () -> Unit = {},
+    val onReroute: (String, String) -> Unit = { _, _ -> },
+    val onManagePrinters: () -> Unit = {},
     val onResolveUnknown: (String) -> Unit = {},
 )
 
@@ -44,6 +52,15 @@ data class LabelQueueCallbacks(
  */
 @Composable
 fun LabelQueueScreen(state: LabelQueueUi, cb: LabelQueueCallbacks) {
+    var choosing by remember { mutableStateOf<LabelQueueItem?>(null) }
+    choosing?.let { item ->
+        PrinterChoiceScreen(if (item.kind == LabelKind.BOX) PrintPurpose.BOX else PrintPurpose.PALLET,
+            state.printers, null, { choosing = null }, allowUnassigned = false, onManage = cb.onManagePrinters) { id ->
+            if (id != null) cb.onReroute(item.id, id)
+            choosing = null
+        }
+        return
+    }
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
@@ -81,6 +98,7 @@ fun LabelQueueScreen(state: LabelQueueUi, cb: LabelQueueCallbacks) {
                             color = c.fg3,
                         )
                     }
+                    Text(item.destinationName ?: stringResource(R.string.printer_unassigned), style = t.caption, color = c.fg2)
                     val tone = if (item.skippedByPrintAll) Tone.Warn else Tone.Err
                     // A label the operator set aside is not a failure, and saying so
                     // would be untrue; the reason from the last attempt still stands.
@@ -90,9 +108,10 @@ fun LabelQueueScreen(state: LabelQueueUi, cb: LabelQueueCallbacks) {
                         style = t.caption,
                         color = c.tone(tone).fg,
                     )
+                    MarkiroTextButton(stringResource(R.string.box_close_other_printer), { if (!state.printing) choosing = item })
                     if (item.skippedByPrintAll) {
                         Text(stringResource(R.string.label_queue_unknown_skipped), style = t.caption, color = c.fg3)
-                        Row(horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
                             SecondaryButton(
                                 stringResource(R.string.label_queue_resolve),
                                 { cb.onResolveUnknown(item.id) },

@@ -27,6 +27,20 @@ function configuredInput(): BoxPrintInput {
 }
 
 describe("attemptBoxPrint", () => {
+  it("keeps recovery retryable and sends nothing when saving the destination fails", async () => {
+    const input = configuredInput();
+    const failure = new Error("private sqlite details");
+    const destination = {
+      exec: { run: vi.fn(() => Promise.reject(failure)), all: vi.fn(() => Promise.resolve([])) },
+      key: { scope: "owner", purpose: "box" as const, jobId: "label", attemptId: "initial" },
+    };
+    await expect(attemptBoxPrint({ ...input, destination })).resolves.toEqual({
+      kind: "failed",
+      code: "persistence_failed",
+    });
+    expect(input.render).not.toHaveBeenCalled();
+    expect(input.printing?.print).not.toHaveBeenCalled();
+  });
   it("classifies a missing box template before attempting render or transport", async () => {
     const input = configuredInput();
 

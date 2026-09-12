@@ -1,3 +1,4 @@
+import { resolvePrinter } from "../lib/printer-routing.js";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, DatePicker, Input, Pager } from "@markiro/ui";
@@ -435,11 +436,8 @@ export function NewShift({
           setError(t("shifts.productTemplateUnavailable"));
           return;
         }
-        if (
-          !hardwareConfig.printer ||
-          !hardwareConfig.printerDpi ||
-          !["zpl", "tspl"].includes(hardwareConfig.printerLanguage)
-        ) {
+        const duplicatePrinter = resolvePrinter(hardwareConfig, "duplicate");
+        if (!duplicatePrinter?.dpi) {
           setPrinterError(true);
           setError(t("shifts.printHardwareRequired"));
           return;

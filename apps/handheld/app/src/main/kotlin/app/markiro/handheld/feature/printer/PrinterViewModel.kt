@@ -7,10 +7,18 @@ import app.markiro.handheld.core.label.PrinterLanguage
 import app.markiro.handheld.core.label.TestLabel
 import app.markiro.handheld.core.print.BluetoothPrinterConnector
 import app.markiro.handheld.core.print.DiscoveredPrinter
+import app.markiro.handheld.core.print.PrintPurpose
+import app.markiro.handheld.core.print.PrinterAssignmentEntity
+import app.markiro.handheld.core.print.PrinterRouting
+import app.markiro.handheld.core.print.observeRouting
+import app.markiro.handheld.core.print.normalizedPrinterAddress
+import app.markiro.handheld.core.print.printerEndpointKey
 import app.markiro.handheld.core.print.NotReadyReason
 import app.markiro.handheld.core.print.PrinterDao
 import app.markiro.handheld.core.print.PrinterEntity
 import app.markiro.handheld.core.print.PrinterStatus
+import app.markiro.handheld.core.print.statusRemembered
+import app.markiro.handheld.core.print.sendRemembered
 import app.markiro.handheld.core.print.PrinterTransport
 import app.markiro.handheld.core.print.SendOutcome
 import app.markiro.handheld.core.print.WifiPrinterConnector
@@ -32,11 +40,15 @@ enum class TransportKind(val wire: String) { WIFI("wifi"), BLUETOOTH("bluetooth"
 data class PrinterUi(
     val printers: List<PrinterEntity> = emptyList(),
     val selected: PrinterEntity? = null,
+    val assignments: List<PrinterAssignmentEntity> = emptyList(),
     val paired: List<DiscoveredPrinter> = emptyList(),
     val permissionNeeded: Boolean = false,
+    val addressConflict: Boolean = false,
 )
 
 data class AddPrinterForm(
+    val id: String? = null,
+    val name: String = "",
     val transport: TransportKind = TransportKind.WIFI,
     val host: String = "",
     val port: String = WifiPrinterConnector.DEFAULT_PORT.toString(),
@@ -78,8 +90,8 @@ class PrinterViewModel(
     ) : this(recovery, printers, transport, renderer, { bluetooth.pairedPrinters() }, System::currentTimeMillis)
 
     private val local = MutableStateFlow(PrinterUi())
-    val state: StateFlow<PrinterUi> = combine(printers.observeAll(), local) { rows, ui ->
-        ui.copy(printers = rows, selected = rows.firstOrNull { it.selected })
+    val state: StateFlow<PrinterUi> = combine(printers.observeRouting(), local) { routing, ui ->
+        ui.copy(printers = routing.printers, assignments = routing.assignments, selected = routing.printers.firstOrNull { it.id == ui.selected?.id })
     }.stateIn(viewModelScope, SharingStarted.Eagerly, PrinterUi())
 
     private val _addForm = MutableStateFlow(AddPrinterForm())
@@ -97,12 +109,32 @@ class PrinterViewModel(
     val saved: SharedFlow<Unit> = _saved
 
     fun select(id: String) {
-        viewModelScope.launch { recovery.work { recovery.commit { printers.select(id) } } }
+        local.update { it.copy(selected = state.value.printers.firstOrNull { row -> row.id == id }) }
+    }
+
+    fun assign(purpose: PrintPurpose, id: String?) {
+        viewModelScope.launch { recovery.work { recovery.commit {
+            if (id == null || printers.get(id) != null) printers.assign(PrinterAssignmentEntity(purpose.wire, id))
+        } } }
     }
 
     fun remove(id: String) {
-        viewModelScope.launch { recovery.work { recovery.commit { printers.delete(id) } } }
+        viewModelScope.launch { recovery.work { recovery.commit {
+            state.value.assignments.filter { it.printerId == id }.forEach { printers.assign(it.copy(printerId = null)) }
+            printers.delete(id)
+        } } }
     }
+
+    fun startEdit(id: String) {
+        val printer = state.value.printers.firstOrNull { it.id == id } ?: return
+        select(id)
+        val (host, port) = if (printer.transport == "wifi") WifiPrinterConnector.parseAddress(printer.address) else printer.address to 9100
+        _addForm.value = AddPrinterForm(id = id, name = printer.name,
+            transport = if (printer.transport == "wifi") TransportKind.WIFI else TransportKind.BLUETOOTH,
+            host = host, port = port.toString(), language = PrinterLanguage.fromWire(printer.language), dpi = printer.dpi)
+    }
+
+    fun editName(value: String) = _addForm.update { it.copy(name = value, error = null) }
 
     /** Enters the add flow with an empty form. */
     fun startAdd(transport: TransportKind) {
@@ -133,28 +165,32 @@ class PrinterViewModel(
         // the socket will actually use.
         val port = WifiPrinterConnector.normalizePort(form.port)
         val transportWire = form.transport.wire
-        val address = if (form.transport == TransportKind.WIFI) "${form.host}:$port" else form.host
+        if (form.host.isBlank() || form.checking) return
+        val address = normalizedPrinterAddress(transportWire, if (form.transport == TransportKind.WIFI) "${form.host.trim()}:$port" else form.host)
         _addForm.update { it.copy(checking = true, error = null) }
         viewModelScope.launch { recovery.work {
             // Adding the same address twice means the same printer, so its row is updated rather
             // than duplicated. Without this a second press of the check button leaves two identical
             // entries the operator cannot tell apart.
-            val existing = printers.findByAddress(transportWire, address)
+            val existing = printers.all().firstOrNull { it.transport == transportWire && normalizedPrinterAddress(it.transport, it.address) == address }
+            if (existing != null && form.id != null && existing.id != form.id) {
+                _addForm.update { it.copy(checking = false, error = NotReadyReason.OTHER) }; return@work
+            }
             val candidate = PrinterEntity(
-                id = existing?.id ?: UUID.randomUUID().toString(),
-                name = form.host.ifBlank { existing?.name ?: "printer" },
+                id = form.id ?: existing?.id ?: UUID.randomUUID().toString(),
+                name = form.name.trim().ifBlank { existing?.name ?: form.host.trim() },
                 transport = transportWire,
                 address = address,
                 language = form.language.wire,
                 dpi = form.dpi,
-                selected = true,
+                selected = false,
                 lastStatus = null,
                 lastSeenAt = null,
             )
             when (val status = transport.status(candidate)) {
                 is PrinterStatus.Ready -> {
                     recovery.commit { printers.upsert(candidate.copy(lastStatus = "ready", lastSeenAt = clock())) }
-                    recovery.commit { printers.select(candidate.id) }
+                    local.update { it.copy(selected = candidate) }
                     _addForm.value = AddPrinterForm()
                     _saved.tryEmit(Unit)
                 }
@@ -175,23 +211,33 @@ class PrinterViewModel(
 
     fun pickPairedDevice(device: DiscoveredPrinter) {
         val form = _addForm.value
+        if (form.checking) return
+        _addForm.update { it.copy(checking = true) }
+        local.update { it.copy(addressConflict = false) }
         viewModelScope.launch { recovery.work {
             // The same device picked twice is the same printer, exactly as for a network address.
             // Without this the list fills with identical rows the operator cannot tell apart.
-            val existing = printers.findByAddress(TransportKind.BLUETOOTH.wire, device.address)
+            val existing = printers.all().firstOrNull { it.transport == "bluetooth" && normalizedPrinterAddress("bluetooth", it.address) == normalizedPrinterAddress("bluetooth", device.address) }
+            if (existing != null && form.id != null && existing.id != form.id) {
+                _addForm.update { it.copy(checking = false) }
+                local.update { it.copy(addressConflict = true) }
+                return@work
+            }
             val printer = PrinterEntity(
-                id = existing?.id ?: UUID.randomUUID().toString(),
-                name = device.name,
+                id = form.id ?: existing?.id ?: UUID.randomUUID().toString(),
+                name = form.name.trim().ifBlank { device.name },
                 transport = TransportKind.BLUETOOTH.wire,
-                address = device.address,
+                address = normalizedPrinterAddress("bluetooth", device.address),
                 language = form.language.wire,
                 dpi = form.dpi,
-                selected = true,
+                selected = false,
                 lastStatus = null,
                 lastSeenAt = null,
             )
             recovery.commit { printers.upsert(printer) }
-            recovery.commit { printers.select(printer.id) }
+            local.update { it.copy(selected = printer) }
+            _addForm.value = AddPrinterForm()
+            _saved.tryEmit(Unit)
         } }
     }
 
@@ -200,14 +246,20 @@ class PrinterViewModel(
      * language acknowledges a job afterwards: without it the only failure this screen could ever
      * report is silence, and the drawn out-of-paper state could not exist.
      */
-    fun printTest() {
-        val printer = state.value.selected ?: return
+    private var testPrinter: PrinterEntity? = null
+    fun printTest(id: String? = state.value.selected?.id) {
+        if (_testStep.value == TestPrintStep.Sending) return
+        val printer = state.value.printers.firstOrNull { it.id == id } ?: return
+        testPrinter = printer
+        sendTest(printer)
+    }
+
+    private fun sendTest(printer: PrinterEntity) {
         _testStep.value = TestPrintStep.Sending
         viewModelScope.launch { recovery.work {
-            val status = transport.status(printer)
+            val status = transport.statusRemembered(printer, printers, recovery, clock())
             if (status is PrinterStatus.NotReady) {
                 _testStep.value = TestPrintStep.Failed(status.reason)
-                recovery.commit { printers.setStatus(printer.id, null, clock()) }
                 return@work
             }
             val document = renderer.render(
@@ -216,12 +268,11 @@ class PrinterViewModel(
                 PrinterLanguage.fromWire(printer.language),
                 printer.dpi,
             )
-            _testStep.value = recovery.printing { when (val outcome = transport.send(printer, document)) {
+            _testStep.value = recovery.printing { when (val outcome = transport.sendRemembered(printer, document, printers, recovery, clock())) {
                 is SendOutcome.Delivered -> TestPrintStep.Sent("${printer.name} · ${printer.address}")
                 is SendOutcome.Refused -> TestPrintStep.Failed(outcome.reason)
                 is SendOutcome.Unknown -> TestPrintStep.Unknown(outcome.cause)
             } }
-            recovery.commit { printers.setStatus(printer.id, if (_testStep.value is TestPrintStep.Sent) "ready" else null, clock()) }
         } }
     }
 
@@ -231,7 +282,10 @@ class PrinterViewModel(
     }
 
     /** An explicit second send, chosen by a person who has looked at the printer. */
-    fun retryTest() = printTest()
+    fun retryTest() {
+        if (_testStep.value == TestPrintStep.Sending) return
+        testPrinter?.let(::sendTest)
+    }
 
     fun dismissTest() {
         _testStep.value = TestPrintStep.Idle

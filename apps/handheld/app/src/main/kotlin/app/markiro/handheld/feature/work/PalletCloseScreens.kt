@@ -48,7 +48,7 @@ private const val PRINTED_DWELL_MS = 1_000L
  * not to a box.
  */
 @Composable
-fun PalletCloseScreen(step: PalletCloseStep, cb: PalletCloseCallbacks) {
+fun PalletCloseScreen(step: PalletCloseStep, cb: PalletCloseCallbacks, destinationLabel: String? = null) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     if (step is PalletCloseStep.Printed) {
@@ -62,6 +62,8 @@ fun PalletCloseScreen(step: PalletCloseStep, cb: PalletCloseCallbacks) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
+        Text(stringResource(R.string.printer_purpose_pallet) + " · " + (destinationLabel ?: stringResource(R.string.printer_unassigned)),
+            style = t.caption, color = c.fg2, textAlign = TextAlign.Center)
         when (step) {
             PalletCloseStep.Idle -> Unit
             is PalletCloseStep.Refused -> Refused(step.reason, cb)
@@ -101,6 +103,7 @@ fun PalletCloseScreen(step: PalletCloseStep, cb: PalletCloseCallbacks) {
                     // second label on a pallet the server has already accepted.
                     PrimaryButton(stringResource(R.string.box_close_confirm_printed), cb.onConfirmPrinted)
                     SecondaryButton(stringResource(R.string.box_close_print_again), cb.onRetry)
+                    SecondaryButton(stringResource(R.string.box_close_other_printer), cb.onOtherPrinter)
                     MarkiroTextButton(stringResource(R.string.box_close_defer), cb.onDefer)
                 }
             }

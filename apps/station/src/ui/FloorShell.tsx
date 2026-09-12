@@ -12,6 +12,8 @@ export interface FloorShellProps {
   serverReachability: ServerReachability;
   scanner: ScannerIndicator;
   printerConfigured: boolean;
+  printerSummary?: { label: string; detail: string; complete?: boolean };
+  onOpenPrinters?: () => void;
   syncPending: number;
   syncStuck: boolean;
   conflicts: number;
@@ -36,6 +38,8 @@ export function FloorShell({
   serverReachability,
   scanner,
   printerConfigured,
+  printerSummary,
+  onOpenPrinters,
   syncPending,
   syncStuck,
   conflicts,
@@ -77,6 +81,8 @@ export function FloorShell({
         serverReachability={serverReachability}
         scanner={scanner}
         printerConfigured={printerConfigured}
+        {...(printerSummary ? { printerSummary } : {})}
+        {...(onOpenPrinters ? { onOpenPrinters } : {})}
         syncPending={syncPending}
         syncStuck={syncStuck}
         conflicts={conflicts}

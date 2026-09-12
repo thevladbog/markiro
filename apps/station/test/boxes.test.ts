@@ -394,6 +394,7 @@ describe("boxes", () => {
       "printer_unconfigured",
       "render_failed",
       "transport_failed",
+      "persistence_failed",
     ] as const satisfies readonly BoxPrintErrorCode[];
     type MissingErrorCode = Exclude<BoxPrintErrorCode, (typeof errorCodes)[number]>;
     const allErrorCodesCovered: MissingErrorCode extends never ? true : never = true;

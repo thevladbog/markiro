@@ -130,7 +130,11 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                         Tile(
                             Icons.Outlined.Settings,
                             stringResource(R.string.hub_tile_settings),
-                            if (state.printerConfigured) "" else stringResource(R.string.hub_printer_not_set),
+                            if (state.missingPrinterPurposes.isNotEmpty()) stringResource(R.string.printer_missing_purposes,
+                                state.missingPrinterPurposes.map { stringResource(app.markiro.handheld.feature.printer.purposeLabel(it)) }.joinToString(", "))
+                            else if (state.printerAttentionPurposes.isNotEmpty()) stringResource(R.string.printer_attention_purposes,
+                                state.printerAttentionPurposes.map { stringResource(app.markiro.handheld.feature.printer.purposeLabel(it)) }.joinToString(", "))
+                            else if (state.printerConfigured) "" else stringResource(R.string.hub_printer_not_set),
                             { onTile(HubTile.SETTINGS) },
                             modifier,
                             statusTone = if (state.printerConfigured) Tone.Neutral else Tone.Warn,

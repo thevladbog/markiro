@@ -1,3 +1,4 @@
+import { configuredPrinterOutput, configuredPrinterRouting } from "./lib/printer-routing.js";
 import { RecoveryWorkSummary } from "./ui/RecoveryWorkSummary.js";
 import {
   initializeDeviceRecovery,
@@ -300,6 +301,7 @@ export function App() {
     setPrintRecoveryBlocked(true);
     setShowSetup(true);
   }, []);
+  const [setupPrinterTab, setSetupPrinterTab] = useState(false);
   const [showConflicts, setShowConflicts] = useState(false);
   const [showUpdates, setShowUpdates] = useState(false);
   const [operatorSwitchState, setOperatorSwitchState] = useState<"idle" | "settling" | "failed">(
@@ -1360,6 +1362,7 @@ export function App() {
     if (showSetup) {
       return withWindowChrome(
         <WorkstationSetup
+          initialTab={setupPrinterTab ? "printer" : "scanner"}
           hw={tauriHardware}
           exec={tauriExecutor}
           sound={sound}
@@ -1367,6 +1370,7 @@ export function App() {
           onConfigChange={setHardwareConfig}
           onDone={() => {
             setShowSetup(false);
+            setSetupPrinterTab(false);
             setSessionEpoch((epoch) => epoch + 1);
           }}
         />,
@@ -1552,6 +1556,18 @@ export function App() {
     }
   }
 
+  const printerRouting = configuredPrinterRouting(hardwareConfig);
+  const printerSummary = {
+    complete: Object.values(printerRouting.assignments).every(Boolean),
+    label: `${Object.values(printerRouting.assignments).filter(Boolean).length} / 3`,
+    detail: (["box", "duplicate", "pallet"] as const)
+      .map(
+        (purpose) =>
+          `${t(`setup.printPurpose.${purpose}`)}: ${printerRouting.printers.find((printer) => printer.id === printerRouting.assignments[purpose])?.name ?? t("setup.printerNotAssigned")}`,
+      )
+      .join(" · "),
+  };
+
   // The scanner reads green only once the Rust side has confirmed a port is
   // actually open; the printer only reflects whether one is configured,
   // since it cannot be proven alive without printing to it.
@@ -1573,7 +1589,23 @@ export function App() {
       }
       serverReachability={serverReachability}
       scanner={scannerIndicator(hardwareConfig, scannerStatus)}
-      printerConfigured={hardwareConfig.printer !== null}
+      printerConfigured={Object.values(printerRouting.assignments).some(Boolean)}
+      printerSummary={printerSummary}
+      {...(!activeFloorTask && !showSetup
+        ? {
+            onOpenPrinters: () => {
+              if (
+                operatorSwitchState !== "idle" ||
+                floorRecoveryBlocked ||
+                shiftEntryPending ||
+                shiftEntryLeaseRef.current
+              )
+                return;
+              setSetupPrinterTab(true);
+              setShowSetup(true);
+            },
+          }
+        : {})}
       syncPending={syncState.pending}
       syncStuck={syncState.stuck}
       conflicts={syncState.conflicts}
@@ -1612,6 +1644,7 @@ export function App() {
         />
       ) : showSetup ? (
         <WorkstationSetup
+          initialTab={setupPrinterTab ? "printer" : "scanner"}
           hw={tauriHardware}
           exec={tauriExecutor}
           sound={sound}
@@ -1622,6 +1655,7 @@ export function App() {
             : { onResetCredential: resetCredentialForPairing })}
           onDone={() => {
             setShowSetup(false);
+            setSetupPrinterTab(false);
             // Covers both exits from Setup with one line: `finish()` calls
             // `onConfigChange` then `onDone`, and Back calls only `onDone` --
             // either way, whatever session Setup's own "Connect scanner"
@@ -1743,16 +1777,14 @@ export function App() {
               palletBoxCapacity={palletBoxCapacity}
               bundleRevision={shiftBundleRevision}
               verifyPrintedLabel={hardwareConfig.verifyPrintedLabel}
-              printing={
-                hardwareConfig.printer
-                  ? {
-                      target: hardwareConfig.printer,
-                      language: hardwareConfig.printerLanguage,
-                      dpi: hardwareConfig.printerDpi ?? null,
-                      print: (target, bytes) => tauriHardware.print(target, bytes),
-                    }
-                  : null
-              }
+              printing={configuredPrinterOutput(hardwareConfig, "box", (target, bytes) =>
+                tauriHardware.print(target, bytes),
+              )}
+              palletPrinting={configuredPrinterOutput(hardwareConfig, "pallet", (target, bytes) =>
+                tauriHardware.print(target, bytes),
+              )}
+              printers={configuredPrinterRouting(hardwareConfig).printers}
+              printTransport={(target, bytes) => tauriHardware.print(target, bytes)}
               onOpenPrinterSetup={openPrintRecoverySetup}
               onPrintRecoveryChange={handlePrintRecoveryChange}
             />
@@ -1777,16 +1809,11 @@ export function App() {
               setFloorView("select");
             }}
             onScanQueueRegister={registerFloorWorkBarrier}
-            printing={
-              hardwareConfig.printer
-                ? {
-                    target: hardwareConfig.printer,
-                    language: hardwareConfig.printerLanguage,
-                    dpi: hardwareConfig.printerDpi ?? null,
-                    print: (target, bytes) => tauriHardware.print(target, bytes),
-                  }
-                : null
-            }
+            printing={configuredPrinterOutput(hardwareConfig, "box", (target, bytes) =>
+              tauriHardware.print(target, bytes),
+            )}
+            printTransport={(target, bytes) => tauriHardware.print(target, bytes)}
+            printers={configuredPrinterRouting(hardwareConfig).printers}
             onOpenPrinterSetup={openPrintRecoverySetup}
             onPrintRecoveryChange={handlePrintRecoveryChange}
           />

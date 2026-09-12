@@ -44,9 +44,11 @@ class PrinterViewModelTest {
         var outcome: SendOutcome = SendOutcome.Delivered,
     ) : PrinterTransport {
         var sent = 0
+        val targets = mutableListOf<PrinterEntity>()
         override suspend fun status(printer: PrinterEntity) = nextStatus
         override suspend fun send(printer: PrinterEntity, document: ByteArray): SendOutcome {
             sent++
+            targets += printer
             return outcome
         }
     }
@@ -75,6 +77,46 @@ class PrinterViewModelTest {
     ) = main.track(PrinterViewModel(recovery = db.recovery, db.printerDao(), transport, LabelRenderer(rasterize), { paired }, { 1_757_000_000_000L }))
 
     @Test
+    fun addingASecondPrinterPreservesAssignmentsAndTestsTheRequestedProfile() = runTest {
+        val transport = FakeTransport()
+        val model = vm(transport)
+        saveSelected(model)
+        val first = model.state.value.printers.single()
+        assertTrue(db.printerDao().observeAssignments().first().isEmpty())
+        model.assign(app.markiro.handheld.core.print.PrintPurpose.BOX, first.id)
+        model.state.first { it.assignments.any { a -> a.purpose == "box" } }
+        model.startAdd(TransportKind.WIFI)
+        model.editHost("192.168.1.41")
+        model.editName("Pallet printer")
+        model.checkAndSave()
+        val second = model.state.first { it.printers.size == 2 }.printers.first { it.id != first.id }
+        assertEquals(first.id, db.printerDao().assigned("box")?.id)
+        assertEquals(null, db.printerDao().assigned("pallet"))
+        model.printTest(first.id)
+        model.testStep.first { it is TestPrintStep.Sent }
+        assertEquals(first.id, transport.targets.last().id)
+        assertEquals(null, db.printerDao().assigned("pallet"))
+        model.assign(app.markiro.handheld.core.print.PrintPurpose.PALLET, second.id)
+        model.state.first { it.assignments.any { a -> a.purpose == "pallet" && a.printerId == second.id } }
+        assertEquals(first.id, db.printerDao().assigned("box")?.id)
+    }
+
+    @Test
+    fun testRetryRetainsThePrinterFromTheOriginalAttempt() = runTest {
+        val transport = FakeTransport(outcome = SendOutcome.Unknown("link lost"))
+        val model = vm(transport)
+        saveSelected(model)
+        val first = model.state.value.printers.single()
+        model.printTest(first.id)
+        model.testStep.first { it is TestPrintStep.Unknown }
+        db.printerDao().upsert(first.copy(address = "changed:9100", language = "tspl", dpi = 300))
+        model.state.first { it.printers.single().dpi == 300 }
+        model.retryTest()
+        model.testStep.first { it is TestPrintStep.Unknown && transport.sent == 2 }
+        assertEquals(listOf(first, first), transport.targets)
+    }
+
+    @Test
     fun aCheckedPrinterIsSavedAndSelected() = runTest {
         val model = vm()
         model.startAdd(TransportKind.WIFI)
@@ -95,7 +137,7 @@ class PrinterViewModelTest {
         saveSelected(model)
         saveSelected(model)
         assertEquals(1, db.printerDao().all().size)
-        assertEquals("192.168.1.40:9100", db.printerDao().selected()?.address)
+        assertEquals("192.168.1.40:9100", db.printerDao().all().single().address)
     }
 
     @Test
@@ -228,6 +270,30 @@ class PrinterViewModelTest {
         assertEquals(TransportKind.BLUETOOTH, form.transport)
         assertEquals(PrinterLanguage.TSPL, form.language)
         assertEquals(300, form.dpi)
+    }
+
+    @Test
+    fun editingBluetoothCannotDuplicateAnotherProfilesAddress() = runTest {
+        val model = vm()
+        saveSelected(model)
+        val first = model.state.value.printers.single()
+        val other = first.copy(id = "other", name = "Other", transport = "bluetooth", address = "AA:BB")
+        db.printerDao().upsert(other)
+        model.state.first { it.printers.size == 2 }
+        model.startEdit(first.id)
+        model.pickPairedDevice(DiscoveredPrinter("aa:bb", "Existing", true))
+        model.state.first { it.addressConflict }
+        assertEquals(first, db.printerDao().get(first.id))
+        assertEquals(other, db.printerDao().get(other.id))
+    }
+
+    @Test
+    fun bluetoothKeepsTheOperatorsProfileName() = runTest {
+        val model = vm()
+        model.editName("Line two duplicates")
+        model.pickPairedDevice(DiscoveredPrinter("AA:BB", "Generic device", true))
+        val stored = model.state.first { it.printers.isNotEmpty() }.printers.single()
+        assertEquals("Line two duplicates", stored.name)
     }
 
     @Test

@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.hub
 
+import app.markiro.handheld.core.print.upsertAssigned
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -275,7 +276,7 @@ class HubViewModelTest {
     fun theHubKnowsWhetherAPrinterIsConfigured() = runTest {
         val model = vm(api())
         assertEquals(false, model.state.first { it.organization.isNotEmpty() }.printerConfigured)
-        db.printerDao().upsert(
+        db.printerDao().upsertAssigned(
             PrinterEntity(
                 id = "p1", name = "Zebra ZD421", transport = "wifi", address = "192.168.1.40:9100",
                 language = "zpl", dpi = 203, selected = true, lastStatus = "ready", lastSeenAt = 1L,

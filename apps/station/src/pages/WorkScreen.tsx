@@ -1,3 +1,14 @@
+import { SavedPrinterDestination } from "../ui/PrinterDestination.js";
+import {
+  bindPrintDestination,
+  readPrintDestination,
+  replacePrintDestination,
+} from "../lib/print-destinations.js";
+import {
+  outputPrinterProfile,
+  serializePrinterOutput,
+  type PrinterProfile,
+} from "../lib/printer-routing.js";
 import { PalletContents } from "../components/PalletContents.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -168,12 +179,16 @@ export interface WorkScreenProps {
   verifyPrintedLabel: boolean;
   /** Where and how to render + send a box label. Omit to skip printing (e.g. no printer configured). */
   printing?: {
+    profile?: PrinterProfile;
     target: PrintTarget;
     language: PrinterLanguage;
     /** The attached printer's resolution; null for settings saved before the field existed. */
     dpi?: PrinterDpi | null;
     print: (target: PrintTarget, bytes: Uint8Array) => Promise<void>;
   } | null;
+  palletPrinting?: WorkScreenProps["printing"];
+  printers?: PrinterProfile[];
+  printTransport?: (target: PrintTarget, bytes: Uint8Array) => Promise<void>;
   /** Opens the existing workstation setup without resolving the durable print job. */
   onOpenPrinterSetup?: () => void;
   /** Publishes the fail-closed state to App's operator/window/update controls. */
@@ -233,6 +248,9 @@ export function WorkScreen({
   onScan,
   verifyPrintedLabel,
   printing,
+  palletPrinting,
+  printers = [],
+  printTransport,
   onOpenPrinterSetup,
   onPrintRecoveryChange,
 }: WorkScreenProps) {
@@ -598,8 +616,20 @@ export function WorkScreen({
     closedAt: string;
   }) {
     await palletLabelSpecReady.current;
-    const currentPrinting = printingRef.current;
+    const currentPrinting = palletPrintingRef.current;
     return attemptBoxPrint({
+      destination: {
+        exec,
+        key: {
+          scope: JSON.stringify([shiftId, terminalId]),
+          purpose: "pallet",
+          jobId: result.sscc,
+          attemptId: "label",
+        },
+        ...(printTransport
+          ? { print: (target, bytes) => serializePrint(() => printTransport(target, bytes)) }
+          : {}),
+      },
       template: palletLabelSpecRef.current,
       fields: fieldsForClosedPallet(result),
       printing: currentPrinting
@@ -967,6 +997,9 @@ export function WorkScreen({
   const printRecoveryReady = useRef<Promise<boolean> | null>(null);
   const printingRef = useRef(printing);
   printingRef.current = printing;
+  const palletPrintingRef = useRef(palletPrinting);
+  // Old injectable callers supplied one transport. App always passes the explicit role (including null).
+  palletPrintingRef.current = palletPrinting === undefined ? printing : palletPrinting;
 
   const retryPrintRecoveryHydration = useCallback((): void => {
     if (printRecoveryRetryingRef.current) return;
@@ -1511,6 +1544,18 @@ export function WorkScreen({
     await labelSpecReady.current;
     const currentPrinting = printingRef.current;
     return attemptBoxPrint({
+      destination: {
+        exec,
+        key: {
+          scope: JSON.stringify([shiftId, terminalId]),
+          purpose: "box",
+          jobId: result.sscc,
+          attemptId: "label",
+        },
+        ...(printTransport
+          ? { print: (target, bytes) => serializePrint(() => printTransport(target, bytes)) }
+          : {}),
+      },
       template: labelSpecRef.current,
       fields: fieldsForClosedBox(result),
       printing: currentPrinting
@@ -2235,6 +2280,60 @@ export function WorkScreen({
     });
   }, [exec, queue, reloadClosedBoxes]);
 
+  const [printerDestinationRevision, setPrinterDestinationRevision] = useState(0);
+  function changeLabelPrinter(
+    purpose: "box" | "pallet",
+    sscc: string,
+    selected: PrinterProfile,
+  ): Promise<void> {
+    const box = printRecoveryRef.current;
+    const pallet = palletCloseRef.current;
+    if (
+      !printers.some((candidate) => JSON.stringify(candidate) === JSON.stringify(selected)) ||
+      (purpose === "box"
+        ? !box || box.sscc !== sscc || box.pending
+        : !pallet || pallet.sscc !== sscc || pallet.pending || pallet.print === "printing")
+    )
+      return Promise.reject(new Error("Print attempt unavailable"));
+    if (purpose === "box" && box) updatePrintRecovery({ ...box, pending: true });
+    if (purpose === "pallet" && pallet) updatePalletClose({ ...pallet, pending: true });
+    return new Promise<void>((resolve, reject) => {
+      const finish = () => {
+        if (purpose === "box" && printRecoveryRef.current?.sscc === sscc)
+          updatePrintRecovery({ ...printRecoveryRef.current, pending: false });
+        if (purpose === "pallet" && palletCloseRef.current?.sscc === sscc)
+          updatePalletClose({ ...palletCloseRef.current, pending: false });
+      };
+      const admitted = queue.enqueueJob(async () => {
+        try {
+          const key = {
+            scope: JSON.stringify([shiftId, terminalId]),
+            purpose,
+            jobId: sscc,
+            attemptId: "label",
+          };
+          const saved = await readPrintDestination(exec, key);
+          if (saved) {
+            if (!(await replacePrintDestination(exec, key, saved, selected)))
+              throw new Error("Print destination changed");
+          } else await bindPrintDestination(exec, key, selected);
+          setPrinterDestinationRevision((value) => value + 1);
+          resolve();
+        } catch (error) {
+          reject(
+            error instanceof Error ? error : new Error("Print destination could not be saved"),
+          );
+        } finally {
+          finish();
+        }
+      });
+      if (!admitted) {
+        finish();
+        reject(new Error("Print recovery unavailable"));
+      }
+    });
+  }
+
   function retryPrintRecovery(): void {
     const job = printRecoveryRef.current;
     if (!job || job.pending) return;
@@ -2641,6 +2740,21 @@ export function WorkScreen({
 
       {printRecovery ? (
         <BoxPrintRecovery
+          destination={
+            <SavedPrinterDestination
+              exec={exec}
+              destination={{
+                scope: JSON.stringify([shiftId, terminalId]),
+                purpose: "box",
+                jobId: printRecovery.sscc,
+                attemptId: "label",
+              }}
+              revision={`${printerDestinationRevision}:${printRecovery.pending}`}
+              printers={printers}
+              disabled={printRecovery.pending}
+              onChoose={(printer) => changeLabelPrinter("box", printRecovery.sscc, printer)}
+            />
+          }
           sscc={printRecovery.sscc}
           errorCode={printRecovery.errorCode}
           pending={printRecovery.pending}
@@ -2652,6 +2766,19 @@ export function WorkScreen({
 
       {verification ? (
         <PrintVerification
+          destination={
+            <SavedPrinterDestination
+              exec={exec}
+              destination={{
+                scope: JSON.stringify([shiftId, terminalId]),
+                purpose: "box",
+                jobId: verification.sscc,
+                attemptId: "label",
+              }}
+              revision={printerDestinationRevision}
+              printers={[]}
+            />
+          }
           expected={verification.sscc}
           onVerified={handleVerified}
           onReprint={async () => {
@@ -2661,9 +2788,24 @@ export function WorkScreen({
             // still sends the exact bytes already rendered. Both routes share
             // the physical-printer queue and expose only a fixed error category.
             try {
-              if (verification.bytes && printing) {
+              if (verification.bytes) {
+                const printer = await bindPrintDestination(
+                  exec,
+                  {
+                    scope: JSON.stringify([shiftId, terminalId]),
+                    purpose: "box",
+                    jobId: verification.sscc,
+                    attemptId: "label",
+                  },
+                  printing ? outputPrinterProfile(printing) : null,
+                );
+                const output = printTransport ?? printing?.print;
+                if (!printer || !output) return "printer_unconfigured";
                 const reprintBytes = verification.bytes;
-                await serializePrint(() => printing.print(printing.target, reprintBytes));
+                await serializePrinterOutput(printer.target, () =>
+                  serializePrint(() => output(printer.target, reprintBytes)),
+                );
+                setPrinterDestinationRevision((value) => value + 1);
                 return undefined;
               }
               const attempt = await attemptClosedBoxPrint(verification);
@@ -2671,6 +2813,7 @@ export function WorkScreen({
                 console.error("station: box label reprint failed");
                 return attempt.code;
               }
+              setPrinterDestinationRevision((value) => value + 1);
               return undefined;
             } catch {
               console.error("station: box label reprint failed");
@@ -2713,6 +2856,26 @@ export function WorkScreen({
       ) : null}
       {palletClose ? (
         <PalletClose
+          destination={
+            <SavedPrinterDestination
+              exec={exec}
+              destination={{
+                scope: JSON.stringify([shiftId, terminalId]),
+                purpose: "pallet",
+                jobId: palletClose.sscc,
+                attemptId: "label",
+              }}
+              revision={`${printerDestinationRevision}:${palletClose.print}:${palletClose.pending}`}
+              printers={printers}
+              disabled={palletClose.pending || palletClose.print === "printing"}
+              {...(palletClose.print === "failed" || palletClose.print === "unknown"
+                ? {
+                    onChoose: (printer: PrinterProfile) =>
+                      changeLabelPrinter("pallet", palletClose.sscc, printer),
+                  }
+                : {})}
+            />
+          }
           result={{ status: "closed", sscc: palletClose.sscc, boxCount: palletClose.boxCount }}
           print={palletClose.print}
           errorCode={palletClose.errorCode}

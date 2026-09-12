@@ -9,6 +9,8 @@ import type { SetupCheckResult } from "./test-code.js";
 type PrinterTransport = PrintTarget["kind"] | "none";
 
 export interface PrinterSetupPanelProps {
+  name?: string;
+  onNameChange?: (value: string) => void;
   /** The code on the last test label sent to the printer; null before any test print. */
   printedCode: string | null;
   /** The verdict of scanning the printed label against `printedCode`. */
@@ -23,7 +25,6 @@ export interface PrinterSetupPanelProps {
   language: PrinterLanguage;
   printerDpi?: 203 | 300 | null;
   onPrinterDpiChange?: (dpi: 203 | 300 | null) => void;
-  verifyPrintedLabel: boolean;
   disabled: boolean;
   busy: boolean;
   onTransportChange: (transport: PrinterTransport) => void;
@@ -34,11 +35,12 @@ export interface PrinterSetupPanelProps {
   onUsbPrinterChange: (name: string) => void;
   onUsbRefresh: () => void;
   onLanguageChange: (language: PrinterLanguage) => void;
-  onVerifyPrintedLabelChange: (verify: boolean) => void;
   onTestPrint: () => void;
 }
 
 export function PrinterSetupPanel({
+  name,
+  onNameChange,
   printedCode,
   check,
   transport,
@@ -51,7 +53,6 @@ export function PrinterSetupPanel({
   language,
   printerDpi = null,
   onPrinterDpiChange,
-  verifyPrintedLabel,
   disabled,
   busy,
   onTransportChange,
@@ -62,7 +63,6 @@ export function PrinterSetupPanel({
   onUsbPrinterChange,
   onUsbRefresh,
   onLanguageChange,
-  onVerifyPrintedLabelChange,
   onTestPrint,
 }: PrinterSetupPanelProps) {
   const { t } = useTranslation();
@@ -98,7 +98,33 @@ export function PrinterSetupPanel({
         className="setup-card setup-card--printer-config"
         aria-label={t("setup.printerTransport")}
       >
-        <h2 className="setup-card__title">{t("setup.connectionTitle")}</h2>
+        <div className="setup-printer-identity">
+          {name !== undefined ? (
+            <Input
+              size="floor"
+              label={t("setup.printerName")}
+              value={name}
+              maxLength={120}
+              disabled={disabled || busy}
+              onChange={(event) => onNameChange?.(event.target.value)}
+            />
+          ) : null}
+          <Select
+            size="floor"
+            label={t("setup.printerResolution")}
+            aria-describedby={dpiHintId}
+            value={printerDpi?.toString() ?? ""}
+            disabled={disabled || transport === "none"}
+            options={[
+              { value: "", label: t("setup.printerResolutionUnknown") },
+              { value: "203", label: "203 dpi" },
+              { value: "300", label: "300 dpi" },
+            ]}
+            onValueChange={(value) =>
+              onPrinterDpiChange?.(value === "203" ? 203 : value === "300" ? 300 : null)
+            }
+          />
+        </div>
         <fieldset className="setup-choice-group setup-choice-group--printer-transport">
           <legend>{t("setup.printerTransport")}</legend>
           <div className="setup-choice-group__options setup-choice-group__options--transport">
@@ -117,71 +143,70 @@ export function PrinterSetupPanel({
           </div>
         </fieldset>
 
-        <div className="setup-panel__fields">
-          {transport === "tcp" ? (
-            <>
-              <Input
-                size="floor"
-                label={t("setup.host")}
-                value={host}
-                disabled={disabled}
-                onChange={(event) => onHostChange(event.target.value)}
-              />
-              <Input
-                size="floor"
-                mono
-                inputMode="numeric"
-                label={t("setup.printerTcpPort")}
-                value={tcpPort}
-                disabled={disabled}
-                onChange={(event) => onTcpPortChange(event.target.value)}
-              />
-            </>
-          ) : transport === "serial" ? (
-            <>
-              <Input
-                size="floor"
-                label={t("setup.printerPort")}
-                value={serialPort}
-                disabled={disabled}
-                onChange={(event) => onSerialPortChange(event.target.value)}
-              />
-              <Input
-                size="floor"
-                mono
-                inputMode="numeric"
-                label={t("setup.printerBaud")}
-                value={serialBaud}
-                disabled={disabled}
-                onChange={(event) => onSerialBaudChange(event.target.value)}
-              />
-            </>
-          ) : transport === "usb" ? (
-            <>
-              <Select
-                native
-                size="floor"
-                label={t("setup.usbPrinterList")}
-                value={usbPrinter}
-                options={usbChoices}
-                disabled={disabled || (usbPrinters.length === 0 && usbPrinter === "")}
-                onValueChange={onUsbPrinterChange}
-              />
-              <Button
-                size="floor"
-                variant="secondary"
-                disabled={disabled || busy}
-                onClick={onUsbRefresh}
-              >
-                {t("setup.usbRefresh")}
-              </Button>
-            </>
-          ) : (
-            <p className="setup-panel__empty">{t("setup.noPrinterHint")}</p>
-          )}
-        </div>
-
-        <div className="setup-printer-format">
+        <div className="setup-printer-connection">
+          <div className="setup-panel__fields">
+            {transport === "tcp" ? (
+              <>
+                <Input
+                  size="floor"
+                  label={t("setup.host")}
+                  value={host}
+                  disabled={disabled}
+                  onChange={(event) => onHostChange(event.target.value)}
+                />
+                <Input
+                  size="floor"
+                  mono
+                  inputMode="numeric"
+                  label={t("setup.printerTcpPort")}
+                  value={tcpPort}
+                  disabled={disabled}
+                  onChange={(event) => onTcpPortChange(event.target.value)}
+                />
+              </>
+            ) : transport === "serial" ? (
+              <>
+                <Input
+                  size="floor"
+                  label={t("setup.printerPort")}
+                  value={serialPort}
+                  disabled={disabled}
+                  onChange={(event) => onSerialPortChange(event.target.value)}
+                />
+                <Input
+                  size="floor"
+                  mono
+                  inputMode="numeric"
+                  label={t("setup.printerBaud")}
+                  value={serialBaud}
+                  disabled={disabled}
+                  onChange={(event) => onSerialBaudChange(event.target.value)}
+                />
+              </>
+            ) : transport === "usb" ? (
+              <>
+                <Select
+                  native
+                  size="floor"
+                  label={t("setup.usbPrinterList")}
+                  value={usbPrinter}
+                  options={usbChoices}
+                  disabled={disabled || (usbPrinters.length === 0 && usbPrinter === "")}
+                  onValueChange={onUsbPrinterChange}
+                />
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  disabled={disabled || busy}
+                  onClick={onUsbRefresh}
+                >
+                  {t("setup.usbRefresh")}
+                </Button>
+              </>
+            ) : (
+              <p className="setup-panel__empty">{t("setup.noPrinterHint")}</p>
+            )}
+          </div>
           <fieldset className="setup-choice-group setup-choice-group--printer-language">
             <legend>{t("setup.printerLanguage")}</legend>
             <div className="setup-choice-group__options setup-choice-group__options--compact">
@@ -199,33 +224,7 @@ export function PrinterSetupPanel({
               ))}
             </div>
           </fieldset>
-
-          <Select
-            size="floor"
-            label={t("setup.printerResolution")}
-            aria-describedby={dpiHintId}
-            value={printerDpi?.toString() ?? ""}
-            disabled={disabled || transport === "none"}
-            options={[
-              { value: "", label: t("setup.printerResolutionUnknown") },
-              { value: "203", label: "203 dpi" },
-              { value: "300", label: "300 dpi" },
-            ]}
-            onValueChange={(value) =>
-              onPrinterDpiChange?.(value === "203" ? 203 : value === "300" ? 300 : null)
-            }
-          />
         </div>
-
-        <label className="setup-touch-choice setup-touch-choice--checkbox">
-          <input
-            type="checkbox"
-            checked={transport === "none" ? false : verifyPrintedLabel}
-            disabled={disabled || transport === "none"}
-            onChange={(event) => onVerifyPrintedLabelChange(event.target.checked)}
-          />
-          <span>{t("setup.verifyPrintedLabel")}</span>
-        </label>
       </section>
 
       <section
@@ -234,6 +233,7 @@ export function PrinterSetupPanel({
         className="setup-card setup-card--check setup-card--printer-check"
       >
         <h2 className="setup-card__title">{t("setup.printerCheckTitle")}</h2>
+        <p className="setup-printer-check__name">{name}</p>
         <p className="setup-card__hint">{t("setup.printerCheckHint")}</p>
         <p id={dpiHintId} className="setup-card__dpi-hint">
           {t("setup.printerDpiHint")}
@@ -241,6 +241,7 @@ export function PrinterSetupPanel({
         <Button size="floor" disabled={!printReady} onClick={onTestPrint}>
           {t("setup.testPrint")}
         </Button>
+
         {printedCode ? (
           <>
             <div className="setup-label-preview" data-testid="printer-test-label">

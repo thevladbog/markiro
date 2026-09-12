@@ -2,6 +2,7 @@ package app.markiro.handheld.feature.printer
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -30,7 +31,7 @@ class PrinterScreensTest {
     )
 
     @Test
-    fun theListShowsTheSelectedPrinterItsSettingsAndTheOthers() {
+    fun theListShowsProfilesAndPurposeSettingsWithoutAGlobalSelection() {
         var tested = false
         compose.setContent {
             MarkiroTheme {
@@ -40,12 +41,11 @@ class PrinterScreensTest {
                 )
             }
         }
-        compose.onNodeWithText("ВЫБРАН").assertIsDisplayed()
+        compose.onNodeWithText("Назначения").assertIsDisplayed()
         compose.onNodeWithText("Zebra ZD421").assertIsDisplayed()
-        compose.onNodeWithText("ДОСТУПНЫЕ").assertIsDisplayed()
         compose.onNodeWithText("Zebra ZQ320").assertIsDisplayed()
         compose.onNodeWithText("ZPL · 203 dpi").assertIsDisplayed()
-        compose.onNodeWithText("Тестовая печать").performClick()
+        compose.onAllNodesWithText("Тест")[0].performClick()
         assertEquals(true, tested)
     }
 

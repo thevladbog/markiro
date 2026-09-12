@@ -13,6 +13,7 @@ import type {
 import type { PrintTarget } from "../hardware.js";
 import type { SqlExecutor } from "../mirror.js";
 import type { BoxLabelInput } from "../box-label.js";
+import type { PrinterProfile } from "../printer-routing.js";
 
 export type DuplicateLabelFieldsInput = Omit<BoxLabelInput, "sscc" | "itemCount" | "closedAt"> & {
   canonicalRaw: string;
@@ -68,12 +69,14 @@ export interface StoredProductLabelAttempt {
 }
 /** Private durable context; only ProductLabelJobView may reach UI components. */
 export interface StoredProductLabelJob extends PreparedProductLabelAcceptance {
+  printer?: PrinterProfile | null;
   projection: ProductLabelProjection;
   attempts: StoredProductLabelAttempt[];
   ownershipConflict: boolean;
   updatedAt: string;
 }
 export interface ProductLabelJobView {
+  printer?: PrinterProfile | null;
   jobId: string;
   shiftId: string;
   codeSuffix: string;
@@ -96,6 +99,7 @@ export interface ProductLabelActor {
   newId(): string;
 }
 export interface ProductLabelPrintingDeps extends ProductLabelActor {
+  profile?: PrinterProfile | null;
   exec: SqlExecutor;
   credentialOwnership: string;
   target: PrintTarget | null;

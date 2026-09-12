@@ -136,6 +136,22 @@ function input(exec: SqlExecutor) {
 }
 
 describe("durable inventory box printing", () => {
+  it("keeps the failed label destination when the box assignment changes before retry", async () => {
+    const { exec } = await setup();
+    const first = input(exec);
+    first.printing.print.mockRejectedValueOnce(new Error("offline"));
+    expect((await attemptInventoryBoxPrint(first)).state).toBe("failed");
+    const second = input(exec);
+    second.attemptId = "66666666-6666-4666-8666-666666666667";
+    second.eventId = "77777777-7777-4777-8777-777777777778";
+    const original = first.printing.target;
+    second.printing.target = { ...original, host: "10.0.0.99" };
+    expect((await attemptInventoryBoxPrint(second)).state).toBe("printed");
+    expect(second.printing.print).toHaveBeenCalledExactlyOnceWith(
+      original,
+      new Uint8Array([1, 2, 3]),
+    );
+  });
   it("rejects an invalid SSCC check digit before render or hardware", async () => {
     const { db, exec } = await setup();
     db.prepare("UPDATE inventory_repack_boxes_mirror SET new_sscc = '046006820000621519'").run();

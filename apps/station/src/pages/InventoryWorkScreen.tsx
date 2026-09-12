@@ -1,3 +1,10 @@
+import { SavedPrinterDestination } from "../ui/PrinterDestination.js";
+import {
+  bindPrintDestination,
+  readPrintDestination,
+  replacePrintDestination,
+} from "../lib/print-destinations.js";
+import type { PrinterProfile } from "../lib/printer-routing.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, FullScreenDialog } from "@markiro/ui";
@@ -68,6 +75,8 @@ export interface InventoryWorkScreenProps {
   onLeft?: () => void;
   onScanQueueRegister?: (queue: ScanQueue) => () => void;
   printing?: InventoryBoxPrintingTransport | null;
+  printTransport?: InventoryBoxPrintingTransport["print"];
+  printers?: PrinterProfile[];
   onOpenPrinterSetup?: () => void;
   onPrintRecoveryChange?: (blocked: boolean) => void;
   createEventId?: () => string;
@@ -812,6 +821,8 @@ function RepackInventoryWorkScreen({
   onLeft,
   onScanQueueRegister,
   printing = null,
+  printTransport,
+  printers = [],
   onOpenPrinterSetup,
   onPrintRecoveryChange,
   createEventId = defaultEventId,
@@ -1139,6 +1150,7 @@ function RepackInventoryWorkScreen({
           attemptedAt,
           completedAt: now,
           printing,
+          ...(printTransport ? { printTransport } : {}),
           kind,
           ...(recoveryOfAttemptId ? { recoveryOfAttemptId } : {}),
         });
@@ -1213,7 +1225,19 @@ function RepackInventoryWorkScreen({
         if (mounted.current) setPrintBusy(false);
       }
     },
-    [createEventId, deviceId, exec, inventory, now, operatorId, printing, queue, nudge, refresh],
+    [
+      createEventId,
+      deviceId,
+      exec,
+      inventory,
+      now,
+      operatorId,
+      printing,
+      printTransport,
+      queue,
+      nudge,
+      refresh,
+    ],
   );
 
   useEffect(() => {
@@ -1249,6 +1273,7 @@ function RepackInventoryWorkScreen({
           createEventId,
           now,
           printing,
+          ...(printTransport ? { printTransport } : {}),
         });
         if (outcome && mounted.current) {
           setPrintResult(outcome);
@@ -1274,6 +1299,7 @@ function RepackInventoryWorkScreen({
     nudge,
     operatorId,
     printing,
+    printTransport,
     queue,
     refresh,
     refreshRevision,
@@ -1482,6 +1508,36 @@ function RepackInventoryWorkScreen({
     reprintSscc,
   ]);
 
+  const [printerDestinationRevision, setPrinterDestinationRevision] = useState(0);
+  const changePrinter = async (recovery: InventoryPrintDisplay, printer: PrinterProfile) => {
+    if (
+      printInvocationBusy.current ||
+      remoteReprintBusy.current ||
+      !printers.some((candidate) => JSON.stringify(candidate) === JSON.stringify(printer))
+    )
+      throw new Error("Print recovery unavailable");
+    printInvocationBusy.current = true;
+    setPrintBusy(true);
+    try {
+      await runQueuedJob(queue, async () => {
+        const key = {
+          scope: JSON.stringify([inventory.inventoryId, inventory.snapshotId, deviceId]),
+          purpose: "box" as const,
+          jobId: recovery.boxId,
+          attemptId: "label",
+        };
+        const saved = await readPrintDestination(exec, key);
+        if (saved) {
+          if (!(await replacePrintDestination(exec, key, saved, printer)))
+            throw new Error("Print destination changed");
+        } else await bindPrintDestination(exec, key, printer);
+      });
+      if (mounted.current) setPrinterDestinationRevision((value) => value + 1);
+    } finally {
+      printInvocationBusy.current = false;
+      if (mounted.current) setPrintBusy(false);
+    }
+  };
   const retryPrint = async (recovery: InventoryPrintDisplay) => {
     if (recovery.attemptState === "printing" && recovery.attemptId) {
       setPrintBusy(true);
@@ -1737,6 +1793,25 @@ function RepackInventoryWorkScreen({
           {printDisplay ? (
             <InventoryBoxPrintRecovery
               state={printDisplay.state}
+              destination={
+                <SavedPrinterDestination
+                  exec={exec}
+                  destination={{
+                    scope: JSON.stringify([inventory.inventoryId, inventory.snapshotId, deviceId]),
+                    purpose: "box",
+                    jobId: printDisplay.boxId,
+                    attemptId: "label",
+                  }}
+                  revision={`${printerDestinationRevision}:${printDisplay.state}:${printBusy}`}
+                  printers={printers}
+                  disabled={printBusy}
+                  {...(printDisplay.state !== "printed"
+                    ? {
+                        onChoose: (printer: PrinterProfile) => changePrinter(printDisplay, printer),
+                      }
+                    : {})}
+                />
+              }
               facts={{
                 ...printDisplay,
                 productionDate: formatCivilDate(printDisplay.productionDate, locale),

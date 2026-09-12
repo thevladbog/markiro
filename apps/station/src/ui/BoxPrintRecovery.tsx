@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, FullScreenDialog } from "@markiro/ui";
@@ -6,6 +7,7 @@ import type { BoxPrintErrorCode } from "../lib/boxes.js";
 export type BoxPrintRecoveryErrorCode = BoxPrintErrorCode | "interrupted";
 
 export interface BoxPrintRecoveryProps {
+  destination?: ReactNode;
   sscc: string;
   errorCode: BoxPrintRecoveryErrorCode;
   pending: boolean;
@@ -15,6 +17,7 @@ export interface BoxPrintRecoveryProps {
 }
 
 const ERROR_KEYS: Record<BoxPrintRecoveryErrorCode, string> = {
+  persistence_failed: "printerRouting.storageFailed",
   template_missing: "box.printRecovery.errors.templateMissing",
   printer_unconfigured: "box.printRecovery.errors.printerUnconfigured",
   render_failed: "box.printRecovery.errors.renderFailed",
@@ -24,6 +27,7 @@ const ERROR_KEYS: Record<BoxPrintRecoveryErrorCode, string> = {
 
 export function BoxPrintRecovery({
   sscc,
+  destination,
   errorCode,
   pending,
   onRetry,
@@ -90,6 +94,7 @@ export function BoxPrintRecovery({
       }
     >
       <div className="box-print-recovery">
+        {destination}
         <p role="alert">{t(ERROR_KEYS[errorCode])}</p>
         <p className="box-print-recovery__sscc">
           <span>{t("box.printRecovery.sscc")}</span>

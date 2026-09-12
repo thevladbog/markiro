@@ -169,9 +169,9 @@ describe("fixed station viewport source contract", () => {
 
     expect(css).toMatch(/\.station-update-indicator\s*\{[^}]*position:\s*static;/s);
     expect(css).not.toMatch(/\.station-update-indicator\s*\{[^}]*position:\s*absolute;/s);
-    expect(statusBar.match(/<Button/g)).toHaveLength(2);
-    expect(statusBar.match(/size="floor"/g)).toHaveLength(2);
-    expect(statusBar.match(/variant="secondary"/g)).toHaveLength(2);
+    expect(statusBar.match(/<Button/g)).toHaveLength(3);
+    expect(statusBar.match(/size="floor"/g)).toHaveLength(3);
+    expect(statusBar.match(/variant="secondary"/g)).toHaveLength(3);
     // The identity column is the ONLY flexible track: pills and actions size
     // to content, so no fixed floor can starve the station/operator names the
     // way the old minmax(960px, …) actions column did.
