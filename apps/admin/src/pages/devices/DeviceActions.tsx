@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
@@ -12,6 +12,7 @@ export interface DeviceActionsProps {
   canManageCredentials: boolean;
   onReassign: (device: DeviceDto) => void;
   onPair: (device: DeviceDto) => void;
+  reservationCancelledOrUnknown?: boolean;
 }
 
 /** Row lifecycle controls. Server success is the only point that changes visible state. */
@@ -21,6 +22,7 @@ export function DeviceActions({
   canManageCredentials,
   onReassign,
   onPair,
+  reservationCancelledOrUnknown = false,
 }: DeviceActionsProps) {
   const { t } = useTranslation();
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
@@ -31,7 +33,12 @@ export function DeviceActions({
   const isKiosk = device.type === "kiosk";
   const actionKey = isKiosk ? "unbind" : "revoke";
 
+  useEffect(() => {
+    if (reservationCancelledOrUnknown && !isKiosk) setConfirmingRevoke(false);
+  }, [isKiosk, reservationCancelledOrUnknown]);
+
   const revoke = async () => {
+    if (reservationCancelledOrUnknown && !isKiosk) return;
     setRevokeError(null);
     try {
       if (device.type === "station") await revokeStation.mutateAsync(device.id);
@@ -74,7 +81,7 @@ export function DeviceActions({
             {t("pages.devices.kioskSettings")}
           </Link>
         ) : null}
-        {canReassign ? (
+        {(!reservationCancelledOrUnknown || isKiosk) && canReassign ? (
           <Button
             type="button"
             size="compact"
@@ -84,7 +91,7 @@ export function DeviceActions({
             {t("pages.devices.reassign")}
           </Button>
         ) : null}
-        {canManageCredentials ? (
+        {(!reservationCancelledOrUnknown || isKiosk) && canManageCredentials ? (
           <>
             <Button type="button" size="compact" variant="secondary" onClick={() => onPair(device)}>
               {t("pages.devices.actions.repair")}

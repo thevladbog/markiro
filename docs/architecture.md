@@ -283,6 +283,20 @@ activate rights, migrate customers, or verify native clients. See the
 version negotiation, preview recovery and migration order. Device allocation, offline grants and
 production activation remain P1B–P1D.
 
+P1B.2 introduces a current licensed-place assignment and append-only transition journal
+for each Station/handheld identity; both kinds use the same `stations` pool. Creation,
+pairing, security revocation and re-pairing maintain assignments under the existing
+quota lock. Missing or contradictory facts retain capacity and disable reservation
+cancellation until diagnosed. An authorized user may cancel a never-paired, keyless
+reservation without production references; its device record remains, its live code
+is retired, and the cancelled assignment cannot be reused. Cancellation compares a
+revision and stores an actor-bound idempotent receipt. It is permitted in read-only
+subscription state without enabling creation or credential issuance. Separate cabinet
+and platform inspection routes expose licensing independently of connection status.
+The deployment image compatibility floor rejects old readers/writers for both deploy
+and rollback; see the [device reservations runbook](operations/entitlements-p1b2.md).
+Replacement preparation, downgrade retention and offline grants remain later deliveries.
+
 Bank imports retain the bounded source row as reconciliation evidence, while the public match and
 audit contracts expose only the payer account's last four digits and whether it is a known active,
 known archived, unknown, or unavailable account. Active known accounts may be suggested. Archived

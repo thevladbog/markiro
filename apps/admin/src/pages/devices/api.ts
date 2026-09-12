@@ -1,6 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient, UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { apiFetch } from "../../api/client.js";
+import {
+  cabinetDeviceLicensingContracts,
+  cancelDeviceReservationSchema,
+  workingDevicePoolSchema,
+  type CancelDeviceReservation,
+  type DeviceReservationReceipt,
+  type WorkingDevicePool,
+} from "@markiro/platform-contracts";
 
 export type DeviceType = "station" | "kiosk" | "handheld";
 /** Stations and handhelds share the station endpoints and the station pairing mutation. */
@@ -63,6 +71,7 @@ export interface CreatedDevice {
 }
 export const DEVICES_QUERY_KEY = ["devices"] as const;
 export const KIOSKS_QUERY_KEY = ["kiosks"] as const;
+export const DEVICE_LICENSING_QUERY_KEY = ["device-licensing"] as const;
 const DEVICE_PAIRING_CODE_MUTATION_KEY = ["device-pairing-code"] as const;
 function pairingMutationKey(type: DeviceType) {
   return [...DEVICE_PAIRING_CODE_MUTATION_KEY, type] as const;
@@ -81,6 +90,31 @@ export function useDevices(params: DevicesParams): UseQueryResult<DevicesRespons
     queryKey: key(params),
     queryFn: () => apiFetch<DevicesResponse>(listPath(params)),
   });
+}
+export function useDeviceLicensing(enabled: boolean): UseQueryResult<WorkingDevicePool> {
+  return useQuery({
+    queryKey: DEVICE_LICENSING_QUERY_KEY,
+    enabled,
+    queryFn: async () =>
+      workingDevicePoolSchema.parse(await apiFetch(cabinetDeviceLicensingContracts.inspect.path)),
+  });
+}
+
+export async function cancelDeviceReservation(
+  deviceId: string,
+  input: CancelDeviceReservation,
+): Promise<DeviceReservationReceipt> {
+  const body = cancelDeviceReservationSchema.parse(input);
+  const path = cabinetDeviceLicensingContracts.cancelReservation.path.replace(
+    ":deviceId",
+    deviceId,
+  );
+  return cabinetDeviceLicensingContracts.cancelReservation.response.parse(
+    await apiFetch(path, {
+      method: cabinetDeviceLicensingContracts.cancelReservation.method,
+      body: JSON.stringify(body),
+    }),
+  );
 }
 function useDeviceMutation<T, V>(
   fn: (value: V) => Promise<T>,

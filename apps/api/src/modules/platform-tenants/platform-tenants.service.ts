@@ -1,6 +1,7 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, count, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import { countWorkingDeviceUsage } from "../../subscriptions/working-device-assignments";
 import {
   platformTenantContracts,
   platformTenantV3Contracts,
@@ -271,15 +272,7 @@ export class PlatformTenantsService {
         .select({ value: count() })
         .from(schema.lines)
         .where(eq(schema.lines.tenantId, tenantId)),
-      this.db
-        .select({ value: count() })
-        .from(schema.stationDevices)
-        .where(
-          and(
-            eq(schema.stationDevices.tenantId, tenantId),
-            isNull(schema.stationDevices.revokedAt),
-          ),
-        ),
+      countWorkingDeviceUsage(this.db, tenantId),
       this.db
         .select({ value: count() })
         .from(schema.kiosks)
@@ -340,7 +333,7 @@ export class PlatformTenantsService {
         cabinetUsers: (cabinetUsage[0]?.value ?? 0) + (invitationUsage[0]?.value ?? 0),
         kiosks: kioskUsage[0]?.value ?? 0,
         lines: lineUsage[0]?.value ?? 0,
-        stations: stationUsage[0]?.value ?? 0,
+        stations: stationUsage,
       },
       events: events.map((event) => ({
         id: event.id,

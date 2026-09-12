@@ -158,6 +158,22 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   },
   {
     contract: customerContract(CABINET_GUARDS, {
+      mode: "licensing",
+      operation: "inspect",
+    }),
+    routes: ["GET /device-licensing (DeviceLicensingController.inspect)"],
+  },
+  {
+    contract: customerContract(CABINET_GUARDS, {
+      mode: "licensing",
+      operation: "cancel_reservation",
+    }),
+    routes: [
+      "POST /device-licensing/:deviceId/cancel-reservation (DeviceLicensingController.cancelReservation)",
+    ],
+  },
+  {
+    contract: customerContract(CABINET_GUARDS, {
       mode: "read_only_allowed",
       reason: "security",
     }),
@@ -390,6 +406,9 @@ const profile: RouteExemption = {
 };
 
 const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
+  "PlatformDeviceLicensingController.cancelReservation": platform(
+    "cross-tenant reservation cancellation requires platform tenant and billing write capabilities",
+  ),
   "PlatformReportsController.create": platform(
     "cross-tenant report creation uses platform reports.create capability and revalidated platform identity",
   ),

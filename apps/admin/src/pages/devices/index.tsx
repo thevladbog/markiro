@@ -14,6 +14,7 @@ import {
   Table,
 } from "@markiro/ui";
 import type { TableColumn } from "@markiro/ui";
+import type { WorkingDevicePool } from "@markiro/platform-contracts";
 
 import { useCan } from "../../access/context.js";
 import { useActiveOrg } from "../../layout/useActiveOrg.js";
@@ -23,7 +24,14 @@ import { DeviceActions } from "./DeviceActions.js";
 import { DeviceDrawer } from "./DeviceDrawer.js";
 import { StationDownloadLink } from "./StationDownloadLink.js";
 import { DevicePager } from "./DevicePager.js";
-import { useDevices, type DeviceDto, type DeviceStatus, type DeviceType } from "./api.js";
+import { DeviceLicensingPanel } from "./DeviceLicensingPanel.js";
+import {
+  useDeviceLicensing,
+  useDevices,
+  type DeviceDto,
+  type DeviceStatus,
+  type DeviceType,
+} from "./api.js";
 
 const PAGE_SIZE = 8;
 const deviceTypes: readonly DeviceType[] = ["station", "kiosk", "handheld"];
@@ -43,6 +51,15 @@ function parseStatus(value: string | null): DeviceStatus | undefined {
 function parsePage(value: string | null): number {
   const number = Number(value);
   return Number.isInteger(number) && number > 0 ? number : 1;
+}
+
+export function reservationCancelledOrUnknown(
+  device: DeviceDto,
+  pool: WorkingDevicePool | undefined,
+): boolean {
+  if (device.type === "kiosk") return false;
+  const assignment = pool?.devices.find((item) => item.deviceId === device.id);
+  return assignment === undefined || assignment.releaseReason === "reservation_cancelled";
 }
 
 /**
@@ -90,6 +107,7 @@ export function DevicesPage() {
     page,
     pageSize: PAGE_SIZE,
   });
+  const licensing = useDeviceLicensing(canManageCredentials);
 
   const setFilters = useCallback(
     (next: { type?: DeviceType | null; status?: DeviceStatus | null; page?: number }) => {
@@ -113,6 +131,15 @@ export function DevicesPage() {
   const columns = useMemo<TableColumn<DeviceDto>[]>(
     () => [
       { key: "name", title: t("pages.devices.table.name") },
+      {
+        key: "licensing",
+        title: t("pages.devices.table.licensing"),
+        render: (row) => {
+          if (row.type === "kiosk") return "—";
+          const assignment = licensing.data?.devices.find((item) => item.deviceId === row.id);
+          return assignment ? t(`pages.devices.licensing.state.${assignment.state}`) : "—";
+        },
+      },
       {
         key: "type",
         title: t("pages.devices.table.type"),
@@ -150,13 +177,14 @@ export function DevicesPage() {
             device={row}
             canReassign={row.type === "station" ? canManageCredentials : canWriteOperations}
             canManageCredentials={canManageCredentials}
+            reservationCancelledOrUnknown={reservationCancelledOrUnknown(row, licensing.data)}
             onReassign={(device) => setDrawer({ mode: "reassign", device })}
             onPair={(device) => setDrawer({ mode: "pair", device })}
           />
         ),
       },
     ],
-    [canManageCredentials, canWriteOperations, t],
+    [canManageCredentials, canWriteOperations, licensing.data, t],
   );
 
   return (
@@ -179,6 +207,7 @@ export function DevicesPage() {
           </>
         }
       />
+      <DeviceLicensingPanel enabled={canManageCredentials} />
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <Select
           label={t("pages.devices.typeLabel")}

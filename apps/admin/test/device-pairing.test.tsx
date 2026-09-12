@@ -358,6 +358,68 @@ it("uses the type-specific destructive endpoint only after confirmation", async 
   await waitFor(() => expect(request).toHaveBeenCalledOnce());
 });
 
+it("blocks station mutations only for a cancelled or unknown reservation and leaves kiosk controls available", () => {
+  const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+  const base = {
+    name: "Packing",
+    place: { id: null, name: null },
+    status: "revoked" as const,
+    lastSeenAt: null,
+    paired: false,
+  };
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ThemeProvider defaultTheme="light">
+        <MemoryRouter>
+          <DeviceActions
+            device={{ ...base, id: "station-1", type: "station" }}
+            canReassign
+            canManageCredentials
+            reservationCancelledOrUnknown
+            onPair={vi.fn()}
+            onReassign={vi.fn()}
+          />
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+  expect(screen.queryByRole("button", { name: "Выдать новый код" })).toBeNull();
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <ThemeProvider defaultTheme="light">
+        <MemoryRouter>
+          <DeviceActions
+            device={{ ...base, id: "station-1", type: "station" }}
+            canReassign
+            canManageCredentials
+            reservationCancelledOrUnknown={false}
+            onPair={vi.fn()}
+            onReassign={vi.fn()}
+          />
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+  expect(screen.getByRole("button", { name: "Выдать новый код" })).toBeDefined();
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <ThemeProvider defaultTheme="light">
+        <MemoryRouter>
+          <DeviceActions
+            device={{ ...base, id: "kiosk-1", type: "kiosk" }}
+            canReassign
+            canManageCredentials
+            reservationCancelledOrUnknown
+            onPair={vi.fn()}
+            onReassign={vi.fn()}
+          />
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+  expect(screen.getByRole("button", { name: "Выдать новый код" })).toBeDefined();
+});
+
 it("preserves a failed reassignment drawer and never issues or revokes a credential", async () => {
   const request = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input) === "/api/lines") return response({ items: [] });

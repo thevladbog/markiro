@@ -8,7 +8,14 @@ import {
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
+import type { EntitlementsExecutor } from "../../subscriptions/entitlements.types";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
+import {
+  assertReservationOpen,
+  transitionWorkingAssignment,
+  workingAssignment,
+  type WorkingDeviceActor,
+} from "../../subscriptions/working-device-assignments";
 import {
   stationDeviceLifecycle,
   type CreateStationDeviceDto,
@@ -35,7 +42,11 @@ export class StationDevicesService {
     return { items: rows.map((row) => this.toDto(row)) };
   }
 
-  async create(tenantId: string, dto: CreateStationDeviceDto): Promise<StationDeviceDto> {
+  async create(
+    tenantId: string,
+    dto: CreateStationDeviceDto,
+    actor?: WorkingDeviceActor,
+  ): Promise<StationDeviceDto> {
     const lineName = await this.lineName(tenantId, dto.lineId);
     const row = await this.db.transaction((tx) =>
       this.entitlements.withQuotaSlot(tx, tenantId, "stations", async () => {
@@ -49,6 +60,7 @@ export class StationDevicesService {
             apiKeyId: null,
           })
           .returning();
+        if (created) await transitionWorkingAssignment(tx, created, actor);
         return created;
       }),
     );
@@ -60,33 +72,47 @@ export class StationDevicesService {
     tenantId: string,
     id: string,
     dto: UpdateStationDeviceDto,
+    actor?: WorkingDeviceActor,
   ): Promise<StationDeviceDto> {
-    const current = await this.find(tenantId, id);
-    if (!current) throw new NotFoundException();
-
-    let lineName = current.lineName;
-    if (dto.lineId !== undefined) lineName = await this.lineName(tenantId, dto.lineId);
-
-    const set: { name?: string; lineId?: string | null; kind?: StationDeviceKind } = {};
-    if (dto.name !== undefined) set.name = dto.name;
-    if (dto.lineId !== undefined) set.lineId = dto.lineId;
-    if (dto.kind !== undefined && dto.kind !== current.device.kind) {
-      // The kind decides which app may redeem the pairing code; a paired
-      // device already runs one of them, so the kind is fixed from then on.
-      if (current.device.apiKeyId !== null || current.device.pairedAt !== null) {
-        throw new ConflictException("Device kind is fixed after pairing");
-      }
-      set.kind = dto.kind;
-    }
-    if (Object.keys(set).length === 0) return this.toDto(current);
-
-    const [row] = await this.db
-      .update(schema.stationDevices)
-      .set(set)
-      .where(and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)))
-      .returning();
-    if (!row) throw new NotFoundException();
-    return this.toDto({ device: row, lineName });
+    return this.db.transaction((tx) =>
+      this.entitlements.withQuotaLock(tx, tenantId, "stations", async () => {
+        const [current] = await tx
+          .select()
+          .from(schema.stationDevices)
+          .where(
+            and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)),
+          )
+          .for("update");
+        if (!current) throw new NotFoundException();
+        assertReservationOpen(await workingAssignment(tx, tenantId, id));
+        const lineName = await this.lineName(
+          tenantId,
+          dto.lineId === undefined ? current.lineId : dto.lineId,
+          tx,
+        );
+        const set: { name?: string; lineId?: string | null; kind?: StationDeviceKind } = {};
+        if (dto.name !== undefined) set.name = dto.name;
+        if (dto.lineId !== undefined) set.lineId = dto.lineId;
+        if (dto.kind !== undefined && dto.kind !== current.kind) {
+          // Recheck after the same lock used by the pairing claim.
+          if (current.apiKeyId !== null || current.pairedAt !== null) {
+            throw new ConflictException("Device kind is fixed after pairing");
+          }
+          set.kind = dto.kind;
+        }
+        if (Object.keys(set).length === 0) return this.toDto({ device: current, lineName });
+        const [row] = await tx
+          .update(schema.stationDevices)
+          .set(set)
+          .where(
+            and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)),
+          )
+          .returning();
+        if (!row) throw new NotFoundException();
+        await transitionWorkingAssignment(tx, row, actor, "observed");
+        return this.toDto({ device: row, lineName });
+      }),
+    );
   }
 
   /**
@@ -94,7 +120,7 @@ export class StationDevicesService {
    * The api-key statement is deliberately auto-committed: a transaction error
    * must never resurrect a still-authenticating device key.
    */
-  async revoke(tenantId: string, id: string): Promise<void> {
+  async revoke(tenantId: string, id: string, actor?: WorkingDeviceActor): Promise<void> {
     const current = await this.find(tenantId, id);
     if (!current) throw new NotFoundException();
 
@@ -106,33 +132,56 @@ export class StationDevicesService {
     // timestamp remains the durable security event rather than moving forward.
     if (current.device.apiKeyId === null && current.device.revokedAt !== null) return;
 
-    const revokedAt = new Date();
-    await this.db.transaction((tx) =>
-      this.entitlements.withQuotaLock(tx, tenantId, "stations", async () => {
-        const [revoked] = await tx
-          .update(schema.stationDevices)
-          .set({ apiKeyId: null, revokedAt })
-          .where(
-            and(
-              eq(schema.stationDevices.tenantId, tenantId),
-              eq(schema.stationDevices.id, id),
-              isNull(schema.stationDevices.revokedAt),
-            ),
-          )
-          .returning({ id: schema.stationDevices.id });
-        if (!revoked) return;
-        await tx
-          .update(schema.stationPairingCodes)
-          .set({ usedAt: revokedAt })
-          .where(
-            and(
-              eq(schema.stationPairingCodes.tenantId, tenantId),
-              eq(schema.stationPairingCodes.stationDeviceId, id),
-              isNull(schema.stationPairingCodes.usedAt),
-            ),
-          );
-      }),
-    );
+    const deletedKeys = new Set(current.device.apiKeyId === null ? [] : [current.device.apiKeyId]);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const nextKey = await this.db.transaction((tx) =>
+        this.entitlements.withQuotaLock(tx, tenantId, "stations", async () => {
+          const [locked] = await tx
+            .select()
+            .from(schema.stationDevices)
+            .where(
+              and(eq(schema.stationDevices.tenantId, tenantId), eq(schema.stationDevices.id, id)),
+            )
+            .for("update");
+          if (!locked) throw new NotFoundException();
+          // Release this transaction before auto-committing a newly discovered
+          // key deletion. Acquiring a second pooled connection while holding the
+          // quota lock could starve the pool behind concurrent waiting revokes.
+          if (locked.apiKeyId !== null && !deletedKeys.has(locked.apiKeyId)) return locked.apiKeyId;
+          assertReservationOpen(await workingAssignment(tx, tenantId, id));
+          if (locked.revokedAt !== null) return null;
+          const revokedAt = new Date();
+          const [revoked] = await tx
+            .update(schema.stationDevices)
+            .set({ apiKeyId: null, revokedAt })
+            .where(
+              and(
+                eq(schema.stationDevices.tenantId, tenantId),
+                eq(schema.stationDevices.id, id),
+                isNull(schema.stationDevices.revokedAt),
+              ),
+            )
+            .returning();
+          if (!revoked) return null;
+          await transitionWorkingAssignment(tx, revoked, actor);
+          await tx
+            .update(schema.stationPairingCodes)
+            .set({ usedAt: revokedAt })
+            .where(
+              and(
+                eq(schema.stationPairingCodes.tenantId, tenantId),
+                eq(schema.stationPairingCodes.stationDeviceId, id),
+                isNull(schema.stationPairingCodes.usedAt),
+              ),
+            );
+          return null;
+        }),
+      );
+      if (nextKey === null) return;
+      await this.db.delete(schema.apikey).where(eq(schema.apikey.id, nextKey));
+      deletedKeys.add(nextKey);
+    }
+    throw new ConflictException({ code: "station_credential_changed" });
   }
 
   private deviceQuery() {
@@ -155,9 +204,13 @@ export class StationDevicesService {
     return row;
   }
 
-  private async lineName(tenantId: string, lineId: string | null): Promise<string | null> {
+  private async lineName(
+    tenantId: string,
+    lineId: string | null,
+    executor: EntitlementsExecutor = this.db,
+  ): Promise<string | null> {
     if (lineId === null) return null;
-    const [line] = await this.db
+    const [line] = await executor
       .select({ id: schema.lines.id, name: schema.lines.name })
       .from(schema.lines)
       .where(and(eq(schema.lines.tenantId, tenantId), eq(schema.lines.id, lineId)));

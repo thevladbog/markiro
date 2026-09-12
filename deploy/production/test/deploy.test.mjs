@@ -42,6 +42,8 @@ function fakeRunner({ failures = {} } = {}) {
       });
       const key = [command, ...args].join(" ");
       if (failures[key]) return { code: failures[key], stdout: "", stderr: "private stderr" };
+      if (args.includes("/opt/markiro/working-device-compatibility.mjs"))
+        return { code: 0, stdout: "working-device-assignments-v1\n", stderr: "" };
       if (args.includes("image") && args.includes("inspect")) {
         const image = args.at(-1);
         return {
@@ -124,6 +126,24 @@ test("deploys approved digest-backed images in migration, readiness, edge, and p
       ["docker", [...compose, "pull", "api", "edge"]],
       ["docker", ["image", "inspect", "--format", "{{json .RepoDigests}}", apiImage]],
       ["docker", ["image", "inspect", "--format", "{{json .RepoDigests}}", edgeImage]],
+      [
+        "docker",
+        [
+          "run",
+          "--rm",
+          "--network",
+          "none",
+          "--read-only",
+          "--cap-drop",
+          "ALL",
+          "--security-opt",
+          "no-new-privileges:true",
+          "--entrypoint",
+          "node",
+          apiImage,
+          "/opt/markiro/working-device-compatibility.mjs",
+        ],
+      ],
       ["docker", [...compose, "run", "--rm", "migrate"]],
       ["docker", [...compose, "up", "-d", "--no-deps", "api"]],
       ["docker", [...compose, "exec", "-T", "api", "node", "/opt/markiro/healthcheck.mjs"]],
@@ -462,17 +482,19 @@ test("emits the full lifecycle trace without environment values", async () => {
   };
   const run = runner.run;
   runner.run = async (command, args, childEnvironment) => {
-    const operation = args.includes("pull")
-      ? "pull"
-      : args.includes("inspect")
-        ? "inspect"
-        : args.includes("migrate")
-          ? "migrate"
-          : args.some((argument) => argument.includes("healthcheck"))
-            ? "readiness"
-            : args.includes("api") && args.includes("up")
-              ? "api up"
-              : "edge up";
+    const operation = args.includes("/opt/markiro/working-device-compatibility.mjs")
+      ? "compatibility"
+      : args.includes("pull")
+        ? "pull"
+        : args.includes("inspect")
+          ? "inspect"
+          : args.includes("migrate")
+            ? "migrate"
+            : args.some((argument) => argument.includes("healthcheck"))
+              ? "readiness"
+              : args.includes("api") && args.includes("up")
+                ? "api up"
+                : "edge up";
     trace.push(operation);
     return run(command, args, childEnvironment);
   };
@@ -494,6 +516,7 @@ test("emits the full lifecycle trace without environment values", async () => {
     "pull",
     "inspect",
     "inspect",
+    "compatibility",
     "write pending",
     "migrate",
     "api up",

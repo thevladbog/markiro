@@ -49,10 +49,16 @@ export class SubscriptionAccessGuard implements CanActivate {
 
     const resolved = await this.entitlements.resolve(request.tenantId, undefined, new Date());
     if (resolved.access === "unmanaged") {
+      if (policy.mode === "licensing") return true;
       if (this.enforcementMode === "all") throw new SubscriptionUnmanagedException();
       return true;
     }
-    if (policy.mode === "recovery" || policy.mode === "read_only_allowed") return true;
+    if (
+      policy.mode === "recovery" ||
+      policy.mode === "read_only_allowed" ||
+      policy.mode === "licensing"
+    )
+      return true;
     if (resolved.access === "read_only") throw new SubscriptionReadOnlyException();
     if (policy.mode === "feature" && !resolved.features[policy.entitlement]) {
       throw new SubscriptionFeatureDisabledException(policy.entitlement);

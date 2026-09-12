@@ -16,6 +16,7 @@ import {
 } from "@markiro/ui";
 
 import { EntitlementsPanel } from "./EntitlementsPanel.js";
+import { DeviceLicensingPanel } from "./DeviceLicensingPanel.js";
 import { ENTITLEMENT_FEATURE_KEYS, type PlatformCapability } from "@markiro/platform-contracts";
 import { PanelState } from "../../components/PanelState.js";
 import {
@@ -506,6 +507,10 @@ export function SubscriptionPanel({
       </section>
 
       <EntitlementsPanel tenantId={detail.tenant.id} capabilities={capabilities} />
+      <DeviceLicensingPanel
+        tenantId={detail.tenant.id}
+        canWrite={capabilities.includes("tenants.write") && capabilities.includes("billing.write")}
+      />
 
       <div className="addon-grid">
         <AddonList

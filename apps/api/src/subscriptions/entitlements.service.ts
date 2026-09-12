@@ -1,4 +1,5 @@
 import type { EntitlementSnapshotV1 } from "@markiro/platform-contracts";
+import { countWorkingDeviceUsage } from "./working-device-assignments";
 import { projectEntitlements } from "./entitlement-projection";
 import { readEntitlementFacts, entitlementDigest } from "./entitlement-snapshot-reader";
 import { NationalCatalogCapabilitiesService } from "../modules/national-catalog/national-catalog-capabilities.service";
@@ -175,12 +176,7 @@ export class EntitlementsService {
       .select({ value: count() })
       .from(schema.lines)
       .where(eq(schema.lines.tenantId, tenantId));
-    const [stations] = await executor
-      .select({ value: count() })
-      .from(schema.stationDevices)
-      .where(
-        and(eq(schema.stationDevices.tenantId, tenantId), isNull(schema.stationDevices.revokedAt)),
-      );
+    const stations = await countWorkingDeviceUsage(executor, tenantId);
     const [kiosks] = await executor
       .select({ value: count() })
       .from(schema.kiosks)
@@ -201,7 +197,7 @@ export class EntitlementsService {
       );
     return {
       lines: lines?.value ?? 0,
-      stations: stations?.value ?? 0,
+      stations,
       kiosks: kiosks?.value ?? 0,
       cabinetUsers: (members?.value ?? 0) + (invitations?.value ?? 0),
     };
