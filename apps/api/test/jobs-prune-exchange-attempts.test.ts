@@ -1,3 +1,5 @@
+import { EntitlementAdmissionService } from "../src/subscriptions/entitlement-admission.service";
+import { EntitlementsService } from "../src/subscriptions/entitlements.service";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { schema, type Db } from "@markiro/db";
@@ -43,7 +45,11 @@ describe.skipIf(!ready)("PgBossService: prune exchange_attempts", () => {
     const setup = setupAuth(env);
     db = setup.db;
     const journal = new JournalService(db);
-    const exchangeSessions = new ExchangeSessionService(db, journal);
+    const exchangeSessions = new ExchangeSessionService(
+      db,
+      journal,
+      new EntitlementAdmissionService(db, new EntitlementsService(db, "managed_only")),
+    );
     const mailJobs = {} as MailJobsService;
     const mailRetention = {} as MailRetentionService;
     const shiftExportRunner = {} as ShiftExportRunnerService;

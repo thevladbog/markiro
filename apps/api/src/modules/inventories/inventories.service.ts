@@ -18,6 +18,10 @@ import { findLabelTemplateEligibility } from "../label-templates/box-label-templ
 import { INVENTORY_CHZ_STATUSES, type InventoryChzStatus } from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
+import {
+  EntitlementAdmissionService,
+  admissionScopeDigest,
+} from "../../subscriptions/entitlement-admission.service";
 import { ObjectStorageService } from "../storage/object-storage.service";
 import { ChzImportError, parseChzImport } from "./chz-import-parser";
 import type { ChzContainerKind } from "./chz-tabular-reader";
@@ -114,6 +118,7 @@ export class InventoriesService {
     @Inject(DB) private readonly db: Db,
     private readonly storage: ObjectStorageService,
     private readonly snapshots: InventorySnapshotService,
+    private readonly admission: EntitlementAdmissionService,
   ) {}
 
   async list(tenantId: string): Promise<ListInventoriesResponseDto> {
@@ -339,6 +344,7 @@ export class InventoriesService {
   ): Promise<InventoryDto> {
     this.assertDateRange(input.productionDateFrom, input.productionDateTo);
     const inventoryId = randomUUID();
+    const admissionFacts = await this.admission.capture(tenantId);
 
     await this.db.transaction(async (tx) => {
       const [tenant] = await tx
@@ -370,6 +376,24 @@ export class InventoriesService {
         .where(eq(schema.inventories.tenantId, tenantId));
       const next = Number(sequence?.last ?? 0) + 1;
       const number = formatInventoryNumber(next, new Date());
+
+      await this.admission.observe({
+        tenantId,
+        facts: admissionFacts,
+        actor: { domain: "cabinet", id: actorUserId },
+        operationId: "inventory.task.create.v1",
+        scopeDigest: admissionScopeDigest({
+          inventoryId,
+          productId: resolved.productId,
+          lineId: resolved.lineId,
+          mode: resolved.mode,
+          productionDateFrom: resolved.productionDateFrom,
+          productionDateTo: resolved.productionDateTo,
+          boxLabelTemplateId: resolved.boxLabelTemplateId,
+        }),
+        runtime: { enabled: true, observedAt: new Date() },
+        transaction: tx,
+      });
 
       await tx.insert(schema.inventories).values({
         id: inventoryId,
@@ -589,6 +613,7 @@ export class InventoriesService {
         parsedStatus = error.parsedStatus ?? null;
         includedGtin14 = error.includedGtin14 ?? null;
       }
+      const admissionFacts = await this.admission.capture(tenantId);
 
       return await this.db.transaction(async (tx) => {
         const [inventory] = await tx
@@ -659,6 +684,23 @@ export class InventoriesService {
         if (product.gtin14 !== preflightProduct.gtin14) {
           throw new ConflictException({ code: "INVENTORY_PRODUCT_GTIN_CHANGED" });
         }
+
+        await this.admission.observe({
+          tenantId,
+          facts: admissionFacts,
+          actor: { domain: "cabinet", id: actorUserId },
+          operationId: "inventory.file.create.v1",
+          scopeDigest: admissionScopeDigest({
+            inventoryId,
+            declaredStatus,
+            sha256,
+            parseOutcome: result,
+            parsedStatus,
+            includedGtin14,
+          }),
+          runtime: { enabled: true, observedAt: new Date() },
+          transaction: tx,
+        });
 
         await tx.insert(schema.inventoryImports).values({
           id: importId,

@@ -18,6 +18,10 @@ import {
 } from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
+import {
+  EntitlementAdmissionService,
+  admissionScopeDigest,
+} from "../../subscriptions/entitlement-admission.service";
 import type { InventorySnapshotCountsDto } from "./dto";
 import {
   STATION_INVENTORY_LIMITS,
@@ -72,7 +76,10 @@ interface StartFacts {
 
 @Injectable()
 export class InventoryLifecycleService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly admission: EntitlementAdmissionService,
+  ) {}
 
   cancel(tenantId: string, actorUserId: string, inventoryId: string): Promise<void> {
     return this.db.transaction(async (tx) => {
@@ -134,11 +141,12 @@ export class InventoryLifecycleService {
     });
   }
 
-  start(
+  async start(
     tenantId: string,
     actorUserId: string,
     inventoryId: string,
   ): Promise<StationInventoryManifest> {
+    const admissionFacts = await this.admission.capture(tenantId);
     return this.db.transaction(async (tx) => {
       const inventory = await this.lockInventory(tx, tenantId, inventoryId);
       if (inventory.status !== "ready" && inventory.status !== "running") {
@@ -162,6 +170,20 @@ export class InventoryLifecycleService {
       } catch {
         throw new ConflictException({ code: "INVENTORY_STORED_MANIFEST_INVALID" });
       }
+      await this.admission.observe({
+        tenantId,
+        facts: admissionFacts,
+        actor: { domain: "cabinet", id: actorUserId },
+        operationId: "inventory.task.start.v1",
+        scopeDigest: admissionScopeDigest({
+          inventoryId: inventory.id,
+          snapshotId: facts.snapshot.id,
+          snapshotRevision: facts.snapshot.revision,
+          combinedDigest: facts.snapshot.combinedDigest,
+        }),
+        runtime: { enabled: true, observedAt: new Date() },
+        transaction: tx,
+      });
       const startedAt = new Date();
       await tx
         .update(schema.inventories)

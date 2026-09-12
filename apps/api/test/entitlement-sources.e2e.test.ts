@@ -14,6 +14,7 @@ import {
   entitlementDigest,
   entitlementRegistryFingerprint,
 } from "../src/subscriptions/entitlement-snapshot-reader";
+import * as entitlementSnapshotReader from "../src/subscriptions/entitlement-snapshot-reader";
 import {
   createManagedSubscription,
   createOrganization,
@@ -68,6 +69,9 @@ describe.skipIf(!process.env.DATABASE_URL)("prepared entitlement sources", () =>
     if (request.intent !== "prepare") throw new Error("Expected preparation fixture");
     const before = await resolver.resolveSnapshot(managed.tenantId);
     const preview = await service.preview(principal, managed.tenantId, request);
+    expect(entitlementRegistryFingerprint()).toBe(
+      "p1b.v1:500451301e6d55759b5e9086b1bd58e51461cbb6889cda162d14722a8292ccf6",
+    );
     expect(preview.after.current).toEqual(preview.before.current);
     expect(preview.after.candidate.features.chzIntegration).toBe(true);
     expect((await resolver.resolveSnapshot(managed.tenantId)).candidate).toEqual(before.candidate);
@@ -185,6 +189,45 @@ describe.skipIf(!process.env.DATABASE_URL)("prepared entitlement sources", () =>
         },
       },
     ]);
+  });
+  it("invalidates only an unconfirmed prior-registry preview and replays a confirmed receipt", async () => {
+    const principal = await actor();
+    const managed = await createManagedSubscription(db);
+    const oldFingerprint = `p1a.v1:${"a".repeat(64)}`;
+    const fingerprint = vi
+      .spyOn(entitlementSnapshotReader, "entitlementRegistryFingerprint")
+      .mockReturnValue(oldFingerprint);
+    const priorRequest = command();
+    const prior = await service.preview(principal, managed.tenantId, priorRequest);
+    fingerprint.mockRestore();
+    await expect(
+      service.confirm(principal, managed.tenantId, {
+        previewId: prior.previewId,
+        requestId: prior.requestId,
+      }),
+    ).rejects.toMatchObject({ response: { code: "entitlement_preview_stale" } });
+    await expect(service.preview(principal, managed.tenantId, priorRequest)).rejects.toMatchObject({
+      response: { code: "entitlement_preview_stale" },
+    });
+
+    const fresh = await service.preview(principal, managed.tenantId, command());
+    const receipt = await service.confirm(principal, managed.tenantId, {
+      previewId: fresh.previewId,
+      requestId: fresh.requestId,
+    });
+    const future = vi
+      .spyOn(entitlementSnapshotReader, "entitlementRegistryFingerprint")
+      .mockReturnValue(`future.v1:${"b".repeat(64)}`);
+    try {
+      expect(
+        await service.confirm(principal, managed.tenantId, {
+          previewId: fresh.previewId,
+          requestId: fresh.requestId,
+        }),
+      ).toEqual(receipt);
+    } finally {
+      future.mockRestore();
+    }
   });
   it("rejects changed request, tenant, actor and request binding without writes", async () => {
     const principal = await actor();

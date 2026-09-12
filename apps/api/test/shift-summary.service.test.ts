@@ -1,3 +1,4 @@
+import type { EntitlementAdmissionService } from "../src/subscriptions/entitlement-admission.service";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
@@ -28,6 +29,10 @@ function summaryService(results: QueryResult[]) {
     {} as OperatorsService,
     {} as SsccService,
     {} as EntitlementsService,
+    {
+      capture: async () => undefined,
+      observe: async () => undefined,
+    } as unknown as EntitlementAdmissionService,
   );
   return { service, transaction, queries };
 }

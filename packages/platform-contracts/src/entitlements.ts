@@ -22,16 +22,21 @@ export interface EntitlementOperationDefinition {
   readonly features: readonly EntitlementFeatureKey[];
   readonly class: EntitlementOperationClass;
   readonly capability: "operations.read" | "operations.write" | null;
-  readonly authorization: "cabinet" | "exchange_session" | "station_device" | "api_key_scope";
+  readonly authorization:
+    | "cabinet"
+    | "exchange_session"
+    | "station_device"
+    | "cabinet_or_station_device"
+    | "api_key_scope";
   readonly releaseEligibility:
     | "national_catalog_operation_policy"
     | "chz_filtered_cis_report_policy"
     | "existing_operation_policy";
   readonly implementationStage: "p1a" | "p1b" | "p1c";
   readonly version: 1;
-  readonly coverage: "p1a_adapter" | "classified" | "deferred";
+  readonly coverage: "p1a_adapter" | "p1b_adapter" | "classified" | "deferred";
 }
-export const ENTITLEMENT_REGISTRY_VERSION = "p1a.v1" as const;
+export const ENTITLEMENT_REGISTRY_VERSION = "p1b.v1" as const;
 export const ENTITLEMENT_OPERATIONS = {
   "nk.lookup.v1": {
     authorization: "cabinet",
@@ -121,7 +126,27 @@ export const ENTITLEMENT_OPERATIONS = {
     capability: "operations.write",
     implementationStage: "p1b",
     version: 1,
-    coverage: "deferred",
+    coverage: "p1b_adapter",
+  },
+  "inventory.task.create.v1": {
+    authorization: "cabinet",
+    releaseEligibility: "existing_operation_policy",
+    features: ["inventory"],
+    class: "new_work",
+    capability: "operations.write",
+    implementationStage: "p1b",
+    version: 1,
+    coverage: "p1b_adapter",
+  },
+  "inventory.task.start.v1": {
+    authorization: "cabinet",
+    releaseEligibility: "existing_operation_policy",
+    features: ["inventory"],
+    class: "new_work",
+    capability: "operations.write",
+    implementationStage: "p1b",
+    version: 1,
+    coverage: "p1b_adapter",
   },
   "commerceMl.exchange.v1": {
     authorization: "exchange_session",
@@ -131,7 +156,7 @@ export const ENTITLEMENT_OPERATIONS = {
     capability: null,
     implementationStage: "p1b",
     version: 1,
-    coverage: "deferred",
+    coverage: "p1b_adapter",
   },
   "handheld.work.start.v1": {
     authorization: "station_device",
@@ -151,7 +176,7 @@ export const ENTITLEMENT_OPERATIONS = {
     capability: "operations.write",
     implementationStage: "p1b",
     version: 1,
-    coverage: "deferred",
+    coverage: "p1b_adapter",
   },
   "pallets.shift.configure.v1": {
     authorization: "cabinet",
@@ -161,7 +186,27 @@ export const ENTITLEMENT_OPERATIONS = {
     capability: "operations.write",
     implementationStage: "p1b",
     version: 1,
-    coverage: "deferred",
+    coverage: "p1b_adapter",
+  },
+  "pallets.shift.configure.station.v1": {
+    authorization: "station_device",
+    releaseEligibility: "existing_operation_policy",
+    features: ["pallets"],
+    class: "new_work",
+    capability: null,
+    implementationStage: "p1b",
+    version: 1,
+    coverage: "p1b_adapter",
+  },
+  "pallets.shift.start.v1": {
+    authorization: "cabinet_or_station_device",
+    releaseEligibility: "existing_operation_policy",
+    features: ["pallets"],
+    class: "new_work",
+    capability: "operations.write",
+    implementationStage: "p1b",
+    version: 1,
+    coverage: "p1b_adapter",
   },
   "publicApi.request.v1": {
     authorization: "api_key_scope",

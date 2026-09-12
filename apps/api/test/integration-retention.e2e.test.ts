@@ -1,3 +1,5 @@
+import { EntitlementAdmissionService } from "../src/subscriptions/entitlement-admission.service";
+import { EntitlementsService } from "../src/subscriptions/entitlements.service";
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
@@ -35,7 +37,11 @@ describe.skipIf(!ready)("retention job", () => {
     setup = setupAuth(env);
     db = setup.db;
     journal = new JournalService(db);
-    sessions = new ExchangeSessionService(db, journal);
+    sessions = new ExchangeSessionService(
+      db,
+      journal,
+      new EntitlementAdmissionService(db, new EntitlementsService(db, "managed_only")),
+    );
 
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],

@@ -173,6 +173,13 @@ describe("entitlement projection", () => {
       }),
     ]);
     expect(evaluateEntitlementOperation(snap, operationId).outcome).toBe("allow");
+    if (operationId === "pallets.shift.configure.v1") {
+      for (const added of ["pallets.shift.configure.station.v1", "pallets.shift.start.v1"] as const)
+        expect(evaluateEntitlementOperation(snap, added)).toEqual({
+          outcome: "deny",
+          reasonCodes: ["feature_not_included"],
+        });
+    }
   });
   it("preserves stored and continuation recovery when new work is commercially denied", () => {
     const snapshot = project([plan], "read_only");

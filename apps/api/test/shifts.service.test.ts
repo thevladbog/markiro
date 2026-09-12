@@ -1,3 +1,4 @@
+import type { EntitlementAdmissionService } from "../src/subscriptions/entitlement-admission.service";
 import { ConflictException } from "@nestjs/common";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
@@ -140,7 +141,13 @@ describe("ShiftsService.getBundle's bundleSscc degrade path (Task 7 correction)"
     const entitlements = {
       resolveRecovery: async () => ({ access: "managed", subscription: null }),
     } as unknown as EntitlementsService;
-    const service = new ShiftsService(db, fakeOperatorsService(), sscc, entitlements);
+    const service = new ShiftsService(
+      db,
+      fakeOperatorsService(),
+      sscc,
+      entitlements,
+      {} as EntitlementAdmissionService,
+    );
 
     await expect(service.getBundle("tenant-1", "shift-1", "device-1")).rejects.toBe(boom);
     expect(lockedTables).toEqual([schema.shifts]);
@@ -160,6 +167,10 @@ describe("ShiftsService.getReferenceBundle product-group mapping", () => {
       fakeOperatorsService(),
       {} as SsccService,
       {} as EntitlementsService,
+      {
+        capture: async () => undefined,
+        observe: async () => undefined,
+      } as unknown as EntitlementAdmissionService,
     );
 
     const bundle = await service.getReferenceBundle("tenant-1", "shift-1");
@@ -219,10 +230,20 @@ describe("ShiftsService box-template snapshot boundary", () => {
     const entitlements = {
       assertFeatureAccess: async () => undefined,
     } as unknown as EntitlementsService;
-    const service = new ShiftsService(db, fakeOperatorsService(), {} as SsccService, entitlements);
+    const service = new ShiftsService(
+      db,
+      fakeOperatorsService(),
+      {} as SsccService,
+      entitlements,
+      {} as EntitlementAdmissionService,
+    );
 
     await expect(
-      service.createShift(tenantId, { productId, mode: "aggregation" }),
+      service.createShift(
+        tenantId,
+        { productId, mode: "aggregation" },
+        { domain: "cabinet", id: "user-1" },
+      ),
     ).rejects.toMatchObject({
       response: { message: "Unknown box label template for this organization" },
     });
@@ -267,6 +288,10 @@ function serviceForUpdate(db: Db) {
     fakeOperatorsService(),
     {} as SsccService,
     {} as EntitlementsService,
+    {
+      capture: async () => undefined,
+      observe: async () => undefined,
+    } as unknown as EntitlementAdmissionService,
   );
 }
 

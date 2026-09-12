@@ -1,3 +1,8 @@
+import { randomUUID } from "node:crypto";
+import {
+  EntitlementAdmissionService,
+  admissionScopeDigest,
+} from "../../subscriptions/entitlement-admission.service";
 import {
   BadRequestException,
   ConflictException,
@@ -51,7 +56,10 @@ const LABEL_TEMPLATE_REFERENCE_CONSTRAINTS = new Set([
 
 @Injectable()
 export class LabelTemplatesService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly admission: EntitlementAdmissionService,
+  ) {}
 
   /**
    * List a tenant's label templates as size/DPI/language summaries (spec
@@ -91,22 +99,30 @@ export class LabelTemplatesService {
   async createLabelTemplate(
     tenantId: string,
     data: CreateLabelTemplateDto,
+    actorUserId: string,
   ): Promise<LabelTemplateDto> {
     this.assertPurposeSpec(data.purpose, data.spec);
     if (data.chzProductGroupCodes !== null) {
       await assertKnownProductGroupCodes(this.db, data.chzProductGroupCodes);
     }
-    const [row] = await this.db
-      .insert(schema.labelTemplates)
-      .values({
+    const id = randomUUID();
+    const facts = await this.admission.capture(tenantId);
+    const row = await this.db.transaction(async (tx) => {
+      await this.admission.observe({
         tenantId,
-        name: data.name,
-        purpose: data.purpose,
-        spec: data.spec,
-        enabled: data.enabled,
-        chzProductGroupCodes: data.chzProductGroupCodes,
-      })
-      .returning();
+        actor: { domain: "cabinet", id: actorUserId },
+        facts,
+        operationId: "labelEditor.template.write.v1",
+        transaction: tx,
+        runtime: { enabled: true, observedAt: new Date() },
+        scopeDigest: admissionScopeDigest({ action: "create", templateId: id, ...data }),
+      });
+      const [created] = await tx
+        .insert(schema.labelTemplates)
+        .values({ id, tenantId, ...data })
+        .returning();
+      return created;
+    });
 
     if (!row) {
       throw new InternalServerErrorException("Failed to create label template");
@@ -124,7 +140,9 @@ export class LabelTemplatesService {
     tenantId: string,
     id: string,
     data: UpdateLabelTemplateDto,
+    actorUserId: string,
   ): Promise<LabelTemplateDto> {
+    const facts = await this.admission.capture(tenantId);
     return this.db.transaction(async (tx) => {
       const [current] = await tx
         .select()
@@ -188,6 +206,21 @@ export class LabelTemplatesService {
         setClause.chzProductGroupCodes = data.chzProductGroupCodes;
       }
 
+      const changed = Object.entries(data).some(
+        ([key, value]) =>
+          admissionScopeDigest(value) !==
+          admissionScopeDigest(current[key as keyof LabelTemplateRow]),
+      );
+      if (changed)
+        await this.admission.observe({
+          tenantId,
+          actor: { domain: "cabinet", id: actorUserId },
+          facts,
+          operationId: "labelEditor.template.write.v1",
+          transaction: tx,
+          runtime: { enabled: true, observedAt: new Date() },
+          scopeDigest: admissionScopeDigest({ action: "update", templateId: id, changes: data }),
+        });
       const [row] = await tx
         .update(schema.labelTemplates)
         .set(setClause)
@@ -201,20 +234,36 @@ export class LabelTemplatesService {
   }
 
   /**
-   * Delete a label template. Returns 404 if not found. Referenced-delete
-   * (409 when a product/shift still points at this template) lands in
-   * Task 7 once those FKs exist -- today the delete is unconditional.
+   * Delete a tenant template under its row lock. A concurrent delete returns
+   * 404; known default/product/shift references retain their 409 mapping.
    */
-  async deleteLabelTemplate(tenantId: string, id: string): Promise<void> {
-    const current = await this.findRow(tenantId, id);
-    if (!current) {
-      throw new NotFoundException();
-    }
-
+  async deleteLabelTemplate(tenantId: string, id: string, actorUserId: string): Promise<void> {
+    const facts = await this.admission.capture(tenantId);
     try {
-      await this.db
-        .delete(schema.labelTemplates)
-        .where(and(eq(schema.labelTemplates.tenantId, tenantId), eq(schema.labelTemplates.id, id)));
+      await this.db.transaction(async (tx) => {
+        const [current] = await tx
+          .select()
+          .from(schema.labelTemplates)
+          .where(
+            and(eq(schema.labelTemplates.tenantId, tenantId), eq(schema.labelTemplates.id, id)),
+          )
+          .for("update");
+        if (!current) throw new NotFoundException();
+        await this.admission.observe({
+          tenantId,
+          actor: { domain: "cabinet", id: actorUserId },
+          facts,
+          operationId: "labelEditor.template.write.v1",
+          transaction: tx,
+          runtime: { enabled: true, observedAt: new Date() },
+          scopeDigest: admissionScopeDigest({ action: "delete", templateId: id }),
+        });
+        await tx
+          .delete(schema.labelTemplates)
+          .where(
+            and(eq(schema.labelTemplates.tenantId, tenantId), eq(schema.labelTemplates.id, id)),
+          );
+      });
     } catch (error) {
       // Catch only known PostgreSQL FK references to label_templates. Drizzle
       // may place the database fields directly on the error or under cause.
