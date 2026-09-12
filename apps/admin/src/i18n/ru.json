@@ -2837,10 +2837,15 @@
         "linesEmpty": "Строки не добавлены",
         "table": {
           "sscc": "SSCC",
+          "level": "Уровень",
           "productName": "Товар",
           "codeCount": "Кодов",
           "status": "Статус",
           "actions": "Действия"
+        },
+        "level": {
+          "box": "Короб",
+          "pallet": "Паллета"
         },
         "deleteLine": "Удалить",
         "deleteLineNamed": "Удалить строку {{sscc}}",

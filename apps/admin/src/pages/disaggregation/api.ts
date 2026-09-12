@@ -33,6 +33,8 @@ export interface LineDto {
   ssccInput: string;
   sscc: string | null;
   boxId: string | null;
+  /** Set INSTEAD of `boxId` when this line names a pallet. */
+  palletId: string | null;
   status: LineStatus;
   productId: string | null;
   productName: string | null;

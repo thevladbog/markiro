@@ -438,6 +438,14 @@ export function DisaggregationDocumentPage() {
         ),
     },
     {
+      key: "level",
+      title: t("pages.disaggregation.detail.table.level"),
+      render: (line) =>
+        line.palletId
+          ? t("pages.disaggregation.detail.level.pallet")
+          : t("pages.disaggregation.detail.level.box"),
+    },
+    {
       key: "productName",
       title: t("pages.disaggregation.detail.table.productName"),
       render: (line) => line.productName ?? "—",

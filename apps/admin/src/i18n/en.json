@@ -2837,10 +2837,15 @@
         "linesEmpty": "No lines added",
         "table": {
           "sscc": "SSCC",
+          "level": "Level",
           "productName": "Product",
           "codeCount": "Codes",
           "status": "Status",
           "actions": "Actions"
+        },
+        "level": {
+          "box": "Box",
+          "pallet": "Pallet"
         },
         "deleteLine": "Delete",
         "deleteLineNamed": "Delete line {{sscc}}",
