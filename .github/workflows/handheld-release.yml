@@ -30,11 +30,6 @@ on:
         type: choice
         default: stable
         options: [stable, beta]
-      notes:
-        description: Russian release notes shown beside the update; required to publish
-        required: false
-        type: string
-        default: ""
 
 permissions:
   contents: read
@@ -48,8 +43,14 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions: {}
+    permissions:
+      contents: read
     steps:
+      # Only so the changelog can be read: the refusal has to happen here,
+      # before the release job puts a signing key on a runner.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Authorize handheld release owner
         shell: bash
         env:
@@ -59,7 +60,6 @@ jobs:
           VERSION_NAME: ${{ inputs.version_name }}
           VERSION_CODE: ${{ inputs.version_code }}
           PUBLISH: ${{ inputs.publish }}
-          NOTES: ${{ inputs.notes }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
@@ -76,9 +76,10 @@ jobs:
           test "$VERSION_CODE" -le 2147483647
           # Refused here rather than after the key is on the runner: a build
           # published with nothing to say about it is how a line ends up asking
-          # the office what changed.
+          # the office what changed. The notes live in the changelog, reviewed
+          # with the change they describe.
           if [ "$PUBLISH" = "true" ]; then
-            test -n "$(printf '%s' "$NOTES" | tr -d '[:space:]')"
+            grep -qxF "## $VERSION_NAME" apps/handheld/CHANGELOG.md
           fi
 
   release:
@@ -183,7 +184,6 @@ jobs:
         working-directory: ${{ github.workspace }}
         shell: bash
         env:
-          MARKIRO_HANDHELD_RELEASE_NOTES: ${{ inputs.notes }}
           YANDEX_STATION_RELEASE_ENDPOINT: https://storage.yandexcloud.net
           YANDEX_STATION_RELEASE_BUCKET: ${{ vars.YANDEX_STATION_RELEASE_BUCKET }}
           YANDEX_STATION_RELEASE_ACCESS_KEY_ID: ${{ secrets.YANDEX_STATION_RELEASE_ACCESS_KEY_ID }}

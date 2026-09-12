@@ -86,8 +86,18 @@ test("the object-storage credential reaches the publish step and nothing else", 
   );
 });
 
-test("publishing refuses an empty set of release notes", () => {
-  assert.match(text, /if \[ "\$PUBLISH" = "true" \]; then\n\s+test -n/);
+test("publishing refuses a version the changelog does not describe", () => {
+  // Checked in `authorize`, which is why that job checks the repository out at
+  // all: the refusal must happen before a signing key reaches a runner.
+  assert.match(text, /grep -qxF "## \$VERSION_NAME" apps\/handheld\/CHANGELOG\.md/);
+  assert.ok(
+    workflow.jobs.authorize.steps.some((step) => (step.uses ?? "").startsWith("actions/checkout@")),
+  );
+  assert.equal(
+    workflow.on.workflow_dispatch.inputs.notes,
+    undefined,
+    "notes come from the changelog",
+  );
 });
 
 test("the release job runs in its own protected environment", () => {
