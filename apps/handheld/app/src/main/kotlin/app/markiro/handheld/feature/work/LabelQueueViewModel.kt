@@ -10,6 +10,7 @@ import app.markiro.handheld.core.box.PalletRepository
 import app.markiro.handheld.core.exceptions.ExceptionEngine
 import app.markiro.handheld.core.exceptions.ReprintReason
 import app.markiro.handheld.core.storage.DeviceConfigDao
+import app.markiro.handheld.core.storage.PalletPrint
 import app.markiro.handheld.feature.signin.SessionHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -115,6 +116,29 @@ class LabelQueueViewModel @Inject constructor(
     }
 
     /**
+     * [auditIfOutcomeUnknown] for a pallet, and deliberately the same shape:
+     * `PalletPrint` mirrors `BoxPrint` state for state, so a pallet label
+     * reprinted out of an unknown outcome is the same explicit same-SSCC
+     * reprint, with the same fixed reason and the same silence for `failed`
+     * and `deferred`.
+     *
+     * The station records this fact too (`reprintPallet` in
+     * `apps/station/src/lib/pallets.ts`); leaving it out here is what made this
+     * device's audit trail asymmetric with the station's.
+     */
+    private suspend fun auditPalletIfOutcomeUnknown(palletId: String) {
+        val pallet = pallets.get(palletId) ?: return
+        if (pallet.printState != PalletPrint.UNKNOWN) return
+        exceptions.reprintPallet(
+            shiftId = pallet.shiftId,
+            palletId = palletId,
+            reason = ReprintReason.PRINT_OUTCOME_UNKNOWN,
+            operatorId = session.state.value.operator?.operatorId,
+            terminalId = config.get()?.deviceId,
+        )
+    }
+
+    /**
      * Every queued label except those whose last attempt is `unknown`.
      *
      * Retrying an unknown could put a second label on a box or pallet the
@@ -135,31 +159,10 @@ class LabelQueueViewModel @Inject constructor(
                 auditIfOutcomeUnknown(id)
                 printer.print(id)
             }
-            // KNOWN GAP, not an oversight: a pallet reprint after an unknown
-            // outcome writes no audit fact, so this device's trail is
-            // asymmetric with the station's, which does record one
-            // (`reprintPallet` in `apps/station/src/lib/pallets.ts`). Two
-            // blockers, both bigger than this call site:
-            //
-            //  1. `pallet_exceptions` has no Room entity. It is created only by
-            //     `MIGRATION_9_10`'s raw `execSQL`, and Room builds a fresh
-            //     database from its entity list -- so on a CLEAN INSTALL the
-            //     table does not exist at all, and writing here would crash a
-            //     reprint on a new terminal. Giving it an entity means a schema
-            //     version bump plus a migration reconciling the already-shipped
-            //     raw table with what Room then expects.
-            //  2. Nothing would drain it. The server accepts the channel
-            //     (`palletExceptions` in `apps/api/src/modules/station-scans/
-            //     dto.ts`), but `SyncEngine` has no reader for it, and its
-            //     retry identity folds EVERY channel into one batch id
-            //     signature with its own pinned counter -- so a fifth channel
-            //     is a change to batch identity, not an added query. A row
-            //     written today would sit on the device forever.
-            //
-            // Audited wrongly is worse than audited late: until the handheld's
-            // pallet-exceptions screen lands with both halves, this path prints
-            // and records nothing.
-            LabelKind.PALLET -> palletPrinter.print(id)
+            LabelKind.PALLET -> {
+                auditPalletIfOutcomeUnknown(id)
+                palletPrinter.print(id)
+            }
         }
     }
 

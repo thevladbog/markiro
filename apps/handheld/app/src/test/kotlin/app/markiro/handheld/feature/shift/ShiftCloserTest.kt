@@ -4,9 +4,11 @@ import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.markiro.handheld.core.storage.BoxEntity
 import app.markiro.handheld.core.storage.CodeEntity
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.PalletEntity
 import app.markiro.handheld.core.storage.ScanEventEntity
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -43,6 +45,18 @@ class ShiftCloserTest {
     @After
     fun tearDown() = db.close()
 
+    private fun box(id: String, closedAt: String?) = BoxEntity(
+        boxId = id, shiftId = "s1", sscc = if (closedAt == null) null else "04680089900000001$id".takeLast(18),
+        openedAt = "2026-09-10T10:00:00.000Z", closedAt = closedAt, operatorId = "op-1",
+        printState = "printed", printReason = null, ackedAt = null,
+    )
+
+    private fun pallet(id: String, closedAt: String?) = PalletEntity(
+        palletId = id, shiftId = "s1", terminalId = "dev-1", sscc = if (closedAt == null) null else "146800899000000015",
+        openedAt = "2026-09-10T10:00:00.000Z", closedAt = closedAt, operatorId = "op-1",
+        printState = "printed", printReason = null, ackedAt = null,
+    )
+
     @Test
     fun previewCountsAndRequiresAReasonWhenThePlanIsMissed() = runTest {
         val p = ShiftCloser(db).preview("s1")!!
@@ -66,6 +80,75 @@ class ShiftCloserTest {
         assertNull(db.deviceConfigDao().get()?.activeShiftId)
         val again = closer.close("s1", "op-1", "equipment_stop")
         assertEquals(row.eventId, again.eventId)
+    }
+
+    /**
+     * The count that rides `/station/shift-closures` into
+     * `station_shift_close_events.closed_box_count`. It was hardcoded to 0, so
+     * every shift a handheld closed recorded a false number rather than an
+     * absent one -- invisible because nothing reads that column yet.
+     *
+     * The open box is the load-bearing part of the fixture: counting rows
+     * instead of CLOSED rows would pass an assertion of 2 against two boxes,
+     * so there have to be three.
+     */
+    @Test
+    fun closeRecordsTheBoxesItActuallyClosedRatherThanZero() = runTest {
+        db.boxDao().insert(box("b1", closedAt = "2026-09-10T10:30:00.000Z"))
+        db.boxDao().insert(box("b2", closedAt = "2026-09-10T10:40:00.000Z"))
+        db.boxDao().insert(box("b3", closedAt = null))
+
+        val row = ShiftCloser(db) { 1_757_500_000_000L }.close("s1", "op-1", "material_shortage")
+
+        assertEquals(2, row.closedBoxCount)
+    }
+
+    /**
+     * A box taken apart after it was closed still counts: this is "how many
+     * boxes did this shift close", a production fact a later event does not
+     * undo, and it is the same rule the station applies to the same field. The
+     * contrast is deliberate -- `PalletDao.boxCount` DOES exclude a disassembled
+     * box, because it answers what is physically on a stack right now.
+     */
+    @Test
+    fun aDisassembledBoxStillCountsAsClosed() = runTest {
+        db.boxDao().insert(box("b1", closedAt = "2026-09-10T10:30:00.000Z"))
+        db.boxDao().insert(
+            box("b2", closedAt = "2026-09-10T10:40:00.000Z").copy(disassembledAt = "2026-09-10T11:00:00.000Z"),
+        )
+
+        val row = ShiftCloser(db) { 1_757_500_000_000L }.close("s1", "op-1", "material_shortage")
+
+        assertEquals(2, row.closedBoxCount)
+    }
+
+    /**
+     * Design brief 10 §9 puts boxes and pallets in the close summary. They are
+     * absent, not zero, when the shift has none: «Паллеты 0» on every validation
+     * close is noise, and zero has to stay meaningful for the aggregation shift
+     * that really closed nothing.
+     */
+    @Test
+    fun previewCountsBoxesAndPalletsOnlyForAShiftThatHasThem() = runTest {
+        db.boxDao().insert(box("b1", closedAt = "2026-09-10T10:30:00.000Z"))
+        db.palletDao().insert(pallet("p1", closedAt = "2026-09-10T10:45:00.000Z"))
+        db.palletDao().insert(pallet("p2", closedAt = null))
+
+        val validation = ShiftCloser(db).preview("s1")!!
+        assertNull(validation.closedBoxes)
+        assertNull(validation.closedPallets)
+
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1").copy(plannedQty = 3, mode = "aggregation"))
+        val boxesOnly = ShiftCloser(db).preview("s1")!!
+        assertEquals(1, boxesOnly.closedBoxes)
+        assertNull(boxesOnly.closedPallets)
+
+        db.shiftDao().upsert(
+            ShiftEntityFixtures.bundled("s1").copy(plannedQty = 3, mode = "aggregation", palletsEnabled = true),
+        )
+        val withPallets = ShiftCloser(db).preview("s1")!!
+        assertEquals(1, withPallets.closedBoxes)
+        assertEquals(1, withPallets.closedPallets)
     }
 
     @Test

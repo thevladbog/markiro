@@ -171,6 +171,7 @@
     <string name="shifts_loading">Загружаем смены…</string>
     <string name="shifts_mode_validation">валидация</string>
     <string name="shifts_mode_aggregation">+ агрегация</string>
+    <string name="shifts_mode_pallets">+ паллеты</string>
     <string name="shifts_plan">план %1$d</string>
     <string name="shifts_no_plan">без плана</string>
     <string name="shifts_tolling">для: %1$s</string>
@@ -237,6 +238,8 @@
     <string name="close_summary_accepted">Принято</string>
     <string name="close_summary_errors">Ошибки</string>
     <string name="close_summary_duplicates">Дубли</string>
+    <string name="close_summary_boxes">Короба</string>
+    <string name="close_summary_pallets">Паллеты</string>
     <string name="close_summary_conflicts">Конфликты</string>
     <string name="close_to_hub">В хаб</string>
 

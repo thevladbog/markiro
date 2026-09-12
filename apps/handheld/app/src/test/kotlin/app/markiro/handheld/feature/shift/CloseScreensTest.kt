@@ -44,6 +44,36 @@ class CloseScreensTest {
         compose.onNodeWithText("В хаб").assertIsDisplayed()
     }
 
+    /** Design brief 10 §9: the summary reports boxes and pallets, not only units. */
+    @Test
+    fun summaryReportsBoxesAndPallets() {
+        compose.setContent {
+            MarkiroTheme {
+                CloseScreen(CloseStep.Summary(240, 1, 0, 0, CloseOutcome.ACCEPTED, boxes = 12, pallets = 3), CloseCallbacks())
+            }
+        }
+        compose.onNodeWithText("Короба").assertIsDisplayed()
+        compose.onNodeWithText("12").assertIsDisplayed()
+        compose.onNodeWithText("Паллеты").assertIsDisplayed()
+        compose.onNodeWithText("3").assertIsDisplayed()
+    }
+
+    /**
+     * A validation shift aggregates nothing, so the rows are absent rather than
+     * a pair of permanent zeroes the operator learns to read past. Zero stays
+     * reserved for the aggregation shift that really closed no box.
+     */
+    @Test
+    fun summaryOmitsBoxesAndPalletsForAShiftThatHasNeither() {
+        compose.setContent {
+            MarkiroTheme { CloseScreen(CloseStep.Summary(8, 1, 0, 0, CloseOutcome.ACCEPTED), CloseCallbacks()) }
+        }
+        compose.onNodeWithText("Короба").assertDoesNotExist()
+        compose.onNodeWithText("Паллеты").assertDoesNotExist()
+        // The rest of the summary is unaffected.
+        compose.onNodeWithText("Принято").assertIsDisplayed()
+    }
+
     /**
      * An unresolved duplicate is said out loud and the shift closes anyway.
      * Blocking a close on a printer would stop a line over a sticker.

@@ -26,6 +26,13 @@ class MetaStore(private val db: HandheldDatabase) {
         const val SYNC_PENDING_PALLET_COUNT = "sync_pending_pallet_count"
         const val SYNC_PENDING_LABEL_COUNT = "sync_pending_label_count"
         const val SYNC_PENDING_EXCEPTION_COUNT = "sync_pending_exception_count"
+
+        /**
+         * Pallet corrections' own pin, for the identical reason every other
+         * channel here has one: a batch whose id is already fixed must carry
+         * the set it chose and no more.
+         */
+        const val SYNC_PENDING_PALLET_EXCEPTION_COUNT = "sync_pending_pallet_exception_count"
         const val SYNC_LAST_SUCCESS_AT = "sync_last_success_at"
         const val SYNC_LAST_DENIED = "sync_last_denied"
         const val INVENTORY_LAST_SUCCESS_AT = "inventory_sync_last_success_at"

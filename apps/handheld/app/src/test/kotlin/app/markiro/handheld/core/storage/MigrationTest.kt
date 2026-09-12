@@ -45,7 +45,7 @@ class MigrationTest {
         val db = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
             .addMigrations(
                 MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
-                MIGRATION_8_9, MIGRATION_9_10,
+                MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
             )
             .allowMainThreadQueries()
             .build()
@@ -285,6 +285,115 @@ class MigrationTest {
             }
         } finally {
             helper.close()
+            context.deleteDatabase(name)
+        }
+    }
+
+    /**
+     * The single highest-risk step in giving `pallet_exceptions` an entity.
+     *
+     * `MIGRATION_9_10` created that table by raw `execSQL` with no entity
+     * behind it, so an installed 06d terminal is holding a shape Room does not
+     * expect, while a clean install has no such table at all (Room builds a
+     * fresh database from the entity list). Room validates the on-disk schema
+     * against its entities on EVERY open, so getting `MIGRATION_10_11` wrong is
+     * a crash at startup on every upgraded device -- not a silent problem.
+     *
+     * Driven through Room from a genuine v9 file rather than in-memory: only
+     * the real upgrade path runs 9 -> 10 (which creates the old shape) and then
+     * 10 -> 11 (which must replace it), and only Room's own open-time
+     * validation proves the result is the schema the entities describe.
+     */
+    @Test
+    fun migratesAVersionNineDatabaseThroughTheRebuiltPalletExceptionTable() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "migration-9-11-test.db"
+        context.deleteDatabase(name)
+        val file = context.getDatabasePath(name).also { it.parentFile?.mkdirs() }
+        SQLiteDatabase.openOrCreateDatabase(file, null).use { legacy ->
+            legacy.execSQL(
+                "CREATE TABLE `device_config` (`id` INTEGER NOT NULL, `deviceId` TEXT NOT NULL, `deviceName` TEXT NOT NULL, " +
+                    "`tenantId` TEXT NOT NULL, `organizationName` TEXT NOT NULL, `lineId` TEXT, `lineName` TEXT, `kind` TEXT NOT NULL, " +
+                    "`serverUrl` TEXT NOT NULL, `pairedAt` INTEGER NOT NULL, `rosterFetchedAt` INTEGER, `lastOperatorId` TEXT, " +
+                    "`shiftsCount` INTEGER, `inventoryCount` INTEGER, `countsAt` INTEGER, PRIMARY KEY(`id`))",
+            )
+            legacy.execSQL(
+                "CREATE TABLE `operators` (`operatorId` TEXT NOT NULL, `name` TEXT NOT NULL, `login` TEXT NOT NULL, `role` TEXT NOT NULL, " +
+                    "`pinHash` TEXT NOT NULL, `badgeHash` TEXT, `active` INTEGER NOT NULL, PRIMARY KEY(`operatorId`))",
+            )
+            legacy.execSQL("CREATE TABLE room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)")
+            legacy.execSQL("INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'legacy')")
+            legacy.version = 1
+        }
+        // The shipped statements, run in order, are what actually produces a v9
+        // file; hand-writing every v9 table here would only assert this test's
+        // own DDL. Room is not involved yet -- it would refuse to open a v1
+        // file it has no path from.
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(name).callback(
+                object : SupportSQLiteOpenHelper.Callback(1) {
+                    override fun onCreate(db: SupportSQLiteDatabase) = Unit
+                    override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                },
+            ).build(),
+        )
+        try {
+            val raw = helper.writableDatabase
+            for (migration in listOf(
+                MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
+                MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+            )) {
+                migration.migrate(raw)
+            }
+            // A v9 terminal has no pallet tables at all; 9 -> 10 is what creates them.
+            raw.query("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pallet_exceptions'").use {
+                assertTrue(it.moveToFirst())
+                assertEquals(0, it.getInt(0))
+            }
+            raw.version = 9
+        } finally {
+            helper.close()
+        }
+
+        val db = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
+            .addMigrations(MIGRATION_9_10, MIGRATION_10_11)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            // Opening runs 9 -> 10 -> 11 and then validates every table against
+            // the entities. A `pallet_exceptions` left at its v10 shape throws here.
+            assertEquals(11, db.openHelper.readableDatabase.version)
+            val columns = mutableListOf<String>()
+            db.openHelper.readableDatabase.query("PRAGMA table_info(`pallet_exceptions`)").use { cursor ->
+                while (cursor.moveToNext()) columns += cursor.getString(cursor.getColumnIndexOrThrow("name"))
+            }
+            assertEquals(
+                listOf(
+                    "id", "kind", "palletId", "shiftId", "terminalId",
+                    "operatorId", "reason", "occurredAt", "payloadJson", "ackedAt",
+                ),
+                columns,
+            )
+            db.palletDao().insert(
+                PalletEntity(
+                    palletId = "pal-1", shiftId = "s1", terminalId = null, sscc = "146800899000000012",
+                    openedAt = "2026-09-12T07:00:00.000Z", closedAt = "2026-09-12T08:00:00.000Z",
+                    operatorId = null, printState = "unknown", printReason = null,
+                    ackedAt = "2026-09-12T08:00:15.000Z",
+                ),
+            )
+            val id = db.palletExceptionDao().insert(
+                PalletExceptionEntity(
+                    kind = "reprint", palletId = "pal-1", shiftId = "s1", terminalId = "dev-1",
+                    operatorId = null, reason = "Результат печати неизвестен",
+                    occurredAt = "2026-09-12T08:01:00.000Z", payloadJson = "{}", ackedAt = null,
+                ),
+            )
+            // AUTOINCREMENT, so the drain's id order is also its send order.
+            assertEquals(1L, id)
+            assertEquals(listOf(1L), db.palletExceptionDao().sendable(emptyList(), 10).map { it.id })
+        } finally {
+            db.close()
             context.deleteDatabase(name)
         }
     }

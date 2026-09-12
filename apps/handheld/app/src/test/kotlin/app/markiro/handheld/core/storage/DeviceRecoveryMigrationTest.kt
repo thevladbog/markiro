@@ -17,14 +17,15 @@ import java.util.UUID
 class DeviceRecoveryMigrationTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
     private fun database(name: String) = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
-        .allowMainThreadQueries().addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10).build()
+        .allowMainThreadQueries()
+        .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11).build()
 
     /**
      * Turns the file Room just built at the CURRENT version back into a real v7
      * one, so the upgrade under test is the one an installed v7 terminal takes.
      *
      * Everything added after v7 comes off: `device_recovery` (v8), and 06d's
-     * pallet tables and columns (v9, v10). The two ALTERed tables are dropped
+     * pallet tables and columns (v9, v10, v11). The two ALTERed tables are dropped
      * and recreated at their v7 shape rather than losing columns, because the
      * SQLite behind Robolectric has no `ALTER TABLE ... DROP COLUMN`; both are
      * empty in this fixture, and the DDL below is the v1/v4-to-v5/v5-to-v6/
@@ -33,9 +34,11 @@ class DeviceRecoveryMigrationTest {
      */
     private fun rewindToVersionSeven(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         db.execSQL("DROP TABLE device_recovery")
-        // `IF EXISTS`: `pallet_exceptions` has no Room entity by design (nothing
-        // reads it until the handheld's pallet exceptions screen lands), so a
-        // Room-built file never has it -- only a migrated one does.
+        // `IF EXISTS` is kept rather than tightened: `pallet_exceptions` gained
+        // its entity only at v11 (`MIGRATION_10_11`), so a file built by an
+        // older Room -- or rewound by an earlier revision of this helper -- may
+        // not have it, and a rewind that throws would fail the case it is
+        // setting up rather than the behaviour under test.
         db.execSQL("DROP TABLE IF EXISTS pallet_exceptions")
         db.execSQL("DROP TABLE pallets")
         db.execSQL("DROP TABLE boxes")
@@ -83,7 +86,7 @@ class DeviceRecoveryMigrationTest {
                     assertEquals("exact\u001dscan", upgraded.outboxDao().head(5).single().raw)
                     assertEquals(1L, upgraded.outboxDao().head(5).single().id)
                     assertEquals("{\"batch\":\"saved\\u001dbytes\"}", upgraded.metaDao().get("inventory_pending_batch:i1"))
-                    assertEquals(10, upgraded.openHelper.readableDatabase.version)
+                    assertEquals(11, upgraded.openHelper.readableDatabase.version)
                 }
                 database(name).useDb { restarted ->
                     val recovery = DeviceRecovery(restarted, credentials)

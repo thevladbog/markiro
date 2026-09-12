@@ -3,6 +3,7 @@ package app.markiro.handheld.core.exceptions
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -81,6 +82,51 @@ class ExceptionFactsTest {
         val json = clear.copy(operatorId = null, terminalId = null).toWireJson()
         assertEquals(JsonNull, json["operatorId"])
         assertEquals(JsonNull, json["terminalId"])
+    }
+
+    // -- The pallet channel (06d). Its schema is `palletExceptionSchema` in
+    // `apps/api/src/modules/station-scans/dto.ts`: a different key set from the
+    // box one, and `reason` is REQUIRED for both of its kinds. --
+
+    private val palletKeys = listOf("kind", "palletId", "shiftId", "terminalId", "operatorId", "reason", "occurredAt")
+
+    private val palletReprint = PalletExceptionFact(
+        kind = PalletExceptionKind.REPRINT, palletId = "pallet-1", shiftId = undo.shiftId,
+        terminalId = "dev-1", operatorId = undo.operatorId,
+        reason = ReprintReason.PRINT_OUTCOME_UNKNOWN.audit, occurredAt = undo.occurredAt,
+    )
+
+    @Test
+    fun everyPalletKindCarriesEveryKeyTheServerDeclares() {
+        for (kind in PalletExceptionKind.entries) {
+            val json = palletReprint.copy(kind = kind).toWireJson()
+            assertEquals(kind.wire, palletKeys, json.keys.toList())
+            // A box fact's keys would fail the pallet schema outright.
+            assertEquals(kind.wire, json["kind"]!!.jsonPrimitive.content)
+        }
+    }
+
+    /**
+     * `terminalId` and `operatorId` are `.nullable()` with no `.default()`, so
+     * a dropped key is a 400 for the WHOLE batch, retried forever.
+     */
+    @Test
+    fun anAbsentPalletOperatorIsStillSpelledOut() {
+        val json = palletReprint.copy(operatorId = null, terminalId = null).toWireJson()
+        assertEquals(palletKeys, json.keys.toList())
+        assertEquals(JsonNull, json["operatorId"])
+        assertEquals(JsonNull, json["terminalId"])
+    }
+
+    /** `reason` is `z.string().min(1)` for both pallet kinds -- never null, never empty. */
+    @Test
+    fun aPalletFactAlwaysCarriesANonEmptyReason() {
+        for (kind in PalletExceptionKind.entries) {
+            val reason = palletReprint.copy(kind = kind).toWireJson()["reason"]
+            assertEquals(kind.wire, false, reason == JsonNull)
+            assertTrue(kind.wire, reason!!.jsonPrimitive.content.isNotEmpty())
+        }
+        assertEquals("Результат печати неизвестен", palletReprint.toWireJson()["reason"]!!.jsonPrimitive.content)
     }
 
     /** The audit wording must match the station's, or one ledger reads two ways. */

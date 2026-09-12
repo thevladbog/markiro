@@ -1,9 +1,11 @@
 package app.markiro.handheld.feature.shift
 
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -48,6 +50,37 @@ class ShiftListScreenTest {
         // what found the one with no distinctive name to grep for.
         compose.onNodeWithText("SEP26-003").performClick()
         assertEquals("s3", selected)
+    }
+
+    /**
+     * The operator picks a shift before seeing anything of it, and a pallet
+     * shift is different work: a pallet strip, a second label, a printer that
+     * has to be set up. The chip only rides alongside «+ агрегация», because
+     * pallets are built out of closed boxes and the flag means nothing without
+     * them.
+     */
+    @Test
+    fun aPalletShiftSaysSoOnItsCard() {
+        compose.setContent {
+            MarkiroTheme {
+                ShiftListScreen(
+                    ShiftListUi(
+                        loading = false,
+                        continueShift = null,
+                        mine = listOf(
+                            ShiftEntityFixtures.listed("s2", mode = "aggregation"),
+                            ShiftEntityFixtures.listed("s3", mode = "aggregation").copy(palletsEnabled = true),
+                        ),
+                        others = emptyList(), othersExpanded = false, othersLoading = false, listFetchedAt = 0L, reachable = true,
+                        ownLineName = "Линия 2", dialog = null,
+                    ),
+                    ShiftListCallbacks(),
+                )
+            }
+        }
+        // Exactly one of the two aggregation shifts carries it.
+        compose.onAllNodesWithText("+ агрегация").assertCountEquals(2)
+        compose.onAllNodesWithText("+ паллеты").assertCountEquals(1)
     }
 
     /**

@@ -332,6 +332,66 @@ class LabelQueueViewModelTest {
         assertEquals(PalletPrint.UNKNOWN, db.palletDao().get("p1")?.printState)
     }
 
+    /**
+     * The pallet half of «печать заново после неизвестного результата».
+     *
+     * The station records this through `reprintPallet`
+     * (`apps/station/src/lib/pallets.ts`); a handheld that prints the same
+     * pallet label a second time and writes nothing leaves the two surfaces
+     * keeping different ledgers for the same physical event.
+     */
+    @Test
+    fun printingAPalletAgainFromAnUnknownOutcomeWritesAReprint() = runTest {
+        pallet("p1", "146800899000000012", PalletPrint.UNKNOWN)
+        // The closure syncs within a heartbeat, while the operator is still
+        // working out whether paper moved; only then is the fact sendable.
+        db.palletDao().markAcked(listOf("p1"), "2026-09-10T08:00:15.000Z")
+        val vm = model()
+        vm.state.first { it.items.size == 1 }
+        vm.printOne("p1")
+        vm.state.first { it.printing }
+        vm.state.first { !it.printing }
+        val queued = db.palletExceptionDao().sendable(emptyList(), 10).single()
+        assertEquals("reprint", queued.kind)
+        assertEquals("p1", queued.palletId)
+        assertEquals("s1", queued.shiftId)
+        assertEquals("Результат печати неизвестен", queued.reason)
+        // Nothing must land in the BOX channel: its schema has no `palletId`.
+        assertEquals(0, db.boxExceptionDao().unackedCount())
+    }
+
+    /**
+     * `failed` and `deferred` never put paper through the printer, and
+     * `printed`/`pending` were never in doubt, so printing them is an ordinary
+     * retry and not a second label to account for.
+     */
+    @Test
+    fun retryingAPalletLabelThatNeverPrintedWritesNoReprint() = runTest {
+        for (state in listOf(PalletPrint.FAILED, PalletPrint.DEFERRED, PalletPrint.PENDING)) {
+            pallet("p-$state", "146800899000000012", state)
+        }
+        val vm = model()
+        vm.state.first { it.items.size == 3 }
+        for (state in listOf(PalletPrint.FAILED, PalletPrint.DEFERRED, PalletPrint.PENDING)) {
+            vm.printOne("p-$state")
+            vm.state.first { it.printing }
+            vm.state.first { !it.printing }
+        }
+        assertEquals(3, transport.printed.size)
+        assertEquals(0, db.palletExceptionDao().unackedCount())
+    }
+
+    /** «Этикетка напечаталась» says the label is already there. Nothing was reprinted. */
+    @Test
+    fun confirmingAPalletLabelPrintedWritesNoReprint() = runTest {
+        pallet("p1", "146800899000000012", PalletPrint.UNKNOWN)
+        val vm = model()
+        vm.state.first { it.items.size == 1 }
+        vm.resolveUnknown("p1")
+        db.palletDao().observeUnprintedCount().first { it == 0 }
+        assertEquals(0, db.palletExceptionDao().unackedCount())
+    }
+
     @Test fun delayedAuditLookupCannotReprintUnderReplacementCredential() = runTest {
         box("b1", "046800899000000018", BoxPrint.UNKNOWN)
         val lookup = kotlinx.coroutines.CompletableDeferred<Unit>()

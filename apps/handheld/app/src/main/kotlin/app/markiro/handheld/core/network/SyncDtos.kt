@@ -89,6 +89,14 @@ data class SyncBatchRequest(
      * present, and this device's Retrofit converter drops null-valued fields.
      */
     val exceptions: List<JsonElement> = emptyList(),
+    /**
+     * Pallet (06d) corrections, sent as stored JSON for the same reason the two
+     * lists above are: `palletExceptionSchema` declares `terminalId` and
+     * `operatorId` `.nullable()` without `.default()`, and this device's
+     * Retrofit converter drops a null-valued field, so a re-serialised object
+     * would fail validation for the whole batch.
+     */
+    val palletExceptions: List<JsonElement> = emptyList(),
 )
 
 @Serializable

@@ -67,6 +67,15 @@ data class ShiftCard(
     val product: String,
     val plan: Int?,
     val aggregation: Boolean,
+    /**
+     * Whether this shift builds pallets, shown as its own chip.
+     *
+     * The operator picks a shift before seeing a single screen of it, and
+     * pallets change what the work looks like: a pallet strip under the box
+     * grid, a second label to print, a printer that has to be set up. Without
+     * this the first sign of any of that was arriving inside the shift.
+     */
+    val pallets: Boolean,
     val lineName: String?,
     val tolling: String?,
     val active: Boolean,
@@ -80,6 +89,7 @@ private fun ShiftEntity.card(reachable: Boolean) = ShiftCard(
     product = productPrintName ?: productName ?: productId,
     plan = plannedQty,
     aggregation = mode == "aggregation",
+    pallets = palletsEnabled,
     lineName = lineName,
     tolling = counterpartyName,
     active = status == "active",
@@ -93,6 +103,7 @@ private fun ShiftDto.card(reachable: Boolean, lineName: String) = ShiftCard(
     product = productPrintName ?: productName ?: productId,
     plan = plannedQty,
     aggregation = mode == "aggregation",
+    pallets = palletsEnabled,
     lineName = lineName,
     tolling = counterpartyName,
     active = status == "active",
@@ -262,6 +273,10 @@ fun ShiftCardView(card: ShiftCard, onClick: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp1)) {
                 MarkiroChip(stringResource(R.string.shifts_mode_validation), Tone.Neutral)
                 if (card.aggregation) MarkiroChip(stringResource(R.string.shifts_mode_aggregation), Tone.Info)
+                // Only alongside aggregation: pallets are built out of closed
+                // boxes, so the flag is meaningless on a validation shift and a
+                // chip there would promise work the shift cannot do.
+                if (card.aggregation && card.pallets) MarkiroChip(stringResource(R.string.shifts_mode_pallets), Tone.Info)
                 if (card.active) MarkiroChip(stringResource(R.string.shifts_status_active), Tone.Ok)
             }
         }

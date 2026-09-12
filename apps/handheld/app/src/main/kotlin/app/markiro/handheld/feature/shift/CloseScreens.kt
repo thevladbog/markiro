@@ -102,6 +102,12 @@ fun CloseScreen(step: CloseStep, cb: CloseCallbacks) {
                     SummaryRow(stringResource(R.string.close_summary_accepted), step.accepted.toString())
                     SummaryRow(stringResource(R.string.close_summary_errors), step.errors.toString())
                     SummaryRow(stringResource(R.string.close_summary_duplicates), step.duplicates.toString())
+                    // Design brief 10 §9 lists boxes and pallets in this summary,
+                    // grouped with the other production counts; conflicts stay
+                    // last because they are about sync, not about what was made.
+                    // Absent rather than zero when the shift has neither.
+                    step.boxes?.let { SummaryRow(stringResource(R.string.close_summary_boxes), it.toString()) }
+                    step.pallets?.let { SummaryRow(stringResource(R.string.close_summary_pallets), it.toString()) }
                     SummaryRow(stringResource(R.string.close_summary_conflicts), step.conflicts.toString())
                     val (note, noteTone) = when (step.outcome) {
                         CloseOutcome.ACCEPTED -> R.string.close_summary_title to Tone.Ok
