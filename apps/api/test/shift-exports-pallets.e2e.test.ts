@@ -346,4 +346,156 @@ describe.skipIf(!ready)("shift exports pallets e2e", () => {
       );
     expect(audit).toMatchObject({ outcome: "failure" });
   });
+
+  it("surfaces boxes suppressed by a still-open pallet in the completed export's audit metadata", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const station = await createTestStationDevice(app!, agent, "Open-pallet line");
+
+    const gtin = "04006381333962";
+    const product = await agent
+      .post("/products")
+      .send({
+        name: "Juice",
+        gtin,
+        chzProductGroupCode: 8,
+        boxCapacity: 10,
+        palletBoxCapacity: 5,
+      })
+      .expect(201);
+    const productId = (product.body as { id: string }).id;
+
+    const shift = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", plannedDate: "2026-09-11" })
+      .expect(201);
+    const shiftId = (shift.body as { id: string }).id;
+    await agent.post(`/shifts/${shiftId}/open`).expect(200);
+
+    function item(label: string, boxId: string, index: number): ScanItemDto {
+      const raw = `01${gtin}21S-${label}`;
+      const km = canonicalizeKm(raw);
+      return {
+        shiftId,
+        terminalId: "t1",
+        raw,
+        verdict: "ok",
+        scannedAt: new Date(Date.parse("2026-09-11T07:00:00.000Z") + index * 1000).toISOString(),
+        code: { codeHash: kmHash(km), gtin14: km.gtin14, serial: km.serial },
+        boxId,
+        operatorId: null,
+      };
+    }
+
+    const closedBoxSscc = buildSscc(1, ISSUER_PREFIX, 401);
+    const closedPalletSscc = buildSscc(9, ISSUER_PREFIX, 2);
+    const openPalletBoxSscc = buildSscc(1, ISSUER_PREFIX, 402);
+
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", station.apiKey)
+      .send({
+        batchId: `pallet-export-e2e-${randomUUID()}`,
+        items: [item("closed-0", "closed-box", 0), item("open-0", "open-box", 1)],
+      })
+      .expect(201);
+
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", station.apiKey)
+      .send({
+        batchId: `pallet-export-e2e-${randomUUID()}`,
+        items: [],
+        boxes: [
+          {
+            boxId: "closed-box",
+            shiftId,
+            terminalId: "t1",
+            sscc: closedBoxSscc,
+            closedAt: "2026-09-11T07:30:00.000Z",
+            operatorId: null,
+            devicePalletId: "p-closed",
+          },
+          {
+            boxId: "open-box",
+            shiftId,
+            terminalId: "t1",
+            sscc: openPalletBoxSscc,
+            closedAt: "2026-09-11T07:30:00.000Z",
+            operatorId: null,
+            devicePalletId: "p-open",
+          },
+        ],
+      })
+      .expect(201);
+
+    // Only "p-closed" actually closes here. "p-open" is created (a box named
+    // it) but never itself closes -- so the box standing on it must render
+    // loose, but for a DIFFERENT reason than a box with no pallet at all.
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", station.apiKey)
+      .send({
+        batchId: `pallet-export-e2e-${randomUUID()}`,
+        items: [],
+        pallets: [
+          {
+            palletId: "p-closed",
+            shiftId,
+            terminalId: "t1",
+            sscc: closedPalletSscc,
+            closedAt: "2026-09-11T08:00:00.000Z",
+            operatorId: null,
+            printVerifiedAt: null,
+            printSkippedAt: null,
+          },
+        ],
+      })
+      .expect(201);
+
+    await agent.post(`/shifts/${shiftId}/close`).send({ reason: "test close" }).expect(200);
+
+    const created = await agent
+      .post(`/shifts/${shiftId}/exports`)
+      .send({
+        formatId: "shift_csv_pallets",
+        formatVersion: 1,
+        maxLines: null,
+        idempotencyKey: randomUUID(),
+      })
+      .expect(201);
+    const exportId = (created.body as { id: string }).id;
+
+    await app!.get(ShiftExportRunnerService).run(exportId, { retryCount: 0, retryLimit: 5 });
+
+    const [row] = await db
+      .select()
+      .from(schema.shiftExports)
+      .where(eq(schema.shiftExports.id, exportId));
+    expect(row).toMatchObject({
+      status: "ready",
+      errorCode: null,
+      totalCodeCount: 2,
+      totalBoxCount: 2,
+    });
+
+    const [audit] = await db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "shift_export.completed"),
+          eq(schema.tenantAuditEvents.targetId, exportId),
+        ),
+      );
+    expect(audit?.after).toMatchObject({
+      totalCodeCount: 2,
+      totalBoxCount: 2,
+      // Exactly the box that stood on the still-open "p-open" pallet -- NOT
+      // the box that never had a pallet at all, and not the box that closed
+      // onto the pallet which itself closed.
+      openPalletSuppressedBoxCount: 1,
+    });
+  });
 });

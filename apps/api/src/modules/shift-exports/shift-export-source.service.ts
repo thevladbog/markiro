@@ -29,6 +29,17 @@ export interface ShiftExportSnapshot {
   shiftDate: string;
   /** Tenant's ИНН; loaded only for formats that embed it (GISMT XML). */
   organizationInn: string | null;
+  /**
+   * Eligible boxes rendered LOOSE only because the pallet they closed onto has
+   * not itself closed yet (no SSCC to name it with) -- always 0 outside
+   * pallets mode. This is a real, silent gap in the rendered document (see
+   * `toPalletsSource`): the box's pallet-aggregation obligation is not yet
+   * discharged, and the factory must re-export once that pallet closes. Never
+   * counts a box that stands on no pallet at all, nor one whose `palletId`
+   * fails to resolve for any other reason (wrong tenant/shift, vanished row) --
+   * both stay ordinary, unremarkable loose boxes.
+   */
+  openPalletSuppressedBoxCount: number;
   source: ShiftExportSource;
 }
 
@@ -190,14 +201,18 @@ export class ShiftExportSourceService {
     }
 
     let source: ShiftExportSource;
+    let openPalletSuppressedBoxCount = 0;
     if (format.boxMode === "flat") {
       source = { mode: "flat", codes: authoritative.map((row) => row.canonicalRaw) };
     } else {
       const eligibleBoxes = await this.loadEligibleBoxes(tx, tenantId, shiftId, authoritative);
-      source =
-        format.boxMode === "boxes"
-          ? this.toBoxesSource(eligibleBoxes)
-          : await this.toPalletsSource(tx, tenantId, shiftId, eligibleBoxes);
+      if (format.boxMode === "boxes") {
+        source = this.toBoxesSource(eligibleBoxes);
+      } else {
+        const pallets = await this.toPalletsSource(tx, tenantId, shiftId, eligibleBoxes);
+        source = pallets.source;
+        openPalletSuppressedBoxCount = pallets.openPalletSuppressedBoxCount;
+      }
     }
 
     return {
@@ -205,6 +220,7 @@ export class ShiftExportSourceService {
       productName: shift.productName ?? "Продукция",
       shiftDate,
       organizationInn,
+      openPalletSuppressedBoxCount,
       source,
     };
   }
@@ -308,19 +324,24 @@ export class ShiftExportSourceService {
 
   /**
    * Groups the same eligible boxes by `pallet_id`: a box on a pallet joins
-   * that pallet's group (ordered by the PALLET's own `closed_at`); a box with
+   * that pallet's group (ordered by the PALLET's own `closed_at`, tiebroken by
+   * the pallet's own SSCC so two pallets sharing one timestamp -- a legitimate
+   * offline batch-close artifact -- still render in the SAME order on every
+   * run, regardless of the arrival order of an unordered SQL join); a box with
    * no pallet, or whose pallet has not itself closed (no `sscc` to name yet),
    * is rendered loose, after every pallet. A shift can close before every
    * pallet does (`closeShift` does not gate on it), so a still-open pallet is
    * treated the same as no pallet at all rather than surfacing a document
-   * that names a pallet with nothing to call it.
+   * that names a pallet with nothing to call it -- but that box is counted in
+   * `openPalletSuppressedBoxCount` (see `ShiftExportSnapshot`) so the omission
+   * is not silent.
    */
   private async toPalletsSource(
     tx: ShiftExportTransaction,
     tenantId: string,
     shiftId: string,
     eligibleBoxes: readonly EligibleBox[],
-  ): Promise<ShiftExportSource> {
+  ): Promise<{ source: ShiftExportSource; openPalletSuppressedBoxCount: number }> {
     const palletRows: PalletRow[] = await tx
       .select({
         tenantId: schema.pallets.tenantId,
@@ -331,12 +352,14 @@ export class ShiftExportSourceService {
       })
       .from(schema.pallets)
       .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.shiftId, shiftId)));
+    const tenantPalletRows = palletRows.filter(
+      (row) => row.tenantId === tenantId && row.shiftId === shiftId,
+    );
+    /** Every pallet this shift knows about, closed or not -- used only to tell "still open" apart from "does not resolve at all". */
+    const palletById = new Map(tenantPalletRows.map((row) => [row.id, row]));
     const closedPalletById = new Map(
-      palletRows
-        .filter(
-          (row): row is PalletRow & { sscc: string } =>
-            row.tenantId === tenantId && row.shiftId === shiftId && row.sscc !== null,
-        )
+      tenantPalletRows
+        .filter((row): row is PalletRow & { sscc: string } => row.sscc !== null)
         .map((row) => [row.id, { sscc: row.sscc, closedAt: row.closedAt }]),
     );
 
@@ -345,6 +368,7 @@ export class ShiftExportSourceService {
       { sscc: string; closedAt: Date | null; boxes: { sscc: string; codes: string[] }[] }
     >();
     const looseBoxes: { sscc: string; codes: string[] }[] = [];
+    let openPalletSuppressedBoxCount = 0;
 
     for (const box of eligibleBoxes) {
       if (box.palletId === null) {
@@ -353,6 +377,9 @@ export class ShiftExportSourceService {
       }
       const pallet = closedPalletById.get(box.palletId);
       if (pallet === undefined) {
+        if (palletById.get(box.palletId)?.sscc === null) {
+          openPalletSuppressedBoxCount += 1;
+        }
         looseBoxes.push({ sscc: box.sscc, codes: box.codes });
         continue;
       }
@@ -369,20 +396,33 @@ export class ShiftExportSourceService {
     }
 
     if (groups.size === 0) {
+      // Fires whenever every eligible box ends up loose -- which covers TWO
+      // distinct shift histories: no box in this shift ever stood on a
+      // pallet, OR pallets were used but NONE of them has closed yet (so
+      // there is no pallet SSCC available to aggregate onto). Both mean the
+      // same thing for this export: no pallet-level aggregate exists yet to
+      // submit. Do not read this code as "this shift never used pallets".
       throw new ShiftExportSourceError("SHIFT_HAS_NO_PALLETS");
     }
 
     const pallets: ShiftExportPalletGroup[] = [...groups.values()]
-      .sort((left, right) => compareNullableDates(left.closedAt, right.closedAt))
+      .sort(
+        (left, right) =>
+          compareNullableDates(left.closedAt, right.closedAt) ||
+          compareCodeUnits(left.sscc, right.sscc),
+      )
       .map((group) => ({
         sscc: group.sscc,
         boxes: [...group.boxes].sort((left, right) => compareCodeUnits(left.sscc, right.sscc)),
       }));
 
     return {
-      mode: "pallets",
-      pallets,
-      looseBoxes: looseBoxes.sort((left, right) => compareCodeUnits(left.sscc, right.sscc)),
+      source: {
+        mode: "pallets",
+        pallets,
+        looseBoxes: looseBoxes.sort((left, right) => compareCodeUnits(left.sscc, right.sscc)),
+      },
+      openPalletSuppressedBoxCount,
     };
   }
 }

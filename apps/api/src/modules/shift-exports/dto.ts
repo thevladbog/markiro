@@ -156,7 +156,14 @@ export const shiftExportOpenApiSchema = {
     formatVersion: { type: "integer", minimum: 1 },
     maxLines: { type: "integer", nullable: true, minimum: 2, maximum: 1_000_000 },
     status: { type: "string", enum: ["queued", "processing", "ready", "failed"] },
-    errorCode: { type: "string", nullable: true },
+    errorCode: {
+      type: "string",
+      nullable: true,
+      description:
+        'Present only when status is "failed". SHIFT_HAS_NO_PALLETS covers two distinct ' +
+        "shift histories: no box in the shift ever stood on a pallet, or pallets were used " +
+        "but none of them has closed yet -- not only the former.",
+    },
     productNameSnapshot: { type: "string", nullable: true },
     shiftDateSnapshot: { type: "string", format: "date", nullable: true },
     totalCodeCount: { type: "integer", nullable: true, minimum: 1 },

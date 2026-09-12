@@ -268,6 +268,7 @@ describe("ShiftExportSourceService", () => {
       productName: "Вода газированная",
       shiftDate: "2026-08-13",
       organizationInn: null,
+      openPalletSuppressedBoxCount: 0,
       source: { mode: "flat", codes: ["code-a", "code-b", "code-c"] },
     });
     expect(fake.transactionOptions).toEqual([
@@ -604,6 +605,103 @@ describe("ShiftExportSourceService", () => {
                 { sscc: "900000000000000009", codes: ["code-b"] },
               ],
             },
+          ],
+        },
+      });
+    });
+
+    it("breaks a closed_at tie between two pallets by SSCC, regardless of row arrival order", async () => {
+      const tiedClosedAt = new Date("2026-08-13T11:00:00.000Z");
+      const palletA = palletRow("pallet-a", "100000000000000001", tiedClosedAt);
+      const palletZ = palletRow("pallet-z", "900000000000000009", tiedClosedAt);
+      const membershipA = membership("box-a", "200000000000000002", HASH_A, {
+        palletId: "pallet-a",
+      });
+      const membershipZ = membership("box-z", "300000000000000003", HASH_B, {
+        palletId: "pallet-z",
+      });
+      const registry = [
+        registryRow(HASH_A, "2026-08-13T10:00:00.000Z"),
+        registryRow(HASH_B, "2026-08-13T10:00:01.000Z"),
+      ];
+      const codeHistory = [
+        codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a"),
+        codeRow(HASH_B, "2026-08-13T10:00:01.000Z", "code-b"),
+      ];
+      const expectedPalletOrder = [
+        {
+          sscc: "100000000000000001",
+          boxes: [{ sscc: "200000000000000002", codes: ["code-a"] }],
+        },
+        {
+          sscc: "900000000000000009",
+          boxes: [{ sscc: "300000000000000003", codes: ["code-b"] }],
+        },
+      ];
+
+      // Same logical shift, but the underlying box rows arrive in the
+      // OPPOSITE order -- an unordered SQL join can legitimately return
+      // either order across runs. Without a tiebreaker, output order would
+      // follow arrival order (via `groups`' insertion order surviving a
+      // stable sort on a tied key); with the fix, both arrival orders must
+      // render the identical, SSCC-ordered result.
+      const arrivalOrders = [
+        [membershipZ, membershipA],
+        [membershipA, membershipZ],
+      ];
+
+      for (const memberships of arrivalOrders) {
+        const fake = fakeDb({
+          shifts: [closedShift()],
+          registry,
+          codeHistory,
+          memberships,
+          pallets: [palletZ, palletA],
+        });
+
+        await expect(
+          new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", PALLETS),
+        ).resolves.toMatchObject({
+          source: { mode: "pallets", pallets: expectedPalletOrder },
+        });
+      }
+    });
+
+    it("counts boxes suppressed by a still-open pallet, but not boxes with no pallet at all", async () => {
+      const fake = fakeDb({
+        shifts: [closedShift()],
+        registry: [
+          registryRow(HASH_A, "2026-08-13T10:00:00.000Z"),
+          registryRow(HASH_B, "2026-08-13T10:00:01.000Z"),
+          registryRow(HASH_C, "2026-08-13T10:00:02.000Z"),
+        ],
+        codeHistory: [
+          codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a"),
+          codeRow(HASH_B, "2026-08-13T10:00:01.000Z", "code-b"),
+          codeRow(HASH_C, "2026-08-13T10:00:02.000Z", "code-c"),
+        ],
+        memberships: [
+          membership("box-closed", "100000000000000001", HASH_A, { palletId: "pallet-closed" }),
+          membership("box-open-pallet", "200000000000000002", HASH_B, {
+            palletId: "pallet-open",
+          }),
+          membership("box-no-pallet", "300000000000000003", HASH_C),
+        ],
+        pallets: [
+          palletRow("pallet-closed", "500000000000000005", new Date("2026-08-13T11:00:00.000Z")),
+          palletRow("pallet-open", null, null),
+        ],
+      });
+
+      await expect(
+        new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", PALLETS),
+      ).resolves.toMatchObject({
+        openPalletSuppressedBoxCount: 1,
+        source: {
+          mode: "pallets",
+          looseBoxes: [
+            { sscc: "200000000000000002", codes: ["code-b"] },
+            { sscc: "300000000000000003", codes: ["code-c"] },
           ],
         },
       });

@@ -22,6 +22,7 @@ export const SHIFT_EXPORT_SAFE_ERROR_CODES = [
   "FORMAT_NOT_FOUND",
   "INVALID_LINE_LIMIT",
   "BOX_EXCEEDS_LINE_LIMIT",
+  "PALLET_EXCEEDS_LINE_LIMIT",
   "INVALID_BOX_SSCC",
   "INVALID_CIS",
   "GENERATION_FAILED",
@@ -108,7 +109,7 @@ export class ShiftExportRunnerService {
 
       infrastructureErrorCode = "GENERATION_FAILED";
       publicationAttempted = true;
-      await this.publishReady(claimed, uploaded);
+      await this.publishReady(claimed, uploaded, snapshot.openPalletSuppressedBoxCount);
     } catch (error) {
       if (publicationAttempted) {
         try {
@@ -189,6 +190,7 @@ export class ShiftExportRunnerService {
   private async publishReady(
     claimed: ShiftExportRow,
     uploaded: readonly UploadedArtifact[],
+    openPalletSuppressedBoxCount: number,
   ): Promise<void> {
     const completedAt = new Date();
     const totalCodeCount = uploaded.reduce((total, artifact) => total + artifact.part.codeCount, 0);
@@ -229,6 +231,11 @@ export class ShiftExportRunnerService {
         partCount: uploaded.length,
         totalCodeCount,
         totalBoxCount,
+        // Boxes rendered loose only because their pallet had not itself
+        // closed yet -- 0 outside pallets mode. Surfaced here (rather than
+        // left silent) so a factory does not mistake this export for having
+        // fully discharged the pallet-aggregation obligation.
+        openPalletSuppressedBoxCount,
       });
     });
   }
@@ -337,6 +344,7 @@ function safeDomainErrorCode(error: unknown): ShiftExportSafeErrorCode | null {
     case "FORMAT_NOT_FOUND":
     case "INVALID_LINE_LIMIT":
     case "BOX_EXCEEDS_LINE_LIMIT":
+    case "PALLET_EXCEEDS_LINE_LIMIT":
     case "INVALID_BOX_SSCC":
     case "INVALID_CIS":
     case "ORG_INN_MISSING":

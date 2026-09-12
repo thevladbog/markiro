@@ -77,6 +77,7 @@ export type ShiftExportDomainErrorCode =
   | "EMPTY_SOURCE"
   | "INVALID_LINE_LIMIT"
   | "BOX_EXCEEDS_LINE_LIMIT"
+  | "PALLET_EXCEEDS_LINE_LIMIT"
   | "INVALID_BOX_SSCC"
   | "INVALID_CIS"
   | "ORG_INN_MISSING";
@@ -193,6 +194,13 @@ interface ShiftExportBlock {
   xmlBoxes?: readonly GismtAggregationBox[];
   /** Set only by a pallet-group block: the aggregate referencing `xmlBoxes`. */
   xmlPallet?: GismtAggregationPallet;
+  /**
+   * True only for a block built by `buildPalletGroupBlock` (every extension,
+   * not just XML) -- so a line-limit overflow can be reported as
+   * `PALLET_EXCEEDS_LINE_LIMIT` rather than the misleading `BOX_EXCEEDS_LINE_LIMIT`,
+   * which names a single box, not a whole pallet's worth of them.
+   */
+  isPalletGroup?: boolean;
   physicalLineCount: number;
   codeCount: number;
   boxCount: number;
@@ -379,6 +387,7 @@ function buildPalletGroupBlock(
     return {
       xmlBoxes: boxBlocks.map(requireXmlBox),
       xmlPallet,
+      isPalletGroup: true,
       physicalLineCount: physicalLineCountOfBoxes + gismtAggregationPalletLineCount(xmlPallet),
       codeCount,
       boxCount,
@@ -388,6 +397,7 @@ function buildPalletGroupBlock(
   if (descriptor.extension === "txt") {
     return {
       lines: [formatBoxSscc(pallet.sscc), ...boxBlocks.flatMap((block) => block.lines ?? [])],
+      isPalletGroup: true,
       physicalLineCount: 1 + physicalLineCountOfBoxes,
       codeCount,
       boxCount,
@@ -396,6 +406,7 @@ function buildPalletGroupBlock(
 
   return {
     csvRows: boxBlocks.flatMap((block) => block.csvRows ?? []),
+    isPalletGroup: true,
     physicalLineCount: physicalLineCountOfBoxes,
     codeCount,
     boxCount,
@@ -469,7 +480,12 @@ function splitBlocks(
 
   for (const block of blocks) {
     if (headerLines + block.physicalLineCount > maxLines) {
-      throw new ShiftExportDomainError("BOX_EXCEEDS_LINE_LIMIT");
+      // A pallet group is one atomic block (see `buildPalletGroupBlock`), so an
+      // overflow here means the WHOLE pallet -- its own aggregate line plus
+      // every member box -- does not fit, not that a single box is too big.
+      throw new ShiftExportDomainError(
+        block.isPalletGroup ? "PALLET_EXCEEDS_LINE_LIMIT" : "BOX_EXCEEDS_LINE_LIMIT",
+      );
     }
 
     if (currentBlocks.length > 0 && currentPhysicalLineCount + block.physicalLineCount > maxLines) {

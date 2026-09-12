@@ -805,6 +805,25 @@ describe("pallets shift export formats", () => {
     expect(palletParts).toHaveLength(1);
   });
 
+  it("names a whole pallet group's own line-limit overflow distinctly from a single box's", () => {
+    // The pallet block is 1 (pallet line) + boxA (4 lines) + boxB (3 lines) =
+    // 8 physical lines; a limit of 7 cannot fit it even alone in an empty
+    // part, and TXT has no header overhead to blame instead.
+    expect(() => renderPalletParts("shift_txt_pallets", palletsSource, 7)).toThrow(
+      new ShiftExportDomainError("PALLET_EXCEEDS_LINE_LIMIT"),
+    );
+    // A lone box (not in a pallet group) hitting the same kind of overflow
+    // still reports the box-shaped code, proving the two paths stay distinct.
+    const looseOnly: ShiftExportSource = {
+      mode: "pallets",
+      pallets: [],
+      looseBoxes: [{ sscc: boxA, codes: ["KM-1", "KM-2"] }],
+    };
+    expect(() => renderPalletParts("shift_txt_pallets", looseOnly, 3)).toThrow(
+      new ShiftExportDomainError("BOX_EXCEEDS_LINE_LIMIT"),
+    );
+  });
+
   it("rejects a flat or boxes source for a pallets-mode format, and vice versa", () => {
     expect(() =>
       renderShiftExport({
