@@ -122,8 +122,35 @@
       "billing_buyer_profile_required": "Complete buyer details in the customer profile.",
       "billing_profile_unconfirmed": "Confirm party details before issuing.",
       "billing_seller_account_required": "Select a seller bank account.",
-      "billing_seller_account_inactive": "The seller bank account is inactive. Select an active account."
-    }
+      "billing_seller_account_inactive": "The seller bank account is inactive. Select an active account.",
+      "offer_draft_changed": "This draft has changed. Reopen it before saving your changes.",
+      "offer_not_draft": "The offer has already been issued or changed status. Reopen its details.",
+      "offer_version_stale": "A newer offer version exists. Open it from the history.",
+      "offer_catalog_version_invalid": "A selected catalog version is no longer published. Replace it in the offer.",
+      "offer_price_override_reason_required": "Provide a reason for the price override."
+    },
+    "edit": "Edit",
+    "editDraft": "Edit offer",
+    "saveDraft": "Save changes",
+    "open": "Open",
+    "backToOffer": "Back to offer",
+    "correct": "Fix",
+    "openCatalog": "Open catalog",
+    "beforeIssue": "Before issuing the offer",
+    "sellerUnconfirmed": "Confirm the seller's billing details.",
+    "buyerUnconfirmed": "Confirm the buyer's billing details.",
+    "sellerAccountMissing": "Select an active seller bank account.",
+    "expiredDraft": "The draft has expired. Select a new expiry date.",
+    "lineTermsMissing": "Missing terms for “{{name}}”: document name, sale subject and license period where applicable.",
+    "legacyDraftHint": "You can save and preview this draft. To issue it, publish a catalog version with complete terms, then replace the old line in the offer editor. Saved prices and terms are never updated automatically.",
+    "issuedImmutable": "Issued offers retain their frozen terms. Changes require a subsequent version.",
+    "publishUnavailable": "Issuing is unavailable: check billing details, expiry and whether this is the latest offer version.",
+    "fixTermsBeforeIssue": "Correct the marked line terms before issuing. Draft preview is available.",
+    "readyToIssue": "Preview is ready. You can issue the offer.",
+    "paymentUnavailable": "Payment requires the current unexpired offer to be accepted by the customer.",
+    "revisionUnavailable": "A subsequent version requires a customer change request and no existing revision draft.",
+    "tenant": "Customer · {{tenantId}}",
+    "retryFrozen": "The retry uses the saved changes. Fields are temporarily unavailable to preserve the first attempt."
   },
   "brand": {
     "logoAlt": "Markiro logo"
@@ -1296,20 +1323,24 @@
     "money": "RUB {{value}}",
     "effectsLabel": "Version effect",
     "lines": "{{count}} lines",
-    "stations": "{{count}} stations",
+    "stations": "Stations and handhelds: {{count}}",
     "kiosks": "{{count}} kiosks",
     "unlimitedLines": "Unlimited lines",
-    "unlimitedStations": "Unlimited stations",
+    "unlimitedStations": "Unlimited stations and handhelds",
     "unlimitedKiosks": "Unlimited kiosks",
     "serviceEffect": "One-time service without quotas",
     "effects": {
       "lines": "+{{count}} lines",
-      "stations": "+{{count}} stations",
+      "stations": "Stations and handhelds: +{{count}}",
       "kiosks": "+{{count}} kiosks",
       "cabinetUsers": "+{{count}} cabinet users",
       "labelEditor": "Label editor",
       "publicApi": "Public API",
-      "pallets": "Pallet workflows"
+      "pallets": "Pallet workflows",
+      "chzIntegration": "Chestny ZNAK and National Catalog",
+      "inventory": "Inventory",
+      "commerceMl": "CommerceML",
+      "handheld": "Handheld"
     },
     "units": {
       "month": "Month",
@@ -1335,12 +1366,16 @@
     },
     "effectNames": {
       "lines": "Lines",
-      "stations": "Stations",
+      "stations": "Stations and handhelds",
       "kiosks": "Kiosks",
       "cabinetUsers": "Cabinet users",
       "labelEditor": "Label editor",
       "publicApi": "Public API",
-      "pallets": "Pallet workflows"
+      "pallets": "Pallet workflows",
+      "chzIntegration": "Chestny ZNAK and National Catalog",
+      "inventory": "Inventory",
+      "commerceMl": "CommerceML",
+      "handheld": "Handheld"
     },
     "validation": {
       "required": "This field is required",
@@ -1352,7 +1387,8 @@
       "descriptionTooLong": "Use no more than 2000 characters",
       "effectRequired": "Add at least one effect",
       "effectDuplicate": "Each effect type can be added only once",
-      "quota": "Enter a positive whole quantity."
+      "quota": "Enter a positive whole quantity.",
+      "p1Mapping": "Explicitly choose values for the four new modules before saving."
     },
     "form": {
       "identity": "Version parameters",
@@ -1368,7 +1404,7 @@
       "vatRate": "VAT rate, %",
       "planLimits": "Plan limits and features",
       "maxLines": "Lines",
-      "maxStations": "Stations",
+      "maxStations": "Stations and handhelds",
       "maxKiosks": "Kiosks",
       "maxUsers": "Cabinet users",
       "demoDays": "Demo days",
@@ -1564,6 +1600,26 @@
         "price": "Version price"
       },
       "usageTitle": "Usage and limits",
+      "deviceLicensing": {
+        "title": "Working devices: Station and handheld",
+        "count": "{{usage}} of {{limit}}",
+        "unlimited": "{{usage}} · unlimited",
+        "loadError": "Could not load working device licensing.",
+        "cancel": "Cancel reservation",
+        "confirmTitle": "Cancel this reservation?",
+        "confirmBody": "One place will be freed and the old pairing code will stop working.",
+        "confirm": "Free place",
+        "retry": "The result is uncertain. Retry to use the same request.",
+        "permissionError": "Your session or permissions changed. Access was refreshed; review the current state before trying again.",
+        "stale": "The reservation changed. Review the refreshed state and confirm again.",
+        "kind": { "station": "Station", "handheld": "Handheld" },
+        "state": {
+          "reserved": "Reserved",
+          "assigned": "Occupied",
+          "released": "Released",
+          "inconsistent": "Needs review"
+        }
+      },
       "featuresTitle": "Features",
       "addons": {
         "active": "Active add-ons",
@@ -1576,7 +1632,7 @@
     },
     "usage": {
       "lines": "Lines",
-      "stations": "Stations",
+      "stations": "Stations and handhelds",
       "kiosks": "Kiosks",
       "cabinetUsers": "Cabinet users",
       "unlimited": "unlimited",
@@ -1591,7 +1647,11 @@
       "publicApi": "Public API",
       "pallets": "Pallets",
       "enabled": "enabled",
-      "disabled": "disabled"
+      "disabled": "disabled",
+      "chzIntegration": "Chestny ZNAK and National Catalog",
+      "inventory": "Inventory",
+      "commerceMl": "CommerceML",
+      "handheld": "Handheld"
     },
     "assignment": {
       "title": "Direct assignment",
@@ -1699,7 +1759,7 @@
     "purchasedPeriod": "Purchased period",
     "errors": {
       "commercial_review_stale": "Seller policy changed. Review the new terms and create a new document; saved terms remain unchanged.",
-      "commercial_terms_review_required": "Review the commercial terms and create a new catalog version.",
+      "commercial_terms_review_required": "You can save and preview this draft. To issue it, publish a catalog version with complete terms, then replace the old line in the offer editor. Saved prices and terms are never updated automatically.",
       "seller_tax_policy_unconfigured": "Configure the seller tax policy before publishing.",
       "seller_tax_policy_violation": "VAT conflicts with current seller policy. Review the terms.",
       "commercial_source_review_required": "The source document requires review. Its terms and amounts remain unchanged.",
@@ -1729,6 +1789,7 @@
       "counterparty": "Counterparty",
       "inn": "INN",
       "status": "Status",
+      "documentForm": "Form",
       "conclusionDate": "Concluded",
       "tenant": "Tenant",
       "documentKind": "Kind",
@@ -1760,6 +1821,13 @@
       "sole_proprietor": "Sole proprietor",
       "self_employed": "Self-employed",
       "individual": "Individual"
+    },
+    "documentForm": {
+      "label": "Document form",
+      "ru": "Russian",
+      "ru_en": "Bilingual (RU/EN)",
+      "badgeRu": "RU",
+      "badgeRuEn": "RU + EN"
     },
     "sections": {
       "counterparty": "Counterparty",
@@ -1819,7 +1887,124 @@
       "attach": "Attach a file",
       "deleteAttachment": "Delete",
       "badAttachmentType": "Only PDF, DOCX, PNG and JPEG are accepted.",
-      "noDocuments": "No documents yet."
+      "noDocuments": "No documents yet.",
+      "staleDraft": "The agreement changed after this document was generated: the file no longer matches the record. Generate the printable form again before sending it.",
+      "staleBadge": "Out of date"
     }
+  },
+  "entitlements": {
+    "title": "Rights and usage",
+    "current": "Current",
+    "candidate": "Prepared model",
+    "prepared": "Prepared",
+    "shadow": "Prepared terms are not applied yet. Current access checks remain in force.",
+    "unknown": "Not mapped",
+    "enabled": "Enabled",
+    "disabled": "Not included",
+    "notEvaluated": "Not evaluated by current model",
+    "unlimited": "Unlimited",
+    "remaining": "Remaining: {{value}}",
+    "sources": "Entitlement sources",
+    "noSources": "No sources",
+    "from": "Start",
+    "until": "End (exclusive)",
+    "noEnd": "No end date",
+    "observed": "Observed: {{value}}",
+    "readiness": "Readiness and connectivity",
+    "writeAllowed": "Current policy permits writes",
+    "writeDenied": "Current policy restricts writes",
+    "loadError": "Unable to load rights.",
+    "retry": "Retry",
+    "prepare": "Prepare source",
+    "revoke": "Revoke prepared source",
+    "reason": "Reason",
+    "decision": "Decision reference",
+    "kind": "Source kind",
+    "periodHint": "Times use your browser timezone: {{zone}}. The end is exclusive; temporary sources do not extend the subscription.",
+    "operations": "Operation scope",
+    "effects": "Source effects",
+    "preview": "Calculate changes",
+    "confirm": "Confirm preparation",
+    "confirmRevoke": "Confirm revocation",
+    "cancel": "Close",
+    "before": "Before change",
+    "after": "After change",
+    "stale": "Preview expired. Facts refreshed; calculate changes again.",
+    "error": "Unable to complete the operation. Check the inputs and retry.",
+    "invalid": "Choose effects and operations, provide a reason, decision and valid period.",
+    "success": "Change prepared. Current rights have not changed.",
+    "previewExpires": "Preview valid until {{value}}",
+    "catalogAccess": "Modules and license rules",
+    "policy": "License lifecycle rules (optional)",
+    "policyHint": "Agreed rules for applying the license and its limits. Approved separately from the catalog item.",
+    "policyMissing": "The selected rules are unavailable. Choose approved rules or publish without additional rules.",
+    "policySelect": "No additional rules",
+    "policyOptional": "Plans, add-ons and services can be published. Current subscription rules apply; new module restrictions are activated separately.",
+    "mappingRequired": "Explicitly choose values for the four new modules before saving.",
+    "choice": "Choose a value",
+    "scopeHint": "A module does not grant every operation: the listed scope applies. Connection readiness is checked separately.",
+    "features": {
+      "labelEditor": "Label editor",
+      "publicApi": "Public API",
+      "pallets": "Pallets",
+      "chzIntegration": "Chestny ZNAK and National Catalog",
+      "inventory": "Inventory",
+      "commerceMl": "CommerceML",
+      "handheld": "Handheld"
+    },
+    "operationsLabels": {
+      "nk_lookup_v1": "NC: product lookup",
+      "nk_proposal_v1": "NC: propose changes",
+      "nk_apply_v1": "NC: apply changes",
+      "nk_refresh_v1": "NC: refresh link",
+      "nk_worker_v1": "NC: background processing",
+      "chz_export_create_v1": "CHZ: create export",
+      "chz_export_poll_v1": "CHZ: poll export",
+      "chz_export_receipt_v1": "CHZ: read receipt",
+      "inventory_file_create_v1": "Inventory: create from file",
+      "commerceMl_exchange_v1": "CommerceML: exchange",
+      "handheld_work_start_v1": "Handheld: start work",
+      "labelEditor_template_write_v1": "Editor: write template",
+      "pallets_shift_configure_v1": "Pallets: configure shift",
+      "publicApi_request_v1": "Public API: request"
+    },
+    "quotas": {
+      "lines": "Lines",
+      "stations": "Stations and handhelds",
+      "kiosks": "Kiosks",
+      "cabinetUsers": "Cabinet users"
+    },
+    "kinds": {
+      "plan": "Plan",
+      "addon": "Add-on",
+      "temporary": "Temporary",
+      "compatibility": "Compatibility"
+    },
+    "connections": {
+      "ready": "Ready",
+      "not_ready": "Not ready",
+      "unknown": "Unknown"
+    },
+    "reasons": {
+      "mapping_required": "The new modules have not been mapped yet. Current access rules remain in force.",
+      "lifecycle_policy_required": "Transition terms have not been approved yet. Prepared rights are not applied.",
+      "subscription_unmanaged": "Subscription is unmanaged",
+      "subscription_read_only": "Subscription is read-only",
+      "other": "Readiness review required"
+    },
+    "chz": "Chestny ZNAK",
+    "nationalCatalog": "National Catalog",
+    "calculatedAt": "Calculated: {{value}}",
+    "usageAt": "Usage counted: {{value}}",
+    "nextChange": "Next change: {{value}}",
+    "planBaseline": "Plan source terms",
+    "scheduled": "Scheduled",
+    "ended": "Ended",
+    "comparison": "Effects on the prepared model",
+    "confirmUncertain": "The confirmation result is unknown. Retry the same confirmation to resolve its outcome.",
+    "confirmUncertainAccess": "Access or session restrictions prevented confirmation verification. The previous request’s outcome is still unknown. Restore access and retry the same confirmation without closing the form.",
+    "confirmUncertainRateLimit": "Too many requests. The previous confirmation’s outcome is still unknown. Wait and retry the same confirmation.",
+    "retryConfirm": "Retry confirmation",
+    "successRefreshError": "The prepared model was saved. Current access is unchanged. The displayed data could not be refreshed."
   }
 }

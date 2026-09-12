@@ -26,6 +26,7 @@ function resolvedQuery<T>(rows: T[]) {
     from: vi.fn(() => query),
     where: vi.fn(() => query),
     orderBy: vi.fn(() => query),
+    for: vi.fn(() => query),
     limit: vi.fn(() => promise),
     then: promise.then.bind(promise),
   };
@@ -143,6 +144,7 @@ describe("BillingService offer snapshots", () => {
     const catalogVersion = {
       id: "41111111-1111-4111-8111-111111111111",
       kind: "plan",
+      lifecyclePolicyId: null,
       nameRu: "Производство",
       nameEn: "Production",
       descriptionRu: "Описание из каталога",
@@ -160,10 +162,10 @@ describe("BillingService offer snapshots", () => {
         return resolvedQuery<unknown>(
           transactionSelect === 1
             ? [{ id: invoice.tenantId }]
-            : transactionSelect === 2
-              ? [{ number: "INV-000001" }]
-              : transactionSelect === 3
-                ? [catalogVersion]
+            : transactionSelect === 2 || transactionSelect === 5
+              ? [catalogVersion]
+              : transactionSelect === 4
+                ? [{ number: "INV-000001" }]
                 : [],
         );
       }),

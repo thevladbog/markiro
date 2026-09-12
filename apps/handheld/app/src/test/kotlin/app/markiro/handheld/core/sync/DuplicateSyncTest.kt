@@ -1,5 +1,7 @@
 package app.markiro.handheld.core.sync
 
+import app.markiro.handheld.core.storage.reconnectSameDeviceForTest
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -26,6 +28,7 @@ import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -54,6 +57,7 @@ class DuplicateSyncTest {
             ),
         )
         db.productLabelJobDao().insert(job("j1"))
+        db.initializeRecoveryForTest()
     }
 
     @After
@@ -64,10 +68,10 @@ class DuplicateSyncTest {
     }
 
     private fun engine(): SyncEngine {
-        val client = OkHttpClient.Builder().addInterceptor(RevocationInterceptor(bus, Json { ignoreUnknownKeys = true })).build()
+        val client = OkHttpClient.Builder().addInterceptor(RevocationInterceptor(bus, db.recovery, Json { ignoreUnknownKeys = true })).build()
         return SyncEngine(
-            db = db, meta = MetaStore(db.metaDao()), config = db.deviceConfigDao(),
-            transport = SyncTransport(client) { server.url("/").toString() }, json = strict,
+            db = db, meta = MetaStore(db), config = db.deviceConfigDao(),
+            transport = SyncTransport(app.markiro.handheld.core.network.GenerationCallFactory(client, db.recovery)) { server.url("/").toString() }, json = strict,
             scope = engineScope, clock = { clock },
         )
     }
@@ -271,4 +275,23 @@ class DuplicateSyncTest {
 
         assertTrue("$first == $second", first != second)
     }
+    @Test fun recoveryResendsExactLabelEventsAndBytesWithNewCredential() = runTest {
+        event("e1", 1)
+        scan("exact\u001dscan")
+        val e = engine()
+        server.enqueue(MockResponse().setResponseCode(401).setBody("""{"code":"STATION_CREDENTIAL_REVOKED"}"""))
+        assertFalse(e.drainAll())
+        val original = server.takeRequest().body.readUtf8()
+        assertEquals(job("j1"), db.productLabelJobDao().get("j1"))
+        assertEquals(1, db.productLabelEventDao().unacked(5).size)
+        db.reconnectSameDeviceForTest()
+        server.enqueue(ok(1, receipt(accepted = listOf("e1"))))
+        assertTrue(e.drainAll())
+        val retry = server.takeRequest()
+        assertEquals(original, retry.body.readUtf8())
+        assertEquals("restored-synthetic-key", retry.getHeader("x-api-key"))
+        assertEquals("AAEC", db.productLabelJobDao().get("j1")?.bytesBase64)
+        assertTrue(db.productLabelEventDao().unacked(5).isEmpty())
+    }
+
 }

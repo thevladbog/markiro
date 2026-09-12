@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.hub
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -80,12 +81,17 @@ class HubViewModelTest {
             .allowMainThreadQueries()
             .build()
         db.deviceConfigDao().upsert(paired)
+        db.initializeRecoveryForTest()
     }
 
     @After
     fun tearDown() {
-        engineScope.cancel()
-        db.close()
+        try {
+            main.cancelAndJoinModels()
+        } finally {
+            engineScope.cancel()
+            db.close()
+        }
     }
 
     private fun dto(id: String, number: String, status: String) =
@@ -119,15 +125,15 @@ class HubViewModelTest {
 
     private fun vm(api: StationApi): HubViewModel {
         val engine = SyncEngine(
-            db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
+            db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), engineScope,
         )
         val inventoryEngine = InventorySyncEngine(
-            db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
+            db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), engineScope,
         )
         return main.track(
-            HubViewModel(
+            HubViewModel(recovery = db.recovery,
                 api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(), db.printerDao(),
                 BoxRepository(db), scannerLabel = { "встроенный" }, now = { clock }, tick = flowOf(Unit),
             ),

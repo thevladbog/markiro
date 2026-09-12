@@ -744,6 +744,7 @@ function LabelEditorContent({
 
       <ImportCodeDialog
         open={showImportDialog}
+        purpose={purpose}
         initialLanguage={spec.language}
         initialDpi={spec.dpi}
         currentDirty={dirty}

@@ -35,9 +35,10 @@ apps/
               shift whose validation policy prints a duplicate: one job at a time,
               bytes prepared once and replayed rather than re-rendered, and an
               unknown delivery resolved by scanning the printed sticker under either
-              policy. Those jobs carry NO credential ownership, unlike the station's,
-              because revoking a handheld wipes its database -- a rule that holds only
-              while DeviceWipe names both tables)
+              policy. Durable work belongs to the normalized server origin, tenant,
+              device ID and handheld kind. Credential rejection seals that owner's
+              database generation, removes the rejected secret and operator roster,
+              and preserves operational rows for authorized same-device recovery.)
   kiosk/      React 19 + Vite 8 + IndexedDB — offline-first self-service
               pickup kiosk (installable PWA), paired to the api by device token
   landing/    Astro 7 — marketing site
@@ -82,6 +83,11 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
   to system/serial/network printers. The internal hardware module mirrors the
   idento-agent HTTP contract (`/scan/consume`, `/print`, discovery) so it can
   be extracted into a standalone agent later without touching the UI.
+- **Multiple COM scanners:** every saved port has an independent reader and
+  reconnect loop. Any scanner can feed the existing scan queue without operator
+  switching; one failed port does not stop the others. Local settings retain
+  compatibility with the legacy single-scanner configuration. See
+  [runtime and acceptance](acceptance/station-multiple-com-scanners.md).
 - **Local DB:** SQLite via `tauri-plugin-sql`, accessed with
   `drizzle-orm/sqlite-proxy`; schema defined in `packages/db`, mirrors the
   server's shift entities (shift, codes, scan journal, boxes, pallets).
@@ -253,13 +259,43 @@ not the display unit or quantity as a period multiplier. Invoice and direct acce
 application share lifecycle and sold-line ownership; repeated application cannot grant twice.
 Issued bytes and historical snapshots remain unchanged after catalog or seller edits.
 
-Updated platform clients negotiate `X-Markiro-Commercial-Version: 2`; legacy positive/null
+P0 platform clients negotiate `X-Markiro-Commercial-Version: 2`; legacy positive/null
 representations remain strict and truthful, and unrepresentable zero values fail with
 `client_update_required`. Review and issuance revalidate the current seller revision. Calculated
 invoice/offer amounts fail with `commercial_amount_out_of_range` before overflowing money columns.
 See the [rollout and recovery guide](operations/commercial-p0-rollout.md) for additive migration,
 client order, read-only impact reporting and rollback limits. This P0 does not enable P1 module
 or offline licensing enforcement and does not implement P2 recurring services.
+
+P1A adds an explicit Commercial V3 and a coherent entitlement snapshot with separate current and
+candidate conditions. New module mappings remain nullable on legacy versions. Prepared temporary
+and compatibility sources retain their operation-version scope, immutable proof and audit; they
+affect shadow calculations only. Terms and occupied-capacity revisions commit with their owning
+writes, and confirmation also binds time and policy identity. V3 plans require four explicit
+module values. Catalog publication for plans, add-ons and services may omit the additional
+lifecycle policy and retain current subscription rules; this also permits offers and invoices.
+An explicitly selected policy must be approved and intact, and its identity remains bound to
+publication review. Publication does not activate candidate P1 restrictions. The customer projection excludes
+internal source metadata, while platform preparation requires both tenant and billing write
+capabilities. Tenant readiness/impact is a read-only current observation that does not assign or
+activate rights, migrate customers, or verify native clients. See the
+[P1A preparation and recovery guide](operations/entitlements-p1a.md) for
+version negotiation, preview recovery and migration order. Device allocation, offline grants and
+production activation remain P1B–P1D.
+
+P1B.2 introduces a current licensed-place assignment and append-only transition journal
+for each Station/handheld identity; both kinds use the same `stations` pool. Creation,
+pairing, security revocation and re-pairing maintain assignments under the existing
+quota lock. Missing or contradictory facts retain capacity and disable reservation
+cancellation until diagnosed. An authorized user may cancel a never-paired, keyless
+reservation without production references; its device record remains, its live code
+is retired, and the cancelled assignment cannot be reused. Cancellation compares a
+revision and stores an actor-bound idempotent receipt. It is permitted in read-only
+subscription state without enabling creation or credential issuance. Separate cabinet
+and platform inspection routes expose licensing independently of connection status.
+The deployment image compatibility floor rejects old readers/writers for both deploy
+and rollback; see the [device reservations runbook](operations/entitlements-p1b2.md).
+Replacement preparation, downgrade retention and offline grants remain later deliveries.
 
 Bank imports retain the bounded source row as reconciliation evidence, while the public match and
 audit contracts expose only the payer account's last four digits and whether it is a known active,
@@ -421,6 +457,17 @@ production access, CDN hosts and live recovery acceptance remain unverified.
 [The import runbook](runbooks/national-catalog-import.md) defines operational and
 rollout boundaries; [delivery evidence](evidence/national-catalog-import/delivery-verification.md)
 records current local verification separately from external acceptance.
+
+Product cards render regulatory attributes from the profile's pinned schema definition.
+Production, code-ordering, circulation and EGAIS readiness remain separate. Category
+binding/change requires an explicit preview and confirmed value transfer; operational
+base fields and category attributes use separate saves. Background read failures preserve
+cached cards and unsaved drafts; a conflict reload fetches the current revision before
+an explicit discard. Read-only cabinet access opens the same product route in view mode.
+National Catalog numeric values retain the exact supported source unit across preview,
+apply, observation and reviewed baselines; missing or unsupported units are not inferred.
+[Catalog delivery evidence](evidence/catalog-category-readiness.md) records local checks
+and the remaining live schema/assortment acceptance for groups 23, 33 and 35.
 
 A confirmed link binds tenant, provider environment, card, canonical GTIN and revision.
 GTIN equality only offers a link. One card may expose several GTINs. New import

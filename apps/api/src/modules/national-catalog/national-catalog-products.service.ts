@@ -1,3 +1,7 @@
+import {
+  EntitlementAdmissionService,
+  admissionScopeDigest,
+} from "../../subscriptions/entitlement-admission.service";
 import { createHash } from "node:crypto";
 
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
@@ -7,7 +11,11 @@ import { and, desc, eq, isNotNull, notInArray } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
 import type { ChzTokenService } from "../chz-exports/chz-token.service";
 import type { NationalCatalogClient } from "./national-catalog.client";
-import type { NationalCatalogProduct, NationalCatalogResult } from "./national-catalog.types";
+import {
+  nationalCatalogProductAttributeUnit,
+  type NationalCatalogProduct,
+  type NationalCatalogResult,
+} from "./national-catalog.types";
 
 export type NationalCatalogCardReadMethod = "feed_product" | "product";
 
@@ -332,11 +340,13 @@ export class NationalCatalogProductsService {
     private readonly tokens: ChzTokenService,
     private readonly baseUrl: string | undefined,
     private readonly now: () => Date = () => new Date(),
+    private readonly admission?: EntitlementAdmissionService,
   ) {}
 
   async lookup(
     tenantId: string,
     productId: string,
+    actorUserId?: string,
   ): Promise<{
     outcome: NationalCatalogLookupOutcome;
     cards: NationalCatalogStoredCard[];
@@ -349,10 +359,29 @@ export class NationalCatalogProductsService {
     if (token.status !== "ok") return { outcome: `token_${token.status}`, cards: [] };
     const auth = { baseUrl: this.baseUrl, token: token.auth.token };
     const feedEtag = await this.repository.findProviderEtag(tenantId, productId, "feed_product");
+    await this.admission?.observe({
+      tenantId: tenantId,
+      actor: { domain: "cabinet", id: actorUserId ?? null },
+      operationId: "nk.lookup.v1",
+      scopeDigest: admissionScopeDigest({
+        productId,
+        method: "feed_product",
+        gtin: product.gtin14,
+      }),
+      transaction: undefined,
+      runtime: { enabled: Boolean(this.baseUrl), observedAt: new Date() },
+    });
     const feed = feedEtag
       ? await this.client.getFeedProducts(auth, [product.gtin14], { ifNoneMatch: feedEtag })
       : await this.client.getFeedProducts(auth, [product.gtin14]);
-    const selected = await this.selectCardRead(tenantId, productId, auth, product.gtin14, feed);
+    const selected = await this.selectCardRead(
+      tenantId,
+      productId,
+      auth,
+      product.gtin14,
+      feed,
+      actorUserId,
+    );
     if (selected.result.status === "not_modified") {
       const cards = await this.repository.markNotModified(
         tenantId,
@@ -395,7 +424,7 @@ export class NationalCatalogProductsService {
             attributes: card.attributes.map((attribute) => ({
               id: attribute.id,
               value: attribute.value,
-              unit: attribute.valueType,
+              unit: nationalCatalogProductAttributeUnit(attribute),
             })),
           },
         },
@@ -434,6 +463,7 @@ export class NationalCatalogProductsService {
     auth: { baseUrl: string; token: string },
     gtin: string,
     feed: NationalCatalogResult<{ products: NationalCatalogProduct[] }>,
+    actorUserId?: string,
   ): Promise<{
     sourceMethod: NationalCatalogCardReadMethod;
     result: NationalCatalogResult<{ products: NationalCatalogProduct[] }>;
@@ -460,6 +490,14 @@ export class NationalCatalogProductsService {
       );
     }
     const publishedEtag = await this.repository.findProviderEtag(tenantId, productId, "product");
+    await this.admission?.observe({
+      tenantId: tenantId,
+      actor: { domain: "cabinet", id: actorUserId ?? null },
+      operationId: "nk.lookup.v1",
+      scopeDigest: admissionScopeDigest({ productId, method: "product", gtin }),
+      transaction: undefined,
+      runtime: { enabled: Boolean(this.baseUrl), observedAt: new Date() },
+    });
     return {
       sourceMethod: "product",
       result: publishedEtag

@@ -1,3 +1,16 @@
+import {
+  stationRecoveryResponseSchema,
+  type StationRecoveryIdentity,
+} from "@markiro/platform-contracts";
+import {
+  initializeDeviceRecovery,
+  readDeviceRecovery,
+  restoreDeviceRecovery,
+  sameStationOwner,
+  stationOwner,
+  stationServerOrigin,
+  type DurableStationOwner,
+} from "./device-recovery.js";
 import { parsePhc } from "@markiro/domain";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import { postUnauthenticatedStationRequest } from "./api-client.js";
@@ -5,7 +18,15 @@ import type { StationConfig } from "./config.js";
 import { replaceOperatorsMirror, type SqlExecutor } from "./mirror.js";
 
 export type PairingError =
-  "invalid" | "expired" | "locked" | "rate_limited" | "unavailable" | "invalid_response";
+  | "invalid"
+  | "expired"
+  | "locked"
+  | "rate_limited"
+  | "unavailable"
+  | "invalid_response"
+  | "mismatch"
+  | "update_required"
+  | "owner_unresolved";
 
 export interface StationProvisioning {
   deviceId: string;
@@ -34,6 +55,7 @@ export interface ProvisioningPersistenceDependencies {
   machineId: string;
   /** Present during recovery: sealed work belongs only to this device record. */
   expectedDeviceId?: string;
+  expectedOwner?: DurableStationOwner;
   exec: SqlExecutor;
   writeConfig: (config: StationConfig) => Promise<void>;
   /** Test-only/telemetry seam; normal callers signal only after this resolves. */
@@ -41,6 +63,7 @@ export interface ProvisioningPersistenceDependencies {
 }
 
 const pairingErrors: Record<string, PairingError> = {
+  PAIR_RECOVERY_MISMATCH: "mismatch",
   PAIR_INVALID: "invalid",
   PAIR_EXPIRED: "expired",
   PAIR_LOCKED: "locked",
@@ -75,6 +98,51 @@ export async function redeemStationPairing(
   }
 }
 
+/** Recovery never retries the ordinary endpoint: an old server cannot safely rotate the key. */
+export async function redeemStationRecovery(
+  serverUrl: string,
+  code: string,
+  expectedOwner: DurableStationOwner,
+  signal?: AbortSignal,
+): Promise<PairingResult> {
+  if (!/^\d{8}$/.test(code)) return { ok: false, error: "invalid" };
+  try {
+    if (stationServerOrigin(serverUrl) !== expectedOwner.serverOrigin)
+      return { ok: false, error: "mismatch" };
+    const expected: StationRecoveryIdentity = {
+      tenantId: expectedOwner.tenantId,
+      deviceId: expectedOwner.deviceId,
+      kind: "station",
+    };
+    const response = await postUnauthenticatedStationRequest(
+      serverUrl,
+      "/station/pair/recovery",
+      { version: 1, code, expected },
+      signal,
+    );
+    if (response.status === 404 || response.status === 405)
+      return { ok: false, error: "update_required" };
+    const body = await readJson(response);
+    if (!response.ok) return { ok: false, error: pairingErrorFrom(body) };
+    const parsed = stationRecoveryResponseSchema.safeParse(body);
+    if (!parsed.success) return { ok: false, error: "invalid_response" };
+    const { kind, ...device } = parsed.data.device;
+    const provisioning = decodeProvisioning({
+      device,
+      credential: parsed.data.credential,
+      operators: parsed.data.operators,
+      ...(parsed.data.subscription ? { subscription: parsed.data.subscription } : {}),
+    });
+    if (!provisioning) return { ok: false, error: "invalid_response" };
+    const actual = stationOwner({ machineId: "", ...provisioning });
+    if (kind !== "station" || !actual || !sameStationOwner(actual, expectedOwner))
+      return { ok: false, error: "mismatch" };
+    return { ok: true, provisioning };
+  } catch {
+    return { ok: false, error: "unavailable" };
+  }
+}
+
 /**
  * Makes a redeemed station usable in the only safe order. The mirror publisher
  * writes the inactive slot and flips it atomically; the Tauri config writer
@@ -86,6 +154,7 @@ export async function persistStationProvisioning(
   {
     machineId,
     expectedDeviceId,
+    expectedOwner,
     exec,
     writeConfig,
     onRosterPublished,
@@ -97,19 +166,32 @@ export async function persistStationProvisioning(
   if (!provisioning.operators.every(isOperator)) {
     throw new Error("Invalid operator roster");
   }
-  await replaceOperatorsMirror(exec, provisioning.operators);
-  onRosterPublished?.();
-  await writeConfig({
-    machineId,
-    deviceId: provisioning.deviceId,
-    deviceName: provisioning.deviceName,
-    tenantId: provisioning.tenantId,
-    organizationName: provisioning.organizationName,
-    ...(provisioning.lineId !== undefined ? { lineId: provisioning.lineId } : {}),
-    ...(provisioning.lineName !== undefined ? { lineName: provisioning.lineName } : {}),
-    apiKey: provisioning.apiKey,
-    serverUrl: provisioning.serverUrl,
-  });
+  const publish = async (config: StationConfig) => {
+    await replaceOperatorsMirror(exec, provisioning.operators);
+    onRosterPublished?.();
+    await writeConfig(config);
+  };
+  if (expectedOwner) {
+    await restoreDeviceRecovery(exec, expectedOwner, provisioning, publish);
+  } else {
+    if (expectedDeviceId !== undefined) throw new Error("Recovery identity required");
+    const saved =
+      (await readDeviceRecovery(exec)) ?? (await initializeDeviceRecovery(exec, { machineId }));
+    if (saved.owner || saved.phase !== "active") throw new Error("Recovery identity required");
+    const config: StationConfig = {
+      machineId,
+      deviceId: provisioning.deviceId,
+      deviceName: provisioning.deviceName,
+      tenantId: provisioning.tenantId,
+      organizationName: provisioning.organizationName,
+      ...(provisioning.lineId !== undefined ? { lineId: provisioning.lineId } : {}),
+      ...(provisioning.lineName !== undefined ? { lineName: provisioning.lineName } : {}),
+      apiKey: provisioning.apiKey,
+      serverUrl: provisioning.serverUrl,
+    };
+    await publish(config);
+    await initializeDeviceRecovery(exec, config);
+  }
 }
 
 function pairingErrorFrom(body: unknown): PairingError {

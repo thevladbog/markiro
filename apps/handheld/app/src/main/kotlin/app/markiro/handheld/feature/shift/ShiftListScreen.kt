@@ -15,11 +15,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Factory
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Report
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.WifiOff
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,7 +35,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.markiro.handheld.R
 import app.markiro.handheld.core.design.AppBar
+import app.markiro.handheld.core.design.Banner
 import app.markiro.handheld.core.design.FullScreenState
+import app.markiro.handheld.core.design.IconAction
 import app.markiro.handheld.core.design.MarkiroChip
 import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.design.MarkiroTextButton
@@ -93,6 +100,7 @@ private fun ShiftDto.card(reachable: Boolean, lineName: String) = ShiftCard(
     disabledReason = if (!reachable) R.string.shifts_needs_network else null,
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShiftListScreen(state: ShiftListUi, cb: ShiftListCallbacks) {
     val c = MarkiroTheme.colors
@@ -138,6 +146,28 @@ fun ShiftListScreen(state: ShiftListUi, cb: ShiftListCallbacks) {
                 )
                 return
             }
+            is ShiftDialog.Refused -> {
+                AppBar(stringResource(R.string.shifts_title), cb.onDismiss)
+                FullScreenState(
+                    Icons.Outlined.Report,
+                    stringResource(R.string.shifts_refused_title),
+                    stringResource(
+                        R.string.shifts_refused_text,
+                        stringResource(
+                            when (d.step) {
+                                EnterStep.ENTER -> R.string.shifts_refused_step_enter
+                                EnterStep.BUNDLE -> R.string.shifts_refused_step_bundle
+                            },
+                        ),
+                        d.status,
+                        d.code ?: stringResource(R.string.shifts_refused_no_code),
+                    ),
+                    primary = StateAction(stringResource(R.string.common_got_it), cb.onDismiss),
+                    tone = Tone.Err,
+                    primaryIsAccent = false,
+                )
+                return
+            }
             ShiftDialog.Unavailable -> {
                 AppBar(stringResource(R.string.shifts_title), cb.onDismiss)
                 FullScreenState(
@@ -152,7 +182,12 @@ fun ShiftListScreen(state: ShiftListUi, cb: ShiftListCallbacks) {
             }
             null -> Unit
         }
-        AppBar(stringResource(R.string.shifts_title), cb.onBack)
+        // Two ways to ask again, because the list is the one screen where a
+        // stale answer stops the work: the gesture for whoever knows it, and a
+        // button for whoever is wearing gloves and does not.
+        AppBar(stringResource(R.string.shifts_title), cb.onBack) {
+            IconAction(Icons.Outlined.Refresh, stringResource(R.string.common_refresh), cb.onRefresh)
+        }
         if (!state.reachable && state.listFetchedAt != null) {
             Text(
                 stringResource(R.string.common_data_as_of, TimeText.hhmm(state.listFetchedAt)),
@@ -161,36 +196,47 @@ fun ShiftListScreen(state: ShiftListUi, cb: ShiftListCallbacks) {
                 modifier = Modifier.padding(horizontal = MarkiroSizes.sp4),
             )
         }
+        // The device can be reachable and the refresh still refused; without this
+        // the pull gesture turns a spinner and changes nothing, silently.
+        if (state.refreshFailed) {
+            Banner(stringResource(R.string.common_refresh_failed), Tone.Warn, Icons.Outlined.CloudOff)
+        }
         if (!state.loading && state.continueShift == null && state.mine.isEmpty() && !state.othersExpanded) {
             FullScreenState(Icons.Outlined.Factory, stringResource(R.string.shifts_empty_title), stringResource(R.string.shifts_empty_text))
             return
         }
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(MarkiroSizes.sp4),
-            verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3),
-        ) {
-            state.continueShift?.let { current ->
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
-                        ShiftCardView(current.card(true), onClick = cb.onContinue)
-                        PrimaryButton(stringResource(R.string.common_continue), cb.onContinue)
+        PullToRefreshBox(isRefreshing = state.loading, onRefresh = cb.onRefresh, modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(MarkiroSizes.sp4),
+                verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3),
+            ) {
+                state.continueShift?.let { current ->
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+                            ShiftCardView(current.card(true), onClick = cb.onContinue)
+                            PrimaryButton(stringResource(R.string.common_continue), cb.onContinue)
+                        }
                     }
                 }
-            }
-            if (state.mine.isNotEmpty()) {
-                item { Text(stringResource(R.string.shifts_my_line), style = t.label, color = c.fg3) }
-                items(state.mine, key = { it.id }) { shift -> ShiftCardView(shift.card(state.reachable), onClick = { cb.onSelect(shift) }) }
-            }
-            if (state.loading) item { Text(stringResource(R.string.shifts_loading), style = t.caption, color = c.fg3) }
-            if (!state.othersExpanded) {
-                item { MarkiroTextButton(stringResource(R.string.shifts_show_other), cb.onExpandOthers) }
-            } else {
-                item { Text(stringResource(R.string.shifts_other_lines), style = t.label, color = c.fg3) }
-                if (state.othersLoading) item { Text(stringResource(R.string.shifts_loading), style = t.caption, color = c.fg3) }
-                state.others.forEach { line ->
-                    items(line.shifts, key = { "${line.id}:${it.id}" }) { dto ->
-                        ShiftCardView(dto.card(state.reachable, line.name), onClick = { cb.onSelectOther(dto, line.name) })
+                if (state.mine.isNotEmpty()) {
+                    item { Text(stringResource(R.string.shifts_my_line), style = t.label, color = c.fg3) }
+                    items(state.mine, key = { it.id }) { shift -> ShiftCardView(shift.card(state.reachable), onClick = { cb.onSelect(shift) }) }
+                }
+                if (state.loading) item { Text(stringResource(R.string.shifts_loading), style = t.caption, color = c.fg3) }
+                if (!state.othersExpanded) {
+                    item { MarkiroTextButton(stringResource(R.string.shifts_show_other), cb.onExpandOthers) }
+                } else {
+                    item { Text(stringResource(R.string.shifts_other_lines), style = t.label, color = c.fg3) }
+                    if (state.othersLoading) item { Text(stringResource(R.string.shifts_loading), style = t.caption, color = c.fg3) }
+                    // A failed lookup used to be indistinguishable from «нет смен».
+                    if (state.othersFailed) {
+                        item { Text(stringResource(R.string.common_other_lines_failed), style = t.caption, color = c.warnFg) }
+                    }
+                    state.others.forEach { line ->
+                        items(line.shifts, key = { "${line.id}:${it.id}" }) { dto ->
+                            ShiftCardView(dto.card(state.reachable, line.name), onClick = { cb.onSelectOther(dto, line.name) })
+                        }
                     }
                 }
             }

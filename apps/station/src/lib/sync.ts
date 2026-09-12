@@ -1,3 +1,4 @@
+import { deviceRecoveryAllowsWork } from "./device-recovery.js";
 import { purgeCompletedProductLabelJobs } from "./product-labels/retention.js";
 import {
   MAX_BOX_CLOSURES_PER_SYNC_BATCH,
@@ -104,8 +105,10 @@ async function drainShiftCloseRows(
   exec: SqlExecutor,
   client: Pick<StationClient, "post">,
   rows: PendingShiftClose[],
+  generation: CredentialGeneration,
 ): Promise<void> {
   for (const row of rows) {
+    if (!(await deviceRecoveryAllowsWork(exec, generation))) return;
     const response = await client.post<{
       outcome: "accepted" | "already_resolved" | "conflict";
       conflictCode?: "multiple_devices";
@@ -119,10 +122,21 @@ async function drainShiftCloseRows(
       reasonCode: row.reason_code,
       closedAt: row.closed_at,
     });
-    if (response.outcome === "conflict") {
-      await markShiftCloseConflict(exec, row.event_id, response.conflictCode ?? "multiple_devices");
-    } else {
-      await markShiftCloseAccepted(exec, row.event_id);
+    if (!(await deviceRecoveryAllowsWork(exec, generation))) return;
+    const lease = acquireCredentialCommitLease(generation);
+    if (!lease) return;
+    try {
+      if (response.outcome === "conflict") {
+        await markShiftCloseConflict(
+          exec,
+          row.event_id,
+          response.conflictCode ?? "multiple_devices",
+        );
+      } else {
+        await markShiftCloseAccepted(exec, row.event_id);
+      }
+    } finally {
+      lease.release();
     }
   }
 }
@@ -1233,13 +1247,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     try {
       drainLoop: for (;;) {
         if (stopped || pauseInvalidated() || credentialGeneration.sealed) break;
+        if (!(await deviceRecoveryAllowsWork(deps.exec, credentialGeneration))) break;
         // A ceiling from a previous failed attempt on THIS batch — whether
         // pinned earlier in this same process or persisted by a process
         // that pinned it and then never got to clear it — re-reads exactly
         // that range; otherwise this is a plain fresh prefix.
         const pendingCloses = await readPendingShiftCloses(deps.exec);
         if (pendingCloses.length > 0) {
-          await drainShiftCloseRows(deps.exec, deps.client, pendingCloses);
+          await drainShiftCloseRows(deps.exec, deps.client, pendingCloses, credentialGeneration);
           if (credentialGeneration.sealed) break;
         }
         const ceiling = await ensurePendingCeiling();

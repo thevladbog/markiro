@@ -173,3 +173,13 @@ test("API shutdown hooks exit with the hook outcome instead of re-sending the si
   assert.ok(useProcessExit);
   assert.equal(useProcessExit.initializer.kind, ts.SyntaxKind.TrueKeyword);
 });
+
+test("API image packages and executes the compatibility probe against its final runtime closure", async () => {
+  const source = await readFile(new URL("deploy/production/api.Dockerfile", root), "utf8");
+  const runtime = source.indexOf("AS runtime");
+  const copy = source.indexOf(
+    "COPY --chown=node:node deploy/production/working-device-compatibility.mjs /opt/markiro/working-device-compatibility.mjs",
+  );
+  const probe = source.indexOf("RUN node /opt/markiro/working-device-compatibility.mjs");
+  assert.ok(runtime >= 0 && copy > runtime && probe > copy);
+});

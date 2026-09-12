@@ -1,3 +1,4 @@
+import { assertCatalogCommercialCompatibility } from "../../platform-http/commercial-catalog-compatibility";
 import {
   BadRequestException,
   ConflictException,
@@ -8,22 +9,35 @@ import {
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
-  platformCatalogV2Contracts as platformCatalogContracts,
+  platformCatalogV3Contracts as platformCatalogContracts,
+  catalogVersionCreateV3Schema,
+  catalogVersionPatchV3Schema,
+  catalogVersionPatchV2Schema,
+  planEntitlementsReadV3Schema,
+  type CatalogVersionCreateV2,
+  type CatalogVersionPatchV2,
+  type CatalogPublicationReviewV3,
+  type CommercialReviewIdentityV3,
+  type PlanEntitlementsReadV3,
   catalogVersionCreateV2Schema,
   type CommercialReviewIdentity,
   type CatalogPublicationReview,
-  type AddonEffect,
+  type AddonEffectV3 as AddonEffect,
   type ArchiveCatalogItemResponse,
-  type CatalogVersionV2 as CatalogVersion,
-  type CatalogVersionCreateV2 as CatalogVersionCreate,
-  type CatalogVersionPatchV2 as CatalogVersionPatch,
+  type CatalogVersionV3 as CatalogVersion,
+  type CatalogVersionCreateV3 as CatalogVersionCreate,
+  type CatalogVersionPatchV3 as CatalogVersionPatch,
   type DefaultDemoPlanResponse,
   type PlanEntitlements,
   type SetDefaultDemoPlan,
 } from "@markiro/platform-contracts";
 import { commercialTaxDefaults, isCommercialTaxAllowed } from "@markiro/domain";
 import { lockSellerPolicy, readSellerPolicy } from "../billing-profiles/billing-profiles.service";
-import { assertLegacyCommercialRepresentation } from "../../platform-http/commercial-version";
+import {
+  projectCommercialResponse,
+  type CommercialVersion,
+} from "../../platform-http/commercial-version";
+import { entitlementDigest } from "../../subscriptions/entitlement-snapshot-reader";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
@@ -91,11 +105,15 @@ export class PlatformCatalogService {
   async createVersion(
     principal: PlatformPrincipal,
     itemRef: string,
-    input: CatalogVersionCreate,
-    legacy = false,
+    input: CatalogVersionCreate | CatalogVersionCreateV2,
+    clientVersion: CommercialVersion | boolean = 2,
   ): Promise<CatalogVersion> {
-    input = catalogVersionCreateV2Schema.parse(input);
-    if (legacy) assertLegacyCommercialRepresentation(input);
+    const versionNumber = normalizeVersion(clientVersion);
+    projectCommercialResponse(versionNumber, input);
+    input =
+      versionNumber === 3
+        ? catalogVersionCreateV3Schema.parse(input)
+        : catalogVersionCreateV2Schema.parse(input);
     const kind = kindForInput(input);
     try {
       return await this.db.transaction(async (tx) => {
@@ -138,6 +156,7 @@ export class PlatformCatalogService {
             documentNameEn: input.documentNameEn ?? null,
             subject: input.subject ?? null,
             sellerPolicyRevision: input.sellerPolicyRevision ?? null,
+            lifecyclePolicyId: "lifecyclePolicyId" in input ? input.lifecyclePolicyId : null,
             unit: input.billingMode === "recurring" ? input.billingPeriod : input.unit,
             billingMode: input.billingMode,
             billingPeriod: input.billingPeriod ?? null,
@@ -159,9 +178,15 @@ export class PlatformCatalogService {
     principal: PlatformPrincipal,
     itemRef: string,
     versionId: string,
-    input: CatalogVersionPatch,
-    legacy = false,
+    input: CatalogVersionPatch | CatalogVersionPatchV2,
+    clientVersion: CommercialVersion | boolean = 2,
   ): Promise<CatalogVersion> {
+    const versionNumber = normalizeVersion(clientVersion);
+    projectCommercialResponse(versionNumber, input);
+    input =
+      versionNumber === 3
+        ? catalogVersionPatchV3Schema.parse(input)
+        : catalogVersionPatchV2Schema.parse(input);
     try {
       return await this.db.transaction(async (tx) => {
         await this.lockVersion(tx, versionId);
@@ -171,9 +196,14 @@ export class PlatformCatalogService {
           throw new ConflictException({ code: "catalog_version_immutable" });
         }
         const currentDto = await this.toDto(found.item, found.version, true, tx);
-        if (legacy) assertLegacyCommercialRepresentation(currentDto);
+        projectCommercialResponse(versionNumber, currentDto);
+        const representable = projectCommercialResponse(
+          versionNumber === 1 ? 2 : versionNumber,
+          currentDto,
+        );
+        if (!representable || typeof representable !== "object") throw new BadRequestException();
         validateEffectForKind(found.item.kind, input);
-        const merged = { ...currentDto, ...input };
+        const merged = { ...representable, ...input };
         const responseFields = new Set([
           "id",
           "catalogItemId",
@@ -187,7 +217,25 @@ export class PlatformCatalogService {
         const candidate = Object.fromEntries(
           Object.entries(merged).filter(([key]) => !responseFields.has(key)),
         );
-        const parsed = catalogVersionCreateV2Schema.safeParse(candidate);
+        // A V3 edit of a legacy draft preserves unknown mapping until explicit plan values are supplied.
+        const parsed =
+          versionNumber === 3 &&
+          currentDto.kind === "plan" &&
+          input.plan === undefined &&
+          [
+            currentDto.plan.chzIntegrationEnabled,
+            currentDto.plan.inventoryEnabled,
+            currentDto.plan.commerceMlEnabled,
+            currentDto.plan.handheldEnabled,
+          ].some((flag) => flag === null)
+            ? catalogVersionCreateV3Schema.options[0]
+                .extend({ plan: planEntitlementsReadV3Schema })
+                .strict()
+                .safeParse(candidate)
+            : (versionNumber === 3
+                ? catalogVersionCreateV3Schema
+                : catalogVersionCreateV2Schema
+              ).safeParse(candidate);
         if (!parsed.success) throw new BadRequestException({ code: "catalog_version_invalid" });
         const changes: Record<string, unknown> = {
           updatedAt: sql`greatest(clock_timestamp(), date_trunc('milliseconds', updated_at) + interval '1 millisecond')`,
@@ -197,6 +245,7 @@ export class PlatformCatalogService {
           "documentNameEn",
           "subject",
           "sellerPolicyRevision",
+          "lifecyclePolicyId",
           "nameRu",
           "nameEn",
           "descriptionRu",
@@ -229,7 +278,8 @@ export class PlatformCatalogService {
     principal: PlatformPrincipal,
     itemRef: string,
     versionId: string,
-    identity?: CommercialReviewIdentity,
+    identity?: CommercialReviewIdentity | CommercialReviewIdentityV3,
+    clientVersion: CommercialVersion = 2,
   ): Promise<CatalogVersion> {
     if (!identity) throw new ConflictException({ code: "client_update_required" });
     try {
@@ -246,11 +296,21 @@ export class PlatformCatalogService {
         if (found.version.status !== "draft") {
           throw new ConflictException({ code: "catalog_version_immutable" });
         }
-        const review = await this.publicationReview(tx, found.item, found.version);
+        projectCommercialResponse(
+          clientVersion,
+          await this.toDto(found.item, found.version, true, tx),
+        );
+        const review = await this.publicationReview(tx, found.item, found.version, clientVersion);
         if (
           identity.catalogVersionId !== review.identity.catalogVersionId ||
           identity.draftUpdatedAt !== review.identity.draftUpdatedAt ||
-          identity.sellerPolicyRevision !== review.identity.sellerPolicyRevision
+          identity.sellerPolicyRevision !== review.identity.sellerPolicyRevision ||
+          (clientVersion === 3 &&
+            (!("lifecyclePolicyId" in identity) ||
+              !("lifecyclePolicyId" in review.identity) ||
+              identity.lifecyclePolicyId !== review.identity.lifecyclePolicyId ||
+              identity.lifecyclePolicyVersion !== review.identity.lifecyclePolicyVersion ||
+              identity.lifecyclePolicyHash !== review.identity.lifecyclePolicyHash))
         )
           throw new ConflictException({ code: "commercial_review_stale" });
         if (review.errors.length)
@@ -297,17 +357,17 @@ export class PlatformCatalogService {
     principal: PlatformPrincipal,
     itemRef: string,
     versionId: string,
-    legacy = false,
+    clientVersion: CommercialVersion | boolean = 2,
   ): Promise<CatalogVersion> {
     try {
       return await this.db.transaction(async (tx) => {
         await this.lockVersion(tx, versionId);
         const found = await this.findVersion(itemRef, versionId, tx);
         if (!found) throw new NotFoundException({ code: "catalog_version_not_found" });
-        if (legacy)
-          assertLegacyCommercialRepresentation(
-            await this.toDto(found.item, found.version, true, tx),
-          );
+        projectCommercialResponse(
+          normalizeVersion(clientVersion),
+          await this.toDto(found.item, found.version, true, tx),
+        );
         if (found.version.status !== "published") {
           throw new ConflictException({ code: "catalog_version_not_published" });
         }
@@ -401,10 +461,12 @@ export class PlatformCatalogService {
   async setDefaultDemo(
     principal: PlatformPrincipal,
     input: SetDefaultDemoPlan,
+    clientVersion: CommercialVersion = 2,
   ): Promise<SetDefaultDemoPlan> {
     try {
       return await this.db.transaction(async (tx) => {
         await this.lockVersion(tx, input.catalogVersionId);
+        await assertCatalogCommercialCompatibility(tx, input.catalogVersionId, clientVersion);
         const before = await this.lockDefaultDemoSetting(tx);
         const [candidate] = await tx
           .select({
@@ -463,13 +525,27 @@ export class PlatformCatalogService {
     }
   }
 
-  async editorContext(principal: PlatformPrincipal) {
+  async editorContext(principal: PlatformPrincipal, clientVersion: CommercialVersion = 2) {
+    const policies =
+      clientVersion === 3
+        ? await this.db
+            .select()
+            .from(schema.entitlementLifecyclePolicies)
+            .where(eq(schema.entitlementLifecyclePolicies.status, "approved"))
+        : [];
     const seller = await readSellerPolicy(this.db);
     return {
       sellerPolicyRevision: seller.revision,
       taxPolicy: seller.taxPolicy,
       taxDefaults: seller.taxPolicy ? commercialTaxDefaults(seller.taxPolicy) : null,
       canWrite: principal.capabilities.includes("catalog.write"),
+      ...(clientVersion === 3
+        ? {
+            lifecyclePolicies: policies
+              .filter((policy) => policy.payloadHash === entitlementDigest(policy.payload))
+              .map(({ id, policyKey, version }) => ({ id, policyKey, version })),
+          }
+        : {}),
     };
   }
 
@@ -477,7 +553,8 @@ export class PlatformCatalogService {
     _principal: PlatformPrincipal,
     itemRef: string,
     versionId: string,
-  ): Promise<CatalogPublicationReview> {
+    clientVersion: CommercialVersion = 2,
+  ): Promise<CatalogPublicationReview | CatalogPublicationReviewV3> {
     return this.db.transaction(async (tx) => {
       await lockSellerPolicy(tx);
       const item = await this.findItem(itemRef, tx);
@@ -488,7 +565,11 @@ export class PlatformCatalogService {
       if (!found) throw new NotFoundException({ code: "catalog_version_not_found" });
       if (found.version.status !== "draft")
         throw new ConflictException({ code: "catalog_version_immutable" });
-      return this.publicationReview(tx, found.item, found.version);
+      projectCommercialResponse(
+        clientVersion,
+        await this.toDto(found.item, found.version, true, tx),
+      );
+      return this.publicationReview(tx, found.item, found.version, clientVersion);
     });
   }
 
@@ -496,7 +577,8 @@ export class PlatformCatalogService {
     tx: CatalogTransaction,
     item: CatalogItemRow,
     version: CatalogVersionRow,
-  ): Promise<CatalogPublicationReview> {
+    clientVersion: CommercialVersion,
+  ): Promise<CatalogPublicationReview | CatalogPublicationReviewV3> {
     const seller = await readSellerPolicy(tx);
     const errors: CatalogPublicationReview["errors"] = [];
     if (!seller.taxPolicy)
@@ -513,12 +595,52 @@ export class PlatformCatalogService {
     )
       errors.push({ code: "seller_tax_policy_violation", path: "vatRateBps" });
     // Strict DTO validation also rejects unknown effects and inconsistent stored kind/period.
-    await this.toDto(item, version, true, tx);
+    const dto = await this.toDto(item, version, true, tx);
+    let lifecyclePolicyVersion: number | null = null;
+    let lifecyclePolicyHash: string | null = null;
+    if (clientVersion === 3) {
+      if (
+        dto.kind === "plan" &&
+        [
+          dto.plan.chzIntegrationEnabled,
+          dto.plan.inventoryEnabled,
+          dto.plan.commerceMlEnabled,
+          dto.plan.handheldEnabled,
+        ].some((flag) => flag === null)
+      )
+        errors.push({ code: "plan_mapping_required", path: "plan" });
+      // Policy-free publication keeps current subscription rules. P1 admission readiness
+      // remains separate; an explicitly selected policy must still be approved and intact.
+      if (version.lifecyclePolicyId) {
+        const [policy] = await tx
+          .select()
+          .from(schema.entitlementLifecyclePolicies)
+          .where(eq(schema.entitlementLifecyclePolicies.id, version.lifecyclePolicyId))
+          .for("share");
+        if (policy) {
+          lifecyclePolicyVersion = policy.version;
+          lifecyclePolicyHash = policy.payloadHash;
+        }
+        if (
+          !policy ||
+          policy.status !== "approved" ||
+          policy.payloadHash !== entitlementDigest(policy.payload)
+        )
+          errors.push({ code: "lifecycle_policy_not_approved", path: "lifecyclePolicyId" });
+      }
+    }
     return {
       identity: {
         catalogVersionId: version.id,
         draftUpdatedAt: version.updatedAt.toISOString(),
         sellerPolicyRevision: seller.revision,
+        ...(clientVersion === 3
+          ? {
+              lifecyclePolicyId: version.lifecyclePolicyId,
+              lifecyclePolicyVersion,
+              lifecyclePolicyHash,
+            }
+          : {}),
       },
       errors,
     };
@@ -587,7 +709,7 @@ export class PlatformCatalogService {
     tx: CatalogTransaction,
     versionId: string,
     kind: CatalogItemKind,
-    input: CatalogVersionCreate,
+    input: CatalogVersionCreate | CatalogVersionCreateV2,
   ): Promise<void> {
     if (kind === "plan" && "plan" in input) {
       await tx
@@ -612,7 +734,7 @@ export class PlatformCatalogService {
     tx: CatalogTransaction,
     versionId: string,
     kind: CatalogItemKind,
-    input: CatalogVersionPatch,
+    input: CatalogVersionPatch | CatalogVersionPatchV2,
   ): Promise<void> {
     if (kind === "plan" && input.plan !== undefined) {
       await tx
@@ -669,6 +791,7 @@ export class PlatformCatalogService {
       documentNameEn: version.documentNameEn,
       subject: version.subject,
       sellerPolicyRevision: version.sellerPolicyRevision,
+      lifecyclePolicyId: version.lifecyclePolicyId,
       id: version.id,
       catalogItemId: item.id,
       catalogItemCode: item.code,
@@ -709,6 +832,10 @@ export class PlatformCatalogService {
               labelEditorEnabled: plan.labelEditorEnabled,
               publicApiEnabled: plan.publicApiEnabled,
               palletsEnabled: plan.palletsEnabled,
+              chzIntegrationEnabled: plan.chzIntegrationEnabled,
+              inventoryEnabled: plan.inventoryEnabled,
+              commerceMlEnabled: plan.commerceMlEnabled,
+              handheldEnabled: plan.handheldEnabled,
               demoDurationDays: plan.demoDurationDays,
             }
           : undefined,
@@ -735,7 +862,7 @@ export class PlatformCatalogService {
   }
 }
 
-function kindForInput(input: CatalogVersionCreate): CatalogItemKind {
+function kindForInput(input: CatalogVersionCreate | CatalogVersionCreateV2): CatalogItemKind {
   if ("plan" in input) return "plan";
   if ("addon" in input) return "addon";
   return "service";
@@ -745,7 +872,7 @@ function toVatRate(vatRateBps: number | null | undefined): string | null {
   return vatRateBps === null || vatRateBps === undefined ? null : (vatRateBps / 100).toFixed(2);
 }
 
-function toPlanValues(plan: PlanEntitlements) {
+function toPlanValues(plan: PlanEntitlements | PlanEntitlementsReadV3) {
   return {
     maxLines: plan.maxLines,
     maxStations: plan.maxStations,
@@ -755,10 +882,21 @@ function toPlanValues(plan: PlanEntitlements) {
     publicApiEnabled: plan.publicApiEnabled,
     palletsEnabled: plan.palletsEnabled,
     demoDurationDays: plan.demoDurationDays,
+    ...("chzIntegrationEnabled" in plan
+      ? {
+          chzIntegrationEnabled: plan.chzIntegrationEnabled,
+          inventoryEnabled: plan.inventoryEnabled,
+          commerceMlEnabled: plan.commerceMlEnabled,
+          handheldEnabled: plan.handheldEnabled,
+        }
+      : {}),
   };
 }
 
-function validateEffectForKind(kind: CatalogItemKind, input: CatalogVersionPatch): void {
+function validateEffectForKind(
+  kind: CatalogItemKind,
+  input: CatalogVersionPatch | CatalogVersionPatchV2,
+): void {
   if (
     (input.plan !== undefined && kind !== "plan") ||
     (input.addon !== undefined && kind !== "addon") ||
@@ -770,11 +908,11 @@ function validateEffectForKind(kind: CatalogItemKind, input: CatalogVersionPatch
 
 function copyDefined(
   target: Record<string, unknown>,
-  source: CatalogVersionPatch,
+  source: CatalogVersionPatch | CatalogVersionPatchV2,
   keys: readonly (keyof CatalogVersionPatch)[],
 ): void {
   for (const key of keys) {
-    const value = source[key];
+    const value: unknown = key in source ? Reflect.get(source, key) : undefined;
     if (value !== undefined) target[key] = value;
   }
 }
@@ -811,4 +949,8 @@ function catalogDatabaseError(error: unknown): never {
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function normalizeVersion(value: CommercialVersion | boolean): CommercialVersion {
+  return value === true ? 1 : value === false ? 2 : value;
 }

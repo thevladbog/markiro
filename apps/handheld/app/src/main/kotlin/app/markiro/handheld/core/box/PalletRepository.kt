@@ -14,7 +14,7 @@ import java.util.UUID
  * the STATION guards its own pallet table with a partial unique index on
  * `(shiftId, terminalId)` where `closedAt IS NULL`. The handheld's `pallets`
  * table carries only the plain, non-unique `(shiftId, closedAt)` index (see
- * `MIGRATION_7_8`), so nothing at the database stops two scans arriving
+ * `MIGRATION_9_10`), so nothing at the database stops two scans arriving
  * together from each finding no open pallet and inserting one. The shared
  * [PalletLock] is what closes that gap here, the way `BoxRepository.currentBox`
  * closes the identical exposure for boxes -- shared rather than private so
@@ -30,9 +30,13 @@ class PalletRepository(
      *
      * Serialised so two boxes closing together cannot each open a pallet and
      * leave the shift with two open ones, which no later query could tell apart.
+     *
+     * The recovery lease is taken BEFORE the lock, the same order `CloseBox`
+     * and `ClosePallet` take them in; `exclusive` holds it without opening a
+     * transaction, which is what [PalletLock] requires of its callers.
      */
     suspend fun currentPallet(shiftId: String, terminalId: String? = null): PalletEntity =
-        lock.withLock { held -> currentPallet(held, shiftId, terminalId) }
+        db.recovery.exclusive { lock.withLock { held -> currentPallet(held, shiftId, terminalId) } }
 
     /**
      * [currentPallet] for a caller that already holds the lock.
@@ -69,7 +73,7 @@ class PalletRepository(
     suspend fun itemCount(palletId: String): Int = db.palletDao().itemCount(palletId)
 
     suspend fun setPrintState(palletId: String, state: String, reason: String?) =
-        db.palletDao().setPrintState(palletId, state, reason)
+        db.recovery.commit { db.palletDao().setPrintState(palletId, state, reason) }
 
     /** Closed pallets whose label is not resolved -- the label queue's pallet half. */
     fun observeUnprinted(): Flow<List<PalletEntity>> = db.palletDao().observeUnprinted()
@@ -83,5 +87,5 @@ class PalletRepository(
      * a pallet the server has accepted. Same reasoning as
      * `BoxRepository.demoteInterruptedPrints`.
      */
-    suspend fun demoteInterruptedPrints(): Int = db.palletDao().demoteInterruptedPrints()
+    suspend fun demoteInterruptedPrints(): Int = db.recovery.commit { db.palletDao().demoteInterruptedPrints() }
 }

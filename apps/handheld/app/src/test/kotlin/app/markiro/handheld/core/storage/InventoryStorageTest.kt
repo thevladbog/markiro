@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.storage
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -22,6 +23,7 @@ class InventoryStorageTest {
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java)
             .allowMainThreadQueries()
             .build()
+        db.initializeRecoveryForTest()
     }
 
     @After

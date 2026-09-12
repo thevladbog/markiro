@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import app.markiro.handheld.core.storage.DeviceRecovery
 import retrofit2.HttpException
 import java.io.IOException
 import javax.inject.Inject
@@ -43,6 +45,9 @@ data class InventoryListUi(
     val ownLineName: String?,
     val listFetchedAt: Long?,
     val dialog: InventoryDialog?,
+    /** See the shift list: a refresh that never reached the server looked exactly like one that did. */
+    val refreshFailed: Boolean = false,
+    val othersFailed: Boolean = false,
 )
 
 sealed interface InventoryListEvent {
@@ -55,10 +60,17 @@ private const val REACHABLE_WINDOW_MS = 2 * 60 * 1000L
 class InventoryListViewModel @Inject constructor(
     private val repository: InventoryGateway,
     private val config: DeviceConfigDao,
+    private val recovery: DeviceRecovery,
     private val session: SessionHolder,
     reachability: ReachabilityTracker,
     scans: ScanEvents,
 ) : ViewModel() {
+    private val generation = recovery.token()
+
+    private fun launchOwned(block: suspend CoroutineScope.() -> Unit) = viewModelScope.launch {
+        recovery.work(generation) { block() }
+    }
+
     private val now: () -> Long = System::currentTimeMillis
     private val loading = MutableStateFlow(true)
     private val mine = MutableStateFlow<List<InventoryTaskDto>>(emptyList())
@@ -66,49 +78,64 @@ class InventoryListViewModel @Inject constructor(
     private val othersExpanded = MutableStateFlow(false)
     private val othersLoading = MutableStateFlow(false)
     private val fetchedAt = MutableStateFlow<Long?>(null)
+    private val refreshFailed = MutableStateFlow(false)
+    private val othersFailed = MutableStateFlow(false)
     private val dialog = MutableStateFlow<InventoryDialog?>(null)
     private val _events = MutableSharedFlow<InventoryListEvent>(extraBufferCapacity = 1)
     val events: SharedFlow<InventoryListEvent> = _events
 
-    private data class Base(val active: InventoryTaskEntity?, val ownLineName: String?, val ownLineId: String?, val reachable: Boolean)
+    private data class Base(val active: InventoryTaskEntity?, val ownLineName: String?, val reachable: Boolean)
 
     private val base = combine(repository.observeTasks(), config.observe(), reachability.lastSuccessAt) { tasks, cfg, lastOk ->
         val active = cfg?.activeInventoryId?.let { id -> tasks.firstOrNull { it.inventoryId == id && it.state == "active" } }
-        Base(active, cfg?.lineName, cfg?.lineId, lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS)
+        Base(active, cfg?.lineName, lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS)
     }
 
-    val state: StateFlow<InventoryListUi> = combine(base, loading, mine, others, othersExpanded, othersLoading, fetchedAt, dialog) { v ->
-        val b = v[0] as Base
-        @Suppress("UNCHECKED_CAST")
-        InventoryListUi(
-            loading = v[1] as Boolean,
-            active = b.active,
-            mine = (v[2] as List<InventoryTaskDto>).filter { it.inventoryId != b.active?.inventoryId },
-            others = v[3] as Map<String, List<InventoryTaskDto>>,
-            othersExpanded = v[4] as Boolean,
-            othersLoading = v[5] as Boolean,
-            reachable = b.reachable,
-            ownLineName = b.ownLineName,
-            listFetchedAt = v[6] as Long?,
-            dialog = v[7] as InventoryDialog?,
-        )
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, InventoryListUi(true, null, emptyList(), emptyMap(), false, false, false, null, null, null))
+    val state: StateFlow<InventoryListUi> =
+        combine(base, loading, mine, others, othersExpanded, othersLoading, fetchedAt, dialog, refreshFailed, othersFailed) { v ->
+            val b = v[0] as Base
+            @Suppress("UNCHECKED_CAST")
+            InventoryListUi(
+                loading = v[1] as Boolean,
+                active = b.active,
+                mine = (v[2] as List<InventoryTaskDto>).filter { it.inventoryId != b.active?.inventoryId },
+                others = v[3] as Map<String, List<InventoryTaskDto>>,
+                othersExpanded = v[4] as Boolean,
+                othersLoading = v[5] as Boolean,
+                reachable = b.reachable,
+                ownLineName = b.ownLineName,
+                listFetchedAt = v[6] as Long?,
+                dialog = v[7] as InventoryDialog?,
+                refreshFailed = v[8] as Boolean,
+                othersFailed = v[9] as Boolean,
+            )
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, InventoryListUi(true, null, emptyList(), emptyMap(), false, false, false, null, null, null))
 
-    private var ownLineId: String? = null
+    /**
+     * The device's own line, read at the moment it is needed.
+     *
+     * Deliberately not cached from an observer: the config arrives on Room's own
+     * threads, so a copy kept in a field is simply absent for the first frames
+     * after the screen opens. A tap that landed in that window compared against
+     * `null` and asked «это другая линия?» about the operator's own task.
+     */
+    private suspend fun ownLineId(): String? = config.get()?.lineId
 
     init {
-        viewModelScope.launch { config.observe().collect { ownLineId = it?.lineId } }
-        viewModelScope.launch { scans.events.collect { onScan(it.raw) } }
+        launchOwned { scans.events.collect { onScan(it.raw) } }
         refresh()
     }
 
     fun refresh() {
-        viewModelScope.launch {
+        launchOwned {
             loading.value = true
-            runCatching { repository.listTasks(null) }.onSuccess {
-                mine.value = it
-                fetchedAt.value = now()
-            }
+            runCatching { repository.listTasks(null) }
+                .onSuccess {
+                    mine.value = it
+                    fetchedAt.value = now()
+                    refreshFailed.value = false
+                }
+                .onFailure { refreshFailed.value = true }
             loading.value = false
         }
     }
@@ -117,17 +144,18 @@ class InventoryListViewModel @Inject constructor(
         if (othersExpanded.value) return
         othersExpanded.value = true
         othersLoading.value = true
-        viewModelScope.launch {
-            val all = runCatching { repository.listTasks("all") }.getOrDefault(emptyList())
-            val own = ownLineId
-            others.value = all.filter { it.lineId != own }.groupBy { it.lineName }
+        launchOwned {
+            val all = runCatching { repository.listTasks("all") }
+            othersFailed.value = all.isFailure
+            val own = ownLineId()
+            others.value = all.getOrDefault(emptyList()).filter { it.lineId != own }.groupBy { it.lineName }
             othersLoading.value = false
         }
     }
 
     fun continueActive() {
         val active = state.value.active ?: return
-        viewModelScope.launch {
+        launchOwned {
             repository.activate(active.inventoryId)
             _events.emit(InventoryListEvent.Entered(active.inventoryId))
         }
@@ -135,16 +163,18 @@ class InventoryListViewModel @Inject constructor(
 
     fun select(task: InventoryTaskDto) {
         if (task.mode != "check") return
-        if (task.lineId != ownLineId) {
-            dialog.value = InventoryDialog.ConfirmOther(task, null)
-            return
+        launchOwned {
+            if (task.lineId != ownLineId()) {
+                dialog.value = InventoryDialog.ConfirmOther(task, null)
+                return@launchOwned
+            }
+            join(task, confirm = false, barcode = null)
         }
-        join(task, confirm = false, barcode = null)
     }
 
     fun confirmOther() {
         val d = dialog.value as? InventoryDialog.ConfirmOther ?: return
-        join(d.task, confirm = true, barcode = d.barcode)
+        launchOwned { join(d.task, confirm = true, barcode = d.barcode) }
     }
 
     fun dismissDialog() {
@@ -154,7 +184,7 @@ class InventoryListViewModel @Inject constructor(
     fun retry() {
         val d = dialog.value as? InventoryDialog.Error ?: return
         val task = d.retry ?: return dismissDialog()
-        join(task, confirm = task.lineId != ownLineId, barcode = null)
+        launchOwned { join(task, confirm = task.lineId != ownLineId(), barcode = null) }
     }
 
     private suspend fun onScan(raw: String) {
@@ -182,40 +212,38 @@ class InventoryListViewModel @Inject constructor(
         }
     }
 
-    private fun join(task: InventoryTaskDto, confirm: Boolean, barcode: String?) {
-        viewModelScope.launch {
-            val operatorId = session.state.value.operator?.operatorId ?: return@launch
-            val cached = state.value.active?.takeIf { it.inventoryId == task.inventoryId }
-            if (!state.value.reachable && cached != null) {
+    private suspend fun join(task: InventoryTaskDto, confirm: Boolean, barcode: String?) {
+        val operatorId = session.state.value.operator?.operatorId ?: return
+        val cached = state.value.active?.takeIf { it.inventoryId == task.inventoryId }
+        if (!state.value.reachable && cached != null) {
+            repository.activate(task.inventoryId)
+            _events.emit(InventoryListEvent.Entered(task.inventoryId))
+            return
+        }
+        dialog.value = InventoryDialog.Joining
+        val manifest = when (val joined = repository.join(task, operatorId, confirm, barcode)) {
+            is JoinResult.Ok -> joined.manifest
+            JoinResult.NotRunning -> return fail(InventoryError.NOT_RUNNING)
+            JoinResult.OperatorUnavailable -> return fail(InventoryError.OPERATOR_UNAVAILABLE)
+            JoinResult.LineRequired -> return fail(InventoryError.LINE_REQUIRED)
+            JoinResult.ConfirmationRequired -> {
+                dialog.value = InventoryDialog.ConfirmOther(task, barcode)
+                return
+            }
+            JoinResult.Unavailable -> return fail(if (cached == null) InventoryError.NEEDS_NETWORK else InventoryError.DOWNLOAD_FAILED, retry = task)
+        }
+        dialog.value = InventoryDialog.Downloading(task.inventoryNumber, 0, manifest.codeCount)
+        val result = runCatching {
+            repository.download(manifest) { staged, total -> dialog.value = InventoryDialog.Downloading(task.inventoryNumber, staged, total) }
+        }.getOrElse { return fail(InventoryError.DOWNLOAD_FAILED, retry = task) }
+        when (result) {
+            MirrorResult.Active -> {
                 repository.activate(task.inventoryId)
+                dialog.value = null
                 _events.emit(InventoryListEvent.Entered(task.inventoryId))
-                return@launch
             }
-            dialog.value = InventoryDialog.Joining
-            val manifest = when (val joined = repository.join(task, operatorId, confirm, barcode)) {
-                is JoinResult.Ok -> joined.manifest
-                JoinResult.NotRunning -> return@launch fail(InventoryError.NOT_RUNNING)
-                JoinResult.OperatorUnavailable -> return@launch fail(InventoryError.OPERATOR_UNAVAILABLE)
-                JoinResult.LineRequired -> return@launch fail(InventoryError.LINE_REQUIRED)
-                JoinResult.ConfirmationRequired -> {
-                    dialog.value = InventoryDialog.ConfirmOther(task, barcode)
-                    return@launch
-                }
-                JoinResult.Unavailable -> return@launch fail(if (cached == null) InventoryError.NEEDS_NETWORK else InventoryError.DOWNLOAD_FAILED, retry = task)
-            }
-            dialog.value = InventoryDialog.Downloading(task.inventoryNumber, 0, manifest.codeCount)
-            val result = runCatching {
-                repository.download(manifest) { staged, total -> dialog.value = InventoryDialog.Downloading(task.inventoryNumber, staged, total) }
-            }.getOrElse { return@launch fail(InventoryError.DOWNLOAD_FAILED, retry = task) }
-            when (result) {
-                MirrorResult.Active -> {
-                    repository.activate(task.inventoryId)
-                    dialog.value = null
-                    _events.emit(InventoryListEvent.Entered(task.inventoryId))
-                }
-                MirrorResult.Repack -> fail(InventoryError.REPACK)
-                is MirrorResult.Invalid -> fail(InventoryError.INVALID_SNAPSHOT, detail = result.reason, retry = task)
-            }
+            MirrorResult.Repack -> fail(InventoryError.REPACK)
+            is MirrorResult.Invalid -> fail(InventoryError.INVALID_SNAPSHOT, detail = result.reason, retry = task)
         }
     }
 

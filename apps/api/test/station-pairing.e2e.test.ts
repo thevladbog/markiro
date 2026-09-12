@@ -1,3 +1,4 @@
+import { stationRecoveryResponseSchema } from "@markiro/platform-contracts";
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
@@ -55,6 +56,7 @@ describe.skipIf(!ready)("station pairing e2e", () => {
   let agent: ReturnType<typeof request.agent>;
   let otherAgent: ReturnType<typeof request.agent>;
   let tenantId: string;
+  let otherTenantId: string;
   let deviceId: string;
   let deviceName: string;
   let pairingCodePepper: string;
@@ -92,7 +94,7 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     agent = request.agent(app!.getHttpServer());
     tenantId = await signUpAndActivate(agent);
     otherAgent = request.agent(app!.getHttpServer());
-    await signUpAndActivate(otherAgent);
+    otherTenantId = await signUpAndActivate(otherAgent);
     const [line] = await db.insert(schema.lines).values({ tenantId, name: "Packing" }).returning();
     deviceName = `Station ${randomUUID()}`;
     const created = await agent
@@ -136,7 +138,7 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     await createManagedSubscription(db, { tenantId, planVersionId });
   }
 
-  async function waitForQuotaWaiter(keyOrder: number): Promise<void> {
+  async function waitForQuotaWaiter(keyOrder: number, minimum = 1): Promise<void> {
     const pool = app!.get<AuthSetup["pool"]>(DB_POOL);
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
@@ -151,7 +153,7 @@ describe.skipIf(!ready)("station pairing e2e", () => {
            and not granted`,
         [`subscription-quota:${tenantId}`, keyOrder],
       );
-      if ((result.rows[0]?.count ?? 0) >= 1) return;
+      if ((result.rows[0]?.count ?? 0) >= minimum) return;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     throw new Error("Timed out waiting for the stations quota lock");
@@ -177,6 +179,523 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     }
     throw new Error("Timed out waiting for the station restore barrier");
   }
+
+  function recoveryPair(
+    code: string,
+    expected = { tenantId, deviceId, kind: "station" },
+    capabilities = "",
+  ) {
+    return request(app!.getHttpServer())
+      .post("/station/pair/recovery")
+      .set("x-station-capabilities", capabilities)
+      .send({ version: 1, code, expected });
+  }
+
+  async function recoveryState() {
+    const devices = await db
+      .select()
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.tenantId, tenantId));
+    const keys = await db
+      .select()
+      .from(schema.apikey)
+      .where(and(eq(schema.apikey.referenceId, tenantId), eq(schema.apikey.configId, "station")));
+    return { devices, keys };
+  }
+
+  async function issueRecoveryCode(): Promise<string> {
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    return issued.body.code as string;
+  }
+
+  async function expectRecoveryCodeLive(code: string) {
+    const [row] = await db
+      .select()
+      .from(schema.stationPairingCodes)
+      .where(eq(schema.stationPairingCodes.codeHash, hashPairingCode(code, pairingCodePepper)));
+    expect(row?.usedAt).toBeNull();
+    expect(row?.attempts).toBe(0);
+    expect(row!.expiresAt.getTime()).toBeGreaterThan(Date.now());
+  }
+
+  it.each(["device", "tenant", "kind"])(
+    "recovery rejects mismatched %s before minting without changing the current credential",
+    async (field) => {
+      await pairCurrentDevice();
+      const code = await issueRecoveryCode();
+      const mint = vi.spyOn(app!.get<Auth>(AUTH).api, "createApiKey");
+      const expected = { tenantId, deviceId, kind: "station" };
+      if (field === "device") {
+        const other = await agent
+          .post("/station-devices")
+          .send({ name: "Other station", lineId: null })
+          .expect(201);
+        expected.deviceId = other.body.id as string;
+      }
+      if (field === "tenant") expected.tenantId = otherTenantId;
+      if (field === "kind") expected.kind = "handheld";
+      const before = await recoveryState();
+      const result = await recoveryPair(code, expected).expect(401);
+      expect(result.body).toEqual({ code: "PAIR_RECOVERY_MISMATCH" });
+      expect(mint).not.toHaveBeenCalled();
+      expect(await recoveryState()).toEqual(before);
+      await expectRecoveryCodeLive(code);
+      expect(auditSpy).toHaveBeenLastCalledWith({
+        tenantId,
+        actorType: "unauthenticated_device",
+        actorId: null,
+        action: "station.repair",
+        resourceId: deviceId,
+        outcome: "failed",
+      });
+    },
+  );
+
+  it("recovery rejects incompatible client capability independently of matching identity", async () => {
+    const code = await issueRecoveryCode();
+    const before = await recoveryState();
+    const result = await recoveryPair(
+      code,
+      { tenantId, deviceId, kind: "station" },
+      "handheld-v1",
+    ).expect(401);
+    expect(result.body).toEqual({ code: "PAIR_KIND_MISMATCH" });
+    expect(await recoveryState()).toEqual(before);
+    await expectRecoveryCodeLive(code);
+  });
+
+  it("recovery rotates an active same-ID credential at full quota and rejects the old key", async () => {
+    const oldKey = await pairCurrentDevice();
+    await manageCurrentTenant(1);
+    const code = await issueRecoveryCode();
+    const result = await recoveryPair(
+      code,
+      { tenantId, deviceId, kind: "station" },
+      "subscription-state-v1",
+    )
+      .expect("Cache-Control", "no-store")
+      .expect(201);
+    expect(stationRecoveryResponseSchema.parse(result.body)).toEqual(result.body);
+    expect(result.body.version).toBe(1);
+    expect(result.body.device).toMatchObject({ id: deviceId, tenantId, kind: "station" });
+    expect(result.body.subscription).toBeDefined();
+    expect(result.body.operators).toHaveLength(1);
+    await request(app!.getHttpServer())
+      .get("/station/operators")
+      .set("x-api-key", oldKey)
+      .expect(401);
+    await request(app!.getHttpServer())
+      .get("/station/operators")
+      .set("x-api-key", result.body.credential.apiKey as string)
+      .expect(200);
+    const state = await recoveryState();
+    expect(state.keys).toHaveLength(1);
+    expect(state.devices).toHaveLength(1);
+    expect(auditSpy).toHaveBeenLastCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "station.repair",
+      resourceId: deviceId,
+      outcome: "succeeded",
+    });
+  });
+
+  it.each(["expired", "pending_activation"])(
+    "recovery preserves the current key when subscription is %s",
+    async (status) => {
+      await pairCurrentDevice();
+      const code = await issueRecoveryCode();
+      const before = await recoveryState();
+      await createManagedSubscription(db, {
+        tenantId,
+        status: status === "expired" ? "active" : "pending_activation",
+        startsAt: status === "expired" ? new Date(Date.now() - 60_000) : null,
+        endsAt: status === "expired" ? new Date(Date.now() - 1000) : null,
+      });
+      const mint = vi.spyOn(app!.get<Auth>(AUTH).api, "createApiKey");
+      await recoveryPair(code).expect(403);
+      expect(mint).not.toHaveBeenCalled();
+      expect(await recoveryState()).toEqual(before);
+      await expectRecoveryCodeLive(code);
+    },
+  );
+
+  it("recovery restores a revoked handheld with the same identity and optional subscription omitted", async () => {
+    const handheld = await agent
+      .post("/station-devices")
+      .send({ name: "Handheld", kind: "handheld", lineId: null })
+      .expect(201);
+    const handheldId = handheld.body.id as string;
+    await agent.delete(`/station-devices/${handheldId}`).expect(204);
+    const issued = await agent
+      .post(`/station-devices/${handheldId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const expected = { tenantId, deviceId: handheldId, kind: "handheld" };
+    const before = await recoveryState();
+    const mismatch = await recoveryPair(issued.body.code as string, expected).expect(401);
+    expect(mismatch.body).toEqual({ code: "PAIR_KIND_MISMATCH" });
+    expect(await recoveryState()).toEqual(before);
+    const result = await recoveryPair(issued.body.code as string, expected, "handheld-v1").expect(
+      201,
+    );
+    expect(result.body).toMatchObject({
+      version: 1,
+      device: { id: handheldId, tenantId, kind: "handheld" },
+    });
+    expect(result.body).not.toHaveProperty("subscription");
+    const [device] = await db
+      .select()
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, handheldId));
+    expect(device?.revokedAt).toBeNull();
+  });
+
+  it("recovery rejects malformed identity before provisioning", async () => {
+    const code = await issueRecoveryCode();
+    const mint = vi.spyOn(app!.get<Auth>(AUTH).api, "createApiKey");
+    await recoveryPair(code, { tenantId, deviceId: "not-a-uuid", kind: "station" }).expect(400);
+    expect(mint).not.toHaveBeenCalled();
+    await expectRecoveryCodeLive(code);
+  });
+
+  it.each([false, true])(
+    "rechecks identity and client kind under the device lock and cleans up its candidate (recovery=%s)",
+    async (recovery) => {
+      await pairCurrentDevice();
+      const code = await issueRecoveryCode();
+      const before = await recoveryState();
+      const auth = app!.get<Auth>(AUTH);
+      const create = auth.api.createApiKey.bind(auth.api);
+      vi.spyOn(auth.api, "createApiKey").mockImplementationOnce(async (input) => {
+        const key = await create(input);
+        await db
+          .update(schema.stationDevices)
+          .set({ kind: "handheld" })
+          .where(eq(schema.stationDevices.id, deviceId));
+        return key;
+      });
+      const result = await (
+        recovery
+          ? recoveryPair(code)
+          : request(app!.getHttpServer()).post("/station/pair").send({ code })
+      ).expect(401);
+      expect(result.body).toEqual({
+        code: recovery ? "PAIR_RECOVERY_MISMATCH" : "PAIR_KIND_MISMATCH",
+      });
+      const after = await recoveryState();
+      expect(after.keys).toEqual(before.keys);
+      expect(after.devices).toEqual(before.devices.map((row) => ({ ...row, kind: "handheld" })));
+      await expectRecoveryCodeLive(code);
+    },
+  );
+
+  async function quotaQueue(
+    first: () => Promise<request.Response>,
+    second: () => Promise<request.Response>,
+  ) {
+    const blocker = await app!.get<AuthSetup["pool"]>(DB_POOL).connect();
+    let a: Promise<request.Response> | undefined;
+    let b: Promise<request.Response> | undefined;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("select pg_advisory_xact_lock(hashtext($1), 2)", [
+        `subscription-quota:${tenantId}`,
+      ]);
+      a = first();
+      await waitForQuotaWaiter(2);
+      b = second();
+      await waitForQuotaWaiter(2, 2);
+    } finally {
+      await blocker.query("COMMIT");
+      blocker.release();
+    }
+    return Promise.all([a!, b!]);
+  }
+
+  it.each(["cancel", "create"] as const)(
+    "serializes final-slot creation and reservation cancellation with %s first",
+    async (first) => {
+      await manageCurrentTenant(1);
+      const cancel = () =>
+        agent
+          .post(`/device-licensing/${deviceId}/cancel-reservation`)
+          .send({ requestId: randomUUID(), expectedRevision: 1 })
+          .then((r) => r);
+      const create = () =>
+        agent
+          .post("/station-devices")
+          .send({ name: "Next handheld", kind: "handheld", lineId: null })
+          .then((r) => r);
+      const [a, b] = await quotaQueue(
+        first === "cancel" ? cancel : create,
+        first === "cancel" ? create : cancel,
+      );
+      expect(a.status).toBe(first === "cancel" ? 200 : 409);
+      expect(b.status).toBe(first === "cancel" ? 201 : 200);
+      const projection = (await agent.get("/device-licensing").expect(200)).body;
+      expect(projection).toMatchObject({
+        integrity: "ready",
+        usage: first === "cancel" ? 1 : 0,
+        limit: 1,
+      });
+      expect(projection.devices).toEqual(
+        expect.arrayContaining([expect.objectContaining({ deviceId, state: "released" })]),
+      );
+    },
+  );
+
+  it.each(["kind", "pair"] as const)(
+    "serializes kind changes and pairing with %s first",
+    async (first) => {
+      const code = await issueRecoveryCode();
+      const update = () =>
+        agent
+          .patch(`/station-devices/${deviceId}`)
+          .send({ kind: "handheld" })
+          .then((r) => r);
+      const pair = () =>
+        request(app!.getHttpServer())
+          .post("/station/pair")
+          .send({ code })
+          .then((r) => r);
+      const [a, b] = await quotaQueue(
+        first === "kind" ? update : pair,
+        first === "kind" ? pair : update,
+      );
+      expect(a.status).toBe(first === "kind" ? 200 : 201);
+      expect(b.status).toBe(first === "kind" ? 401 : 409);
+      const projection = (await agent.get("/device-licensing").expect(200)).body;
+      expect(projection).toMatchObject({
+        integrity: "ready",
+        usage: 1,
+        devices: [
+          {
+            kind: first === "kind" ? "handheld" : "station",
+            state: first === "kind" ? "reserved" : "assigned",
+            revision: 2,
+          },
+        ],
+      });
+      expect((await recoveryState()).keys).toHaveLength(first === "kind" ? 0 : 1);
+    },
+  );
+
+  it("deletes a credential linked after the security revoke's initial read", async () => {
+    const code = await issueRecoveryCode();
+    const [paired, revoked] = await quotaQueue(
+      () =>
+        request(app!.getHttpServer())
+          .post("/station/pair")
+          .send({ code })
+          .then((r) => r),
+      () => agent.delete(`/station-devices/${deviceId}`).then((r) => r),
+    );
+    expect(paired.status).toBe(201);
+    expect(revoked.status).toBe(204);
+    const after = await recoveryState();
+    expect(after.keys).toHaveLength(0);
+    expect(after.devices[0]).toMatchObject({ apiKeyId: null, revokedAt: expect.any(Date) });
+    expect((await agent.get("/device-licensing").expect(200)).body).toMatchObject({
+      integrity: "ready",
+      usage: 0,
+      devices: [{ state: "released", releaseReason: "security_revoked" }],
+    });
+  });
+
+  it("allows read-only cancellation without a lifecycle policy while keeping enrollment blocked", async () => {
+    await createManagedSubscription(db, {
+      tenantId,
+      maxStations: 1,
+      startsAt: new Date(Date.now() - 3600000),
+      endsAt: new Date(Date.now() - 60000),
+    });
+    const inspection = await agent.get("/device-licensing").expect(200);
+    expect(inspection.body.devices[0]).toMatchObject({ deviceId, canCancel: true });
+    await agent
+      .post("/station-devices")
+      .send({ name: "Blocked enrollment", lineId: null })
+      .expect(403);
+    await agent.post(`/station-devices/${deviceId}/pairing-code`).send({}).expect(403);
+    await agent
+      .post(`/device-licensing/${deviceId}/cancel-reservation`)
+      .send({ requestId: randomUUID(), expectedRevision: 1 })
+      .expect(200);
+    expect((await agent.get("/device-licensing").expect(200)).body).toMatchObject({
+      usage: 0,
+      devices: [{ state: "released" }],
+    });
+  });
+
+  it.each(["cancel", "issue"] as const)(
+    "serializes code issuance and cancellation with %s first",
+    async (first) => {
+      const cancel = () =>
+        agent
+          .post(`/device-licensing/${deviceId}/cancel-reservation`)
+          .send({ requestId: randomUUID(), expectedRevision: 1 })
+          .then((r) => r);
+      const issue = () =>
+        agent
+          .post(`/station-devices/${deviceId}/pairing-code`)
+          .send({})
+          .then((r) => r);
+      const [a, b] = await quotaQueue(
+        first === "cancel" ? cancel : issue,
+        first === "cancel" ? issue : cancel,
+      );
+      expect(a.status).toBe(first === "cancel" ? 200 : 201);
+      expect(b.status).toBe(first === "cancel" ? 409 : 200);
+      const liveCodes = await db
+        .select()
+        .from(schema.stationPairingCodes)
+        .where(
+          and(
+            eq(schema.stationPairingCodes.stationDeviceId, deviceId),
+            isNull(schema.stationPairingCodes.usedAt),
+          ),
+        );
+      expect(liveCodes).toEqual([]);
+      expect((await agent.get("/device-licensing").expect(200)).body).toMatchObject({ usage: 0 });
+    },
+  );
+
+  it("assigns the existing reservation without consuming a second place", async () => {
+    const before = await agent.get("/device-licensing").expect(200);
+    await pairCurrentDevice();
+    const after = await agent.get("/device-licensing").expect(200);
+    expect(after.body).toMatchObject({
+      usage: 1,
+      integrity: "ready",
+      devices: [
+        {
+          assignmentId: before.body.devices[0].assignmentId,
+          state: "assigned",
+          revision: 2,
+          canCancel: false,
+        },
+      ],
+    });
+    const events = await db
+      .select()
+      .from(schema.workingDeviceEvents)
+      .where(eq(schema.workingDeviceEvents.deviceId, deviceId));
+    const [membership] = await db
+      .select()
+      .from(schema.member)
+      .where(and(eq(schema.member.organizationId, tenantId), eq(schema.member.role, "owner")));
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tenantId,
+          deviceId,
+          action: "reserved",
+          actorDomain: "cabinet",
+          actorId: membership!.userId,
+          before: null,
+          outcome: "success",
+        }),
+      ]),
+    );
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "assigned",
+          actorDomain: "device",
+          actorId: deviceId,
+          before: expect.objectContaining({ state: "reserved" }),
+          after: expect.objectContaining({ state: "assigned" }),
+        }),
+      ]),
+    );
+  });
+
+  it.each([false, true])(
+    "rejects a cancelled reservation after candidate provisioning (recovery=%s)",
+    async (recovery) => {
+      const code = await issueRecoveryCode();
+      const before = await recoveryState();
+      const auth = app!.get<Auth>(AUTH);
+      const mint = auth.api.createApiKey.bind(auth.api);
+      vi.spyOn(auth.api, "createApiKey").mockImplementationOnce(async (input) => {
+        const key = await mint(input);
+        await agent
+          .post(`/device-licensing/${deviceId}/cancel-reservation`)
+          .send({ requestId: randomUUID(), expectedRevision: 1 })
+          .expect(200);
+        return key;
+      });
+      const result = await (
+        recovery
+          ? recoveryPair(code)
+          : request(app!.getHttpServer()).post("/station/pair").send({ code })
+      ).expect(401);
+      expect(result.body).toEqual({ code: "PAIR_INVALID" });
+      const after = await recoveryState();
+      expect(after.keys).toEqual(before.keys);
+      expect(after.devices).toEqual(before.devices);
+      await agent.post(`/station-devices/${deviceId}/pairing-code`).send({}).expect(409);
+      await agent
+        .patch(`/station-devices/${deviceId}`)
+        .send({ name: "Cannot resurrect" })
+        .expect(409);
+      await agent.delete(`/station-devices/${deviceId}`).expect(409);
+      expect((await agent.get("/device-licensing").expect(200)).body).toMatchObject({
+        usage: 0,
+        devices: [{ state: "released", releaseReason: "reservation_cancelled" }],
+      });
+    },
+  );
+
+  it.each(["cancel", "pair"] as const)(
+    "serializes cancellation versus claim with %s first",
+    async (first) => {
+      const code = await issueRecoveryCode();
+      const blocker = await app!.get<AuthSetup["pool"]>(DB_POOL).connect();
+      let pairAttempt: Promise<request.Response> | undefined;
+      let cancelAttempt: Promise<request.Response> | undefined;
+      const cancel = () =>
+        agent
+          .post(`/device-licensing/${deviceId}/cancel-reservation`)
+          .send({ requestId: randomUUID(), expectedRevision: 1 })
+          .then((r) => r);
+      const pair = () =>
+        request(app!.getHttpServer())
+          .post("/station/pair")
+          .send({ code })
+          .then((r) => r);
+      try {
+        await blocker.query("BEGIN");
+        await blocker.query("select pg_advisory_xact_lock(hashtext($1), 2)", [
+          `subscription-quota:${tenantId}`,
+        ]);
+        if (first === "cancel") cancelAttempt = cancel();
+        else pairAttempt = pair();
+        await waitForQuotaWaiter(2);
+        if (first === "cancel") pairAttempt = pair();
+        else cancelAttempt = cancel();
+        await waitForQuotaWaiter(2, 2);
+      } finally {
+        await blocker.query("COMMIT");
+        blocker.release();
+      }
+      const [cancelled, paired] = await Promise.all([cancelAttempt!, pairAttempt!]);
+      expect(cancelled.status).toBe(first === "cancel" ? 200 : 409);
+      expect(paired.status).toBe(first === "cancel" ? 401 : 201);
+      const projection = (await agent.get("/device-licensing").expect(200)).body;
+      expect(projection).toMatchObject({
+        integrity: "ready",
+        usage: first === "cancel" ? 0 : 1,
+        devices: [{ state: first === "cancel" ? "released" : "assigned" }],
+      });
+      const state = await recoveryState();
+      expect(state.keys).toHaveLength(first === "cancel" ? 0 : 1);
+    },
+  );
 
   it("issues an HMAC-protected 8-digit code and redeems it into one durable station credential", async () => {
     const issued = await agent
@@ -529,6 +1048,54 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     expect(keys).toEqual([{ id: station!.apiKeyId! }]);
   });
 
+  it("revokes a paired handheld through the station endpoint and retires its credential", async () => {
+    const created = await agent
+      .post("/station-devices")
+      .send({ name: "Handheld revocation", kind: "handheld", lineId: null })
+      .expect(201);
+    const handheldId = created.body.id as string;
+    const issued = await agent
+      .post(`/station-devices/${handheldId}/pairing-code`)
+      .send({})
+      .expect(201);
+    await recoveryPair(
+      issued.body.code as string,
+      { tenantId, deviceId: handheldId, kind: "handheld" },
+      "handheld-v1",
+    ).expect(201);
+    const [before] = await db
+      .select()
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, handheldId));
+    if (!before?.apiKeyId) throw new Error("Paired handheld credential missing");
+
+    await agent.delete(`/station-devices/${handheldId}`).expect(204);
+
+    const [after] = await db
+      .select()
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, handheldId));
+    expect(after).toMatchObject({
+      id: handheldId,
+      tenantId,
+      kind: "handheld",
+      apiKeyId: null,
+      revokedAt: expect.any(Date),
+      pairedAt: before.pairedAt,
+    });
+    expect(
+      await db
+        .select({ id: schema.apikey.id })
+        .from(schema.apikey)
+        .where(eq(schema.apikey.id, before.apiKeyId)),
+    ).toEqual([]);
+    const [assignment] = await db
+      .select()
+      .from(schema.workingDeviceAssignments)
+      .where(eq(schema.workingDeviceAssignments.deviceId, handheldId));
+    expect(assignment).toMatchObject({ state: "released", releaseReason: "security_revoked" });
+  });
+
   it("re-pairs the same revoked durable station record", async () => {
     await agent.delete(`/station-devices/${deviceId}`).expect(204);
     const issued = await agent
@@ -551,84 +1118,90 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     expect(station).toMatchObject({ apiKeyId: expect.any(String), revokedAt: null });
   });
 
-  it("rejects revoked station restoration when another live station filled its slot", async () => {
-    await manageCurrentTenant(1);
-    await agent.delete(`/station-devices/${deviceId}`).expect(204);
-    const [revokedBefore] = await db
-      .select({ revokedAt: schema.stationDevices.revokedAt })
-      .from(schema.stationDevices)
-      .where(eq(schema.stationDevices.id, deviceId));
-    const replacement = await agent
-      .post("/station-devices")
-      .send({ name: "Replacement station", lineId: null })
-      .expect(201);
-    const issued = await agent
-      .post(`/station-devices/${deviceId}/pairing-code`)
-      .send({})
-      .expect(201);
-    const [storedCode] = await db
-      .select({ id: schema.stationPairingCodes.id })
-      .from(schema.stationPairingCodes)
-      .where(
-        eq(
-          schema.stationPairingCodes.codeHash,
-          hashPairingCode(issued.body.code as string, pairingCodePepper),
-        ),
-      );
-    auditSpy.mockClear();
-
-    const rejected = await request(app!.getHttpServer())
-      .post("/station/pair")
-      .send({ code: issued.body.code })
-      .expect(409);
-    expect(rejected.body).toEqual({
-      code: "subscription_limit_reached",
-      entitlement: "stations",
-      used: 1,
-      limit: 1,
-    });
-    expect(auditSpy).toHaveBeenCalledTimes(1);
-    expect(auditSpy).toHaveBeenCalledWith({
-      tenantId,
-      actorType: "unauthenticated_device",
-      actorId: null,
-      action: "station.pair",
-      resourceId: deviceId,
-      outcome: "failed",
-    });
-    await expect(
-      db
-        .select({
-          apiKeyId: schema.stationDevices.apiKeyId,
-          revokedAt: schema.stationDevices.revokedAt,
-        })
+  it.each([false, true])(
+    "rejects revoked station restoration when another live station filled its slot (recovery=%s)",
+    async (recovery) => {
+      await manageCurrentTenant(1);
+      await agent.delete(`/station-devices/${deviceId}`).expect(204);
+      const [revokedBefore] = await db
+        .select({ revokedAt: schema.stationDevices.revokedAt })
         .from(schema.stationDevices)
-        .where(eq(schema.stationDevices.id, deviceId)),
-    ).resolves.toEqual([{ apiKeyId: null, revokedAt: revokedBefore!.revokedAt }]);
-    await expect(
-      db
-        .select({ usedAt: schema.stationPairingCodes.usedAt })
+        .where(eq(schema.stationDevices.id, deviceId));
+      const replacement = await agent
+        .post("/station-devices")
+        .send({ name: "Replacement station", lineId: null })
+        .expect(201);
+      const issued = await agent
+        .post(`/station-devices/${deviceId}/pairing-code`)
+        .send({})
+        .expect(201);
+      const [storedCode] = await db
+        .select({ id: schema.stationPairingCodes.id })
         .from(schema.stationPairingCodes)
-        .where(eq(schema.stationPairingCodes.id, storedCode!.id)),
-    ).resolves.toEqual([{ usedAt: null }]);
-    await expect(
-      db
-        .select({ id: schema.apikey.id })
-        .from(schema.apikey)
-        .where(and(eq(schema.apikey.referenceId, tenantId), eq(schema.apikey.configId, "station"))),
-    ).resolves.toEqual([]);
-    await expect(
-      db
-        .select({ id: schema.stationDevices.id })
-        .from(schema.stationDevices)
         .where(
-          and(
-            eq(schema.stationDevices.tenantId, tenantId),
-            isNull(schema.stationDevices.revokedAt),
+          eq(
+            schema.stationPairingCodes.codeHash,
+            hashPairingCode(issued.body.code as string, pairingCodePepper),
           ),
-        ),
-    ).resolves.toEqual([{ id: replacement.body.id as string }]);
-  });
+        );
+      auditSpy.mockClear();
+
+      const rejected = await (
+        recovery
+          ? recoveryPair(issued.body.code as string)
+          : request(app!.getHttpServer()).post("/station/pair").send({ code: issued.body.code })
+      ).expect(409);
+      expect(rejected.body).toEqual({
+        code: "subscription_limit_reached",
+        entitlement: "stations",
+        used: 1,
+        limit: 1,
+      });
+      expect(auditSpy).toHaveBeenCalledTimes(1);
+      expect(auditSpy).toHaveBeenCalledWith({
+        tenantId,
+        actorType: "unauthenticated_device",
+        actorId: null,
+        action: "station.pair",
+        resourceId: deviceId,
+        outcome: "failed",
+      });
+      await expect(
+        db
+          .select({
+            apiKeyId: schema.stationDevices.apiKeyId,
+            revokedAt: schema.stationDevices.revokedAt,
+          })
+          .from(schema.stationDevices)
+          .where(eq(schema.stationDevices.id, deviceId)),
+      ).resolves.toEqual([{ apiKeyId: null, revokedAt: revokedBefore!.revokedAt }]);
+      await expect(
+        db
+          .select({ usedAt: schema.stationPairingCodes.usedAt })
+          .from(schema.stationPairingCodes)
+          .where(eq(schema.stationPairingCodes.id, storedCode!.id)),
+      ).resolves.toEqual([{ usedAt: null }]);
+      await expect(
+        db
+          .select({ id: schema.apikey.id })
+          .from(schema.apikey)
+          .where(
+            and(eq(schema.apikey.referenceId, tenantId), eq(schema.apikey.configId, "station")),
+          ),
+      ).resolves.toEqual([]);
+      await expect(
+        db
+          .select({ id: schema.stationDevices.id })
+          .from(schema.stationDevices)
+          .where(
+            and(
+              eq(schema.stationDevices.tenantId, tenantId),
+              isNull(schema.stationDevices.revokedAt),
+            ),
+          ),
+      ).resolves.toEqual([{ id: replacement.body.id as string }]);
+    },
+  );
 
   it("serializes revoked restoration against final-slot creation", async () => {
     await manageCurrentTenant(1);
@@ -910,67 +1483,71 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     expect(keys).toEqual([{ id: station!.apiKeyId! }]);
   });
 
-  it("keeps the active key when a regenerated code loses after candidate provisioning", async () => {
-    const firstCode = await agent
-      .post(`/station-devices/${deviceId}/pairing-code`)
-      .send({})
-      .expect(201);
-    const firstPair = await request(app!.getHttpServer())
-      .post("/station/pair")
-      .send({ code: firstCode.body.code })
-      .expect(201);
-    const oldKey = firstPair.body.credential.apiKey as string;
-    const [before] = await db
-      .select({ apiKeyId: schema.stationDevices.apiKeyId })
-      .from(schema.stationDevices)
-      .where(eq(schema.stationDevices.id, deviceId));
-
-    const issued = await agent
-      .post(`/station-devices/${deviceId}/pairing-code`)
-      .send({})
-      .expect(201);
-    const auth = app!.get<Auth>(AUTH);
-    const createApiKey = auth.api.createApiKey.bind(auth.api);
-    const candidateBeforeClaim = vi
-      .spyOn(auth.api, "createApiKey")
-      .mockImplementationOnce(async (input) => {
-        const candidate = await createApiKey(input);
-        await agent.post(`/station-devices/${deviceId}/pairing-code`).send({}).expect(201);
-        return candidate;
-      });
-    try {
-      const lost = await request(app!.getHttpServer())
+  it.each([false, true])(
+    "keeps the active key when a regenerated code loses after candidate provisioning (recovery=%s)",
+    async (recovery) => {
+      const firstCode = await agent
+        .post(`/station-devices/${deviceId}/pairing-code`)
+        .send({})
+        .expect(201);
+      const firstPair = await request(app!.getHttpServer())
         .post("/station/pair")
-        .send({ code: issued.body.code })
-        .expect(401);
-      expect(lost.body).toMatchObject({ code: "PAIR_INVALID" });
-      expect(auditSpy).toHaveBeenLastCalledWith({
-        tenantId,
-        actorType: "unauthenticated_device",
-        actorId: null,
-        action: "station.repair",
-        resourceId: deviceId,
-        outcome: "failed",
-      });
-    } finally {
-      candidateBeforeClaim.mockRestore();
-    }
+        .send({ code: firstCode.body.code })
+        .expect(201);
+      const oldKey = firstPair.body.credential.apiKey as string;
+      const [before] = await db
+        .select({ apiKeyId: schema.stationDevices.apiKeyId })
+        .from(schema.stationDevices)
+        .where(eq(schema.stationDevices.id, deviceId));
 
-    await request(app!.getHttpServer())
-      .get("/station/operators")
-      .set("x-api-key", oldKey)
-      .expect(200);
-    const [after] = await db
-      .select({ apiKeyId: schema.stationDevices.apiKeyId })
-      .from(schema.stationDevices)
-      .where(eq(schema.stationDevices.id, deviceId));
-    expect(after!.apiKeyId).toBe(before!.apiKeyId);
-    const keys = await db
-      .select({ id: schema.apikey.id })
-      .from(schema.apikey)
-      .where(and(eq(schema.apikey.referenceId, tenantId), eq(schema.apikey.configId, "station")));
-    expect(keys).toEqual([{ id: before!.apiKeyId! }]);
-  });
+      const issued = await agent
+        .post(`/station-devices/${deviceId}/pairing-code`)
+        .send({})
+        .expect(201);
+      const auth = app!.get<Auth>(AUTH);
+      const createApiKey = auth.api.createApiKey.bind(auth.api);
+      const candidateBeforeClaim = vi
+        .spyOn(auth.api, "createApiKey")
+        .mockImplementationOnce(async (input) => {
+          const candidate = await createApiKey(input);
+          await agent.post(`/station-devices/${deviceId}/pairing-code`).send({}).expect(201);
+          return candidate;
+        });
+      try {
+        const lost = await (
+          recovery
+            ? recoveryPair(issued.body.code as string)
+            : request(app!.getHttpServer()).post("/station/pair").send({ code: issued.body.code })
+        ).expect(401);
+        expect(lost.body).toMatchObject({ code: "PAIR_INVALID" });
+        expect(auditSpy).toHaveBeenLastCalledWith({
+          tenantId,
+          actorType: "unauthenticated_device",
+          actorId: null,
+          action: "station.repair",
+          resourceId: deviceId,
+          outcome: "failed",
+        });
+      } finally {
+        candidateBeforeClaim.mockRestore();
+      }
+
+      await request(app!.getHttpServer())
+        .get("/station/operators")
+        .set("x-api-key", oldKey)
+        .expect(200);
+      const [after] = await db
+        .select({ apiKeyId: schema.stationDevices.apiKeyId })
+        .from(schema.stationDevices)
+        .where(eq(schema.stationDevices.id, deviceId));
+      expect(after!.apiKeyId).toBe(before!.apiKeyId);
+      const keys = await db
+        .select({ id: schema.apikey.id })
+        .from(schema.apikey)
+        .where(and(eq(schema.apikey.referenceId, tenantId), eq(schema.apikey.configId, "station")));
+      expect(keys).toEqual([{ id: before!.apiKeyId! }]);
+    },
+  );
 
   it("rejects a previously used station code with PAIR_INVALID", async () => {
     const issued = await agent

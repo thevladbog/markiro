@@ -4,7 +4,7 @@ import { Button } from "@markiro/ui";
 import type { ServerReachability } from "../lib/api-client.js";
 
 /** What the station can honestly say about its scanner. */
-export type ScannerIndicator = "keyboard" | "connected" | "disconnected";
+export type ScannerIndicator = "keyboard" | "connected" | "partial" | "disconnected";
 export type FloorConnectivityState = "online" | "offline" | "sync-stuck";
 export type UpdateSeverity = "none" | "info" | "warn" | "urgent";
 
@@ -86,9 +86,11 @@ export function StatusBar({
   const scannerLabel =
     scanner === "connected"
       ? connected
-      : scanner === "disconnected"
-        ? t("shell.scannerDisconnected")
-        : t("shell.scannerKeyboard");
+      : scanner === "partial"
+        ? t("shell.scannerPartial")
+        : scanner === "disconnected"
+          ? t("shell.scannerDisconnected")
+          : t("shell.scannerKeyboard");
   const connectivityState = floorConnectivityState(serverReachability === "reachable", syncStuck);
   const serverLabel =
     serverReachability === "checking"
@@ -207,7 +209,7 @@ export function StatusBar({
         <StatusPill
           label={t("shell.scanner")}
           value={scannerLabel}
-          tone={scanner === "connected" ? "ok" : scanner === "disconnected" ? "warn" : "neutral"}
+          tone={scanner === "connected" ? "ok" : scanner === "keyboard" ? "neutral" : "warn"}
           valueShown={scanner !== "connected"}
           testId="scanner-status"
         />

@@ -108,6 +108,55 @@ describe.skipIf(!ready)("commercial catalog publication review", () => {
         ),
     ).toEqual([]);
   }
+  it("creates and edits explicit V3 plans through the service parser while refusing old writers", async () => {
+    const code = `p1-${randomUUID()}`;
+    const input = {
+      ...plan,
+      lifecyclePolicyId: null,
+      plan: {
+        ...plan.plan,
+        chzIntegrationEnabled: false,
+        inventoryEnabled: true,
+        commerceMlEnabled: false,
+        handheldEnabled: false,
+      },
+    };
+    const version = await catalog.createVersion(actor, code, input, 3);
+    expect(version.plan).toMatchObject(input.plan);
+    for (const clientVersion of [1, 2] as const) {
+      await expect(
+        catalog.updateVersion(actor, code, version.id, { nameRu: "Unsafe" }, clientVersion),
+      ).rejects.toMatchObject({ response: { code: "client_update_required" } });
+      const persisted = await catalog.getVersion(actor, code, version.id);
+      expect(persisted.nameRu).toBe(input.nameRu);
+    }
+    const changed = await catalog.updateVersion(actor, code, version.id, { nameRu: "P1 edit" }, 3);
+    expect(changed.nameRu).toBe("P1 edit");
+    expect(changed.plan).toMatchObject(input.plan);
+    await profiles.setOperator(actor, seller);
+    const review = await catalog.review(actor, code, version.id, 3);
+    expect(review.errors).toEqual([]);
+    await noPublication(version.id);
+  });
+
+  it("preserves unknown legacy mapping and commercial metadata through V3 and legacy edits", async () => {
+    const { code, version } = await draft({ plan: { ...plan.plan, maxLines: 1 } });
+    expect(version.plan).toMatchObject({ inventoryEnabled: null, chzIntegrationEnabled: null });
+    const edited = await catalog.updateVersion(
+      actor,
+      code,
+      version.id,
+      { nameRu: "Legacy name" },
+      1,
+    );
+    expect(edited.documentNameRu).toBe(plan.documentNameRu);
+    expect(edited.plan).toMatchObject({ inventoryEnabled: null, chzIntegrationEnabled: null });
+    const v3edit = await catalog.updateVersion(actor, code, version.id, { nameRu: "V3 name" }, 3);
+    expect(v3edit.plan).toMatchObject({ inventoryEnabled: null, chzIntegrationEnabled: null });
+    const review = await catalog.review(actor, code, version.id, 3);
+    expect(review.errors).toContainEqual({ code: "plan_mapping_required", path: "plan" });
+  });
+
   it("rejects legacy assignment of zero quotas before subscription or audit mutation", async () => {
     const tenantId = await createOrganization(db);
     const catalogVersionId = await createPublishedPlan(db, {

@@ -7,14 +7,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
 import {
-  platformCatalogV2Contracts,
-  type CatalogVersionV2 as CatalogVersion,
+  platformCatalogV3Contracts,
+  type CatalogVersionV3 as CatalogVersion,
   type OperatorBankAccount,
 } from "@markiro/platform-contracts";
 
 import i18n from "../src/i18n/index.js";
 import { NavigationGuardProvider } from "../src/layout/NavigationGuard.js";
 import { DocumentComposer } from "../src/pages/documents/DocumentComposer.js";
+import { DocumentSummary } from "../src/pages/documents/DocumentSummary.js";
 import { createLineFromCatalog } from "../src/pages/documents/documentDraft.js";
 import type { TenantListItem } from "../src/pages/tenants/api.js";
 
@@ -22,6 +23,7 @@ const globalCss = readFileSync("src/global.css", "utf8");
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -41,6 +43,7 @@ const plan = {
   documentNameEn: null,
   subject: null,
   sellerPolicyRevision: null,
+  lifecyclePolicyId: null,
   kind: "plan",
   version: 3,
   status: "published",
@@ -64,6 +67,10 @@ const plan = {
     labelEditorEnabled: false,
     publicApiEnabled: false,
     palletsEnabled: false,
+    chzIntegrationEnabled: null,
+    inventoryEnabled: null,
+    commerceMlEnabled: null,
+    handheldEnabled: null,
     demoDurationDays: null,
   },
 } satisfies CatalogVersion;
@@ -185,6 +192,41 @@ async function selectCombobox(
 }
 
 describe("DocumentComposer", () => {
+  it("closes the date picker and blocks date changes when submission starts", async () => {
+    await i18n.changeLanguage("ru");
+    const user = userEvent.setup();
+    const onDateChange = vi.fn();
+    const summary = (submitting: boolean) => (
+      <ThemeProvider>
+        <DocumentSummary
+          kind="offer"
+          draft={{
+            tenantId: tenant.id,
+            applicationMode: "automatic",
+            date: "2026-09-12",
+            lines: [],
+          }}
+          totals={{ subtotal: "0.00", vatTotal: "0.00", total: "0.00" }}
+          errors={{}}
+          submitting={submitting}
+          onApplicationModeChange={vi.fn()}
+          onDateChange={onDateChange}
+          onCancel={vi.fn()}
+        />
+      </ThemeProvider>
+    );
+    const view = render(summary(false));
+    const trigger = screen.getByRole("button", { name: i18n.t("documents.date.offer") });
+    await user.click(trigger);
+    expect(screen.getByRole("dialog")).toBeDefined();
+    view.rerender(summary(true));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(trigger.hasAttribute("disabled")).toBe(true);
+    await user.click(trigger);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(onDateChange).not.toHaveBeenCalled();
+  });
+
   it("localizes structured license units while preserving literal legacy and service units", async () => {
     await i18n.changeLanguage("ru");
     const current = createLineFromCatalog(
@@ -274,7 +316,7 @@ describe("DocumentComposer", () => {
     void _unitPrice;
     void _vatRateBps;
     void _vatIncluded;
-    const parsed = platformCatalogV2Contracts.list.response.parse({ items: [redacted] });
+    const parsed = platformCatalogV3Contracts.list.response.parse({ items: [redacted] });
 
     expect(parsed.items[0]?.descriptionRu).toBeNull();
     expect(parsed.items[0]).not.toHaveProperty("unitPrice");
@@ -286,7 +328,9 @@ describe("DocumentComposer", () => {
     const { props, container } = renderComposer();
 
     await selectCombobox(user, "Тенант", "sever", "Завод Север · sever-factory");
-    await user.type(screen.getByLabelText("Срок оплаты"), "2026-09-01");
+    vi.setSystemTime(new Date("2026-09-01T12:00:00Z"));
+    await user.click(screen.getByRole("button", { name: "Срок оплаты" }));
+    await user.click(screen.getByRole("button", { name: /^1 сентября 2026/ }));
     await selectCombobox(user, "Добавить позицию", "v3", "Базовый тариф · plan-basic · v3");
     await selectCombobox(user, "Добавить позицию", "plan-basic", "Базовый тариф · plan-basic · v3");
     expect((screen.getByLabelText("Количество Базовый тариф") as HTMLInputElement).value).toBe("1");

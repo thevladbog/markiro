@@ -1,7 +1,8 @@
 package app.markiro.handheld.core.network
 
 import app.markiro.handheld.BuildConfig
-import app.markiro.handheld.core.storage.CredentialStore
+import app.markiro.handheld.core.storage.DeviceRecovery
+import okhttp3.Call
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import dagger.Module
 import dagger.Provides
@@ -69,7 +70,7 @@ object NetworkModule {
     @Provides
     @Singleton
     fun client(
-        credential: CredentialStore,
+        recovery: DeviceRecovery,
         revocation: RevocationBus,
         reachability: ReachabilityTracker,
         serverUrl: ServerUrlProvider,
@@ -79,17 +80,21 @@ object NetworkModule {
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .addInterceptor(BaseUrlInterceptor(serverUrl))
-        .addInterceptor(ApiKeyInterceptor(credential))
+        .addInterceptor(ApiKeyInterceptor(recovery))
         .addInterceptor(CapabilitiesInterceptor())
-        .addInterceptor(RevocationInterceptor(revocation, json))
+        .addInterceptor(RevocationInterceptor(revocation, recovery, json))
         .addInterceptor(ReachabilityInterceptor(reachability))
         .build()
 
     @Provides
     @Singleton
-    fun stationApi(client: OkHttpClient, json: Json): StationApi = Retrofit.Builder()
+    fun authenticatedCalls(client: OkHttpClient, recovery: DeviceRecovery): Call.Factory = GenerationCallFactory(client, recovery)
+
+    @Provides
+    @Singleton
+    fun stationApi(client: Call.Factory, json: Json): StationApi = Retrofit.Builder()
         .baseUrl("http://placeholder.invalid/")
-        .client(client)
+        .callFactory(client)
         .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
         .build()
         .create(StationApi::class.java)

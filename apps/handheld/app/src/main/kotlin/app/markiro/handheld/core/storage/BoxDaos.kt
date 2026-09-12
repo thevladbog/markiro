@@ -67,12 +67,42 @@ interface BoxDao {
     @Query("UPDATE boxes SET printState = 'unknown', printReason = NULL WHERE printState = 'printing'")
     suspend fun demoteInterruptedPrints(): Int
 
-    /** The deferred-label queue: closed boxes whose label is not resolved, oldest first. */
-    @Query("SELECT * FROM boxes WHERE closedAt IS NOT NULL AND printState <> 'printed' ORDER BY closedAt, boxId")
+    /**
+     * The deferred-label queue: closed boxes whose label is not resolved, oldest
+     * first. A retired box drops out -- its number is out of circulation, so a
+     * label for it would be worse than none.
+     */
+    @Query(
+        "SELECT * FROM boxes WHERE closedAt IS NOT NULL AND printState <> 'printed' " +
+            "AND disassembledAt IS NULL ORDER BY closedAt, boxId",
+    )
     fun observeUnprinted(): Flow<List<BoxEntity>>
 
-    @Query("SELECT COUNT(*) FROM boxes WHERE closedAt IS NOT NULL AND printState <> 'printed'")
+    @Query(
+        "SELECT COUNT(*) FROM boxes WHERE closedAt IS NOT NULL AND printState <> 'printed' " +
+            "AND disassembledAt IS NULL",
+    )
     fun observeUnprintedCount(): Flow<Int>
+
+    /** Guarded so a redelivered confirmation cannot restamp a retirement. */
+    @Query("UPDATE boxes SET disassembledAt = :at WHERE boxId = :boxId AND disassembledAt IS NULL")
+    suspend fun markDisassembled(boxId: String, at: String): Int
+
+    /** Closed, not retired boxes of this shift, most recent first. */
+    @Query(
+        "SELECT * FROM boxes WHERE shiftId = :shiftId AND closedAt IS NOT NULL " +
+            "AND disassembledAt IS NULL ORDER BY closedAt DESC, boxId DESC",
+    )
+    suspend fun reprintable(shiftId: String): List<BoxEntity>
+
+    @Query(
+        "SELECT * FROM boxes WHERE shiftId = :shiftId AND closedAt IS NOT NULL " +
+            "AND disassembledAt IS NULL ORDER BY closedAt DESC, boxId DESC",
+    )
+    fun observeReprintable(shiftId: String): Flow<List<BoxEntity>>
+
+    @Query("SELECT boxId FROM boxes WHERE sscc = :sscc AND disassembledAt IS NULL LIMIT 1")
+    suspend fun boxIdBySscc(sscc: String): String?
 
     @Query("SELECT COUNT(*) FROM boxes WHERE shiftId = :shiftId AND closedAt IS NOT NULL")
     suspend fun closedCount(shiftId: String): Int

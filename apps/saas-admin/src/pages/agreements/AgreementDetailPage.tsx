@@ -25,6 +25,7 @@ import {
   unlinkAgreementTenant,
   uploadAgreementAttachment,
 } from "./api.js";
+import { AgreementDocumentFormField } from "./AgreementDocumentFormField.js";
 import { AgreementRequisitesForm, fromRequisites } from "./AgreementRequisitesForm.js";
 
 const STATUS_CHIP: Record<AgreementStatus, StatusChipStatus> = {
@@ -192,6 +193,11 @@ export function AgreementDetailPage() {
       />
 
       <h3>{t("agreements.sections.documents")}</h3>
+      {/* Read-only for the same reason as the requisites above: the detail
+          page has no update workflow, and an enabled control whose onChange
+          is discarded would silently lose the choice. The form is picked on
+          the create form. */}
+      <AgreementDocumentFormField value={detail.documentForm} onChange={() => undefined} disabled />
       <Button type="button" onClick={() => render.mutate()} disabled={render.isPending}>
         {t("agreements.detail.renderDraft")}
       </Button>
@@ -217,6 +223,13 @@ export function AgreementDetailPage() {
       {uploadError && <Alert tone="error">{uploadError}</Alert>}
       {upload.error && <Alert tone="error">{upload.error.message}</Alert>}
 
+      {detail.documents.some((document) => document.stale) && (
+        // The record says one thing and the stored file says another. Said
+        // before the download button, not after: the point is to stop an
+        // operator sending a document that no longer matches the agreement.
+        <Alert tone="warn">{t("agreements.detail.staleDraft")}</Alert>
+      )}
+
       <Table<(typeof detail.documents)[number]>
         scrollLabel={t("agreements.sections.documents")}
         empty={t("agreements.detail.noDocuments")}
@@ -228,7 +241,22 @@ export function AgreementDetailPage() {
             title: t("agreements.columns.documentKind"),
             render: (row) => t(`agreements.documentKinds.${row.kind}`),
           },
-          { key: "filename", title: t("agreements.columns.filename"), wrap: true },
+          {
+            key: "filename",
+            title: t("agreements.columns.filename"),
+            wrap: true,
+            render: (row) => (
+              <>
+                {row.filename}
+                {row.stale && (
+                  <>
+                    {" "}
+                    <StatusChip status="warn" label={t("agreements.detail.staleBadge")} />
+                  </>
+                )}
+              </>
+            ),
+          },
           {
             key: "size",
             title: t("agreements.columns.size"),

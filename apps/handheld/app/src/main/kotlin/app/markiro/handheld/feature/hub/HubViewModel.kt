@@ -60,7 +60,7 @@ data class HubUi(
     val unprintedLabels: Int = 0,
 )
 
-enum class HubTile { SHIFT, INVENTORY, CHECK, SETTINGS }
+enum class HubTile { SHIFT, INVENTORY, SETTINGS }
 
 /** Reachable = an HTTP response within the last two minutes (the station's online threshold). */
 private const val REACHABLE_WINDOW_MS = 2 * 60 * 1000L
@@ -70,6 +70,7 @@ private val OPEN_SHIFT_STATUSES = setOf("planned", "active")
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class HubViewModel(
+    private val recovery: app.markiro.handheld.core.storage.DeviceRecovery,
     private val api: StationApi,
     private val config: DeviceConfigDao,
     private val session: SessionHolder,
@@ -93,6 +94,7 @@ class HubViewModel(
     @Inject
     constructor(
         @ApplicationContext context: Context,
+        recovery: app.markiro.handheld.core.storage.DeviceRecovery,
         api: StationApi,
         config: DeviceConfigDao,
         session: SessionHolder,
@@ -105,6 +107,7 @@ class HubViewModel(
         boxes: BoxRepository,
         scan: ScanPreferences,
     ) : this(
+        recovery,
         api,
         config,
         session,
@@ -164,14 +167,15 @@ class HubViewModel(
 
     /** Fetches live counts; on any failure the cached counts and their timestamp stay untouched. */
     fun refresh() {
-        viewModelScope.launch {
-            val current = config.get() ?: return@launch
+        viewModelScope.launch { recovery.work {
+            val current = config.get() ?: return@work
             val counts = runCatching {
                 val shifts = api.shifts().items.count { it.status in OPEN_SHIFT_STATUSES }
                 val tasks = api.inventoryTasks().items.size
                 shifts to tasks
-            }.getOrNull() ?: return@launch
-            config.upsert(current.copy(shiftsCount = counts.first, inventoryCount = counts.second, countsAt = now()))
+            }.getOrNull() ?: return@work
+            recovery.commit { config.upsert(current.copy(shiftsCount = counts.first, inventoryCount = counts.second, countsAt = now())) }
+        }
         }
     }
 

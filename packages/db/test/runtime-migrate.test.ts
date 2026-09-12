@@ -143,11 +143,11 @@ try {
   }
   const stationJournalPath = join(stationMigrationsFolder, "meta", "_journal.json");
   const stationJournal = JSON.parse(await readFile(stationJournalPath, "utf8"));
+  // A genuine pre-0029 database has a contiguous migration history. Applying
+  // later migrations while omitting 0029 makes its journal falsely claim that
+  // paired_at/revoked_at exist and prevents runtime from ever adding them.
   stationJournal.entries = stationJournal.entries.filter(
-    (entry) =>
-      entry.tag !== "0029_loving_triathlon" &&
-      entry.tag !== "0071_fantastic_hellion" &&
-      Number(entry.tag.slice(0, 4)) < 72,
+    (entry) => Number(entry.tag.slice(0, 4)) < 29,
   );
   await writeFile(stationJournalPath, JSON.stringify(stationJournal));
 

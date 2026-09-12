@@ -1,3 +1,8 @@
+import {
+  initializeDeviceRecovery,
+  sealDeviceRecovery,
+  restoreDeviceRecovery,
+} from "../src/lib/device-recovery.js";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
@@ -165,6 +170,133 @@ async function rotatingProgressSetup(hooks: Parameters<typeof makeRotatingExec>[
 }
 
 describe("inventory sync engine", () => {
+  it("restores the exact old inventory batch after verified key rotation and denies foreign keys", async () => {
+    const { db, exec } = await setup();
+    const generation = createCredentialGeneration("inventory-key-a");
+    const hash = await credentialGenerationOwnership(generation);
+    await exec.run("UPDATE inventory_task_mirror SET credential_ownership=?", [hash]);
+    await exec.run(
+      "UPDATE station_meta SET value=json_set(value,'$.credentialOwnership',?) WHERE key='active_inventory_floor_task_v1'",
+      [hash],
+    );
+    const config = {
+      machineId: "local",
+      deviceId: DEVICE_ID,
+      tenantId: "tenant",
+      apiKey: "inventory-key-a",
+      serverUrl: "https://api.example",
+    };
+    const view = await initializeDeviceRecovery(exec, config);
+    if (!view.owner) throw new Error("missing owner");
+    const before = await exec.all("SELECT * FROM inventory_scan_events_mirror");
+    const pointer = await exec.all(
+      "SELECT * FROM station_meta WHERE key='active_inventory_floor_task_v1'",
+    );
+    const requests: unknown[] = [];
+    const first = createInventorySyncEngine({
+      exec,
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      credentialGeneration: generation,
+      retry: false,
+      onState: () => {},
+      client: {
+        post: async (_path, body) => {
+          requests.push(structuredClone(body));
+          throw new Error("lost reply");
+        },
+      },
+    });
+    first.nudge();
+    await first.idle();
+    first.stop();
+    const batch = await exec.all(
+      "SELECT * FROM station_meta WHERE key LIKE 'inventory_sync_batch_v1:%'",
+    );
+    await sealDeviceRecovery(exec, config, generation);
+    const foreignPost = vi.fn();
+    const foreign = createInventorySyncEngine({
+      exec,
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      credentialGeneration: createCredentialGeneration("foreign"),
+      retry: false,
+      onState: () => {},
+      client: { post: foreignPost },
+    });
+    foreign.nudge();
+    await foreign.idle();
+    foreign.stop();
+    expect(foreignPost).not.toHaveBeenCalled();
+    expect(
+      await exec.all("SELECT * FROM station_meta WHERE key LIKE 'inventory_sync_batch_v1:%'"),
+    ).toEqual(batch);
+    let restored = config;
+    await restoreDeviceRecovery(
+      exec,
+      view.owner,
+      {
+        deviceId: DEVICE_ID,
+        tenantId: "tenant",
+        apiKey: "inventory-key-b",
+        serverUrl: config.serverUrl,
+        deviceName: "Station",
+        organizationName: "Org",
+        operators: [],
+      },
+      async (next) => {
+        restored = { ...config, ...next, apiKey: next.apiKey ?? "" };
+      },
+    );
+    expect((await initializeDeviceRecovery(exec, restored)).phase).toBe("active");
+    const second = createInventorySyncEngine({
+      exec,
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      credentialGeneration: createCredentialGeneration("inventory-key-b"),
+      retry: false,
+      onState: () => {},
+      client: {
+        post: async <T>(_path: string, value?: unknown): Promise<T> => {
+          requests.push(structuredClone(value));
+          const request = value as {
+            batchId: string;
+            payloadDigest: string;
+            sequenceCeiling: number;
+          };
+          return {
+            inventoryId: INVENTORY_ID,
+            snapshotId: SNAPSHOT_ID,
+            snapshotRevision: 1,
+            batchId: request.batchId,
+            payloadDigest: request.payloadDigest,
+            sequenceCeiling: request.sequenceCeiling,
+            resultRevision: 1,
+            outcomes: [appliedOutcome()],
+          } as T;
+        },
+      },
+    });
+    second.nudge();
+    await second.idle();
+    second.stop();
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toEqual(requests[0]);
+    expect(await exec.all("SELECT * FROM inventory_outbox")).toEqual([]);
+    expect(await exec.all("SELECT * FROM inventory_scan_events_mirror")).toEqual(
+      before.map((row) => ({
+        ...(row as Record<string, unknown>),
+        authoritative_verdict: "applied",
+        server_reason_code: "CLAIM_APPLIED",
+        server_result_revision: 1,
+      })),
+    );
+    expect(
+      await exec.all("SELECT * FROM station_meta WHERE key='active_inventory_floor_task_v1'"),
+    ).toEqual(pointer);
+    db.close();
+  });
+
   it("reruns receipt migrations through rotating pooled SQLite connections", async () => {
     const directory = mkdtempSync(join(tmpdir(), `inventory-migration-${randomUUID()}-`));
     const path = join(directory, "mirror.sqlite");

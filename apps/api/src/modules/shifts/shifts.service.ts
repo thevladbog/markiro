@@ -1476,7 +1476,7 @@ export class ShiftsService {
       // signal is `shifts.pallets_enabled`, and the two diverge on an
       // ordinary path: with pallets off the admin omits `palletBoxCapacity`,
       // `createShift` reads an omitted value as "take the product's", and
-      // migration 0130 backfilled `products.pallet_box_capacity` broadly --
+      // migration 0135 backfilled `products.pallet_box_capacity` broadly --
       // so a pallets-DISABLED shift routinely carries a capacity. Emitting it
       // would make both devices show the pallet strip, join boxes to local
       // pallets and send `devicePalletId`, creating server pallet rows that
@@ -1799,7 +1799,7 @@ export class ShiftsService {
    * not be turned into a 422 by that earlier, deliberate choice. Callers
    * invoke this only at the moment pallets are being newly ENABLED -- create,
    * or the update path's off -> ON transition -- which is exactly where
-   * migration 0130 used to guarantee a resolvable default and, since the I6
+   * migration 0135 used to guarantee a resolvable default and, since the I6
    * fix let a tenant clear its own, no longer does.
    */
   private resolvePalletTemplate(

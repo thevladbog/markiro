@@ -41,6 +41,8 @@ WORKDIR /app
 COPY --from=build --chown=node:node /out/api /app
 COPY --from=build --chown=node:node /workspace/packages/db/migrations /app/node_modules/@markiro/db/migrations
 COPY --chown=node:node deploy/production/healthcheck.mjs /opt/markiro/healthcheck.mjs
+COPY --chown=node:node deploy/production/working-device-compatibility.mjs /opt/markiro/working-device-compatibility.mjs
+RUN node /opt/markiro/working-device-compatibility.mjs
 COPY --chown=root:root deploy/production/yandex-cloud-ca.pem /etc/ssl/certs/yandex-cloud-ca.pem
 ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/yandex-cloud-ca.pem
 ENV NODE_ENV=production PORT=3000

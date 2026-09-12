@@ -120,7 +120,8 @@ function renderAccessRoute(
       if (path.endsWith("/api/org/profile")) {
         return jsonResponse(200, { gln: null, gs1Prefixes: [], inn: null });
       }
-      if (path.endsWith("/api/products")) return jsonResponse(200, { items: [] });
+      if (path === "/api/products" || path.startsWith("/api/products?"))
+        return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/pickup-reasons")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/counterparties")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/employees")) return jsonResponse(200, { items: [JANE] });
@@ -210,7 +211,7 @@ it("redirects the retired kiosks section into the unified devices page", async (
   expect(requests).not.toContain("/api/kiosks");
 });
 
-it.each(["/catalog/new", "/catalog/p1/edit"])(
+it.each(["/catalog/new"])(
   "forbids the direct write route %s for a read-only operator",
   async (path) => {
     renderAccessRoute(path, OPERATIONS_READ_ONLY);
@@ -219,6 +220,19 @@ it.each(["/catalog/new", "/catalog/p1/edit"])(
     expect(screen.queryByRole("dialog")).toBeNull();
   },
 );
+
+it("opens product details without write controls for a read-only operator", async () => {
+  renderAccessRoute("/catalog/p1/edit", OPERATIONS_READ_ONLY);
+  expect(await screen.findByRole("dialog", { name: "Карточка товара" })).toBeDefined();
+  expect(screen.queryByTestId("forbidden-page")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Сохранить" })).toBeNull();
+});
+
+it("denies direct product details without operations.read", async () => {
+  renderAccessRoute("/catalog/p1/edit", INTEGRATIONS_ONLY_ACCESS);
+  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
 
 it("allows a read-only operator to open write-off reasons directly", async () => {
   renderAccessRoute("/kiosks/reasons", OPERATIONS_READ_ONLY);

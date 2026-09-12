@@ -15,7 +15,7 @@ import {
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
-import { AgreementDocumentsService } from "./agreement-documents.service";
+import { AgreementDocumentsService, isAgreementDocumentStale } from "./agreement-documents.service";
 import { nextAgreementNumber } from "./agreement-numbering";
 import {
   buildStoredTerms,
@@ -75,6 +75,7 @@ export class PlatformAgreementsService {
               status: "draft",
               conclusionDate: input.conclusionDate ?? null,
               city: input.city ?? null,
+              documentForm: input.documentForm ?? "ru",
               counterpartyInn: input.counterparty.inn ?? null,
               counterparty: input.counterparty,
               contractor,
@@ -132,6 +133,7 @@ export class PlatformAgreementsService {
             ...(input.number === undefined ? {} : { number: input.number }),
             ...(input.conclusionDate === undefined ? {} : { conclusionDate: input.conclusionDate }),
             ...(input.city === undefined ? {} : { city: input.city }),
+            ...(input.documentForm === undefined ? {} : { documentForm: input.documentForm }),
             ...(input.counterparty === undefined
               ? {}
               : {
@@ -200,6 +202,7 @@ export class PlatformAgreementsService {
                 number: existing.number,
                 conclusionDate: existing.conclusionDate,
                 city: existing.city,
+                documentForm: existing.documentForm,
                 counterparty: existing.counterparty,
                 contractor: existing.contractor,
                 terms: existing.terms,
@@ -471,6 +474,7 @@ function toSummary(row: AgreementRow): AgreementSummary {
     id: row.id,
     number: row.number,
     status: row.status,
+    documentForm: row.documentForm,
     counterpartyName: counterparty.name,
     counterpartyInn: row.counterpartyInn,
     conclusionDate: row.conclusionDate,
@@ -498,6 +502,7 @@ function toDetail(row: AgreementRow, documents: readonly AgreementDocumentRow[])
       mediaType: document.mediaType,
       sha256: document.sha256,
       byteSize: document.byteSize,
+      stale: isAgreementDocumentStale(row, document),
       createdAt: document.createdAt.toISOString(),
     })),
   };

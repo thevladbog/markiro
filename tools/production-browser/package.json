@@ -22,7 +22,8 @@
     "test:catalog": "playwright test --config catalog.playwright.config.ts",
     "test:catalog-import": "playwright test --config catalog-import.playwright.config.ts",
     "test:reports": "playwright test --config reports.playwright.config.ts",
-    "test:offers": "playwright test --config offers.playwright.config.ts"
+    "test:offers": "playwright test --config offers.playwright.config.ts",
+    "test:catalog-regulatory": "playwright test --config catalog-regulatory.playwright.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.62.0",

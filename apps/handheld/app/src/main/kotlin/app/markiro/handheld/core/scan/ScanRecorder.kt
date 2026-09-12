@@ -1,7 +1,6 @@
 package app.markiro.handheld.core.scan
 
 import android.database.sqlite.SQLiteConstraintException
-import androidx.room.withTransaction
 import app.markiro.handheld.core.km.Classification
 import app.markiro.handheld.core.km.ParsedKm
 import app.markiro.handheld.core.km.ShiftValidator
@@ -43,10 +42,17 @@ class ScanRecorder(private val db: HandheldDatabase, private val clock: () -> Lo
         raw: String,
         operatorId: String?,
         boxId: String? = null,
+    ): ScanOutcome = db.recovery.commit { recordOwned(shift, raw, operatorId, boxId) }
+
+    private suspend fun recordOwned(
+        shift: ShiftEntity,
+        raw: String,
+        operatorId: String?,
+        boxId: String? = null,
     ): ScanOutcome = mutex.withLock {
         val expectedGtin = checkNotNull(shift.productGtin14) { "shift ${shift.id} has no bundle" }
         val scannedAt = Iso.format(clock())
-        db.withTransaction {
+        db.recovery.commit {
             when (val c = ShiftValidator.classify(raw, expectedGtin)) {
                 is Classification.Invalid -> {
                     write(shift.id, raw, Verdict.INVALID, scannedAt, operatorId, null, null, null)

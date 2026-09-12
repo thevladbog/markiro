@@ -209,6 +209,23 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
     expect(profile.body).toMatchObject({
       productId: seeded.productId,
       binding: { revision: 1, categoryId: "softdrinks" },
+      definition: {
+        formatVersion: 2,
+        categoryId: "softdrinks",
+        scopeKey: seeded.scopeKey,
+        attributes: [
+          expect.objectContaining({
+            id: "hasSweetener",
+            label: "Содержит подсластитель",
+            valueType: "boolean",
+            multiplicity: "one",
+            unit: null,
+            requirementRules: [{ layer: "circulation", level: "mandatory", when: null }],
+            presetMode: "none",
+            presets: [],
+          }),
+        ],
+      },
     });
 
     const readiness = await owner.get(`/products/${seeded.productId}/readiness`).expect(200);
@@ -220,6 +237,22 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
       ]),
     );
     await foreign.get(`/products/${seeded.productId}/regulatory-profile`).expect(404);
+  });
+
+  it("returns a null definition for an unbound tenant product", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const tenant = await signUpAndActivate(owner);
+    await seedMappedSchema(tenant.actorUserId);
+    const productId = await seedUnboundProduct(tenant.tenantId);
+
+    await owner.get(`/products/${productId}/regulatory-profile`).expect(200, {
+      productId,
+      binding: null,
+      definition: null,
+      values: [],
+      egaisCodes: [],
+      pendingProposalCount: 0,
+    });
   });
 
   it("stores a manual typed value, increments revision, and writes an exact audit event", async () => {

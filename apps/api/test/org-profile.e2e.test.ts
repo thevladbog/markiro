@@ -309,7 +309,7 @@ describe.skipIf(!ready)("org profile e2e", () => {
   }
 
   it("PUT /org/profile sets, preserves, and clears a same-tenant pallet label default", async () => {
-    // Without this write path the stock «Паллета 100×150» that migration 0130
+    // Without this write path the stock «Паллета 100×150» that migration 0135
     // pins to `org_profiles.default_pallet_label_template_id` is permanently
     // undisableable for every tenant: `LABEL_TEMPLATE_REFERENCE_CONSTRAINTS`
     // refuses to disable a template a default still names, and nothing could

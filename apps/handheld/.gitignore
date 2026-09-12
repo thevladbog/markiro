@@ -5,3 +5,7 @@ local.properties
 .idea/
 *.iml
 captures/
+# Signing material never belongs in the repository; see README, «Релизная сборка».
+keystore.properties
+*.jks
+*.keystore

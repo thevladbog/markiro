@@ -356,6 +356,10 @@ describe("credential rejection recovery", () => {
       productLabels: 0,
       boxes: 1,
       exceptions: 1,
+      closes: 0,
+      conflicts: 1,
+      quarantinedLabels: 0,
+      unknownPrints: 0,
       total: 5,
     });
     expect(snapshotQueries).toBe(1);
@@ -400,6 +404,10 @@ describe("credential rejection recovery", () => {
       productLabels: 0,
       boxes: 0,
       exceptions: 0,
+      closes: 0,
+      conflicts: 0,
+      quarantinedLabels: 0,
+      unknownPrints: 0,
       total: 1,
     });
   });

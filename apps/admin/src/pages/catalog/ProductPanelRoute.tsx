@@ -1,5 +1,7 @@
+import { CABINET_CAPABILITY } from "@markiro/domain";
+import { useCan } from "../../access/context.js";
 import { Alert, Button, ConfirmDialog, SidePanel, Spinner } from "@markiro/ui";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useOutletContext, useParams } from "react-router";
 
@@ -16,14 +18,17 @@ import {
   type ProductDto,
 } from "./api.js";
 import { ProductForm, type ProductFormValues } from "./ProductForm.js";
+import { ProductRegulatorySections } from "./regulatory/ProductRegulatorySections.js";
 
 export interface CatalogPanelContext {
   products: ProductDto[];
   productsPending: boolean;
   productsError: boolean;
+  productsAvailable: boolean;
   counterparties: CounterpartyDto[];
   counterpartiesPending: boolean;
   counterpartiesError: boolean;
+  counterpartiesAvailable: boolean;
   retryPanelData: () => Promise<void>;
 }
 
@@ -41,7 +46,14 @@ export function closeCatalogPanel(
 }
 
 export function ProductPanelRoute({ mode }: { mode: "create" | "edit" }) {
-  return mode === "create" ? <CreateProductPanel /> : <EditProductPanel />;
+  const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
+  return mode === "create" ? (
+    <CreateProductPanel />
+  ) : canWrite ? (
+    <EditProductPanel />
+  ) : (
+    <ReadProductPanel />
+  );
 }
 
 function usePanelContext() {
@@ -50,7 +62,9 @@ function usePanelContext() {
   const location = useLocation();
   const navigate = useNavigate();
   const loading = context.productsPending || context.counterpartiesPending;
-  const failed = context.productsError || context.counterpartiesError;
+  const failed =
+    (context.productsError && !context.productsAvailable) ||
+    (context.counterpartiesError && !context.counterpartiesAvailable);
   const close = () => closeCatalogPanel(location, navigate);
   return { t, context, loading, failed, close };
 }
@@ -82,7 +96,12 @@ function CreateProductPanel() {
   const imageMutation = useUploadProductImage();
   const [error, setError] = useState<string | null>(null);
   const [createdProduct, setCreatedProduct] = useState<ProductDto | null>(null);
-  const guard = useRoutePanelGuard(close, mutation.isPending || imageMutation.isPending);
+  const navigate = useNavigate();
+  const destination = useRef<string | null>(null);
+  const guard = useRoutePanelGuard(() => {
+    if (destination.current) void navigate(destination.current, { replace: true });
+    else close();
+  }, mutation.isPending || imageMutation.isPending);
   const createdInitialValues = useMemo<ProductFormValues | undefined>(
     () =>
       createdProduct
@@ -136,6 +155,7 @@ function CreateProductPanel() {
               }
             }
             toast("ok", t("pages.catalog.toasts.createSuccess"));
+            destination.current = `/catalog/${encodeURIComponent(created.id)}/edit`;
             guard.finish();
           } catch (cause) {
             if (!createdProduct) {
@@ -172,9 +192,21 @@ function EditProductPanel() {
   const deleteImageMutation = useDeleteProductImage();
   const [error, setError] = useState<string | null>(null);
   const [gtinError, setGtinError] = useState<string | null>(null);
+  const [baseDirty, setBaseDirty] = useState(false);
+  const [regulatoryDirty, setRegulatoryDirty] = useState(false);
+  const [regulatoryBusy, setRegulatoryBusy] = useState(false);
+  const [profileBound, setProfileBound] = useState(true);
   const guard = useRoutePanelGuard(
     close,
-    mutation.isPending || imageMutation.isPending || deleteImageMutation.isPending,
+    mutation.isPending ||
+      imageMutation.isPending ||
+      deleteImageMutation.isPending ||
+      regulatoryBusy,
+  );
+  const setGuardDirty = guard.setDirty;
+  useEffect(
+    () => setGuardDirty(baseDirty || regulatoryDirty),
+    [baseDirty, regulatoryDirty, setGuardDirty],
   );
   const product = context.products.find((item) => item.id === productId);
   const initialValues = useMemo<ProductFormValues | undefined>(
@@ -230,6 +262,38 @@ function EditProductPanel() {
         mode="edit"
         initialValues={initialValues}
         productStatus={product.status}
+        regulatoryDirty={regulatoryDirty}
+        regulatoryBusy={regulatoryBusy}
+        profileBound={profileBound}
+        regulatoryContent={
+          <>
+            {(context.productsError || context.counterpartiesError) && (
+              <Alert
+                tone="warn"
+                action={
+                  <Button onClick={() => void context.retryPanelData()}>
+                    {t("pages.catalog.form.retry")}
+                  </Button>
+                }
+              >
+                {t("pages.catalog.regulatory.cachedDataError")}
+              </Alert>
+            )}
+            <ProductRegulatorySections
+              key={product.id}
+              product={product}
+              disabled={
+                baseDirty ||
+                mutation.isPending ||
+                imageMutation.isPending ||
+                deleteImageMutation.isPending
+              }
+              onDirtyChange={setRegulatoryDirty}
+              onBusyChange={setRegulatoryBusy}
+              onProfileBoundChange={setProfileBound}
+            />
+          </>
+        }
         productId={product.id}
         externalRef={product.externalRef}
         {...(product.chz ? { chzSummary: product.chz } : {})}
@@ -251,7 +315,7 @@ function EditProductPanel() {
           }
         }}
         submissionError={error}
-        onDirtyChange={guard.setDirty}
+        onDirtyChange={setBaseDirty}
         onClose={guard.requestClose}
         onSubmit={async (input: CreateProductInput, image, detach) => {
           setError(null);
@@ -306,5 +370,40 @@ function EditProductPanel() {
         />
       ) : null}
     </>
+  );
+}
+
+const ignoreDirty = () => {};
+function ReadProductPanel() {
+  const { productId } = useParams();
+  const { t, context, loading, failed, close } = usePanelContext();
+  if (loading || failed) return <PanelState mode="edit" />;
+  const product = context.products.find((item) => item.id === productId);
+  return (
+    <SidePanel
+      open
+      title={t("pages.catalog.regulatory.viewTitle")}
+      closeLabel={t("common.close")}
+      onClose={close}
+    >
+      {product ? (
+        <>
+          <section className="mk-catalog-panel-section">
+            <h3>{product.name}</h3>
+            <dl className="mk-regulatory-binding">
+              <dt>{t("pages.catalog.form.gtinLabel")}</dt>
+              <dd>{product.gtin14}</dd>
+              <dt>{t("pages.catalog.table.productGroup")}</dt>
+              <dd>{product.productGroup ?? "—"}</dd>
+              <dt>{t("pages.catalog.table.boxCapacity")}</dt>
+              <dd>{product.boxCapacity ?? "—"}</dd>
+            </dl>
+          </section>
+          <ProductRegulatorySections product={product} onDirtyChange={ignoreDirty} />
+        </>
+      ) : (
+        <p>{t("pages.catalog.form.notFound")}</p>
+      )}
+    </SidePanel>
   );
 }

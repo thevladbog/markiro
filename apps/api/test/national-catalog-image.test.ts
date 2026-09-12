@@ -1,3 +1,4 @@
+import { EntitlementAdmissionService } from "../src/subscriptions/entitlement-admission.service";
 import sharp from "sharp";
 import { PgBoss, type JobWithMetadata } from "pg-boss";
 import { createHash } from "node:crypto";
@@ -21,7 +22,12 @@ import { buildImportPreview } from "../src/modules/national-catalog/national-cat
 import { NationalCatalogImageService } from "../src/modules/national-catalog/national-catalog-image.service";
 import { NationalCatalogImportApplyService } from "../src/modules/national-catalog/national-catalog-import-apply.service";
 import type { NationalCatalogProduct } from "../src/modules/national-catalog/national-catalog.types";
-import { createManagedSubscription, createOrganization } from "./support/subscription-fixtures";
+import {
+  createManagedSubscription,
+  createOrganization,
+  createPublishedAddon,
+} from "./support/subscription-fixtures";
+import { evaluateEntitlementOperation } from "../src/subscriptions/entitlement-projection";
 
 const GTIN = "04601234567893";
 if (!process.env.DATABASE_URL) throw new Error("Apply tests require local PostgreSQL");
@@ -209,6 +215,7 @@ describe("private National Catalog images (real PostgreSQL and normalized bytes)
       products,
       { enabled: true, verifiedHosts: ["images.example"] },
       download,
+      new EntitlementAdmissionService(db, new EntitlementsService(db, "managed_only")),
     );
     return { service, media, products, download, coordinator, storage, objects };
   }
@@ -418,6 +425,37 @@ describe("private National Catalog images (real PostgreSQL and normalized bytes)
     await rt.service.resume(actor.tenantId, sessionId, p.id, id);
     expect(rt.download).not.toHaveBeenCalled();
   });
+  it("records the verified photo preparer rather than the import session creator", async () => {
+    const other = randomUUID();
+    await db
+      .insert(schema.user)
+      .values({ id: other, name: "Preparer", email: `${other}@example.test`, emailVerified: true });
+    await db.insert(schema.member).values({
+      id: randomUUID(),
+      userId: other,
+      organizationId: actor.tenantId,
+      role: "owner",
+      createdAt: new Date(),
+    });
+    photos();
+    const p = await preview(undefined, undefined, other);
+    const rt = runtime();
+    await rt.service.resume(actor.tenantId, sessionId, p.id, p.photos[0]?.candidateId ?? "");
+    const observations = await db
+      .select()
+      .from(schema.entitlementShadowObservations)
+      .where(eq(schema.entitlementShadowObservations.tenantId, actor.tenantId));
+    expect(observations).toHaveLength(2);
+    expect(
+      observations.every(
+        (row) =>
+          row.actorType === "cabinet" &&
+          row.actorId === other &&
+          row.operationId === "nk.worker.v1" &&
+          row.fencedAttempt === 1,
+      ),
+    ).toBe(true);
+  });
   it("retains a foreign-GTIN warning after explicit preparation and never chooses it by default", async () => {
     source.images = [
       {
@@ -500,6 +538,21 @@ describe("private National Catalog images (real PostgreSQL and normalized bytes)
     const rt = runtime();
     const { p, id } = await prepared(rt);
     const { apply, result } = await accept(p, id);
+    const [subscription] = await db
+      .select()
+      .from(schema.tenantSubscriptions)
+      .where(eq(schema.tenantSubscriptions.tenantId, actor.tenantId));
+    if (!subscription) throw new Error("subscription fixture missing");
+    await db.insert(schema.subscriptionAddons).values({
+      tenantId: actor.tenantId,
+      subscriptionId: subscription.id,
+      addonVersionId: await createPublishedAddon(db, [{ entitlementKey: "chzIntegration" }]),
+      quantity: 1,
+      startsAt: new Date(Date.now() - 60_000),
+      endsAt: new Date(Date.now() + 3_600_000),
+      status: "active",
+      source: "manual",
+    });
     const future = new Date(Date.now() + 48 * 3600_000);
     expect(await rt.service.releaseExpired(future)).toBeGreaterThanOrEqual(0);
     const [previewRow] = await db
@@ -519,11 +572,35 @@ describe("private National Catalog images (real PostgreSQL and normalized bytes)
       .update(schema.nationalCatalogImportSessions)
       .set({ state: "expired" })
       .where(eq(schema.nationalCatalogImportSessions.id, sessionId));
+    const facts = await new EntitlementAdmissionService(
+      db,
+      new EntitlementsService(db, "managed_only"),
+    ).capture(actor.tenantId);
+    if (!facts.snapshot) throw new Error("snapshot fixture missing");
+    expect(evaluateEntitlementOperation(facts.snapshot, "nk.worker.v1").outcome).toBe("allow");
+    const before = await db
+      .select({ id: schema.entitlementShadowObservations.id })
+      .from(schema.entitlementShadowObservations)
+      .where(eq(schema.entitlementShadowObservations.tenantId, actor.tenantId));
     await rt.service.apply(actor.tenantId, result.operationId, p.id);
     expect((await apply.read(actor.tenantId, sessionId, result.operationId)).items[0]?.image).toBe(
       "applied",
     );
     expect(rt.download).toHaveBeenCalledTimes(1);
+    const after = await db
+      .select()
+      .from(schema.entitlementShadowObservations)
+      .where(eq(schema.entitlementShadowObservations.tenantId, actor.tenantId));
+    const observations = after.filter((row) => !before.some((prior) => prior.id === row.id));
+    expect(observations).toHaveLength(1);
+    expect(observations[0]).toMatchObject({
+      actorType: "cabinet",
+      actorId: actor.userId,
+      operationId: "nk.worker.v1",
+      outcome: "unknown",
+      reasonCodes: ["runtime_readiness_unknown"],
+      resourceScope: { runtime: { enabled: null, observedAt: expect.any(String) } },
+    });
   });
   it("keeps product success on photo conflict, including equal-checksum local replacement, and retry preserves decision", async () => {
     const rt = runtime();

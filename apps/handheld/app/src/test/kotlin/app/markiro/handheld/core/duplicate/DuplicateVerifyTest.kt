@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.duplicate
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -79,6 +80,7 @@ class DuplicateVerifyTest {
                 language = "zpl", dpi = 203, selected = true, lastStatus = null, lastSeenAt = null,
             ),
         )
+        db.initializeRecoveryForTest()
     }
 
     @After

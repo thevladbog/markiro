@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EntitlementsService } from "../src/subscriptions/entitlements.service";
 import { SubscriptionAccessGuard } from "../src/subscriptions/subscription-access.guard";
 import {
+  AllowSubscriptionLicensing,
   AllowSubscriptionRecovery,
   RequireFeature,
   RequireSubscriptionWrite,
@@ -21,6 +22,12 @@ class PolicyController {
 
   @AllowSubscriptionRecovery("station")
   recovery(): void {}
+
+  @AllowSubscriptionLicensing("cancel_reservation")
+  licensing(): void {}
+
+  @AllowSubscriptionLicensing("inspect")
+  licensingInspect(): void {}
 }
 
 interface FakeRequest {
@@ -40,6 +47,8 @@ const unclassifiedHandler = PolicyController.prototype.unclassified;
 const writeHandler = PolicyController.prototype.write;
 const featureHandler = PolicyController.prototype.feature;
 const recoveryHandler = PolicyController.prototype.recovery;
+const licensingHandler = PolicyController.prototype.licensing;
+const licensingInspectHandler = PolicyController.prototype.licensingInspect;
 
 function entitlements(
   access: EffectiveEntitlements["access"],
@@ -145,6 +154,36 @@ describe("SubscriptionAccessGuard", () => {
     service.resolve.mockResolvedValue(entitlements("read_only"));
     await expect(
       guard().canActivate(contextFor({ method: "POST", tenantId: "tenant_1" }, recoveryHandler)),
+    ).resolves.toBe(true);
+  });
+
+  it("permits only the explicit licensing cancellation in read-only and unmanaged all mode", async () => {
+    service.resolve.mockResolvedValueOnce(entitlements("read_only"));
+    await expect(
+      guard().canActivate(contextFor({ method: "POST", tenantId: "tenant_1" }, licensingHandler)),
+    ).resolves.toBe(true);
+
+    service.resolve.mockResolvedValueOnce(entitlements("unmanaged"));
+    await expect(
+      guard("all").canActivate(
+        contextFor({ method: "POST", tenantId: "tenant_1" }, licensingHandler),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it("permits the explicit licensing inspection in read-only and unmanaged all mode", async () => {
+    service.resolve.mockResolvedValueOnce(entitlements("read_only"));
+    await expect(
+      guard().canActivate(
+        contextFor({ method: "GET", tenantId: "tenant_1" }, licensingInspectHandler),
+      ),
+    ).resolves.toBe(true);
+
+    service.resolve.mockResolvedValueOnce(entitlements("unmanaged"));
+    await expect(
+      guard("all").canActivate(
+        contextFor({ method: "GET", tenantId: "tenant_1" }, licensingInspectHandler),
+      ),
     ).resolves.toBe(true);
   });
 });

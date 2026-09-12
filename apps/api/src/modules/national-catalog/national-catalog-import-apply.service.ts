@@ -1,3 +1,7 @@
+import {
+  type EntitlementAdmissionService,
+  admissionScopeDigest,
+} from "../../subscriptions/entitlement-admission.service";
 import { assertReadyImage, naturalReadyPhotoId } from "./national-catalog-image-state";
 import { randomUUID } from "node:crypto";
 import {
@@ -37,10 +41,12 @@ export class NationalCatalogImportApplyService {
   constructor(
     private readonly repository: NationalCatalogImportRepository,
     private readonly sessions: NationalCatalogImportService,
+    private readonly admission?: EntitlementAdmissionService,
   ) {}
   async start(actor: ImportActor, sessionId: string, input: ImportApply): Promise<ImportResult> {
     const body = importApplySchema.parse(input);
     const canonical = canonicalImportDecisions(body);
+    const facts = await this.admission?.capture(actor.tenantId);
     const operationId = await this.repository.transaction(async (tx) => {
       // Serializes tenant-wide requestId admission and coherent entitlement mutation checks.
       await lockTenantSubscriptionTimeline(tx, actor.tenantId);
@@ -167,6 +173,16 @@ export class NationalCatalogImportApplyService {
           imageRetryEligible: !!imageId,
         });
       }
+      await this.admission?.observe({
+        tenantId: actor.tenantId,
+        actor: { domain: "cabinet", id: actor.userId },
+        operationId: "nk.apply.v1",
+        scopeDigest: admissionScopeDigest({ sessionId, decisionHash: canonical.hash }),
+        transaction: tx,
+        facts,
+        runtime: { enabled: true, observedAt: new Date() },
+        requestId: body.requestId,
+      });
       await tx.insert(operations).values({
         id,
         tenantId: actor.tenantId,
@@ -212,6 +228,7 @@ export class NationalCatalogImportApplyService {
     if (admitted.operation.state === "cancelled") return;
     for (const candidate of admitted.items) {
       try {
+        const facts = await this.admission?.capture(tenantId);
         await this.repository.transaction(async (tx) => {
           await lockTenantSubscriptionTimeline(tx, tenantId);
           const session = await this.repository.lock(tx, tenantId, admitted.operation.sessionId);
@@ -238,6 +255,20 @@ export class NationalCatalogImportApplyService {
           const preview = await this.preview(tx, tenantId, session.id, item.previewId);
           if (sourceEnvelopeSchema.parse(preview.source).environment !== session.environment)
             throw new ConflictException("environment_mismatch");
+          await this.admission?.observe({
+            tenantId: tenantId,
+            actor: { domain: "cabinet", id: actor.userId },
+            operationId: "nk.worker.v1",
+            scopeDigest: admissionScopeDigest({
+              operationId,
+              itemId: item.id,
+              previewId: preview.id,
+            }),
+            transaction: tx,
+            facts,
+            runtime: { enabled: true, observedAt: new Date() },
+            attempt: { number: item.attempts + 1, identity: item.id },
+          });
           await applyImportItem(tx, actor, preview, item);
         });
       } catch (error) {

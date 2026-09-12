@@ -1,3 +1,4 @@
+import { ENTITLEMENT_SNAPSHOT } from "./entitlements-fixture.js";
 import type { SellerTaxPolicy } from "@markiro/platform-contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
@@ -182,6 +183,7 @@ export const DRAFT_PLAN = {
   documentNameEn: null,
   subject: null,
   sellerPolicyRevision: null,
+  lifecyclePolicyId: "91111111-1111-4111-8111-111111111111",
   kind: "plan",
   version: 2,
   status: "draft",
@@ -205,6 +207,10 @@ export const DRAFT_PLAN = {
     labelEditorEnabled: true,
     publicApiEnabled: false,
     palletsEnabled: false,
+    chzIntegrationEnabled: false,
+    inventoryEnabled: false,
+    commerceMlEnabled: false,
+    handheldEnabled: false,
     demoDurationDays: 14,
   },
 } satisfies CatalogVersionDto;
@@ -226,6 +232,7 @@ export const ADDON = {
   documentNameEn: null,
   subject: null,
   sellerPolicyRevision: null,
+  lifecyclePolicyId: "91111111-1111-4111-8111-111111111111",
   kind: "addon",
   version: 1,
   status: "published",
@@ -252,6 +259,7 @@ export const SERVICE = {
   documentNameEn: null,
   subject: null,
   sellerPolicyRevision: null,
+  lifecyclePolicyId: "91111111-1111-4111-8111-111111111111",
   kind: "service",
   version: 1,
   status: "published",
@@ -306,6 +314,9 @@ export function installCatalogApi({
   catalogStatus = 200,
   stalePublishPrice,
   stalePublishPeriod,
+  lifecyclePolicies = [
+    { id: "91111111-1111-4111-8111-111111111111", policyKey: "test-fixture-policy", version: 1 },
+  ],
   taxPolicy = {
     kind: "vat",
     regime: "other",
@@ -324,6 +335,7 @@ export function installCatalogApi({
   catalogStatus?: number;
   stalePublishPrice?: string;
   stalePublishPeriod?: "month" | "year";
+  lifecyclePolicies?: { id: string; policyKey: string; version: number }[];
   taxPolicy?: SellerTaxPolicy | null;
 } = {}) {
   let catalog: CatalogVersionDto[] = items.map((item) => structuredClone(item));
@@ -371,16 +383,23 @@ export function installCatalogApi({
                 ? { vatRateBps: null, vatIncluded: false }
                 : null,
           canWrite: true,
+          lifecyclePolicies,
         });
-      if (url.endsWith("/review"))
+      if (url.endsWith("/review")) {
+        const policyId =
+          catalog.find((item) => item.id === url.split("/").at(-2))?.lifecyclePolicyId ?? null;
         return jsonResponse(200, {
           identity: {
             catalogVersionId: url.split("/").at(-2),
             draftUpdatedAt: reviewRevision,
+            lifecyclePolicyId: policyId,
+            lifecyclePolicyVersion: policyId ? 1 : null,
+            lifecyclePolicyHash: policyId ? "a".repeat(64) : null,
             sellerPolicyRevision: 1,
           },
           errors: [],
         });
+      }
       const createMatch = url.match(/\/api\/platform\/catalog\/items\/([^/]+)\/versions$/);
       if (createMatch && init.method === "POST") {
         const response = createResponses.shift() ?? 201;
@@ -492,6 +511,7 @@ const SCHEDULED_PLAN = {
   documentNameEn: null,
   subject: null,
   sellerPolicyRevision: null,
+  lifecyclePolicyId: "91111111-1111-4111-8111-111111111111",
   version: 3,
   nameRu: "Производственный",
   nameEn: "Production",
@@ -504,6 +524,10 @@ const SCHEDULED_PLAN = {
     labelEditorEnabled: true,
     publicApiEnabled: true,
     palletsEnabled: true,
+    chzIntegrationEnabled: false,
+    inventoryEnabled: false,
+    commerceMlEnabled: false,
+    handheldEnabled: false,
     demoDurationDays: null,
   },
 } satisfies CatalogVersionDto;
@@ -571,6 +595,7 @@ export const TENANT_DETAIL = {
       documentNameEn: null,
       subject: null,
       sellerPolicyRevision: null,
+      lifecyclePolicyId: "91111111-1111-4111-8111-111111111111",
       kind: "plan",
       version: 1,
       status: "published",
@@ -590,6 +615,10 @@ export const TENANT_DETAIL = {
         labelEditorEnabled: true,
         publicApiEnabled: false,
         palletsEnabled: false,
+        chzIntegrationEnabled: false,
+        inventoryEnabled: false,
+        commerceMlEnabled: false,
+        handheldEnabled: false,
         demoDurationDays: 14,
       },
     },
@@ -614,6 +643,7 @@ export const TENANT_DETAIL = {
       documentNameEn: null,
       subject: null,
       sellerPolicyRevision: null,
+      lifecyclePolicyId: "91111111-1111-4111-8111-111111111111",
       kind: "plan",
       version: 3,
       status: "published",
@@ -633,6 +663,10 @@ export const TENANT_DETAIL = {
         labelEditorEnabled: true,
         publicApiEnabled: true,
         palletsEnabled: true,
+        chzIntegrationEnabled: false,
+        inventoryEnabled: false,
+        commerceMlEnabled: false,
+        handheldEnabled: false,
         demoDurationDays: null,
       },
     },
@@ -656,6 +690,7 @@ export const TENANT_DETAIL = {
         documentNameEn: null,
         subject: null,
         sellerPolicyRevision: null,
+        lifecyclePolicyId: "91111111-1111-4111-8111-111111111111",
         kind: "addon",
         version: 1,
         status: "published",
@@ -690,6 +725,7 @@ export const TENANT_DETAIL = {
         documentNameEn: null,
         subject: null,
         sellerPolicyRevision: null,
+        lifecyclePolicyId: "91111111-1111-4111-8111-111111111111",
         kind: "addon",
         version: 1,
         status: "published",
@@ -709,7 +745,6 @@ export const TENANT_DETAIL = {
   events: [
     {
       id: "12111111-1111-4111-8111-111111111111",
-      commercialPeriod: null,
       subscriptionId: "d1111111-1111-4111-8111-111111111111",
       eventKind: "plan.scheduled",
       effectiveAt: TEST_SUBSCRIPTION_TRANSITION_AT,
@@ -721,7 +756,6 @@ export const TENANT_DETAIL = {
     },
     {
       id: "13111111-1111-4111-8111-111111111111",
-      commercialPeriod: null,
       subscriptionId: "b1111111-1111-4111-8111-111111111111",
       eventKind: "demo.activated",
       effectiveAt: "2026-08-10T08:00:00.000Z",
@@ -780,6 +814,12 @@ export function installTenantApi({
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = String(input);
       const method = init.method ?? "GET";
+      if (url.endsWith("/entitlements"))
+        return jsonResponse(200, {
+          snapshot: ENTITLEMENT_SNAPSHOT,
+          detailsVisible: false,
+          sourceDetails: [],
+        });
       if (url.endsWith("/api/platform/me")) return jsonResponse(200, me);
       if (url.includes("/api/platform/tenants?") && method === "GET") {
         return listStatus === 200

@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.box
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
@@ -55,6 +56,7 @@ class ClosePalletTest {
         pallets = PalletRepository(db, palletLock) { now }
         closePallet = ClosePallet(db, pool, palletLock) { now }
         closeBox = CloseBox(db, boxes, pool, pallets, closePallet, palletLock) { now }
+        db.initializeRecoveryForTest()
     }
 
     @After

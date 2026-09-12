@@ -1,7 +1,8 @@
 import {
   platformCommercialV2Contracts,
+  platformOfferDraftContracts,
+  type OfferDraftUpdate,
   COMMERCIAL_VERSION_HEADER,
-  COMMERCIAL_VERSION,
   type CreateOfferV2 as CreateOfferInput,
   platformCommercialContracts,
   platformOfferWorkspaceContracts,
@@ -11,7 +12,7 @@ import {
   type OfferDetailV2 as OfferDetail,
 } from "@markiro/platform-contracts";
 
-import { platformApiFetch } from "../../api/client.js";
+import { platformApiFetch, CURRENT_COMMERCIAL_VERSION } from "../../api/client.js";
 
 export type Offer = SharedOffer;
 export type OfferLine = OfferDetail["lines"][number];
@@ -29,7 +30,7 @@ export function getOfferWorkspace(id: string) {
   const validated = platformOfferWorkspaceContracts.workspace.params.parse(id);
   return platformApiFetch(`/offers/${validated}/workspace`, {
     responseSchema: platformOfferWorkspaceV2Contracts.workspace.response,
-    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
   });
 }
 export function previewOffer(id: string) {
@@ -43,7 +44,7 @@ export function cancelOffer(id: string) {
   const validated = platformCommercialV2Contracts.offers.cancel.params.parse(id);
   return platformApiFetch(`/offers/${validated}/cancel`, {
     responseSchema: platformCommercialV2Contracts.offers.cancel.response,
-    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
     method: "POST",
     body: "{}",
   });
@@ -74,7 +75,7 @@ export function downloadOfferDocument(offerId: string, documentId: string) {
 
 export function listOffers() {
   return platformApiFetch("/offers", {
-    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
     responseSchema: platformCommercialV2Contracts.offers.list.response,
   });
 }
@@ -82,7 +83,7 @@ export function listOffers() {
 export function getOffer(id: string) {
   const validatedId = platformCommercialV2Contracts.offers.detail.params.parse(id);
   return platformApiFetch(`/offers/${validatedId}`, {
-    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
     responseSchema: platformCommercialV2Contracts.offers.detail.response,
   });
 }
@@ -90,7 +91,7 @@ export function getOffer(id: string) {
 export function createOffer(input: CreateOfferInput) {
   const validated = platformCommercialV2Contracts.offers.create.body.parse(input);
   return platformApiFetch("/offers", {
-    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
     responseSchema: platformCommercialV2Contracts.offers.create.response,
     method: "POST",
     body: JSON.stringify(validated),
@@ -100,7 +101,7 @@ export function createOffer(input: CreateOfferInput) {
 export function publishOffer(id: string, previewFingerprint?: string) {
   const validatedId = platformCommercialV2Contracts.offers.publish.params.parse(id);
   return platformApiFetch(`/offers/${validatedId}/publish`, {
-    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
     responseSchema: platformCommercialV2Contracts.offers.publish.response,
     method: "POST",
     body: JSON.stringify(
@@ -113,7 +114,7 @@ export function reviseOffer(id: string, idempotencyKey: string) {
   const validatedId = platformCommercialV2Contracts.offers.revise.params.parse(id);
   const body = platformCommercialV2Contracts.offers.revise.body.parse({ idempotencyKey });
   return platformApiFetch(`/offers/${validatedId}/revise`, {
-    headers: { [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
     responseSchema: platformCommercialV2Contracts.offers.revise.response,
     method: "POST",
     body: JSON.stringify(body),
@@ -130,7 +131,17 @@ export function payOffer(id: string, amount: string, bankReference: string, key:
   return platformApiFetch(`/offers/${validatedId}/payment`, {
     responseSchema: platformCommercialV2Contracts.offers.payment.response,
     method: "POST",
-    headers: { "Idempotency-Key": key, [COMMERCIAL_VERSION_HEADER]: COMMERCIAL_VERSION },
+    headers: { "Idempotency-Key": key, [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
     body: JSON.stringify(validated),
+  });
+}
+
+export function updateOfferDraft(id: string, input: OfferDraftUpdate) {
+  const contract = platformOfferDraftContracts.update;
+  return platformApiFetch(`/offers/${contract.params.parse(id)}/draft`, {
+    method: "PATCH",
+    headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
+    body: JSON.stringify(contract.body.parse(input)),
+    responseSchema: contract.response,
   });
 }

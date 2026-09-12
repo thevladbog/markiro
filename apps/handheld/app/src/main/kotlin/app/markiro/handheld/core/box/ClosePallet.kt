@@ -1,6 +1,5 @@
 package app.markiro.handheld.core.box
 
-import androidx.room.withTransaction
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.PalletEntity
 import app.markiro.handheld.core.storage.PalletPrint
@@ -42,7 +41,7 @@ sealed interface ClosePalletResult {
  * `CloseBox` one level up, keeping every one of its invariants for the exact
  * same reasons: emptiness is checked BEFORE burning, so a pallet closed
  * before any box joined it (or closed by mistake) costs no serial; burning
- * and closing are ONE `db.withTransaction`, because a serial that leaves the
+ * and closing are ONE `db.recovery.commit`, because a serial that leaves the
  * pool without landing on a pallet is gone and the pool has no way to give
  * one back; and the `AlreadyClosed` rollback takes the burn back with it if
  * the guarded close affects no row.
@@ -54,13 +53,17 @@ sealed interface ClosePalletResult {
  * serial for the same pallet -- identical to why `CloseBox` guards itself
  * against its own automatic-close-at-capacity race.
  *
- * Both entry points take that lock BEFORE opening the transaction below, and
- * neither runs inside somebody else's: `CloseBox` commits its own box
- * transaction first and calls [close] with the lock still in hand. That single
- * order is what keeps the automatic and manual paths out of an ABBA deadlock,
- * and it also keeps the `AlreadyClosed` rollback local -- a nested
- * `withTransaction` that throws marks the OUTER transaction for rollback on
- * Android's SQLiteDatabase even when the exception is caught here.
+ * Both entry points take the device-recovery lease FIRST, then that lock, and
+ * only then open the transaction below, and neither runs inside somebody
+ * else's: `CloseBox` commits its own box transaction first and calls [close]
+ * with the lease and the lock still in hand. That single order --
+ * lease, lock, transaction -- is what keeps the automatic and manual paths out
+ * of an ABBA deadlock (`SsccPool.burn` takes the recovery lease itself, so a
+ * burn reached from inside a transaction that does not already hold it would
+ * wait on the lease while holding Room's single writer), and it also keeps the
+ * `AlreadyClosed` rollback local -- a nested transaction that throws marks the
+ * OUTER transaction for rollback on Android's SQLiteDatabase even when the
+ * exception is caught here.
  */
 class ClosePallet(
     private val db: HandheldDatabase,
@@ -71,9 +74,14 @@ class ClosePallet(
     /** Rolls the burn back when the guarded close turns out to affect no row. */
     private class AlreadyClosed : Exception()
 
-    /** Closes the shift's open pallet, taking the pallet lock itself. */
+    /**
+     * Closes the shift's open pallet, taking the recovery lease and then the
+     * pallet lock itself -- in that order, which is the same order `CloseBox`
+     * takes them in. `exclusive` holds the lease without opening a transaction,
+     * so the lock is still taken outside one.
+     */
     suspend fun close(shiftId: String, issuerPrefix: String?, operatorId: String?): ClosePalletResult =
-        lock.withLock { held -> close(held, shiftId, issuerPrefix, operatorId) }
+        db.recovery.exclusive { lock.withLock { held -> close(held, shiftId, issuerPrefix, operatorId) } }
 
     /**
      * [close] for a caller that already holds the lock -- `CloseBox`, which
@@ -98,16 +106,16 @@ class ClosePallet(
         // give one back -- so the guarded update failing has to take the
         // burn with it.
         return try {
-            db.withTransaction {
+            db.recovery.commit {
                 val serial = pool.burn(issuerPrefix, SsccPool.PALLET_EXTENSION_DIGIT)
-                    ?: return@withTransaction ClosePalletResult.NoSerials
+                    ?: return@commit ClosePalletResult.NoSerials
                 val sscc = try {
                     Sscc.build(SsccPool.PALLET_EXTENSION_DIGIT, issuerPrefix, serial)
                 } catch (_: SsccException) {
                     // The serial IS spent here, deliberately: see CloseBox's
                     // identical InvalidSerial case for why rolling back
                     // would only hand the same impossible serial out again.
-                    return@withTransaction ClosePalletResult.InvalidSerial
+                    return@commit ClosePalletResult.InvalidSerial
                 }
                 // The pallet's own moment, persisted: the label's «Дата
                 // производства» and «Годен до» derive from it, and a

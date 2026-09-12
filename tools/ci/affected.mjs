@@ -106,6 +106,13 @@ function jobsForPath(path) {
     return [...sharedJobs["platform-contracts"], ...signerJobs];
   }
 
+  if (
+    path === "packages/platform-contracts/src/station-recovery.ts" ||
+    path.startsWith("packages/platform-contracts/fixtures/station-recovery/")
+  ) {
+    return [...sharedJobs["platform-contracts"], "handheld_android"];
+  }
+
   if (path.startsWith("apps/signer/")) {
     if (
       path.startsWith("apps/signer/src-tauri/") ||
@@ -133,6 +140,9 @@ function jobsForPath(path) {
 
   if (path.startsWith("tools/signer-release/")) return signerJobs;
   if (path.startsWith("tools/station-release/")) return stationJobs;
+  // Node contracts for the Android release, so they run in the Node job -- the
+  // handheld job is Gradle-only and has no pnpm.
+  if (path.startsWith("tools/handheld-release/")) return ["verify_static"];
   if (path.startsWith("tools/production-browser/")) {
     return ["production_bundle"];
   }

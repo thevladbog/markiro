@@ -4,7 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.core.network.RevocationBus
 import app.markiro.handheld.core.storage.DeviceConfigDao
-import app.markiro.handheld.core.storage.DeviceWipe
+import app.markiro.handheld.core.storage.DeviceRecovery
+import app.markiro.handheld.core.storage.RecoveryPhase
 import app.markiro.handheld.feature.signin.SessionHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -29,12 +30,12 @@ class AppShellViewModel(
     private val config: DeviceConfigDao,
     private val session: SessionHolder,
     revocation: RevocationBus,
-    private val wipe: DeviceWipe,
+    private val recovery: DeviceRecovery,
     private val idleMs: Long,
 ) : ViewModel() {
     @Inject
-    constructor(config: DeviceConfigDao, session: SessionHolder, revocation: RevocationBus, wipe: DeviceWipe) :
-        this(config, session, revocation, wipe, idleMs = IDLE_LOCK_MS)
+    constructor(config: DeviceConfigDao, session: SessionHolder, revocation: RevocationBus, recovery: DeviceRecovery) :
+        this(config, session, revocation, recovery, idleMs = IDLE_LOCK_MS)
 
     private val _start = MutableStateFlow<StartDestination?>(null)
     val start: StateFlow<StartDestination?> = _start
@@ -44,19 +45,22 @@ class AppShellViewModel(
 
     init {
         viewModelScope.launch {
-            val paired = config.observe().first() != null
-            _start.value = when {
-                !paired -> StartDestination.PAIRING
-                session.state.value.operator != null && !session.state.value.locked -> StartDestination.HUB
-                else -> StartDestination.SIGN_IN
+            runCatching { recovery.initialize() }
+            recovery.state.collect { current ->
+                if (current.phase == RecoveryPhase.UNINITIALIZED) return@collect
+                val active = current.phase == RecoveryPhase.ACTIVE
+                if (!active) session.signOut()
+                if (_start.value == null) {
+                    _start.value = when {
+                        !active -> StartDestination.PAIRING
+                        session.state.value.operator != null && !session.state.value.locked -> StartDestination.HUB
+                        else -> StartDestination.SIGN_IN
+                    }
+                } else if (!active) _events.emit(ShellEvent.Revoked)
             }
         }
         viewModelScope.launch {
-            revocation.events.collect {
-                wipe.wipeAll()
-                session.signOut()
-                _events.emit(ShellEvent.Revoked)
-            }
+            revocation.events.collect { token -> recovery.reject(token) }
         }
     }
 

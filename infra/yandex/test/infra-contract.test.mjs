@@ -248,14 +248,14 @@ test("Station releases use one protected versioned bucket and a prefix-limited p
   );
   assert.match(
     policy,
-    /Condition\s*=\s*\{[\s\S]*StringLike\s*=\s*\{[\s\S]*"s3:prefix"\s*=\s*\["station\/\*",\s*"signer\/\*"\]/,
+    /Condition\s*=\s*\{[\s\S]*StringLike\s*=\s*\{[\s\S]*"s3:prefix"\s*=\s*\["station\/\*",\s*"signer\/\*",\s*"handheld\/\*"\]/,
   );
 
-  // The bucket serves the Station under station/* and the signer agent under
-  // signer/*. Both grants must name both prefixes: a policy that only allowed
-  // writes would still leave the signer's latest.json unreadable, so the agent
-  // would never see an update and the release would fail silently rather than
-  // loudly.
+  // The bucket serves the Station under station/*, the signer agent under
+  // signer/* and the Android handheld under handheld/*. Every grant must name
+  // every prefix: a policy that only allowed writes would leave that product's
+  // latest.json unreadable, so the device would never see an update and the
+  // release would fail silently rather than loudly.
   for (const sid of ["AllowPublicReleaseObjects", "AllowPublisherReleaseObjects"]) {
     // Bounded to this statement: slicing to the end of the block would let a
     // later statement's signer/* satisfy an earlier statement's assertion, and
@@ -264,7 +264,7 @@ test("Station releases use one protected versioned bucket and a prefix-limited p
     assert.notEqual(start, -1, `${sid} must exist`);
     const next = policy.indexOf("Sid       =", start + sid.length);
     const grant = next === -1 ? policy.slice(start) : policy.slice(start, next);
-    for (const prefix of ["station", "signer"]) {
+    for (const prefix of ["station", "signer", "handheld"]) {
       assert.match(
         grant,
         new RegExp(

@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.inventory
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -61,6 +62,7 @@ class InventoryBundleMirrorTest {
         server = MockWebServer().also { it.start() }
         api = Retrofit.Builder().baseUrl(server.url("/")).client(OkHttpClient())
             .addConverterFactory(NetworkModule.json().asConverterFactory("application/json".toMediaType())).build().create(StationApi::class.java)
+        db.initializeRecoveryForTest()
     }
 
     @After

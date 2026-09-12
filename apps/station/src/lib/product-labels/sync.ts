@@ -1,3 +1,4 @@
+import { AUTHORIZED_CREDENTIAL_OWNERS_SQL } from "../device-recovery.js";
 import {
   DomainError,
   MAX_PRODUCT_LABEL_EVENTS,
@@ -38,21 +39,26 @@ export function validateProductLabelReceipt(
 async function recordReceipts(
   exec: SqlExecutor,
   rows: Array<{ owner: string; eventId: string; eventJson: string; code: string | null }>,
+  callerOwnership: string,
 ): Promise<void> {
   if (rows.length === 0) return;
   const receivedAt = new Date().toISOString();
   await exec.run(
     `INSERT INTO product_label_receipts(credential_ownership,event_id,event_json,outcome,rejection_code,received_at)
-    VALUES ${rows.map(() => "(?,?,?,?,?,?)").join(",")}
+    SELECT * FROM (${rows.map(() => "SELECT ? AS credential_ownership,? AS event_id,? AS event_json,? AS outcome,? AS rejection_code,? AS received_at").join(" UNION ALL ")})
+    WHERE credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL})
     ON CONFLICT(credential_ownership,event_id) DO NOTHING`,
-    rows.flatMap((row) => [
-      row.owner,
-      row.eventId,
-      row.eventJson,
-      row.code === null ? "accepted" : "quarantined",
-      row.code,
-      receivedAt,
-    ]),
+    [
+      ...rows.flatMap((row) => [
+        row.owner,
+        row.eventId,
+        row.eventJson,
+        row.code === null ? "accepted" : "quarantined",
+        row.code,
+        receivedAt,
+      ]),
+      callerOwnership,
+    ],
   );
 }
 
@@ -69,11 +75,12 @@ export async function readPendingProductLabelEvents(
     job_id: string;
     sequence: number;
     event_json: string;
+    credential_ownership: string;
   }>(
-    `SELECT pending.id,event.event_id,event.job_id,event.sequence,event.event_json
+    `SELECT pending.credential_ownership,pending.id,event.event_id,event.job_id,event.sequence,event.event_json
      FROM product_label_outbox pending JOIN product_label_events event
        ON event.credential_ownership=pending.credential_ownership AND event.event_id=pending.event_id
-     WHERE pending.credential_ownership=? AND (? IS NULL OR pending.id<=?)
+     WHERE pending.credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND (? IS NULL OR pending.id<=?)
        ${scanCeiling === undefined ? "" : `AND NOT EXISTS (SELECT 1 FROM outbox scan WHERE scan.shift_id=json_extract(event.event_json,'$.shiftId') AND scan.code_hash=json_extract(event.event_json,'$.codeHash') AND scan.scanned_at=json_extract(event.event_json,'$.acceptedAt') AND scan.verdict='ok' AND scan.id>?)`}
      ORDER BY pending.id LIMIT ?`,
     [
@@ -99,14 +106,18 @@ export async function readPendingProductLabelEvents(
       parsed.data.jobId !== row.job_id ||
       parsed.data.sequence !== row.sequence
     ) {
-      await recordReceipts(exec, [
-        {
-          owner: credentialOwnership,
-          eventId: row.event_id,
-          eventJson: row.event_json,
-          code: "storage_invalid",
-        },
-      ]);
+      await recordReceipts(
+        exec,
+        [
+          {
+            owner: row.credential_ownership,
+            eventId: row.event_id,
+            eventJson: row.event_json,
+            code: "storage_invalid",
+          },
+        ],
+        credentialOwnership,
+      );
       continue;
     }
     result.push({ id: row.id, event: parsed.data });
@@ -122,15 +133,20 @@ export async function ackProductLabelEvents(
 ): Promise<void> {
   const receipt = validateProductLabelReceipt(sentEvents, input);
   if (sentEvents.length === 0) return;
-  const rows = await exec.all<{ event_id: string; event_json: string }>(
-    `SELECT event_id,event_json FROM product_label_events WHERE credential_ownership=? AND event_id IN (${sentEvents.map(() => "?").join(",")})`,
+  const rows = await exec.all<{
+    event_id: string;
+    event_json: string;
+    credential_ownership: string;
+  }>(
+    `SELECT credential_ownership,event_id,event_json FROM product_label_events WHERE credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND event_id IN (${sentEvents.map(() => "?").join(",")})`,
     [credentialOwnership, ...sentEvents.map((event) => event.eventId)],
   );
-  const byId = new Map(rows.map((row) => [row.event_id, row.event_json]));
+  const byId = new Map(rows.map((row) => [row.event_id, row]));
   const rejected = new Map(receipt.quarantined.map((record) => [record.eventId, record.code]));
   const acknowledgements = sentEvents.map((event) => {
-    const eventJson = byId.get(event.eventId);
-    if (!eventJson) invalidReceipt();
+    const stored = byId.get(event.eventId);
+    if (!stored) invalidReceipt();
+    const eventJson = stored.event_json;
     let saved: unknown;
     try {
       saved = JSON.parse(eventJson);
@@ -141,13 +157,13 @@ export async function ackProductLabelEvents(
     if (!parsed.success || productLabelValueDigest(parsed.data) !== productLabelValueDigest(event))
       invalidReceipt();
     return {
-      owner: credentialOwnership,
+      owner: stored.credential_ownership,
       eventId: event.eventId,
       eventJson,
       code: rejected.get(event.eventId) ?? null,
     };
   });
-  await recordReceipts(exec, acknowledgements);
+  await recordReceipts(exec, acknowledgements, credentialOwnership);
 }
 
 export function productLabelSetSignature(events: ProductLabelEvent[]): string {
@@ -159,7 +175,7 @@ export async function productLabelPendingStats(
   owner: string,
 ): Promise<{ count: number; oldest: string | null }> {
   const [row] = await exec.all<{ count: number; oldest: string | null }>(
-    "SELECT COUNT(*) AS count,MIN(queued_at) AS oldest FROM product_label_outbox WHERE credential_ownership=?",
+    `SELECT COUNT(*) AS count,MIN(queued_at) AS oldest FROM product_label_outbox WHERE credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL})`,
     [owner],
   );
   return row ?? { count: 0, oldest: null };

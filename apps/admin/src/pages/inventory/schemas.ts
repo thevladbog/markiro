@@ -269,6 +269,7 @@ export type ChzExportRunState = (typeof CHZ_EXPORT_RUN_STATES)[number];
  * keeps using `errorCodeFallback`.
  */
 export const CHZ_EXPORT_SAFE_ERROR_CODES = [
+  "CHZ_ACTION_ACCESS_DENIED",
   "CHZ_TOKEN_UNAVAILABLE",
   "CHZ_ORDER_CONTEXT_MISSING",
   "CHZ_TASK_REJECTED",

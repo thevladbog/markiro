@@ -1,9 +1,14 @@
 package app.markiro.handheld.feature.signin
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.design.MarkiroTheme
 import org.junit.Assert.assertEquals
@@ -24,6 +29,23 @@ class SignInScreenTest {
         compose.onNodeWithText("41").assertIsDisplayed()
         compose.onNodeWithText("Найти по имени").performClick()
         assertEquals(true, searched)
+    }
+
+    /**
+     * The badge block, the field, the keypad and the search link do not fit a
+     * short handheld display, and there was nothing to scroll: the OK key and
+     * «Найти по имени» were simply below the edge with no way to reach them.
+     * The height here is deliberately smaller than the layout needs.
+     */
+    @Test
+    fun aShortScreenCanBeScrolledToTheConfirmKey() {
+        compose.setContent {
+            MarkiroTheme {
+                Box(Modifier.size(320.dp, 300.dp)) { SignInScreen(SignInUi.Login("41"), SignInCallbacks()) }
+            }
+        }
+        compose.onNodeWithText("OK").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Найти по имени").performScrollTo().assertIsDisplayed()
     }
 
     @Test

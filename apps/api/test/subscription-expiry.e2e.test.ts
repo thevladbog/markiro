@@ -452,7 +452,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         },
       ],
       // Pallet closures are quarantined exactly like the four older kinds
-      // (migration 0132). Before it, an ineligible pallet closure was dropped
+      // (migration 0135). Before it, an ineligible pallet closure was dropped
       // with only a log line -- and since `sync_batches` stores a digest and
       // never the body, and the drain acks and DELETEs its outbox rows
       // unconditionally, the closure of a pallet already physically labelled

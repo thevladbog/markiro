@@ -1,6 +1,5 @@
 package app.markiro.handheld.core.box
 
-import androidx.room.withTransaction
 import app.markiro.handheld.core.storage.BoxEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.util.Iso
@@ -95,16 +94,29 @@ class CloseBox(
     /**
      * Closes the shift's open box and, at capacity, the pallet it just filled.
      *
-     * The lock order is the design. `palletLock` is taken BEFORE the box
-     * transaction opens and held across both it and the pallet close that may
-     * follow, so every path through pallets -- this one, a standalone
-     * «Закрыть паллету досрочно», `PalletRepository.currentPallet` -- runs
-     * lock-then-transaction. Taking it the other way round on one path, as
-     * calling `closePallet.close` from inside this transaction did, is the ABBA
-     * shape: the automatic close holds the write transaction waiting for the
-     * lock while the manual close holds the lock waiting for the transaction.
+     * The outer lease is `recovery.exclusive`, not `recovery.commit`: the whole
+     * close runs under ONE device generation, so a credential rejected halfway
+     * through cannot leave a box closed against an owner the device no longer
+     * is -- but `exclusive` holds that lease WITHOUT opening a Room transaction,
+     * which is what lets `palletLock` still be taken outside one. The
+     * transaction itself is opened by the `recovery.commit` below, exactly as
+     * wide as the burn-and-close it has to be atomic over.
+     *
+     * The lock order is the design, and it is the SAME order on every path:
+     * **recovery lease, then `palletLock`, then the transaction.** `palletLock`
+     * is taken BEFORE the box transaction opens and held across both it and the
+     * pallet close that may follow, so every path through pallets -- this one,
+     * a standalone «Закрыть паллету досрочно», `PalletRepository.currentPallet`
+     * -- runs lease-then-lock-then-transaction. Taking any two of the three the
+     * other way round on one path, as calling `closePallet.close` from inside
+     * this transaction did, is the ABBA shape: the automatic close holds the
+     * write transaction waiting for the lock while the manual close holds the
+     * lock waiting for the transaction.
      */
-    suspend fun close(shiftId: String, issuerPrefix: String?, operatorId: String?): CloseResult = mutex.withLock {
+    suspend fun close(shiftId: String, issuerPrefix: String?, operatorId: String?): CloseResult =
+        db.recovery.exclusive { closeOwned(shiftId, issuerPrefix, operatorId) }
+
+    private suspend fun closeOwned(shiftId: String, issuerPrefix: String?, operatorId: String?): CloseResult = mutex.withLock {
         if (issuerPrefix == null) return CloseResult.NoIssuer
         val box = db.boxDao().open(shiftId) ?: return CloseResult.Empty
         val itemCount = boxes.itemCount(box.boxId)
@@ -117,16 +129,16 @@ class CloseBox(
             // pool without landing on a box is gone -- the pool has no way to give
             // one back -- so the guarded update failing has to take the burn with it.
             val outcome = try {
-                db.withTransaction {
+                db.recovery.commit {
                     val serial = pool.burn(issuerPrefix, SsccPool.BOX_EXTENSION_DIGIT)
-                        ?: return@withTransaction BoxOutcome(CloseResult.NoSerials, false)
+                        ?: return@commit BoxOutcome(CloseResult.NoSerials, false)
                     val sscc = try {
                         Sscc.build(SsccPool.BOX_EXTENSION_DIGIT, issuerPrefix, serial)
                     } catch (_: SsccException) {
                         // The serial IS spent here, deliberately: the pool row is
                         // beyond its prefix's capacity and rolling back would hand the
                         // same impossible serial out again on the next attempt.
-                        return@withTransaction BoxOutcome(CloseResult.InvalidSerial, false)
+                        return@commit BoxOutcome(CloseResult.InvalidSerial, false)
                     }
                     // The box's own moment, persisted: the label's «Дата производства»
                     // and «Годен до» derive from it, and a recovery print the next

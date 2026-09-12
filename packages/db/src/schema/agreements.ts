@@ -25,6 +25,11 @@ export const platformAgreementStatus = pgEnum("platform_agreement_status", [
   "terminated",
 ]);
 
+export const platformAgreementDocumentForm = pgEnum("platform_agreement_document_form", [
+  "ru",
+  "ru_en",
+]);
+
 export const platformAgreementDocumentKind = pgEnum("platform_agreement_document_kind", [
   "draft",
   "generated",
@@ -39,6 +44,11 @@ export const platformAgreements = pgTable(
     status: platformAgreementStatus("status").notNull().default("draft"),
     conclusionDate: date("conclusion_date"),
     city: text("city"),
+    // Russian-only or the two-column Russian/English form. A property of the
+    // record rather than a download option: the stored document is the copy
+    // that gets signed, and two files under one number cannot be told apart
+    // afterwards.
+    documentForm: platformAgreementDocumentForm("document_form").notNull().default("ru"),
     // An agreement may be concluded before the tenant exists, so the link is
     // optional and is set by hand once the cabinet is registered.
     tenantId: text("tenant_id"),
@@ -104,6 +114,13 @@ export const platformAgreementDocuments = pgTable(
     sha256: text("sha256").notNull(),
     byteSize: bigint("byte_size", { mode: "number" }).notNull(),
     rendererVersion: text("renderer_version"),
+    // Fingerprint of the agreement values this document was rendered from. A
+    // draft is an explicitly rendered snapshot, so comparing this with the
+    // record's current values is what tells an operator the file no longer
+    // matches. Nullable: rows written before this column existed cannot be
+    // fingerprinted retroactively, and they are reported as out of date
+    // rather than vouched for.
+    sourceDigest: text("source_digest"),
     uploadedByPlatformUserId: text("uploaded_by_platform_user_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -117,6 +134,10 @@ export const platformAgreementDocuments = pgTable(
     }).onDelete("restrict"),
     check("platform_agreement_documents_checksum_format", sql`${table.sha256} ~ '^[0-9a-f]{64}$'`),
     check("platform_agreement_documents_size_positive", sql`${table.byteSize} > 0`),
+    check(
+      "platform_agreement_documents_source_digest_format",
+      sql`${table.sourceDigest} is null or ${table.sourceDigest} ~ '^[0-9a-f]{64}$'`,
+    ),
     check(
       "platform_agreement_documents_provenance",
       sql`(${table.kind} = 'attachment' and ${table.uploadedByPlatformUserId} is not null and ${table.rendererVersion} is null) or (${table.kind} in ('draft', 'generated') and ${table.uploadedByPlatformUserId} is null and ${table.rendererVersion} is not null)`,

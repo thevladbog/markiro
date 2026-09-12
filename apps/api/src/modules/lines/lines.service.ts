@@ -16,6 +16,7 @@ import type {
   ListLinesResponseDto,
   UpdateLineDto,
 } from "./dto";
+import { workingDeviceOccupiedSql } from "../../subscriptions/working-device-assignments";
 import { stationDeviceLifecycle } from "../station-devices/dto";
 
 @Injectable()
@@ -41,6 +42,7 @@ export class LinesService {
         lineId: schema.lines.id,
         lineName: schema.lines.name,
         deviceId: schema.stationDevices.id,
+        slotOccupied: workingDeviceOccupiedSql(),
         apiKeyId: schema.stationDevices.apiKeyId,
         revokedAt: schema.stationDevices.revokedAt,
         lastSeenAt: schema.stationDevices.lastSeenAt,
@@ -71,7 +73,7 @@ export class LinesService {
         onlineStations: 0,
         lastSeenAt: null,
       };
-      if (row.deviceId && row.revokedAt === null) {
+      if (row.deviceId && row.slotOccupied) {
         current.assignedStations += 1;
         if (stationDeviceLifecycle(row, now) === "online") current.onlineStations += 1;
         if (row.lastSeenAt && (!current.lastSeenAt || row.lastSeenAt > current.lastSeenAt))

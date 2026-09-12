@@ -90,13 +90,13 @@ class PalletStorageTest {
     /**
      * Seeded first, migration driven directly -- same reasoning as
      * `MigrationTest`'s v4-to-v5 and v5-to-v6 cases: a database Room builds
-     * from the current entities is already v8, so the migration would never
+     * from the current entities is already v10, so the migration would never
      * run at all if it went through Room.
      */
     @Test
     fun migratesAnExistingDatabaseWithoutLosingBoxes() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val name = "migration-7-8-test.db"
+        val name = "migration-9-10-test.db"
         context.deleteDatabase(name)
         val file = context.getDatabasePath(name).also { it.parentFile?.mkdirs() }
         SQLiteDatabase.openOrCreateDatabase(file, null).use { legacy ->
@@ -112,11 +112,11 @@ class PalletStorageTest {
                 "INSERT INTO boxes VALUES ('b1','s1',NULL,'2026-09-11T08:00:00.000Z',NULL,NULL,'pending',NULL,NULL)",
             )
             legacy.execSQL("INSERT INTO shift_mirror VALUES ('s1','SEP26-001')")
-            legacy.version = 7
+            legacy.version = 9
         }
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context).name(name).callback(
-                object : SupportSQLiteOpenHelper.Callback(7) {
+                object : SupportSQLiteOpenHelper.Callback(9) {
                     override fun onCreate(db: SupportSQLiteDatabase) = Unit
                     override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
                 },
@@ -124,7 +124,7 @@ class PalletStorageTest {
         )
         try {
             val migrated = helper.writableDatabase
-            MIGRATION_7_8.migrate(migrated)
+            MIGRATION_9_10.migrate(migrated)
             migrated.query("SELECT boxId, palletId FROM boxes WHERE boxId = 'b1'").use { cursor ->
                 assertTrue(cursor.moveToFirst())
                 assertEquals("b1", cursor.getString(0))
@@ -185,10 +185,23 @@ class PalletStorageTest {
         assertEquals(listOf("p1", "p3"), db.palletDao().observeUnprinted().first().map { it.palletId })
     }
 
+    /**
+     * Was `aWipeClearsPallets` before same-device recovery landed. A rejected
+     * credential no longer empties the operational tables: recovery on the SAME
+     * device keeps the work, and `StorageTest`\'s
+     * `rejectionPreservesEveryOperationalChannelAndRemovesSecrets` asserts that
+     * for every table generically. Pallets are operational data exactly as
+     * boxes are, so this pins the same answer for them by name -- a future
+     * change that starts clearing pallets on rejection loses a closed,
+     * physically labelled pallet that the server has not yet acknowledged.
+     */
     @Test
-    fun aWipeClearsPallets() = runTest {
+    fun aCredentialRejectionKeepsPalletsForTheSameDevice() = runTest {
+        val credential = InMemoryCredentialStore().apply { write("mk_live_secret") }
+        val recovery = db.initializeRecoveryForTest(credential)
         db.palletDao().insert(pallet("p1", "s1"))
-        DeviceWipe(db, InMemoryCredentialStore()).wipeAll()
-        assertNull(db.palletDao().get("p1"))
+        assertTrue(DeviceWipe(recovery).reject(recovery.token()))
+        assertEquals("p1", db.palletDao().get("p1")?.palletId)
+        assertNull(credential.read())
     }
 }

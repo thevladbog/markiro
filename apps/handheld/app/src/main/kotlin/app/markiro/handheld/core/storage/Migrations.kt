@@ -171,11 +171,35 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `boxes` ADD COLUMN `disassembledAt` TEXT")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `box_exceptions` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`kind` TEXT NOT NULL, `boxId` TEXT NOT NULL, `codeHash` TEXT, `targetScannedAt` TEXT, " +
+                "`shiftId` TEXT NOT NULL, `operatorId` TEXT, `reason` TEXT, `occurredAt` TEXT NOT NULL, " +
+                "`payloadJson` TEXT NOT NULL, `afterOutboxId` INTEGER NOT NULL, `ackedAt` TEXT)",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_box_exceptions_ackedAt` ON `box_exceptions` (`ackedAt`)")
+    }
+}
+
+/** Recovery metadata is additive: operational payloads and local sequence are untouched. */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `device_recovery` (`id` INTEGER NOT NULL, `serverOrigin` TEXT, `tenantId` TEXT, `deviceId` TEXT, `kind` TEXT, `generation` INTEGER NOT NULL, `phase` TEXT NOT NULL, `pendingId` TEXT, PRIMARY KEY(`id`))")
+    }
+}
+
 /**
  * Pallets (06d): boxes per pallet. Additive only -- `palletCapacity`'s old
  * units-valued column is left in place and unread; see `ShiftEntities.kt`.
+ *
+ * Numbered 8 -> 9 rather than 6 -> 7: versions 7 and 8 belong to the shipped
+ * box-exceptions and device-recovery migrations above, and an installed
+ * terminal has already applied them.
  */
-val MIGRATION_6_7 = object : Migration(6, 7) {
+val MIGRATION_8_9 = object : Migration(8, 9) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE `shift_mirror` ADD COLUMN `palletBoxCapacity` INTEGER")
     }
@@ -184,7 +208,7 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
 /**
  * Pallets (06d) continued: the pallets table itself, `boxes.palletId`, and the
  * pallet label template spec the close screen will read. `palletBoxCapacity`
- * already landed in MIGRATION_6_7 -- this migration does not touch it, and it
+ * already landed in MIGRATION_8_9 -- this migration does not touch it, and it
  * does not rename or drop the dead `palletCapacity` column either; see
  * `ShiftEntities.kt` for why leaving that column in place, unread, is the
  * chosen trade over rebuilding the table.
@@ -194,7 +218,7 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
  * deliberately, not an oversight -- so there is no Room entity or DAO for it
  * until that screen lands and actually needs one.
  */
-val MIGRATION_7_8 = object : Migration(7, 8) {
+val MIGRATION_9_10 = object : Migration(9, 10) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL(
             "CREATE TABLE IF NOT EXISTS `pallets` (`palletId` TEXT NOT NULL, `shiftId` TEXT NOT NULL, " +

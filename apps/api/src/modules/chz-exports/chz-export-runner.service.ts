@@ -1,5 +1,15 @@
-import { HttpException, Inject, Injectable, Logger } from "@nestjs/common";
-import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { SubscriptionUnmanagedException } from "../../subscriptions/subscription-errors";
+import { AuthorizationService } from "../../authorization/authorization.service";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
+import {
+  EntitlementAdmissionService,
+  admissionScopeDigest,
+} from "../../subscriptions/entitlement-admission.service";
+import { lockTenantSubscriptionTimeline } from "../../subscriptions/subscription-locks";
+import type { SubscriptionTransaction } from "../../subscriptions/entitlements.types";
+import { CABINET_CAPABILITY, chzFilteredCisReportPolicy } from "@markiro/domain";
+import { ForbiddenException, HttpException, Inject, Injectable, Logger } from "@nestjs/common";
+import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 
 import { DB } from "../../auth/auth.module";
@@ -67,6 +77,7 @@ const FAILED_TASK_STATUSES = new Set([
 
 export const CHZ_EXPORT_SAFE_ERROR_CODES = [
   "CHZ_TOKEN_UNAVAILABLE",
+  "CHZ_ACTION_ACCESS_DENIED",
   "CHZ_ORDER_CONTEXT_MISSING",
   "CHZ_TASK_REJECTED",
   "CHZ_TASK_FAILED",
@@ -112,6 +123,9 @@ export class ChzExportRunnerService {
     private readonly client: TrueApiClient,
     private readonly inventories: InventoriesService,
     private readonly journal: JournalService,
+    private readonly authorization: AuthorizationService,
+    private readonly entitlements: EntitlementsService,
+    private readonly admission: EntitlementAdmissionService,
   ) {}
 
   async run(
@@ -146,9 +160,21 @@ export class ChzExportRunnerService {
         await this.failNonTerminal(tenantId, inventoryId, "CHZ_ORDER_CONTEXT_MISSING");
         return { finished: true };
       }
-      await this.orderQueuedRuns(tenantId, inventoryId, token.auth, context);
-      await this.pollOrderedRuns(tenantId, inventoryId, token.auth, context.productGroupCode);
-      await this.importReadyRuns(tenantId, inventoryId, token.auth, context.productGroupCode);
+      const taskGroups = await this.orderQueuedRuns(tenantId, inventoryId, token.auth, context);
+      await this.pollOrderedRuns(
+        tenantId,
+        inventoryId,
+        token.auth,
+        context.productGroupCode,
+        taskGroups,
+      );
+      await this.importReadyRuns(
+        tenantId,
+        inventoryId,
+        token.auth,
+        context.productGroupCode,
+        taskGroups,
+      );
     } catch (error) {
       if (!(error instanceof ChzUnauthorizedError)) throw error;
       // A 401 mid-pass is the same condition as a token we could not load:
@@ -197,23 +223,28 @@ export class ChzExportRunnerService {
     inventoryId: string,
     auth: TrueApiAuth,
     context: OrderContext,
-  ): Promise<void> {
+  ): Promise<Map<string, number>> {
+    const taskGroups = new Map<string, number>();
     const allQueued = (await this.loadRuns(tenantId, inventoryId)).filter(
       (run) => run.state === "queued",
     );
-    if (allQueued.length === 0) return;
+    if (allQueued.length === 0) return taskGroups;
 
     // A run at the cap is failed outright, before it is claimed again: claiming
     // would push `attempts` past the cap and cost another create call for an
     // answer we already know. See `MAX_CREATE_ATTEMPTS`.
-    const exhausted = allQueued.filter((run) => run.attempts >= MAX_CREATE_ATTEMPTS);
+    const staleCutoff = new Date(Date.now() - STALE_CLAIM_MS);
+    const exhausted = allQueued.filter(
+      (run) =>
+        run.attempts >= MAX_CREATE_ATTEMPTS &&
+        (run.claimedAt === null || run.claimedAt < staleCutoff),
+    );
     for (const run of exhausted) {
       await this.failRun(run, "CHZ_CREATE_ATTEMPTS_EXHAUSTED", null);
     }
     const queued = allQueued.filter((run) => run.attempts < MAX_CREATE_ATTEMPTS);
-    if (queued.length === 0) return;
+    if (queued.length === 0) return taskGroups;
 
-    const staleCutoff = new Date(Date.now() - STALE_CLAIM_MS);
     const awaitingAdoption = queued.filter(
       (run) =>
         run.dispenserTaskId === null && run.claimedAt !== null && run.claimedAt < staleCutoff,
@@ -221,15 +252,17 @@ export class ChzExportRunnerService {
     const adoption = await this.resolveAdoption(tenantId, auth, context, awaitingAdoption);
 
     for (const run of queued) {
-      if (!(await this.claim(run, staleCutoff))) continue; // another worker holds a fresh claim
-      const taskId =
-        adoption !== null && adoption.runId === run.id
-          ? adoption.taskId
-          : await this.createTask(auth, context, run);
-      if (taskId === null) continue; // failed or retryable; handled by createTask
-      await this.markOrdered(run, taskId);
-      await this.appendJournal(run, "ok", "Заказан отчёт Честного Знака", taskId);
+      const adoptedTaskId = adoption?.runId === run.id ? adoption.taskId : null;
+      const claimed = await this.claim(run, staleCutoff, context, adoptedTaskId === null);
+      if (!claimed) continue;
+      const taskId = adoptedTaskId ?? (await this.createTask(auth, claimed.context, claimed.run));
+      if (taskId === null) continue;
+      await this.markOrdered(claimed.run, taskId);
+      // Only this exact attempt/task may reuse the checked group in this pass.
+      // Known/adopted work retains the pass's original recovery context.
+      taskGroups.set(taskAttemptKey(claimed.run, taskId), claimed.context.productGroupCode);
     }
+    return taskGroups;
   }
 
   /**
@@ -237,32 +270,105 @@ export class ChzExportRunnerService {
    * only once a `dispenserTaskId` exists, which is what keeps the table's state
    * consistency check true at every instant rather than only between steps.
    *
-   * The prior claim is read from the row loaded above, not from `returning()`:
-   * `UPDATE ... RETURNING` yields post-update values, so the claim timestamp
-   * here would always be the one we just wrote.
+   * The previously loaded row supplies pre-claim eligibility and adoption context.
+   * `UPDATE ... RETURNING` supplies the new attempt and claim timestamp used to
+   * fence this worker's subsequent observation, result and journal writes.
    */
-  private async claim(run: ChzExportRunRow, staleCutoff: Date): Promise<boolean> {
-    const now = new Date();
-    const [claimed] = await this.db
-      .update(schema.chzExportRuns)
-      .set({
-        claimedAt: now,
-        attempts: sql`${schema.chzExportRuns.attempts} + 1`,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(schema.chzExportRuns.tenantId, run.tenantId),
-          eq(schema.chzExportRuns.id, run.id),
-          eq(schema.chzExportRuns.state, "queued"),
-          or(
-            isNull(schema.chzExportRuns.claimedAt),
-            lt(schema.chzExportRuns.claimedAt, staleCutoff),
+  private async claim(
+    run: ChzExportRunRow,
+    staleCutoff: Date,
+    context: OrderContext,
+    freshCreate: boolean,
+  ): Promise<{ run: ChzExportRunRow; context: OrderContext } | null> {
+    const facts = freshCreate ? await this.admission.capture(run.tenantId) : undefined;
+    return this.db.transaction(async (tx) => {
+      // Match lifecycle lock order before taking the run lock. No HTTP inside this transaction.
+      await lockTenantSubscriptionTimeline(tx, run.tenantId);
+      const [owned] = await tx
+        .select()
+        .from(schema.chzExportRuns)
+        .where(
+          and(
+            this.ownedRunInState(run, "queued"),
+            or(
+              isNull(schema.chzExportRuns.claimedAt),
+              lt(schema.chzExportRuns.claimedAt, staleCutoff),
+            ),
           ),
-        ),
-      )
-      .returning({ id: schema.chzExportRuns.id });
-    return claimed !== undefined;
+        )
+        .for("update");
+      if (!owned) return null;
+      if (freshCreate) {
+        try {
+          const principal = await this.authorization.resolvePrincipal(
+            owned.orderedByUserId,
+            owned.tenantId,
+            tx,
+          );
+          if (!principal?.capabilities.includes(CABINET_CAPABILITY.OPERATIONS_WRITE))
+            throw new ForbiddenException();
+          await this.entitlements.assertWriteAccess(owned.tenantId, tx);
+        } catch (error) {
+          // Only an authoritative denial is terminal; infrastructure/auth lookup failure retries.
+          if (
+            !(error instanceof SubscriptionUnmanagedException) &&
+            (!(error instanceof HttpException) || error.getStatus() !== 403)
+          )
+            throw error;
+          await this.failRun(owned, "CHZ_ACTION_ACCESS_DENIED", null, tx);
+          return null;
+        }
+      }
+      // Read once through the owner after timeline/run and authorization waits.
+      // A plain SELECT has one coherent statement snapshot and adds no inventory
+      // lock after the run lock (receipt ingestion locks inventory -> run -> product).
+      const checkedContext = freshCreate
+        ? await this.loadOrderContext(owned.tenantId, owned.inventoryId, tx)
+        : context;
+      const contextObservedAt = new Date();
+      if (checkedContext === null) {
+        await this.failRun(owned, "CHZ_ORDER_CONTEXT_MISSING", null, tx);
+        return null;
+      }
+      if (freshCreate && !chzFilteredCisReportPolicy(checkedContext.productGroupCode).supported) {
+        await this.failRun(owned, "CHZ_ACTION_ACCESS_DENIED", null, tx);
+        return null;
+      }
+      const now = new Date();
+      const [claimed] = await tx
+        .update(schema.chzExportRuns)
+        .set({
+          claimedAt: now,
+          attempts: sql`${schema.chzExportRuns.attempts} + 1`,
+          updatedAt: now,
+        })
+        .where(this.ownedRunInState(owned, "queued"))
+        .returning();
+      if (!claimed) return null;
+      if (freshCreate)
+        await this.admission.observe({
+          tenantId: claimed.tenantId,
+          actor: { domain: "cabinet", id: claimed.orderedByUserId },
+          operationId: "chz.export.create.v1",
+          scopeDigest: admissionScopeDigest({
+            inventoryId: claimed.inventoryId,
+            runId: claimed.id,
+            status: claimed.status,
+            context: checkedContext,
+          }),
+          transaction: tx,
+          facts,
+          attempt: {
+            number: claimed.attempts,
+            identity: `${claimed.id}:${claimed.claimedAt?.toISOString()}`,
+          },
+          runtime: {
+            enabled: chzFilteredCisReportPolicy(checkedContext.productGroupCode).supported,
+            observedAt: contextObservedAt,
+          },
+        });
+      return { run: claimed, context: checkedContext };
+    });
   }
 
   /**
@@ -372,70 +478,73 @@ export class ChzExportRunnerService {
   }
 
   /**
-   * One request for the whole order. `GET dispenser/tasks/{id}` allows five
-   * calls a minute, so six statuses polled one by one would fail on their own
-   * traffic before ЧЗ ever finished a report.
+   * Batch statuses per product group. Normally this is one request for the
+   * whole order; a group edited during creation needs a separate batch for
+   * those new tasks. `GET dispenser/tasks/{id}` allows five calls a minute,
+   * so do not poll the six statuses individually.
    */
   private async pollOrderedRuns(
     tenantId: string,
     inventoryId: string,
     auth: TrueApiAuth,
     productGroupCode: number,
+    taskGroups: ReadonlyMap<string, number>,
   ): Promise<void> {
     // A run past the timeout deadline was already failed by
     // `sweepExpiredOrders` earlier in this same pass, before the token gate,
     // so nothing here needs to re-check `orderedAt`.
-    const byTaskId = new Map<string, ChzExportRunRow>();
+    const groups = new Map<number, Map<string, ChzExportRunRow>>();
     for (const run of await this.loadRuns(tenantId, inventoryId)) {
       if (run.state !== "ordered") continue;
       if (run.dispenserTaskId === null || run.dispenserTaskId.length === 0) continue;
+      const group = taskGroups.get(taskAttemptKey(run)) ?? productGroupCode;
+      const byTaskId = groups.get(group) ?? new Map<string, ChzExportRunRow>();
       byTaskId.set(run.dispenserTaskId, run);
+      groups.set(group, byTaskId);
     }
-    if (byTaskId.size === 0) return;
+    for (const [group, byTaskId] of groups) {
+      const results = await this.client.listDispenserResults(auth, group, [...byTaskId.keys()]);
+      if (results.status === "unauthorized") throw new ChzUnauthorizedError();
+      if (results.status !== "ok") {
+        // Both `rejected` and `unavailable` leave the runs ordered: a batch poll
+        // says nothing about an individual task, and the report ЧЗ is preparing
+        // outlives this pass either way.
+        this.logger.warn(
+          `ChZ dispenser results unavailable for inventory ${inventoryId} (${results.status})`,
+        );
+        continue;
+      }
 
-    const results = await this.client.listDispenserResults(auth, productGroupCode, [
-      ...byTaskId.keys(),
-    ]);
-    if (results.status === "unauthorized") throw new ChzUnauthorizedError();
-    if (results.status !== "ok") {
-      // Both `rejected` and `unavailable` leave the runs ordered: a batch poll
-      // says nothing about an individual task, and the report ЧЗ is preparing
-      // outlives this pass either way.
-      this.logger.warn(
-        `ChZ dispenser results unavailable for inventory ${inventoryId} (${results.status})`,
-      );
-      return;
-    }
-
-    for (const result of results.value) {
-      // An empty `taskId` is a malformed listed row; a run's task id is never
-      // empty, so it can only match by accident. Skipped explicitly.
-      const run = result.taskId.length > 0 ? byTaskId.get(result.taskId) : undefined;
-      if (run === undefined) continue;
-      const status = result.status.toUpperCase();
-      if (
-        result.resultId !== null &&
-        result.resultId.length > 0 &&
-        COMPLETED_TASK_STATUSES.has(status)
-      ) {
+      for (const result of results.value) {
+        // An empty `taskId` is a malformed listed row; a run's task id is never
+        // empty, so it can only match by accident. Skipped explicitly.
+        const run = result.taskId.length > 0 ? byTaskId.get(result.taskId) : undefined;
+        if (run === undefined) continue;
+        const status = result.status.toUpperCase();
         if (
-          result.available !== null &&
-          result.available !== undefined &&
-          result.available.toUpperCase() !== "AVAILABLE"
+          result.resultId !== null &&
+          result.resultId.length > 0 &&
+          COMPLETED_TASK_STATUSES.has(status)
         ) {
-          continue;
+          if (
+            result.available !== null &&
+            result.available !== undefined &&
+            result.available.toUpperCase() !== "AVAILABLE"
+          ) {
+            continue;
+          }
+          if (
+            result.archiveSize !== null &&
+            result.archiveSize !== undefined &&
+            result.archiveSize > CHZ_MAX_INPUT_BYTES
+          ) {
+            await this.failRun(run, "CHZ_DOWNLOAD_REJECTED", null);
+            continue;
+          }
+          await this.markReady(run, result.resultId);
+        } else if (FAILED_TASK_STATUSES.has(status)) {
+          await this.failRun(run, "CHZ_TASK_FAILED", result.errorMessage ?? null);
         }
-        if (
-          result.archiveSize !== null &&
-          result.archiveSize !== undefined &&
-          result.archiveSize > CHZ_MAX_INPUT_BYTES
-        ) {
-          await this.failRun(run, "CHZ_DOWNLOAD_REJECTED", null);
-          continue;
-        }
-        await this.markReady(run, result.resultId);
-      } else if (FAILED_TASK_STATUSES.has(status)) {
-        await this.failRun(run, "CHZ_TASK_FAILED", result.errorMessage ?? null);
       }
     }
   }
@@ -445,6 +554,7 @@ export class ChzExportRunnerService {
     inventoryId: string,
     auth: TrueApiAuth,
     productGroupCode: number,
+    taskGroups: ReadonlyMap<string, number>,
   ): Promise<void> {
     for (const run of await this.loadRuns(tenantId, inventoryId)) {
       if (run.state !== "ready") continue;
@@ -454,7 +564,7 @@ export class ChzExportRunnerService {
       const downloaded = await this.client.downloadDispenserResult(
         auth,
         resultId,
-        productGroupCode,
+        taskGroups.get(taskAttemptKey(run)) ?? productGroupCode,
         CHZ_MAX_INPUT_BYTES,
       );
       switch (downloaded.status) {
@@ -497,6 +607,13 @@ export class ChzExportRunnerService {
           mimeType: "application/zip",
           bytes: Buffer.from(archive),
         },
+        {
+          runId: run.id,
+          attempts: run.attempts,
+          claimedAt: run.claimedAt,
+          dispenserTaskId: run.dispenserTaskId,
+          resultId: run.resultId,
+        },
       );
     } catch (error) {
       this.logger.warn(
@@ -514,7 +631,6 @@ export class ChzExportRunnerService {
       return;
     }
     await this.markImported(run, imported.id);
-    await this.appendJournal(run, "ok", "Отчёт Честного Знака загружен", run.dispenserTaskId);
   }
 
   /**
@@ -609,8 +725,9 @@ export class ChzExportRunnerService {
   private async loadOrderContext(
     tenantId: string,
     inventoryId: string,
+    executor: Db | SubscriptionTransaction = this.db,
   ): Promise<OrderContext | null> {
-    const [row] = await this.db
+    const [row] = await executor
       .select({
         inn: schema.orgProfiles.inn,
         productGroupCode: schema.products.chzProductGroupCode,
@@ -640,20 +757,25 @@ export class ChzExportRunnerService {
 
   private async markOrdered(run: ChzExportRunRow, dispenserTaskId: string): Promise<void> {
     const now = new Date();
-    await this.db
-      .update(schema.chzExportRuns)
-      .set({
-        state: "ordered",
-        dispenserTaskId,
-        resultId: null,
-        importId: null,
-        errorCode: null,
-        errorMessage: null,
-        orderedAt: now,
-        completedAt: null,
-        updatedAt: now,
-      })
-      .where(this.ownedRunInState(run, "queued"));
+    await this.db.transaction(async (tx) => {
+      const updated = await tx
+        .update(schema.chzExportRuns)
+        .set({
+          state: "ordered",
+          dispenserTaskId,
+          resultId: null,
+          importId: null,
+          errorCode: null,
+          errorMessage: null,
+          orderedAt: now,
+          completedAt: null,
+          updatedAt: now,
+        })
+        .where(this.ownedRunInState(run, "queued"))
+        .returning({ id: schema.chzExportRuns.id });
+      if (updated.length)
+        await this.appendJournal(run, "ok", "Заказан отчёт Честного Знака", dispenserTaskId, tx);
+    });
   }
 
   private async markReady(run: ChzExportRunRow, resultId: string): Promise<void> {
@@ -674,17 +796,28 @@ export class ChzExportRunnerService {
 
   private async markImported(run: ChzExportRunRow, importId: string): Promise<void> {
     const now = new Date();
-    await this.db
-      .update(schema.chzExportRuns)
-      .set({
-        state: "imported",
-        importId,
-        errorCode: null,
-        errorMessage: null,
-        completedAt: now,
-        updatedAt: now,
-      })
-      .where(this.ownedRunInState(run, "ready"));
+    await this.db.transaction(async (tx) => {
+      const updated = await tx
+        .update(schema.chzExportRuns)
+        .set({
+          state: "imported",
+          importId,
+          errorCode: null,
+          errorMessage: null,
+          completedAt: now,
+          updatedAt: now,
+        })
+        .where(this.ownedRunInState(run, "ready"))
+        .returning({ id: schema.chzExportRuns.id });
+      if (updated.length)
+        await this.appendJournal(
+          run,
+          "ok",
+          "Отчёт Честного Знака загружен",
+          run.dispenserTaskId,
+          tx,
+        );
+    });
   }
 
   /**
@@ -696,34 +829,36 @@ export class ChzExportRunnerService {
     run: ChzExportRunRow,
     errorCode: string,
     errorMessage: string | null,
+    transaction?: SubscriptionTransaction,
   ): Promise<void> {
     const now = new Date();
     const bounded =
       errorMessage === null || errorMessage.length === 0
         ? null
         : errorMessage.slice(0, ERROR_MESSAGE_LIMIT);
-    await this.db
-      .update(schema.chzExportRuns)
-      .set({
-        state: "failed",
-        errorCode,
-        errorMessage: bounded,
-        completedAt: now,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(schema.chzExportRuns.tenantId, run.tenantId),
-          eq(schema.chzExportRuns.id, run.id),
-          inArray(schema.chzExportRuns.state, ["queued", "ordered", "ready"]),
-        ),
+    const write = async (tx: SubscriptionTransaction) => {
+      const updated = await tx
+        .update(schema.chzExportRuns)
+        .set({
+          state: "failed",
+          errorCode,
+          errorMessage: bounded,
+          completedAt: now,
+          updatedAt: now,
+        })
+        .where(this.ownedRunInState(run, run.state))
+        .returning({ id: schema.chzExportRuns.id });
+      if (!updated.length) return;
+      await this.appendJournal(
+        run,
+        "error",
+        `Выгрузка Честного Знака не удалась: ${errorCode}`,
+        run.dispenserTaskId,
+        tx,
       );
-    await this.appendJournal(
-      run,
-      "error",
-      `Выгрузка Честного Знака не удалась: ${errorCode}`,
-      run.dispenserTaskId,
-    );
+    };
+    if (transaction) await write(transaction);
+    else await this.db.transaction(write);
   }
 
   private ownedRunInState(run: ChzExportRunRow, state: ChzExportRunRow["state"]) {
@@ -731,6 +866,10 @@ export class ChzExportRunnerService {
       eq(schema.chzExportRuns.tenantId, run.tenantId),
       eq(schema.chzExportRuns.id, run.id),
       eq(schema.chzExportRuns.state, state),
+      eq(schema.chzExportRuns.attempts, run.attempts),
+      run.claimedAt
+        ? eq(schema.chzExportRuns.claimedAt, run.claimedAt)
+        : isNull(schema.chzExportRuns.claimedAt),
     );
   }
 
@@ -744,12 +883,20 @@ export class ChzExportRunnerService {
     outcome: "ok" | "warn" | "error",
     message: string,
     dispenserTaskId: string | null,
+    transaction?: SubscriptionTransaction,
   ): Promise<void> {
-    await this.append(run.tenantId, outcome, "out", message, {
-      inventoryId: run.inventoryId,
-      status: run.status,
-      dispenserTaskId,
-    });
+    await this.append(
+      run.tenantId,
+      outcome,
+      "out",
+      message,
+      {
+        inventoryId: run.inventoryId,
+        status: run.status,
+        dispenserTaskId,
+      },
+      transaction,
+    );
   }
 
   private async appendOrderJournal(
@@ -762,10 +909,9 @@ export class ChzExportRunnerService {
   }
 
   /**
-   * A failed audit write is noise, not a reason to abandon an order mid-pass:
-   * the row transition it describes has already committed, and the next phase
-   * still has requests in flight. Same shape as the signer scheduler's expiry
-   * loop.
+   * Fenced transitions append their journal entry in the owner transaction before
+   * commit. The journal's savepoint isolates a failed append so that the owned
+   * transition can still commit and the pass can continue.
    */
   private async append(
     tenantId: string,
@@ -773,18 +919,22 @@ export class ChzExportRunnerService {
     direction: "out" | "local",
     message: string,
     details: Record<string, unknown>,
+    transaction?: SubscriptionTransaction,
   ): Promise<void> {
     try {
-      await this.journal.append({
-        tenantId,
-        channelType: CHZ_CHANNEL_TYPE,
-        sessionId: null,
-        direction,
-        outcome,
-        grain: "item",
-        message,
-        details,
-      });
+      await this.journal.append(
+        {
+          tenantId,
+          channelType: CHZ_CHANNEL_TYPE,
+          sessionId: null,
+          direction,
+          outcome,
+          grain: "item",
+          message,
+          details,
+        },
+        transaction,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to journal ChZ export event for tenant ${tenantId}`,
@@ -801,6 +951,11 @@ export class ChzExportRunnerService {
  * as a normal non-`ok` result.
  */
 class ChzUnauthorizedError extends Error {}
+
+/** In-memory context only: a stale response must never select a winning task's group. */
+function taskAttemptKey(run: ChzExportRunRow, taskId = run.dispenserTaskId): string {
+  return `${run.id}:${run.attempts}:${run.claimedAt?.toISOString()}:${taskId}`;
+}
 
 function isTerminal(run: ChzExportRunRow): boolean {
   return run.state === "imported" || run.state === "failed";

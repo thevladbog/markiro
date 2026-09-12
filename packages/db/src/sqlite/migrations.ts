@@ -3493,6 +3493,50 @@ export const STATION_MIGRATIONS: string[] = [
        OR NEW.planned_qty_snapshot IS NOT (SELECT planned_qty FROM shift_mirror WHERE id=NEW.shift_id)
        THEN RAISE(ABORT,'PRODUCT_LABEL_CLOSE_CHANGED') END;
    END;`,
+  `CREATE TABLE IF NOT EXISTS station_device_recovery (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    machine_id TEXT NOT NULL,
+    owner_json TEXT,
+    phase TEXT NOT NULL CHECK(phase IN ('active','sealing','sealed','restoring','owner_unresolved')),
+    active_hash TEXT,
+    candidate_hash TEXT
+  );`,
+  `CREATE TABLE IF NOT EXISTS station_device_owners (
+    credential_hash TEXT PRIMARY KEY,
+    owner_json TEXT NOT NULL
+  );`,
+  `CREATE TRIGGER IF NOT EXISTS station_device_owner_activate AFTER UPDATE OF phase ON station_device_recovery
+   WHEN NEW.phase='active' AND NEW.active_hash IS NOT NULL AND NEW.owner_json IS NOT NULL
+   BEGIN INSERT INTO station_device_owners(credential_hash,owner_json) VALUES(NEW.active_hash,NEW.owner_json)
+     ON CONFLICT(credential_hash) DO NOTHING; END;`,
+  `CREATE TRIGGER IF NOT EXISTS station_device_owner_initialize AFTER INSERT ON station_device_recovery
+   WHEN NEW.phase='active' AND NEW.active_hash IS NOT NULL AND NEW.owner_json IS NOT NULL
+   BEGIN INSERT INTO station_device_owners(credential_hash,owner_json) VALUES(NEW.active_hash,NEW.owner_json)
+     ON CONFLICT(credential_hash) DO NOTHING; END;`,
+
+  `CREATE TRIGGER IF NOT EXISTS product_label_durable_owner_guard BEFORE INSERT ON product_label_accept_commands
+   WHEN EXISTS (SELECT 1 FROM station_device_recovery)
+   BEGIN
+     SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM station_device_recovery
+       WHERE phase='active' AND active_hash=NEW.credential_ownership AND owner_json IS NOT NULL)
+       THEN RAISE(ABORT,'PRODUCT_LABEL_OWNER_SEALED') END;
+     SELECT CASE WHEN EXISTS (
+       SELECT 1 FROM product_label_jobs job JOIN station_device_owners owners ON owners.credential_hash=job.credential_ownership
+       JOIN station_device_recovery recovery ON recovery.owner_json=owners.owner_json
+       WHERE job.status<>'completed' AND NOT (job.credential_ownership=NEW.credential_ownership AND job.job_id=NEW.job_id)
+     ) THEN RAISE(ABORT,'PRODUCT_LABEL_BUSY') END;
+   END;`,
+  // AFTER INSERT preserves ON CONFLICT DO NOTHING replay semantics. Either
+  // this guard or the historical apply trigger may run first; ABORT rolls back both.
+  `CREATE TRIGGER IF NOT EXISTS product_label_durable_reprint_guard AFTER INSERT ON product_label_event_commands
+   WHEN json_extract(NEW.event_json,'$.kind')='prepared' AND EXISTS (SELECT 1 FROM station_device_recovery)
+   BEGIN
+     SELECT CASE WHEN EXISTS (
+       SELECT 1 FROM product_label_jobs job JOIN station_device_owners owners ON owners.credential_hash=job.credential_ownership
+       JOIN station_device_recovery recovery ON recovery.owner_json=owners.owner_json
+       WHERE job.status<>'completed' AND NOT (job.credential_ownership=NEW.credential_ownership AND job.job_id=NEW.job_id)
+     ) THEN RAISE(ABORT,'PRODUCT_LABEL_BUSY') END;
+   END;`,
 
   // ---- 06d pallets ----
   //

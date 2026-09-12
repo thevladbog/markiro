@@ -1,3 +1,5 @@
+import { PlatformEntitlementsController } from "../src/subscriptions/platform-entitlements.controller";
+import { EntitlementSourcesService } from "../src/subscriptions/entitlement-sources.service";
 import { Test } from "@nestjs/testing";
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from "@nestjs/swagger";
 import { platformCommercialContracts, platformErrorSchema } from "@markiro/platform-contracts";
@@ -37,6 +39,8 @@ import { PlatformOffersController } from "../src/modules/platform-offers/platfor
 import { PlatformOffersService } from "../src/modules/platform-offers/platform-offers.service";
 import { PlatformOperationsController } from "../src/modules/platform-operations/platform-operations.controller";
 import { PlatformOperationsService } from "../src/modules/platform-operations/platform-operations.service";
+import { PlatformDeviceLicensingController } from "../src/modules/device-licensing/platform-device-licensing.controller";
+import { DeviceLicensingService } from "../src/modules/device-licensing/device-licensing.service";
 import { NationalCatalogSchemaService } from "../src/modules/national-catalog/national-catalog-schema.service";
 import { PlatformTenantsController } from "../src/modules/platform-tenants/platform-tenants.controller";
 import { PlatformTenantsService } from "../src/modules/platform-tenants/platform-tenants.service";
@@ -117,6 +121,7 @@ async function createPlatformDocument(): Promise<{
   close: () => Promise<void>;
 }> {
   const providers = [
+    EntitlementSourcesService,
     PlatformReportsService,
     PlatformActivationService,
     PlatformTeamService,
@@ -139,10 +144,12 @@ async function createPlatformDocument(): Promise<{
     PlatformDadataRateLimit,
     PlatformOperationsService,
     NationalCatalogSchemaService,
+    DeviceLicensingService,
     DB,
   ].map((provide) => ({ provide, useValue: {} }));
   const moduleRef = await Test.createTestingModule({
     controllers: [
+      PlatformEntitlementsController,
       PlatformReportsController,
       PlatformMeController,
       PlatformActivationController,
@@ -160,6 +167,7 @@ async function createPlatformDocument(): Promise<{
       BillingAccountsController,
       PlatformDadataController,
       PlatformOperationsController,
+      PlatformDeviceLicensingController,
     ],
     providers,
   }).compile();
@@ -184,7 +192,7 @@ async function createPlatformDocument(): Promise<{
 
 describe("current SaaS platform OpenAPI contracts", () => {
   it("converts all current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(154);
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(166);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }
@@ -219,7 +227,13 @@ describe("current SaaS platform OpenAPI contracts", () => {
         const successSchema = inlineJsonSchema(documented.responses[contract.status]);
         expect(successSchema).toEqual(
           contract.commercialV2
-            ? { anyOf: [jsonSchema(contract.response), jsonSchema(contract.commercialV2.response)] }
+            ? {
+                anyOf: [
+                  jsonSchema(contract.response),
+                  jsonSchema(contract.commercialV2.response),
+                  jsonSchema((contract.commercialV3 ?? contract.commercialV2).response),
+                ],
+              }
             : jsonSchema(contract.response),
         );
         if (contract.commercialV2)
@@ -230,7 +244,7 @@ describe("current SaaS platform OpenAPI contracts", () => {
           );
         expectOpenApi30Compatible(successSchema);
 
-        if (contract.body || contract.commercialV2?.body) {
+        if (contract.body || contract.commercialV2?.body || contract.commercialV3?.body) {
           if (contract.multipart) {
             expect(inlineJsonSchema(documented.requestBody)).toBeUndefined();
             const multipartSchema = inlineContentSchema(
@@ -249,9 +263,11 @@ describe("current SaaS platform OpenAPI contracts", () => {
             expectOpenApi30Compatible(multipartSchema);
           } else {
             const bodySchema = inlineJsonSchema(documented.requestBody);
-            const bodies = [contract.body, contract.commercialV2?.body].filter(
-              (body): body is ZodType => body !== undefined,
-            );
+            const bodies = [
+              contract.body,
+              contract.commercialV2?.body,
+              (contract.commercialV3 ?? contract.commercialV2)?.body,
+            ].filter((body): body is ZodType => body !== undefined);
             expect(bodySchema).toEqual(
               bodies.length === 1 ? jsonSchema(bodies[0]!) : { anyOf: bodies.map(jsonSchema) },
             );
@@ -323,9 +339,9 @@ describe("current SaaS platform OpenAPI contracts", () => {
         }>;
       };
 
-      expect(body.anyOf).toHaveLength(2);
+      expect(body.anyOf).toHaveLength(3);
       const alternatives = body.anyOf?.flatMap((representation) => representation.anyOf ?? []);
-      expect(alternatives).toHaveLength(8);
+      expect(alternatives).toHaveLength(12);
       const direct = alternatives?.filter(
         (candidate) =>
           !("sourceOfferId" in (candidate.properties ?? {})) &&
@@ -339,9 +355,10 @@ describe("current SaaS platform OpenAPI contracts", () => {
       expect(direct).toEqual([
         expect.objectContaining({ additionalProperties: false }),
         expect.objectContaining({ additionalProperties: false }),
+        expect.objectContaining({ additionalProperties: false }),
       ]);
       expect(direct?.[0]?.required ?? []).not.toContain("idempotencyKey");
-      expect(linked).toHaveLength(6);
+      expect(linked).toHaveLength(9);
       for (const candidate of linked ?? []) {
         const sourceProperties = Object.keys(candidate.properties ?? {}).filter((property) =>
           property.startsWith("source"),

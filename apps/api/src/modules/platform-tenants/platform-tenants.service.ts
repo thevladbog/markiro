@@ -1,10 +1,11 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, count, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import { countWorkingDeviceUsage } from "../../subscriptions/working-device-assignments";
 import {
   platformTenantContracts,
-  platformTenantV2Contracts,
-  type TenantDetailV2,
+  platformTenantV3Contracts,
+  type TenantDetailV3,
   type AddonAssignmentResult,
   type CreateTenantResult,
   type PlanAssignmentResult,
@@ -12,7 +13,10 @@ import {
   type TenantListResult,
   type TenantSubscriptionStatus,
 } from "@markiro/platform-contracts";
-import { assertLegacyCommercialRepresentation } from "../../platform-http/commercial-version";
+import {
+  assertLegacyCommercialRepresentation,
+  type CommercialVersion,
+} from "../../platform-http/commercial-version";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { sanitizeSupportAuditMetadata } from "../../platform-auth/platform-audit.service";
@@ -148,7 +152,7 @@ export class PlatformTenantsService {
     });
   }
 
-  async get(actor: PlatformPrincipal, tenantId: string): Promise<TenantDetailV2> {
+  async get(actor: PlatformPrincipal, tenantId: string): Promise<TenantDetailV3> {
     const [tenant] = await this.db
       .select()
       .from(schema.organization)
@@ -268,15 +272,7 @@ export class PlatformTenantsService {
         .select({ value: count() })
         .from(schema.lines)
         .where(eq(schema.lines.tenantId, tenantId)),
-      this.db
-        .select({ value: count() })
-        .from(schema.stationDevices)
-        .where(
-          and(
-            eq(schema.stationDevices.tenantId, tenantId),
-            isNull(schema.stationDevices.revokedAt),
-          ),
-        ),
+      countWorkingDeviceUsage(this.db, tenantId),
       this.db
         .select({ value: count() })
         .from(schema.kiosks)
@@ -307,7 +303,7 @@ export class PlatformTenantsService {
     );
     const scrub =
       actor.role === "support" ? sanitizeSupportAuditMetadata : (value: unknown) => value;
-    return platformTenantV2Contracts.detail.response.parse({
+    return platformTenantV3Contracts.detail.response.parse({
       tenant: {
         id: tenant.id,
         name: tenant.name,
@@ -337,7 +333,7 @@ export class PlatformTenantsService {
         cabinetUsers: (cabinetUsage[0]?.value ?? 0) + (invitationUsage[0]?.value ?? 0),
         kiosks: kioskUsage[0]?.value ?? 0,
         lines: lineUsage[0]?.value ?? 0,
-        stations: stationUsage[0]?.value ?? 0,
+        stations: stationUsage,
       },
       events: events.map((event) => ({
         id: event.id,
@@ -387,9 +383,9 @@ export class PlatformTenantsService {
     actor: PlatformPrincipal,
     tenantId: string,
     input: AssignPlanDto,
-    legacy = false,
+    clientVersion: CommercialVersion | boolean = 2,
   ): Promise<PlanAssignmentResult> {
-    if (legacy) {
+    if (clientVersion === true || clientVersion === 1) {
       const version = await this.requireCatalogVersion(input.catalogVersionId);
       // Reject the captured draft before a concurrent publication can bypass the legacy check.
       if (version.status !== "published") {
@@ -399,7 +395,12 @@ export class PlatformTenantsService {
       assertLegacyCommercialRepresentation(await this.catalogVersionDto(version, true));
     }
     return platformTenantContracts.assignPlan.response.parse(
-      await this.subscriptions.assignPlan(actor, tenantId, input),
+      await this.subscriptions.assignPlan(
+        actor,
+        tenantId,
+        input,
+        clientVersion === true ? 1 : clientVersion === false ? 2 : clientVersion,
+      ),
     );
   }
 
@@ -407,9 +408,10 @@ export class PlatformTenantsService {
     actor: PlatformPrincipal,
     tenantId: string,
     input: AssignAddonDto,
+    clientVersion: CommercialVersion = 2,
   ): Promise<AddonAssignmentResult> {
     return platformTenantContracts.assignAddon.response.parse(
-      await this.subscriptions.assignAddon(actor, tenantId, input),
+      await this.subscriptions.assignAddon(actor, tenantId, input, clientVersion),
     );
   }
 
@@ -462,6 +464,7 @@ export class PlatformTenantsService {
       documentNameEn: version.documentNameEn,
       subject: version.subject,
       sellerPolicyRevision: version.sellerPolicyRevision,
+      lifecyclePolicyId: version.lifecyclePolicyId,
       id: version.id,
       catalogItemId: version.catalogItemId,
       catalogItemCode: item?.code ?? null,
@@ -497,6 +500,10 @@ export class PlatformTenantsService {
               labelEditorEnabled: entitlements.labelEditorEnabled,
               publicApiEnabled: entitlements.publicApiEnabled,
               palletsEnabled: entitlements.palletsEnabled,
+              chzIntegrationEnabled: entitlements.chzIntegrationEnabled,
+              inventoryEnabled: entitlements.inventoryEnabled,
+              commerceMlEnabled: entitlements.commerceMlEnabled,
+              handheldEnabled: entitlements.handheldEnabled,
               demoDurationDays: entitlements.demoDurationDays,
             }
           : null,

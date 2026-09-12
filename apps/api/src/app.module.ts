@@ -1,3 +1,4 @@
+import { PlatformEntitlementsModule } from "./subscriptions/platform-entitlements.module";
 import { Module, type DynamicModule } from "@nestjs/common";
 import { AuthModule } from "./auth/auth.module";
 import type { AuthSetup } from "./auth/auth.setup";
@@ -10,6 +11,7 @@ import { ShiftsModule } from "./modules/shifts/shifts.module";
 import { LabelTemplatesModule } from "./modules/label-templates/label-templates.module";
 import { StationDevicesModule } from "./modules/station-devices/station-devices.module";
 import { DevicesModule } from "./modules/devices/devices.module";
+import { DeviceLicensingModule } from "./modules/device-licensing/device-licensing.module";
 import { StationPairingModule } from "./modules/station-pairing/station-pairing.module";
 import { StationScansModule } from "./modules/station-scans/station-scans.module";
 import { EmployeesModule } from "./modules/employees/employees.module";
@@ -96,6 +98,7 @@ export class AppModule {
           ? [
               PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN),
               PlatformCatalogModule,
+              PlatformEntitlementsModule,
               PlatformTenantsModule.forRoot(env.ADMIN_ORIGIN),
               PlatformReportsModule,
               PlatformAgreementsModule,
@@ -130,6 +133,7 @@ export class AppModule {
         LabelTemplatesModule,
         StationDevicesModule,
         DevicesModule,
+        DeviceLicensingModule,
         StationPairingModule,
         StationScansModule,
         EmployeesModule,

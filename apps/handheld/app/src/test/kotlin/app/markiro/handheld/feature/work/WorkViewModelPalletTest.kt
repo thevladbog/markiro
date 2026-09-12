@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.work
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -18,6 +19,7 @@ import app.markiro.handheld.core.box.PrintReason
 import app.markiro.handheld.core.box.ServerRange
 import app.markiro.handheld.core.box.SsccPool
 import app.markiro.handheld.core.duplicate.DuplicateJobs
+import app.markiro.handheld.core.exceptions.ExceptionEngine
 import app.markiro.handheld.core.label.LabelRenderer
 import app.markiro.handheld.core.label.RasterResult
 import app.markiro.handheld.core.label.RasterizeText
@@ -108,12 +110,20 @@ class WorkViewModelPalletTest {
                 kind = "handheld", serverUrl = "http://x", pairedAt = 1L, activeShiftId = "s1",
             ),
         )
+        db.initializeRecoveryForTest()
     }
 
     @After
     fun tearDown() {
-        engineScope.cancel()
-        db.close()
+        // #506's guard: `finished()` runs after `@After`, so a tracked model
+        // left collecting would meet a closed Room pool and fail whichever test
+        // ran next. Cancel first, close second.
+        try {
+            main.cancelAndJoinModels()
+        } finally {
+            engineScope.cancel()
+            db.close()
+        }
     }
 
     /** An aggregation shift with pallets enabled (06d): every scan closes a box unless `boxCapacity` says otherwise. */
@@ -145,7 +155,7 @@ class WorkViewModelPalletTest {
 
     private fun vm(): WorkViewModel {
         val engine = SyncEngine(
-            db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
+            db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), engineScope,
         )
         val boxes = BoxRepository(db)
@@ -161,7 +171,7 @@ class WorkViewModelPalletTest {
                 boxes, CloseBox(db, boxes, pool, pallets, closePallet, palletLock),
                 BoxPrinter(db, boxes, LabelRenderer(rasterize), transport),
                 DuplicateJobs(db, LabelRenderer(rasterize), transport),
-                pallets, closePallet, palletPrinter, flowOf(Unit),
+                pallets, closePallet, palletPrinter, ExceptionEngine(db), flowOf(Unit),
             ),
         )
     }

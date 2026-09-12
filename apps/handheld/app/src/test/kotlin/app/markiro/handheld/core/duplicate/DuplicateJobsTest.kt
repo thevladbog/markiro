@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.duplicate
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -13,6 +14,7 @@ import app.markiro.handheld.core.print.PrinterTransport
 import app.markiro.handheld.core.print.SendOutcome
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.ShiftEntity
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -109,6 +111,7 @@ class DuplicateJobsTest {
         transport = FakeTransport()
         db.shiftDao().upsert(shift())
         selectPrinter()
+        db.initializeRecoveryForTest()
     }
 
     @After
@@ -354,4 +357,33 @@ class DuplicateJobsTest {
         val noDigest = shift().copy(duplicateTemplateDigest = null)
         assertEquals(DuplicateReason.POLICY_INCOMPLETE, jobs().preflight(noDigest))
     }
+    @Test fun acceptAndDemotionShareLeaseOrderAndDoNotHoldRoomDuringRender() = runTest {
+        db.close()
+        db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java)
+            .allowMainThreadQueries().setTransactionExecutor { it.run() }.setQueryExecutor { it.run() }.build()
+        db.initializeRecoveryForTest()
+        selectPrinter()
+        val rendering = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val finishRender = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val jobs = DuplicateJobs(db, LabelRenderer(RasterizeText { _, _ ->
+            assertTrue("Rendering must not hold a Room transaction", !db.inTransaction())
+            rendering.complete(Unit)
+            finishRender.await()
+            RasterResult("00", 1, 1, 1, 1)
+        }), transport)
+        kotlinx.coroutines.withTimeout(5_000) {
+            val accepting = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                jobs.accept(shift(), RAW, "hash", "op", "Name", ACCEPTED_AT)
+            }
+            rendering.await()
+            val demoting = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { jobs.demoteInterrupted() }
+            finishRender.complete(Unit)
+            assertTrue(accepting.await() is DuplicateOutcome.Prepared)
+            demoting.await()
+        }
+        assertEquals(1L, db.openHelper.readableDatabase.query("SELECT COUNT(*) FROM product_label_events").use { it.moveToFirst(); it.getLong(0) })
+        assertTrue(transport.sent.isEmpty())
+        assertTrue(db.recovery.reject(db.recovery.token()))
+    }
+
 }

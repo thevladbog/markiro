@@ -34,6 +34,7 @@ import { closeNationalCatalogLinkInTransaction } from "./national-catalog-link-w
 import { buildNationalCatalogImportEntries } from "./national-catalog-proposal.service";
 import { statuses } from "./national-catalog-enumeration";
 import type { DbTx, ImportActor } from "./national-catalog-import.types";
+import { nationalCatalogProductAttributeUnit } from "./national-catalog.types";
 
 type Preview = typeof schema.nationalCatalogImportPreviews.$inferSelect;
 type Receipt = typeof schema.nationalCatalogImportOperationItems.$inferSelect;
@@ -446,7 +447,11 @@ export async function applyImportItem(
               a.gtin === null ||
               (isValidGtin(a.gtin) && normalizeToGtin14(a.gtin) === source.boundGtin14),
           )
-          .map((a) => ({ id: a.id, value: a.value, unit: null })),
+          .map((a) => ({
+            id: a.id,
+            value: a.value,
+            unit: nationalCatalogProductAttributeUnit(a),
+          })),
         sourceName: source.normalized.name,
         stableMappings,
         currentStableFields: new Map<"print_name" | "shelf_life_days", string | number | null>([

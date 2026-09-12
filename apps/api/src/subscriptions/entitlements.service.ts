@@ -1,4 +1,9 @@
-import { Inject, Injectable } from "@nestjs/common";
+import type { EntitlementSnapshotV1 } from "@markiro/platform-contracts";
+import { countWorkingDeviceUsage } from "./working-device-assignments";
+import { projectEntitlements } from "./entitlement-projection";
+import { readEntitlementFacts, entitlementDigest } from "./entitlement-snapshot-reader";
+import { NationalCatalogCapabilitiesService } from "../modules/national-catalog/national-catalog-capabilities.service";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { and, asc, count, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
@@ -45,7 +50,50 @@ export class EntitlementsService {
     @Inject(DB) private readonly db: Db,
     @Inject(SUBSCRIPTION_ENFORCEMENT_MODE)
     private readonly enforcementMode: SubscriptionEnforcementMode,
+    @Optional() private readonly nationalCatalog?: NationalCatalogCapabilitiesService,
   ) {}
+
+  async resolveSnapshot(tenantId: string): Promise<EntitlementSnapshotV1> {
+    const { snapshot } = await this.db.transaction(
+      (tx) => this.resolveSnapshotInTransaction(tenantId, tx),
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
+    return this.observeConnectivity(snapshot);
+  }
+
+  /** Internal operation-owner entry; caller owns coherent isolation and all locks. */
+  async resolveSnapshotInTransaction(tenantId: string, tx: SubscriptionTransaction) {
+    const at = new Date();
+    const current = await this.resolve(tenantId, tx, at);
+    const usage = await this.usage(tenantId, tx, at);
+    const facts = await readEntitlementFacts(tx, current);
+    const input = { current, usage, at, enforcementMode: this.enforcementMode, ...facts };
+    return {
+      ...facts,
+      input,
+      snapshot: projectEntitlements(input),
+      usageFingerprint: entitlementDigest(usage),
+    };
+  }
+
+  async observeConnectivity(snapshot: EntitlementSnapshotV1): Promise<EntitlementSnapshotV1> {
+    const connectivity: EntitlementSnapshotV1["connectivity"] = {
+      observedAt: new Date().toISOString(),
+      chz: "unknown",
+      nationalCatalog: "unknown",
+    };
+    if (this.nationalCatalog) {
+      try {
+        Object.assign(
+          connectivity,
+          await this.nationalCatalog.observeEntitlementConnectivity(snapshot.tenantId),
+        );
+      } catch {
+        /* Observation unavailable, never a grant. */
+      }
+    }
+    return { ...snapshot, connectivity };
+  }
 
   async resolve(
     tenantId: string,
@@ -128,12 +176,7 @@ export class EntitlementsService {
       .select({ value: count() })
       .from(schema.lines)
       .where(eq(schema.lines.tenantId, tenantId));
-    const [stations] = await executor
-      .select({ value: count() })
-      .from(schema.stationDevices)
-      .where(
-        and(eq(schema.stationDevices.tenantId, tenantId), isNull(schema.stationDevices.revokedAt)),
-      );
+    const stations = await countWorkingDeviceUsage(executor, tenantId);
     const [kiosks] = await executor
       .select({ value: count() })
       .from(schema.kiosks)
@@ -154,7 +197,7 @@ export class EntitlementsService {
       );
     return {
       lines: lines?.value ?? 0,
-      stations: stations?.value ?? 0,
+      stations,
       kiosks: kiosks?.value ?? 0,
       cabinetUsers: (members?.value ?? 0) + (invitations?.value ?? 0),
     };
@@ -367,7 +410,13 @@ export class EntitlementsService {
           quotas[effect.entitlementKey] = value;
         } else {
           if (!effect.featureEnabled) throw new SubscriptionEntitlementsInvalidException();
-          features.push(effect.entitlementKey);
+          if (
+            effect.entitlementKey === "labelEditor" ||
+            effect.entitlementKey === "publicApi" ||
+            effect.entitlementKey === "pallets"
+          ) {
+            features.push(effect.entitlementKey);
+          }
         }
       }
       contributors.push({

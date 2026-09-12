@@ -604,3 +604,24 @@
     flex: 0 0 auto;
   }
 }
+
+.mk-billing-limit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: var(--sp-4);
+}
+
+.mk-billing-entitlement-facts {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.mk-billing-entitlement-facts > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: var(--sp-2);
+}
+
+.mk-billing-entitlement-facts dd {
+  margin: 0;
+}

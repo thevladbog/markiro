@@ -53,6 +53,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   {
     contract: customerContract(CABINET_GUARDS, { mode: "read_only_allowed", reason: "read" }),
     routes: [
+      "GET /access/entitlements (AccessController.entitlementSnapshot)",
       "GET /national-catalog/capabilities (NationalCatalogImportController.capabilitiesRead)",
       "GET /national-catalog/import-sessions/:sessionId (NationalCatalogImportController.read)",
       "GET /national-catalog/import-sessions/:sessionId/preparations/:preparationId (NationalCatalogImportController.preparation)",
@@ -154,6 +155,22 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /station-devices (StationDevicesController.list)",
       "GET /team (TeamController.list)",
       "POST /products/gtin-check (ProductsController.checkGtinOwner)",
+    ],
+  },
+  {
+    contract: customerContract(CABINET_GUARDS, {
+      mode: "licensing",
+      operation: "inspect",
+    }),
+    routes: ["GET /device-licensing (DeviceLicensingController.inspect)"],
+  },
+  {
+    contract: customerContract(CABINET_GUARDS, {
+      mode: "licensing",
+      operation: "cancel_reservation",
+    }),
+    routes: [
+      "POST /device-licensing/:deviceId/cancel-reservation (DeviceLicensingController.cancelReservation)",
     ],
   },
   {
@@ -390,6 +407,9 @@ const profile: RouteExemption = {
 };
 
 const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
+  "PlatformDeviceLicensingController.cancelReservation": platform(
+    "cross-tenant reservation cancellation requires platform tenant and billing write capabilities",
+  ),
   "PlatformReportsController.create": platform(
     "cross-tenant report creation uses platform reports.create capability and revalidated platform identity",
   ),
@@ -489,6 +509,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "PlatformOffersController.create": platform(
     "platform billing offer creation is guarded by platform capabilities",
   ),
+  "PlatformOffersController.updateDraft": platform(
+    "platform billing draft editing is guarded by the isolated platform billing.write capability",
+  ),
   "PlatformBillingRequestsController.comment": platform(
     "platform billing request comments are guarded by platform billing capabilities",
   ),
@@ -543,6 +566,10 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "KioskPairController.pair": {
     reason:
       "unpaired kiosk has no device identity; PairingService resolves the authoritative tenant and enforces write access",
+  },
+  "StationPairController.recovery": {
+    reason:
+      "recovery authenticates the single-use code and expected identity; StationPairingService enforces authoritative tenant write/quota access",
   },
   "StationPairController.pair": {
     reason:
@@ -619,6 +646,12 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   ),
   "PlatformTeamController.suspend": platform(
     "platform account lifecycle uses the isolated platform principal and capability policy",
+  ),
+  "PlatformEntitlementsController.preview": platform(
+    "source preview uses the isolated platform principal and both entitlement write capabilities",
+  ),
+  "PlatformEntitlementsController.confirm": platform(
+    "source confirmation uses the isolated platform principal and both entitlement write capabilities",
   ),
   "PlatformTenantsController.assignAddon": platform(
     "subscription lifecycle is administered by the isolated platform trust domain",

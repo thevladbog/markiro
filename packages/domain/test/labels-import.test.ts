@@ -69,6 +69,43 @@ describe("label code import contract", () => {
   });
 
   describe("ZPL subset", () => {
+    it("keeps modal module width across fields without applying it to a matrix", () => {
+      const { spec } = parseZplLabel(
+        "^XA^PW800^LL800^BY3^FO20,20^BCN,60,N,N,N^FD{{sscc}}^FS" +
+          "^FO20,100^BEN,60,N^FD{{product.gtin}}^FS" +
+          "^FO20,200^BXN,100^FD{{km.code}}^FS^XZ",
+        203,
+      );
+      expect(spec.elements[0]).toMatchObject({ moduleWidthMm: (3 * 25.4) / 203 });
+      expect(spec.elements[1]).toMatchObject({ moduleWidthMm: (3 * 25.4) / 203 });
+      expect(spec.elements[2]).not.toHaveProperty("moduleWidthMm");
+      expect(
+        parseZplLabel("^XA^PW800^LL800^FO20,20^BCN,60,N,N,N^FD{{sscc}}^FS^XZ", 203).spec
+          .elements[0],
+      ).not.toHaveProperty("moduleWidthMm");
+    });
+
+    it.each(["0", "11", "2.5", "invalid", ""])("rejects invalid ^BY module width %s", (width) => {
+      expect(() => parseZplLabel(`^XA^PW800^LL800^BY${width}^XZ`, 203)).toThrow(
+        expect.objectContaining({ code: "LABEL_CODE_INVALID" }),
+      );
+    });
+
+    it("preserves explicit linear barcode module width for imported SSCC labels", () => {
+      const result = parseZplLabel(
+        "^XA\n^PW464\n^LL320\n^FO16,200^BY2^BCN,64,N,N,N^FD{{sscc}}^FS\n^XZ",
+        203,
+      );
+      expect(result.warnings).toEqual([]);
+      expect(result.spec.elements).toEqual([
+        expect.objectContaining({
+          format: "code128",
+          data: "sscc",
+          moduleWidthMm: (2 * 25.4) / 203,
+        }),
+      ]);
+    });
+
     it("imports native text and a field in draw order", () => {
       const result = parseZplLabel(
         [

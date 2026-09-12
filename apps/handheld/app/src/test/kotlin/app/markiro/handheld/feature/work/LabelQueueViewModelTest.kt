@@ -1,5 +1,7 @@
 package app.markiro.handheld.feature.work
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
+import app.markiro.handheld.core.storage.reconnectSameDeviceForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -10,6 +12,9 @@ import app.markiro.handheld.core.box.BoxRepository
 import app.markiro.handheld.core.box.PalletLock
 import app.markiro.handheld.core.box.PalletPrinter
 import app.markiro.handheld.core.box.PalletRepository
+import app.markiro.handheld.core.auth.OperatorRecord
+import app.markiro.handheld.core.exceptions.ExceptionEngine
+import app.markiro.handheld.feature.signin.SessionHolder
 import app.markiro.handheld.core.label.LabelRenderer
 import app.markiro.handheld.core.label.RasterResult
 import app.markiro.handheld.core.label.RasterizeText
@@ -24,6 +29,7 @@ import app.markiro.handheld.core.storage.PalletPrint
 import app.markiro.handheld.core.storage.ShiftEntity
 import app.markiro.handheld.demoteInterruptedPrints
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -40,6 +46,9 @@ class LabelQueueViewModelTest {
     val main = MainDispatcherRule()
 
     private lateinit var db: HandheldDatabase
+    private val session = SessionHolder().apply {
+        signIn(OperatorRecord("op-1", "Иванова Анна", "4127", "operator", "x", null, true))
+    }
 
     private class RecordingTransport : PrinterTransport {
         val printed = mutableListOf<String>()
@@ -76,10 +85,17 @@ class LabelQueueViewModelTest {
                 language = "zpl", dpi = 203, selected = true, lastStatus = null, lastSeenAt = null,
             ),
         )
+        db.initializeRecoveryForTest()
     }
 
     @After
-    fun tearDown() = db.close()
+    fun tearDown() {
+        try {
+            main.cancelAndJoinModels()
+        } finally {
+            db.close()
+        }
+    }
 
     private suspend fun box(id: String, sscc: String, state: String, shiftId: String = "s1") = db.boxDao().insert(
         BoxEntity(
@@ -97,7 +113,9 @@ class LabelQueueViewModelTest {
         ),
     )
 
-    private fun model(): LabelQueueViewModel {
+    private fun model(
+        config: app.markiro.handheld.core.storage.DeviceConfigDao = db.deviceConfigDao(),
+    ): LabelQueueViewModel {
         val palletLock = PalletLock(db)
         val pallets = PalletRepository(db, palletLock)
         return main.track(
@@ -106,8 +124,75 @@ class LabelQueueViewModelTest {
                 BoxPrinter(db, BoxRepository(db), LabelRenderer(RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) }), transport),
                 pallets,
                 PalletPrinter(db, pallets, LabelRenderer(RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) }), transport),
+                ExceptionEngine(db),
+                session,
+                config,
+                db.recovery,
             ),
         )
+    }
+
+    /**
+     * Brief §8: resolving an unknown outcome by printing again is "an explicit
+     * same-SSCC reprint, audited as such". This is where that is kept.
+     */
+    @Test
+    fun printingAgainFromAnUnknownOutcomeWritesAReprint() = runTest {
+        box("b1", "046800899000000018", BoxPrint.UNKNOWN)
+        // The closure syncs within a heartbeat, while the operator is still
+        // working out whether paper moved; only then is the fact sendable.
+        db.boxDao().markAcked(listOf("b1"), "2026-09-10T08:00:15.000Z")
+        val vm = model()
+        vm.state.first { it.items.size == 1 }
+        vm.printOne("b1")
+        // `advanceUntilIdle` returns while Room is still writing on its own
+        // executor; the flag is cleared in a `finally` after both the audit and
+        // the print, so bracketing on it is the deterministic wait.
+        vm.state.first { it.printing }
+        vm.state.first { !it.printing }
+        val queued = db.boxExceptionDao().sendable(Long.MAX_VALUE, 10).single()
+        assertEquals("reprint", queued.kind)
+        assertEquals("b1", queued.boxId)
+        assertEquals("Результат печати неизвестен", queued.reason)
+    }
+
+    /** «Этикетка напечаталась» says the label is already there. Nothing was reprinted. */
+    @Test
+    fun confirmingTheLabelPrintedWritesNoReprint() = runTest {
+        box("b1", "046800899000000018", BoxPrint.UNKNOWN)
+        val vm = model()
+        vm.state.first { it.items.size == 1 }
+        vm.resolveUnknown("b1")
+        // Resolving marks the label printed, which drops it out of the queue.
+        db.boxDao().observeUnprintedCount().first { it == 0 }
+        assertEquals(0, db.boxExceptionDao().unackedCount())
+    }
+
+    /**
+     * A failed attempt never put paper through the printer, so printing it is an
+     * ordinary retry and not a second label to account for.
+     */
+    @Test
+    fun retryingAFailedPrintWritesNoReprint() = runTest {
+        box("b1", "046800899000000018", BoxPrint.FAILED)
+        val vm = model()
+        vm.state.first { it.items.size == 1 }
+        vm.printOne("b1")
+        vm.state.first { it.printing }
+        vm.state.first { !it.printing }
+        assertEquals(0, db.boxExceptionDao().unackedCount())
+    }
+
+    /** A deferred label was never sent either. */
+    @Test
+    fun printingADeferredLabelWritesNoReprint() = runTest {
+        box("b1", "046800899000000018", BoxPrint.DEFERRED)
+        val vm = model()
+        vm.state.first { it.items.size == 1 }
+        vm.printOne("b1")
+        vm.state.first { it.printing }
+        vm.state.first { !it.printing }
+        assertEquals(0, db.boxExceptionDao().unackedCount())
     }
 
     @Test
@@ -245,5 +330,30 @@ class LabelQueueViewModelTest {
         assertEquals(1, transport.printed.size)
         assertTrue(transport.printed.single().contains("046800899000000018"))
         assertEquals(PalletPrint.UNKNOWN, db.palletDao().get("p1")?.printState)
+    }
+
+    @Test fun delayedAuditLookupCannotReprintUnderReplacementCredential() = runTest {
+        box("b1", "046800899000000018", BoxPrint.UNKNOWN)
+        val lookup = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val resume = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val config = object : app.markiro.handheld.core.storage.DeviceConfigDao by db.deviceConfigDao() {
+            override suspend fun get(): app.markiro.handheld.core.storage.DeviceConfigEntity? {
+                val saved = db.deviceConfigDao().get()
+                lookup.complete(Unit)
+                resume.await()
+                return saved
+            }
+        }
+        val vm = model(config)
+        vm.state.first { it.items.size == 1 }
+        vm.printOne("b1")
+        lookup.await()
+        db.recovery.reject(db.recovery.token())
+        db.reconnectSameDeviceForTest()
+        resume.complete(Unit)
+        vm.state.first { !it.printing }
+        assertTrue(transport.printed.isEmpty())
+        assertEquals(0, db.boxExceptionDao().unackedCount())
+        assertEquals(BoxPrint.UNKNOWN, db.boxDao().get("b1")?.printState)
     }
 }

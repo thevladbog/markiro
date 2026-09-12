@@ -465,7 +465,7 @@ for (const lang of ["ru", "en"] as const)
       }
       await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
     });
-    await page.goto(open(`/catalog/import?sessionId=${id(1)}`) + `&lang=${lang}`);
+    await page.goto(open(`/catalog/import?sessionId=${id(1)}`) + `&locale=${lang}`);
     await expect(page.getByText(text.sessionRowLimit)).toBeVisible();
     await expect(
       page.getByRole("table").getByText("Фермерское хозяйство / Farm brand"),
@@ -485,7 +485,7 @@ for (const lang of ["ru", "en"] as const)
     }
     await page.goto(
       open(`/catalog/import?sessionId=${id(1)}&preparationId=${preparation.preparation.id}`) +
-        `&lang=${lang}`,
+        `&locale=${lang}`,
     );
     await expect(page.getByRole("tab")).toHaveCount(3);
     await expect(page.locator(".mk-nc-review-item")).toHaveCount(1);

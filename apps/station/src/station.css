@@ -226,6 +226,29 @@ body,
   min-width: 0;
 }
 
+.station-enrollment__pairing,
+.station-enrollment__pairing-context,
+.station-enrollment__pairing-controls {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-3);
+}
+
+.station-enrollment__entry--recovery {
+  --control-keypad: 80px;
+}
+
+.station-enrollment__entry--recovery .station-enrollment__pairing {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.station-enrollment__keypad button:nth-child(10),
+.station-enrollment__keypad button:nth-child(12) {
+  padding-inline: 4px !important;
+  font-size: 14px !important;
+}
+
 .station-enrollment__panel-heading h1,
 .station-enrollment__panel-heading p,
 .station-enrollment__success h1,
@@ -2463,6 +2486,30 @@ body,
   border: 1px solid var(--line);
   border-radius: var(--r-3);
   background: var(--surface-card);
+}
+
+.setup-card--scanner-config {
+  overflow-y: auto;
+}
+
+.setup-split--scanners > .setup-card--check {
+  overflow-y: auto;
+  align-content: safe center;
+}
+
+.setup-scanner-row {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: var(--sp-3) 0 0;
+  gap: var(--sp-3);
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.setup-scanner-row legend {
+  padding: 0 var(--sp-2) 0 0;
+  font: var(--floor-body-strong);
 }
 
 .setup-card--printer-config {

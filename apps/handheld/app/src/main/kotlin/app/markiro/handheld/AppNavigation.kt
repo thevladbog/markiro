@@ -5,9 +5,11 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -50,7 +52,6 @@ import app.markiro.handheld.feature.printer.TestPrintCallbacks
 import app.markiro.handheld.feature.printer.TestPrintScreen
 import app.markiro.handheld.feature.printer.TransportKind
 import app.markiro.handheld.feature.settings.AppPreferences
-import app.markiro.handheld.feature.settings.ComingSoonScreen
 import app.markiro.handheld.feature.settings.ScannerSettingsScreen
 import app.markiro.handheld.feature.settings.SettingsScreen
 import app.markiro.handheld.feature.settings.SettingsViewModel
@@ -76,6 +77,16 @@ import app.markiro.handheld.feature.work.DuplicateScreen
 import app.markiro.handheld.feature.work.DuplicateStep
 import app.markiro.handheld.feature.work.LabelQueueCallbacks
 import app.markiro.handheld.feature.work.LabelQueueScreen
+import app.markiro.handheld.feature.work.PlanReachedScreen
+import app.markiro.handheld.feature.exceptions.DisassembleCallbacks
+import app.markiro.handheld.feature.exceptions.DisassembleScreen
+import app.markiro.handheld.feature.exceptions.DisassembleViewModel
+import app.markiro.handheld.feature.exceptions.ExceptionsCallbacks
+import app.markiro.handheld.feature.exceptions.ExceptionsScreen
+import app.markiro.handheld.feature.exceptions.ExceptionsViewModel
+import app.markiro.handheld.feature.exceptions.ReprintCallbacks
+import app.markiro.handheld.feature.exceptions.ReprintScreen
+import app.markiro.handheld.feature.exceptions.ReprintViewModel
 import app.markiro.handheld.feature.work.LabelQueueViewModel
 import app.markiro.handheld.feature.work.PalletCloseCallbacks
 import app.markiro.handheld.feature.work.PalletCloseScreen
@@ -100,7 +111,9 @@ object Routes {
     const val CLOSE = "close/{shiftId}"
     const val CONFLICTS = "conflicts/{shiftId}"
     const val LABEL_QUEUE = "label-queue"
-    const val SOON = "soon/{tile}"
+    const val EXCEPTIONS = "exceptions/{shiftId}"
+    const val DISASSEMBLE = "exceptions/{shiftId}/disassemble"
+    const val REPRINT = "exceptions/{shiftId}/reprint"
     const val INVENTORY = "inventory"
     const val INVENTORY_WORK = "inventory/{inventoryId}"
     const val INVENTORY_LEAVE = "inventory/{inventoryId}/leave"
@@ -109,7 +122,9 @@ object Routes {
     fun work(id: String) = "work/$id"
     fun close(id: String) = "close/$id"
     fun conflicts(id: String) = "conflicts/$id"
-    fun soon(tile: HubTile) = "soon/${tile.name}"
+    fun exceptions(id: String) = "exceptions/$id"
+    fun disassemble(id: String) = "exceptions/$id/disassemble"
+    fun reprintLabel(id: String) = "exceptions/$id/reprint"
 }
 
 @Composable
@@ -199,7 +214,6 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         when (tile) {
                             HubTile.SHIFT -> state.activeShiftId?.let { nav.navigate(Routes.work(it)) } ?: nav.navigate(Routes.SHIFTS)
                             HubTile.INVENTORY -> state.activeInventoryId?.let { nav.navigate(Routes.inventoryWork(it)) } ?: nav.navigate(Routes.INVENTORY)
-                            HubTile.CHECK -> nav.navigate(Routes.soon(tile))
                             HubTile.SETTINGS -> nav.navigate(Routes.SETTINGS)
                         }
                     },
@@ -233,10 +247,20 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             composable(Routes.WORK) { entry ->
                 val vm: WorkViewModel = hiltViewModel()
+                // The view model outlives this composable: its back-stack entry
+                // keeps it alive while the exception routes are on top. The
+                // scanner is one app-wide flow, so it has to be told when the
+                // work screen stops owning scans -- otherwise a box label
+                // scanned to disassemble is recorded here as a bad code too.
+                DisposableEffect(Unit) {
+                    vm.setScanning(true)
+                    onDispose { vm.setScanning(false) }
+                }
                 val state by vm.state.collectAsStateWithLifecycle()
                 val closeStep by vm.closeStep.collectAsStateWithLifecycle()
                 val palletCloseStep by vm.palletCloseStep.collectAsStateWithLifecycle()
                 val duplicateStep by vm.duplicateStep.collectAsStateWithLifecycle()
+                val planPrompt by vm.planPrompt.collectAsStateWithLifecycle()
                 val shiftId = entry.arguments?.getString("shiftId").orEmpty()
                 WorkScreen(
                     state,
@@ -249,6 +273,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         onConflicts = { nav.navigate(Routes.conflicts(shiftId)) },
                         onCloseBoxEarly = vm::closeEarly,
                         onLabelQueue = { nav.navigate(Routes.LABEL_QUEUE) },
+                        onExceptions = { nav.navigate(Routes.exceptions(shiftId)) },
                         onRequestEarlyPalletClose = vm::requestEarlyPalletClose,
                         onConfirmEarlyPalletClose = vm::confirmEarlyPalletClose,
                         onCancelEarlyPalletClose = vm::cancelEarlyPalletClose,
@@ -306,6 +331,65 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         ),
                     )
                 }
+                // Last of the three overlays: a box close or a duplicate is about
+                // the unit in the operator's hand and must win over a prompt about
+                // the shift as a whole.
+                if (planPrompt && closeStep == BoxCloseStep.Idle && duplicateStep == DuplicateStep.Idle) {
+                    PlanReachedScreen(
+                        total = state.total,
+                        plan = state.plan ?: 0,
+                        onClose = {
+                            vm.dismissPlanPrompt()
+                            nav.navigate(Routes.close(shiftId))
+                        },
+                        onContinue = vm::dismissPlanPrompt,
+                    )
+                }
+            }
+            composable(Routes.EXCEPTIONS) { entry ->
+                val shiftId = entry.arguments?.getString("shiftId").orEmpty()
+                val vm: ExceptionsViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                ExceptionsScreen(
+                    state,
+                    ExceptionsCallbacks(
+                        onBack = { nav.popBackStack() },
+                        onDisassemble = { nav.navigate(Routes.disassemble(shiftId)) },
+                        onReprint = { nav.navigate(Routes.reprintLabel(shiftId)) },
+                        onClear = vm::startClear,
+                        onUndo = vm::startUndo,
+                        onConfirm = vm::confirm,
+                        onDismiss = vm::dismiss,
+                    ),
+                )
+            }
+            composable(Routes.DISASSEMBLE) {
+                val vm: DisassembleViewModel = hiltViewModel()
+                val step by vm.step.collectAsStateWithLifecycle()
+                DisassembleScreen(
+                    step,
+                    DisassembleCallbacks(
+                        onBack = { nav.popBackStack() },
+                        onReason = vm::chooseReason,
+                        onConfirm = vm::confirm,
+                        onCancel = vm::cancel,
+                        onDone = { nav.popBackStack() },
+                    ),
+                )
+            }
+            composable(Routes.REPRINT) {
+                val vm: ReprintViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                ReprintScreen(
+                    state,
+                    ReprintCallbacks(
+                        onBack = { nav.popBackStack() },
+                        onChooseLast = vm::chooseLast,
+                        onReason = vm::chooseReason,
+                        onCancel = vm::cancel,
+                        onDone = { nav.popBackStack() },
+                    ),
+                )
             }
             composable(Routes.LABEL_QUEUE) {
                 val vm: LabelQueueViewModel = hiltViewModel()
@@ -390,6 +474,9 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             composable(Routes.SETTINGS) {
                 val vm: SettingsViewModel = hiltViewModel()
+                // The system installer is an activity and the operator confirms it.
+                val activity = LocalContext.current
+                LaunchedEffect(vm) { vm.launchInstall.collect { activity.startActivity(it) } }
                 val state by vm.state.collectAsStateWithLifecycle()
                 val config by vm.config.collectAsStateWithLifecycle()
                 SettingsScreen(
@@ -404,6 +491,8 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     onVolume = vm::setVolume,
                     onToggleVibration = vm::toggleVibration,
                     onTest = vm::testSignal,
+                    onCheckUpdate = vm::checkForUpdate,
+                    onInstallUpdate = vm::installUpdate,
                 )
             }
             navigation(startDestination = Routes.PRINTER, route = Routes.PRINTER_GRAPH) {
@@ -516,13 +605,6 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     onProfile = vm::setProfile,
                     onDebugScan = vm::submitDebugScan,
                 )
-            }
-            composable(Routes.SOON) { entry ->
-                val title = when (entry.arguments?.getString("tile")) {
-                    HubTile.SHIFT.name -> R.string.hub_tile_shift
-                    else -> R.string.hub_tile_check
-                }
-                ComingSoonScreen(stringResource(title), onBack = { nav.popBackStack() })
             }
         }
     }

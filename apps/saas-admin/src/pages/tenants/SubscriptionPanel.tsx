@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
@@ -15,6 +15,9 @@ import {
   type ComboboxOption,
 } from "@markiro/ui";
 
+import { EntitlementsPanel } from "./EntitlementsPanel.js";
+import { DeviceLicensingPanel } from "./DeviceLicensingPanel.js";
+import { ENTITLEMENT_FEATURE_KEYS, type PlatformCapability } from "@markiro/platform-contracts";
 import { PanelState } from "../../components/PanelState.js";
 import {
   assignTenantAddon,
@@ -33,7 +36,6 @@ import { tenantErrorMessageKey } from "./errorMessages.js";
 import { useUnsavedChanges } from "./useUnsavedChanges.js";
 
 type QuotaKey = "lines" | "stations" | "kiosks" | "cabinetUsers";
-type FeatureKey = "labelEditor" | "publicApi" | "pallets";
 type AssignmentKind = "plan" | "addon";
 type ActivationPolicy = "immediate" | "after_current";
 
@@ -61,7 +63,7 @@ interface ConfirmationState {
 }
 
 const QUOTA_KEYS: readonly QuotaKey[] = ["lines", "stations", "kiosks", "cabinetUsers"];
-const FEATURE_KEYS: readonly FeatureKey[] = ["labelEditor", "publicApi", "pallets"];
+const FEATURE_KEYS = ENTITLEMENT_FEATURE_KEYS;
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const MAX_MANUAL_TERM_MS = 10 * 366 * DAY_MS;
 
@@ -79,52 +81,6 @@ function formatDate(value: string | null, language: "ru" | "en") {
     timeStyle: "short",
     timeZone: "Europe/Moscow",
   }).format(new Date(value));
-}
-
-function quotaFromPlan(plan: DetailPlanVersion | null): Record<QuotaKey, number | null> {
-  const effect = plan?.entitlements;
-  return {
-    lines: effect?.maxLines ?? null,
-    stations: effect?.maxStations ?? null,
-    kiosks: effect?.maxKiosks ?? null,
-    cabinetUsers: effect?.maxCabinetUsers ?? null,
-  };
-}
-
-function featuresFromPlan(plan: DetailPlanVersion | null): Record<FeatureKey, boolean> {
-  const effect = plan?.entitlements;
-  return {
-    labelEditor: effect?.labelEditorEnabled ?? false,
-    publicApi: effect?.publicApiEnabled ?? false,
-    pallets: effect?.palletsEnabled ?? false,
-  };
-}
-
-function applyAddons(
-  quotas: Record<QuotaKey, number | null>,
-  features: Record<FeatureKey, boolean>,
-  addons: TenantSubscriptionAddon[],
-) {
-  const nextQuotas = { ...quotas };
-  const nextFeatures = { ...features };
-  for (const addon of addons) {
-    for (const effect of addon.addonVersion.effects) {
-      if (
-        effect.entitlementKey === "lines" ||
-        effect.entitlementKey === "stations" ||
-        effect.entitlementKey === "kiosks" ||
-        effect.entitlementKey === "cabinetUsers"
-      ) {
-        const currentQuota = nextQuotas[effect.entitlementKey];
-        if (currentQuota !== null && effect.quotaIncrement !== null) {
-          nextQuotas[effect.entitlementKey] = currentQuota + effect.quotaIncrement * addon.quantity;
-        }
-      } else if (effect.featureEnabled) {
-        nextFeatures[effect.entitlementKey] = true;
-      }
-    }
-  }
-  return { quotas: nextQuotas, features: nextFeatures };
 }
 
 function SubscriptionCard({
@@ -240,11 +196,13 @@ function AddonList({
 export function SubscriptionPanel({
   detail,
   canDirectAssign,
+  capabilities,
   financialVisible,
   accountant,
 }: {
   detail: TenantDetail;
   canDirectAssign: boolean;
+  capabilities: readonly PlatformCapability[];
   financialVisible: boolean;
   accountant: boolean;
 }) {
@@ -281,15 +239,6 @@ export function SubscriptionPanel({
   const mutationPending = planMutation.isPending || addonMutation.isPending;
   useUnsavedChanges(form.formState.isDirty, mutationPending);
 
-  const effective = useMemo(
-    () =>
-      applyAddons(
-        quotaFromPlan(detail.currentSubscription?.planVersion ?? null),
-        featuresFromPlan(detail.currentSubscription?.planVersion ?? null),
-        detail.activeAddons,
-      ),
-    [detail.activeAddons, detail.currentSubscription?.planVersion],
-  );
   const currentTermEnded = Boolean(
     detail.currentSubscription?.endsAt &&
     new Date(detail.currentSubscription.endsAt).getTime() <= Date.now(),
@@ -452,17 +401,7 @@ export function SubscriptionPanel({
           t("tenants.assignment.confirm.feature", {
             name: t(`tenants.features.${key}`),
             value: t(
-              `tenants.features.${
-                version.plan?.[
-                  key === "labelEditor"
-                    ? "labelEditorEnabled"
-                    : key === "publicApi"
-                      ? "publicApiEnabled"
-                      : "palletsEnabled"
-                ]
-                  ? "enabled"
-                  : "disabled"
-              }`,
+              `entitlements.${version.plan?.[`${key}Enabled`] === null ? "unknown" : version.plan?.[`${key}Enabled`] ? "enabled" : "disabled"}`,
             ),
           }),
         ),
@@ -482,43 +421,11 @@ export function SubscriptionPanel({
     }
     if (values.kind === "addon" && version.addon) {
       if (!targetSubscription) return;
-      const targetAddons =
-        values.activationPolicy === "after_current"
-          ? effectiveDetail.scheduledAddons.filter(
-              (addon) => addon.subscriptionId === targetSubscription.id,
-            )
-          : effectiveDetail.activeAddons.filter(
-              (addon) => addon.subscriptionId === targetSubscription.id,
-            );
-      const targetEffective = applyAddons(
-        quotaFromPlan(targetSubscription.planVersion),
-        featuresFromPlan(targetSubscription.planVersion),
-        targetAddons,
+      const summaries = version.addon.effects.map((effect) =>
+        "quotaIncrement" in effect
+          ? `${t(`entitlements.quotas.${effect.key}`)}: +${effect.quotaIncrement} × ${quantity}`
+          : t(`entitlements.features.${effect.key}`),
       );
-      const resultingQuotas = { ...targetEffective.quotas };
-      const resultingFeatures = { ...targetEffective.features };
-      for (const effect of version.addon.effects) {
-        if ("quotaIncrement" in effect) {
-          const currentQuota = resultingQuotas[effect.key];
-          if (currentQuota !== null) {
-            resultingQuotas[effect.key] = currentQuota + effect.quotaIncrement * quantity;
-          }
-        } else {
-          resultingFeatures[effect.key] = true;
-        }
-      }
-      const summaries = [
-        ...version.addon.effects.map((effect) =>
-          "quotaIncrement" in effect
-            ? t("tenants.assignment.confirm.resultingQuota", {
-                name: t(`tenants.usage.${effect.key}`),
-                value: resultingQuotas[effect.key] ?? t("tenants.usage.unlimited"),
-              })
-            : t("tenants.assignment.confirm.resultingFeature", {
-                name: t(`tenants.features.${effect.key}`),
-              }),
-        ),
-      ];
       setConfirmation({
         kind: "addon",
         version,
@@ -599,51 +506,11 @@ export function SubscriptionPanel({
         />
       </section>
 
-      <Card className="usage-card" title={t("tenants.detail.usageTitle")} titleAs="h2">
-        <div className="usage-grid">
-          {QUOTA_KEYS.map((key) => {
-            const used = detail.usage[key];
-            const limit = effective.quotas[key];
-            const over = limit !== null && used > limit;
-            const text =
-              limit === null
-                ? t("tenants.usage.textUnlimited", { used })
-                : over
-                  ? t("tenants.usage.textOver", { used, limit, over: used - limit })
-                  : t("tenants.usage.text", { used, limit });
-            return (
-              <article key={key} className="usage-item" data-over={over || undefined}>
-                <div className="usage-item__label">
-                  <strong>{t(`tenants.usage.${key}`)}</strong>
-                  <span>{text}</span>
-                </div>
-                {limit === null ? (
-                  <div className="usage-unlimited" aria-hidden="true" />
-                ) : (
-                  <meter
-                    aria-label={`${t(`tenants.usage.${key}`)}: ${text}`}
-                    min={0}
-                    max={Math.max(limit, used, 1)}
-                    value={Math.min(used, Math.max(limit, used, 1))}
-                  />
-                )}
-                <StatusChip
-                  status={over ? "error" : "neutral"}
-                  label={over ? t("tenants.usage.over") : t("tenants.usage.within")}
-                />
-              </article>
-            );
-          })}
-        </div>
-        <div className="feature-summary" aria-label={t("tenants.detail.featuresTitle")}>
-          {FEATURE_KEYS.map((key) => (
-            <span key={key}>
-              {t(`tenants.features.${key}`)}:{" "}
-              {t(`tenants.features.${effective.features[key] ? "enabled" : "disabled"}`)}
-            </span>
-          ))}
-        </div>
-      </Card>
+      <EntitlementsPanel tenantId={detail.tenant.id} capabilities={capabilities} />
+      <DeviceLicensingPanel
+        tenantId={detail.tenant.id}
+        canWrite={capabilities.includes("tenants.write") && capabilities.includes("billing.write")}
+      />
 
       <div className="addon-grid">
         <AddonList

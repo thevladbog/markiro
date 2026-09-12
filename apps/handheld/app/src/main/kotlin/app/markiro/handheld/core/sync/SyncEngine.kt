@@ -1,6 +1,5 @@
 package app.markiro.handheld.core.sync
 
-import androidx.room.withTransaction
 import app.markiro.handheld.core.network.BatchConflictDto
 import app.markiro.handheld.core.network.BoxClosureDto
 import app.markiro.handheld.core.network.ConflictStatusRequest
@@ -70,24 +69,27 @@ class SyncEngine(
     /**
      * Everything this device still owes the server.
      *
-     * A box closure is queued work too, and so is a product-label event -- and
-     * so is a pallet closure. Counting only scans showed «Очередь 0» while a
-     * closure sat unsent, and a queue that had stopped moving would never read
-     * as stuck; pallets reintroduce the identical gap if left out, and unlike a
-     * box, a pallet the operator forgets about while this reads clear is a
-     * physically labelled unit the server never learns about.
+     * A box closure is queued work too, and so is a product-label event, an
+     * operator correction and a pallet closure. Counting only scans showed
+     * «Очередь 0» while a closure sat unsent, and a queue that had stopped
+     * moving would never read as stuck; every channel added since reintroduces
+     * the identical gap if left out, and unlike a box, a pallet the operator
+     * forgets about while this reads clear is a physically labelled unit the
+     * server never learns about.
      *
      * Summed in its own flow so the state below stays a FOUR-argument combine:
      * the vararg overload infers one element type across every flow, which for
      * a mix of `Int`, `Long?` and `Long` collapses to an intersection and costs
-     * an unchecked cast per value.
+     * an unchecked cast per value. Here every flow is `Flow<Int>`, so the
+     * vararg overload is safe.
      */
     private val pending: Flow<Int> = combine(
         db.outboxDao().count(),
         db.boxDao().observeUnackedCount(),
         db.palletDao().observeUnackedCount(),
         db.productLabelEventDao().observeUnackedCount(),
-    ) { scans, boxes, pallets, labels -> scans + boxes + pallets + labels }
+        db.boxExceptionDao().observeUnackedCount(),
+    ) { counts -> counts.sum() }
 
     val state: StateFlow<SyncState> =
         combine(pending, db.conflictDao().count(), lastSuccess, now) { owed, conflicts, last, at ->
@@ -103,7 +105,7 @@ class SyncEngine(
             while (true) {
                 withTimeoutOrNull(delayMs) { nudges.receive() }
                 tick()
-                delayMs = if (drainAll()) {
+                delayMs = if (try { drainAll() } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) { false }) {
                     backoff.reset()
                     heartbeatMs
                 } else {
@@ -139,7 +141,9 @@ class SyncEngine(
 
     internal enum class Step { SENT, EMPTY, FAILED }
 
-    internal suspend fun drainOnce(): Step {
+    internal suspend fun drainOnce(): Step = try { db.recovery.work { drainOnceOwned() } } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) { Step.FAILED }
+
+    private suspend fun drainOnceOwned(): Step {
         val cfg = config.get() ?: return Step.EMPTY
         val pendingCeiling = meta.get(MetaStore.SYNC_PENDING_CEILING)?.toLongOrNull()
         val rows = if (pendingCeiling != null) db.outboxDao().headThrough(pendingCeiling, BATCH_SIZE) else db.outboxDao().head(BATCH_SIZE)
@@ -175,8 +179,30 @@ class SyncEngine(
             MAX_PALLET_CLOSURES
         }
         val palletRows = if (palletLimit == 0) emptyList() else db.palletDao().unacked(palletLimit)
-        // An empty outbox with unacknowledged boxes, pallets or events is not empty.
-        if (rows.isEmpty() && boxRows.isEmpty() && palletRows.isEmpty() && labelRows.isEmpty()) {
+        // Corrections follow the same pinning rule as boxes and label events.
+        val exceptionLimit = if (pendingCeiling != null) {
+            meta.get(MetaStore.SYNC_PENDING_EXCEPTION_COUNT)?.toIntOrNull() ?: 0
+        } else {
+            MAX_EXCEPTIONS
+        }
+        // A correction may only ride a batch that also carries -- or has already
+        // delivered -- the scans it corrects. `exceptionThrough` is this batch's
+        // outbox ceiling; an empty outbox means everything before it is
+        // acknowledged, so every watermark is satisfied. Without this, a device
+        // that packed offline sends an undo in the first batch while the scan it
+        // undoes waits for the third, and the server applies it against a row
+        // that does not exist yet and drops it with no error anywhere.
+        val exceptionThrough = if (rows.isEmpty()) Long.MAX_VALUE else rows.last().id
+        val exceptionRows = if (exceptionLimit == 0) {
+            emptyList()
+        } else {
+            db.boxExceptionDao().sendable(exceptionThrough, exceptionLimit)
+        }
+        // An empty outbox with unacknowledged boxes, pallets, events or
+        // corrections is not empty.
+        if (rows.isEmpty() && boxRows.isEmpty() && palletRows.isEmpty() && labelRows.isEmpty() &&
+            exceptionRows.isEmpty()
+        ) {
             if (pendingCeiling != null) clearPending()
             return Step.EMPTY
         }
@@ -184,10 +210,10 @@ class SyncEngine(
         val boxIds = boxRows.map { it.boxId }
         val palletIds = palletRows.map { it.palletId }
         val batchId = meta.get(MetaStore.SYNC_PENDING_BATCH_ID)?.takeIf { pendingCeiling != null } ?: run {
-            // The box AND pallet sets are folded in. Without it, a box or
-            // pallet closing while this batch awaits acknowledgement would be
-            // resent under an id the server has already applied, and the
-            // closure would vanish silently.
+            // EVERY channel's set is folded in -- boxes, pallets, label events
+            // and corrections. Without it, a record of that channel closing
+            // while this batch awaits acknowledgement would be resent under an
+            // id the server has already applied, and it would vanish silently.
             //
             // Every id here is a short hashed signature (`idSignature`), not
             // the raw ids themselves, so this key's worst-case length does not
@@ -196,14 +222,18 @@ class SyncEngine(
             // bounded signatures stay well under the server's shared
             // `MAX_SYNC_BATCH_ID_CHARS` (200) even fully loaded, so no folding
             // digest is needed here the way the station needs one.
-            val id = "${cfg.deviceId}:${meta.installId()}:$maxId:" +
+            val id = "${cfg.deviceId}:${db.recovery.commit { meta.installId() }}:$maxId:" +
                 "${idSignature(boxIds)}:${idSignature(palletIds)}:" +
-                idSignature(labelRows.map { it.eventId })
+                "${idSignature(labelRows.map { it.eventId })}:" +
+                idSignature(exceptionRows.map { it.id.toString() })
+            db.recovery.commit {
             meta.put(MetaStore.SYNC_PENDING_CEILING, maxId.toString())
             meta.put(MetaStore.SYNC_PENDING_BOX_COUNT, boxIds.size.toString())
             meta.put(MetaStore.SYNC_PENDING_PALLET_COUNT, palletIds.size.toString())
             meta.put(MetaStore.SYNC_PENDING_LABEL_COUNT, labelRows.size.toString())
+            meta.put(MetaStore.SYNC_PENDING_EXCEPTION_COUNT, exceptionRows.size.toString())
             meta.put(MetaStore.SYNC_PENDING_BATCH_ID, id)
+            }
             id
         }
         val body = json.encodeToString(
@@ -214,6 +244,7 @@ class SyncEngine(
                 boxRows.map { it.toClosure(cfg.deviceId) },
                 palletRows.map { it.toClosure(cfg.deviceId) },
                 labelRows.map { json.parseToJsonElement(it.payloadJson) },
+                exceptionRows.map { json.parseToJsonElement(it.payloadJson) },
             ),
         )
         val result = transport.post("/station/scans", body) as? TransportResult.Ok ?: return Step.FAILED
@@ -222,7 +253,7 @@ class SyncEngine(
         // A fresh batch is applied whole (`applied == items.length`) or replayed (`alreadyApplied`); anything else is not this endpoint.
         if (!parsed.alreadyApplied && parsed.applied != rows.size) return Step.FAILED
         val at = clock()
-        db.withTransaction {
+        db.recovery.commit {
             db.conflictDao().insertIgnore(
                 parsed.conflicts.map { ConflictEntity(it.codeHash, it.winningTerminalId, it.winningScannedAt!!, Iso.format(at)) },
             )
@@ -245,11 +276,19 @@ class SyncEngine(
                     db.productLabelEventDao().markQuarantined(eventId, code, Iso.format(at))
                 }
             }
+            // Unconditional, like the boxes above: this endpoint answers no
+            // per-exception receipt, and the server records every fact it
+            // accepts -- including one that matched nothing.
+            if (exceptionRows.isNotEmpty()) {
+                db.boxExceptionDao().markAcked(exceptionRows.map { it.id }, Iso.format(at))
+                db.boxExceptionDao().purgeAcked()
+            }
             db.metaDao().remove(MetaStore.SYNC_PENDING_BATCH_ID)
             db.metaDao().remove(MetaStore.SYNC_PENDING_CEILING)
             db.metaDao().remove(MetaStore.SYNC_PENDING_BOX_COUNT)
             db.metaDao().remove(MetaStore.SYNC_PENDING_PALLET_COUNT)
             db.metaDao().remove(MetaStore.SYNC_PENDING_LABEL_COUNT)
+            db.metaDao().remove(MetaStore.SYNC_PENDING_EXCEPTION_COUNT)
             parsed.denied?.let { db.metaDao().put(MetaEntity(MetaStore.SYNC_LAST_DENIED, it)) }
             db.metaDao().put(MetaEntity(MetaStore.SYNC_LAST_SUCCESS_AT, at.toString()))
             // A completed job the server has fully answered is dead weight, and
@@ -261,12 +300,15 @@ class SyncEngine(
         return Step.SENT
     }
 
-    private suspend fun clearPending() {
+    private suspend fun clearPending() = db.recovery.commit { clearPendingOwned() }
+
+    private suspend fun clearPendingOwned() {
         meta.remove(MetaStore.SYNC_PENDING_BATCH_ID)
         meta.remove(MetaStore.SYNC_PENDING_CEILING)
         meta.remove(MetaStore.SYNC_PENDING_BOX_COUNT)
         meta.remove(MetaStore.SYNC_PENDING_PALLET_COUNT)
         meta.remove(MetaStore.SYNC_PENDING_LABEL_COUNT)
+        meta.remove(MetaStore.SYNC_PENDING_EXCEPTION_COUNT)
     }
 
     /**
@@ -353,7 +395,9 @@ class SyncEngine(
         return ProductLabelReceipt(accepted, quarantined)
     }
 
-    private suspend fun drainCloses(): Boolean {
+    private suspend fun drainCloses(): Boolean = try { db.recovery.work { drainClosesOwned() } } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) { false }
+
+    private suspend fun drainClosesOwned(): Boolean {
         for (row in db.shiftCloseDao().pending()) {
             val body = json.encodeToString(ShiftCloseRequest.serializer(), row.toRequest())
             val result = transport.post("/station/shift-closures", body) as? TransportResult.Ok ?: return false
@@ -361,15 +405,17 @@ class SyncEngine(
             val response = runCatching { json.decodeFromString(ShiftCloseResponse.serializer(), result.body) }.getOrNull() ?: return false
             when (response.outcome) {
                 // The row stays as the idempotency marker: a second close of the same shift returns it instead of a new event.
-                "accepted", "already_resolved" -> db.shiftCloseDao().markAccepted(row.eventId, Iso.format(clock()))
-                "conflict" -> db.shiftCloseDao().markConflict(row.eventId, response.conflictCode ?: "multiple_devices", Iso.format(clock()))
+                "accepted", "already_resolved" -> db.recovery.commit { db.shiftCloseDao().markAccepted(row.eventId, Iso.format(clock())) }
+                "conflict" -> db.recovery.commit { db.shiftCloseDao().markConflict(row.eventId, response.conflictCode ?: "multiple_devices", Iso.format(clock())) }
                 else -> return false
             }
         }
         return true
     }
 
-    private suspend fun reconcileConflicts() {
+    private suspend fun reconcileConflicts() = try { db.recovery.work { reconcileConflictsOwned() } } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) { Unit }
+
+    private suspend fun reconcileConflictsOwned() {
         var after = ""
         while (true) {
             val page = db.conflictDao().pageHashes(after, RECONCILE_PAGE)
@@ -380,7 +426,7 @@ class SyncEngine(
             val reviewed = runCatching { json.decodeFromString(ConflictStatusResponse.serializer(), result.body) }
                 .getOrNull()?.reviewedCodeHashes ?: return
             val gone = reviewed.filter { it in page }
-            if (gone.isNotEmpty()) db.conflictDao().delete(gone)
+            if (gone.isNotEmpty()) db.recovery.commit { db.conflictDao().delete(gone) }
             if (page.size < RECONCILE_PAGE) return
             after = page.last()
         }
@@ -456,6 +502,9 @@ class SyncEngine(
          * `MAX_PALLET_CLOSURES` are: see `SyncLimitsFixturesTest`.
          */
         const val MAX_SYNC_BATCH_ID_CHARS = 200
+
+        /** The server's own cap on `exceptions[]`. */
+        const val MAX_EXCEPTIONS = 200
 
         const val RECONCILE_PAGE = 200
         const val HEARTBEAT_MS = 15_000L

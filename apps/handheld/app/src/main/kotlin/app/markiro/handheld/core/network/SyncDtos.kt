@@ -83,6 +83,12 @@ data class SyncBatchRequest(
      * field added or dropped by re-serialising would fail the whole batch.
      */
     val productLabelEvents: List<JsonElement> = emptyList(),
+    /**
+     * Operator corrections, sent as stored JSON for the same reason the label
+     * events are: the server's schema requires every nullable key to be
+     * present, and this device's Retrofit converter drops null-valued fields.
+     */
+    val exceptions: List<JsonElement> = emptyList(),
 )
 
 @Serializable

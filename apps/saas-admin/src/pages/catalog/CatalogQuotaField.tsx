@@ -16,7 +16,7 @@ export function CatalogQuotaField({
   const { t } = useTranslation();
   const mode = value === "" ? "unlimited" : value === "0" ? "none" : "limited";
   return (
-    <div>
+    <div className="catalog-quota-field">
       <Select
         label={t("catalog.quota.mode", { label })}
         value={mode}

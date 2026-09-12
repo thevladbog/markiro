@@ -1,6 +1,5 @@
 package app.markiro.handheld.feature.shift
 
-import androidx.room.withTransaction
 import app.markiro.handheld.core.box.ServerRange
 import app.markiro.handheld.core.box.SsccPool
 import app.markiro.handheld.core.network.BundleSsccDto
@@ -17,11 +16,23 @@ import kotlinx.serialization.json.Json
 import retrofit2.HttpException
 import java.io.IOException
 
+/** Which call the server refused: entering the shift, or downloading its bundle. */
+enum class EnterStep { ENTER, BUNDLE }
+
 sealed interface EnterResult {
     data object Ok : EnterResult
     data object UpdateRequired : EnterResult
     data object Closed : EnterResult
     data object Unavailable : EnterResult
+
+    /**
+     * The server refused for a reason this build cannot name. It carries the
+     * status and the server's own code so the screen can show them: every such
+     * refusal used to be reported as «смена уже закрыта», which sends a line to
+     * look at a shift that is wide open and hides the real reason -- an expired
+     * subscription, a disabled feature, a revoked device.
+     */
+    data class Refused(val step: EnterStep, val status: Int, val code: String?) : EnterResult
 }
 
 fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
@@ -91,10 +102,12 @@ class ShiftRepository(
     fun observeShifts(): Flow<List<ShiftEntity>> = db.shiftDao().observeAll()
 
     /** Own line plus unassigned shifts; rows without a bundle that vanished from the list are dropped. */
-    suspend fun refreshList(): Boolean = try {
+    suspend fun refreshList(): Boolean = db.recovery.work { refreshListOwned() }
+
+    private suspend fun refreshListOwned(): Boolean = try {
         val items = api.shifts().items
         val now = clock()
-        db.withTransaction {
+        db.recovery.commit {
             val existing = db.shiftDao().all().associateBy { it.id }
             db.shiftDao().upsertAll(items.map { it.toEntity(existing[it.id], now) })
             db.shiftDao().dropListedExcept(items.map { it.id })
@@ -110,53 +123,86 @@ class ShiftRepository(
 
     suspend fun shiftsOfLine(lineId: String): List<ShiftDto> = api.shifts(lineId = lineId).items.filter { it.status != "closed" }
 
-    suspend fun enter(shiftId: String): EnterResult {
+    /**
+     * The two calls are caught separately on purpose. They fail for unrelated
+     * reasons -- the first decides whether this device may join at all, the
+     * second whether there is anything to work with offline -- and folding them
+     * together made a missing product or label template look like a closed
+     * shift.
+     */
+    suspend fun enter(shiftId: String): EnterResult = db.recovery.work { enterOwned(shiftId) }
+
+    private suspend fun enterOwned(shiftId: String): EnterResult {
         val cached = db.shiftDao().get(shiftId)
-        return try {
-            val entered = api.enter(shiftId)
-            val bundle = api.bundle(shiftId)
-            val now = clock()
-            applySsccBlock(bundle)
-            db.withTransaction {
-                db.shiftDao().upsert(
-                    bundle.shift.toEntity(cached, now).copy(
-                        status = entered.status,
-                        productGtin14 = bundle.product.gtin14,
-                        productName = bundle.product.name,
-                        productPrintName = bundle.product.printName ?: bundle.shift.productPrintName,
-                        boxLabelTemplate = bundle.boxLabelTemplate?.spec?.toString(),
-                        palletLabelTemplateSpec = bundle.palletLabelTemplate?.spec?.toString(),
-                        shelfLifeDays = bundle.product.shelfLifeDays,
-                        egaisCode = bundle.product.egaisCode,
-                        ssccIssuerPrefix = bundle.sscc?.issuerPrefix,
-                        duplicateVerification = bundle.shift.validationPrint.verification,
-                        duplicateTemplate = bundle.shift.validationPrint.snapshot?.spec?.toString(),
-                        duplicateTemplateDigest = bundle.shift.validationPrint.snapshot?.digest,
-                        duplicatePolicyRevision = bundle.shift.validationPrint.policyRevision,
-                        bundleFetchedAt = now,
-                        enteredAt = now,
-                        leftAt = null,
-                    ),
-                )
-                // As on the station, `bundle.operators` is ignored: pairing and the roster refresh are the authoritative sources.
-                db.deviceConfigDao().get()?.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = shiftId)) }
-            }
-            EnterResult.Ok
+        val entered = try {
+            api.enter(shiftId)
         } catch (e: HttpException) {
-            when {
-                e.code() == 409 && errorCode(e) == UPDATE_REQUIRED_CODE -> EnterResult.UpdateRequired
-                e.code() == 409 || e.code() == 404 -> EnterResult.Closed
-                else -> EnterResult.Unavailable
-            }
+            return refusal(EnterStep.ENTER, e)
         } catch (_: IOException) {
-            if (cached?.bundleFetchedAt != null) {
-                enterOffline(cached)
-                EnterResult.Ok
-            } else {
-                EnterResult.Unavailable
-            }
+            return offline(cached)
+        }
+        val bundle = try {
+            api.bundle(shiftId)
+        } catch (e: HttpException) {
+            return refusal(EnterStep.BUNDLE, e)
+        } catch (_: IOException) {
+            return offline(cached)
+        }
+        val now = clock()
+        applySsccBlock(bundle)
+        db.recovery.commit {
+            db.shiftDao().upsert(
+                bundle.shift.toEntity(cached, now).copy(
+                    status = entered.status,
+                    productGtin14 = bundle.product.gtin14,
+                    productName = bundle.product.name,
+                    productPrintName = bundle.product.printName ?: bundle.shift.productPrintName,
+                    boxLabelTemplate = bundle.boxLabelTemplate?.spec?.toString(),
+                    palletLabelTemplateSpec = bundle.palletLabelTemplate?.spec?.toString(),
+                    shelfLifeDays = bundle.product.shelfLifeDays,
+                    egaisCode = bundle.product.egaisCode,
+                    ssccIssuerPrefix = bundle.sscc?.issuerPrefix,
+                    duplicateVerification = bundle.shift.validationPrint.verification,
+                    duplicateTemplate = bundle.shift.validationPrint.snapshot?.spec?.toString(),
+                    duplicateTemplateDigest = bundle.shift.validationPrint.snapshot?.digest,
+                    duplicatePolicyRevision = bundle.shift.validationPrint.policyRevision,
+                    bundleFetchedAt = now,
+                    enteredAt = now,
+                    leftAt = null,
+                ),
+            )
+            // As on the station, `bundle.operators` is ignored: pairing and the roster refresh are the authoritative sources.
+            db.deviceConfigDao().get()?.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = shiftId)) }
+        }
+        return EnterResult.Ok
+    }
+
+    /**
+     * Nest serializes a string-payload exception without a `code`, and on these
+     * two routes the only codeless conflict is the closed shift itself. A
+     * conflict that DOES carry a code is something else entirely -- an
+     * unmanaged or expired subscription, a disabled feature -- and naming it is
+     * the difference between an operator who can call the office and one who
+     * stands in front of a shift the screen insists is closed.
+     */
+    private fun refusal(step: EnterStep, e: HttpException): EnterResult {
+        val code = errorCode(e)
+        return when {
+            e.code() == 409 && code == UPDATE_REQUIRED_CODE -> EnterResult.UpdateRequired
+            e.code() == 409 && code == null -> EnterResult.Closed
+            e.code() in 400..499 -> EnterResult.Refused(step, e.code(), code)
+            else -> EnterResult.Unavailable
         }
     }
+
+    /** No route to the server: a shift whose bundle is already on the device can still be worked. */
+    private suspend fun offline(cached: ShiftEntity?): EnterResult =
+        if (cached?.bundleFetchedAt != null) {
+            enterOffline(cached)
+            EnterResult.Ok
+        } else {
+            EnterResult.Unavailable
+        }
 
     /**
      * Both serial streams the bundle carries: boxes (extension digit 0) and,
@@ -213,15 +259,19 @@ class ShiftRepository(
         )
     }
 
-    private suspend fun enterOffline(cached: ShiftEntity) {
+    private suspend fun enterOffline(cached: ShiftEntity) = db.recovery.commit { enterOfflineOwned(cached) }
+
+    private suspend fun enterOfflineOwned(cached: ShiftEntity) {
         val now = clock()
-        db.withTransaction {
+        db.recovery.commit {
             db.shiftDao().upsert(cached.copy(enteredAt = now, leftAt = null))
             db.deviceConfigDao().get()?.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = cached.id)) }
         }
     }
 
-    suspend fun leave(shiftId: String) = db.shiftDao().setLeftAt(shiftId, clock())
+    suspend fun leave(shiftId: String) = db.recovery.commit { leaveOwned(shiftId) }
+
+    private suspend fun leaveOwned(shiftId: String) = db.shiftDao().setLeftAt(shiftId, clock())
 
     private fun errorCode(e: HttpException): String? =
         runCatching { json.decodeFromString(ErrorBody.serializer(), e.response()?.errorBody()?.string().orEmpty()).code }.getOrNull()

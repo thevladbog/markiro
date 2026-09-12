@@ -1,3 +1,7 @@
+import {
+  type EntitlementAdmissionService,
+  admissionScopeDigest,
+} from "../../subscriptions/entitlement-admission.service";
 import { randomUUID } from "node:crypto";
 import { schema, type Db } from "@markiro/db";
 import { CABINET_CAPABILITY, isValidGtin, normalizeToGtin14 } from "@markiro/domain";
@@ -59,6 +63,7 @@ export class NationalCatalogLinkRefreshService {
     private readonly coordinator: Pick<NationalCatalogRequestCoordinator, "run" | "runExternal">,
     private readonly policy: CatalogRefreshPolicy,
     private readonly download = downloadBoundedImage,
+    private readonly admission?: EntitlementAdmissionService,
   ) {}
   async request(actor: ImportActor, productId: string): Promise<void> {
     await this.enqueue(actor.tenantId, productId, { kind: "manual", userId: actor.userId });
@@ -68,6 +73,7 @@ export class NationalCatalogLinkRefreshService {
     await this.enqueue(tenantId, productId, { kind: "system" });
   }
   private async enqueue(tenantId: string, productId: string, actor: RefreshActor): Promise<void> {
+    const facts = await this.admission?.capture(tenantId);
     await this.db.transaction(async (tx) => {
       await lockTenantSubscriptionTimeline(tx, tenantId);
       const [product] = await tx
@@ -101,6 +107,23 @@ export class NationalCatalogLinkRefreshService {
         await this.fail(tx, link, cp, "local_gtin_changed");
         return;
       }
+      await this.admission?.observe({
+        tenantId: tenantId,
+        actor: {
+          domain: actor.kind === "manual" ? "cabinet" : "system",
+          id: actor.kind === "manual" ? actor.userId : null,
+        },
+        operationId: "nk.refresh.v1",
+        scopeDigest: admissionScopeDigest({
+          productId,
+          linkId: link.id,
+          revision: link.revision,
+          stepId: cp.stepId,
+        }),
+        transaction: tx,
+        facts,
+        runtime: { enabled: this.policy.enabled, observedAt: new Date() },
+      });
       await tx
         .update(links)
         .set({ refreshCheckpoint: cp, refreshErrorCode: null, updatedAt: new Date() })
@@ -284,6 +307,7 @@ export class NationalCatalogLinkRefreshService {
     expected: RefreshCheckpoint,
     photo = false,
   ): Promise<boolean | string> {
+    const facts = await this.admission?.capture(tenantId);
     return this.db.transaction(async (tx) => {
       const locked = await this.lock(tx, tenantId, linkId);
       if (!locked) return false;
@@ -299,6 +323,24 @@ export class NationalCatalogLinkRefreshService {
         await this.fail(tx, link, cp, "photo_unavailable");
         return false;
       }
+      await this.admission?.observe({
+        tenantId: tenantId,
+        actor: {
+          domain: cp.actor.kind === "manual" ? "cabinet" : "system",
+          id: cp.actor.kind === "manual" ? cp.actor.userId : null,
+        },
+        operationId: "nk.worker.v1",
+        scopeDigest: admissionScopeDigest({
+          linkId,
+          revision: cp.revision,
+          phase: cp.phase,
+          stepId: cp.stepId,
+        }),
+        transaction: tx,
+        facts,
+        runtime: { enabled: this.policy.enabled, observedAt: new Date() },
+        attempt: { number: cp.attempts + 1, identity: cp.runId ?? cp.stepId },
+      });
       await tx
         .update(links)
         .set({ refreshCheckpoint: { ...cp, attempts: cp.attempts + 1 }, lastAttemptAt: new Date() })

@@ -1,0 +1,2 @@
+ALTER TABLE "working_device_events" DROP CONSTRAINT "working_device_events_actor_check";--> statement-breakpoint
+ALTER TABLE "working_device_events" ADD CONSTRAINT "working_device_events_actor_check" CHECK ("working_device_events"."actor_domain" in ('migration','system','cabinet','platform','device') and ("working_device_events"."actor_domain" <> 'migration' or "working_device_events"."actor_id" is null) and ("working_device_events"."actor_domain" not in ('cabinet','platform','device') or "working_device_events"."actor_id" is not null));

@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.sync
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -70,6 +71,7 @@ class SyncPalletsTest {
                 lineName = "Линия 2", kind = "handheld", serverUrl = server.url("/").toString(), pairedAt = 1L,
             ),
         )
+        db.initializeRecoveryForTest()
     }
 
     @After
@@ -80,10 +82,11 @@ class SyncPalletsTest {
     }
 
     private fun engine(): SyncEngine {
-        val client = OkHttpClient.Builder().addInterceptor(RevocationInterceptor(bus, Json { ignoreUnknownKeys = true })).build()
+        val client = OkHttpClient.Builder().addInterceptor(RevocationInterceptor(bus, db.recovery, Json { ignoreUnknownKeys = true })).build()
+        val transport = SyncTransport(app.markiro.handheld.core.network.GenerationCallFactory(client, db.recovery)) { server.url("/").toString() }
         return SyncEngine(
-            db = db, meta = MetaStore(db.metaDao()), config = db.deviceConfigDao(),
-            transport = SyncTransport(client) { server.url("/").toString() }, json = strict,
+            db = db, meta = MetaStore(db), config = db.deviceConfigDao(),
+            transport = transport, json = strict,
             scope = engineScope, clock = { clock },
         )
     }

@@ -63,26 +63,28 @@ function serviceHarness(
 ) {
   const insertedValues: unknown[] = [];
   const offer = { id: "41111111-1111-4111-8111-111111111111", tenantId: input.tenantId };
-  let selectCount = 0;
   let insertCount = 0;
   const tx = {
     select: vi.fn(() => {
-      selectCount += 1;
-      if (selectCount === 1) {
-        const query = {
-          from: vi.fn(() => query),
-          where: vi.fn(() => query),
-          for: vi.fn(async () => (version === null ? [] : [version])),
-          limit: vi.fn(async () => [offer]),
-          orderBy: vi.fn(async () => []),
-        };
-        return query;
-      }
+      let table: unknown;
+      const rows = () =>
+        table === schema.catalogItemVersions
+          ? version === null
+            ? []
+            : [{ ...version, id: inputLine.catalogVersionId, lifecyclePolicyId: null }]
+          : table === schema.commercialOffers
+            ? [offer]
+            : [];
       const query = {
-        from: vi.fn(() => query),
+        from: vi.fn((value: unknown) => {
+          table = value;
+          return query;
+        }),
         where: vi.fn(() => query),
-        limit: vi.fn(async () => (selectCount === 2 ? [offer] : [])),
-        orderBy: vi.fn(async () => []),
+        for: vi.fn(() => query),
+        limit: vi.fn(async () => rows()),
+        orderBy: vi.fn(async () => rows()),
+        then: (resolve: (value: unknown[]) => unknown) => Promise.resolve(rows()).then(resolve),
       };
       return query;
     }),

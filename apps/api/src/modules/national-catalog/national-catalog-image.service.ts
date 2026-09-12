@@ -1,3 +1,7 @@
+import {
+  type EntitlementAdmissionService,
+  admissionScopeDigest,
+} from "../../subscriptions/entitlement-admission.service";
 import { randomUUID } from "node:crypto";
 import {
   ConflictException,
@@ -42,6 +46,7 @@ export class NationalCatalogImageService {
     private readonly products: Pick<ProductsService, "applyPreparedImage">,
     private readonly policy: CatalogImagePolicy,
     private readonly download = downloadBoundedImage,
+    private readonly admission?: EntitlementAdmissionService,
   ) {}
   private enabled(): void {
     if (!this.policy.enabled || !this.policy.verifiedHosts.length)
@@ -123,6 +128,7 @@ export class NationalCatalogImageService {
       const bytes = await this.coordinator.runExternal(
         { tenantId, environment: claim.session.environment },
         async (signal) => {
+          const facts = await this.admission?.capture(tenantId);
           const allowed = await this.repository.transaction(async (tx) => {
             const session = await this.repository.lock(tx, tenantId, sessionId);
             const row = await this.lock(tx, tenantId, sessionId, previewId, candidateId);
@@ -134,6 +140,22 @@ export class NationalCatalogImageService {
             )
               throw new CatalogRequestError("deferred", "step_changed");
             if (!(await this.authorize(tx, session, row))) return false;
+            await this.admission?.observe({
+              tenantId: tenantId,
+              actor: { domain: "cabinet", id: row.preparationActorId },
+              operationId: "nk.worker.v1",
+              scopeDigest: admissionScopeDigest({
+                sessionId,
+                previewId,
+                candidateId,
+                stepId: cp.stepId,
+                effect: "image_download",
+              }),
+              transaction: tx,
+              facts,
+              runtime: { enabled: this.policy.enabled, observedAt: new Date() },
+              attempt: { number: cp.attempts + 1, identity: runId },
+            });
             await tx
               .update(images)
               .set({
@@ -177,12 +199,29 @@ export class NationalCatalogImageService {
       const processed = await processProductImage(bytes);
       const assetId = randomUUID();
       const objectKey = `tenants/${tenantId}/national-catalog/${assetId}.webp`;
+      const facts = await this.admission?.capture(tenantId);
       const staged = await this.repository.transaction(async (tx) => {
         const session = await this.repository.lock(tx, tenantId, sessionId);
         const row = await this.lock(tx, tenantId, sessionId, previewId, candidateId);
         const cp = imageCheckpointSchema.parse(row.preparationCheckpoint);
         if (cp.runId !== runId || !cp.enqueuePending || !(await this.authorize(tx, session, row)))
           return false;
+        await this.admission?.observe({
+          tenantId: tenantId,
+          actor: { domain: "cabinet", id: row.preparationActorId },
+          operationId: "nk.worker.v1",
+          scopeDigest: admissionScopeDigest({
+            sessionId,
+            previewId,
+            candidateId,
+            stepId: cp.stepId,
+            effect: "image_stage",
+          }),
+          transaction: tx,
+          facts,
+          runtime: { enabled: this.policy.enabled, observedAt: new Date() },
+          attempt: { number: cp.attempts, identity: runId },
+        });
         await tx.insert(schema.mediaAssets).values({
           id: assetId,
           ownerTenantId: tenantId,
@@ -307,6 +346,7 @@ export class NationalCatalogImageService {
       tenantId,
       operationId,
       previewId,
+      this.admission,
     );
   }
   /** Task11 bounded cleanup job. Retain exact previousPhoto for every retry-eligible receipt. */

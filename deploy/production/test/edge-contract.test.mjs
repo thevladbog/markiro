@@ -537,6 +537,7 @@ function assertAuthorityContract(adapted, { alb }) {
       "/shifts/box-label-templates",
       "/products",
       "/products/gtin-check",
+      "/lines",
     ],
     [
       "/shifts",
@@ -545,9 +546,10 @@ function assertAuthorityContract(adapted, { alb }) {
       "/shifts/box-label-templates",
       "/products",
       "/products/gtin-check",
+      "/lines",
     ],
-    ["^/shifts/[^/]+/(open|bundle|reference-bundle)$"],
-    ["^/shifts/[^/]+/(open|bundle|reference-bundle)$"],
+    ["^/shifts/[^/]+/(open|enter|bundle|reference-bundle|summary)$"],
+    ["^/shifts/[^/]+/(open|enter|bundle|reference-bundle|summary)$"],
   ];
   const adminProxies = proxyRoutes(admin);
   const adminReverseProxies = nestedObjects(admin).filter(
@@ -988,7 +990,7 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.deepEqual(
     landingInstructions.filter((instruction) => instruction.name === "RUN"),
     [
-      { name: "RUN", arguments: "pnpm --filter @markiro/ui build" },
+      { name: "RUN", arguments: "pnpm turbo build --filter @markiro/ui..." },
       { name: "RUN", arguments: "pnpm --filter @markiro/landing build" },
     ],
   );
@@ -1100,7 +1102,7 @@ test("edge build validates every tracked legal artifact before copying landing o
     readFile("apps/landing/public/legal/artifacts.json", "utf8"),
   ]);
   const artifacts = JSON.parse(manifestSource);
-  assert.equal(artifacts.length, 32);
+  assert.equal(artifacts.length, 34);
   assert.equal(new Set(artifacts.map(({ fileName }) => fileName)).size, artifacts.length);
   for (const artifact of artifacts) {
     assert.match(artifact.sha256, /^[0-9a-f]{64}$/);
@@ -1415,6 +1417,9 @@ test("direct Caddy adapter keeps bare admin routes static and routes exact Stati
     "/shifts/planning-config",
     "/shifts/product-label-templates",
     "/products",
+    // Opening /lines to the handheld must not take the cabinet's own page away
+    // from the SPA: the Station match is gated on the api key, not the path.
+    "/lines",
   ]) {
     const request = { method: "GET", path };
     const selected = selectedAdaptedRoute(routeTable, request);
@@ -1467,6 +1472,26 @@ test("direct Caddy adapter keeps bare admin routes static and routes exact Stati
       path: "/shifts/shift-1/reference-bundle",
       headers: { "x-api-key": "station-test-key" },
     },
+    // The handheld's three routes. They were absent from this table and from
+    // the Caddyfile, so production answered a bare 404 -- no body, no code --
+    // and the terminal read that as «смена уже закрыта». No station client
+    // calls them, which is why nothing here noticed: `enter` is the handheld's
+    // way into a shift, `summary` feeds the team chip, `lines` lists the other
+    // lines' shifts.
+    {
+      method: "POST",
+      path: "/shifts/shift-1/enter",
+      headers: { "x-api-key": "station-test-key" },
+    },
+    {
+      method: "GET",
+      path: "/shifts/shift-1/summary",
+      headers: { "x-api-key": "station-test-key" },
+    },
+    { method: "GET", path: "/lines", headers: { "x-api-key": "station-test-key" } },
+    { method: "OPTIONS", path: "/shifts/shift-1/enter" },
+    { method: "OPTIONS", path: "/shifts/shift-1/summary" },
+    { method: "OPTIONS", path: "/lines" },
     { method: "OPTIONS", path: "/shifts" },
     { method: "OPTIONS", path: "/shifts/planning-config" },
     { method: "OPTIONS", path: "/shifts/product-label-templates" },

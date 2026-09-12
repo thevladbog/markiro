@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -29,15 +29,63 @@ async function chooseOption(
   await user.click(await screen.findByRole("option", { name: option }));
 }
 
+async function chooseP1Defaults(user: ReturnType<typeof userEvent.setup>) {
+  for (const label of [
+    "Честный знак и Национальный каталог",
+    "Инвентаризация",
+    "CommerceML",
+    "ТСД",
+  ]) {
+    const combobox = screen.queryByRole("combobox", { name: label });
+    if (combobox) {
+      await user.click(combobox);
+      await user.click(await screen.findByRole("option", { name: "Не включено" }));
+    }
+  }
+}
 async function submitMinimalCatalogCreate(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
-  await user.type(screen.getByLabelText("Код позиции"), "plan-contract-check");
-  await user.type(screen.getByLabelText("Название на русском"), "Проверка контракта");
-  await user.type(screen.getByLabelText("Название на английском"), "Contract check");
+  fireEvent.change(screen.getByLabelText("Код позиции"), {
+    target: { value: "plan-contract-check" },
+  });
+  fireEvent.change(screen.getByLabelText("Название на русском"), {
+    target: { value: "Проверка контракта" },
+  });
+  fireEvent.change(screen.getByLabelText("Название на английском"), {
+    target: { value: "Contract check" },
+  });
+  await chooseP1Defaults(user);
   await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
 }
 
 describe("commercial catalog", () => {
+  it.each([
+    { item: DRAFT_PLAN, tab: "Тарифы" },
+    { item: ADDON, tab: "Дополнения" },
+    { item: SERVICE, tab: "Услуги" },
+  ])("publishes $item.kind without an approved lifecycle policy", async ({ item, tab }) => {
+    installCatalogApi({
+      items: [{ ...item, status: "draft", lifecyclePolicyId: null }],
+      lifecyclePolicies: [],
+    });
+    renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("tab", { name: tab }));
+    await user.click(
+      screen.getByRole("button", { name: `Открыть ${item.nameRu}, версия ${item.version}` }),
+    );
+    const publish = screen.getByRole("button", { name: `Опубликовать версию ${item.version}` });
+    await waitFor(() => expect((publish as HTMLButtonElement).disabled).toBe(false));
+    await user.click(publish);
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: `Опубликовать версию ${item.version}`,
+      }),
+    );
+    expect(await screen.findByText("Опубликованная версия не редактируется.")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Сохранить черновик" })).toBeNull();
+  });
+
   it.each(["save", "review"])(
     "locks addon effects during deferred %s and retains the submitted values",
     async (operation) => {
@@ -168,7 +216,7 @@ describe("commercial catalog", () => {
     );
     await user.clear(screen.getByLabelText("Прибавка к квоте 1"));
     await user.type(screen.getByLabelText("Прибавка к квоте 1"), "3");
-    expect(screen.getByText("+3 станции")).toBeDefined();
+    expect(screen.getByText("Станции и ТСД: +3")).toBeDefined();
   });
 
   it("creates an annual plan with explicit zero finite and unlimited quotas", async () => {
@@ -176,16 +224,33 @@ describe("commercial catalog", () => {
     renderSaasApp();
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
-    await user.type(screen.getByLabelText("Код позиции"), "plan-year");
-    await user.type(screen.getByLabelText("Название на русском"), "Годовой");
-    await user.type(screen.getByLabelText("Название на английском"), "Annual");
-    await chooseOption(user, "Период лицензии", "Год");
-    await user.clear(screen.getByLabelText("Цена за единицу"));
-    await user.type(screen.getByLabelText("Цена за единицу"), "69000.00");
-    await chooseOption(user, "Киоски: режим", "Нет");
-    await chooseOption(user, "Линии: режим", "Ограничено");
-    await user.type(screen.getByLabelText("Линии"), "2");
-    await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
+    const form = within(await screen.findByRole("region", { name: "Новая позиция каталога" }));
+    const choose = async (label: string, option: string) => {
+      await user.click(form.getByLabelText(label, { selector: 'button[role="combobox"]' }));
+      const listbox = within(await screen.findByRole("listbox"));
+      await user.click(listbox.getByRole("option", { name: option }));
+    };
+    fireEvent.change(form.getByLabelText("Код позиции"), { target: { value: "plan-year" } });
+    fireEvent.change(form.getByLabelText("Название на русском"), {
+      target: { value: "Годовой" },
+    });
+    fireEvent.change(form.getByLabelText("Название на английском"), {
+      target: { value: "Annual" },
+    });
+    await choose("Период лицензии", "Год");
+    fireEvent.change(form.getByLabelText("Цена за единицу"), { target: { value: "69000.00" } });
+    await choose("Киоски: режим", "Нет");
+    await choose("Линии: режим", "Ограничено");
+    await user.type(form.getByLabelText("Линии"), "2");
+    for (const label of [
+      "Честный знак и Национальный каталог",
+      "Инвентаризация",
+      "CommerceML",
+      "ТСД",
+    ]) {
+      await choose(label, "Не включено");
+    }
+    await user.click(form.getByRole("button", { name: "Создать позицию" }));
     expect(api.createCalls()[0]?.body).toMatchObject({
       billingPeriod: "year",
       unit: "year",
@@ -335,6 +400,7 @@ describe("commercial catalog", () => {
     await user.type(screen.getByLabelText("Код позиции"), "plan-pro");
     await user.type(screen.getByLabelText("Название на русском"), "Профи");
     await user.type(screen.getByLabelText("Название на английском"), "Pro");
+    await chooseP1Defaults(user);
     await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
     expect(await screen.findByRole("region", { name: "Версия 1 · Профи" })).toBeDefined();
     expect(api.items()).toHaveLength(1);
@@ -363,7 +429,7 @@ describe("commercial catalog", () => {
 
       await submitMinimalCatalogCreate(user);
 
-      const alert = await screen.findByRole("alert");
+      const alert = await screen.findByText(expectedMessage);
       expect(alert.textContent).toContain(expectedMessage);
       expect(alert.textContent).not.toMatch(/raw-server-conflict|zod|must-not-render/i);
     },
@@ -382,6 +448,7 @@ describe("commercial catalog", () => {
     await user.type(screen.getByLabelText("Код позиции"), "service-license");
     await user.type(screen.getByLabelText("Название на русском"), "Лицензия");
     await user.type(screen.getByLabelText("Название на английском"), "License");
+    await chooseP1Defaults(user);
     await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
 
     expect(api.createCalls()[0]?.body).toMatchObject({
@@ -405,6 +472,7 @@ describe("commercial catalog", () => {
     await user.type(screen.getByLabelText("Код позиции"), "service-no-vat");
     await user.type(screen.getByLabelText("Название на русском"), "Без НДС");
     await user.type(screen.getByLabelText("Название на английском"), "No VAT");
+    await chooseP1Defaults(user);
     await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
 
     expect(api.createCalls()[0]?.body).toMatchObject({
@@ -437,7 +505,7 @@ describe("commercial catalog", () => {
 
     expect(screen.getByRole("group", { name: "Что расширяет дополнение" })).toBeDefined();
     expect(screen.getByRole("combobox", { name: "Тип эффекта 1" }).textContent).toContain(
-      "Станции",
+      "Станции и ТСД",
     );
     expect((screen.getByLabelText("Прибавка к квоте 1") as HTMLInputElement).value).toBe("1");
     await chooseOption(user, "Тип эффекта 1", "Киоски");
@@ -448,6 +516,7 @@ describe("commercial catalog", () => {
     await user.type(screen.getByLabelText("Код позиции"), "addon-kiosk");
     await user.type(screen.getByLabelText("Название на русском"), "Киоски");
     await user.type(screen.getByLabelText("Название на английском"), "Kiosks");
+    await chooseP1Defaults(user);
     await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
 
     expect(api.createCalls()[0]?.body).toMatchObject({
@@ -466,11 +535,19 @@ describe("commercial catalog", () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
-    await user.type(screen.getByLabelText("Код позиции"), "plan-complete");
-    await user.type(screen.getByLabelText("Название на русском"), "Полный тариф");
-    await user.type(screen.getByLabelText("Название на английском"), "Complete plan");
-    await user.type(screen.getByLabelText("Описание на русском"), "Для производства");
-    await user.type(screen.getByLabelText("Описание на английском"), "For production");
+    fireEvent.change(screen.getByLabelText("Код позиции"), { target: { value: "plan-complete" } });
+    fireEvent.change(screen.getByLabelText("Название на русском"), {
+      target: { value: "Полный тариф" },
+    });
+    fireEvent.change(screen.getByLabelText("Название на английском"), {
+      target: { value: "Complete plan" },
+    });
+    fireEvent.change(screen.getByLabelText("Описание на русском"), {
+      target: { value: "Для производства" },
+    });
+    fireEvent.change(screen.getByLabelText("Описание на английском"), {
+      target: { value: "For production" },
+    });
     await chooseOption(user, "Линии: режим", "Ограничено");
     await user.type(screen.getByLabelText("Линии"), "10");
     await user.clear(screen.getByLabelText("Дней демо"));
@@ -478,6 +555,7 @@ describe("commercial catalog", () => {
     await user.click(screen.getByLabelText("Редактор этикеток"));
     await user.click(screen.getByLabelText("Публичный API"));
     await user.click(screen.getByLabelText("Работа с палетами"));
+    await chooseP1Defaults(user);
     await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
 
     expect(api.createCalls()[0]?.body).toMatchObject({
@@ -690,7 +768,7 @@ describe("commercial catalog", () => {
     );
     expect(screen.getAllByRole("combobox", { name: /Тип эффекта/ })).toHaveLength(2);
     await user.click(screen.getAllByRole("combobox", { name: /Тип эффекта/ })[0]!);
-    expect(screen.getAllByRole("option", { name: "Станции" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("option", { name: "Станции и ТСД" }).length).toBeGreaterThan(0);
     expect(screen.queryByRole("option", { name: /\{\{count\}\}/ })).toBeNull();
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Добавить эффект" }));
@@ -766,6 +844,7 @@ describe("commercial catalog", () => {
           documentNameEn: null,
           subject: "software_license",
           sellerPolicyRevision: 1,
+          lifecyclePolicyId: DRAFT_PLAN.lifecyclePolicyId,
           descriptionRu: "Для одной площадки",
           descriptionEn: "For one site",
           nameRu: "Базовый",
@@ -779,6 +858,10 @@ describe("commercial catalog", () => {
             maxStations: 3,
             maxKiosks: 1,
             maxCabinetUsers: 5,
+            chzIntegrationEnabled: false,
+            inventoryEnabled: false,
+            commerceMlEnabled: false,
+            handheldEnabled: false,
             demoDurationDays: 14,
             labelEditorEnabled: true,
             publicApiEnabled: false,
@@ -824,6 +907,7 @@ describe("commercial catalog", () => {
           documentNameEn: null,
           subject: "software_license",
           sellerPolicyRevision: 1,
+          lifecyclePolicyId: DRAFT_PLAN.lifecyclePolicyId,
           descriptionRu: null,
           descriptionEn: null,
           nameRu: "Дополнительная станция",
@@ -946,4 +1030,35 @@ describe("commercial catalog", () => {
 
     expect(await screen.findByText("Демо по умолчанию")).toBeDefined();
   });
+});
+
+it("shows unmapped new module facts when a legacy published plan is read or cloned", async () => {
+  const legacy: CatalogVersionDto = {
+    ...PUBLISHED_PLAN,
+    lifecyclePolicyId: null,
+    plan: {
+      ...PUBLISHED_PLAN.plan,
+      chzIntegrationEnabled: null,
+      inventoryEnabled: null,
+      commerceMlEnabled: null,
+      handheldEnabled: null,
+    },
+  };
+  installCatalogApi({ items: [legacy] });
+  renderSaasApp();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Открыть Базовый, версия 1" }));
+  expect(screen.getByText("Честный знак и Национальный каталог: Не сопоставлено")).toBeDefined();
+});
+it("offers translated new module add-on effects", async () => {
+  installCatalogApi({ items: [{ ...ADDON, status: "draft" }] });
+  renderSaasApp();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("tab", { name: "Дополнения" }));
+  await user.click(
+    screen.getByRole("button", { name: "Открыть Дополнительная станция, версия 1" }),
+  );
+  await user.click(screen.getByRole("combobox", { name: "Тип эффекта 1" }));
+  expect(screen.getByRole("option", { name: "Честный знак и Национальный каталог" })).toBeDefined();
+  expect(screen.getByRole("option", { name: "ТСД" })).toBeDefined();
 });

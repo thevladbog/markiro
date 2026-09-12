@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,6 +40,7 @@ import app.markiro.handheld.core.design.MarkiroChip
 import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.core.design.PrimaryButton
+import app.markiro.handheld.core.design.ScreenColumn
 import app.markiro.handheld.core.design.StateAction
 import app.markiro.handheld.core.design.Tone
 import app.markiro.handheld.core.scan.ScanEvent
@@ -46,6 +48,8 @@ import app.markiro.handheld.core.scan.ScanSourceKind
 import app.markiro.handheld.core.scan.VendorProfiles
 import app.markiro.handheld.core.signal.SignalKind
 import app.markiro.handheld.core.storage.DeviceConfigEntity
+import app.markiro.handheld.core.update.DownloadResult
+import app.markiro.handheld.core.update.UpdateState
 import app.markiro.handheld.core.util.TimeText
 
 @Composable
@@ -61,6 +65,8 @@ fun SettingsScreen(
     onVolume: (Float) -> Unit = {},
     onToggleVibration: () -> Unit = {},
     onTest: (SignalKind) -> Unit = {},
+    onCheckUpdate: () -> Unit = {},
+    onInstallUpdate: () -> Unit = {},
 ) {
     val c = MarkiroTheme.colors
     Column(Modifier.fillMaxSize().background(c.surfacePage).verticalScroll(rememberScrollState())) {
@@ -117,6 +123,19 @@ fun SettingsScreen(
             InfoRow(stringResource(R.string.settings_name), listOfNotNull(config?.deviceName, config?.lineName).joinToString(" · "))
             InfoRow(stringResource(R.string.settings_server), config?.serverUrl.orEmpty().removePrefix("https://"))
             InfoRow(stringResource(R.string.settings_version), state.version)
+            // A row, not a banner: the terminal is offline most of a shift, so
+            // this answers only when an operator asks.
+            SettingRow(stringResource(R.string.settings_update), updateLabel(state), onCheckUpdate)
+            // Offered only here, never from the work screen: an install restarts
+            // the app, and a line in the middle of a box should not meet it.
+            if (state.update is UpdateState.Available) {
+                SettingRow(
+                    stringResource(R.string.settings_update_install),
+                    installLabel(state),
+                    onInstallUpdate,
+                )
+            }
+            InfoRow(stringResource(R.string.settings_vendor), stringResource(R.string.settings_vendor_value))
             InfoRow(
                 stringResource(R.string.settings_sync),
                 state.lastSyncAt?.let { stringResource(R.string.settings_sync_value, state.queue, TimeText.hhmm(it)) }
@@ -136,6 +155,36 @@ fun SettingsScreen(
             )
         }
     }
+}
+
+@Composable
+private fun installLabel(state: SettingsUi): String = when (val install = state.install) {
+    null -> ""
+    InstallStep.Downloading -> stringResource(R.string.settings_update_downloading)
+    InstallStep.QueueNotEmpty -> stringResource(R.string.settings_update_queue)
+    is InstallStep.Failed -> stringResource(
+        when (install.failure) {
+            DownloadResult.Failure.CORRUPT -> R.string.settings_update_failed_corrupt
+            DownloadResult.Failure.NO_SPACE -> R.string.settings_update_failed_space
+            DownloadResult.Failure.REFUSED -> R.string.settings_update_refused
+            DownloadResult.Failure.UNREACHABLE -> R.string.settings_update_unreachable
+        },
+    )
+}
+
+/** «Не знаю» is a first-class answer here, and it says which kind of «не знаю». */
+@Composable
+private fun updateLabel(state: SettingsUi): String = when (val update = state.update) {
+    null -> stringResource(R.string.settings_update_check)
+    UpdateState.UpToDate -> stringResource(R.string.settings_update_current)
+    is UpdateState.Available -> stringResource(R.string.settings_update_available, update.manifest.versionName)
+    is UpdateState.Unknown -> stringResource(
+        when (update.reason) {
+            UpdateState.Reason.UNREACHABLE -> R.string.settings_update_unreachable
+            UpdateState.Reason.REFUSED -> R.string.settings_update_refused
+            UpdateState.Reason.MALFORMED -> R.string.settings_update_malformed
+        },
+    )
 }
 
 @Composable
@@ -159,7 +208,7 @@ fun ScannerSettingsScreen(
     val current = VendorProfiles.byId(state.profileId)
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
         AppBar(stringResource(R.string.scanner_title), onBack)
-        Column(Modifier.padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+        ScreenColumn(padding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
             Text(stringResource(R.string.scanner_sources), style = t.label, color = c.fg3)
             OptionRow(
                 stringResource(R.string.scanner_builtin_title),
@@ -228,21 +277,6 @@ private fun TestScan(event: ScanEvent?) {
                 color = c.okFg,
             )
         }
-    }
-}
-
-@Composable
-fun ComingSoonScreen(title: String, onBack: () -> Unit) {
-    val c = MarkiroTheme.colors
-    Column(Modifier.fillMaxSize().background(c.surfacePage)) {
-        AppBar(title, onBack)
-        FullScreenState(
-            Icons.Outlined.Construction,
-            stringResource(R.string.soon_title),
-            stringResource(R.string.soon_text),
-            primary = StateAction(stringResource(R.string.common_back), onBack),
-            primaryIsAccent = false,
-        )
     }
 }
 

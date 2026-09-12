@@ -11,6 +11,7 @@ import { BoxesController } from "../src/modules/boxes/boxes.controller";
 import { ConflictsController } from "../src/modules/conflicts/conflicts.controller";
 import { CounterpartiesController } from "../src/modules/counterparties/counterparties.controller";
 import { DevicesController } from "../src/modules/devices/devices.controller";
+import { DeviceLicensingController } from "../src/modules/device-licensing/device-licensing.controller";
 import { DashboardController } from "../src/modules/dashboard/dashboard.controller";
 import { EmployeesController } from "../src/modules/employees/employees.controller";
 import { LabelTemplatesController } from "../src/modules/label-templates/label-templates.controller";
@@ -247,7 +248,7 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
   ControllerClass,
   Readonly<Record<string, RouteAccessPolicy>>,
 ][] = [
-  [AccessController, { me: membershipPolicy }],
+  [AccessController, { me: membershipPolicy, entitlementSnapshot: membershipPolicy }],
   [
     OrgProfileController,
     {
@@ -293,6 +294,7 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
       issuePairingCode: credentialsPolicy,
     },
   ],
+  [DeviceLicensingController, { inspect: credentialsPolicy, cancelReservation: credentialsPolicy }],
   [
     KiosksController,
     {
@@ -371,13 +373,14 @@ describe("cabinet route authorization metadata", () => {
     const guards = Reflect.getMetadata(GUARDS_METADATA, StationPairController) ?? [];
     expect(guards).not.toContain(TenantGuard);
     expect(guards).not.toContain(AuthorizationGuard);
-    expect(routeMethods(StationPairController).sort()).toEqual(["identity", "pair"]);
+    expect(routeMethods(StationPairController).sort()).toEqual(["identity", "pair", "recovery"]);
 
     const prototype = StationPairController.prototype as unknown as Record<
       string,
       (...args: never[]) => unknown
     >;
     expect(Reflect.getMetadata(GUARDS_METADATA, prototype.pair!)).toBeUndefined();
+    expect(Reflect.getMetadata(GUARDS_METADATA, prototype.recovery!)).toBeUndefined();
     expect(Reflect.getMetadata(GUARDS_METADATA, prototype.identity!)).toEqual([
       TenantGuard,
       StationOnlyGuard,

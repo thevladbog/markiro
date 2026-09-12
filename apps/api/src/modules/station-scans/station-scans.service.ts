@@ -467,7 +467,7 @@ export class StationScansService {
           // Pallet records are held to the SAME eligibility rule as the boxes
           // they hold, and they are quarantined like every other kind. Dropping
           // them with only a log line -- what this path did before migration
-          // 0132 widened `station_sync_quarantine_record_kind_check` -- was
+          // 0135 widened `station_sync_quarantine_record_kind_check` -- was
           // data loss, not a lesser evil: `sync_batches` stores a digest and
           // never the body, and the device's drain acks and DELETEs its outbox
           // rows unconditionally, so a physically labelled pallet's closure

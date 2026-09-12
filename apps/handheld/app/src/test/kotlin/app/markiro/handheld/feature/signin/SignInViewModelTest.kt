@@ -1,5 +1,15 @@
 package app.markiro.handheld.feature.signin
 
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.DeviceRecovery
+import app.markiro.handheld.core.storage.InMemoryCredentialStore
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
+import org.junit.After
+import org.junit.Before
+import org.junit.runner.RunWith
 import app.markiro.handheld.MainDispatcherRule
 import app.markiro.handheld.core.auth.OperatorAuth
 import app.markiro.handheld.core.auth.OperatorRecord
@@ -14,7 +24,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
+@RunWith(AndroidJUnit4::class)
 class SignInViewModelTest {
+    private lateinit var db: HandheldDatabase
+    private lateinit var recovery: DeviceRecovery
+    @Before fun setupRecovery() {
+        db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java).allowMainThreadQueries().build()
+        recovery = db.initializeRecoveryForTest()
+    }
+    @After fun closeRecovery() { main.cancelAndJoinModels(); db.close() }
+
     @get:Rule
     val main = MainDispatcherRule()
 
@@ -26,7 +45,7 @@ class SignInViewModelTest {
     private val scans = MutableSharedFlow<ScanEvent>(extraBufferCapacity = 4)
     private val session = SessionHolder()
 
-    private fun vm() = main.track(SignInViewModel(auth, session, scans))
+    private fun vm() = main.track(SignInViewModel(recovery, auth, session, scans))
 
     @Test
     fun loginThenPinSignsTheOperatorIn() = runTest {

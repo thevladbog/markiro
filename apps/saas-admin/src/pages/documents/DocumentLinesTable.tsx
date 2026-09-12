@@ -86,7 +86,9 @@ export function DocumentLinesTable({
                       </p>
                     ) : null}
                     <span>
-                      {line.catalogItemCode} · v{line.version} ·{" "}
+                      {line.catalogItemCode && line.version > 0
+                        ? `${line.catalogItemCode} · v${line.version} · `
+                        : ""}
                       {line.commercialTerms?.subject === "software_license" &&
                       line.commercialTerms.billingPeriod
                         ? t(`catalog.units.${line.commercialTerms.billingPeriod}`)
@@ -201,6 +203,13 @@ export function DocumentLinesTable({
                 </tr>
                 <tr className="document-lines-table__comment-row">
                   <td colSpan={6}>
+                    {kind === "offer" && !line.commercialTerms ? (
+                      <p className="field-error">
+                        {t("offerWorkspace.lineTermsMissing", {
+                          name: i18n.language === "en" ? line.nameEn : line.nameRu,
+                        })}
+                      </p>
+                    ) : null}
                     <Textarea
                       label={t("documents.commentFor", { name: line.nameRu })}
                       disabled={Boolean(draft.sourceOfferId)}

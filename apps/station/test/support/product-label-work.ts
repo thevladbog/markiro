@@ -15,6 +15,7 @@ export async function openProductLabelWork(
   verification: VerificationPolicy = "required",
   ownership?: string,
   accept = true,
+  durableTerminal = false,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "markiro-label-work-"));
   const path = join(directory, "station.sqlite");
@@ -37,7 +38,7 @@ export async function openProductLabelWork(
     jobId: f.jobId,
     shiftId: f.shiftId,
     deviceId: f.deviceId,
-    terminalId: f.terminalId,
+    terminalId: durableTerminal ? f.deviceId : f.terminalId,
     operatorId: f.operatorId,
     credentialOwnership: f.credentialOwnership,
     raw: f.raw,

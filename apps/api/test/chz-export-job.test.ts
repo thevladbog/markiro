@@ -1,3 +1,6 @@
+import { AuthorizationService } from "../src/authorization/authorization.service";
+import { EntitlementsService } from "../src/subscriptions/entitlements.service";
+import { EntitlementAdmissionService } from "../src/subscriptions/entitlement-admission.service";
 import { randomBytes, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { Logger } from "@nestjs/common";
@@ -528,7 +531,16 @@ describe.skipIf(!ready)("PgBossService run-chz-export queue: pass budget (amendm
     const client = new TrueApiClient();
     const inventories = {} as InventoriesService;
     const journal = new JournalService(runnerDb);
-    return new ChzExportRunnerService(runnerDb, tokens, client, inventories, journal);
+    return new ChzExportRunnerService(
+      runnerDb,
+      tokens,
+      client,
+      inventories,
+      journal,
+      new AuthorizationService(runnerDb),
+      new EntitlementsService(runnerDb, "managed_only"),
+      new EntitlementAdmissionService(runnerDb, new EntitlementsService(runnerDb, "managed_only")),
+    );
   }
 
   it("advances the pass counter across re-enqueues and fails a tokenless all-queued order once the budget is spent", async () => {
@@ -679,7 +691,19 @@ describe.skipIf(!ready)(
       const client = new TrueApiClient();
       const inventories = {} as InventoriesService;
       const journal = new JournalService(runnerDb);
-      const runner = new ChzExportRunnerService(runnerDb, tokens, client, inventories, journal);
+      const runner = new ChzExportRunnerService(
+        runnerDb,
+        tokens,
+        client,
+        inventories,
+        journal,
+        new AuthorizationService(runnerDb),
+        new EntitlementsService(runnerDb, "managed_only"),
+        new EntitlementAdmissionService(
+          runnerDb,
+          new EntitlementsService(runnerDb, "managed_only"),
+        ),
+      );
       vi.spyOn(runner, "run").mockRejectedValue(new Error("persistent True API failure"));
       return runner;
     }

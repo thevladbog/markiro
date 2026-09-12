@@ -10,7 +10,7 @@ import {
   UnprocessableEntityException,
   UnsupportedMediaTypeException,
 } from "@nestjs/common";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
 import { isBoxLabelTemplateEligible } from "@markiro/domain";
@@ -42,6 +42,14 @@ import { parseStationInventoryManifest } from "./station-inventory.dto";
 
 type InventoryTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type InventoryImport = typeof schema.inventoryImports.$inferSelect;
+/** Server-internal CHZ receipt identity; never accepted from an HTTP upload DTO. */
+export interface ChzImportAttempt {
+  runId: string;
+  attempts: number;
+  claimedAt: Date | null;
+  dispenserTaskId: string | null;
+  resultId: string | null;
+}
 
 interface InventoryJoinedRow {
   id: string;
@@ -499,6 +507,7 @@ export class InventoriesService {
     inventoryId: string,
     declaredStatus: InventoryChzStatus,
     file: InventoryImportFile,
+    chzAttempt?: ChzImportAttempt,
   ): Promise<InventoryImportDto> {
     const sha256 = createHash("sha256").update(file.bytes).digest("hex");
     const importId = randomUUID();
@@ -604,6 +613,35 @@ export class InventoriesService {
           sha256,
         );
         if (existing) return this.importDtoWithStoredDiagnostic(tx, existing);
+
+        // Lock order: inventory -> exact CHZ run -> product. Storage already finished;
+        // a losing worker may read a saved receipt above, but cannot publish new evidence.
+        if (chzAttempt) {
+          const [owned] = await tx
+            .select({ id: schema.chzExportRuns.id })
+            .from(schema.chzExportRuns)
+            .where(
+              and(
+                eq(schema.chzExportRuns.tenantId, tenantId),
+                eq(schema.chzExportRuns.inventoryId, inventoryId),
+                eq(schema.chzExportRuns.id, chzAttempt.runId),
+                eq(schema.chzExportRuns.status, declaredStatus),
+                eq(schema.chzExportRuns.state, "ready"),
+                eq(schema.chzExportRuns.attempts, chzAttempt.attempts),
+                chzAttempt.claimedAt
+                  ? eq(schema.chzExportRuns.claimedAt, chzAttempt.claimedAt)
+                  : isNull(schema.chzExportRuns.claimedAt),
+                chzAttempt.dispenserTaskId
+                  ? eq(schema.chzExportRuns.dispenserTaskId, chzAttempt.dispenserTaskId)
+                  : isNull(schema.chzExportRuns.dispenserTaskId),
+                chzAttempt.resultId
+                  ? eq(schema.chzExportRuns.resultId, chzAttempt.resultId)
+                  : isNull(schema.chzExportRuns.resultId),
+              ),
+            )
+            .for("update");
+          if (!owned) throw new ConflictException("CHZ_IMPORT_ATTEMPT_STALE");
+        }
 
         const [product] = await tx
           .select({ gtin14: schema.products.gtin14, status: schema.products.status })

@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.work
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -9,6 +10,7 @@ import app.markiro.handheld.core.auth.OperatorRecord
 import app.markiro.handheld.core.box.BoxPrinter
 import app.markiro.handheld.core.box.PrintReason
 import app.markiro.handheld.core.box.BoxRepository
+import app.markiro.handheld.core.exceptions.ExceptionEngine
 import app.markiro.handheld.core.box.CloseBox
 import app.markiro.handheld.core.box.ClosePallet
 import app.markiro.handheld.core.box.PalletLock
@@ -53,6 +55,7 @@ import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -106,17 +109,22 @@ class WorkViewModelTest {
             ),
         )
         db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1"))
+        db.initializeRecoveryForTest()
     }
 
     @After
     fun tearDown() {
-        engineScope.cancel()
-        db.close()
+        try {
+            main.cancelAndJoinModels()
+        } finally {
+            engineScope.cancel()
+            db.close()
+        }
     }
 
     private fun vm(team: TeamRefresher = TeamRefresher { null }): WorkViewModel {
         val engine = SyncEngine(
-            db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
+            db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), engineScope,
         )
         val boxes = BoxRepository(db)
@@ -138,7 +146,7 @@ class WorkViewModelTest {
                 boxes, CloseBox(db, boxes, pool, pallets, closePallet, palletLock),
                 BoxPrinter(db, boxes, LabelRenderer(rasterize), transport),
                 DuplicateJobs(db, LabelRenderer(rasterize), transport),
-                pallets, closePallet, palletPrinter, flowOf(Unit),
+                pallets, closePallet, palletPrinter, ExceptionEngine(db), flowOf(Unit),
             ),
         )
     }
@@ -158,7 +166,13 @@ class WorkViewModelTest {
         advanceUntilIdle()
         scans.tryEmit(ScanEvent("garbage", null, "debug", 0))
         advanceUntilIdle()
-        val s = vm.state.first { it.feed.size == 4 && it.errors == 2 }
+        // Waits for WHICH scan is last, then asserts what it was judged to be.
+        // `feed` and `errors` come from Room's flows and `last` from this view
+        // model, so a predicate on counters alone is satisfied by a state whose
+        // `last` is still the previous scan -- which is how this read
+        // «expected:<INVALID> but was:<WRONG_GTIN>» on a loaded CI runner and
+        // never once on a developer machine.
+        val s = vm.state.first { it.feed.size == 4 && it.errors == 2 && it.last?.tail == "garbage" }
         assertEquals(Verdict.INVALID, s.last?.verdict)
         assertEquals(1, s.thisTerminal)
         assertEquals(2, s.errors)
@@ -175,6 +189,31 @@ class WorkViewModelTest {
         scans.tryEmit(ScanEvent("010460068200001321abc${gs}93AAAA", null, "debug", 0))
         advanceUntilIdle()
         assertEquals(1, vm.state.first { it.thisTerminal == 1 }.total)
+    }
+
+    /**
+     * Offered on the crossing, and only once. A plain `total >= plan` would raise
+     * this again on every scan past the plan, and would greet an operator who
+     * merely re-entered a shift that was already finished.
+     */
+    @Test
+    fun theCloseOfferComesOnceWhenTheShiftCrossesItsPlan() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1").copy(plannedQty = 2))
+        val vm = vm()
+        advanceUntilIdle()
+        assertFalse(vm.planPrompt.value)
+
+        scans.tryEmit(ScanEvent("010460068200001321one${gs}93AAAA", null, "debug", 0))
+        advanceUntilIdle()
+        assertFalse("below the plan, nothing is offered", vm.planPrompt.value)
+
+        scans.tryEmit(ScanEvent("010460068200001321two${gs}93BBBB", null, "debug", 0))
+        assertTrue(vm.planPrompt.first { it })
+
+        vm.dismissPlanPrompt()
+        scans.tryEmit(ScanEvent("010460068200001321three${gs}93CCCC", null, "debug", 0))
+        advanceUntilIdle()
+        assertFalse("past the plan it must not ask again", vm.planPrompt.value)
     }
 
     @Test
@@ -331,6 +370,47 @@ class WorkViewModelTest {
         assertEquals(BoxCloseStep.Idle, vm.closeStep.value)
         assertEquals(1, transport.sent)
         assertEquals(0, vm.state.first { it.unprintedLabels == 0 }.unprintedLabels)
+    }
+
+    /**
+     * Brief §8: «Напечатать ещё раз» out of an unknown outcome is an explicit
+     * same-SSCC reprint and is recorded as one, with a fixed reason.
+     */
+    @Test
+    fun printingAgainFromAnUnknownOutcomeWritesAReprint() = runTest {
+        aggregating(capacity = 1)
+        transport.outcome = SendOutcome.Unknown("link lost")
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        val closed = vm.closeStep.first { it is BoxCloseStep.Unknown } as BoxCloseStep.Unknown
+        vm.retryPrint()
+        // The queue depth is the observable outcome; `advanceUntilIdle` would
+        // return while Room is still writing it.
+        db.boxExceptionDao().observeUnackedCount().first { it == 1 }
+        // `queued`, not `sendable`: the closure of a box shut seconds ago is
+        // very likely still unacknowledged, and the drain rightly withholds the
+        // fact until the server has seen the box.
+        val queued = db.boxExceptionDao().queued().single()
+        assertEquals("reprint", queued.kind)
+        assertEquals(closed.box.boxId, queued.boxId)
+        assertEquals("Результат печати неизвестен", queued.reason)
+    }
+
+    /** Confirming the label is there sends nothing and records nothing. */
+    @Test
+    fun confirmingAnUnknownPrintWritesNoReprint() = runTest {
+        aggregating(capacity = 1)
+        transport.outcome = SendOutcome.Unknown("link lost")
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        vm.closeStep.first { it is BoxCloseStep.Unknown }
+        vm.confirmPrinted()
+        vm.state.first { it.unprintedLabels == 0 }
+        assertEquals(0, db.boxExceptionDao().unackedCount())
     }
 
     @Test
@@ -506,5 +586,46 @@ class WorkViewModelTest {
         assertEquals(true, last?.blocked)
         // Never judged, so never a verdict about the code itself.
         assertEquals(1, db.codeDao().countForShift("s1"))
+    }
+
+    /**
+     * The view model outlives its screen: the back-stack entry keeps it alive
+     * while the exception routes are on top, and the scanner is one app-wide
+     * flow. Without the gate the SSCC scanned to disassemble a box was recorded
+     * here as «НЕВЕРНЫЙ КОД», with an error beep and a bumped counter.
+     */
+    @Test
+    fun aScanIsIgnoredWhileAnotherRouteOwnsTheScanner() = runTest {
+        aggregating(capacity = 3)
+        val vm = vm()
+        advanceUntilIdle()
+        vm.setScanning(false)
+        scan("GATED1")
+        advanceUntilIdle()
+        vm.setScanning(true)
+        scan("GATED2")
+        // Awaited, not advanced: `advanceUntilIdle` returns while Room is still
+        // writing. Exactly one row proves the gated scan was dropped -- a leak
+        // would make it two.
+        db.outboxDao().count().first { it == 1 }
+        advanceUntilIdle()
+        assertEquals(1, db.outboxDao().countNow())
+    }
+
+    /** Two taps must not put two identical reprints in the manager's ledger. */
+    @Test
+    fun aDoubleRetryFromAnUnknownOutcomeWritesOneReprint() = runTest {
+        aggregating(capacity = 1)
+        transport.outcome = SendOutcome.Unknown("link lost")
+        val vm = vm()
+        advanceUntilIdle()
+        scan("a")
+        advanceUntilIdle()
+        vm.closeStep.first { it is BoxCloseStep.Unknown }
+        vm.retryPrint()
+        vm.retryPrint()
+        db.boxExceptionDao().observeUnackedCount().first { it == 1 }
+        advanceUntilIdle()
+        assertEquals(1, db.boxExceptionDao().queued().size)
     }
 }

@@ -29,10 +29,17 @@ class ScanRouter(private val context: Context, private val preferences: ScanPref
     fun configure() {
         active.forEach { it.stop() }
         val sources = mutableListOf<ScanSource>()
-        when (preferences.sourceKind) {
-            ScanSourceKind.BUILTIN_INTENT -> sources += IntentScanSource(context, VendorProfiles.byId(preferences.profileId))
-            ScanSourceKind.KEYBOARD_WEDGE -> sources += wedge
-            ScanSourceKind.DEBUG -> Unit
+        // The wedge is always on, whatever the preference says. A terminal ships
+        // in HID mode and the vendor intent action is a guess until somebody
+        // opens Settings -- but Settings is behind pairing, and pairing is done
+        // by scanning the code the cabinet prints. With the wedge off by
+        // default, a brand-new device cannot be paired by scanning at all, and
+        // has no screen on which to fix that. Both sources cost nothing
+        // together: a scanner in intent mode types nothing, one in HID mode
+        // broadcasts nothing.
+        sources += wedge
+        if (preferences.sourceKind == ScanSourceKind.BUILTIN_INTENT) {
+            sources += IntentScanSource(context, VendorProfiles.byId(preferences.profileId))
         }
         if (BuildConfig.DEBUG_SCAN_SOURCE) sources += DebugScanSource(context)
         sources.forEach { it.start(::submit) }

@@ -43,6 +43,7 @@ function offerRecord(overrides: Record<string, unknown> = {}) {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -423,7 +424,9 @@ describe("offer editor route", () => {
     await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
     await addPosition(user, "Дополнительная", "Дополнительная станция · addon-station · v1");
     await addPosition(user, "Внедрение", "Внедрение · service-implementation · v1");
-    await user.type(screen.getByLabelText("Срок действия"), "2026-09-15");
+    vi.setSystemTime(new Date("2026-09-01T12:00:00Z"));
+    await user.click(screen.getByRole("button", { name: "Срок действия" }));
+    await user.click(screen.getByRole("button", { name: /^15 сентября 2026/ }));
     await user.click(screen.getByRole("button", { name: "Создать черновик предложения" }));
 
     expect(api.calls()).toEqual([
@@ -486,7 +489,7 @@ describe("offer editor route", () => {
         },
       },
     ]);
-    expect((await screen.findByRole("alert")).textContent).toContain("Предложение создано");
+    expect(await screen.findByText("Предложение создано")).toBeDefined();
   });
 
   it("refreshes the catalog and keeps the offer draft when a version was retired", async () => {
@@ -613,4 +616,13 @@ it("shows a readable rejected-payment error and preserves bank reference", async
   ).toBeDefined();
   expect(screen.getByDisplayValue("bank-ref")).toBeDefined();
   expect(payments).toBe(1);
+});
+
+it("opens the custom calendar while composing an offer", async () => {
+  installOfferEditorApi();
+  renderSaasApp({ initialEntry: "/offers/new" });
+  const user = userEvent.setup();
+  const date = await screen.findByRole("button", { name: "Срок действия" });
+  await user.click(date);
+  expect(screen.getByRole("dialog")).toBeDefined();
 });

@@ -36,7 +36,7 @@ object InventoryModule {
         db: HandheldDatabase,
         meta: MetaStore,
         config: DeviceConfigDao,
-        client: OkHttpClient,
+        client: okhttp3.Call.Factory,
         serverUrl: ServerUrlProvider,
         @Strict json: Json,
     ): InventorySyncEngine = InventorySyncEngine(

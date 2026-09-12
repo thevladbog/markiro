@@ -44,6 +44,7 @@ data class InventoryManifestDto(
     val sscc: JsonElement? = null,
     val ssccRevokedFrom: JsonElement? = null,
     val ssccRevokedBlocks: JsonElement? = null,
+    @kotlinx.serialization.Transient val recoveryGeneration: app.markiro.handheld.core.storage.GenerationToken? = null,
 )
 
 @Serializable

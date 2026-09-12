@@ -1,6 +1,6 @@
 {
-  "id": "0b5fceed-8d54-4dfe-8290-89c74bbca18f",
-  "prevId": "e487ebba-bbc7-429b-ad1f-42a2067c2e73",
+  "id": "521910f6-6cf4-4459-a951-6ad50383b612",
+  "prevId": "6915f727-a402-4614-8df4-65c689034f51",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1337,18 +1337,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "disassembly_received_at": {
-          "name": "disassembly_received_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "pallet_id": {
-          "name": "pallet_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "registry_version": {
           "name": "registry_version",
           "type": "bigint",
@@ -1382,27 +1370,6 @@
             },
             {
               "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "boxes_tenant_pallet_idx": {
-          "name": "boxes_tenant_pallet_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "pallet_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1450,21 +1417,6 @@
           "columnsFrom": [
             "tenant_id",
             "operator_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "boxes_tenant_pallet_fk": {
-          "name": "boxes_tenant_pallet_fk",
-          "tableFrom": "boxes",
-          "tableTo": "pallets",
-          "columnsFrom": [
-            "tenant_id",
-            "pallet_id"
           ],
           "columnsTo": [
             "tenant_id",
@@ -1961,399 +1913,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.pallet_exceptions": {
-      "name": "pallet_exceptions",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "pallet_id": {
-          "name": "pallet_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "shift_id": {
-          "name": "shift_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "terminal_id": {
-          "name": "terminal_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "operator_id": {
-          "name": "operator_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "disaggregation_document_id": {
-          "name": "disaggregation_document_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "occurred_at": {
-          "name": "occurred_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "recorded_at": {
-          "name": "recorded_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "pallet_exceptions_tenant_pallet_idx": {
-          "name": "pallet_exceptions_tenant_pallet_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "pallet_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "recorded_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "pallet_exceptions_tenant_shift_recorded_idx": {
-          "name": "pallet_exceptions_tenant_shift_recorded_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "shift_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "recorded_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "pallet_exceptions_tenant_id_organization_id_fk": {
-          "name": "pallet_exceptions_tenant_id_organization_id_fk",
-          "tableFrom": "pallet_exceptions",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "pallet_exceptions_tenant_pallet_fk": {
-          "name": "pallet_exceptions_tenant_pallet_fk",
-          "tableFrom": "pallet_exceptions",
-          "tableTo": "pallets",
-          "columnsFrom": [
-            "tenant_id",
-            "pallet_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "pallet_exceptions_tenant_shift_fk": {
-          "name": "pallet_exceptions_tenant_shift_fk",
-          "tableFrom": "pallet_exceptions",
-          "tableTo": "shifts",
-          "columnsFrom": [
-            "tenant_id",
-            "shift_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "pallet_exceptions_tenant_operator_fk": {
-          "name": "pallet_exceptions_tenant_operator_fk",
-          "tableFrom": "pallet_exceptions",
-          "tableTo": "employees",
-          "columnsFrom": [
-            "tenant_id",
-            "operator_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "pallet_exceptions_kind_check": {
-          "name": "pallet_exceptions_kind_check",
-          "value": "\"pallet_exceptions\".\"kind\" IN ('disassemble', 'reprint')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.pallets": {
-      "name": "pallets",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "shift_id": {
-          "name": "shift_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "terminal_id": {
-          "name": "terminal_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "device_pallet_id": {
-          "name": "device_pallet_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sscc": {
-          "name": "sscc",
-          "type": "char(18)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "operator_id": {
-          "name": "operator_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "opened_at": {
-          "name": "opened_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "closed_at": {
-          "name": "closed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "closure_received_at": {
-          "name": "closure_received_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "print_verified_at": {
-          "name": "print_verified_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "print_skipped_at": {
-          "name": "print_skipped_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "disassembled_at": {
-          "name": "disassembled_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "pallets_tenant_shift_idx": {
-          "name": "pallets_tenant_shift_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "shift_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "pallets_tenant_id_organization_id_fk": {
-          "name": "pallets_tenant_id_organization_id_fk",
-          "tableFrom": "pallets",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "pallets_tenant_shift_fk": {
-          "name": "pallets_tenant_shift_fk",
-          "tableFrom": "pallets",
-          "tableTo": "shifts",
-          "columnsFrom": [
-            "tenant_id",
-            "shift_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "pallets_tenant_operator_fk": {
-          "name": "pallets_tenant_operator_fk",
-          "tableFrom": "pallets",
-          "tableTo": "employees",
-          "columnsFrom": [
-            "tenant_id",
-            "operator_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "pallets_tenant_id_uq": {
-          "name": "pallets_tenant_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        },
-        "pallets_tenant_sscc_uq": {
-          "name": "pallets_tenant_sscc_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "sscc"
-          ]
-        },
-        "pallets_device_pallet_uq": {
-          "name": "pallets_device_pallet_uq",
-          "nullsNotDistinct": true,
-          "columns": [
-            "tenant_id",
-            "shift_id",
-            "terminal_id",
-            "device_pallet_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.product_images": {
       "name": "product_images",
       "schema": "",
@@ -2506,8 +2065,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "pallet_box_capacity": {
-          "name": "pallet_box_capacity",
+        "pallet_capacity": {
+          "name": "pallet_capacity",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
@@ -2955,8 +2514,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "pallet_box_capacity": {
-          "name": "pallet_box_capacity",
+        "pallet_capacity": {
+          "name": "pallet_capacity",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
@@ -2967,12 +2526,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
-        },
-        "pallet_label_template_id": {
-          "name": "pallet_label_template_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_from": {
           "name": "created_from",
@@ -3198,21 +2751,6 @@
           "columnsFrom": [
             "tenant_id",
             "box_label_template_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "shifts_tenant_pallet_label_template_fk": {
-          "name": "shifts_tenant_pallet_label_template_fk",
-          "tableFrom": "shifts",
-          "tableTo": "label_templates",
-          "columnsFrom": [
-            "tenant_id",
-            "pallet_label_template_id"
           ],
           "columnsTo": [
             "tenant_id",
@@ -4149,7 +3687,7 @@
         },
         "station_sync_quarantine_record_kind_check": {
           "name": "station_sync_quarantine_record_kind_check",
-          "value": "\"station_sync_quarantine\".\"record_kind\" IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception')"
+          "value": "\"station_sync_quarantine\".\"record_kind\" IN ('item', 'box', 'exception', 'product_label_event')"
         },
         "station_sync_quarantine_record_index_check": {
           "name": "station_sync_quarantine_record_index_check",
@@ -4346,94 +3884,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.org_pallet_label_template_defaults": {
-      "name": "org_pallet_label_template_defaults",
-      "schema": "",
-      "columns": {
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "chz_product_group_code": {
-          "name": "chz_product_group_code",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "template_id": {
-          "name": "template_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "org_pallet_label_template_defaults_tenant_id_organization_id_fk": {
-          "name": "org_pallet_label_template_defaults_tenant_id_organization_id_fk",
-          "tableFrom": "org_pallet_label_template_defaults",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "org_pallet_label_template_defaults_chz_product_group_code_chz_product_groups_code_fk": {
-          "name": "org_pallet_label_template_defaults_chz_product_group_code_chz_product_groups_code_fk",
-          "tableFrom": "org_pallet_label_template_defaults",
-          "tableTo": "chz_product_groups",
-          "columnsFrom": [
-            "chz_product_group_code"
-          ],
-          "columnsTo": [
-            "code"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "org_pallet_label_template_defaults_template_tenant_fk": {
-          "name": "org_pallet_label_template_defaults_template_tenant_fk",
-          "tableFrom": "org_pallet_label_template_defaults",
-          "tableTo": "label_templates",
-          "columnsFrom": [
-            "tenant_id",
-            "template_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "org_pallet_label_template_defaults_tenant_id_chz_product_group_code_pk": {
-          "name": "org_pallet_label_template_defaults_tenant_id_chz_product_group_code_pk",
-          "columns": [
-            "tenant_id",
-            "chz_product_group_code"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.org_profiles": {
       "name": "org_profiles",
       "schema": "",
@@ -4478,12 +3928,6 @@
         },
         "default_box_label_template_id": {
           "name": "default_box_label_template_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "default_pallet_label_template_id": {
-          "name": "default_pallet_label_template_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
@@ -4533,21 +3977,6 @@
           "columnsFrom": [
             "tenant_id",
             "default_box_label_template_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "org_profiles_pallet_label_template_tenant_fk": {
-          "name": "org_profiles_pallet_label_template_tenant_fk",
-          "tableFrom": "org_profiles",
-          "tableTo": "label_templates",
-          "columnsFrom": [
-            "tenant_id",
-            "default_pallet_label_template_id"
           ],
           "columnsTo": [
             "tenant_id",
@@ -4658,7 +4087,7 @@
       "checkConstraints": {
         "label_templates_purpose_check": {
           "name": "label_templates_purpose_check",
-          "value": "\"label_templates\".\"purpose\" IN ('box', 'product_duplicate', 'pallet')"
+          "value": "\"label_templates\".\"purpose\" IN ('box', 'product_duplicate')"
         },
         "label_templates_product_group_codes_nonempty": {
           "name": "label_templates_product_group_codes_nonempty",
@@ -9795,6 +9224,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "source_digest": {
+          "name": "source_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "uploaded_by_platform_user_id": {
           "name": "uploaded_by_platform_user_id",
           "type": "text",
@@ -9880,6 +9315,10 @@
           "name": "platform_agreement_documents_size_positive",
           "value": "\"platform_agreement_documents\".\"byte_size\" > 0"
         },
+        "platform_agreement_documents_source_digest_format": {
+          "name": "platform_agreement_documents_source_digest_format",
+          "value": "\"platform_agreement_documents\".\"source_digest\" is null or \"platform_agreement_documents\".\"source_digest\" ~ '^[0-9a-f]{64}$'"
+        },
         "platform_agreement_documents_provenance": {
           "name": "platform_agreement_documents_provenance",
           "value": "(\"platform_agreement_documents\".\"kind\" = 'attachment' and \"platform_agreement_documents\".\"uploaded_by_platform_user_id\" is not null and \"platform_agreement_documents\".\"renderer_version\" is null) or (\"platform_agreement_documents\".\"kind\" in ('draft', 'generated') and \"platform_agreement_documents\".\"uploaded_by_platform_user_id\" is null and \"platform_agreement_documents\".\"renderer_version\" is not null)"
@@ -9923,6 +9362,14 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "document_form": {
+          "name": "document_form",
+          "type": "platform_agreement_document_form",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ru'"
         },
         "tenant_id": {
           "name": "tenant_id",
@@ -10184,7 +9631,7 @@
         },
         "addon_entitlements_key_shape_check": {
           "name": "addon_entitlements_key_shape_check",
-          "value": "(\"addon_entitlements\".\"entitlement_key\" in ('lines', 'stations', 'kiosks', 'cabinetUsers') and \"addon_entitlements\".\"quota_increment\" is not null)\n        or (\"addon_entitlements\".\"entitlement_key\" in ('labelEditor', 'publicApi', 'pallets') and \"addon_entitlements\".\"quota_increment\" is null and \"addon_entitlements\".\"feature_enabled\" = true)"
+          "value": "(\"addon_entitlements\".\"entitlement_key\"::text in ('lines', 'stations', 'kiosks', 'cabinetUsers') and \"addon_entitlements\".\"quota_increment\" is not null)\n        or (\"addon_entitlements\".\"entitlement_key\"::text in ('labelEditor', 'publicApi', 'pallets', 'chzIntegration', 'inventory', 'commerceMl', 'handheld') and \"addon_entitlements\".\"quota_increment\" is null and \"addon_entitlements\".\"feature_enabled\" = true)"
         }
       },
       "isRLSEnabled": false
@@ -10248,6 +9695,12 @@
         "seller_policy_revision": {
           "name": "seller_policy_revision",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lifecycle_policy_id": {
+          "name": "lifecycle_policy_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
@@ -10342,6 +9795,19 @@
       },
       "indexes": {},
       "foreignKeys": {
+        "catalog_item_versions_lifecycle_policy_id_entitlement_lifecycle_policies_id_fk": {
+          "name": "catalog_item_versions_lifecycle_policy_id_entitlement_lifecycle_policies_id_fk",
+          "tableFrom": "catalog_item_versions",
+          "tableTo": "entitlement_lifecycle_policies",
+          "columnsFrom": [
+            "lifecycle_policy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "catalog_item_versions_published_by_platform_user_id_platform_users_id_fk": {
           "name": "catalog_item_versions_published_by_platform_user_id_platform_users_id_fk",
           "tableFrom": "catalog_item_versions",
@@ -11880,6 +11346,30 @@
           "notNull": true,
           "default": false
         },
+        "chz_integration_enabled": {
+          "name": "chz_integration_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "inventory_enabled": {
+          "name": "inventory_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "commerce_ml_enabled": {
+          "name": "commerce_ml_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "handheld_enabled": {
+          "name": "handheld_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
         "demo_duration_days": {
           "name": "demo_duration_days",
           "type": "integer",
@@ -12768,6 +12258,1131 @@
         "tenant_subscriptions_commercial_source_check": {
           "name": "tenant_subscriptions_commercial_source_check",
           "value": "((\"tenant_subscriptions\".\"source\" = 'paid_offer_line') = (\"tenant_subscriptions\".\"source_offer_line_id\" is not null))\n        and ((\"tenant_subscriptions\".\"source\" = 'paid_invoice_line') = (\"tenant_subscriptions\".\"source_invoice_line_id\" is not null))"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.entitlement_lifecycle_policies": {
+      "name": "entitlement_lifecycle_policies",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "policy_key": {
+          "name": "policy_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload_hash": {
+          "name": "payload_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decision_reference": {
+          "name": "decision_reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "approved_at": {
+          "name": "approved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "approved_by_platform_user_id": {
+          "name": "approved_by_platform_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_platform_user_id": {
+          "name": "created_by_platform_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "entitlement_lifecycle_policies_approved_by_platform_user_id_platform_users_id_fk": {
+          "name": "entitlement_lifecycle_policies_approved_by_platform_user_id_platform_users_id_fk",
+          "tableFrom": "entitlement_lifecycle_policies",
+          "tableTo": "platform_users",
+          "columnsFrom": [
+            "approved_by_platform_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "entitlement_lifecycle_policies_created_by_platform_user_id_platform_users_id_fk": {
+          "name": "entitlement_lifecycle_policies_created_by_platform_user_id_platform_users_id_fk",
+          "tableFrom": "entitlement_lifecycle_policies",
+          "tableTo": "platform_users",
+          "columnsFrom": [
+            "created_by_platform_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "entitlement_lifecycle_policies_key_version_uq": {
+          "name": "entitlement_lifecycle_policies_key_version_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "policy_key",
+            "version"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "entitlement_lifecycle_policies_version_check": {
+          "name": "entitlement_lifecycle_policies_version_check",
+          "value": "\"entitlement_lifecycle_policies\".\"version\" > 0 and length(btrim(\"entitlement_lifecycle_policies\".\"policy_key\")) between 1 and 100"
+        },
+        "entitlement_lifecycle_policies_payload_check": {
+          "name": "entitlement_lifecycle_policies_payload_check",
+          "value": "jsonb_typeof(\"entitlement_lifecycle_policies\".\"payload\") = 'object' and octet_length(\"entitlement_lifecycle_policies\".\"payload\"::text) <= 65536 and \"entitlement_lifecycle_policies\".\"payload_hash\" ~ '^[0-9a-f]{64}$'"
+        },
+        "entitlement_lifecycle_policies_approval_check": {
+          "name": "entitlement_lifecycle_policies_approval_check",
+          "value": "(\"entitlement_lifecycle_policies\".\"status\" = 'draft' and \"entitlement_lifecycle_policies\".\"approved_at\" is null and \"entitlement_lifecycle_policies\".\"approved_by_platform_user_id\" is null) or (\"entitlement_lifecycle_policies\".\"status\" = 'approved' and \"entitlement_lifecycle_policies\".\"approved_at\" is not null and isfinite(\"entitlement_lifecycle_policies\".\"approved_at\") and \"entitlement_lifecycle_policies\".\"approved_by_platform_user_id\" is not null and \"entitlement_lifecycle_policies\".\"decision_reference\" is not null and length(btrim(\"entitlement_lifecycle_policies\".\"decision_reference\")) between 1 and 1000)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.entitlement_revisions": {
+      "name": "entitlement_revisions",
+      "schema": "",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "usage_revision": {
+          "name": "usage_revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "entitlement_revisions_tenant_id_organization_id_fk": {
+          "name": "entitlement_revisions_tenant_id_organization_id_fk",
+          "tableFrom": "entitlement_revisions",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "entitlement_revisions_nonnegative_check": {
+          "name": "entitlement_revisions_nonnegative_check",
+          "value": "\"entitlement_revisions\".\"revision\" >= 0 and \"entitlement_revisions\".\"usage_revision\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.entitlement_shadow_observations": {
+      "name": "entitlement_shadow_observations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "operation_id": {
+          "name": "operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "registry_version": {
+          "name": "registry_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "usage_revision": {
+          "name": "usage_revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "observed_at": {
+          "name": "observed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason_codes": {
+          "name": "reason_codes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_type": {
+          "name": "actor_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resource_scope": {
+          "name": "resource_scope",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fenced_attempt": {
+          "name": "fenced_attempt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lifecycle_policy_fingerprint": {
+          "name": "lifecycle_policy_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "entitlement_shadow_tenant_observed_idx": {
+          "name": "entitlement_shadow_tenant_observed_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "observed_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "entitlement_shadow_observations_tenant_id_organization_id_fk": {
+          "name": "entitlement_shadow_observations_tenant_id_organization_id_fk",
+          "tableFrom": "entitlement_shadow_observations",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "entitlement_shadow_identity_check": {
+          "name": "entitlement_shadow_identity_check",
+          "value": "length(btrim(\"entitlement_shadow_observations\".\"operation_id\")) between 1 and 100 and length(btrim(\"entitlement_shadow_observations\".\"registry_version\")) between 1 and 100 and length(btrim(\"entitlement_shadow_observations\".\"actor_type\")) between 1 and 100 and \"entitlement_shadow_observations\".\"outcome\" in ('allow','deny','unknown','error') and (\"entitlement_shadow_observations\".\"revision\" is null or \"entitlement_shadow_observations\".\"revision\" >= 0) and (\"entitlement_shadow_observations\".\"usage_revision\" is null or \"entitlement_shadow_observations\".\"usage_revision\" >= 0) and (\"entitlement_shadow_observations\".\"fenced_attempt\" is null or \"entitlement_shadow_observations\".\"fenced_attempt\" > 0) and (\"entitlement_shadow_observations\".\"lifecycle_policy_fingerprint\" is null or \"entitlement_shadow_observations\".\"lifecycle_policy_fingerprint\" ~ '^[0-9a-f]{64}$')"
+        },
+        "entitlement_shadow_payload_check": {
+          "name": "entitlement_shadow_payload_check",
+          "value": "case when jsonb_typeof(\"entitlement_shadow_observations\".\"reason_codes\") = 'array' then jsonb_array_length(\"entitlement_shadow_observations\".\"reason_codes\") <= 64 and octet_length(\"entitlement_shadow_observations\".\"reason_codes\"::text) <= 8192 else false end and jsonb_typeof(\"entitlement_shadow_observations\".\"resource_scope\") = 'object' and octet_length(\"entitlement_shadow_observations\".\"resource_scope\"::text) <= 8192"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.entitlement_source_previews": {
+      "name": "entitlement_source_previews",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subscription_id": {
+          "name": "subscription_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "intent": {
+          "name": "intent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by_platform_user_id": {
+          "name": "created_by_platform_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload_hash": {
+          "name": "payload_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "usage_revision": {
+          "name": "usage_revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "usage_fingerprint": {
+          "name": "usage_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "registry_version": {
+          "name": "registry_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lifecycle_policy_fingerprint": {
+          "name": "lifecycle_policy_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "next_change_at": {
+          "name": "next_change_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "before_snapshot": {
+          "name": "before_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "after_snapshot": {
+          "name": "after_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "confirmed_at": {
+          "name": "confirmed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "result_source_id": {
+          "name": "result_source_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "entitlement_source_previews_created_by_platform_user_id_platform_users_id_fk": {
+          "name": "entitlement_source_previews_created_by_platform_user_id_platform_users_id_fk",
+          "tableFrom": "entitlement_source_previews",
+          "tableTo": "platform_users",
+          "columnsFrom": [
+            "created_by_platform_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "entitlement_previews_tenant_subscription_fk": {
+          "name": "entitlement_previews_tenant_subscription_fk",
+          "tableFrom": "entitlement_source_previews",
+          "tableTo": "tenant_subscriptions",
+          "columnsFrom": [
+            "tenant_id",
+            "subscription_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "entitlement_previews_tenant_result_fk": {
+          "name": "entitlement_previews_tenant_result_fk",
+          "tableFrom": "entitlement_source_previews",
+          "tableTo": "entitlement_sources",
+          "columnsFrom": [
+            "tenant_id",
+            "result_source_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "entitlement_previews_tenant_request_uq": {
+          "name": "entitlement_previews_tenant_request_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "request_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "entitlement_previews_identity_check": {
+          "name": "entitlement_previews_identity_check",
+          "value": "\"entitlement_source_previews\".\"intent\" in ('prepare','revoke') and \"entitlement_source_previews\".\"payload_hash\" ~ '^[0-9a-f]{64}$' and \"entitlement_source_previews\".\"usage_fingerprint\" ~ '^[0-9a-f]{64}$' and \"entitlement_source_previews\".\"lifecycle_policy_fingerprint\" ~ '^[0-9a-f]{64}$' and length(btrim(\"entitlement_source_previews\".\"registry_version\")) between 1 and 100 and \"entitlement_source_previews\".\"revision\" >= 0 and \"entitlement_source_previews\".\"usage_revision\" >= 0"
+        },
+        "entitlement_previews_payload_check": {
+          "name": "entitlement_previews_payload_check",
+          "value": "jsonb_typeof(\"entitlement_source_previews\".\"payload\") = 'object' and octet_length(\"entitlement_source_previews\".\"payload\"::text) <= 32768 and jsonb_typeof(\"entitlement_source_previews\".\"before_snapshot\") = 'object' and octet_length(\"entitlement_source_previews\".\"before_snapshot\"::text) <= 1048576 and jsonb_typeof(\"entitlement_source_previews\".\"after_snapshot\") = 'object' and octet_length(\"entitlement_source_previews\".\"after_snapshot\"::text) <= 1048576"
+        },
+        "entitlement_previews_interval_check": {
+          "name": "entitlement_previews_interval_check",
+          "value": "isfinite(\"entitlement_source_previews\".\"created_at\") and isfinite(\"entitlement_source_previews\".\"expires_at\") and \"entitlement_source_previews\".\"expires_at\" > \"entitlement_source_previews\".\"created_at\" and (\"entitlement_source_previews\".\"next_change_at\" is null or (isfinite(\"entitlement_source_previews\".\"next_change_at\") and \"entitlement_source_previews\".\"next_change_at\" > \"entitlement_source_previews\".\"created_at\" and \"entitlement_source_previews\".\"expires_at\" <= \"entitlement_source_previews\".\"next_change_at\"))"
+        },
+        "entitlement_previews_result_check": {
+          "name": "entitlement_previews_result_check",
+          "value": "(\"entitlement_source_previews\".\"confirmed_at\" is null and \"entitlement_source_previews\".\"result_source_id\" is null) or (\"entitlement_source_previews\".\"confirmed_at\" is not null and \"entitlement_source_previews\".\"result_source_id\" is not null and isfinite(\"entitlement_source_previews\".\"confirmed_at\") and \"entitlement_source_previews\".\"confirmed_at\" >= \"entitlement_source_previews\".\"created_at\" and \"entitlement_source_previews\".\"confirmed_at\" < \"entitlement_source_previews\".\"expires_at\")"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.entitlement_sources": {
+      "name": "entitlement_sources",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "version_id": {
+          "name": "version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subscription_id": {
+          "name": "subscription_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "effects": {
+          "name": "effects",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "operation_ids": {
+          "name": "operation_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "starts_at": {
+          "name": "starts_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ends_at": {
+          "name": "ends_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "prepared": {
+          "name": "prepared",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decision_reference": {
+          "name": "decision_reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by_platform_user_id": {
+          "name": "created_by_platform_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoked_by_platform_user_id": {
+          "name": "revoked_by_platform_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revocation_reason": {
+          "name": "revocation_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revocation_decision_reference": {
+          "name": "revocation_decision_reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revocation_request_id": {
+          "name": "revocation_request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "entitlement_sources_tenant_revoke_request_uq": {
+          "name": "entitlement_sources_tenant_revoke_request_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "revocation_request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"entitlement_sources\".\"revocation_request_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "entitlement_sources_tenant_subscription_idx": {
+          "name": "entitlement_sources_tenant_subscription_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "subscription_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "starts_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "entitlement_sources_created_by_platform_user_id_platform_users_id_fk": {
+          "name": "entitlement_sources_created_by_platform_user_id_platform_users_id_fk",
+          "tableFrom": "entitlement_sources",
+          "tableTo": "platform_users",
+          "columnsFrom": [
+            "created_by_platform_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "entitlement_sources_revoked_by_platform_user_id_platform_users_id_fk": {
+          "name": "entitlement_sources_revoked_by_platform_user_id_platform_users_id_fk",
+          "tableFrom": "entitlement_sources",
+          "tableTo": "platform_users",
+          "columnsFrom": [
+            "revoked_by_platform_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "entitlement_sources_tenant_subscription_fk": {
+          "name": "entitlement_sources_tenant_subscription_fk",
+          "tableFrom": "entitlement_sources",
+          "tableTo": "tenant_subscriptions",
+          "columnsFrom": [
+            "tenant_id",
+            "subscription_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "entitlement_sources_tenant_id_uq": {
+          "name": "entitlement_sources_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "entitlement_sources_version_id_uq": {
+          "name": "entitlement_sources_version_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "version_id"
+          ]
+        },
+        "entitlement_sources_tenant_request_uq": {
+          "name": "entitlement_sources_tenant_request_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "request_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "entitlement_sources_kind_version_check": {
+          "name": "entitlement_sources_kind_version_check",
+          "value": "\"entitlement_sources\".\"kind\" in ('temporary','compatibility') and \"entitlement_sources\".\"version\" > 0 and \"entitlement_sources\".\"prepared\" = true"
+        },
+        "entitlement_sources_interval_check": {
+          "name": "entitlement_sources_interval_check",
+          "value": "isfinite(\"entitlement_sources\".\"starts_at\") and (\"entitlement_sources\".\"ends_at\" is null or (isfinite(\"entitlement_sources\".\"ends_at\") and \"entitlement_sources\".\"ends_at\" > \"entitlement_sources\".\"starts_at\")) and (\"entitlement_sources\".\"kind\" <> 'temporary' or \"entitlement_sources\".\"ends_at\" is not null)"
+        },
+        "entitlement_sources_effects_check": {
+          "name": "entitlement_sources_effects_check",
+          "value": "case when jsonb_typeof(\"entitlement_sources\".\"effects\") = 'array' then jsonb_array_length(\"entitlement_sources\".\"effects\") between 1 and 11 and octet_length(\"entitlement_sources\".\"effects\"::text) <= 8192 else false end"
+        },
+        "entitlement_sources_operations_check": {
+          "name": "entitlement_sources_operations_check",
+          "value": "case when jsonb_typeof(\"entitlement_sources\".\"operation_ids\") = 'array' then jsonb_array_length(\"entitlement_sources\".\"operation_ids\") between 1 and 64 and octet_length(\"entitlement_sources\".\"operation_ids\"::text) <= 8192 else false end"
+        },
+        "entitlement_sources_compatibility_check": {
+          "name": "entitlement_sources_compatibility_check",
+          "value": "\"entitlement_sources\".\"kind\" <> 'compatibility' or \"entitlement_sources\".\"effects\" <@ '[{\"key\":\"chzIntegration\",\"featureEnabled\":true},{\"key\":\"inventory\",\"featureEnabled\":true},{\"key\":\"commerceMl\",\"featureEnabled\":true},{\"key\":\"handheld\",\"featureEnabled\":true}]'::jsonb"
+        },
+        "entitlement_sources_reason_check": {
+          "name": "entitlement_sources_reason_check",
+          "value": "length(btrim(\"entitlement_sources\".\"reason\")) between 1 and 1000 and length(btrim(\"entitlement_sources\".\"decision_reference\")) between 1 and 1000"
+        },
+        "entitlement_sources_revocation_check": {
+          "name": "entitlement_sources_revocation_check",
+          "value": "(\"entitlement_sources\".\"revoked_at\" is null and \"entitlement_sources\".\"revoked_by_platform_user_id\" is null and \"entitlement_sources\".\"revocation_reason\" is null and \"entitlement_sources\".\"revocation_decision_reference\" is null and \"entitlement_sources\".\"revocation_request_id\" is null) or (\"entitlement_sources\".\"revoked_at\" is not null and isfinite(\"entitlement_sources\".\"revoked_at\") and \"entitlement_sources\".\"revoked_at\" >= \"entitlement_sources\".\"created_at\" and \"entitlement_sources\".\"revoked_by_platform_user_id\" is not null and \"entitlement_sources\".\"revocation_request_id\" is not null and \"entitlement_sources\".\"revocation_reason\" is not null and length(btrim(\"entitlement_sources\".\"revocation_reason\")) between 1 and 1000 and \"entitlement_sources\".\"revocation_decision_reference\" is not null and length(btrim(\"entitlement_sources\".\"revocation_decision_reference\")) between 1 and 1000)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.working_device_assignments": {
+      "name": "working_device_assignments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "observed_at": {
+          "name": "observed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "released_at": {
+          "name": "released_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "release_reason": {
+          "name": "release_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provenance": {
+          "name": "provenance",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_event_id": {
+          "name": "last_event_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "working_device_assignments_tenant_device_fk": {
+          "name": "working_device_assignments_tenant_device_fk",
+          "tableFrom": "working_device_assignments",
+          "tableTo": "station_devices",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "working_device_assignments_last_event_fk": {
+          "name": "working_device_assignments_last_event_fk",
+          "tableFrom": "working_device_assignments",
+          "tableTo": "working_device_events",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id",
+            "last_event_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "device_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "working_device_assignments_tenant_id_uq": {
+          "name": "working_device_assignments_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "working_device_assignments_tenant_device_uq": {
+          "name": "working_device_assignments_tenant_device_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "device_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "working_device_assignments_state_check": {
+          "name": "working_device_assignments_state_check",
+          "value": "\"working_device_assignments\".\"state\" in ('reserved','assigned','released') and \"working_device_assignments\".\"revision\" >= 1 and \"working_device_assignments\".\"provenance\" in ('migration','runtime')"
+        },
+        "working_device_assignments_release_check": {
+          "name": "working_device_assignments_release_check",
+          "value": "(\"working_device_assignments\".\"state\" <> 'released' and \"working_device_assignments\".\"released_at\" is null and \"working_device_assignments\".\"release_reason\" is null) or (\"working_device_assignments\".\"state\" = 'released' and \"working_device_assignments\".\"released_at\" is not null and \"working_device_assignments\".\"release_reason\" is not null and \"working_device_assignments\".\"release_reason\" in ('reservation_cancelled','security_revoked'))"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.working_device_events": {
+      "name": "working_device_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_domain": {
+          "name": "actor_domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "before": {
+          "name": "before",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "after": {
+          "name": "after",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'success'"
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response": {
+          "name": "response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "working_device_events_tenant_device_fk": {
+          "name": "working_device_events_tenant_device_fk",
+          "tableFrom": "working_device_events",
+          "tableTo": "station_devices",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "working_device_events_tenant_id_uq": {
+          "name": "working_device_events_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "working_device_events_tenant_device_id_uq": {
+          "name": "working_device_events_tenant_device_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "device_id",
+            "id"
+          ]
+        },
+        "working_device_events_tenant_request_uq": {
+          "name": "working_device_events_tenant_request_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "request_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "working_device_events_actor_check": {
+          "name": "working_device_events_actor_check",
+          "value": "\"working_device_events\".\"actor_domain\" in ('migration','system','cabinet','platform','device') and (\"working_device_events\".\"actor_domain\" <> 'migration' or \"working_device_events\".\"actor_id\" is null)"
+        },
+        "working_device_events_action_check": {
+          "name": "working_device_events_action_check",
+          "value": "\"working_device_events\".\"action\" in ('observed','reserved','assigned','released','reservation_cancelled') and \"working_device_events\".\"outcome\" = 'success'"
+        },
+        "working_device_events_json_check": {
+          "name": "working_device_events_json_check",
+          "value": "(\"working_device_events\".\"before\" is null or jsonb_typeof(\"working_device_events\".\"before\")='object') and jsonb_typeof(\"working_device_events\".\"after\")='object'"
         }
       },
       "isRLSEnabled": false
@@ -17734,12 +18349,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "pallet_id": {
-          "name": "pallet_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "status": {
           "name": "status",
           "type": "disaggregation_line_status",
@@ -17842,21 +18451,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "disaggregation_document_lines_tenant_pallet_fk": {
-          "name": "disaggregation_document_lines_tenant_pallet_fk",
-          "tableFrom": "disaggregation_document_lines",
-          "tableTo": "pallets",
-          "columnsFrom": [
-            "tenant_id",
-            "pallet_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "disaggregation_document_lines_tenant_product_fk": {
           "name": "disaggregation_document_lines_tenant_product_fk",
           "tableFrom": "disaggregation_document_lines",
@@ -17886,12 +18480,7 @@
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "disaggregation_document_lines_target_check": {
-          "name": "disaggregation_document_lines_target_check",
-          "value": "num_nonnulls(\"disaggregation_document_lines\".\"box_id\", \"disaggregation_document_lines\".\"pallet_id\") <= 1"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.disaggregation_documents": {
@@ -27825,6 +28414,14 @@
         "expired"
       ]
     },
+    "public.platform_agreement_document_form": {
+      "name": "platform_agreement_document_form",
+      "schema": "public",
+      "values": [
+        "ru",
+        "ru_en"
+      ]
+    },
     "public.platform_agreement_document_kind": {
       "name": "platform_agreement_document_kind",
       "schema": "public",
@@ -27936,7 +28533,11 @@
         "cabinetUsers",
         "labelEditor",
         "publicApi",
-        "pallets"
+        "pallets",
+        "chzIntegration",
+        "inventory",
+        "commerceMl",
+        "handheld"
       ]
     },
     "public.subscription_addon_status": {

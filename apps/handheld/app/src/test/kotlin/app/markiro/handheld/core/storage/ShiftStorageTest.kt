@@ -89,7 +89,8 @@ class ShiftStorageTest {
 
     @Test
     fun metaStoreCreatesOneInstallIdAndKeepsIt() = runTest {
-        val meta = MetaStore(db.metaDao())
+        db.initializeRecoveryForTest()
+        val meta = MetaStore(db)
         val first = meta.installId()
         assertEquals(first, meta.installId())
         assertEquals(36, first.length)
@@ -101,18 +102,18 @@ class ShiftStorageTest {
     }
 
     @Test
-    fun wipeClearsEveryTable() = runTest {
+    fun rejectionPreservesEveryTable() = runTest {
         db.shiftDao().upsert(sampleShift())
         db.codeDao().insert(CodeEntity("h1", "s1", "04600682000013", "x", "2026-09-10T10:00:00.000Z"))
         db.outboxDao().insert(outboxRow("a"))
         db.conflictDao().insertIgnore(listOf(ConflictEntity("h9", null, "2026-09-10T09:00:00.000Z", "2026-09-10T10:00:00.000Z")))
         db.metaDao().put(MetaEntity("install_id", "id"))
-        DeviceWipe(db, InMemoryCredentialStore()).wipeAll()
-        assertTrue(db.shiftDao().all().isEmpty())
-        assertNull(db.codeDao().get("h1"))
-        assertEquals(0, db.outboxDao().count().first())
-        assertEquals(0, db.conflictDao().count().first())
-        assertNull(db.metaDao().get("install_id"))
+        DeviceRecovery(db, InMemoryCredentialStore()).initialize()
+        assertEquals(listOf(sampleShift()), db.shiftDao().all())
+        assertEquals("h1", db.codeDao().get("h1")?.codeHash)
+        assertEquals(1, db.outboxDao().count().first())
+        assertEquals(1, db.conflictDao().count().first())
+        assertEquals("id", db.metaDao().get("install_id"))
     }
 
     private fun sampleShift() = ShiftEntity(

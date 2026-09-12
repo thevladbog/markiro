@@ -1456,6 +1456,134 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     expect(attempts).toEqual([]);
   });
 
+  it("rejects a stale CHZ receipt attempt after storage without new evidence, inventory transition or audit", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId } = await seedPreparation(agent);
+    const inventory = await createInventory(agent, productId, lineId);
+    const userId = await actorUserId(tenantId);
+    const claimedAt = new Date();
+    const [run] = await db
+      .insert(schema.chzExportRuns)
+      .values({
+        tenantId,
+        inventoryId: inventory.id,
+        status: "INTRODUCED",
+        state: "ready",
+        dispenserTaskId: "known-task",
+        resultId: "known-result",
+        orderedAt: new Date(),
+        orderedByUserId: userId,
+        attempts: 1,
+        claimedAt,
+      })
+      .returning();
+    if (!run) throw new Error("fixture missing");
+    const before = await db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(eq(schema.tenantAuditEvents.organizationId, tenantId));
+    storage.putVerified.mockImplementationOnce(async (key, body, _mime, sha256) => {
+      objects.set(key, Buffer.from(body));
+      await db
+        .update(schema.chzExportRuns)
+        .set({ attempts: 2, claimedAt: new Date(Date.now() + 1) })
+        .where(eq(schema.chzExportRuns.id, run.id));
+      return { byteSize: body.length, sha256 };
+    });
+    await expect(
+      inventories.importEvidence(
+        tenantId,
+        userId,
+        inventory.id,
+        "INTRODUCED",
+        { originalName: "introduced.csv", mimeType: "text/csv", bytes: INTRODUCED_BYTES },
+        {
+          runId: run.id,
+          attempts: 1,
+          claimedAt,
+          dispenserTaskId: "known-task",
+          resultId: "known-result",
+        },
+      ),
+    ).rejects.toThrow("CHZ_IMPORT_ATTEMPT_STALE");
+    expect(
+      await db
+        .select()
+        .from(schema.inventoryImports)
+        .where(eq(schema.inventoryImports.inventoryId, inventory.id)),
+    ).toEqual([]);
+    expect(
+      (await db.select().from(schema.inventories).where(eq(schema.inventories.id, inventory.id)))[0]
+        ?.status,
+    ).toBe("draft");
+    expect(
+      await db
+        .select()
+        .from(schema.tenantAuditEvents)
+        .where(eq(schema.tenantAuditEvents.organizationId, tenantId)),
+    ).toEqual(before);
+  });
+
+  it("reuses a concurrently committed CHZ receipt after losing its fence without deleting winning evidence", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId } = await seedPreparation(agent);
+    const inventory = await createInventory(agent, productId, lineId);
+    const userId = await actorUserId(tenantId);
+    const claimedAt = new Date();
+    const [run] = await db
+      .insert(schema.chzExportRuns)
+      .values({
+        tenantId,
+        inventoryId: inventory.id,
+        status: "INTRODUCED",
+        state: "ready",
+        dispenserTaskId: "known-task",
+        resultId: "known-result",
+        orderedAt: new Date(),
+        orderedByUserId: userId,
+        attempts: 1,
+        claimedAt,
+      })
+      .returning();
+    if (!run) throw new Error("fixture missing");
+    const file = { originalName: "introduced.csv", mimeType: "text/csv", bytes: INTRODUCED_BYTES };
+    let winningId: string | null = null;
+    storage.putVerified.mockImplementationOnce(async (key, body, _mime, sha256) => {
+      objects.set(key, Buffer.from(body));
+      await db
+        .update(schema.chzExportRuns)
+        .set({ attempts: 2, claimedAt: new Date(Date.now() + 1) })
+        .where(eq(schema.chzExportRuns.id, run.id));
+      winningId = (
+        await inventories.importEvidence(tenantId, userId, inventory.id, "INTRODUCED", file)
+      ).id;
+      return { byteSize: body.length, sha256 };
+    });
+    const result = await inventories.importEvidence(
+      tenantId,
+      userId,
+      inventory.id,
+      "INTRODUCED",
+      file,
+      {
+        runId: run.id,
+        attempts: 1,
+        claimedAt,
+        dispenserTaskId: "known-task",
+        resultId: "known-result",
+      },
+    );
+    expect(result.id).toBe(winningId);
+    expect(
+      await db
+        .select()
+        .from(schema.inventoryImports)
+        .where(eq(schema.inventoryImports.inventoryId, inventory.id)),
+    ).toHaveLength(1);
+    expect(storage.delete).not.toHaveBeenCalled();
+    expect(objects.size).toBe(1);
+  });
+
   it("reconciles a committed deterministic object when transaction acknowledgement is lost", async () => {
     const agent = request.agent(app!.getHttpServer());
     const { tenantId, productId, lineId } = await seedPreparation(agent);

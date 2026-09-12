@@ -1,3 +1,13 @@
+import { SubscriptionLifecycleService } from "../src/subscriptions/subscription-lifecycle.service";
+import { PlatformEntitlementsController } from "../src/subscriptions/platform-entitlements.controller";
+import { PLATFORM_ACCESS_POLICY } from "../src/platform-auth/platform-access-policy";
+import { signUpAndActivate } from "./support/auth";
+import { createManagedSubscription, createPublishedAddon } from "./support/subscription-fixtures";
+import {
+  entitlementSourceListSchema,
+  entitlementSnapshotV1Schema,
+  catalogVersionV3Schema,
+} from "@markiro/platform-contracts";
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import express from "express";
 import { ConflictException, type INestApplication } from "@nestjs/common";
@@ -386,6 +396,167 @@ describe.skipIf(!ready)("platform catalog", () => {
     throw new Error("Timed out waiting for a blocked catalog version query");
   }
 
+  it("exposes guarded entitlement read, impact, source preview and immutable confirmation", async () => {
+    const { tenantId, subscriptionId } = await createManagedSubscription(setup.db);
+    const other = await createManagedSubscription(setup.db);
+    const path = `/platform/tenants/${tenantId}/entitlements`;
+    const legacyDetail = await admin.get(`/platform/tenants/${tenantId}`).expect(200);
+    expect(legacyDetail.body).not.toHaveProperty(
+      "currentSubscription.planVersion.lifecyclePolicyId",
+    );
+    const read = await admin.get(path).expect(200);
+    expect(entitlementSourceListSchema.parse(read.body).snapshot.tenantId).toBe(tenantId);
+    const supportRead = await support.get(path).expect(200);
+    expect(supportRead.body).toMatchObject({ detailsVisible: false, sourceDetails: [] });
+    await admin.get(`${path}/impact`).expect(200);
+    await admin.get(`${path}/sources`).expect(200);
+    await request(app!.getHttpServer()).get(path).expect(401);
+    await admin.get("/access/entitlements").expect(401);
+    const cabinet = request.agent(app!.getHttpServer());
+    await signUpAndActivate(cabinet);
+    await cabinet.get("/access/entitlements").expect(200);
+    await cabinet.get(path).expect(401);
+    await cabinet
+      .post(`${path}/confirm`)
+      .send({ previewId: randomUUID(), requestId: randomUUID() })
+      .expect(401);
+    const command = {
+      intent: "prepare",
+      command: {
+        kind: "temporary",
+        effects: [{ key: "chzIntegration", featureEnabled: true }],
+        operationIds: ["nk.lookup.v1"],
+        startsAt: new Date(Date.now() - 1000).toISOString(),
+        endsAt: new Date(Date.now() + 600000).toISOString(),
+        reason: "HTTP fixture",
+        decisionReference: "TEST-ONLY",
+        requestId: randomUUID(),
+      },
+    };
+    await support.post(`${path}/preview`).send(command).expect(403);
+    await accountant.post(`${path}/preview`).send(command).expect(403);
+    await admin
+      .post(`${path}/preview`)
+      .send({ ...command, actorId: adminId })
+      .expect(400);
+    const preview = await admin.post(`${path}/preview`).send(command).expect(200);
+    expect(entitlementSnapshotV1Schema.parse(preview.body.after).tenantId).toBe(tenantId);
+    const confirmation = { previewId: preview.body.previewId, requestId: preview.body.requestId };
+    await admin
+      .post(`/platform/tenants/${other.tenantId}/entitlements/confirm`)
+      .send(confirmation)
+      .expect(404);
+    await admin
+      .post(`${path}/confirm`)
+      .send({ ...confirmation, effects: [] })
+      .expect(400);
+    const confirmed = await admin.post(`${path}/confirm`).send(confirmation).expect(200);
+    expect((await admin.post(`${path}/confirm`).send(confirmation).expect(200)).body).toEqual(
+      confirmed.body,
+    );
+    const events = await setup.db
+      .select()
+      .from(schema.platformAuditEvents)
+      .where(eq(schema.platformAuditEvents.tenantId, tenantId));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      actorPlatformUserId: adminId,
+      actorRole: "platform_admin",
+      tenantId,
+      targetId: confirmed.body.sourceId,
+      outcome: "success",
+      requestId: command.command.requestId,
+      reason: command.command.reason,
+    });
+    const addonId = await createPublishedAddon(setup.db, [{ entitlementKey: "chzIntegration" }]);
+    await app!.get(SubscriptionLifecycleService).assignAddon(
+      principal(),
+      tenantId,
+      {
+        catalogVersionId: addonId,
+        expectedSubscriptionId: subscriptionId,
+        activationPolicy: "immediate",
+        quantity: 1,
+        reason: "HTTP nested fixture",
+      },
+      3,
+    );
+    await admin.get(`/platform/tenants/${tenantId}`).expect(409);
+    const nested = await admin
+      .get(`/platform/tenants/${tenantId}`)
+      .set("X-Markiro-Commercial-Version", "3")
+      .expect(200);
+    expect(JSON.stringify(nested.body)).toContain("chzIntegration");
+  });
+
+  it("round trips explicit V3 catalog fields and refuses old nested representations", async () => {
+    const path = `/platform/catalog/items/p1-http-${randomUUID()}/versions`;
+    const plan = {
+      ...basicPlan,
+      lifecyclePolicyId: null,
+      plan: {
+        ...basicPlan.plan,
+        chzIntegrationEnabled: true,
+        inventoryEnabled: false,
+        commerceMlEnabled: false,
+        handheldEnabled: false,
+      },
+    };
+    await admin.post(path).set("X-Markiro-Commercial-Version", "2").send(plan).expect(409);
+    const created = await admin
+      .post(path)
+      .set("X-Markiro-Commercial-Version", "3")
+      .send(plan)
+      .expect(201);
+    const value = catalogVersionV3Schema.parse(created.body);
+    expect(value.plan).toMatchObject(plan.plan);
+    for (const header of [undefined, "2"]) {
+      const read = admin.get(`${path}/${value.id}`);
+      if (header) read.set("X-Markiro-Commercial-Version", header);
+      else read.unset("X-Markiro-Commercial-Version");
+      expect((await read.expect(409)).body.code).toBe("client_update_required");
+    }
+    await admin
+      .patch(`${path}/${value.id}`)
+      .set("X-Markiro-Commercial-Version", "3")
+      .send({ nameRu: "P1" })
+      .expect(200);
+    const review = await admin
+      .post(`${path}/${value.id}/review`)
+      .set("X-Markiro-Commercial-Version", "3")
+      .send({})
+      .expect(200);
+    expect(review.body.errors).toEqual([]);
+    const published = await admin
+      .post(`${path}/${value.id}/publish`)
+      .set("X-Markiro-Commercial-Version", "3")
+      .send(review.body.identity)
+      .expect(200);
+    expect(catalogVersionV3Schema.parse(published.body)).toMatchObject({
+      id: value.id,
+      status: "published",
+      lifecyclePolicyId: null,
+      plan: plan.plan,
+    });
+  });
+
+  it("pins each entitlement route to its exact platform capabilities", () => {
+    for (const method of ["get", "list", "impact"] as const)
+      expect(
+        Reflect.getMetadata(
+          PLATFORM_ACCESS_POLICY,
+          PlatformEntitlementsController.prototype[method],
+        ),
+      ).toEqual({ mode: "capabilities", capabilities: ["tenants.read"] });
+    for (const method of ["preview", "confirm"] as const)
+      expect(
+        Reflect.getMetadata(
+          PLATFORM_ACCESS_POLICY,
+          PlatformEntitlementsController.prototype[method],
+        ),
+      ).toEqual({ mode: "capabilities", capabilities: ["tenants.write", "billing.write"] });
+  });
+
   it("wires the catalog service to the shared platform audit provider through AppModule", () => {
     expect(catalog).toBeInstanceOf(PlatformCatalogService);
     expect(audit).toBeInstanceOf(PlatformAuditService);
@@ -470,7 +641,7 @@ describe.skipIf(!ready)("platform catalog", () => {
     ).toEqual([]);
     await support.post(`${versionPath}/review`).send({}).expect(403);
     await request(app!.getHttpServer()).get("/platform/catalog/editor-context").expect(401);
-    await admin.get(versionPath).set("X-Markiro-Commercial-Version", "3").expect(400);
+    await admin.get(versionPath).set("X-Markiro-Commercial-Version", "4").expect(400);
     const preflight = await request(app!.getHttpServer())
       .options(path)
       .set("Origin", env.SAAS_ADMIN_ORIGIN)

@@ -43,7 +43,7 @@ export const putOrgProfileSchema = z.object({
   /**
    * The pallet counterparts, in full symmetry with the two box fields above
    * (06d §1.5, "defaults mirror the box ones exactly"). They are not
-   * cosmetic: migration 0130 seeds the stock «Паллета 100×150» for every
+   * cosmetic: migration 0135 seeds the stock «Паллета 100×150» for every
    * organisation and points `org_profiles.default_pallet_label_template_id`
    * at it, and `LABEL_TEMPLATE_REFERENCE_CONSTRAINTS` refuses to disable or
    * delete a template a default still names. Without a write path here that

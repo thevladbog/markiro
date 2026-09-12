@@ -23,6 +23,20 @@ class WorkScreenTest {
     @get:Rule
     val compose = createComposeRule()
 
+    /**
+     * The feed printed the raw tail, which on a real code is the crypto
+     * signature: «…5\u001d93txKP» named no unit and did not match the serial
+     * shown for the same scan two centimetres higher.
+     */
+    @Test
+    fun theFeedShowsTheSerialNotTheCryptoTail() {
+        val km = "010460068200001321ABCDEF1234\u001d93XyZw"
+        assertEquals("ABCDEF1234".takeLast(8).let { "…" + it }, feedTail(km))
+        // A code that does not parse keeps its raw tail: for a rejected scan the
+        // raw text is the only thing there is to show.
+        assertEquals("garbage", feedTail("garbage"))
+    }
+
     private val ui = WorkUi(
         shift = ShiftEntityFixtures.bundled("s1"),
         last = LastScan(Verdict.DUPLICATE, "…1234567", firstSeenAt = "2026-09-10T07:42:00.000Z", at = "2026-09-10T08:00:00.000Z"),
@@ -57,5 +71,39 @@ class WorkScreenTest {
         compose.onNodeWithText("+1").assertIsDisplayed()
         compose.onNodeWithText("+1").performClick()
         compose.onNodeWithText("Петров Иван").assertIsDisplayed()
+    }
+
+    /**
+     * The feed renders whatever the journal holds, and the journal holds
+     * `undone` as soon as the operator takes a scan back. `Verdict.fromWire`
+     * threw on it and took the whole screen down on the main thread -- a crash
+     * the emulator walk-through found and no unit test had reached, because
+     * none of them rendered the feed after an undo.
+     */
+    @Test
+    fun anUndoneScanRendersInTheFeed() {
+        compose.setContent {
+            MarkiroTheme {
+                WorkScreen(
+                    ui.copy(feed = listOf(ScanEventEntity(1, "s1", "raw", "undone", "2026-09-10T08:00:00.000Z", null, "h"))),
+                    WorkCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("ОТМЕНЁН").assertIsDisplayed()
+    }
+
+    /** A row written by a newer build must not take the screen down either. */
+    @Test
+    fun anUnknownVerdictRendersAsItself() {
+        compose.setContent {
+            MarkiroTheme {
+                WorkScreen(
+                    ui.copy(feed = listOf(ScanEventEntity(1, "s1", "raw", "from_the_future", "2026-09-10T08:00:00.000Z", null, "h"))),
+                    WorkCallbacks(),
+                )
+            }
+        }
+        compose.onNodeWithText("from_the_future").assertIsDisplayed()
     }
 }

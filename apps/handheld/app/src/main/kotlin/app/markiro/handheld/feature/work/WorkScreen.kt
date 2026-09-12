@@ -42,7 +42,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.markiro.handheld.R
 import app.markiro.handheld.core.design.Banner
+import app.markiro.handheld.core.design.FullScreenState
 import app.markiro.handheld.core.design.IconAction
+import app.markiro.handheld.core.design.StateAction
+import app.markiro.handheld.core.km.KmCodec
 import app.markiro.handheld.core.design.MarkiroChip
 import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.design.MarkiroTextButton
@@ -58,6 +61,7 @@ import app.markiro.handheld.core.util.TimeText
 import java.text.NumberFormat
 
 data class WorkCallbacks(
+    val onExceptions: () -> Unit = {},
     val onLeave: () -> Unit = {},
     val onClose: () -> Unit = {},
     val onConflicts: () -> Unit = {},
@@ -148,6 +152,13 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                         )
                     }
                     DropdownMenuItem(
+                        text = { Text(stringResource(R.string.work_exceptions)) },
+                        onClick = {
+                            menu = false
+                            cb.onExceptions()
+                        },
+                    )
+                    DropdownMenuItem(
                         text = { Text(stringResource(R.string.work_leave)) },
                         onClick = {
                             menu = false
@@ -209,11 +220,17 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
         Column(Modifier.weight(if (box != null) 0.38f else 0.6f).fillMaxWidth().padding(horizontal = MarkiroSizes.sp4)) {
             if (state.feed.isEmpty()) Text(stringResource(R.string.work_feed_empty), style = t.caption, color = c.fg3)
             state.feed.forEach { event ->
-                val verdict = Verdict.fromWire(event.verdict)
+                // An unknown verdict is shown as a plain row rather than taking
+                // the screen down; see `Verdict.fromWireOrNull`.
+                val verdict = Verdict.fromWireOrNull(event.verdict)
                 Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(Iso.parse(event.scannedAt)?.let { TimeText.hhmm(it) } ?: "", style = t.caption, color = c.fg3)
-                    Text("…" + event.raw.takeLast(8), style = t.code.copy(fontSize = 14.sp), color = c.fg1)
-                    Text(stringResource(verdict.label()), style = t.caption, color = c.tone(verdict.verdictTone()).fg)
+                    Text(feedTail(event.raw), style = t.code.copy(fontSize = 14.sp), color = c.fg1)
+                    Text(
+                        verdict?.let { stringResource(it.label()) } ?: event.verdict,
+                        style = t.caption,
+                        color = c.tone(verdict?.verdictTone() ?: Tone.Neutral).fg,
+                    )
                 }
             }
         }
@@ -264,12 +281,15 @@ fun Verdict.label(): Int = when (this) {
     Verdict.DUPLICATE -> R.string.signal_duplicate
     Verdict.WRONG_GTIN -> R.string.signal_wrong_gtin
     Verdict.INVALID -> R.string.signal_wrong_code
+    Verdict.UNDONE -> R.string.signal_undone
 }
 
 fun Verdict.verdictTone(): Tone = when (this) {
     Verdict.OK -> Tone.Ok
     Verdict.DUPLICATE -> Tone.Warn
     Verdict.WRONG_GTIN, Verdict.INVALID -> Tone.Err
+    // A correction the operator made on purpose is not an error.
+    Verdict.UNDONE -> Tone.Neutral
 }
 
 @Composable
@@ -352,6 +372,42 @@ private fun LastScanStrip(last: LastScan?) {
             Text(last.tail, style = t.code.copy(fontSize = 16.sp), color = c.fg1)
         }
     }
+}
+
+/**
+ * Offered when the shift's accepted count crosses its plan.
+ *
+ * Drawn over the work screen rather than as a route of its own, like the box
+ * close and duplicate prompts: the scan router keeps recording underneath, so
+ * an operator who carries on packing loses nothing while this is up.
+ */
+@Composable
+fun PlanReachedScreen(total: Int, plan: Int, onClose: () -> Unit, onContinue: () -> Unit) {
+    Box(Modifier.fillMaxSize().background(MarkiroTheme.colors.surfacePage)) {
+        FullScreenState(
+            icon = Icons.Outlined.CheckCircle,
+            title = stringResource(R.string.work_plan_reached_title),
+            text = stringResource(R.string.work_plan_reached_text, total, plan),
+            primary = StateAction(stringResource(R.string.work_plan_reached_close), onClose),
+            secondary = StateAction(stringResource(R.string.work_plan_reached_continue), onContinue),
+            tone = Tone.Ok,
+        )
+    }
+}
+
+/**
+ * What the feed shows for one scan: the serial, exactly as the last-scan zone
+ * above it does.
+ *
+ * The raw tail used to be printed instead, and on a real code that is the
+ * crypto signature -- «…593txKP» told an operator nothing and did not
+ * match the value shown two centimetres higher for the same unit. An
+ * unparseable scan keeps its raw tail, because for a rejected code the raw
+ * text is the only thing there is.
+ */
+internal fun feedTail(raw: String): String {
+    val serial = runCatching { KmCodec.parse(raw).serial }.getOrNull() ?: raw
+    return if (serial.length > 8) "…" + serial.takeLast(8) else serial
 }
 
 @Composable

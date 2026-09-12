@@ -5,7 +5,7 @@ import {
   platformCommercialV2Contracts,
 } from "@markiro/platform-contracts";
 import {
-  isCommercialV2,
+  commercialVersion,
   commercialBody,
   commercialResponse,
 } from "../../platform-http/commercial-version";
@@ -35,7 +35,7 @@ export class BillingProfilesController {
   @RequirePlatformCapabilities("billing.read")
   async getOperator(@Res() response: Response, @Req() request?: RequestWithPlatformPrincipal) {
     const profile = commercialResponse(
-      isCommercialV2(request ?? {}),
+      commercialVersion(request ?? {}),
       platformCommercialContracts.billingProfiles.operator.get.response,
       platformCommercialV2Contracts.billingProfiles.operator.get.response,
       operatorProfileDto(await this.profiles.getOperator()),
@@ -56,7 +56,7 @@ export class BillingProfilesController {
       .setOperator(
         request.platformPrincipal!,
         commercialBody(
-          isCommercialV2(request)
+          commercialVersion(request) >= 2
             ? platformCommercialV2Contracts.billingProfiles.operator.set.body
             : platformCommercialContracts.billingProfiles.operator.set.body,
           body,
@@ -64,7 +64,7 @@ export class BillingProfilesController {
       )
       .then((profile) =>
         commercialResponse(
-          isCommercialV2(request),
+          commercialVersion(request),
           platformCommercialContracts.billingProfiles.operator.set.response,
           platformCommercialV2Contracts.billingProfiles.operator.set.response,
           operatorProfileDto(profile),

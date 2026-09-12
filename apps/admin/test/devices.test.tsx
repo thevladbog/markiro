@@ -6,12 +6,17 @@ import { afterEach, expect, it, vi } from "vitest";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { ThemeProvider } from "@markiro/ui";
 import { AccessProvider } from "../src/access/context.js";
+import { AuthClientProvider, type AuthClientLike } from "../src/auth/client.js";
 import i18n from "../src/i18n/index.js";
 import { DevicesPage } from "../src/pages/devices/index.js";
 
 vi.mock("../src/layout/useActiveOrg.js", () => ({
   useActiveOrg: () => ({ orgId: "org-1", orgName: "Factory" }),
 }));
+
+const testAuthClient = {
+  useSession: () => ({ data: null, isPending: false, error: null, refetch: async () => undefined }),
+} as unknown as AuthClientLike;
 
 function response(body: unknown): Response {
   return {
@@ -50,6 +55,31 @@ function renderPage(
           pageSize: 8,
           total: items.length,
         });
+      if (url === "/api/device-licensing")
+        return response({
+          tenantId: "11111111-1111-4111-8111-111111111111",
+          usage: 0,
+          limit: 2,
+          canCancelReservations: true,
+          integrity: "ready",
+          devices: items
+            .filter((item) => item.type === "station" || item.type === "handheld")
+            .map((item) => ({
+              deviceId: item.id,
+              name: item.name,
+              kind: item.type,
+              assignmentId: "22222222-2222-4222-8222-222222222222",
+              revision: 2,
+              state: "released",
+              releaseReason: "security_revoked",
+              slotOccupied: false,
+              canCancel: false,
+              blockedReason: "released",
+              connectionStatus: item.status,
+              pairedAt: null,
+              lastSeenAt: item.lastSeenAt,
+            })),
+        });
       if (url === "/api/lines") return response({ items: [] });
       throw new Error(`Unexpected request: ${url}`);
     }),
@@ -59,20 +89,22 @@ function renderPage(
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
       <ThemeProvider defaultTheme="light">
-        <MemoryRouter>
-          <AccessProvider
-            value={{
-              roles: ["admin"],
-              capabilities: [
-                CABINET_CAPABILITY.OPERATIONS_READ,
-                CABINET_CAPABILITY.OPERATIONS_WRITE,
-                CABINET_CAPABILITY.CREDENTIALS_MANAGE,
-              ],
-            }}
-          >
-            <DevicesPage />
-          </AccessProvider>
-        </MemoryRouter>
+        <AuthClientProvider client={testAuthClient}>
+          <MemoryRouter>
+            <AccessProvider
+              value={{
+                roles: ["admin"],
+                capabilities: [
+                  CABINET_CAPABILITY.OPERATIONS_READ,
+                  CABINET_CAPABILITY.OPERATIONS_WRITE,
+                  CABINET_CAPABILITY.CREDENTIALS_MANAGE,
+                ],
+              }}
+            >
+              <DevicesPage />
+            </AccessProvider>
+          </MemoryRouter>
+        </AuthClientProvider>
       </ThemeProvider>
     </QueryClientProvider>,
   );
@@ -93,7 +125,7 @@ it("keeps kiosk settings reachable as a button-styled action in the unified devi
 it("does not offer another revoke for an already revoked station", async () => {
   renderPage([
     {
-      id: "station-revoked",
+      id: "33333333-3333-4333-8333-333333333333",
       type: "station",
       name: "Revoked station",
       place: { id: "line-1", name: "Line 1" },
@@ -103,7 +135,7 @@ it("does not offer another revoke for an already revoked station", async () => {
     },
   ]);
 
-  await screen.findByText("Revoked station");
+  await screen.findByRole("row", { name: /Revoked station/ });
 
   expect(screen.queryByRole("button", { name: "Отозвать" })).toBeNull();
   expect(screen.getByRole("button", { name: "Выдать новый код" })).toBeDefined();
@@ -115,10 +147,6 @@ it("does not leave auth cleanup tied to the jsdom window", async () => {
 
   try {
     renderPage();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => response({})),
-    );
     await vi.advanceTimersByTimeAsync(0);
     cleanup();
 

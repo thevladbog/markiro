@@ -43,19 +43,41 @@ class StorageTest {
 
     @Test
     fun rosterStoreReplacesTheWholeMirror() = runTest {
-        val store = RosterStore(db.operatorDao())
+        val store = RosterStore(db.operatorDao(), db.initializeRecoveryForTest())
         store.replace(listOf(record("op-1", "Анна"), record("op-2", "Пётр")))
         store.replace(listOf(record("op-3", "Ольга")))
         assertEquals(listOf("Ольга"), store.operators().map { it.name })
     }
 
     @Test
-    fun wipeClearsConfigRosterAndCredential() = runTest {
+    fun rejectionPreservesEveryOperationalChannelAndRemovesSecrets() = runTest {
         val credential = InMemoryCredentialStore().apply { write("mk_live_secret") }
         db.deviceConfigDao().upsert(sampleConfig())
-        RosterStore(db.operatorDao()).replace(listOf(record("op-1", "Анна")))
-        DeviceWipe(db, credential).wipeAll()
-        assertNull(db.deviceConfigDao().get())
+        RosterStore(db.operatorDao(), db.initializeRecoveryForTest(credential)).replace(listOf(record("op-1", "Анна")))
+        val sqlite = db.openHelper.writableDatabase
+        val tables = sqlite.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('room_master_table','android_metadata','device_config','operators','device_recovery')").use { cursor ->
+            buildList { while (cursor.moveToNext()) add(cursor.getString(0)) }
+        }
+        for (table in tables) {
+            val values = android.content.ContentValues()
+            sqlite.query("PRAGMA table_info(`$table`)").use { columns ->
+                while (columns.moveToNext()) {
+                    val name = columns.getString(1)
+                    if (columns.getString(2) == "INTEGER") values.put(name, 7L)
+                    else values.put(name, "saved:$table:$name\u001d")
+                }
+            }
+            sqlite.insert(table, android.database.sqlite.SQLiteDatabase.CONFLICT_ABORT, values)
+        }
+        fun capture() = tables.associateWith { table ->
+            sqlite.query("SELECT * FROM `$table`").use { rows ->
+                buildList { while (rows.moveToNext()) add((0 until rows.columnCount).map { rows.getString(it) }) }
+            }
+        }
+        val saved = capture()
+        DeviceWipe(db.recovery).reject(db.recovery.token())
+        assertEquals(saved, capture())
+        assertEquals(sampleConfig(), db.deviceConfigDao().get())
         assertEquals(emptyList<OperatorEntity>(), db.operatorDao().all())
         assertNull(credential.read())
     }

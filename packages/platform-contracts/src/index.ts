@@ -1,4 +1,5 @@
 export { platformErrorSchema } from "./errors.js";
+export * from "./offer-draft.js";
 export type { PlatformError } from "./errors.js";
 export {
   platformMoneySchema,
@@ -543,6 +544,7 @@ export type { CommercialReviewIdentity, CatalogPublicationReview } from "./catal
 export {
   AGREEMENT_EDITABLE_STATUSES,
   AGREEMENT_TRANSITIONS,
+  agreementDocumentFormSchema,
   agreementDocumentKindSchema,
   agreementRequisitesSchema,
   agreementSignatorySchema,
@@ -555,6 +557,7 @@ export {
 export type {
   AgreementDetail,
   AgreementDocument,
+  AgreementDocumentForm,
   AgreementListQuery,
   AgreementRequisitesInput,
   AgreementStatus,
@@ -562,3 +565,31 @@ export type {
   CreateAgreementInput,
   UpdateAgreementInput,
 } from "./agreements.js";
+
+export * from "./entitlements.js";
+export * from "./catalog-v3.js";
+export * from "./tenants-v3.js";
+
+export {
+  stationRecoveryIdentitySchema,
+  stationRecoveryRequestSchema,
+  stationRecoveryResponseSchema,
+} from "./station-recovery.js";
+export type {
+  StationRecoveryIdentity,
+  StationRecoveryRequest,
+  StationRecoveryResponse,
+} from "./station-recovery.js";
+
+export {
+  cabinetDeviceLicensingContracts,
+  cancelDeviceReservationSchema,
+  deviceReservationReceiptSchema,
+  platformDeviceLicensingContracts,
+  workingDevicePoolSchema,
+} from "./device-licensing.js";
+export type {
+  CancelDeviceReservation,
+  DeviceReservationReceipt,
+  WorkingDevicePool,
+} from "./device-licensing.js";

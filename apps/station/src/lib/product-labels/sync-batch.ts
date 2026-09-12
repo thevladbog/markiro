@@ -1,3 +1,4 @@
+import { credentialOwnsRetainedWork } from "../device-recovery.js";
 import { z } from "zod";
 import {
   DomainError,
@@ -61,7 +62,7 @@ export async function readProductLabelBatchPin(
   const parsed = z.strictObject({ pin: pinSchema, digest: z.string() }).safeParse(value);
   if (!parsed.success || productLabelValueDigest(parsed.data.pin) !== parsed.data.digest)
     invalidPin();
-  if (parsed.data.pin.credentialOwnership !== owner)
+  if (!(await credentialOwnsRetainedWork(exec, owner, parsed.data.pin.credentialOwnership)))
     throw new DomainError(
       "PRODUCT_LABEL_BATCH_OWNER_MISMATCH",
       "Pending delivery belongs to another station credential",

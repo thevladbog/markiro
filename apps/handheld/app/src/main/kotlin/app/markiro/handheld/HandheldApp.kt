@@ -21,16 +21,29 @@ class HandheldApp : Application() {
 
     @Inject lateinit var connectivity: ConnectivityNudger
 
+    @Inject lateinit var recovery: app.markiro.handheld.core.storage.DeviceRecovery
+
     @Inject lateinit var boxes: BoxRepository
 
     @Inject lateinit var pallets: PalletRepository
 
     override fun onCreate() {
         super.onCreate()
-        syncEngine.start()
-        inventorySync.start()
-        connectivity.register()
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { demoteInterruptedPrints(boxes, pallets) }
+
+        // A print the app died in the middle of is unknown, never resumed:
+        // resuming would be an automatic resend of a label that may already be on
+        // a box -- or, since 06d, a pallet -- the server has accepted. Both kinds
+        // are demoted, and only while this device still owns its data: a sealed
+        // or restoring device must not write at all.
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            runCatching { recovery.initialize() }
+            if (recovery.current().phase == app.markiro.handheld.core.storage.RecoveryPhase.ACTIVE) {
+                demoteInterruptedPrints(boxes, pallets)
+            }
+            syncEngine.start()
+            inventorySync.start()
+            connectivity.register()
+        }
     }
 }
 

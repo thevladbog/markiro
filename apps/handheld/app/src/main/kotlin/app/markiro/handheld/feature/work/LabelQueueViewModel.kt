@@ -7,6 +7,10 @@ import app.markiro.handheld.core.box.BoxPrinter
 import app.markiro.handheld.core.box.BoxRepository
 import app.markiro.handheld.core.box.PalletPrinter
 import app.markiro.handheld.core.box.PalletRepository
+import app.markiro.handheld.core.exceptions.ExceptionEngine
+import app.markiro.handheld.core.exceptions.ReprintReason
+import app.markiro.handheld.core.storage.DeviceConfigDao
+import app.markiro.handheld.feature.signin.SessionHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -14,6 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import app.markiro.handheld.core.storage.DeviceRecovery
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
@@ -53,7 +59,17 @@ class LabelQueueViewModel @Inject constructor(
     private val printer: BoxPrinter,
     private val pallets: PalletRepository,
     private val palletPrinter: PalletPrinter,
+    private val exceptions: ExceptionEngine,
+    private val session: SessionHolder,
+    private val config: DeviceConfigDao,
+    private val recovery: DeviceRecovery,
 ) : ViewModel() {
+    private val generation = recovery.token()
+
+    private fun launchOwned(block: suspend CoroutineScope.() -> Unit) = viewModelScope.launch {
+        recovery.work(generation) { block() }
+    }
+
     private val printing = MutableStateFlow(false)
     private val busy = AtomicBoolean(false)
 
@@ -78,6 +94,27 @@ class LabelQueueViewModel @Inject constructor(
     fun printOne(id: String) = runPrint { print(id) }
 
     /**
+     * Printing again a box whose last attempt ended `unknown` is an explicit
+     * same-SSCC reprint (design brief 10 §8) and is recorded as one -- with a
+     * fixed reason rather than a prompt, because the operator is standing at
+     * the printer deciding whether paper moved, not filling in a ledger.
+     *
+     * `failed` and `deferred` never put paper through, so they are ordinary
+     * retries and write nothing.
+     */
+    private suspend fun auditIfOutcomeUnknown(boxId: String) {
+        val box = boxes.get(boxId) ?: return
+        if (box.printState != BoxPrint.UNKNOWN) return
+        exceptions.reprint(
+            shiftId = box.shiftId,
+            boxId = boxId,
+            reason = ReprintReason.PRINT_OUTCOME_UNKNOWN,
+            operatorId = session.state.value.operator?.operatorId,
+            terminalId = config.get()?.deviceId,
+        )
+    }
+
+    /**
      * Every queued label except those whose last attempt is `unknown`.
      *
      * Retrying an unknown could put a second label on a box or pallet the
@@ -94,7 +131,14 @@ class LabelQueueViewModel @Inject constructor(
 
     private suspend fun print(id: String) {
         when (state.value.items.firstOrNull { it.id == id }?.kind ?: LabelKind.BOX) {
-            LabelKind.BOX -> printer.print(id)
+            LabelKind.BOX -> {
+                auditIfOutcomeUnknown(id)
+                printer.print(id)
+            }
+            // No pallet analogue yet: `pallet_exceptions` exists in the
+            // database but nothing reads or writes it until the handheld's
+            // pallet exceptions screen lands, so a pallet reprint after an
+            // unknown outcome is not audited here rather than audited wrongly.
             LabelKind.PALLET -> palletPrinter.print(id)
         }
     }
@@ -106,7 +150,7 @@ class LabelQueueViewModel @Inject constructor(
      */
     private fun runPrint(work: suspend () -> Unit) {
         if (!busy.compareAndSet(false, true)) return
-        viewModelScope.launch {
+        launchOwned {
             printing.value = true
             try {
                 work()
@@ -120,7 +164,7 @@ class LabelQueueViewModel @Inject constructor(
     /** The operator looked at the printer and says the label is there. Nothing is sent. */
     fun resolveUnknown(id: String) {
         val kind = state.value.items.firstOrNull { it.id == id }?.kind ?: LabelKind.BOX
-        viewModelScope.launch {
+        launchOwned {
             when (kind) {
                 LabelKind.BOX -> printer.resolveUnknownAsPrinted(id)
                 LabelKind.PALLET -> palletPrinter.resolveUnknownAsPrinted(id)

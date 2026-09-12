@@ -260,7 +260,7 @@ describe.skipIf(!ready)("shift pallet configuration (task 8)", () => {
   });
 
   it("refuses to create a pallets-on shift when no pallet label template resolves", async () => {
-    // Migration 0130 used to seed every organisation a default, so this state
+    // Migration 0135 used to seed every organisation a default, so this state
     // was unreachable. Since the I6 fix a tenant can clear its own default
     // (and never set a category one), and nothing stopped a shift from being
     // created pallets-ON with no template to print a pallet label from -- the
@@ -395,7 +395,7 @@ describe.skipIf(!ready)("shift pallet configuration (task 8)", () => {
     // separate flag on that path. The server's signal is
     // `shifts.pallets_enabled`, and the two diverge on an ordinary path: the
     // admin omits `palletBoxCapacity` when pallets are off, `createShift`
-    // reads an omitted value as "take the product's", and migration 0130
+    // reads an omitted value as "take the product's", and migration 0135
     // backfilled `products.pallet_box_capacity` broadly. A device handed the
     // prefilled capacity would show the pallet strip, join boxes to local
     // pallets and send `devicePalletId` for a pallets-DISABLED shift,

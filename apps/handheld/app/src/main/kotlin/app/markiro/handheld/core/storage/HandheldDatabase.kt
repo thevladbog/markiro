@@ -8,6 +8,7 @@ import app.markiro.handheld.core.print.PrinterEntity
 @Database(
     entities = [
         DeviceConfigEntity::class,
+        DeviceRecoveryEntity::class,
         OperatorEntity::class,
         ShiftEntity::class,
         CodeEntity::class,
@@ -27,18 +28,27 @@ import app.markiro.handheld.core.print.PrinterEntity
         SsccRangeEntity::class,
         ProductLabelJobEntity::class,
         ProductLabelEventEntity::class,
+        BoxExceptionEntity::class,
         PalletEntity::class,
     ],
-    version = 8,
+    version = 10,
     exportSchema = false,
 )
 abstract class HandheldDatabase : RoomDatabase() {
+    private var coordinator: DeviceRecovery? = null
+    val recovery: DeviceRecovery get() = checkNotNull(coordinator) { "Device recovery must initialize before work" }
+    internal fun attachRecovery(value: DeviceRecovery) {
+        check(coordinator == null || coordinator === value)
+        coordinator = value
+    }
+    abstract fun deviceRecoveryDao(): DeviceRecoveryDao
     abstract fun printerDao(): PrinterDao
     abstract fun boxDao(): BoxDao
     abstract fun ssccPoolDao(): SsccPoolDao
     abstract fun palletDao(): PalletDao
     abstract fun productLabelJobDao(): ProductLabelJobDao
     abstract fun productLabelEventDao(): ProductLabelEventDao
+    abstract fun boxExceptionDao(): BoxExceptionDao
 
     abstract fun inventoryTaskDao(): InventoryTaskDao
     abstract fun inventorySnapshotCodeDao(): InventorySnapshotCodeDao

@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.printer
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -56,15 +57,22 @@ class PrinterViewModelTest {
     fun setUp() {
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java)
             .allowMainThreadQueries().build()
+        db.initializeRecoveryForTest()
     }
 
     @After
-    fun tearDown() = db.close()
+    fun tearDown() {
+        try {
+            main.cancelAndJoinModels()
+        } finally {
+            db.close()
+        }
+    }
 
     private fun vm(
         transport: FakeTransport = FakeTransport(),
         paired: List<DiscoveredPrinter> = emptyList(),
-    ) = main.track(PrinterViewModel(db.printerDao(), transport, LabelRenderer(rasterize), { paired }, { 1_757_000_000_000L }))
+    ) = main.track(PrinterViewModel(recovery = db.recovery, db.printerDao(), transport, LabelRenderer(rasterize), { paired }, { 1_757_000_000_000L }))
 
     @Test
     fun aCheckedPrinterIsSavedAndSelected() = runTest {
@@ -135,9 +143,11 @@ class PrinterViewModelTest {
         val model = vm(transport)
         saveSelected(model)
         model.printTest()
-        advanceUntilIdle()
+        model.testStep.first { it is TestPrintStep.Unknown && transport.sent == 1 }
         model.retryTest()
-        advanceUntilIdle()
+        // Room's status write can still hold the lease after the test scheduler
+        // is idle. Wait for the second send's result, never the first Unknown.
+        model.testStep.first { it is TestPrintStep.Unknown && transport.sent == 2 }
         assertEquals(2, transport.sent)
     }
 

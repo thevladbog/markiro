@@ -20,6 +20,11 @@ import app.markiro.handheld.core.storage.PalletPrint
  * `closedAt` comes off the pallet's own row, never from the clock, so a
  * recovery print the next morning stamps the same «Дата производства» and
  * «Годен до» as the first attempt rather than that morning's.
+ *
+ * Every entry point runs under the device-recovery lease `BoxPrinter` uses, so
+ * a credential rejected while a pallet label is in flight blocks the write that
+ * would record it instead of stamping a state against an owner this device no
+ * longer is.
  */
 class PalletPrinter(
     private val db: HandheldDatabase,
@@ -27,7 +32,9 @@ class PalletPrinter(
     private val renderer: LabelRenderer,
     private val transport: PrinterTransport,
 ) {
-    suspend fun print(palletId: String): PrintOutcome {
+    suspend fun print(palletId: String): PrintOutcome = db.recovery.printing { printOwned(palletId) }
+
+    private suspend fun printOwned(palletId: String): PrintOutcome {
         val pallet = db.palletDao().get(palletId) ?: return fail(palletId, PrintReason.PALLET_MISSING)
         val closedAt = pallet.closedAt ?: return fail(palletId, PrintReason.PALLET_OPEN)
         val sscc = pallet.sscc ?: return fail(palletId, PrintReason.PALLET_OPEN)
@@ -72,6 +79,9 @@ class PalletPrinter(
             return fail(palletId, PrintReason.RENDER_FAILED)
         }
 
+        if (!db.recovery.valid(checkNotNull(app.markiro.handheld.core.storage.DeviceRecovery.generationContext.get()))) {
+            throw app.markiro.handheld.core.storage.RecoveryBlocked()
+        }
         return when (val outcome = transport.send(printer, document)) {
             SendOutcome.Delivered -> {
                 pallets.setPrintState(palletId, PalletPrint.PRINTED, null)
@@ -86,7 +96,9 @@ class PalletPrinter(
     }
 
     /** The operator looked at the printer and says the label is there. Nothing is sent. */
-    suspend fun resolveUnknownAsPrinted(palletId: String) =
+    suspend fun resolveUnknownAsPrinted(palletId: String) = db.recovery.commit { resolveUnknownAsPrintedOwned(palletId) }
+
+    private suspend fun resolveUnknownAsPrintedOwned(palletId: String) =
         pallets.setPrintState(palletId, PalletPrint.PRINTED, null)
 
     /**
@@ -96,10 +108,14 @@ class PalletPrinter(
      * erasing it would leave the queue saying only that the label did not
      * print, which is both less useful and untrue.
      */
-    suspend fun defer(palletId: String) =
+    suspend fun defer(palletId: String) = db.recovery.commit { deferOwned(palletId) }
+
+    private suspend fun deferOwned(palletId: String) =
         pallets.setPrintState(palletId, PalletPrint.DEFERRED, db.palletDao().get(palletId)?.printReason)
 
-    private suspend fun fail(palletId: String, reason: String): PrintOutcome.Failed {
+    private suspend fun fail(palletId: String, reason: String): PrintOutcome.Failed = db.recovery.commit { failOwned(palletId, reason) }
+
+    private suspend fun failOwned(palletId: String, reason: String): PrintOutcome.Failed {
         pallets.setPrintState(palletId, PalletPrint.FAILED, reason)
         return PrintOutcome.Failed(reason)
     }

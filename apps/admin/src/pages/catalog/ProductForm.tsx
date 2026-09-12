@@ -1,12 +1,17 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { ChzSummary } from "@markiro/platform-contracts";
 import type { TFunction } from "i18next";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
-import { CABINET_CAPABILITY, isValidGtin, normalizeToGtin14 } from "@markiro/domain";
+import {
+  CABINET_CAPABILITY,
+  isEgaisApplicable,
+  isValidGtin,
+  normalizeToGtin14,
+} from "@markiro/domain";
 import { Alert, Button, Checkbox, FileDropZone, Input, Select, SidePanel } from "@markiro/ui";
 import type { OverlayDismissReason, SelectOption } from "@markiro/ui";
 
@@ -114,6 +119,10 @@ export interface ProductFormProps {
   submissionError?: string | null;
   gtinSubmissionError?: string | null;
   chzSummary?: ChzSummary;
+  regulatoryContent?: ReactNode;
+  regulatoryDirty?: boolean;
+  regulatoryBusy?: boolean;
+  profileBound?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
   onSubmit: (
     input: CreateProductInput,
@@ -197,6 +206,10 @@ export function ProductForm({
   submissionError,
   gtinSubmissionError,
   chzSummary,
+  regulatoryContent,
+  regulatoryDirty = false,
+  regulatoryBusy = false,
+  profileBound = false,
   onDirtyChange = () => {},
   onSubmit,
   onClose,
@@ -345,12 +358,13 @@ export function ProductForm({
   }, [gtinValue]);
 
   const submit = handleSubmit(async (values) => {
+    if (regulatoryDirty || regulatoryBusy || submitting) return;
     if (needsDetach && (!detachConfirmed || chzBaseline.revision == null)) {
       setError("gtin", { message: "pages.catalog.chz.detachRequired" });
       return;
     }
     await onSubmit(
-      toCreateInput(values, mode),
+      toCreateInput(values, mode, !profileBound),
       selectedImage,
       needsDetach && chzBaseline.revision != null
         ? { action: "detach", expectedRevision: chzBaseline.revision }
@@ -404,7 +418,7 @@ export function ProductForm({
     <SidePanel
       open
       size="standard"
-      busy={submitting}
+      busy={submitting || regulatoryBusy}
       onClose={onClose}
       closeLabel={t("common.close")}
       title={
@@ -420,7 +434,12 @@ export function ProductForm({
           >
             {t("pages.catalog.cancel")}
           </Button>
-          <Button type="submit" form={FORM_ID} loading={submitting}>
+          <Button
+            type="submit"
+            form={FORM_ID}
+            loading={submitting}
+            disabled={regulatoryDirty || regulatoryBusy}
+          >
             {mode === "create"
               ? t("pages.catalog.form.submitCreate")
               : t("pages.catalog.form.submitUpdate")}
@@ -428,213 +447,227 @@ export function ProductForm({
         </>
       }
     >
+      {regulatoryDirty && (
+        <Alert tone="info">{t("pages.catalog.regulatory.saveRegulatoryFirst")}</Alert>
+      )}
       <form
         id={FORM_ID}
         onSubmit={(event) => void submit(event)}
         noValidate
         style={{ display: "flex", flexDirection: "column", gap: 16 }}
       >
-        {submissionError ? <Alert tone="error">{submissionError}</Alert> : null}
-        <section className="mk-catalog-panel-section" aria-labelledby="product-form-basic">
-          <h3 id="product-form-basic">{t("pages.catalog.form.sections.basic")}</h3>
-          {mode === "edit" && productStatus === "draft" && (
-            <Alert tone="warn">{t("pages.catalog.form.draftBanner")}</Alert>
-          )}
+        <fieldset
+          className="mk-product-form-fields"
+          disabled={submitting || regulatoryDirty || regulatoryBusy}
+        >
+          {submissionError ? <Alert tone="error">{submissionError}</Alert> : null}
+          <section className="mk-catalog-panel-section" aria-labelledby="product-form-basic">
+            <h3 id="product-form-basic">{t("pages.catalog.form.sections.basic")}</h3>
+            {mode === "edit" && productStatus === "draft" && (
+              <Alert tone="warn">{t("pages.catalog.form.draftBanner")}</Alert>
+            )}
 
-          {mode === "edit" && (
-            <Checkbox
-              label={t("pages.catalog.form.archivedLabel")}
-              hint={t("pages.catalog.form.archivedHint")}
-              checked={archivedValue}
-              onCheckedChange={(checked) =>
-                setValue("archived", checked, { shouldDirty: true, shouldValidate: true })
+            {mode === "edit" && (
+              <Checkbox
+                label={t("pages.catalog.form.archivedLabel")}
+                hint={t("pages.catalog.form.archivedHint")}
+                checked={archivedValue}
+                onCheckedChange={(checked) =>
+                  setValue("archived", checked, { shouldDirty: true, shouldValidate: true })
+                }
+              />
+            )}
+
+            {mode === "edit" && linkedExternalRef && (
+              <Alert
+                tone="info"
+                {...(canUnlinkIntegrations && productId
+                  ? {
+                      action: (
+                        <AuthorizedUnlinkProductAction
+                          productId={productId}
+                          onUnlinked={() => setLinkedExternalRef(null)}
+                        />
+                      ),
+                    }
+                  : {})}
+              >
+                {t("pages.catalog.form.externalLink.linkedText", { ref: linkedExternalRef })}
+              </Alert>
+            )}
+
+            <Input
+              label={t("pages.catalog.form.gtinLabel")}
+              mono
+              {...errorProp(gtinSubmissionError ?? translateFieldError(t, errors.gtin?.message))}
+              {...register("gtin")}
+            />
+
+            {needsDetach && (
+              <Checkbox
+                label={t("pages.catalog.chz.detachLabel")}
+                checked={detachConfirmed}
+                onCheckedChange={(checked) => {
+                  setDetachConfirmed(checked);
+                  clearErrors("gtin");
+                }}
+              />
+            )}
+
+            {ownerHint?.owner === "counterparty" && (
+              <Alert
+                tone="info"
+                action={
+                  <Button
+                    type="button"
+                    size="compact"
+                    variant="secondary"
+                    onClick={applyCounterpartyHint}
+                  >
+                    {t("pages.catalog.form.applyCounterparty")}
+                  </Button>
+                }
+              >
+                {t("pages.catalog.form.gtinOwnerHint", { name: ownerHint.counterpartyName })}
+              </Alert>
+            )}
+            {ownerHint?.owner === "unknown" && (
+              <Alert tone="warn">{t("pages.catalog.form.gtinOwnerUnknown")}</Alert>
+            )}
+
+            <Input
+              label={t("pages.catalog.form.nameLabel")}
+              {...errorProp(translateFieldError(t, errors.name?.message))}
+              {...register("name")}
+            />
+            <Input
+              label={t("pages.catalog.form.printNameLabel")}
+              hint={t("pages.catalog.form.printNameHint")}
+              {...errorProp(translateFieldError(t, errors.printName?.message))}
+              {...register("printName")}
+            />
+            <Select
+              label={t("pages.catalog.form.productGroupLabel")}
+              options={productGroupOptions}
+              value={chzProductGroupCode ?? ""}
+              disabled={productGroupsPending}
+              searchable
+              searchLabel={t("pages.catalog.form.productGroupSearchLabel")}
+              {...errorProp(
+                productGroupsError ? t("pages.catalog.form.productGroupLoadError") : undefined,
+              )}
+              onValueChange={(value) =>
+                setValue("chzProductGroupCode", value, { shouldDirty: true, shouldValidate: true })
               }
             />
-          )}
-
-          {mode === "edit" && linkedExternalRef && (
-            <Alert
-              tone="info"
-              {...(canUnlinkIntegrations && productId
-                ? {
-                    action: (
-                      <AuthorizedUnlinkProductAction
-                        productId={productId}
-                        onUnlinked={() => setLinkedExternalRef(null)}
-                      />
-                    ),
-                  }
-                : {})}
-            >
-              {t("pages.catalog.form.externalLink.linkedText", { ref: linkedExternalRef })}
-            </Alert>
-          )}
-
-          <Input
-            label={t("pages.catalog.form.gtinLabel")}
-            mono
-            {...errorProp(gtinSubmissionError ?? translateFieldError(t, errors.gtin?.message))}
-            {...register("gtin")}
-          />
-
-          {needsDetach && (
-            <Checkbox
-              label={t("pages.catalog.chz.detachLabel")}
-              checked={detachConfirmed}
-              onCheckedChange={(checked) => {
-                setDetachConfirmed(checked);
-                clearErrors("gtin");
-              }}
+          </section>
+          <section className="mk-catalog-panel-section" aria-labelledby="product-form-aggregation">
+            <h3 id="product-form-aggregation">{t("pages.catalog.form.sections.aggregation")}</h3>
+            <Input
+              label={t("pages.catalog.form.boxCapacityLabel")}
+              mono
+              inputMode="numeric"
+              {...errorProp(translateFieldError(t, errors.boxCapacity?.message))}
+              {...register("boxCapacity")}
             />
-          )}
-
-          {ownerHint?.owner === "counterparty" && (
-            <Alert
-              tone="info"
-              action={
+            <Input
+              label={t("pages.catalog.form.palletBoxCapacityLabel")}
+              // This field changed MEANING in 06d: it used to hold product
+              // units and now holds a BOX count (migration 0135 converted what
+              // it could and nulled the rest). The hint states the unit
+              // outright so a catalogue carried over from before the rename is
+              // not silently re-read as the old number.
+              hint={t("pages.catalog.form.palletBoxCapacityHint")}
+              mono
+              inputMode="numeric"
+              {...errorProp(translateFieldError(t, errors.palletBoxCapacity?.message))}
+              {...register("palletBoxCapacity")}
+            />
+            <Input
+              label={t("pages.catalog.form.unitPriceLabel")}
+              mono
+              inputMode="decimal"
+              {...errorProp(translateFieldError(t, errors.unitPrice?.message))}
+              {...register("unitPrice")}
+            />
+            {!profileBound && isEgaisApplicable(Number(chzProductGroupCode)) && (
+              <Input
+                label={t("pages.catalog.form.egaisCodeLabel")}
+                {...errorProp(translateFieldError(t, errors.egaisCode?.message))}
+                {...register("egaisCode")}
+              />
+            )}
+            <Input
+              label={t("pages.catalog.form.shelfLifeDaysLabel")}
+              mono
+              inputMode="numeric"
+              {...errorProp(translateFieldError(t, errors.shelfLifeDays?.message))}
+              {...register("shelfLifeDays")}
+            />
+          </section>
+          <section className="mk-catalog-panel-section" aria-labelledby="product-form-image">
+            <h3 id="product-form-image">{t("pages.catalog.form.sections.image")}</h3>
+            <div className="mk-product-image-control">
+              {selectedImage && !imageLoadFailed ? (
+                <canvas
+                  ref={previewCanvasRef}
+                  role="img"
+                  aria-label={imageAltName ?? t("pages.catalog.form.imageAlt")}
+                  className="mk-product-image-control__preview"
+                />
+              ) : mode === "edit" && productId && image && !imageLoadFailed ? (
+                <img
+                  src={productImageUrl({ id: productId, image }) ?? undefined}
+                  alt={imageAltName ?? t("pages.catalog.form.imageAlt")}
+                  onError={() => setImageLoadFailed(true)}
+                  className="mk-product-image-control__preview"
+                />
+              ) : (
+                <div className="mk-product-image-control__empty">
+                  {t("pages.catalog.form.imageEmpty")}
+                </div>
+              )}
+              <FileDropZone
+                accept="image/jpeg,image/png,image/webp"
+                label={t("pages.catalog.form.dropLabel")}
+                ariaLabel={t("pages.catalog.form.imageLabel")}
+                disabled={submitting || imageBusy}
+                onFile={(file) => setSelectedImage(file)}
+              />
+              {mode === "edit" && image && onDeleteImage ? (
                 <Button
                   type="button"
                   size="compact"
                   variant="secondary"
-                  onClick={applyCounterpartyHint}
+                  loading={imageBusy}
+                  disabled={submitting}
+                  onClick={() => void onDeleteImage()}
                 >
-                  {t("pages.catalog.form.applyCounterparty")}
+                  {t("pages.catalog.form.imageRemove")}
                 </Button>
+              ) : null}
+              <p className="mk-product-image-control__hint">{t("pages.catalog.form.imageHint")}</p>
+            </div>
+          </section>
+          <section className="mk-catalog-panel-section" aria-labelledby="product-form-defaults">
+            <h3 id="product-form-defaults">{t("pages.catalog.form.sections.defaults")}</h3>
+            <Select
+              label={t("pages.catalog.form.defaultCounterpartyLabel")}
+              options={counterpartyOptions}
+              value={defaultCounterpartyId ?? ""}
+              searchable
+              searchLabel={t("pages.catalog.form.defaultCounterpartySearchLabel")}
+              onValueChange={(value) =>
+                setValue("defaultCounterpartyId", value, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
               }
-            >
-              {t("pages.catalog.form.gtinOwnerHint", { name: ownerHint.counterpartyName })}
-            </Alert>
-          )}
-          {ownerHint?.owner === "unknown" && (
-            <Alert tone="warn">{t("pages.catalog.form.gtinOwnerUnknown")}</Alert>
-          )}
-
-          <Input
-            label={t("pages.catalog.form.nameLabel")}
-            {...errorProp(translateFieldError(t, errors.name?.message))}
-            {...register("name")}
-          />
-          <Input
-            label={t("pages.catalog.form.printNameLabel")}
-            hint={t("pages.catalog.form.printNameHint")}
-            {...errorProp(translateFieldError(t, errors.printName?.message))}
-            {...register("printName")}
-          />
-          <Select
-            label={t("pages.catalog.form.productGroupLabel")}
-            options={productGroupOptions}
-            value={chzProductGroupCode ?? ""}
-            disabled={productGroupsPending}
-            searchable
-            searchLabel={t("pages.catalog.form.productGroupSearchLabel")}
-            {...errorProp(
-              productGroupsError ? t("pages.catalog.form.productGroupLoadError") : undefined,
-            )}
-            onValueChange={(value) =>
-              setValue("chzProductGroupCode", value, { shouldDirty: true, shouldValidate: true })
-            }
-          />
-        </section>
-        <section className="mk-catalog-panel-section" aria-labelledby="product-form-aggregation">
-          <h3 id="product-form-aggregation">{t("pages.catalog.form.sections.aggregation")}</h3>
-          <Input
-            label={t("pages.catalog.form.boxCapacityLabel")}
-            mono
-            inputMode="numeric"
-            {...errorProp(translateFieldError(t, errors.boxCapacity?.message))}
-            {...register("boxCapacity")}
-          />
-          <Input
-            label={t("pages.catalog.form.palletBoxCapacityLabel")}
-            // This field changed MEANING in 06d: it used to hold product
-            // units and now holds a BOX count (migration 0130 converted what
-            // it could and nulled the rest). The hint states the unit
-            // outright so a catalogue carried over from before the rename is
-            // not silently re-read as the old number.
-            hint={t("pages.catalog.form.palletBoxCapacityHint")}
-            mono
-            inputMode="numeric"
-            {...errorProp(translateFieldError(t, errors.palletBoxCapacity?.message))}
-            {...register("palletBoxCapacity")}
-          />
-          <Input
-            label={t("pages.catalog.form.unitPriceLabel")}
-            mono
-            inputMode="decimal"
-            {...errorProp(translateFieldError(t, errors.unitPrice?.message))}
-            {...register("unitPrice")}
-          />
-          <Input
-            label={t("pages.catalog.form.egaisCodeLabel")}
-            {...errorProp(translateFieldError(t, errors.egaisCode?.message))}
-            {...register("egaisCode")}
-          />
-          <Input
-            label={t("pages.catalog.form.shelfLifeDaysLabel")}
-            mono
-            inputMode="numeric"
-            {...errorProp(translateFieldError(t, errors.shelfLifeDays?.message))}
-            {...register("shelfLifeDays")}
-          />
-        </section>
-        <section className="mk-catalog-panel-section" aria-labelledby="product-form-image">
-          <h3 id="product-form-image">{t("pages.catalog.form.sections.image")}</h3>
-          <div className="mk-product-image-control">
-            {selectedImage && !imageLoadFailed ? (
-              <canvas
-                ref={previewCanvasRef}
-                role="img"
-                aria-label={imageAltName ?? t("pages.catalog.form.imageAlt")}
-                className="mk-product-image-control__preview"
-              />
-            ) : mode === "edit" && productId && image && !imageLoadFailed ? (
-              <img
-                src={productImageUrl({ id: productId, image }) ?? undefined}
-                alt={imageAltName ?? t("pages.catalog.form.imageAlt")}
-                onError={() => setImageLoadFailed(true)}
-                className="mk-product-image-control__preview"
-              />
-            ) : (
-              <div className="mk-product-image-control__empty">
-                {t("pages.catalog.form.imageEmpty")}
-              </div>
-            )}
-            <FileDropZone
-              accept="image/jpeg,image/png,image/webp"
-              label={t("pages.catalog.form.dropLabel")}
-              ariaLabel={t("pages.catalog.form.imageLabel")}
-              disabled={submitting || imageBusy}
-              onFile={(file) => setSelectedImage(file)}
             />
-            {mode === "edit" && image && onDeleteImage ? (
-              <Button
-                type="button"
-                size="compact"
-                variant="secondary"
-                loading={imageBusy}
-                disabled={submitting}
-                onClick={() => void onDeleteImage()}
-              >
-                {t("pages.catalog.form.imageRemove")}
-              </Button>
-            ) : null}
-            <p className="mk-product-image-control__hint">{t("pages.catalog.form.imageHint")}</p>
-          </div>
-        </section>
-        <section className="mk-catalog-panel-section" aria-labelledby="product-form-defaults">
-          <h3 id="product-form-defaults">{t("pages.catalog.form.sections.defaults")}</h3>
-          <Select
-            label={t("pages.catalog.form.defaultCounterpartyLabel")}
-            options={counterpartyOptions}
-            value={defaultCounterpartyId ?? ""}
-            searchable
-            searchLabel={t("pages.catalog.form.defaultCounterpartySearchLabel")}
-            onValueChange={(value) =>
-              setValue("defaultCounterpartyId", value, { shouldDirty: true, shouldValidate: true })
-            }
-          />
-        </section>
+          </section>
+        </fieldset>
       </form>
+      {regulatoryContent}
     </SidePanel>
   );
 }
@@ -644,7 +677,11 @@ export function ProductForm({
  * `archived` travels only from the edit form — the create form has no
  * "do not use" control, so create payloads stay free of the field.
  */
-function toCreateInput(values: ProductFormValues, mode: "create" | "edit"): CreateProductInput {
+function toCreateInput(
+  values: ProductFormValues,
+  mode: "create" | "edit",
+  includeEgais: boolean,
+): CreateProductInput {
   const printName = values.printName?.trim();
   const chzProductGroupCode = values.chzProductGroupCode?.trim();
   const boxCapacity = values.boxCapacity?.trim();
@@ -661,7 +698,9 @@ function toCreateInput(values: ProductFormValues, mode: "create" | "edit"): Crea
     boxCapacity: boxCapacity ? Number(boxCapacity) : null,
     palletBoxCapacity: palletBoxCapacity ? Number(palletBoxCapacity) : null,
     unitPrice: unitPrice ? unitPrice.replace(",", ".") : null,
-    egaisCode: egaisCode ? egaisCode : null,
+    ...(includeEgais && isEgaisApplicable(Number(chzProductGroupCode))
+      ? { egaisCode: egaisCode || null }
+      : {}),
     shelfLifeDays: shelfLifeDays ? Number(shelfLifeDays) : null,
     defaultCounterpartyId: defaultCounterpartyId ? defaultCounterpartyId : null,
     ...(mode === "edit" ? { archived: values.archived } : {}),

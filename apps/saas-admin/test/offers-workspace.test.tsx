@@ -1,7 +1,11 @@
-import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OfferWorkspaceV2 as OfferWorkspace } from "@markiro/platform-contracts";
+import i18n from "../src/i18n/index.js";
+import { ThemeProvider } from "@markiro/ui";
+import { MemoryRouter } from "react-router";
+import { OfferReadiness } from "../src/pages/offers/OfferReadiness.js";
 import {
   ACCOUNTANT_ME,
   TENANT_ID,
@@ -13,6 +17,27 @@ import {
 const ID = "91111111-1111-4111-8111-111111111111";
 const NOW = "2026-09-10T10:00:00.000Z";
 const fingerprint = "a".repeat(64);
+const party = {
+  kind: "legal_entity" as const,
+  fullName: "Test seller",
+  displayName: "Seller",
+  inn: "7707083893",
+  kpp: "773601001",
+  ogrn: "1027700132195",
+  ogrnip: null,
+  legalAddressRaw: "Moscow",
+  legalAddress: null,
+  actualSameAsLegal: true,
+  actualAddressRaw: null,
+  actualAddress: null,
+  postalSameAsLegal: true,
+  postalAddressRaw: null,
+  postalAddress: null,
+  contact: null,
+  revision: 1,
+  confirmedAt: NOW,
+  taxPolicy: { kind: "without_vat" as const, regime: "other" as const },
+};
 function workspace(): OfferWorkspace {
   return {
     offer: {
@@ -53,13 +78,35 @@ function workspace(): OfferWorkspace {
           priceOverrideReason: null,
           lineTotal: "12500.50",
           activationPolicy: null,
-          commercialTerms: null,
+          commercialTerms: {
+            version: 1,
+            subject: "service",
+            documentNameRu: "Настройка линии",
+            documentNameEn: "Line setup",
+            sellerPolicyRevision: 1,
+            billingPeriod: null,
+            billingTimezone: null,
+            activationRule: null,
+          },
           createdAt: NOW,
         },
       ],
     },
     tenant: { id: TENANT_ID, name: "Молочная мастерская", slug: "dairy-workshop" },
-    parties: { seller: null, buyer: null, sellerBankAccount: null, buyerBankAccount: null },
+    parties: {
+      seller: party,
+      buyer: { ...party, fullName: "Test buyer" },
+      sellerBankAccount: {
+        id: ID,
+        label: "Main",
+        settlementAccount: "40702810900000000001",
+        bic: "044525225",
+        bankName: "Bank",
+        correspondentAccount: "30101810400000000225",
+        currency: "RUB",
+      },
+      buyerBankAccount: null,
+    },
     revisions: [],
     decision: null,
     documents: [],
@@ -84,12 +131,14 @@ function install(
     canWrite = true,
     failRevise = false,
     workspaceStatuses = [200],
+    saveStatuses = [200],
   } = {},
 ) {
   const calls: Array<{ path: string; method: string; body: unknown; key: string | null }> = [];
   let previews = 0;
   let workspaceReads = 0;
   let payments = 0;
+  let saves = 0;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -101,6 +150,17 @@ function install(
         body: init.body ? JSON.parse(String(init.body)) : null,
         key: new Headers(init.headers).get("Idempotency-Key"),
       });
+      if (path.endsWith("/catalog/items")) return jsonResponse(200, { items: [] });
+      if (path.endsWith("/billing/operator/accounts")) return jsonResponse(200, []);
+      if (path.endsWith("/draft") && method === "PATCH") {
+        const status = saveStatuses[saves++] ?? 200;
+        return jsonResponse(
+          status,
+          status === 200
+            ? data.offer
+            : { code: status === 409 ? "offer_draft_changed" : "unavailable" },
+        );
+      }
       if (path.endsWith("/me"))
         return jsonResponse(
           200,
@@ -178,9 +238,10 @@ function install(
   );
   return calls;
 }
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.unstubAllGlobals();
+  await i18n.changeLanguage("ru");
 });
 
 describe("offers workspace", () => {
@@ -213,7 +274,7 @@ describe("offers workspace", () => {
     const workspaceFetch = vi
       .mocked(fetch)
       .mock.calls.find(([path]) => String(path).endsWith("/workspace"));
-    expect(new Headers(workspaceFetch?.[1]?.headers).get("X-Markiro-Commercial-Version")).toBe("2");
+    expect(new Headers(workspaceFetch?.[1]?.headers).get("X-Markiro-Commercial-Version")).toBe("3");
   });
   it("locks competing actions until the exact ambiguous payment attempt succeeds", async () => {
     const data = workspace();
@@ -450,7 +511,7 @@ describe("offers workspace", () => {
     expect(attempts[0]?.body).toHaveProperty("idempotencyKey");
     expect(attempts[1]?.body).toEqual(attempts[0]?.body);
   });
-  it("renders historical party facts and hides actions disallowed by the workspace", async () => {
+  it("renders historical party facts and explains actions disallowed by the workspace", async () => {
     const data = workspace();
     data.parties.buyer = {
       kind: "legal_entity",
@@ -477,7 +538,9 @@ describe("offers workspace", () => {
     renderSaasApp({ initialEntry: `/offers/${ID}` });
     expect(await screen.findByText("ООО «Исторический покупатель»")).toBeDefined();
     expect(screen.getByText("Москва, улица Тестовая, 8")).toBeDefined();
-    expect(screen.queryByRole("button", { name: "Выпустить предложение" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Выпустить предложение" }).hasAttribute("disabled"),
+    ).toBe(true);
     expect(calls.some((c) => c.path.includes("/billing-profile"))).toBe(false);
   });
   it("keeps clean HTML available when PDF failed and confirms a separate signed variant", async () => {
@@ -633,3 +696,199 @@ describe("offers workspace", () => {
     expect(attempts[1]?.key).toBe(attempts[0]?.key);
   });
 });
+
+it("keeps blocked draft actions visible and provides an edit route", async () => {
+  const data = workspace();
+  data.actions.publish = false;
+  data.offer.lines = data.offer.lines.map((line) => ({ ...line, commercialTerms: null }));
+  data.parties = { seller: null, buyer: null, sellerBankAccount: null, buyerBankAccount: null };
+  install(data);
+  renderSaasApp({ initialEntry: `/offers/${ID}` });
+  expect((await screen.findByRole("link", { name: "Редактировать" })).getAttribute("href")).toBe(
+    `/offers/${ID}/edit`,
+  );
+  expect(
+    screen.getByRole("button", { name: "Выпустить предложение" }).hasAttribute("disabled"),
+  ).toBe(true);
+  expect(screen.getByText(/Подтвердите реквизиты продавца/)).toBeDefined();
+  expect(screen.getByText(/Не заполнены условия позиции/)).toBeDefined();
+});
+
+it.each([false, true])(
+  "shows corrective edit links only with write access: %s",
+  async (canWrite) => {
+    const data = workspace();
+    data.actions.publish = false;
+    data.offer.expiresAt = "2020-01-01T00:00:00.000Z";
+    data.parties.seller = { ...party, revision: 2 };
+    data.parties.sellerBankAccount = null;
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <OfferReadiness workspace={data} canWrite={canWrite} />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    await screen.findByText(i18n.t("offerWorkspace.expiredDraft"));
+    expect(screen.getByText(i18n.t("commercial.errors.commercial_review_stale"))).toBeDefined();
+    const correctiveLinks = within(screen.getByRole("alert")).getAllByRole("link");
+    expect(
+      correctiveLinks.filter((link) => link.getAttribute("href") === `/offers/${ID}/edit`),
+    ).toHaveLength(canWrite ? 2 : 0);
+    expect(
+      correctiveLinks.some((link) => link.getAttribute("href") === "/settings/organization"),
+    ).toBe(true);
+  },
+);
+
+it.each([
+  ["ru", ""],
+  ["en", ""],
+  ["ru", "/edit"],
+  ["en", "/edit"],
+])("localizes missing line warnings in %s on the offer route %s", async (language, suffix) => {
+  await i18n.changeLanguage(language);
+  const data = workspace();
+  data.actions.publish = false;
+  data.offer.lines = data.offer.lines.map((line) => ({ ...line, commercialTerms: null }));
+  install(data);
+  renderSaasApp({ initialEntry: `/offers/${ID}${suffix}` });
+  await screen.findByText(
+    i18n.t("offerWorkspace.lineTermsMissing", {
+      name: language === "en" ? "Line setup" : "Настройка линии",
+    }),
+  );
+});
+
+it("edits saved values without hydrating the current catalog and keeps input on conflict", async () => {
+  const calls = install(workspace(), { saveStatuses: [409] });
+  const user = userEvent.setup();
+  renderSaasApp({ initialEntry: `/offers/${ID}/edit` });
+  const price = await screen.findByRole("textbox", { name: "Цена Настройка линии" });
+  expect(price.getAttribute("value")).toBe("6250.25");
+  await user.clear(price);
+  await user.type(price, "7000");
+  await user.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+  await screen.findByText(/Черновик уже изменён/);
+  expect(price.getAttribute("value")).toBe("7000.00");
+  const saved = calls.find((call) => call.method === "PATCH");
+  expect(saved?.body).toMatchObject({
+    expectedUpdatedAt: NOW,
+    termsMarkdown: "Поставка в течение 14 дней",
+    lines: [
+      {
+        quantity: 2,
+        agreedUnitPrice: "7000.00",
+        nameRu: "Настройка линии",
+        commercialTerms: { subject: "service" },
+      },
+    ],
+  });
+  expect(saved?.body).not.toHaveProperty("tenantId");
+  const patch = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === "PATCH");
+  expect(new Headers(patch?.[1]?.headers).get("X-Markiro-Commercial-Version")).toBe("3");
+});
+
+it("retries an uncertain save with exactly the same payload and returns to the saved offer", async () => {
+  const calls = install(workspace(), { saveStatuses: [503, 200] });
+  const user = userEvent.setup();
+  const app = renderSaasApp({ initialEntry: `/offers/${ID}/edit` });
+  await user.click(await screen.findByRole("button", { name: "Сохранить изменения" }));
+  await user.click(await screen.findByRole("button", { name: "Повторить точно эту попытку" }));
+  await waitFor(() => expect(app.router.state.location.pathname).toBe(`/offers/${ID}`));
+  const attempts = calls.filter((call) => call.method === "PATCH");
+  expect(attempts).toHaveLength(2);
+  expect(attempts[1]?.body).toEqual(attempts[0]?.body);
+});
+
+it("preserves entered values and the original concurrency token after a background refresh", async () => {
+  const data = workspace();
+  const calls = install(data, { saveStatuses: [409] });
+  const user = userEvent.setup();
+  const app = renderSaasApp({ initialEntry: `/offers/${ID}/edit` });
+  const price = await screen.findByRole("textbox", { name: "Цена Настройка линии" });
+  await user.clear(price);
+  await user.type(price, "7100");
+  data.offer.updatedAt = "2026-09-11T15:00:00.000Z";
+  data.offer.lines[0]!.agreedUnitPrice = "9000.00";
+  await act(async () => {
+    await app.queryClient.invalidateQueries({ queryKey: ["platform", "offers", ID, "workspace"] });
+  });
+  expect(screen.getByRole("textbox", { name: "Цена Настройка линии" }).getAttribute("value")).toBe(
+    "7100",
+  );
+  await user.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+  await screen.findByText(/Черновик уже изменён/);
+  expect(calls.find((call) => call.method === "PATCH")?.body).toMatchObject({
+    expectedUpdatedAt: NOW,
+    lines: [{ agreedUnitPrice: "7100.00" }],
+  });
+});
+
+it("keeps entered edits when an uncertain retry is rejected", async () => {
+  install(workspace(), { saveStatuses: [503, 409] });
+  const user = userEvent.setup();
+  renderSaasApp({ initialEntry: `/offers/${ID}/edit` });
+  const price = await screen.findByRole("textbox", { name: "Цена Настройка линии" });
+  await user.clear(price);
+  await user.type(price, "7100");
+  await user.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+  await user.click(await screen.findByRole("button", { name: "Повторить точно эту попытку" }));
+  await screen.findByText(/Черновик уже изменён/);
+  expect(screen.getByRole("textbox", { name: "Цена Настройка линии" }).getAttribute("value")).toBe(
+    "7100.00",
+  );
+});
+
+it("blocks publication when confirmed seller details lack a tax policy", async () => {
+  const data = workspace();
+  data.parties.seller = { ...party, taxPolicy: null };
+  install(data);
+  renderSaasApp({ initialEntry: `/offers/${ID}` });
+  await screen.findByText(/Настройте налоговую политику/);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Предпросмотр" }));
+  await screen.findByTitle("Предпросмотр предложения");
+  expect(
+    screen.getByRole("button", { name: "Выпустить предложение" }).hasAttribute("disabled"),
+  ).toBe(true);
+});
+
+it.each(["catalog", "accounts"])(
+  "keeps edits after a failed background %s refresh",
+  async (source) => {
+    install(workspace());
+    const originalFetch = fetch;
+    let fail = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (
+          fail &&
+          (source === "catalog" ? path.includes("/catalog/items") : path.endsWith("/accounts"))
+        )
+          return Promise.resolve(jsonResponse(503, { code: "temporarily_unavailable" }));
+        return originalFetch(input, init);
+      }),
+    );
+    const user = userEvent.setup();
+    const app = renderSaasApp({ initialEntry: `/offers/${ID}/edit` });
+    const price = await screen.findByRole("textbox", { name: "Цена Настройка линии" });
+    await user.clear(price);
+    await user.type(price, "7200");
+    fail = true;
+    await act(async () => {
+      await app.queryClient.invalidateQueries({
+        queryKey:
+          source === "catalog"
+            ? ["platform", "catalog", "document-picker"]
+            : ["platform", "billing", "operator", "accounts"],
+      });
+    });
+    await screen.findByText("Не удалось загрузить предложения");
+    expect(
+      screen.getByRole("textbox", { name: "Цена Настройка линии" }).getAttribute("value"),
+    ).toBe("7200");
+  },
+);

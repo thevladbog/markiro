@@ -307,8 +307,12 @@ test("CI overlay supplies only local image selectors and pinned test dependencie
   assert.match(compose, /image: postgres:17-alpine/);
   assert.match(compose, /image: axllent\/mailpit:v1\.30\.0/);
   assert.match(compose, /MP_DATABASE: \/tmp\/mailpit\.db/);
-  assert.match(compose, /image: minio\/minio:RELEASE\.2025-09-07T16-13-09Z/);
-  assert.match(compose, /image: minio\/mc:RELEASE\.2025-08-13T08-35-41Z/);
+  // quay.io, not Docker Hub: `docker pull minio/minio` is denied for every tag
+  // now. The registry is pinned here as deliberately as the release is, because
+  // a silent move to an unpinned or unexpected origin is exactly what this
+  // contract exists to catch.
+  assert.match(compose, /image: quay\.io\/minio\/minio:RELEASE\.2025-09-07T16-13-09Z/);
+  assert.match(compose, /image: quay\.io\/minio\/mc:RELEASE\.2025-08-13T08-35-41Z/);
   assert.match(compose, /^  minio-init:$/m);
   assert.doesNotMatch(compose, /^\s+ports:/m);
   assert.doesNotMatch(compose, /read_only: false/);

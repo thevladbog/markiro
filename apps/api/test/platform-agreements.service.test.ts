@@ -240,6 +240,96 @@ describe.skipIf(!databaseUrl)("platform agreements on isolated Postgres", () => 
     expect(xml).toContain("Краснодар");
   });
 
+  it("renders the bilingual form when the record asks for it", async () => {
+    const { agreement } = await service.create(actor, {
+      counterparty: COUNTERPARTY,
+      city: "Краснодар",
+      documentForm: "ru_en",
+    });
+    expect(agreement.documentForm).toBe("ru_en");
+    const row = await service.requireAgreement(agreement.id);
+    const document = await documents.renderDraft(actor, row);
+    expect(document.filename).toContain("_ru-en");
+
+    const bytes = stored.get(`agreements/${agreement.id}/draft.docx`);
+    const { unzipSync } = await import("fflate");
+    const xml = new TextDecoder().decode(unzipSync(new Uint8Array(bytes!))["word/document.xml"]!);
+    // Both columns carry the number; the Russian accounting form appears once.
+    expect(xml.split(agreement.number).length - 1).toBeGreaterThanOrEqual(2);
+    expect(xml.split("Форма счёта на оплату").length - 1).toBe(1);
+  });
+
+  it("defaults to the Russian form and names the file without a suffix", async () => {
+    const { agreement } = await service.create(actor, { counterparty: COUNTERPARTY });
+    expect(agreement.documentForm).toBe("ru");
+    const row = await service.requireAgreement(agreement.id);
+    const document = await documents.renderDraft(actor, row);
+    expect(document.filename).not.toContain("_ru-en");
+  });
+
+  it("replaces the generated document when the form changes", async () => {
+    const { agreement } = await service.create(actor, { counterparty: COUNTERPARTY });
+    const before = await documents.renderDraft(actor, await service.requireAgreement(agreement.id));
+    expect(before.stale).toBe(false);
+
+    const updated = await service.update(actor, agreement.id, { documentForm: "ru_en" });
+    // The edit does not re-render, so the stored file now contradicts the
+    // record — and says so instead of looking clean.
+    expect(updated.agreement.documents.find((doc) => doc.kind === "draft")?.stale).toBe(true);
+
+    const after = await documents.renderDraft(actor, await service.requireAgreement(agreement.id));
+    // One agreement, one draft original: the row is reused, the bytes are not.
+    expect(after.id).toBe(before.id);
+    expect(after.sha256).not.toBe(before.sha256);
+    expect(after.stale).toBe(false);
+  });
+
+  it("marks the draft stale after any edit that changes the printed document", async () => {
+    for (const edit of [
+      { number: "МКР-2026-9001" },
+      { city: "Сочи" },
+      { conclusionDate: "2026-10-01" },
+      { documentForm: "ru_en" as const },
+      { counterparty: { ...COUNTERPARTY, name: "ООО «Другое»" } },
+    ]) {
+      const { agreement } = await service.create(actor, { counterparty: COUNTERPARTY });
+      await documents.renderDraft(actor, await service.requireAgreement(agreement.id));
+      const updated = await service.update(actor, agreement.id, edit);
+      const draft = updated.agreement.documents.find((doc) => doc.kind === "draft");
+      // A rule that covered only the field added last would be worse than no
+      // rule: four fields of five would quietly disagree with the record.
+      expect(draft?.stale, `editing ${Object.keys(edit)[0]} left the draft looking clean`).toBe(
+        true,
+      );
+    }
+  });
+
+  it("leaves the draft clean when an edit cannot change the printed document", async () => {
+    const { agreement } = await service.create(actor, { counterparty: COUNTERPARTY });
+    await documents.renderDraft(actor, await service.requireAgreement(agreement.id));
+    // Re-submitting the same values must not invent staleness; neither must a
+    // tenant link, which the renderer never reads.
+    const same = await service.update(actor, agreement.id, { counterparty: COUNTERPARTY });
+    expect(same.agreement.documents.find((doc) => doc.kind === "draft")?.stale).toBe(false);
+  });
+
+  it("never calls an attachment stale", async () => {
+    const { agreement } = await service.create(actor, { counterparty: COUNTERPARTY });
+    const uploaded = await documents.uploadAttachment(
+      actor,
+      await service.requireAgreement(agreement.id),
+      {
+        originalname: "scan.pdf",
+        mimetype: "application/pdf",
+        buffer: Buffer.from("%PDF-1.4 scan"),
+      },
+    );
+    expect(uploaded.stale).toBe(false);
+    await service.update(actor, agreement.id, { city: "Сочи" });
+    const detail = await service.detail(agreement.id);
+    expect(detail.agreement.documents.find((doc) => doc.kind === "attachment")?.stale).toBe(false);
+  });
+
   it("requires a reason to terminate and records it", async () => {
     const { agreement } = await service.create(actor, { counterparty: COUNTERPARTY });
     await service.transition(actor, agreement.id, "sent", undefined);

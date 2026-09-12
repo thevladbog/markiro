@@ -134,7 +134,7 @@ function appRouteElements() {
           <Route
             path=":productId/edit"
             element={
-              <RequireCapability capability={C.OPERATIONS_WRITE}>
+              <RequireCapability capability={C.OPERATIONS_READ}>
                 <ProductPanelRoute mode="edit" />
               </RequireCapability>
             }

@@ -29,6 +29,7 @@ function renderCreatePanel(initialEntries = ["/catalog", "/catalog/new"]) {
     createRoutesFromElements(
       <Route path="/catalog" element={<CatalogPage />}>
         <Route path="new" element={<ProductPanelRoute mode="create" />} />
+        <Route path=":productId/edit" element={<ProductPanelRoute mode="edit" />} />
       </Route>,
     ),
     { initialEntries, initialIndex: initialEntries.length - 1 },
@@ -250,7 +251,7 @@ it("blocks every dismissal and duplicate submit while product creation is pendin
       status: "draft",
     }),
   );
-  await waitFor(() => expect(router.state.location.pathname).toBe("/catalog"));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/catalog/p-new/edit"));
 });
 
 it("keeps a failed create panel open and retries all required data", async () => {
