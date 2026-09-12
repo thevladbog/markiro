@@ -1060,7 +1060,7 @@ export class ShiftsService {
           data.boxLabelTemplateId !== undefined
             ? data.boxLabelTemplateId
             : current.boxLabelTemplateId;
-        const palletLabelTemplateId =
+        let palletLabelTemplateId =
           data.palletLabelTemplateId !== undefined
             ? data.palletLabelTemplateId
             : current.palletLabelTemplateId;
@@ -1073,6 +1073,36 @@ export class ShiftsService {
           data.palletBoxCapacity !== undefined ? data.palletBoxCapacity : current.palletBoxCapacity;
         const palletsEnabled =
           data.palletsEnabled !== undefined ? data.palletsEnabled : current.palletsEnabled;
+
+        // `createShift` resolves category default -> organisation default ->
+        // none at the moment pallets become enabled. Turning them on by PATCH
+        // is the same moment and must resolve the same way: without this, a
+        // planned shift edited to enable pallets keeps a null
+        // `palletLabelTemplateId` (an omitted field means "keep current"),
+        // `assertPalletConfiguration` checks only capacities, and the shift
+        // goes on to close pallets and burn pallet serials with no template
+        // to print a pallet label from.
+        //
+        // Deliberately scoped to the off -> ON transition and to a template
+        // that is still null: an explicit `palletLabelTemplateId: null`
+        // (a cleared template on a shift whose pallets are already on) is an
+        // operator's decision, and a later unrelated PATCH must not quietly
+        // resurrect the organisation default over it.
+        if (
+          data.palletLabelTemplateId === undefined &&
+          palletsEnabled &&
+          !current.palletsEnabled &&
+          palletLabelTemplateId === null
+        ) {
+          const product = await this.findProductRow(tenantId, current.productId);
+          palletLabelTemplateId = (
+            await resolveDefaultPalletLabelTemplate(
+              tx,
+              tenantId,
+              product?.chzProductGroupCode ?? null,
+            )
+          ).templateId;
+        }
 
         assertPalletConfiguration({ mode, palletsEnabled, boxCapacity, palletBoxCapacity });
         this.assertCapacityRules(mode, boxCapacity);
@@ -1422,7 +1452,22 @@ export class ShiftsService {
       plannedDate: shift.plannedDate,
       productionDate: shift.productionDate,
       boxCapacity: shift.boxCapacity,
-      palletBoxCapacity: shift.palletBoxCapacity,
+      // The BUNDLE's capacity, unlike the cabinet shift's, is the device's
+      // pallets-on/off signal: both `close-box.ts` and `CloseBox.kt` decide
+      // whether a closed box joins a pallet purely from
+      // `palletBoxCapacity !== null`, with no separate flag. The server's own
+      // signal is `shifts.pallets_enabled`, and the two diverge on an
+      // ordinary path: with pallets off the admin omits `palletBoxCapacity`,
+      // `createShift` reads an omitted value as "take the product's", and
+      // migration 0130 backfilled `products.pallet_box_capacity` broadly --
+      // so a pallets-DISABLED shift routinely carries a capacity. Emitting it
+      // would make both devices show the pallet strip, join boxes to local
+      // pallets and send `devicePalletId`, creating server pallet rows that
+      // can never be numbered (`bundleSscc` gates `palletSscc` on
+      // `palletsEnabled`). Gating here makes the device's signal BE the
+      // server's; `palletsEnabled` still rides along unchanged for a consumer
+      // that wants the flag itself.
+      palletBoxCapacity: shift.palletsEnabled ? shift.palletBoxCapacity : null,
       palletsEnabled: shift.palletsEnabled,
       createdFrom: shift.createdFrom,
       openedAt: shift.openedAt,

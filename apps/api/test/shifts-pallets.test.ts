@@ -36,6 +36,7 @@ interface ShiftLike {
 
 interface ShiftBundleLike {
   palletLabelTemplate: { id: string; name: string; spec: { elements: unknown[] } } | null;
+  shift: { palletBoxCapacity: number | null; palletsEnabled: boolean };
 }
 
 describe.skipIf(!ready)("shift pallet configuration (task 8)", () => {
@@ -362,6 +363,118 @@ describe.skipIf(!ready)("shift pallet configuration (task 8)", () => {
     await agent.post(`/shifts/${shiftWithoutPallets.id}/open`).expect(200);
 
     expect((await getBundle(shiftWithoutPallets.id, device.apiKey)).palletLabelTemplate).toBeNull();
+  });
+
+  it("ships no pallet capacity to a device when the shift's pallets are off", async () => {
+    // Both devices read `palletBoxCapacity !== null` as THE pallets-on
+    // signal (apps/station/src/lib/close-box.ts, CloseBox.kt) -- there is no
+    // separate flag on that path. The server's signal is
+    // `shifts.pallets_enabled`, and the two diverge on an ordinary path: the
+    // admin omits `palletBoxCapacity` when pallets are off, `createShift`
+    // reads an omitted value as "take the product's", and migration 0130
+    // backfilled `products.pallet_box_capacity` broadly. A device handed the
+    // prefilled capacity would show the pallet strip, join boxes to local
+    // pallets and send `devicePalletId` for a pallets-DISABLED shift,
+    // creating server pallet rows that can never be numbered.
+    const { agent, productId } = await setupOrg(); // the fixture product carries palletBoxCapacity 12
+    const device = await createTestStationDevice(app!, agent, "Pallets-off terminal");
+
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "aggregation", palletsEnabled: false })
+      .expect(201);
+    const shiftId = created.body.id as string;
+    // The precondition, asserted rather than assumed: the cabinet shift DOES
+    // carry the product-prefilled capacity even with pallets off.
+    expect((created.body as ShiftLike).palletBoxCapacity).toBe(12);
+
+    await agent.post(`/shifts/${shiftId}/open`).expect(200);
+
+    const bundle = await getBundle(shiftId, device.apiKey);
+    expect(bundle.shift.palletsEnabled).toBe(false);
+    expect(bundle.shift.palletBoxCapacity).toBeNull();
+  });
+
+  it("ships the pallet capacity to a device when the shift's pallets are on", async () => {
+    const { agent, tenantId, productId } = await setupOrg();
+    await setOrgDefaultPalletTemplate(tenantId, await seedPalletLabelTemplate(tenantId));
+    const device = await createTestStationDevice(app!, agent, "Pallets-on terminal");
+
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "aggregation", palletsEnabled: true })
+      .expect(201);
+    const shiftId = created.body.id as string;
+    await agent.post(`/shifts/${shiftId}/open`).expect(200);
+
+    const bundle = await getBundle(shiftId, device.apiKey);
+    expect(bundle.shift.palletsEnabled).toBe(true);
+    expect(bundle.shift.palletBoxCapacity).toBe(12);
+  });
+
+  it("resolves the pallet template default when an update turns pallets on", async () => {
+    // `createShift` resolves category -> organisation -> none the moment
+    // pallets become enabled. Turning them on by PATCH is the same moment:
+    // without resolving here too, the shift closes pallets and burns pallet
+    // serials with no template to print a pallet label from
+    // (`assertPalletConfiguration` checks only capacities).
+    const { agent, tenantId, productId } = await setupOrg();
+    const orgTemplateId = await seedPalletLabelTemplate(tenantId, "Org Pallet Default");
+    const categoryTemplateId = await seedPalletLabelTemplate(tenantId, "Category 8 Pallet Default");
+    await setOrgDefaultPalletTemplate(tenantId, orgTemplateId);
+
+    const planned = await postShift(agent, productId, {
+      mode: "aggregation",
+      palletsEnabled: false,
+    });
+    expect(planned.palletLabelTemplateId).toBeNull();
+
+    const enabled = await agent
+      .patch(`/shifts/${planned.id}`)
+      .send({ palletsEnabled: true, palletBoxCapacity: 12 })
+      .expect(200);
+    expect((enabled.body as ShiftLike).palletLabelTemplateId).toBe(orgTemplateId);
+
+    // The category default still wins over the organisation one, exactly as
+    // it does at creation.
+    const second = await postShift(agent, productId, {
+      mode: "aggregation",
+      palletsEnabled: false,
+    });
+    await setCategoryPalletDefault(tenantId, 8, categoryTemplateId);
+    const byCategory = await agent
+      .patch(`/shifts/${second.id}`)
+      .send({ palletsEnabled: true, palletBoxCapacity: 12 })
+      .expect(200);
+    expect((byCategory.body as ShiftLike).palletLabelTemplateId).toBe(categoryTemplateId);
+  });
+
+  it("does not resurrect a cleared pallet template on a later unrelated update", async () => {
+    // The other half of the rule above: resolution happens at the off -> ON
+    // transition only. An operator who deliberately cleared the template on a
+    // pallets-enabled shift must not have the organisation default silently
+    // written back by the next PATCH of an unrelated field.
+    const { agent, tenantId, productId } = await setupOrg();
+    await setOrgDefaultPalletTemplate(tenantId, await seedPalletLabelTemplate(tenantId));
+
+    const planned = await postShift(agent, productId, {
+      mode: "aggregation",
+      palletsEnabled: true,
+      palletBoxCapacity: 12,
+    });
+    expect(planned.palletLabelTemplateId).not.toBeNull();
+
+    const cleared = await agent
+      .patch(`/shifts/${planned.id}`)
+      .send({ palletLabelTemplateId: null })
+      .expect(200);
+    expect((cleared.body as ShiftLike).palletLabelTemplateId).toBeNull();
+
+    const unrelated = await agent
+      .patch(`/shifts/${planned.id}`)
+      .send({ plannedQty: 500 })
+      .expect(200);
+    expect((unrelated.body as ShiftLike).palletLabelTemplateId).toBeNull();
   });
 
   it("refuses opening a planned shift whose pallets are enabled with no boxes-per-pallet count", async () => {
