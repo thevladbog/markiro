@@ -158,13 +158,20 @@ terms containing explicit new-module flags, effects or lifecycle policy referenc
 checks new ID-only selections within the owning transaction before committing a write.
 
 V3 reads retain legacy null mapping. New plan drafts require all four explicit module values.
-Draft preparation can proceed without an approved lifecycle policy, but V3 publication cannot.
+Following the product-owner correction on 2026-09-12, plans, add-ons and services can be
+created and published without an additional lifecycle policy, then used in offers and invoices.
+Select **No additional rules** in the catalog editor to use current subscription rules.
+This does not create or approve a policy or activate candidate P1 module restrictions.
+The four explicit plan module choices, seller tax policy, document names and commercial
+validation remain required. If a policy is selected, publication checks its approval and hash.
 Editor context offers only approved policy references with valid canonical payload digests,
 identified by readable policy key and version. P1A supplies neither an approval endpoint nor an
 approved production policy seed.
 
 Publication review binds the exact catalog version, draft timestamp, seller policy revision and
-lifecycle policy ID/version/hash. `commercial_review_stale` requires a fresh review. An old
+lifecycle policy ID/version/hash (all three are null when no policy is selected).
+Partial policy identities are invalid. Changing a policy selection after review also makes
+the proof stale. `commercial_review_stale` requires a fresh review. An old
 client cannot publish new conditions it cannot represent. The server remains authoritative even
 when a browser previously displayed a valid review.
 

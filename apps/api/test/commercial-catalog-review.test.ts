@@ -135,10 +135,7 @@ describe.skipIf(!ready)("commercial catalog publication review", () => {
     expect(changed.plan).toMatchObject(input.plan);
     await profiles.setOperator(actor, seller);
     const review = await catalog.review(actor, code, version.id, 3);
-    expect(review.errors).toContainEqual({
-      code: "lifecycle_policy_required",
-      path: "lifecyclePolicyId",
-    });
+    expect(review.errors).toEqual([]);
     await noPublication(version.id);
   });
 

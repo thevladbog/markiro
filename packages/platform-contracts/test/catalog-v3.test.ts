@@ -138,9 +138,7 @@ describe("strict negotiated commercial V3", () => {
     expect(
       c.platformCatalogV3Contracts.reviewVersion.response.parse({ identity, errors: [] }).identity,
     ).toEqual(identity);
-    expect(c.platformCatalogV3Contracts.publishVersion.body.safeParse(identity).success).toBe(
-      false,
-    );
+    expect(c.platformCatalogV3Contracts.publishVersion.body.safeParse(identity).success).toBe(true);
     expect(
       c.platformCatalogV2Contracts.reviewVersion.response.safeParse({ identity, errors: [] })
         .success,
@@ -163,7 +161,7 @@ describe("strict negotiated commercial V3", () => {
       }).success,
     ).toBe(false);
   });
-  it("requires a lifecycle reference and explicit plan before V3 publication", () => {
+  it("accepts publication without a policy but rejects partial policy identities and unmapped plans", () => {
     const body = {
       catalogVersionId: id,
       draftUpdatedAt: "2026-09-11T00:00:00.000Z",
@@ -173,6 +171,15 @@ describe("strict negotiated commercial V3", () => {
       lifecyclePolicyHash: "a".repeat(64),
     };
     expect(c.platformCatalogV3Contracts.publishVersion.body.parse(body)).toEqual(body);
+    const withoutPolicy = {
+      ...body,
+      lifecyclePolicyId: null,
+      lifecyclePolicyVersion: null,
+      lifecyclePolicyHash: null,
+    };
+    expect(c.platformCatalogV3Contracts.publishVersion.body.parse(withoutPolicy)).toEqual(
+      withoutPolicy,
+    );
     expect(
       c.platformCatalogV3Contracts.publishVersion.body.safeParse({
         ...body,
@@ -184,7 +191,7 @@ describe("strict negotiated commercial V3", () => {
         ...response,
         status: "published",
       }).success,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       c.platformCatalogV3Contracts.publishVersion.response.safeParse({
         ...response,

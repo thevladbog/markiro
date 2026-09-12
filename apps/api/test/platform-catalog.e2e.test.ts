@@ -526,9 +526,17 @@ describe.skipIf(!ready)("platform catalog", () => {
       .set("X-Markiro-Commercial-Version", "3")
       .send({})
       .expect(200);
-    expect(review.body.errors).toContainEqual({
-      code: "lifecycle_policy_required",
-      path: "lifecyclePolicyId",
+    expect(review.body.errors).toEqual([]);
+    const published = await admin
+      .post(`${path}/${value.id}/publish`)
+      .set("X-Markiro-Commercial-Version", "3")
+      .send(review.body.identity)
+      .expect(200);
+    expect(catalogVersionV3Schema.parse(published.body)).toMatchObject({
+      id: value.id,
+      status: "published",
+      lifecyclePolicyId: null,
+      plan: plan.plan,
     });
   });
 

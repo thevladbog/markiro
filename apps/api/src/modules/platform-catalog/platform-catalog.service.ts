@@ -609,9 +609,9 @@ export class PlatformCatalogService {
         ].some((flag) => flag === null)
       )
         errors.push({ code: "plan_mapping_required", path: "plan" });
-      if (!version.lifecyclePolicyId)
-        errors.push({ code: "lifecycle_policy_required", path: "lifecyclePolicyId" });
-      else {
+      // Policy-free publication keeps current subscription rules. P1 admission readiness
+      // remains separate; an explicitly selected policy must still be approved and intact.
+      if (version.lifecyclePolicyId) {
         const [policy] = await tx
           .select()
           .from(schema.entitlementLifecyclePolicies)
