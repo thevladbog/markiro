@@ -6,7 +6,11 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { z } from "zod";
 
-import { hasValidCheckDigit, isBoxLabelTemplateEligible } from "@markiro/domain";
+import {
+  hasValidCheckDigit,
+  isBoxLabelTemplateEligible,
+  isPalletLabelTemplateEligible,
+} from "@markiro/domain";
 import {
   Alert,
   Button,
@@ -64,6 +68,9 @@ const profileFormSchema = z.object({
   defaultBoxLabelTemplateId: z.string(),
   /** ЧЗ product-group code (as a string key) → template id; "" means "same as organisation". */
   categoryDefaults: z.record(z.string(), z.string()),
+  defaultPalletLabelTemplateId: z.string(),
+  /** Same shape as `categoryDefaults`, for pallet templates. */
+  categoryPalletDefaults: z.record(z.string(), z.string()),
   gln: z
     .string()
     .trim()
@@ -100,6 +107,8 @@ const CATEGORY_CELL_STYLE = {
 const EMPTY_PROFILE_VALUES: ProfileFormValues = {
   defaultBoxLabelTemplateId: "",
   categoryDefaults: {},
+  defaultPalletLabelTemplateId: "",
+  categoryPalletDefaults: {},
   gln: "",
   inn: "",
   timeZone: "Europe/Moscow",
@@ -141,10 +150,26 @@ function translateFieldError(t: TFunction, message: string | undefined): string 
   return message ? t(message) : undefined;
 }
 
+/** Which of the form's own-dirty fields the caller should translate into a PUT patch. */
+interface ProfileChangedFields {
+  defaultBoxLabelTemplateId: boolean;
+  categoryDefaults: boolean;
+  defaultPalletLabelTemplateId: boolean;
+  categoryPalletDefaults: boolean;
+}
+
+function categoryDefaultsToDto(
+  categoryDefaults: Record<string, string>,
+): Array<{ chzProductGroupCode: number; templateId: string }> {
+  return Object.entries(categoryDefaults)
+    .filter(([, templateId]) => templateId !== "")
+    .map(([code, templateId]) => ({ chzProductGroupCode: Number(code), templateId }))
+    .sort((a, b) => a.chzProductGroupCode - b.chzProductGroupCode);
+}
+
 function toProfileInput(
   values: ProfileFormValues,
-  defaultBoxLabelTemplateIdChanged: boolean,
-  categoryDefaultsChanged: boolean,
+  changed: ProfileChangedFields,
 ): PutOrgProfileInput {
   const gln = values.gln?.trim();
   const inn = values.inn?.trim();
@@ -159,14 +184,19 @@ function toProfileInput(
           .filter(Boolean)
       : [],
   };
-  if (defaultBoxLabelTemplateIdChanged) {
+  if (changed.defaultBoxLabelTemplateId) {
     input.defaultBoxLabelTemplateId = values.defaultBoxLabelTemplateId || null;
   }
-  if (categoryDefaultsChanged) {
-    input.categoryBoxLabelTemplateDefaults = Object.entries(values.categoryDefaults)
-      .filter(([, templateId]) => templateId !== "")
-      .map(([code, templateId]) => ({ chzProductGroupCode: Number(code), templateId }))
-      .sort((a, b) => a.chzProductGroupCode - b.chzProductGroupCode);
+  if (changed.categoryDefaults) {
+    input.categoryBoxLabelTemplateDefaults = categoryDefaultsToDto(values.categoryDefaults);
+  }
+  if (changed.defaultPalletLabelTemplateId) {
+    input.defaultPalletLabelTemplateId = values.defaultPalletLabelTemplateId || null;
+  }
+  if (changed.categoryPalletDefaults) {
+    input.categoryPalletLabelTemplateDefaults = categoryDefaultsToDto(
+      values.categoryPalletDefaults,
+    );
   }
   return input;
 }
@@ -174,6 +204,8 @@ function toProfileInput(
 function toProfileFormValues(profile: {
   defaultBoxLabelTemplateId: string | null;
   categoryBoxLabelTemplateDefaults: Array<{ chzProductGroupCode: number; templateId: string }>;
+  defaultPalletLabelTemplateId: string | null;
+  categoryPalletLabelTemplateDefaults: Array<{ chzProductGroupCode: number; templateId: string }>;
   gln: string | null;
   inn: string | null;
   timeZone: string;
@@ -183,6 +215,13 @@ function toProfileFormValues(profile: {
     defaultBoxLabelTemplateId: profile.defaultBoxLabelTemplateId ?? "",
     categoryDefaults: Object.fromEntries(
       profile.categoryBoxLabelTemplateDefaults.map((item) => [
+        String(item.chzProductGroupCode),
+        item.templateId,
+      ]),
+    ),
+    defaultPalletLabelTemplateId: profile.defaultPalletLabelTemplateId ?? "",
+    categoryPalletDefaults: Object.fromEntries(
+      profile.categoryPalletLabelTemplateDefaults.map((item) => [
         String(item.chzProductGroupCode),
         item.templateId,
       ]),
@@ -226,6 +265,7 @@ export function OrgProfilePage() {
   }, [isProfileDirty, profileQuery.data, resetProfile]);
 
   const defaultBoxLabelTemplateId = watchProfile("defaultBoxLabelTemplateId");
+  const defaultPalletLabelTemplateId = watchProfile("defaultPalletLabelTemplateId");
   const timeZone = watchProfile("timeZone");
   const timeZoneOptions = [
     ...OPERATIONAL_TIME_ZONES,
@@ -235,18 +275,30 @@ export function OrgProfilePage() {
   const groupsQuery = useChzProductGroups();
   const groups = groupsQuery.data ?? [];
   const categoryDefaults = watchProfile("categoryDefaults");
-  // The organisation default must fit every shift, so only enabled
-  // templates for all categories qualify (the list is already enabled-only).
-  const universalTemplates = labelTemplates.filter(
-    (template) =>
-      template.enabled &&
-      template.purpose !== "product_duplicate" &&
-      template.chzProductGroupCodes === null,
+  const categoryPalletDefaults = watchProfile("categoryPalletDefaults");
+  // The organisation default must fit every shift, so only enabled,
+  // purpose-matched, all-category templates qualify -- the same rule
+  // `isBoxLabelTemplateEligible`/`isPalletLabelTemplateEligible` apply to a
+  // single category below, called with `null` (only a `chzProductGroupCodes:
+  // null` template can ever match "no category"). Reusing it here -- rather
+  // than a hand-rolled `purpose !== "product_duplicate"` check -- is what
+  // keeps a pallet template out of the box picker and vice versa: the server
+  // already refuses the mismatch (`LABEL_TEMPLATE_REFERENCE_CONSTRAINTS`), so
+  // the picker must not offer it in the first place.
+  const universalTemplates = labelTemplates.filter((template) =>
+    isBoxLabelTemplateEligible(template, null),
+  );
+  const universalPalletTemplates = labelTemplates.filter((template) =>
+    isPalletLabelTemplateEligible(template, null),
   );
   const savedTemplateIsUnavailable =
     defaultBoxLabelTemplateId !== "" &&
     labelTemplatesQuery.data !== undefined &&
     !universalTemplates.some((template) => template.id === defaultBoxLabelTemplateId);
+  const savedPalletTemplateIsUnavailable =
+    defaultPalletLabelTemplateId !== "" &&
+    labelTemplatesQuery.data !== undefined &&
+    !universalPalletTemplates.some((template) => template.id === defaultPalletLabelTemplateId);
   const labelTemplateOptions = [
     { value: "", label: t("pages.settings.profile.defaultBoxLabelTemplateUnset") },
     ...universalTemplates.map((template) => ({ value: template.id, label: template.name })),
@@ -260,11 +312,25 @@ export function OrgProfilePage() {
         ]
       : []),
   ];
+  const palletLabelTemplateOptions = [
+    { value: "", label: t("pages.settings.profile.defaultPalletLabelTemplateUnset") },
+    ...universalPalletTemplates.map((template) => ({ value: template.id, label: template.name })),
+    ...(savedPalletTemplateIsUnavailable
+      ? [
+          {
+            value: defaultPalletLabelTemplateId,
+            label: t("pages.settings.profile.defaultPalletLabelTemplateStaleOption"),
+            disabled: true,
+          },
+        ]
+      : []),
+  ];
 
   const categoryRows = [
     ...new Set([
       ...(profileQuery.data?.productGroupsInUse ?? []),
       ...Object.keys(categoryDefaults).map(Number),
+      ...Object.keys(categoryPalletDefaults).map(Number),
     ]),
   ]
     .map((code) => ({
@@ -274,14 +340,15 @@ export function OrgProfilePage() {
     .sort((a, b) => a.name.localeCompare(b.name, "ru"));
 
   const submitProfile = handleProfileSubmit(async (values) => {
-    if (savedTemplateIsUnavailable) return;
+    if (savedTemplateIsUnavailable || savedPalletTemplateIsUnavailable) return;
     try {
       const savedProfile = await updateProfile.mutateAsync(
-        toProfileInput(
-          values,
-          profileDirtyFields.defaultBoxLabelTemplateId === true,
-          profileDirtyFields.categoryDefaults !== undefined,
-        ),
+        toProfileInput(values, {
+          defaultBoxLabelTemplateId: profileDirtyFields.defaultBoxLabelTemplateId === true,
+          categoryDefaults: profileDirtyFields.categoryDefaults !== undefined,
+          defaultPalletLabelTemplateId: profileDirtyFields.defaultPalletLabelTemplateId === true,
+          categoryPalletDefaults: profileDirtyFields.categoryPalletDefaults !== undefined,
+        }),
       );
       resetProfile(toProfileFormValues(savedProfile));
       toast("ok", t("pages.settings.profile.toasts.updateSuccess"));
@@ -457,11 +524,134 @@ export function OrgProfilePage() {
                   </table>
                 )}
               </div>
+              <Select
+                label={t("pages.settings.profile.defaultPalletLabelTemplateLabel")}
+                hint={t("pages.settings.profile.defaultPalletLabelTemplateScopeHint")}
+                searchable
+                searchLabel={t("pages.settings.profile.templateSearch")}
+                searchPlaceholder={t("pages.settings.profile.templateSearch")}
+                options={palletLabelTemplateOptions}
+                value={defaultPalletLabelTemplateId}
+                onValueChange={(value) =>
+                  setProfileValue("defaultPalletLabelTemplateId", value, { shouldDirty: true })
+                }
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <Link to="/labels">
+                  {t("pages.settings.profile.defaultPalletLabelTemplateLibraryLink")}
+                </Link>
+                {savedPalletTemplateIsUnavailable ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    loading={labelTemplatesQuery.isFetching}
+                    onClick={() => void labelTemplatesQuery.refetch()}
+                  >
+                    {t("pages.settings.profile.defaultPalletLabelTemplateReload")}
+                  </Button>
+                ) : null}
+              </div>
+              {savedPalletTemplateIsUnavailable ? (
+                <Alert tone="warn">
+                  {t("pages.settings.profile.defaultPalletLabelTemplateStale")}
+                </Alert>
+              ) : null}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <h3 style={{ margin: 0, font: "600 14px/20px var(--font-ui)" }}>
+                  {t("pages.settings.profile.categoryPalletDefaultsTitle")}
+                </h3>
+                <p
+                  style={{ margin: 0, color: "var(--fg-3)", font: "400 13px/18px var(--font-ui)" }}
+                >
+                  {t("pages.settings.profile.categoryPalletDefaultsHint")}
+                </p>
+                {categoryRows.length === 0 ? (
+                  <p
+                    style={{
+                      margin: 0,
+                      color: "var(--fg-3)",
+                      font: "400 13px/18px var(--font-ui)",
+                    }}
+                  >
+                    {t("pages.settings.profile.categoryPalletDefaultsEmpty")}
+                  </p>
+                ) : (
+                  <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                    <thead>
+                      <tr>
+                        <th scope="col" style={CATEGORY_HEADER_STYLE}>
+                          {t("pages.settings.profile.categoryDefaultsColumnCategory")}
+                        </th>
+                        <th scope="col" style={CATEGORY_HEADER_STYLE}>
+                          {t("pages.settings.profile.categoryPalletDefaultsColumnTemplate")}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {categoryRows.map((row) => {
+                        const value = categoryPalletDefaults[String(row.code)] ?? "";
+                        const eligible = labelTemplates.filter((template) =>
+                          isPalletLabelTemplateEligible(template, row.code),
+                        );
+                        const stale =
+                          value !== "" && !eligible.some((template) => template.id === value);
+                        return (
+                          <tr key={row.code}>
+                            <td style={CATEGORY_CELL_STYLE}>{row.name}</td>
+                            <td style={CATEGORY_CELL_STYLE}>
+                              <Select
+                                aria-label={t(
+                                  "pages.settings.profile.categoryPalletDefaultsRowLabel",
+                                  {
+                                    category: row.name,
+                                  },
+                                )}
+                                searchable
+                                searchLabel={t("pages.settings.profile.templateSearch")}
+                                searchPlaceholder={t("pages.settings.profile.templateSearch")}
+                                options={[
+                                  {
+                                    value: "",
+                                    label: t("pages.settings.profile.categoryDefaultInherit"),
+                                  },
+                                  ...eligible.map((template) => ({
+                                    value: template.id,
+                                    label: template.name,
+                                  })),
+                                  ...(stale
+                                    ? [
+                                        {
+                                          value,
+                                          label: t(
+                                            "pages.settings.profile.categoryDefaultStaleOption",
+                                          ),
+                                          disabled: true,
+                                        },
+                                      ]
+                                    : []),
+                                ]}
+                                value={value}
+                                onValueChange={(next) =>
+                                  setProfileValue(
+                                    "categoryPalletDefaults",
+                                    { ...categoryPalletDefaults, [String(row.code)]: next },
+                                    { shouldDirty: true },
+                                  )
+                                }
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
               <div>
                 <Button
                   type="submit"
                   loading={updateProfile.isPending}
-                  disabled={savedTemplateIsUnavailable}
+                  disabled={savedTemplateIsUnavailable || savedPalletTemplateIsUnavailable}
                 >
                   {t("pages.settings.profile.save")}
                 </Button>

@@ -8,6 +8,18 @@ import { OrgProfilePage } from "../src/pages/settings/OrgProfilePage.js";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  // `@markiro/ui`'s `toast()` mounts a singleton viewport directly on
+  // `document.body`, outside the tree `cleanup()` unmounts -- a test that
+  // shows a toast without clicking its own dismiss button (several here only
+  // care that a save happened, not about the toast) leaves it sitting in the
+  // DOM for whichever test runs next. That stray toast can make a later
+  // test's own `findByText("Профиль сохранён")` ambiguous ("multiple
+  // elements") for a reason that has nothing to do with what that test
+  // exercises. Clearing every toast here keeps each test's toast assertions
+  // independent of execution order.
+  for (const button of screen.queryAllByRole("button", { name: "Закрыть" })) {
+    fireEvent.click(button);
+  }
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -46,6 +58,11 @@ const PROFILE = {
     chzProductGroupCode: number;
     templateId: string;
   }>,
+  defaultPalletLabelTemplateId: null as string | null,
+  categoryPalletLabelTemplateDefaults: [] as Array<{
+    chzProductGroupCode: number;
+    templateId: string;
+  }>,
   productGroupsInUse: [] as number[],
 };
 const EMPTY_PROFILE = { ...PROFILE, gln: null, gs1Prefixes: [], inn: null };
@@ -74,6 +91,13 @@ const LABEL_TEMPLATES = [
   {
     id: "11111111-1111-4111-8111-111111111111",
     name: "Короб 100 × 75",
+    // `purpose` is a required field of the real `LabelTemplateSummaryDto`
+    // (post-06d); a fixture that omits it silently falls back to the
+    // domain eligibility helpers' "legacy bundle" rule, which treats an
+    // ABSENT purpose as matching every picker -- that would hide a real box
+    // template showing up in the pallet picker (and vice versa) behind a
+    // mock shape the API no longer sends.
+    purpose: "box" as const,
     widthMm: 100,
     heightMm: 75,
     dpi: 203 as const,
@@ -85,6 +109,7 @@ const LABEL_TEMPLATES = [
   {
     id: "tpl-beer",
     name: "Пиво 58×40",
+    purpose: "box" as const,
     widthMm: 58,
     heightMm: 40,
     dpi: 203 as const,
@@ -92,6 +117,30 @@ const LABEL_TEMPLATES = [
     enabled: true,
     chzProductGroupCodes: [15] as number[] | null,
     updatedAt: "2026-08-15T08:00:00.000Z",
+  },
+  {
+    id: "44444444-4444-4444-8444-444444444444",
+    name: "Паллета 100×150",
+    purpose: "pallet" as const,
+    widthMm: 100,
+    heightMm: 150,
+    dpi: 203 as const,
+    language: "zpl" as const,
+    enabled: true,
+    chzProductGroupCodes: null as number[] | null,
+    updatedAt: "2026-08-16T08:00:00.000Z",
+  },
+  {
+    id: "tpl-pallet-beer",
+    name: "Паллета пиво",
+    purpose: "pallet" as const,
+    widthMm: 100,
+    heightMm: 150,
+    dpi: 203 as const,
+    language: "zpl" as const,
+    enabled: true,
+    chzProductGroupCodes: [15] as number[] | null,
+    updatedAt: "2026-08-17T08:00:00.000Z",
   },
 ];
 const PRODUCT_GROUPS = {
@@ -617,7 +666,15 @@ describe("OrgProfilePage", () => {
     fireEvent.change(inn, { target: { value: savedProfile.inn } });
     fireEvent.change(prefixes, { target: { value: savedProfile.gs1Prefixes.join(", ") } });
     fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
-    await screen.findByText("Профиль сохранён");
+    // Dismissed like every other save toast in this file (not just awaited):
+    // the toast viewport is a module-level singleton outside the React root,
+    // so `cleanup()` in `afterEach` does not clear it -- an undismissed toast
+    // here would otherwise leak into whichever test runs next and make its
+    // own `findByText("Профиль сохранён")` ambiguous.
+    const successToast = await screen.findByText("Профиль сохранён");
+    const toastStatus = successToast.closest("[role=status]");
+    if (!toastStatus) throw new Error("Profile success toast not found");
+    fireEvent.click(within(toastStatus as HTMLElement).getByRole("button", { name: "Закрыть" }));
 
     fireEvent.change(screen.getByTestId("file-drop-input"), {
       target: { files: [new File(["png"], "logo.png", { type: "image/png" })] },
@@ -1050,4 +1107,255 @@ it("excludes a universal product duplicate from the organisation box default", a
   openSelect(selector);
   expect(await screen.findByRole("option", { name: box.name })).toBeDefined();
   expect(screen.queryByRole("option", { name: "Дубликат на упаковку" })).toBeNull();
+});
+
+/**
+ * The pallet mirror of the box-default tests above (task 32): migration 0137
+ * seeded every tenant a stock pallet template and pointed
+ * `org_profiles.default_pallet_label_template_id` at it, and the server
+ * refuses to disable/delete a template a default still names
+ * (`LABEL_TEMPLATE_IS_DEFAULT`). Without a picker here, that seeded template
+ * was permanently undisableable for every tenant.
+ */
+describe("OrgProfilePage pallet defaults", () => {
+  it("shows the pallet-label default selector, its tenant templates, and the template library link", async () => {
+    vi.stubGlobal("fetch", routeFetch({}));
+
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const selector = await within(profileCard).findByRole("combobox", {
+      name: "Шаблон этикетки паллеты по умолчанию",
+    });
+    expect(selector.textContent).toContain("Не выбран");
+    openSelect(selector);
+    expect(await screen.findByRole("option", { name: "Не выбран" })).toBeDefined();
+    expect(screen.getByRole("option", { name: "Паллета 100×150" })).toBeDefined();
+    fireEvent.keyDown(document.activeElement ?? selector, { key: "Escape" });
+    expect(
+      screen.getByRole("link", { name: "Открыть библиотеку шаблонов паллет" }).getAttribute("href"),
+    ).toBe("/labels");
+  });
+
+  it("saves a selected default pallet-label template UUID", async () => {
+    const palletTemplate = LABEL_TEMPLATES.find(
+      (template) => template.id === "44444444-4444-4444-8444-444444444444",
+    );
+    if (!palletTemplate) throw new Error("Pallet label template fixture is missing");
+    let profile = PROFILE;
+    const fetchMock = routeFetch({
+      profile: (init) => {
+        if (init?.method === "PUT") {
+          profile = { ...profile, defaultPalletLabelTemplateId: palletTemplate.id };
+        }
+        return jsonResponse(200, profile);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    await chooseSelectOption(
+      await within(profileCard).findByRole("combobox", {
+        name: "Шаблон этикетки паллеты по умолчанию",
+      }),
+      palletTemplate.name,
+    );
+    fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/org/profile",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({
+            gln: PROFILE.gln,
+            inn: PROFILE.inn,
+            timeZone: PROFILE.timeZone,
+            gs1Prefixes: PROFILE.gs1Prefixes,
+            defaultPalletLabelTemplateId: palletTemplate.id,
+          }),
+        }),
+      ),
+    );
+    const successToast = await screen.findByText("Профиль сохранён");
+    const toastStatus = successToast.closest("[role=status]");
+    if (!toastStatus) throw new Error("Profile success toast not found");
+    fireEvent.click(within(toastStatus as HTMLElement).getByRole("button", { name: "Закрыть" }));
+  });
+
+  it("clears the saved default pallet-label template with an explicit null", async () => {
+    const palletTemplate = LABEL_TEMPLATES.find(
+      (template) => template.id === "44444444-4444-4444-8444-444444444444",
+    );
+    if (!palletTemplate) throw new Error("Pallet label template fixture is missing");
+    let profile: typeof PROFILE = {
+      ...PROFILE,
+      defaultPalletLabelTemplateId: palletTemplate.id,
+    };
+    const fetchMock = routeFetch({
+      profile: (init) => {
+        if (init?.method === "PUT") {
+          profile = { ...profile, defaultPalletLabelTemplateId: null };
+        }
+        return jsonResponse(200, profile);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const selector = await within(profileCard).findByRole("combobox", {
+      name: "Шаблон этикетки паллеты по умолчанию",
+    });
+    await waitFor(() => expect(selector.textContent).toContain(palletTemplate.name));
+    await chooseSelectOption(selector, "Не выбран");
+    fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/org/profile",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({
+            gln: PROFILE.gln,
+            inn: PROFILE.inn,
+            timeZone: PROFILE.timeZone,
+            gs1Prefixes: PROFILE.gs1Prefixes,
+            defaultPalletLabelTemplateId: null,
+          }),
+        }),
+      ),
+    );
+    const successToast = await screen.findByText("Профиль сохранён");
+    const toastStatus = successToast.closest("[role=status]");
+    if (!toastStatus) throw new Error("Profile success toast not found");
+    fireEvent.click(within(toastStatus as HTMLElement).getByRole("button", { name: "Закрыть" }));
+  });
+
+  it("keeps a deleted saved pallet template visible and blocks saving until a valid template is selected", async () => {
+    const staleId = "55555555-5555-4555-8555-555555555555";
+    const fetchMock = routeFetch({
+      profile: () => jsonResponse(200, { ...PROFILE, defaultPalletLabelTemplateId: staleId }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const selector = await within(profileCard).findByRole("combobox", {
+      name: "Шаблон этикетки паллеты по умолчанию",
+    });
+    await waitFor(() => expect(selector.textContent).toContain("Недоступный шаблон (удалён)"));
+    const save = within(profileCard).getByRole("button", { name: "Сохранить" });
+    expect(save).toHaveProperty("disabled", true);
+    expect(
+      within(profileCard).getByRole("button", { name: "Обновить шаблоны паллет" }),
+    ).toBeDefined();
+
+    const palletTemplate = LABEL_TEMPLATES.find(
+      (template) => template.id === "44444444-4444-4444-8444-444444444444",
+    );
+    if (!palletTemplate) throw new Error("Pallet label template fixture is missing");
+    await chooseSelectOption(selector, palletTemplate.name);
+    expect(save).toHaveProperty("disabled", false);
+  });
+
+  it("offers only universal enabled pallet templates as the organisation default", async () => {
+    vi.stubGlobal("fetch", routeFetch({}));
+    renderPage();
+    const profileCard = await cardOf("Профиль организации");
+    const select = await within(profileCard).findByRole("combobox", {
+      name: "Шаблон этикетки паллеты по умолчанию",
+    });
+    openSelect(select);
+    expect(await screen.findByRole("option", { name: "Паллета 100×150" })).toBeDefined();
+    // Excluded: scoped to a category ("Паллета пиво"), and both box templates
+    // -- a box template must never be offered as a pallet default.
+    expect(screen.queryByRole("option", { name: "Паллета пиво" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Короб 100 × 75" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Пиво 58×40" })).toBeNull();
+  });
+
+  it("excludes a universal pallet template from the organisation box default", async () => {
+    vi.stubGlobal("fetch", routeFetch({}));
+    renderPage();
+    const profileCard = await cardOf("Профиль организации");
+    const select = await within(profileCard).findByRole("combobox", {
+      name: "Шаблон этикетки короба по умолчанию",
+    });
+    openSelect(select);
+    expect(await screen.findByRole("option", { name: "Короб 100 × 75" })).toBeDefined();
+    // The seeded stock pallet template (migration 0137) must never be
+    // offered as the organisation's BOX default, even though it is enabled
+    // and universal (chzProductGroupCodes: null) -- only its purpose differs.
+    expect(screen.queryByRole("option", { name: "Паллета 100×150" })).toBeNull();
+  });
+
+  it("saves a category pallet default chosen from eligible templates", async () => {
+    let profile = { ...PROFILE, productGroupsInUse: [8, 15] };
+    const fetchMock = routeFetch({
+      profile: (init) => {
+        if (init?.method === "PUT") {
+          const body = JSON.parse(init.body as string) as {
+            categoryPalletLabelTemplateDefaults?: typeof profile.categoryPalletLabelTemplateDefaults;
+          };
+          profile = {
+            ...profile,
+            categoryPalletLabelTemplateDefaults: body.categoryPalletLabelTemplateDefaults ?? [],
+          };
+        }
+        return jsonResponse(200, profile);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const beerSelect = await within(profileCard).findByRole("combobox", {
+      name: "Пиво — паллета",
+    });
+    await chooseSelectOption(beerSelect, "Паллета пиво");
+    expect(beerSelect.textContent).toContain("Паллета пиво");
+
+    const milkSelect = within(profileCard).getByRole("combobox", {
+      name: "Молочная продукция — паллета",
+    });
+    openSelect(milkSelect);
+    expect(await screen.findByRole("option", { name: "Паллета 100×150" })).toBeDefined();
+    expect(screen.queryByRole("option", { name: "Паллета пиво" })).toBeNull();
+    fireEvent.keyDown(document.activeElement ?? milkSelect, { key: "Escape" });
+
+    fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/org/profile",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({
+            gln: PROFILE.gln,
+            inn: PROFILE.inn,
+            timeZone: PROFILE.timeZone,
+            gs1Prefixes: PROFILE.gs1Prefixes,
+            categoryPalletLabelTemplateDefaults: [
+              { chzProductGroupCode: 15, templateId: "tpl-pallet-beer" },
+            ],
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("shows an empty hint when no catalog product carries a category", async () => {
+    vi.stubGlobal("fetch", routeFetch({}));
+    renderPage();
+    const profileCard = await cardOf("Профиль организации");
+    expect(
+      await within(profileCard).findByText(
+        "Назначьте товарам категории в каталоге, чтобы задать шаблон паллеты для категории.",
+      ),
+    ).toBeDefined();
+  });
 });

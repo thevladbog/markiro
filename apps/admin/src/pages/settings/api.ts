@@ -20,9 +20,14 @@ export interface CategoryBoxLabelTemplateDefaultDto {
   templateId: string;
 }
 
+/** Same `{product group -> template}` shape as the box entry, for pallet labels. */
+export type CategoryPalletLabelTemplateDefaultDto = CategoryBoxLabelTemplateDefaultDto;
+
 export interface OrgProfileDto {
   defaultBoxLabelTemplateId: string | null;
   categoryBoxLabelTemplateDefaults: CategoryBoxLabelTemplateDefaultDto[];
+  defaultPalletLabelTemplateId: string | null;
+  categoryPalletLabelTemplateDefaults: CategoryPalletLabelTemplateDefaultDto[];
   /** Distinct ЧЗ product-group codes of non-archived catalog products. */
   productGroupsInUse: number[];
   gln: string | null;
@@ -39,6 +44,8 @@ export type PutOrgProfileInput = Partial<
     OrgProfileDto,
     | "defaultBoxLabelTemplateId"
     | "categoryBoxLabelTemplateDefaults"
+    | "defaultPalletLabelTemplateId"
+    | "categoryPalletLabelTemplateDefaults"
     | "gln"
     | "gs1Prefixes"
     | "inn"
