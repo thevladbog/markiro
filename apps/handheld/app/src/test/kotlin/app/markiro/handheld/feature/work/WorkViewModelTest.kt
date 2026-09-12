@@ -520,6 +520,44 @@ class WorkViewModelTest {
         assertEquals(1, db.codeDao().countForShift("s1"))
     }
 
+    @Test
+    fun skipClosesOnlyTheDisplayedJobAndAllowsTheNextUnit() = runTest {
+        duplicateShift(verification = "required")
+        val vm = vm()
+        advanceUntilIdle()
+        scans.tryEmit(ScanEvent(duplicateRaw("AAA111"), null, "debug", 0))
+        advanceUntilIdle()
+        val pending = vm.duplicateStep.first { it is DuplicateStep.Awaiting } as DuplicateStep.Awaiting
+        assertEquals("AAA111", pending.tail)
+        vm.skipDuplicateVerification()
+        vm.skipDuplicateVerification()
+        advanceUntilIdle()
+        vm.state.first { it.duplicate?.awaitingVerification == false }
+        assertEquals(DuplicateStep.Idle, vm.duplicateStep.value)
+        assertEquals("skipped", db.productLabelJobDao().get(pending.jobId)?.verificationOutcome)
+        assertEquals(1, db.productLabelEventDao().bySequence(pending.jobId).count { it.kind == "verification_skipped" })
+        scans.tryEmit(ScanEvent(duplicateRaw("BBB222"), null, "debug", 0))
+        advanceUntilIdle()
+        val next = vm.duplicateStep.first { it is DuplicateStep.Awaiting } as DuplicateStep.Awaiting
+        assertEquals(2, db.codeDao().countForShift("s1"))
+        assertEquals("BBB222", next.tail)
+    }
+
+    @Test
+    fun pendingVerificationRestoresItsFullScreenAfterViewModelRecreation() = runTest {
+        duplicateShift(verification = "required")
+        val first = vm()
+        advanceUntilIdle()
+        scans.tryEmit(ScanEvent(duplicateRaw("AAA111"), null, "debug", 0))
+        advanceUntilIdle()
+        val expected = first.duplicateStep.first { it is DuplicateStep.Awaiting }
+        first.setScanning(false)
+        val restored = vm()
+        advanceUntilIdle()
+        assertEquals(expected, restored.duplicateStep.first { it is DuplicateStep.Awaiting })
+        assertTrue(restored.duplicateStep.value is DuplicateStep.Awaiting)
+    }
+
     /** Scanning the printed sticker back completes the unit. */
     @Test
     fun scanningTheStickerBackCompletesTheUnit() = runTest {
@@ -534,7 +572,7 @@ class WorkViewModelTest {
         scans.tryEmit(ScanEvent(raw, null, "debug", 0))
         advanceUntilIdle()
         vm.state.first { it.duplicate?.awaitingVerification == false }
-        assertEquals(DuplicateStep.Idle, vm.duplicateStep.value)
+        assertEquals(DuplicateStep.Idle, vm.duplicateStep.first { it == DuplicateStep.Idle })
         // And it did not count as a second unit.
         assertEquals(1, db.codeDao().countForShift("s1"))
     }

@@ -318,9 +318,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         ),
                     )
                 }
-                // Only the three states where a person has to decide. The ordinary
-                // path stays in the last-scan zone, because a duplicate prints on
-                // every unit and a takeover per scan would be unusable.
+                // Verification owns the full screen while the work route keeps receiving scans.
                 if (duplicateStep != DuplicateStep.Idle) {
                     DuplicateScreen(
                         duplicateStep,
@@ -329,6 +327,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                             onReprint = vm::reprintDuplicate,
                             onScanAgain = vm::dismissDuplicate,
                             onDismiss = vm::dismissDuplicate,
+                            onSkip = vm::skipDuplicateVerification,
                         ),
                     )
                 }

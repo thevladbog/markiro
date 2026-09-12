@@ -2507,6 +2507,7 @@
         "states": {
           "prepared": "Ready to send",
           "sending": "Sending",
+          "skipped": "Verification skipped",
           "awaiting_verification": "Awaiting verification",
           "attention": "Needs attention",
           "verified": "Label verified",
@@ -2519,6 +2520,7 @@
           "failed_before_send": "Not sent",
           "delivery_unknown": "Delivery unknown",
           "verified": "Label verified",
+          "verification_skipped": "Verification skipped",
           "verification_rejected": "Verification failed"
         },
         "reasons": {

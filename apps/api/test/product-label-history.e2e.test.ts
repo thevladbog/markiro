@@ -161,6 +161,54 @@ describe.skipIf(!ready)("product label history", () => {
     productLabelEvents: events,
   });
 
+  it("persists an explicit skip once and exposes its actor without increasing verified totals", async () => {
+    const f = await fixture();
+    const skip: ProductLabelEvent = {
+      ...f.sent,
+      eventId: randomUUID(),
+      sequence: 4,
+      kind: "verification_skipped",
+    };
+    const events = [f.prepared, f.sending, f.sent, skip];
+    await send(batch(events, [f.item]));
+    await send(batch([skip]));
+    const history = await agent.get(`/shifts/${f.shiftId}/product-labels`).expect(200);
+    expect(history.body.summary).toMatchObject({
+      sentAttempts: 1,
+      verifiedAttempts: 0,
+      unresolvedJobs: 0,
+    });
+    expect(history.body.items[0]).toMatchObject({
+      jobId: skip.jobId,
+      deviceId: station.deviceId,
+      status: "completed",
+      verificationOutcome: "skipped",
+    });
+    const saved = await db
+      .select()
+      .from(schema.productLabelEvents)
+      .where(
+        and(
+          eq(schema.productLabelEvents.tenantId, tenantId),
+          eq(schema.productLabelEvents.eventId, skip.eventId),
+        ),
+      );
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      tenantId,
+      deviceId: station.deviceId,
+      jobId: skip.jobId,
+      receiveStatus: "accepted",
+      event: skip,
+    });
+    const foreign = await send(batch([skip]), otherStation);
+    expect(foreign.body.productLabelReceipt).toEqual({
+      protocol: PRODUCT_LABEL_PROTOCOL,
+      acceptedEventIds: [],
+      quarantined: [{ eventId: skip.eventId, code: "parent_missing" }],
+    });
+  });
+
   it("counts attempts separately from units and pages accepted events without raw labels", async () => {
     const f = await fixture();
     await send(batch([f.prepared, f.sending, f.sent], [f.item]));

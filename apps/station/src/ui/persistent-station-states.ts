@@ -37,6 +37,8 @@ export const PERSISTENT_STATION_STATE_GALLERY = {
     pending: "validation-print-required",
     verified: "validation-print-verified",
     not_required: "validation-print-none",
+    // A handheld skip is sent output without verification; Station does not offer this action.
+    skipped: "validation-print-none",
   } as const satisfies Record<VerificationOutcome, string>,
   productLabelRecovery: {
     waiting: "validation-print-waiting",

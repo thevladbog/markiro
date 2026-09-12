@@ -199,7 +199,8 @@
     <string name="work_first_seen">Первый скан в %1$s</string>
     <string name="work_total">Всего</string>
     <string name="work_this_terminal">Этот ТСД</string>
-    <string name="work_errors">Ошибки %1$d · Дубли %2$d</string>
+    <string name="work_errors">Ошибки</string>
+    <string name="work_duplicates">Дубли</string>
     <string name="work_feed_empty">Сканов ещё нет</string>
     <string name="work_more">Ещё</string>
     <string name="work_conflicts">Конфликты (%1$d)</string>
@@ -518,4 +519,11 @@
     <string name="recovery_publication_failed">Не удалось завершить подключение. Данные сохранены. Повторите попытку, чтобы завершить сохранение полученного подключения.</string>
     <string name="recovery_success_title">Подключение восстановлено</string>
     <string name="recovery_success_text">Данные ожидают синхронизации. Печать с неизвестным результатом требует проверки оператором.</string>
+    <string name="duplicate_verify_title">Отсканируйте напечатанную этикетку</string>
+    <string name="duplicate_verify_hint">Возьмите этикетку из принтера и отсканируйте Data Matrix. Следующий товар — после проверки или пропуска.</string>
+    <string name="duplicate_verified_title">Этикетка проверена</string>
+    <string name="duplicate_verified_hint">Можно сканировать следующий товар</string>
+    <string name="duplicate_label_problem">Проблема с этикеткой</string>
+    <string name="duplicate_return_to_scan">Вернуться к сканированию</string>
+    <string name="duplicate_skip_verification">Пропустить проверку</string>
 </resources>

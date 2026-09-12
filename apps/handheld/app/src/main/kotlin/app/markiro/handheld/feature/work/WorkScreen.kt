@@ -209,13 +209,10 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
         ) {
             val total = state.plan?.let { stringResource(R.string.work_plan_of, numbers.format(state.total), numbers.format(it)) }
                 ?: numbers.format(state.total)
-            Counter(stringResource(R.string.work_total), total)
-            Counter(stringResource(R.string.work_this_terminal), numbers.format(state.thisTerminal))
-            Counter(
-                "",
-                stringResource(R.string.work_errors, state.errors, state.duplicates),
-                tone = if (state.errors + state.duplicates > 0) Tone.Warn else Tone.Neutral,
-            )
+            Counter(stringResource(R.string.work_total), total, modifier = Modifier.weight(1f))
+            Counter(stringResource(R.string.work_this_terminal), numbers.format(state.thisTerminal), modifier = Modifier.weight(1f))
+            Counter(stringResource(R.string.work_errors), numbers.format(state.errors), tone = if (state.errors > 0) Tone.Warn else Tone.Neutral, modifier = Modifier.weight(1f))
+            Counter(stringResource(R.string.work_duplicates), numbers.format(state.duplicates), tone = if (state.duplicates > 0) Tone.Warn else Tone.Neutral, modifier = Modifier.weight(1f))
         }
         Column(Modifier.weight(if (box != null) 0.38f else 0.6f).fillMaxWidth().padding(horizontal = MarkiroSizes.sp4)) {
             if (state.feed.isEmpty()) Text(stringResource(R.string.work_feed_empty), style = t.caption, color = c.fg3)
@@ -324,11 +321,7 @@ private fun LastScanZone(last: LastScan?, duplicate: DuplicateUi?, modifier: Mod
                 Text(stringResource(R.string.work_first_seen, Iso.parse(seen)?.let { TimeText.hhmm(it) } ?: seen), style = t.caption, color = c.fg2)
             }
         }
-        // The duplicate's progress lives here rather than over the screen: it
-        // prints on EVERY unit, so a full-screen state per scan would be
-        // unusable. «Отсканируйте наклейку» is the line an operator cannot
-        // guess -- without it they scan the next product, are told it is the
-        // wrong code, and have no idea why.
+        // Printing progress stays here; verification also has a dedicated overlay.
         if (duplicate != null) {
             val line = when {
                 duplicate.awaitingVerification -> R.string.duplicate_awaiting_verification
@@ -395,26 +388,18 @@ fun PlanReachedScreen(total: Int, plan: Int, onClose: () -> Unit, onContinue: ()
     }
 }
 
-/**
- * What the feed shows for one scan: the serial, exactly as the last-scan zone
- * above it does.
- *
- * The raw tail used to be printed instead, and on a real code that is the
- * crypto signature -- «…593txKP» told an operator nothing and did not
- * match the value shown two centimetres higher for the same unit. An
- * unparseable scan keeps its raw tail, because for a rejected code the raw
- * text is the only thing there is.
- */
+/** Display only: preserve the full raw code in storage, printing and verification. */
 internal fun feedTail(raw: String): String {
-    val serial = runCatching { KmCodec.parse(raw).serial }.getOrNull() ?: raw
+    val serial = runCatching { KmCodec.canonicalize(raw).serial }.getOrNull()
+        ?: raw.substringBefore(KmCodec.GS).trim()
     return if (serial.length > 8) "…" + serial.takeLast(8) else serial
 }
 
 @Composable
-private fun Counter(label: String, value: String, tone: Tone = Tone.Neutral) {
+private fun Counter(label: String, value: String, tone: Tone = Tone.Neutral, modifier: Modifier = Modifier) {
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
-    Column(horizontalAlignment = Alignment.Start) {
+    Column(modifier.padding(end = MarkiroSizes.sp1), horizontalAlignment = Alignment.Start) {
         if (label.isNotEmpty()) Text(label, style = t.caption, color = c.fg3)
         Text(value, style = t.strong.copy(fontSize = 16.sp), color = if (tone == Tone.Neutral) c.fg1 else c.tone(tone).fg)
     }

@@ -164,6 +164,22 @@ pull means is decided by the open job:
 | `delivery_unknown`                | the verification         |
 | `failed_before_send`              | refused — reprint or fix |
 
+**Verification takes over the screen.** After a successful send with required verification,
+the handheld asks to scan the printed label, showing the serial without its crypto tail.
+Matching the complete code briefly confirms success and returns to work. “Skip verification”
+records `verification_skipped` with the current operator and time, atomically settles the job
+as `verificationOutcome=skipped`, and allows the next unit. It never counts as verified.
+The waiting screen is restored from the job after restart. A skip is unavailable before a
+successful send or when delivery is unknown; those states keep their print recovery flow.
+
+Deploy the API and cabinet with support for `verification_skipped` **before distributing this
+APK**. The previous API strictly rejects unknown event kinds. Old clients' events remain valid.
+
+The scan feed and last-scan zone show the same shortened serial; display formatting strips
+anything after GS even when parsing fails. Full scan bytes remain in the journal and are used
+unchanged for printing and label verification. Total, this handheld, errors and duplicates
+use separate counters with labels above their values.
+
 **The bytes are prepared once and replayed**, never re-rendered — the opposite of the
 box label, which re-renders because «Другой принтер» may speak another language. The
 server holds a digest of these exact bytes and the domain refuses a reprint that alters

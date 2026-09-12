@@ -110,6 +110,7 @@ object EventKind {
     const val FAILED_BEFORE_SEND = "failed_before_send"
     const val DELIVERY_UNKNOWN = "delivery_unknown"
     const val VERIFIED = "verified"
+    const val VERIFICATION_SKIPPED = "verification_skipped"
     const val VERIFICATION_REJECTED = "verification_rejected"
 }
 
@@ -139,6 +140,7 @@ object Verification {
 object VerificationOutcome {
     const val NOT_REQUIRED = "not_required"
     const val PENDING = "pending"
+    const val SKIPPED = "skipped"
     const val VERIFIED = "verified"
 }
 
@@ -146,7 +148,11 @@ private fun invalidTransition(): Nothing =
     throw ProductLabelTransitionException("Product label event does not follow the current attempt")
 
 /** Port of `productLabelStatus` in packages/domain/src/product-labels/state.ts. */
-fun productLabelStatus(attempt: String, verification: String, verified: Boolean): String {
+fun productLabelStatus(attempt: String, verification: String, verified: Boolean, skipped: Boolean = false): String {
+    if (skipped) {
+        if (verified || attempt != AttemptState.SENT || verification != Verification.REQUIRED) invalidTransition()
+        return JobStatus.COMPLETED
+    }
     if (verified) {
         if (attempt != AttemptState.SENT && attempt != AttemptState.DELIVERY_UNKNOWN) invalidTransition()
         return JobStatus.COMPLETED
@@ -190,13 +196,14 @@ fun canApplyProductLabelEvent(current: ProductLabelProjection, event: ProductLab
             event.language == current.language &&
             event.dpi == current.dpi
     }
-    if (event.attemptId != current.attemptId || current.verificationOutcome == VerificationOutcome.VERIFIED) {
+    if (event.attemptId != current.attemptId || (current.verificationOutcome == VerificationOutcome.VERIFIED || current.verificationOutcome == VerificationOutcome.SKIPPED)) {
         return false
     }
 
     return when (event.kind) {
         EventKind.SENDING, EventKind.FAILED_BEFORE_SEND -> current.attemptState == AttemptState.PREPARED
         EventKind.SENT, EventKind.DELIVERY_UNKNOWN -> current.attemptState == AttemptState.SENDING
+        EventKind.VERIFICATION_SKIPPED -> current.attemptState == AttemptState.SENT && current.verification == Verification.REQUIRED
         EventKind.VERIFIED, EventKind.VERIFICATION_REJECTED -> {
             // A scan also resolves an unknown delivery, under EITHER policy: it is
             // how "did a label come out?" gets answered without a reprint.
@@ -258,16 +265,20 @@ fun applyProductLabelEvent(
         )
     }
 
-    val attemptState = if (event.kind == EventKind.VERIFIED || event.kind == EventKind.VERIFICATION_REJECTED) {
+    val attemptState = if (event.kind == EventKind.VERIFIED || event.kind == EventKind.VERIFICATION_REJECTED || event.kind == EventKind.VERIFICATION_SKIPPED) {
         current.attemptState
     } else {
         event.kind
     }
-    val outcome = if (event.kind == EventKind.VERIFIED) VerificationOutcome.VERIFIED else current.verificationOutcome
+    val outcome = when (event.kind) {
+        EventKind.VERIFIED -> VerificationOutcome.VERIFIED
+        EventKind.VERIFICATION_SKIPPED -> VerificationOutcome.SKIPPED
+        else -> current.verificationOutcome
+    }
     return current.copy(
         latestSequence = event.sequence,
         attemptState = attemptState,
         verificationOutcome = outcome,
-        status = productLabelStatus(attemptState, verification, outcome == VerificationOutcome.VERIFIED),
+        status = productLabelStatus(attemptState, verification, outcome == VerificationOutcome.VERIFIED, outcome == VerificationOutcome.SKIPPED),
     )
 }

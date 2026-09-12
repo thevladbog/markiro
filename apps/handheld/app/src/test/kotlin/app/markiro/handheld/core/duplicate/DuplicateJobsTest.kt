@@ -197,6 +197,40 @@ class DuplicateJobsTest {
         assertEquals(JobStatus.AWAITING_VERIFICATION, db.productLabelJobDao().get(jobId)?.status)
     }
 
+    @Test
+    fun skippingIsDurableAuditedAndIdempotent() = runTest {
+        val jobId = (accept(shift = shift(Verification.REQUIRED)) as DuplicateOutcome.Prepared).jobId
+        jobs().send(jobId)
+        val actor = "77777777-7777-4777-8777-777777777777"
+        assertTrue(jobs().skipVerification(jobId, actor))
+        assertEquals(false, jobs().skipVerification(jobId, actor))
+        val restored = jobs()
+        assertNull(restored.openJob("s1"))
+        val job = db.productLabelJobDao().get(jobId)!!
+        assertEquals(JobStatus.COMPLETED, job.status)
+        assertEquals("skipped", job.verificationOutcome)
+        assertEquals(RAW, job.canonicalRaw)
+        val events = db.productLabelEventDao().bySequence(jobId)
+        assertEquals(4, events.size)
+        val skipped = events.last()
+        assertEquals("verification_skipped", skipped.kind)
+        assertNull(skipped.ackedAt)
+        val wire = kotlinx.serialization.json.Json.parseToJsonElement(skipped.payloadJson).toString()
+        assertTrue(wire.contains(actor))
+        assertTrue(wire.contains(jobId))
+        assertEquals(1, transport.sent.size)
+    }
+
+    @Test
+    fun skipCannotTurnAnUnknownDeliveryIntoCompletedOutput() = runTest {
+        val jobId = (accept(shift = shift(Verification.REQUIRED)) as DuplicateOutcome.Prepared).jobId
+        assertEquals(false, jobs().skipVerification(jobId, "operator"))
+        transport.outcome = SendOutcome.Unknown("transport_failed")
+        jobs().send(jobId)
+        assertEquals(false, jobs().skipVerification(jobId, "operator"))
+        assertEquals(JobStatus.ATTENTION, db.productLabelJobDao().get(jobId)?.status)
+    }
+
     /**
      * The printer's own words stay on the device.
      *

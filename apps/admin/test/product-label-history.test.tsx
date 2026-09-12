@@ -90,6 +90,41 @@ describe("cabinet label history", () => {
     expect(fetch.mock.calls.some(([url]) => url.includes(`deviceId=${deviceId}`))).toBe(true);
     expect(screen.queryByRole("button", { name: /Печатать|Напечатать/ })).toBeNull();
   });
+  it("shows an explicit skip with its operator without calling it verified", async () => {
+    await i18n.changeLanguage("ru");
+    const base = Object.fromEntries(
+      Object.entries(event).filter(
+        ([key]) => !["attemptNo", "reason", "language", "dpi", "bytesDigest"].includes(key),
+      ),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify(
+              url.includes("/events")
+                ? { items: [{ ...base, kind: "verification_skipped" }], nextSequence: null }
+                : url.includes("/operators")
+                  ? { items: [] }
+                  : {
+                      summary: { ...summary, verifiedAttempts: 0 },
+                      items: [{ ...row, verificationOutcome: "skipped" }],
+                      nextCursor: null,
+                    },
+            ),
+            { status: 200 },
+          ),
+        ),
+      ),
+    );
+    renderHistory();
+    await screen.findByText("Проверка пропущена");
+    expect(screen.queryByText("Проверена")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "История попыток · …IAL-42" }));
+    await screen.findByText(`…${operatorId.slice(-8)}`);
+    expect(screen.getAllByText("Проверка пропущена")).toHaveLength(2);
+  });
   it("loads the next page and keeps sent distinct from verified", async () => {
     await i18n.changeLanguage("ru");
     vi.stubGlobal(
