@@ -5,7 +5,7 @@
 | Attribute           | Value                                                                                                                         |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | Document ID         | MKR-FR-COMMERCIAL-002                                                                                                         |
-| Version             | 1.2                                                                                                                           |
+| Version             | 1.3                                                                                                                           |
 | Date                | 2026-09-10                                                                                                                    |
 | Status              | Proposed implementation baseline; subject to product-owner approval                                                           |
 | Product             | Markiro                                                                                                                       |
@@ -18,6 +18,8 @@
 **Revision 1.1 — product-owner decisions, 2026-09-10:** Chestny ZNAK and National Catalog access form one commercial module, `chzIntegration`. In the illustrative Start plan this module is a paid add-on; in Workshop and Production it is included. Separate operational capabilities, release eligibility and recovery controls remain mandatory. These decisions do not authorize production catalog publication or migration of existing customer terms.
 
 **Revision 1.2 — approved P0 design, 2026-09-10:** Use explicit workflows in the existing services with shared internal calculations. New paid terms use `Europe/Moscow`; immediate activation begins when confirmed payment is applied, and renewal begins at the current term end. Documents issued before an unknown activation date retain the duration and activation rule; the resolved interval is recorded once at activation without rewriting the issued snapshot.
+
+**Revision 1.3 — product-owner correction, 2026-09-12:** Unfinished P1 lifecycle-policy administration must not block current sales. Plans, add-ons and services may be created and published without an additional lifecycle policy and used in offers and invoices under current subscription rules. A selected policy still requires approval and integrity validation. Catalog publication alone does not activate new P1 module restrictions or offline grants; the enforcement rollout gate remains separate. Existing commercial, tax, authorization and historical-document safeguards remain mandatory.
 
 **Normative language:** MUST indicates a mandatory requirement within the stated delivery phase. SHOULD indicates a recommendation that may be changed through a recorded design decision. Proposed field names are logical contract names; an equivalent implementation is acceptable if behavior, compatibility and traceability are preserved.
 

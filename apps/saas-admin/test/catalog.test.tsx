@@ -59,6 +59,33 @@ async function submitMinimalCatalogCreate(user: ReturnType<typeof userEvent.setu
 }
 
 describe("commercial catalog", () => {
+  it.each([
+    { item: DRAFT_PLAN, tab: "Тарифы" },
+    { item: ADDON, tab: "Дополнения" },
+    { item: SERVICE, tab: "Услуги" },
+  ])("publishes $item.kind without an approved lifecycle policy", async ({ item, tab }) => {
+    installCatalogApi({
+      items: [{ ...item, status: "draft", lifecyclePolicyId: null }],
+      lifecyclePolicies: [],
+    });
+    renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("tab", { name: tab }));
+    await user.click(
+      screen.getByRole("button", { name: `Открыть ${item.nameRu}, версия ${item.version}` }),
+    );
+    const publish = screen.getByRole("button", { name: `Опубликовать версию ${item.version}` });
+    await waitFor(() => expect((publish as HTMLButtonElement).disabled).toBe(false));
+    await user.click(publish);
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: `Опубликовать версию ${item.version}`,
+      }),
+    );
+    expect(await screen.findByText("Опубликованная версия не редактируется.")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Сохранить черновик" })).toBeNull();
+  });
+
   it.each(["save", "review"])(
     "locks addon effects during deferred %s and retains the submitted values",
     async (operation) => {

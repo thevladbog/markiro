@@ -861,9 +861,10 @@ export function CatalogVersionPanel({
                     save.isPending ||
                     prepareReview.isPending ||
                     !context.data?.taxPolicy ||
-                    !context.data.lifecyclePolicies.some(
-                      (policy) => policy.id === form.watch("lifecyclePolicyId"),
-                    ) ||
+                    (form.watch("lifecyclePolicyId") !== null &&
+                      !context.data.lifecyclePolicies.some(
+                        (policy) => policy.id === form.watch("lifecyclePolicyId"),
+                      )) ||
                     (item.kind === "plan" &&
                       [
                         form.watch("chzIntegration"),

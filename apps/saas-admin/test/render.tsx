@@ -314,6 +314,9 @@ export function installCatalogApi({
   catalogStatus = 200,
   stalePublishPrice,
   stalePublishPeriod,
+  lifecyclePolicies = [
+    { id: "91111111-1111-4111-8111-111111111111", policyKey: "test-fixture-policy", version: 1 },
+  ],
   taxPolicy = {
     kind: "vat",
     regime: "other",
@@ -332,6 +335,7 @@ export function installCatalogApi({
   catalogStatus?: number;
   stalePublishPrice?: string;
   stalePublishPeriod?: "month" | "year";
+  lifecyclePolicies?: { id: string; policyKey: string; version: number }[];
   taxPolicy?: SellerTaxPolicy | null;
 } = {}) {
   let catalog: CatalogVersionDto[] = items.map((item) => structuredClone(item));
@@ -379,26 +383,23 @@ export function installCatalogApi({
                 ? { vatRateBps: null, vatIncluded: false }
                 : null,
           canWrite: true,
-          lifecyclePolicies: [
-            {
-              id: "91111111-1111-4111-8111-111111111111",
-              policyKey: "test-fixture-policy",
-              version: 1,
-            },
-          ],
+          lifecyclePolicies,
         });
-      if (url.endsWith("/review"))
+      if (url.endsWith("/review")) {
+        const policyId =
+          catalog.find((item) => item.id === url.split("/").at(-2))?.lifecyclePolicyId ?? null;
         return jsonResponse(200, {
           identity: {
             catalogVersionId: url.split("/").at(-2),
             draftUpdatedAt: reviewRevision,
-            lifecyclePolicyId: "91111111-1111-4111-8111-111111111111",
-            lifecyclePolicyVersion: 1,
-            lifecyclePolicyHash: "a".repeat(64),
+            lifecyclePolicyId: policyId,
+            lifecyclePolicyVersion: policyId ? 1 : null,
+            lifecyclePolicyHash: policyId ? "a".repeat(64) : null,
             sellerPolicyRevision: 1,
           },
           errors: [],
         });
+      }
       const createMatch = url.match(/\/api\/platform\/catalog\/items\/([^/]+)\/versions$/);
       if (createMatch && init.method === "POST") {
         const response = createResponses.shift() ?? 201;

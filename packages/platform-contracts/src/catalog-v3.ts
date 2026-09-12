@@ -74,13 +74,22 @@ export const catalogVersionListResponseV3Schema = z
   .strict();
 export const assignableCatalogVersionV3Schema = catalogVersionV3Schema;
 export const assignableCatalogResponseV3Schema = catalogVersionListResponseV3Schema;
-export const commercialReviewIdentityV3Schema = commercialReviewIdentitySchema
-  .extend({
-    lifecyclePolicyId: platformUuidSchema,
-    lifecyclePolicyVersion: z.number().int().positive(),
-    lifecyclePolicyHash: z.string().regex(/^[0-9a-f]{64}$/),
-  })
-  .strict();
+export const commercialReviewIdentityV3Schema = z.union([
+  commercialReviewIdentitySchema
+    .extend({
+      lifecyclePolicyId: z.null(),
+      lifecyclePolicyVersion: z.null(),
+      lifecyclePolicyHash: z.null(),
+    })
+    .strict(),
+  commercialReviewIdentitySchema
+    .extend({
+      lifecyclePolicyId: platformUuidSchema,
+      lifecyclePolicyVersion: z.number().int().positive(),
+      lifecyclePolicyHash: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict(),
+]);
 export const catalogPublicationReviewV3Schema = z
   .object({
     identity: commercialReviewIdentitySchema
@@ -99,11 +108,10 @@ export const catalogPublicationReviewV3Schema = z
 const publishedCatalogVersionV3Schema = catalogVersionV3Schema.refine(
   (version) =>
     version.status === "published" &&
-    version.lifecyclePolicyId !== null &&
     (version.kind !== "plan" || planEntitlementsV3Schema.safeParse(version.plan).success),
-  "V3 publication requires explicit features and a lifecycle policy reference",
+  "V3 publication requires a published version with explicit plan features",
 );
-// Approval of the referenced lifecycle policy is a server-side publication check.
+// A policy is optional; approval of an explicitly referenced policy is checked by the server.
 export const catalogEditorContextV3Schema = platformCatalogV2Contracts.editorContext.response
   .extend({
     lifecyclePolicies: z.array(
