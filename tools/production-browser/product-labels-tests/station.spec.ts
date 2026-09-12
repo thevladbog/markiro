@@ -517,7 +517,13 @@ for (const locale of ["ru", "en"])
           };
         else if (path === "/shifts/pallet-label-templates")
           body = {
-            items: [{ ...template, id: "pallet-label", name: "Паллета 100×150" }],
+            items: [
+              {
+                ...template,
+                id: "pallet-label",
+                name: locale === "en" ? "Pallet 100×150" : "Паллета 100×150",
+              },
+            ],
             defaultPalletLabelTemplateId: "pallet-label",
           };
         else if (path === "/shifts") {
@@ -583,17 +589,20 @@ for (const locale of ["ru", "en"])
         await page
           .getByRole("button", { name: locale === "ru" ? "Далее" : "Next", exact: true })
           .click();
-        await expect(page.getByRole("button", { name: /Паллета 100×150/ })).toHaveAttribute(
-          "aria-pressed",
-          "true",
-        );
+        await expect(
+          page.getByRole("button", {
+            name: locale === "en" ? /Pallet 100×150/ : /Паллета 100×150/,
+          }),
+        ).toHaveAttribute("aria-pressed", "true");
         await page.screenshot({
           path: info.outputPath(`pallet-template-${viewport.width}-${locale}-${theme}.png`),
         });
         await page
           .getByRole("button", { name: locale === "ru" ? "Начать" : "Start", exact: true })
           .click();
-        await expect(page.getByText("Смена открыта", { exact: true })).toBeVisible();
+        await expect(
+          page.getByText(locale === "en" ? "Shift opened" : "Смена открыта", { exact: true }),
+        ).toBeVisible();
       }
       expect(writes).toHaveLength(2);
       for (const write of writes) {

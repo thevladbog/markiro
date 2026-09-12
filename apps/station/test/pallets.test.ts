@@ -47,17 +47,20 @@ describe("pallets", () => {
       await insertClosedBox(id);
       await joinPallet(exec, id, palletId);
     }
-    await exec.run("UPDATE boxes_mirror SET closed_at=? WHERE box_id='b2'", [iso(2)]);
+    await exec.run("UPDATE boxes_mirror SET closed_at=?, sscc=? WHERE box_id='b2'", [
+      iso(2),
+      "004601234560000024",
+    ]);
     await exec.run("UPDATE boxes_mirror SET disassembled_at=? WHERE box_id='removed'", [iso(3)]);
     expect(await listPalletBoxes(exec, "s1", "t1", palletId)).toEqual([
-      { boxId: "b2", sscc: "004601234560000017", closedAt: iso(2) },
+      { boxId: "b2", sscc: "004601234560000024", closedAt: iso(2) },
       { boxId: "b1", sscc: "004601234560000017", closedAt: iso(0) },
     ]);
     expect(await listPalletBoxes(exec, "s1", "t2", palletId)).toEqual([]);
     expect(await listPalletBoxes(exec, "s2", "t1", palletId)).toEqual([]);
     expect(await currentPallet(exec, "s1", "t1")).toMatchObject({
       boxCount: 2,
-      lastBoxSscc: "004601234560000017",
+      lastBoxSscc: "004601234560000024",
     });
   });
 

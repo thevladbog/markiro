@@ -115,7 +115,7 @@ function Fixture() {
   const [paused, setPaused] = useState(false);
   if (query.get("screen") === "newshift")
     return created ? (
-      <p role="status">Смена открыта</p>
+      <p role="status">{i18n.language === "en" ? "Shift opened" : "Смена открыта"}</p>
     ) : (
       <NewShift
         client={creationClient}
