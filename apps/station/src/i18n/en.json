@@ -127,6 +127,13 @@
     "rosterRefreshUnavailable": "Could not refresh the operator list. Check the connection or sign in with previously synchronized data."
   },
   "shifts": {
+    "palletsLabel": "Pallet assembly",
+    "palletsOn": "With pallets",
+    "palletsOff": "Without pallets",
+    "palletTemplateLabel": "Pallet label template",
+    "palletNext": "Next",
+    "palletCapacityFromProduct": "{{capacity}} boxes per pallet · from the product card",
+    "palletCapacityMissing": "Set the number of boxes per pallet in the product card in the cabinet.",
     "title": "Shifts",
     "loading": "Loading shifts…",
     "empty": "No open shifts",
@@ -537,7 +544,9 @@
     "more": "More",
     "palletOpenAtClose": "The pallet has {{count}} of {{capacity}} boxes — close it?",
     "palletOpenAtCloseConfirm": "Close pallet and shift",
-    "palletOpenAtCloseNoSerials": "Pallet numbers have run out. Connect the station to the network to get more."
+    "palletOpenAtCloseNoSerials": "Pallet numbers have run out. Connect the station to the network to get more.",
+    "errors": "Errors",
+    "duplicates": "Duplicates"
   },
   "setup": {
     "title": "Workstation setup",
@@ -785,7 +794,21 @@
         "printerJam": "Printer jam / no output",
         "qualityRequest": "Quality control request"
       }
-    }
+    },
+    "current": "Current pallet",
+    "contents": "Pallet contents",
+    "closeCurrent": "Close pallet",
+    "remaining_one": "{{count}} box remaining",
+    "remaining_few": "{{count}} boxes remaining",
+    "remaining_many": "{{count}} boxes remaining",
+    "remaining_other": "{{count}} boxes remaining",
+    "lastBox": "Last box:",
+    "backToAssembly": "Back to assembly",
+    "contentsLoading": "Loading pallet contents…",
+    "contentsError": "Could not read pallet contents",
+    "contentsEmpty": "No boxes on this pallet yet",
+    "boxSscc": "Box SSCC",
+    "boxClosedAt": "Closed at"
   },
   "productLabels": {
     "title": "Data Matrix duplicate",
@@ -846,6 +869,11 @@
       "active": "Code is being processed in another active shift",
       "previous": "Code from a previous shift: reprocessing is disabled",
       "unconfirmed": "Previous shift closure has not been confirmed"
-    }
+    },
+    "skip": "Skip verification",
+    "skipped": "Verification skipped",
+    "labelProblem": "Label problem",
+    "scanTitle": "Scan the printed label",
+    "skipHint": "Skipping is recorded in the journal. The label remains unverified."
   }
 }

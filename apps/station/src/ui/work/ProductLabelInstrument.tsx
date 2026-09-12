@@ -3,6 +3,7 @@ import type { ProductLabelJobView } from "../../lib/product-labels/types.js";
 export function productLabelStatusKey(job: ProductLabelJobView | null): string {
   if (!job) return "productLabels.waiting";
   if (job.verificationOutcome === "verified") return "productLabels.verified";
+  if (job.verificationOutcome === "skipped") return "productLabels.skipped";
   if (job.status === "completed") return "productLabels.sent";
   if (job.status === "awaiting_verification") return "productLabels.verify";
   if (job.attemptState === "delivery_unknown") return "productLabels.unknown";

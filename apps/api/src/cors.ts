@@ -54,11 +54,13 @@ function isStationRequest(req: Request): boolean {
       (path === "/station/pair" ||
         path === "/station/codes/releases" ||
         path === "/station/conflicts/status" ||
+        path === "/station/validation-occurrences/status" ||
         path === "/station/scans" ||
         path === "/station/shift-closures")) ||
     (method === "GET" && (path === "/station/identity" || path === "/station/operators")) ||
     ((method === "GET" || method === "POST") && path === "/shifts") ||
     (method === "GET" && path === "/shifts/box-label-templates") ||
+    (method === "GET" && path === "/shifts/pallet-label-templates") ||
     (method === "GET" && path === "/shifts/product-label-templates") ||
     (method === "GET" && path === "/shifts/planning-config") ||
     (method === "GET" && path === "/products") ||
@@ -76,7 +78,8 @@ function isStationRequest(req: Request): boolean {
     (method === "GET" &&
       /^\/station\/inventories\/[^/]+\/bundle\/(?:manifest|codes)$/.test(path)) ||
     (method === "GET" && /^\/station\/inventories\/[^/]+\/progress$/.test(path)) ||
-    (method === "GET" && /^\/shifts\/[^/]+\/(?:bundle|reference-bundle)$/.test(path)) ||
+    (method === "GET" &&
+      /^\/shifts\/[^/]+\/(?:bundle|reference-bundle|code-history)$/.test(path)) ||
     (method === "POST" && /^\/shifts\/[^/]+\/open$/.test(path))
   );
 }

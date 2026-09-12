@@ -8,14 +8,15 @@ import {
   mmToDots,
   parseLabelCode,
   rasterizeGs1DataMatrix,
+  type LabelTemplatePurpose,
 } from "@markiro/domain";
 import samples from "../../../examples/labels/manifest.json";
 import { fitSpecElements } from "../src/pages/labels/geometry.js";
 import { labelPreviewData, labelRenderOptions } from "../src/pages/labels/preview-data.js";
 
 describe("copyable label samples", () => {
-  it("covers both purposes and every documented size for all three groups", () => {
-    expect(samples).toHaveLength(21);
+  it("covers every purpose and documented size for all three groups", () => {
+    expect(samples).toHaveLength(30);
     for (const group of [23, 33, 35]) {
       expect(
         samples
@@ -29,7 +30,23 @@ describe("copyable label samples", () => {
         "box:75x120",
         "box:100x100",
         "box:100x150",
+        "pallet:100x100",
+        "pallet:100x150",
+        "pallet:148x210",
       ]);
+    }
+  });
+
+  /**
+   * Markiro cuts box serials from extension digit 0 and pallet serials from 1,
+   * and the two spaces must never interleave. The preview is where a reader
+   * learns what a real SSCC looks like, so the demonstration values carry the
+   * right first digit for their purpose rather than a single shared number.
+   */
+  it("demonstrates each purpose with an SSCC from its own extension digit", () => {
+    for (const sample of samples) {
+      const expected = { product_duplicate: "", box: "0", pallet: "1" }[sample.purpose];
+      expect(sample.sampleData.sscc.slice(0, 1), sample.id).toBe(expected);
     }
   });
 
@@ -41,7 +58,10 @@ describe("copyable label samples", () => {
         "utf8",
       );
       const { spec, warnings } = parseLabelCode(source, { language: "zpl", dpi: 203 });
-      const purpose = sample.purpose === "box" ? "box" : "product_duplicate";
+      // The manifest's own purpose, not a box/duplicate binary: "pallet" used
+      // to fall through to the duplicate branch, which renders KM as a raster
+      // and asserts a Data Matrix a pallet label does not have.
+      const purpose = sample.purpose as LabelTemplatePurpose;
       const options = labelRenderOptions(purpose);
       const png = readFileSync(
         resolve(import.meta.dirname, "../../../examples/labels", sample.preview),
@@ -50,14 +70,19 @@ describe("copyable label samples", () => {
       expect(png.readUInt32BE(16)).toBe(mmToDots(spec.widthMm, 203));
       expect(png.readUInt32BE(20)).toBe(mmToDots(spec.heightMm, 203));
       expect(hasValidCheckDigit(sample.sampleData["product.gtin"])).toBe(true);
-      if (purpose === "box") expect(hasValidCheckDigit(sample.sampleData.sscc)).toBe(true);
+      if (purpose !== "product_duplicate")
+        expect(hasValidCheckDigit(sample.sampleData.sscc)).toBe(true);
       expect(warnings).toEqual([]);
       expect(Math.abs(spec.widthMm - sample.widthMm)).toBeLessThan(0.07);
       expect(Math.abs(spec.heightMm - sample.heightMm)).toBeLessThan(0.07);
       for (const data of [sample.sampleData, labelPreviewData(purpose)]) {
         expect(fitSpecElements(spec, data, options)).toEqual({ ok: true, spec, adjustedIds: [] });
       }
-      expect(source).not.toMatch(/ЕГАИС|egais|Дата розлива|DEMO-LABEL|146006820000000010/);
+      // A demonstration SSCC must never be baked into the source: the code a
+      // tenant copies has to keep `{{sscc}}` so their own number substitutes.
+      expect(source).not.toMatch(
+        /ЕГАИС|egais|Дата розлива|DEMO-LABEL|046006820000000013|146006820000000027/,
+      );
       const barcodes = spec.elements.filter((element) => element.kind === "barcode");
       expect(barcodes).toHaveLength(1);
       for (const barcode of barcodes) {

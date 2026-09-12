@@ -124,6 +124,9 @@ function ScanVerdict({
   operation: RecentOperation | null;
   labels: ScanResultLabels;
 }) {
+  const displayCode = operation?.identity
+    ? `(01)${operation.identity.gtin14} (21)${operation.identity.serial}`
+    : "";
   const tone = operation?.verdict === "ok" ? "ok" : operation ? "error" : "neutral";
   return (
     <div
@@ -131,11 +134,7 @@ function ScanVerdict({
       role="status"
       data-tone={tone}
       data-compact-success={tone === "ok" && operation?.identity ? "true" : undefined}
-      aria-label={
-        tone === "ok" && operation?.identity
-          ? `${labels.ok}: ${operation.identity.normalized}`
-          : undefined
-      }
+      aria-label={tone === "ok" && operation?.identity ? `${labels.ok}: ${displayCode}` : undefined}
     >
       {tone === "ok" && operation?.identity ? (
         <>
@@ -147,7 +146,7 @@ function ScanVerdict({
             ✓
           </span>
           <code className="work-scan-result__normalized" data-semantic="normalized-code">
-            {operation.identity.normalized}
+            {displayCode}
           </code>
         </>
       ) : (

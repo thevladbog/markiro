@@ -37,8 +37,7 @@ export const PERSISTENT_STATION_STATE_GALLERY = {
     pending: "validation-print-required",
     verified: "validation-print-verified",
     not_required: "validation-print-none",
-    // A handheld skip is sent output without verification; Station does not offer this action.
-    skipped: "validation-print-none",
+    skipped: "validation-print-skipped",
   } as const satisfies Record<VerificationOutcome, string>,
   productLabelRecovery: {
     waiting: "validation-print-waiting",
@@ -94,6 +93,7 @@ export const PERSISTENT_STATION_STATE_GALLERY = {
     found: "new-shift-found",
     notFound: "new-shift-not-found",
     template: "new-shift-template",
+    palletTemplate: "new-shift-pallet-template",
     validationPrint: "validation-print-create-required",
     productTemplate: "validation-print-create-template",
   } as const satisfies Record<NewShiftView, string>,

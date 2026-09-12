@@ -2924,6 +2924,16 @@ body,
   grid-template-rows: minmax(0, 1fr) 64px 64px;
 }
 
+.new-shift__panel--found:has(> .new-shift__pallet-settings) {
+  grid-template-rows: minmax(90px, 1fr) 64px auto auto 64px;
+}
+
+.new-shift__pallet-settings p {
+  margin: var(--sp-2) 0 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
 .new-shift__product {
   min-width: 0;
   min-height: 0;
@@ -3781,30 +3791,127 @@ body,
   white-space: normal;
 }
 
-/*
- * The always-visible pallet readout (Task 15 review, Finding 2): a compact
- * sibling of `.work-box-fill`, not a full hero card, so it gets the same
- * `work-instrument` shell (border/radius/background) but its own small
- * layout rather than that card's grid rows.
- */
+/* Pallet progress stays compact alongside the current box, even for 66+ boxes. */
+.work-screen__primary:has(> .pallet-strip) {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.work-screen__primary:has(> .pallet-strip):not(:has(> .work-box-fill)) {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
 .pallet-strip {
   display: grid;
   padding: var(--sp-3);
+  gap: var(--sp-2) var(--sp-3);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.pallet-strip__summary {
+  min-width: 0;
+}
+.pallet-strip h2 {
+  margin: 0 0 var(--sp-1);
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+.pallet-strip__readout {
+  display: flex;
+  align-items: baseline;
   gap: var(--sp-2);
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
 }
-
+.pallet-strip__readout > span {
+  color: var(--fg-2);
+  font: var(--floor-body);
+  white-space: nowrap;
+}
 .pallet-strip__progress {
-  margin: 0;
   color: var(--fg-1);
-  font: var(--floor-body-strong);
+  font: var(--floor-title);
 }
-
-/* Text-only warning (never colour alone) that this device's serial pool is
-   dry -- see `PalletStrip`'s own doc comment. */
+.pallet-strip__progress[data-highlight="true"] {
+  animation: pallet-count-added 300ms ease-out;
+}
+@keyframes pallet-count-added {
+  50% {
+    color: var(--ok-fg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pallet-strip__progress[data-highlight="true"] {
+    animation: none;
+  }
+}
+.pallet-strip__bar {
+  height: 8px;
+  margin-block: var(--sp-1);
+  overflow: hidden;
+  border-radius: var(--r-1);
+  background: var(--surface-panel);
+}
+.pallet-strip__bar > span {
+  display: block;
+  height: 100%;
+  background: var(--fg-2);
+}
+.pallet-strip__remaining,
+.pallet-strip__last {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+.pallet-strip__last code {
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+}
+.pallet-strip__actions {
+  display: grid;
+  gap: var(--sp-1);
+}
+.pallet-strip__actions .mk-btn {
+  padding-inline: var(--sp-2) !important;
+}
 .pallet-strip__warning {
+  grid-column: 1 / -1;
   margin: 0;
   color: var(--warn-fg);
   font: var(--floor-body);
+}
+
+.pallet-contents {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+.pallet-contents table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font: var(--floor-body);
+}
+.pallet-contents caption {
+  padding-bottom: var(--sp-3);
+  text-align: left;
+  font: var(--floor-title);
+}
+.pallet-contents th {
+  color: var(--fg-2);
+  font: var(--floor-body-strong);
+}
+.pallet-contents th,
+.pallet-contents td {
+  padding: var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+.pallet-contents td:last-child,
+.pallet-contents th:last-child {
+  text-align: right;
+}
+.pallet-contents code {
+  font-family: var(--font-mono);
 }
 
 .work-counters {
@@ -3815,7 +3922,7 @@ body,
   display: grid;
   margin: 0;
   gap: var(--sp-3);
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .work-counters dt {
@@ -5189,4 +5296,52 @@ body,
   gap: var(--sp-4);
   padding: var(--sp-3) 0;
   border-bottom: 1px solid var(--line-strong);
+}
+
+/* The waiting screen describes a physical action; completion keeps its own green signal. */
+.product-label-verification--awaiting > header,
+.product-label-verification--awaiting .print-verification__stage {
+  --fg-1: var(--fg-on-warn-solid);
+  --fg-2: var(--fg-on-warn-solid);
+}
+
+.product-label-verification--awaiting .print-verification__stage {
+  color: var(--fg-on-warn-solid);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.product-label-verification--awaiting .print-verification {
+  overflow: auto;
+}
+
+.product-label-verification--awaiting > footer {
+  flex-wrap: wrap;
+}
+
+.product-label-verification--awaiting > footer .mk-btn {
+  width: auto;
+}
+
+.product-label-verification__icon {
+  width: var(--control-floor);
+  height: var(--control-floor);
+  flex-shrink: 0;
+}
+
+.product-label-verification__skip-hint {
+  max-width: 48ch;
+  font: var(--floor-body);
+}
+
+.setup-card--printer-check {
+  overflow-y: auto;
+  align-content: safe center;
+}
+
+.setup-card__dpi-hint {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--text-caption);
 }

@@ -220,6 +220,11 @@ export async function appendProductLabelEvent(
       `INSERT INTO product_label_event_commands
       (credential_ownership,event_id,job_id,command_token,event_digest,expected_sequence,expected_attempt_id,event_json,projection_json,recovery)
       SELECT ?,?,?,?,?,?,?,?,?,? WHERE ? IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL})
+      AND (? <> 'verification_skipped' OR (
+        EXISTS (SELECT 1 FROM shift_mirror WHERE id=? AND status='active')
+        AND NOT EXISTS (SELECT 1 FROM shift_close_outbox WHERE shift_id=?)
+        AND EXISTS (SELECT 1 FROM product_label_jobs WHERE credential_ownership=? AND job_id=? AND ownership_conflict=0)
+      ))
       ON CONFLICT(credential_ownership,event_id) DO NOTHING`,
       [
         credentialOwnership,
@@ -234,6 +239,11 @@ export async function appendProductLabelEvent(
         options.recovery ? 1 : 0,
         credentialOwnership,
         writerOwnership,
+        event.kind,
+        job.shiftId,
+        job.shiftId,
+        credentialOwnership,
+        job.jobId,
       ],
     );
   } catch (error) {
@@ -255,6 +265,7 @@ export async function appendProductLabelEvent(
     `SELECT command_token,event_digest FROM product_label_event_commands WHERE credential_ownership=? AND event_id=?`,
     [credentialOwnership, event.eventId],
   );
+  if (!command && event.kind === "verification_skipped") return "stale";
   if (!command) invalidStoredJob();
   if (command.event_digest !== digest)
     throw new DomainError(

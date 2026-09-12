@@ -129,7 +129,7 @@
 		}
 
 		@stationRoot {
-			path /shifts /shifts/planning-config /shifts/product-label-templates /shifts/box-label-templates /products /products/gtin-check /lines
+			path /shifts /shifts/planning-config /shifts/product-label-templates /shifts/box-label-templates /shifts/pallet-label-templates /products /products/gtin-check /lines
 			header X-Api-Key *
 		}
 		handle @stationRoot {
@@ -139,7 +139,7 @@
 		}
 
 		@stationRootPreflight {
-			path /shifts /shifts/planning-config /shifts/product-label-templates /shifts/box-label-templates /products /products/gtin-check /lines
+			path /shifts /shifts/planning-config /shifts/product-label-templates /shifts/box-label-templates /shifts/pallet-label-templates /products /products/gtin-check /lines
 			method OPTIONS
 		}
 		handle @stationRootPreflight {
@@ -163,6 +163,28 @@
 			method OPTIONS
 		}
 		handle @stationShiftPreflight {
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
+		@stationCodeHistory {
+			path_regexp stationCodeHistory ^/shifts/[^/]+/code-history$
+			method GET
+			header X-Api-Key *
+		}
+		handle @stationCodeHistory {
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
+		@stationCodeHistoryPreflight {
+			path_regexp stationCodeHistoryPreflight ^/shifts/[^/]+/code-history$
+			method OPTIONS
+			header Access-Control-Request-Method GET
+		}
+		handle @stationCodeHistoryPreflight {
 			reverse_proxy api:3000 {
 				import standard_api_transport
 			}

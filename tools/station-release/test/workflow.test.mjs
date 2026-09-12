@@ -597,6 +597,11 @@ test("the workflow CORS gate pins the production API and Windows webview origin"
       "x-api-key,x-station-capabilities",
     ],
     ["/station/conflicts/status", "POST", "content-type,x-api-key,x-station-capabilities"],
+    [
+      "/station/validation-occurrences/status",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
     ["/station/codes/releases", "POST", "content-type,x-api-key,x-station-capabilities"],
     ["/station/scans", "POST", "content-type,x-api-key,x-station-capabilities"],
     ["/station/inventory-tasks", "GET", "content-type,x-api-key,x-station-capabilities"],
@@ -641,9 +646,11 @@ test("the workflow CORS gate pins the production API and Windows webview origin"
     ["/shifts/planning-config", "GET", "content-type,x-api-key,x-station-capabilities"],
     ["/shifts/product-label-templates", "GET", "content-type,x-api-key,x-station-capabilities"],
     ["/shifts/box-label-templates", "GET", "content-type,x-api-key,x-station-capabilities"],
+    ["/shifts/pallet-label-templates", "GET", "content-type,x-api-key,x-station-capabilities"],
     ["/shifts/cors-probe/open", "POST", "content-type,x-api-key,x-station-capabilities"],
     ["/shifts/cors-probe/bundle", "GET", "content-type,x-api-key,x-station-capabilities"],
     ["/shifts/cors-probe/reference-bundle", "GET", "content-type,x-api-key,x-station-capabilities"],
+    ["/shifts/cors-probe/code-history", "GET", "content-type,x-api-key,x-station-capabilities"],
     ["/products", "GET", "content-type,x-api-key,x-station-capabilities"],
     ["/products/gtin-check", "POST", "content-type,x-api-key,x-station-capabilities"],
   ];

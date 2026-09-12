@@ -27,6 +27,7 @@ interface ResolvedProduct {
   gtin14: string;
   name: string;
   boxCapacity: number | null;
+  palletBoxCapacity?: number | null;
 }
 
 /** Spec-free summary from GET /shifts/box-label-templates. */
@@ -58,7 +59,13 @@ export interface NewShiftProps {
 }
 
 export type NewShiftView =
-  "input" | "found" | "notFound" | "template" | "validationPrint" | "productTemplate";
+  | "input"
+  | "found"
+  | "notFound"
+  | "template"
+  | "palletTemplate"
+  | "validationPrint"
+  | "productTemplate";
 export type NewShiftMode = "validation" | "aggregation";
 
 interface CreatedPrintShift {
@@ -140,6 +147,10 @@ export function NewShift({
   const [mode, setMode] = useState<NewShiftMode>("validation");
   const [productionDate, setProductionDate] = useState(initialDraft?.productionDate ?? "");
   const [unknownGtin, setUnknownGtin] = useState<string>("");
+  const [palletsEnabled, setPalletsEnabled] = useState(false);
+  const [palletTemplates, setPalletTemplates] = useState<BoxLabelTemplateOption[]>([]);
+  const [defaultPalletTemplateId, setDefaultPalletTemplateId] = useState<string | null>(null);
+  const [palletTemplateId, setPalletTemplateId] = useState<string | null>(null);
   const [templates, setTemplates] = useState<BoxLabelTemplateOption[]>([]);
   const [defaultTemplateId, setDefaultTemplateId] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
@@ -192,6 +203,8 @@ export function NewShift({
           productTemplateId: null,
         });
         setPrintEnabled(false);
+        setPalletsEnabled(false);
+        setPalletTemplateId(null);
         setVerificationRequired(true);
         setProductTemplateId(null);
         setPrintProtocol(null);
@@ -254,6 +267,39 @@ export function NewShift({
       setError(err instanceof StationApiError ? err.message : t("shifts.templatesLoadFailed"));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function openPalletTemplateStep() {
+    if (!product || busy) return;
+    const operation = ++shiftEntryOperation.current;
+    const current = () =>
+      mounted.current && shiftEntryOperation.current === operation && (isCurrent?.() ?? true);
+    setBusy(true);
+    setError(null);
+    try {
+      const config = await client.get<{
+        items: BoxLabelTemplateOption[];
+        defaultPalletLabelTemplateId: string | null;
+      }>(`/shifts/pallet-label-templates?productId=${encodeURIComponent(product.id)}`);
+      if (!current()) return;
+      setPalletTemplates(config.items);
+      setDefaultPalletTemplateId(config.defaultPalletLabelTemplateId);
+      setPalletTemplateId(
+        config.items.some((item) => item.id === palletTemplateId)
+          ? palletTemplateId
+          : config.items.some((item) => item.id === config.defaultPalletLabelTemplateId)
+            ? config.defaultPalletLabelTemplateId
+            : null,
+      );
+      setTemplatePage(1);
+      setTemplateSearch("");
+      setView("palletTemplate");
+    } catch (err) {
+      if (current())
+        setError(err instanceof StationApiError ? err.message : t("shifts.templatesLoadFailed"));
+    } finally {
+      if (current()) setBusy(false);
     }
   }
 
@@ -359,6 +405,14 @@ export function NewShift({
       return;
     }
     if (mode === "aggregation" && !selectedTemplateId) return;
+    if (mode === "aggregation" && palletsEnabled) {
+      if (!(product.palletBoxCapacity && product.palletBoxCapacity > 0)) return;
+      if (view === "template") {
+        await openPalletTemplateStep();
+        return;
+      }
+      if (!palletTemplateId) return;
+    }
     const operation = ++shiftEntryOperation.current;
     let lease: ShiftEntryLease | null = null;
     const current = (): boolean =>
@@ -437,6 +491,9 @@ export function NewShift({
           ? { validationPrint }
           : {}),
         ...(mode === "aggregation" ? { boxLabelTemplateId: selectedTemplateId } : {}),
+        ...(mode === "aggregation" && palletsEnabled
+          ? { palletsEnabled: true, palletLabelTemplateId: palletTemplateId }
+          : {}),
       };
       const requestDigest = productLabelValueDigest(createInput);
       if (createdPrintShift.current && createdPrintShift.current.requestDigest !== requestDigest) {
@@ -641,11 +698,21 @@ export function NewShift({
     );
   }
 
-  if ((view === "template" || view === "productTemplate") && product) {
+  if ((view === "template" || view === "palletTemplate" || view === "productTemplate") && product) {
     const productLabels = view === "productTemplate";
-    const choices = productLabels ? productTemplates : templates;
-    const selectedId = productLabels ? productTemplateId : selectedTemplateId;
-    const templateTitle = productLabels ? "shifts.productTemplateLabel" : "shifts.templateLabel";
+    const palletLabels = view === "palletTemplate";
+    const choices = productLabels ? productTemplates : palletLabels ? palletTemplates : templates;
+    const selectedId = productLabels
+      ? productTemplateId
+      : palletLabels
+        ? palletTemplateId
+        : selectedTemplateId;
+    const templateTitle = productLabels
+      ? "shifts.productTemplateLabel"
+      : palletLabels
+        ? "shifts.palletTemplateLabel"
+        : "shifts.templateLabel";
+    const selectedDefault = palletLabels ? defaultPalletTemplateId : defaultTemplateId;
     const needle = templateSearch.trim().toLocaleLowerCase();
     const visibleTemplates = needle
       ? choices.filter((option) => option.name.toLocaleLowerCase().includes(needle))
@@ -663,7 +730,13 @@ export function NewShift({
               disabled={!selectedId}
               onClick={() => void (productLabels ? applyPrintSettings() : start())}
             >
-              {t(productLabels ? "shifts.applyPrintSettings" : "shifts.start")}
+              {t(
+                productLabels
+                  ? "shifts.applyPrintSettings"
+                  : !palletLabels && palletsEnabled
+                    ? "shifts.palletNext"
+                    : "shifts.start",
+              )}
             </Button>
             <Button
               size="floor"
@@ -673,7 +746,11 @@ export function NewShift({
               onClick={() => {
                 setError(null);
                 if (productLabels) void openPrintSettings();
-                else setView("found");
+                else {
+                  setTemplateSearch("");
+                  setTemplatePage(1);
+                  setView(palletLabels ? "template" : "found");
+                }
               }}
             >
               {t("shifts.back")}
@@ -726,7 +803,9 @@ export function NewShift({
                       onClick={() =>
                         productLabels
                           ? setProductTemplateId(option.id)
-                          : setSelectedTemplateId(option.id)
+                          : palletLabels
+                            ? setPalletTemplateId(option.id)
+                            : setSelectedTemplateId(option.id)
                       }
                     >
                       <span className="new-shift__template-name">{option.name}</span>
@@ -736,7 +815,7 @@ export function NewShift({
                           height: option.heightMm,
                         })}
                       </span>
-                      {!productLabels && option.id === defaultTemplateId ? (
+                      {!productLabels && option.id === selectedDefault ? (
                         <span className="new-shift__template-badge">
                           {t("shifts.templateDefault")}
                         </span>
@@ -851,6 +930,37 @@ export function NewShift({
                 ),
               })}
             </Button>
+          ) : null}
+          {mode === "aggregation" ? (
+            <div className="new-shift__pallet-settings">
+              <div className="new-shift__modes" role="group" aria-label={t("shifts.palletsLabel")}>
+                <Button
+                  size="floor"
+                  fullWidth
+                  variant={!palletsEnabled ? "primary" : "secondary"}
+                  aria-pressed={!palletsEnabled}
+                  disabled={busy}
+                  onClick={() => setPalletsEnabled(false)}
+                >
+                  {t("shifts.palletsOff")}
+                </Button>
+                <Button
+                  size="floor"
+                  fullWidth
+                  variant={palletsEnabled ? "primary" : "secondary"}
+                  aria-pressed={palletsEnabled}
+                  disabled={busy || !(product.palletBoxCapacity && product.palletBoxCapacity > 0)}
+                  onClick={() => setPalletsEnabled(true)}
+                >
+                  {t("shifts.palletsOn")}
+                </Button>
+              </div>
+              <p>
+                {product.palletBoxCapacity && product.palletBoxCapacity > 0
+                  ? t("shifts.palletCapacityFromProduct", { capacity: product.palletBoxCapacity })
+                  : t("shifts.palletCapacityMissing")}
+              </p>
+            </div>
           ) : null}
           <DatePicker
             label={t("shifts.productionDate")}

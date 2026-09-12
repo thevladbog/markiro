@@ -7,6 +7,7 @@ import {
   parseLabelCode,
   ptToDots,
   rasterAlignOffsetDots,
+  type LabelTemplatePurpose,
 } from "@markiro/domain";
 import "@markiro/ui/styles.css";
 import samples from "../../../../examples/labels/manifest.json";
@@ -21,7 +22,10 @@ async function renderSample(index: number, code: string, ssccSvg: string | null)
   if (!sample) throw new Error("Unknown sample");
   const { spec, warnings } = parseLabelCode(code, { language: "zpl", dpi: 203 });
   if (warnings.length) throw new Error(JSON.stringify(warnings));
-  const purpose = sample.purpose === "box" ? "box" : "product_duplicate";
+  // The manifest's own purpose. A box/duplicate binary sent "pallet" down the
+  // duplicate branch, which renders KM as a raster — options a pallet label
+  // has no use for, and the wrong ones to exercise the generators with.
+  const purpose = sample.purpose as LabelTemplatePurpose;
   if (!(await checkFamilyCoverage("IBM Plex Sans"))) throw new Error("Cyrillic font unavailable");
   const canvas = document.querySelector("canvas");
   const context = canvas?.getContext("2d");

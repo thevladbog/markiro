@@ -65,16 +65,19 @@ export function ProductLabelVerification({
   work,
   onPause,
   onSetup,
+  onSkipped,
 }: {
   state: ProductLabelWorkState;
   work: ProductLabelWork;
   onPause: () => void;
   onSetup?: () => void;
+  onSkipped?: () => void;
 }) {
   const { t } = useTranslation();
   const [reasonOpen, setReasonOpen] = useState(false);
   const [error, setError] = useState(false);
   const job = state.job;
+  const awaiting = job?.status === "awaiting_verification" && !state.error;
   useEffect(() => () => work.setVerificationPaused(false), [work]);
   async function reprint(reason: ReprintReason) {
     if (!job) return;
@@ -107,13 +110,17 @@ export function ProductLabelVerification({
           ? "productLabels.printerSetup"
           : state.error
             ? "productLabels.storageError"
-            : productLabelStatusKey(job),
+            : awaiting
+              ? "productLabels.scanTitle"
+              : productLabelStatusKey(job),
       )}
       backLabel={t("productLabels.pause")}
       backPlacement="footer"
+      backDisabled={state.busy}
       onClose={onPause}
       initialFocus="dialog"
-      className="print-verification-dialog"
+      className={`print-verification-dialog${awaiting ? " product-label-verification--awaiting" : ""}`}
+      style={awaiting ? { background: "var(--warn-solid)", color: "var(--fg-on-warn-solid)" } : {}}
       footer={
         <>
           {state.error ? (
@@ -141,9 +148,27 @@ export function ProductLabelVerification({
                 setReasonOpen(true);
               }}
             >
-              {t("productLabels.reprint")}
+              {t(awaiting ? "productLabels.labelProblem" : "productLabels.reprint")}
             </Button>
           )}
+          {awaiting && !state.closed && !job.ownershipConflict ? (
+            <Button
+              size="floor"
+              variant="secondary"
+              disabled={state.busy}
+              onClick={() => {
+                setError(false);
+                void work
+                  .skip(job.jobId, job.attemptId)
+                  .then((applied) => {
+                    if (applied) onSkipped?.();
+                  })
+                  .catch(() => setError(true));
+              }}
+            >
+              {t("productLabels.skip")}
+            </Button>
+          ) : null}
           {onSetup && (state.error === "printer" || job?.attemptState === "failed_before_send") ? (
             <Button size="floor" variant="secondary" disabled={state.busy} onClick={onSetup}>
               {t("productLabels.printerSetup")}
@@ -154,6 +179,19 @@ export function ProductLabelVerification({
     >
       <div className="print-verification">
         <section className="print-verification__stage">
+          {awaiting ? (
+            <svg
+              className="product-label-verification__icon"
+              aria-hidden="true"
+              viewBox="0 0 48 48"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+            >
+              <path d="M16 6H8a2 2 0 0 0-2 2v8m26-10h8a2 2 0 0 1 2 2v8M6 32v8a2 2 0 0 0 2 2h8m26-10v8a2 2 0 0 1-2 2h-8M14 18v12m7-12v12m6-12v12m7-12v12" />
+            </svg>
+          ) : null}
           <p className="print-verification__instruction">
             {t(
               state.closed
@@ -185,6 +223,9 @@ export function ProductLabelVerification({
           ) : null}
           {job?.ownershipConflict ? (
             <Alert tone="warn" title={t("productLabels.ownershipConflict")} />
+          ) : null}
+          {awaiting && !state.closed ? (
+            <p className="product-label-verification__skip-hint">{t("productLabels.skipHint")}</p>
           ) : null}
           <p role="status">{t(state.busy ? "productLabels.saving" : "productLabels.waitScan")}</p>
         </section>
