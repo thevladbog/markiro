@@ -18,6 +18,13 @@ platform and device events. Migration observations and system events retain thei
 nullable actor identity. This forward constraint change does not rewrite journal
 records or the already-applied migration 0133.
 
+Migration `0135_supreme_quasar` adds replacement previews and preparations, their
+tenant/source keys, one-current-preparation constraint and immutable-history
+guards. It extends the journal with preparation and cancellation receipts without
+rewriting existing device, assignment or journal rows. Apply it through the same
+deployment workflow before serving replacement routes; it does not add a new
+working-device binary compatibility floor.
+
 Before rollout, save a database backup through the existing production procedure.
 Apply the migration through the existing immutable-image deployment workflow.
 Compare each tenant's pre-migration `station_devices WHERE revoked_at IS NULL`
@@ -61,6 +68,46 @@ fields are unchanged, and journal/audit entries identify the exact actor and res
 After cancellation, old code claim, code issuance and legacy recovery must fail.
 A stale revision or changed retry intent conflicts and requires fresh inspection.
 Security revocation and authorized re-pairing remain distinct operations.
+
+## Replacement preparation
+
+The cabinet and SaaS operator can prepare a replacement for a previously paired
+Station or handheld. Select the source and enter the future device name/kind and
+a reason. Preview reports the source observation, known server work and expected
+eventual slot change. Saving the preparation itself consumes no additional slot.
+An occupied source has an expected eventual net change of zero. A previously
+paired source released by security revocation has an expected eventual increase
+of one; preparation does not restore its revoked authority. Legacy pairing
+evidence may come from the immutable assignment journal or authenticated use
+recorded for migrated devices, even when the current pairing timestamp is absent.
+
+Server shift/inventory references, retained print jobs and quarantine batches are
+observations of retained server data. Local journals, outboxes and unfinished
+printing remain explicitly unknown, even when the server has no work records or
+the device has recently sent a heartbeat. No empty-queue attestation is inferred.
+
+Confirmation stores a project in `prepared` state with its observation and a
+durable receipt. It does not create the future device, release the old assignment,
+issue a pairing code, revoke a credential or move work to another durable ID.
+Execution is unavailable until the later authority-transition and recovery phase.
+Preparing a project does not require a lifecycle policy or change catalog sales.
+
+Only one current project may exist per source. Cancel the project explicitly to
+prepare a different replacement; cancellation preserves the source and history.
+Changed source, pool or commercial facts mark a saved project as needing review.
+An ordinary new heartbeat alone does not invalidate an unchanged intention.
+
+Before confirming, the server revalidates current access and preview facts. The
+preview expires within five technical minutes or at the next entitlement boundary,
+whichever comes first. An uncertain response must be retried with the same request
+identity. A known stale response requires a new preview and explicit confirmation.
+Historical successful receipts retain their original result after cancellation.
+
+Use the ordinary licensing permissions: cabinet `credentials.manage`; platform
+`tenants.read` for inspection and both `tenants.write` and `billing.write` for
+changes. Read-only subscription status does not block preparation or cancellation.
+These routes grant no enrollment or production authority. Device retention
+selection at a quota reduction remains the next separate delivery.
 
 ## Recovery boundary
 

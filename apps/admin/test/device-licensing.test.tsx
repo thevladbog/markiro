@@ -74,6 +74,8 @@ it("shows the shared Station and handheld count and cancels only after keyboard 
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/device-licensing/replacements"))
+        return response({ canPrepare: false, items: [] });
       const url = String(input);
       requests.push({ url, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
       if (init?.method === "POST")
@@ -121,7 +123,9 @@ it("retries an uncertain response after remount with the same request id and rev
   let posts = 0;
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/device-licensing/replacements"))
+        return response({ canPrepare: false, items: [] });
       if (init?.method === "POST") {
         bodies.push(JSON.parse(String(init.body)));
         posts += 1;
@@ -166,8 +170,12 @@ it("treats authorization denial as known, clears confirmation and refreshes acce
   vi.stubGlobal("crypto", { randomUUID: () => "33333333-3333-4333-8333-333333333333" });
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
-      init?.method === "POST" ? response({ message: "Forbidden" }, 403) : response(POOL),
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).endsWith("/device-licensing/replacements")
+        ? response({ canPrepare: false, items: [] })
+        : init?.method === "POST"
+          ? response({ message: "Forbidden" }, 403)
+          : response(POOL),
     ),
   );
   renderPanel();
@@ -189,7 +197,9 @@ it("requires a fresh confirmation and request after a revision conflict", async 
   let revision = 3;
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/device-licensing/replacements"))
+        return response({ canPrepare: false, items: [] });
       if (init?.method === "POST") {
         bodies.push(JSON.parse(String(init.body)));
         if (bodies.length === 1) {
@@ -231,7 +241,13 @@ it("renders zero usage in English", async () => {
   await i18n.changeLanguage("en");
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => response({ ...POOL, usage: 0 })),
+    vi.fn(async (input: RequestInfo | URL) =>
+      response(
+        String(input).endsWith("/device-licensing/replacements")
+          ? { canPrepare: false, items: [] }
+          : { ...POOL, usage: 0 },
+      ),
+    ),
   );
   renderPanel();
   expect(await screen.findByText("0 of 2")).toBeDefined();

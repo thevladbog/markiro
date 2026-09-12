@@ -1,3 +1,5 @@
+import { PlatformDeviceReplacementController } from "../src/modules/device-licensing/platform-device-replacement.controller";
+import { DeviceReplacementService } from "../src/modules/device-licensing/device-replacement.service";
 import { PlatformEntitlementsController } from "../src/subscriptions/platform-entitlements.controller";
 import { EntitlementSourcesService } from "../src/subscriptions/entitlement-sources.service";
 import { Test } from "@nestjs/testing";
@@ -145,6 +147,7 @@ async function createPlatformDocument(): Promise<{
     PlatformOperationsService,
     NationalCatalogSchemaService,
     DeviceLicensingService,
+    DeviceReplacementService,
     DB,
   ].map((provide) => ({ provide, useValue: {} }));
   const moduleRef = await Test.createTestingModule({
@@ -168,6 +171,7 @@ async function createPlatformDocument(): Promise<{
       PlatformDadataController,
       PlatformOperationsController,
       PlatformDeviceLicensingController,
+      PlatformDeviceReplacementController,
     ],
     providers,
   }).compile();
@@ -192,7 +196,7 @@ async function createPlatformDocument(): Promise<{
 
 describe("current SaaS platform OpenAPI contracts", () => {
   it("converts all current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(166);
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(173);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }

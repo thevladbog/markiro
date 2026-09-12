@@ -1,3 +1,4 @@
+import { DeviceReplacementPanel } from "./DeviceReplacementPanel.js";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -101,58 +102,61 @@ export function DeviceLicensingPanel({ enabled }: { enabled: boolean }) {
   if (!query.data) return <Alert tone="error">{t("pages.devices.licensing.loadError")}</Alert>;
   const pool = query.data;
   return (
-    <Card title={t("pages.devices.licensing.title")} titleAs="h2">
-      <p>
-        {pool.limit === null
-          ? t("pages.devices.licensing.unlimited", { usage: pool.usage })
-          : t("pages.devices.licensing.count", { usage: pool.usage, limit: pool.limit })}
-      </p>
-      {stale ? <Alert tone="warn">{t("pages.devices.licensing.stale")}</Alert> : null}
-      {permissionError ? (
-        <Alert tone="error">{t("pages.devices.licensing.permissionError")}</Alert>
-      ) : null}
-      {pool.devices.map((device) => (
-        <div
-          key={device.deviceId}
-          style={{
-            display: "flex",
-            gap: "var(--sp-3)",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-          }}
-        >
-          <span>{device.name}</span>
-          <StatusChip
-            status={
-              device.state === "released"
-                ? "neutral"
-                : device.state === "inconsistent"
-                  ? "error"
-                  : "info"
-            }
-            label={t(`pages.devices.licensing.state.${device.state}`)}
-          />
-          {device.canCancel && pool.canCancelReservations ? (
-            <Button size="compact" variant="secondary" onClick={() => setSelected(device)}>
-              {t("pages.devices.licensing.cancel")}
-            </Button>
-          ) : null}
-        </div>
-      ))}
-      <ConfirmDialog
-        open={selected !== null}
-        title={t("pages.devices.licensing.confirmTitle")}
-        description={t("pages.devices.licensing.confirmBody")}
-        confirmLabel={t("pages.devices.licensing.confirm")}
-        cancelLabel={t("pages.devices.cancel")}
-        busy={mutation.isPending}
-        onCancel={() => setSelected(null)}
-        onConfirm={() => void confirm()}
-      />
-      {mutation.isError && !stale && !permissionError ? (
-        <Alert tone="error">{t("pages.devices.licensing.retry")}</Alert>
-      ) : null}
-    </Card>
+    <>
+      <Card title={t("pages.devices.licensing.title")} titleAs="h2">
+        <p>
+          {pool.limit === null
+            ? t("pages.devices.licensing.unlimited", { usage: pool.usage })
+            : t("pages.devices.licensing.count", { usage: pool.usage, limit: pool.limit })}
+        </p>
+        {stale ? <Alert tone="warn">{t("pages.devices.licensing.stale")}</Alert> : null}
+        {permissionError ? (
+          <Alert tone="error">{t("pages.devices.licensing.permissionError")}</Alert>
+        ) : null}
+        {pool.devices.map((device) => (
+          <div
+            key={device.deviceId}
+            style={{
+              display: "flex",
+              gap: "var(--sp-3)",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+            }}
+          >
+            <span>{device.name}</span>
+            <StatusChip
+              status={
+                device.state === "released"
+                  ? "neutral"
+                  : device.state === "inconsistent"
+                    ? "error"
+                    : "info"
+              }
+              label={t(`pages.devices.licensing.state.${device.state}`)}
+            />
+            {device.canCancel && pool.canCancelReservations ? (
+              <Button size="compact" variant="secondary" onClick={() => setSelected(device)}>
+                {t("pages.devices.licensing.cancel")}
+              </Button>
+            ) : null}
+          </div>
+        ))}
+        <ConfirmDialog
+          open={selected !== null}
+          title={t("pages.devices.licensing.confirmTitle")}
+          description={t("pages.devices.licensing.confirmBody")}
+          confirmLabel={t("pages.devices.licensing.confirm")}
+          cancelLabel={t("pages.devices.cancel")}
+          busy={mutation.isPending}
+          onCancel={() => setSelected(null)}
+          onConfirm={() => void confirm()}
+        />
+        {mutation.isError && !stale && !permissionError ? (
+          <Alert tone="error">{t("pages.devices.licensing.retry")}</Alert>
+        ) : null}
+      </Card>
+      <DeviceReplacementPanel pool={pool} canWrite={enabled} />
+    </>
   );
 }

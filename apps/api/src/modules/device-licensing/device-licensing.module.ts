@@ -1,3 +1,6 @@
+import { DeviceReplacementService } from "./device-replacement.service";
+import { DeviceReplacementController } from "./device-replacement.controller";
+import { PlatformDeviceReplacementController } from "./platform-device-replacement.controller";
 import { Module } from "@nestjs/common";
 
 import { PlatformAuditModule } from "../../platform-auth/platform-audit.module";
@@ -7,7 +10,12 @@ import { PlatformDeviceLicensingController } from "./platform-device-licensing.c
 
 @Module({
   imports: [PlatformAuditModule],
-  controllers: [DeviceLicensingController, PlatformDeviceLicensingController],
-  providers: [DeviceLicensingService],
+  controllers: [
+    DeviceReplacementController,
+    PlatformDeviceReplacementController,
+    DeviceLicensingController,
+    PlatformDeviceLicensingController,
+  ],
+  providers: [DeviceReplacementService, DeviceLicensingService],
 })
 export class DeviceLicensingModule {}

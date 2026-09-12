@@ -27,7 +27,15 @@ export const workingDeviceEvents = pgTable(
       .notNull(),
     actorId: text("actor_id"),
     action: text("action")
-      .$type<"observed" | "reserved" | "assigned" | "released" | "reservation_cancelled">()
+      .$type<
+        | "observed"
+        | "reserved"
+        | "assigned"
+        | "released"
+        | "reservation_cancelled"
+        | "replacement_prepared"
+        | "replacement_cancelled"
+      >()
       .notNull(),
     before: jsonb("before").$type<Record<string, unknown>>(),
     after: jsonb("after").$type<Record<string, unknown>>().notNull(),
@@ -52,11 +60,15 @@ export const workingDeviceEvents = pgTable(
     ),
     check(
       "working_device_events_action_check",
-      sql`${t.action} in ('observed','reserved','assigned','released','reservation_cancelled') and ${t.outcome} = 'success'`,
+      sql`${t.action} in ('observed','reserved','assigned','released','reservation_cancelled','replacement_prepared','replacement_cancelled') and ${t.outcome} = 'success'`,
     ),
     check(
       "working_device_events_json_check",
       sql`(${t.before} is null or jsonb_typeof(${t.before})='object') and jsonb_typeof(${t.after})='object'`,
+    ),
+    check(
+      "working_device_events_replacement_check",
+      sql`${t.action} not in ('replacement_prepared','replacement_cancelled') or ((${t.actorDomain} in ('cabinet','platform') and ${t.actorId} is not null and ${t.requestId} is not null and ${t.requestHash} is not null and ${t.requestHash} ~ '^[0-9a-f]{64}$' and ${t.response} is not null and jsonb_typeof(${t.response}) = 'object' and ${t.response}->>'requestId' is not null and ${t.response}->>'requestId' = ${t.requestId}::text and ${t.after}->>'id' is not null and ${t.response}#>>'{preparation,id}' is not null and ${t.response}#>>'{preparation,id}' = ${t.after}->>'id' and ((${t.action} = 'replacement_prepared' and ${t.before} is null and ${t.after}->>'state' = 'prepared' and ${t.response}#>>'{preparation,state}' = 'prepared') or (${t.action} = 'replacement_cancelled' and ${t.before} is not null and ${t.before}->>'state' = 'prepared' and ${t.after}->>'state' = 'cancelled' and ${t.response}#>>'{preparation,state}' = 'cancelled'))) is true)`,
     ),
   ],
 );
