@@ -125,6 +125,8 @@ export interface SkippedOffer {
 
 export interface ApplicationPlan {
   links: AutoLink[];
+  /** Observation identity only: source catalog refs resolved to existing or new links. */
+  effectiveLinkTargets: { externalRef: string; productId: string }[];
   priceUpdates: PriceUpdate[];
   images: ImageWork[];
   candidates: CandidateItem[];
@@ -414,6 +416,16 @@ export function decideApplication(input: DecideApplicationInput): ApplicationPla
   // цены» из спеки §8 начинается уже здесь, в плане.
   const priceTargetByRef = new Map([...knownByRef, ...linkedByRef]);
 
+  // Reuse the actual resolution, including known links, so an applied link
+  // stays the same observation target on retry. The business worklist and
+  // cursor deliberately exclude links and must not use this metadata.
+  const effectiveLinkTargets = [...new Set(items.map((item) => item.externalRef))]
+    .sort()
+    .flatMap((externalRef) => {
+      const target = priceTargetByRef.get(externalRef);
+      return target === undefined ? [] : [{ externalRef, productId: target.id }];
+    });
+
   const priceUpdates: PriceUpdate[] = [];
   const skipped: SkippedOffer[] = [];
   for (const offer of offers) {
@@ -478,6 +490,7 @@ export function decideApplication(input: DecideApplicationInput): ApplicationPla
 
   return {
     links,
+    effectiveLinkTargets,
     priceUpdates,
     images,
     candidates,

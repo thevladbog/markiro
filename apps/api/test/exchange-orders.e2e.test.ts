@@ -178,8 +178,14 @@ describe("1c_exchange orders (И-2)", () => {
     const second = { orderIds: [], xml: "<empty/>" };
 
     const [left, right] = await Promise.all([
-      sessions.ensureOutstandingOrderQuery(session!.id, first),
-      sessions.ensureOutstandingOrderQuery(session!.id, second),
+      sessions.ensureOutstandingOrderQuery(
+        { id: session!.id, tenantId, channelType: "commerceml" },
+        first,
+      ),
+      sessions.ensureOutstandingOrderQuery(
+        { id: session!.id, tenantId, channelType: "commerceml" },
+        second,
+      ),
     ]);
 
     expect(left).toEqual(right);

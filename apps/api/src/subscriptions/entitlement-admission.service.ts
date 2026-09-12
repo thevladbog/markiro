@@ -14,7 +14,9 @@ import { evaluateEntitlementOperation } from "./entitlement-projection";
 import type { SubscriptionTransaction } from "./entitlements.types";
 
 /** Internal verified identity from the action owner, never a request DTO. */
-export type AdmissionActor = { domain: "cabinet" | "api_key" | "system"; id: string | null };
+export type AdmissionActor =
+  | { domain: "cabinet" | "api_key" | "system"; id: string | null }
+  | { domain: "exchange_session" | "station_device"; id: string };
 export interface AdmissionFacts {
   tenantId: string;
   snapshot: EntitlementSnapshotV1 | null;

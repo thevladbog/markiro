@@ -21,6 +21,7 @@ describe("sale import failure boundary", () => {
       })),
     };
     const sessions = {
+      observeImport: vi.fn(async () => undefined),
       readSaleImportCursor: vi.fn(async () => null),
       writeSaleImportCursor: vi.fn(async () => undefined),
     };
@@ -79,6 +80,7 @@ describe("sale import failure boundary", () => {
       })),
     };
     const sessions = {
+      observeImport: vi.fn(async () => undefined),
       readSaleImportCursor: vi.fn(async () => null),
       writeSaleImportCursor: vi.fn(async () => undefined),
     };

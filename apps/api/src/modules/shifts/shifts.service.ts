@@ -1,3 +1,8 @@
+import { randomUUID } from "node:crypto";
+import {
+  EntitlementAdmissionService,
+  admissionScopeDigest,
+} from "../../subscriptions/entitlement-admission.service";
 import {
   readProductLabelHistory,
   readProductLabelEventHistory,
@@ -207,6 +212,7 @@ export class ShiftsService {
     private readonly operatorsService: OperatorsService,
     private readonly sscc: SsccService,
     private readonly entitlements: EntitlementsService,
+    private readonly admission: EntitlementAdmissionService,
     @Optional()
     @Inject(VALIDATION_DM_DUPLICATE_ENABLED)
     private readonly duplicateEnabled: boolean = false,
@@ -693,6 +699,7 @@ export class ShiftsService {
   async createShift(
     tenantId: string,
     data: CreateShiftDto,
+    actor: { domain: "cabinet" | "station_device"; id: string },
     createdFrom: ShiftOrigin = "admin",
     capabilities?: string,
   ): Promise<ShiftDto> {
@@ -763,6 +770,8 @@ export class ShiftsService {
 
     const monthKey = shiftMonthKey(data.plannedDate ?? new Date().toISOString().slice(0, 10));
 
+    const shiftId = randomUUID();
+    const facts = palletsEnabled ? await this.admission.capture(tenantId) : undefined;
     try {
       const [row] = await this.db.transaction(async (tx) => {
         const validationPrint = await snapshotValidationPrintPolicy(
@@ -783,9 +792,32 @@ export class ShiftsService {
         if (!counter) {
           throw new InternalServerErrorException("Failed to allocate a shift number");
         }
+        if (palletsEnabled)
+          await this.admission.observe({
+            tenantId,
+            actor,
+            facts,
+            operationId:
+              actor.domain === "cabinet"
+                ? "pallets.shift.configure.v1"
+                : "pallets.shift.configure.station.v1",
+            transaction: tx,
+            runtime: { enabled: true, observedAt: new Date() },
+            scopeDigest: admissionScopeDigest({
+              action: "create",
+              shiftId,
+              productId: data.productId,
+              mode: data.mode,
+              palletsEnabled,
+              boxCapacity,
+              palletBoxCapacity,
+              palletLabelTemplateId,
+            }),
+          });
         return tx
           .insert(schema.shifts)
           .values({
+            id: shiftId,
             tenantId,
             productId: data.productId,
             ...validationPrintToStorage(validationPrint),
@@ -855,6 +887,7 @@ export class ShiftsService {
       await this.entitlements.assertFeatureAccess(tenantId, "pallets");
     }
 
+    const facts = await this.admission.capture(tenantId);
     let result: ShiftUpdateTransactionResult;
     try {
       result = await this.db.transaction(async (tx): Promise<ShiftUpdateTransactionResult> => {
@@ -1125,6 +1158,31 @@ export class ShiftsService {
           this.assertPalletTemplateRule(palletsEnabled, palletLabelTemplateId);
         }
 
+        if (
+          palletsEnabled &&
+          (!current.palletsEnabled ||
+            palletBoxCapacity !== current.palletBoxCapacity ||
+            boxCapacity !== current.boxCapacity ||
+            palletLabelTemplateId !== current.palletLabelTemplateId)
+        ) {
+          await this.admission.observe({
+            tenantId,
+            actor: { domain: "cabinet", id: actorUserId },
+            facts,
+            operationId: "pallets.shift.configure.v1",
+            transaction: tx,
+            runtime: { enabled: true, observedAt: new Date() },
+            scopeDigest: admissionScopeDigest({
+              action: "update",
+              shiftId: id,
+              mode,
+              palletsEnabled,
+              boxCapacity,
+              palletBoxCapacity,
+              palletLabelTemplateId,
+            }),
+          });
+        }
         const [updated] = await tx
           .update(schema.shifts)
           .set({
@@ -1254,10 +1312,12 @@ export class ShiftsService {
   async openShift(
     tenantId: string,
     id: string,
+    actor: { domain: "cabinet" | "station_device"; id: string },
     deviceId?: string,
     capabilities?: string,
   ): Promise<ShiftDto> {
     if (deviceId) return this.enterShift(tenantId, id, deviceId, capabilities);
+    const facts = await this.admission.capture(tenantId);
     await this.db.transaction(async (tx) => {
       const [current] = await tx
         .select(CURRENT_SHIFT_STORAGE_SELECTION)
@@ -1286,6 +1346,16 @@ export class ShiftsService {
         validationPrintInput(previous),
         previous,
       );
+      if (current.palletsEnabled)
+        await this.admission.observe({
+          tenantId,
+          actor,
+          facts,
+          operationId: "pallets.shift.start.v1",
+          transaction: tx,
+          runtime: { enabled: true, observedAt: new Date() },
+          scopeDigest: admissionScopeDigest({ action: "start", shiftId: id }),
+        });
       await tx
         .update(schema.shifts)
         .set({ status: "active", openedAt: new Date(), ...validationPrintToStorage(policy) })
@@ -1301,6 +1371,7 @@ export class ShiftsService {
     deviceId: string,
     capabilities?: string,
   ): Promise<ShiftDto> {
+    const facts = await this.admission.capture(tenantId);
     await this.db.transaction(async (tx) => {
       const [device] = await tx
         .select({ id: schema.stationDevices.id })
@@ -1341,6 +1412,16 @@ export class ShiftsService {
           validationPrintInput(previous),
           previous,
         );
+        if (shift.palletsEnabled)
+          await this.admission.observe({
+            tenantId,
+            actor: { domain: "station_device", id: device.id },
+            facts,
+            operationId: "pallets.shift.start.v1",
+            transaction: tx,
+            runtime: { enabled: true, observedAt: new Date() },
+            scopeDigest: admissionScopeDigest({ action: "start", shiftId: id }),
+          });
         await tx
           .update(schema.shifts)
           .set({ status: "active", openedAt: new Date(), ...validationPrintToStorage(policy) })

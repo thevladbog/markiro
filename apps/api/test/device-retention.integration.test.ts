@@ -11,6 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { DeviceRetentionService } from "../src/modules/device-licensing/device-retention.service";
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 import { EntitlementsService } from "../src/subscriptions/entitlements.service";
+import type * as EntitlementSnapshotReader from "../src/subscriptions/entitlement-snapshot-reader";
 import { transitionWorkingAssignment } from "../src/subscriptions/working-device-assignments";
 import {
   createOrganization,
@@ -18,6 +19,16 @@ import {
   createPublishedPlan,
   createPublishedAddon,
 } from "./support/subscription-fixtures";
+
+const registryFingerprintOverride = vi.hoisted(() => ({ value: null as string | null }));
+vi.mock("../src/subscriptions/entitlement-snapshot-reader", async (importOriginal) => {
+  const actual = await importOriginal<typeof EntitlementSnapshotReader>();
+  return {
+    ...actual,
+    entitlementRegistryFingerprint: () =>
+      registryFingerprintOverride.value ?? actual.entitlementRegistryFingerprint(),
+  };
+});
 
 function deferred<T>() {
   let resolve: (value: T) => void = () => {
@@ -39,7 +50,10 @@ describe.skipIf(!process.env.DATABASE_URL)("device retention temporal intent", (
   const entitlements = new EntitlementsService(db, "managed_only");
   const service = new DeviceRetentionService(db, entitlements, new PlatformAuditService());
   let created = false;
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    registryFingerprintOverride.value = null;
+    vi.useRealTimers();
+  });
   beforeAll(async () => {
     await maintenance.pool.query(`CREATE DATABASE "${name}"`);
     created = true;
@@ -192,6 +206,25 @@ describe.skipIf(!process.env.DATABASE_URL)("device retention temporal intent", (
       f.actor,
     );
   }
+  it("marks a prior-registry retention intent for review while replaying its receipt", async () => {
+    const f = await fixture();
+    registryFingerprintOverride.value = `p1a.v1:${"a".repeat(64)}`;
+    const prior = await preview(f);
+    const receipt = await service.confirm(
+      f.tenantId,
+      { requestId: prior.requestId, previewId: prior.id },
+      f.actor,
+    );
+    registryFingerprintOverride.value = null;
+    expect((await service.inspect(f.tenantId, f.actor)).selections[0]?.needsReview).toBe(true);
+    expect(
+      await service.confirm(
+        f.tenantId,
+        { requestId: prior.requestId, previewId: prior.id },
+        f.actor,
+      ),
+    ).toEqual(receipt);
+  });
   it("projects a scheduled smaller plan at precisely the server boundary and preserves operational rows", async () => {
     const f = await fixture();
     const before = await operationalRows(f.tenantId);
@@ -381,6 +414,7 @@ describe.skipIf(!process.env.DATABASE_URL)("device retention temporal intent", (
         decisionReference: "TEST-RETENTION",
         requestId: randomUUID(),
         createdByPlatformUserId: actor.principal.userId,
+        createdAt: new Date(),
       })
       .returning();
     if (!row) throw new Error("fixture");
@@ -1330,6 +1364,11 @@ describe.skipIf(!process.env.DATABASE_URL)("device retention temporal intent", (
   it.each(["plan", "addon", "source", "credential", "new_device", "policy", "revision"] as const)(
     "invalidates preview and preserves receipt under changed %s",
     async (change) => {
+      if (change === "source") {
+        const nodeNow = new Date(Date.now() - 60_000);
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(nodeNow);
+      }
       const f = await fixture(),
         actor = await platformActor();
       const policyId = randomUUID();

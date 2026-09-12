@@ -1,7 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
 import { and, asc, eq, inArray, isNull, lt, max, sql } from "drizzle-orm";
+import {
+  EntitlementAdmissionService,
+  admissionScopeDigest,
+  type EntitlementAdmissionObservation,
+} from "../../subscriptions/entitlement-admission.service";
 import { DB } from "../../auth/auth.module";
 import { hashDeviceToken } from "../../pickup/device-token";
 import type { IntegrationChannelType } from "../integrations/channel-registry";
@@ -135,9 +140,11 @@ export function extractExchangeCookie(header: string | undefined): string | null
 
 @Injectable()
 export class ExchangeSessionService {
+  private readonly logger = new Logger(ExchangeSessionService.name);
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly journal: JournalService,
+    private readonly admission: EntitlementAdmissionService,
   ) {}
 
   /**
@@ -381,36 +388,139 @@ export class ExchangeSessionService {
   }
 
   /**
-   * Installs the first outstanding batch and returns the batch that actually
-   * owns the session. The CASE and RETURNING run in one statement, so two
-   * overlapping initial queries cannot each send one XML body while leaving
-   * the other request's ids for `mode=success`.
+   * The existing UPDATE serialized writers on this row. Lock it before observing
+   * so only the first batch owner is observed; competing proposals replay its bytes.
+   * Capture outside the short transaction: neither facts nor XML need another
+   * connection while holding the session row lock.
    */
   async ensureOutstandingOrderQuery(
-    sessionId: string,
+    session: ResolvedExchangeSession,
     proposed: OutstandingOrderQuery,
   ): Promise<OutstandingOrderQuery> {
-    const [row] = await this.db
-      .update(schema.integrationSessions)
-      .set({
-        summary: sql`case
-          when coalesce(${schema.integrationSessions.summary}, '{}'::jsonb)
-            ->'outstandingOrderQuery' is null
-          then jsonb_set(
-            coalesce(${schema.integrationSessions.summary}, '{}'::jsonb),
-            '{outstandingOrderQuery}',
-            ${JSON.stringify(proposed)}::jsonb,
-            true
-          )
-          else coalesce(${schema.integrationSessions.summary}, '{}'::jsonb)
-        end`,
-      })
-      .where(eq(schema.integrationSessions.id, sessionId))
-      .returning({
-        outstanding: sql<OutstandingOrderQuery>`${schema.integrationSessions.summary}->'outstandingOrderQuery'`,
+    const facts = await this.admission.capture(session.tenantId);
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select({
+          outstanding: sql<OutstandingOrderQuery | null>`${schema.integrationSessions.summary}->'outstandingOrderQuery'`,
+        })
+        .from(schema.integrationSessions)
+        .where(
+          and(
+            eq(schema.integrationSessions.id, session.id),
+            eq(schema.integrationSessions.tenantId, session.tenantId),
+          ),
+        )
+        .for("update");
+      if (!row) throw new Error("Exchange session disappeared while storing query batch");
+      if (row.outstanding) return row.outstanding;
+      await this.admission.observe({
+        tenantId: session.tenantId,
+        actor: { domain: "exchange_session", id: session.id },
+        operationId: "commerceMl.exchange.v1",
+        facts,
+        transaction: tx,
+        scopeDigest: admissionScopeDigest({
+          sessionId: session.id,
+          action: "query",
+          batch: proposed,
+        }),
+        runtime: { enabled: true, observedAt: new Date() },
       });
-    if (!row) throw new Error("Exchange session disappeared while storing query batch");
-    return row.outstanding;
+      await tx
+        .update(schema.integrationSessions)
+        .set({
+          summary: sql`jsonb_set(coalesce(${schema.integrationSessions.summary}, '{}'::jsonb), '{outstandingOrderQuery}', ${JSON.stringify(proposed)}::jsonb, true)`,
+        })
+        .where(
+          and(
+            eq(schema.integrationSessions.id, session.id),
+            eq(schema.integrationSessions.tenantId, session.tenantId),
+          ),
+        );
+      return proposed;
+    });
+  }
+
+  /**
+   * Observation bookkeeping only. Catalog intentionally retains no completed
+   * cursor for a small file, so cursor absence cannot mean a new import.
+   * Keep only the latest identity per action/filename (bounded by uploaded files
+   * in this session), independently of the authoritative apply/cursor semantics.
+   * Failure here is unknown and never prevents the existing import from running.
+   */
+  async observeImport(
+    session: ResolvedExchangeSession,
+    input: {
+      filename: string;
+      sourceFingerprint: string;
+      fingerprint: string;
+      cursor: number;
+    } & (
+      | {
+          action: "catalog_import";
+          /** Observation identity only; never changes the authoritative cursor. */
+          effectiveConfig: { priceType: string | null };
+          effectiveLinkTargets: { externalRef: string; productId: string }[];
+        }
+      | { action: "sale_import" }
+    ),
+  ): Promise<EntitlementAdmissionObservation | null> {
+    const key = admissionScopeDigest({ action: input.action, filename: input.filename });
+    const digest = admissionScopeDigest({ sessionId: session.id, ...input });
+    const facts = await this.admission.capture(session.tenantId);
+    try {
+      return await this.db.transaction(async (tx) => {
+        const [row] = await tx
+          .select({ summary: schema.integrationSessions.summary })
+          .from(schema.integrationSessions)
+          .where(
+            and(
+              eq(schema.integrationSessions.id, session.id),
+              eq(schema.integrationSessions.tenantId, session.tenantId),
+            ),
+          )
+          .for("update");
+        if (!row) throw new Error("Exchange session disappeared while observing import");
+        const markers = row.summary?.["entitlementImports"];
+        if (
+          markers &&
+          typeof markers === "object" &&
+          !Array.isArray(markers) &&
+          key in markers &&
+          Reflect.get(markers, key) === digest
+        )
+          return null;
+        const observation = await this.admission.observe({
+          tenantId: session.tenantId,
+          actor: { domain: "exchange_session", id: session.id },
+          operationId: "commerceMl.exchange.v1",
+          facts,
+          transaction: tx,
+          scopeDigest: digest,
+          runtime: { enabled: true, observedAt: new Date() },
+        });
+        await tx
+          .update(schema.integrationSessions)
+          .set({
+            summary: sql`jsonb_set(coalesce(${schema.integrationSessions.summary}, '{}'::jsonb), '{entitlementImports}', coalesce(${schema.integrationSessions.summary}->'entitlementImports', '{}'::jsonb) || ${JSON.stringify({ [key]: digest })}::jsonb, true)`,
+          })
+          .where(
+            and(
+              eq(schema.integrationSessions.id, session.id),
+              eq(schema.integrationSessions.tenantId, session.tenantId),
+            ),
+          );
+        return observation;
+      });
+    } catch {
+      this.logger.error("entitlement_shadow_persistence_failed operation=commerceMl.exchange.v1");
+      return {
+        mode: "shadow",
+        decision: "unknown",
+        reasons: ["shadow_persistence_failed"],
+        observationId: null,
+      };
+    }
   }
 
   async readOutstandingOrderQuery(sessionId: string): Promise<OutstandingOrderQuery | null> {

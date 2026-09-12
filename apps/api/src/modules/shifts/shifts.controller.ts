@@ -284,11 +284,17 @@ export class ShiftsController {
           ...body,
           lineId: req.deviceLineId ?? null,
         },
+        { domain: "station_device", id: req.deviceId! },
         "station",
         req.get("x-station-capabilities"),
       );
     }
-    return this.shiftsService.createShift(req.tenantId!, body, "admin");
+    return this.shiftsService.createShift(
+      req.tenantId!,
+      body,
+      { domain: "cabinet", id: req.userId! },
+      "admin",
+    );
   }
 
   @Patch(":id")
@@ -368,6 +374,9 @@ export class ShiftsController {
     return this.shiftsService.openShift(
       req.tenantId!,
       id,
+      req.authKind === "station"
+        ? { domain: "station_device", id: req.deviceId! }
+        : { domain: "cabinet", id: req.userId! },
       req.deviceId,
       req.get("x-station-capabilities"),
     );
