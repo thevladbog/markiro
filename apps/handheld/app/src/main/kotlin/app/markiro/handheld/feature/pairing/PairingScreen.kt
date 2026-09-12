@@ -59,7 +59,8 @@ fun PairingScreen(state: PairingUi, callbacks: PairingCallbacks) {
                     append("\n\n")
                     append(state.summary?.let {
                         stringResource(R.string.recovery_summary, it["scans"] ?: 0, it["inventory"] ?: 0, it["labels"] ?: 0,
-                            it["boxes"] ?: 0, it["exceptions"] ?: 0, it["closes"] ?: 0, it["conflicts"] ?: 0, it["unknownPrints"] ?: 0)
+                            it["boxes"] ?: 0, it["pallets"] ?: 0, it["exceptions"] ?: 0, it["closes"] ?: 0,
+                            it["conflicts"] ?: 0, it["unknownPrints"] ?: 0)
                     } ?: stringResource(R.string.recovery_summary_unknown))
                 },
                 primary = if (state.unresolved) null else StateAction(stringResource(R.string.recovery_connect), callbacks.onRetry),
