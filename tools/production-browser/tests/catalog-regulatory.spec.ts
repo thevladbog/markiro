@@ -92,6 +92,8 @@ async function installApi(page: Page, group: number, readonly = false) {
       return json({ gtin14: product(group).gtin14, owner: "own" });
     if (path === `/api/products/${PRODUCT_ID}/regulatory-profile`) return json(current);
     if (path === `/api/products/${PRODUCT_ID}/readiness`) return json(browserReadiness);
+    if (path === `/api/products/${PRODUCT_ID}/regulatory-category-options`)
+      return json({ items: [] });
     if (
       path === `/api/products/${PRODUCT_ID}/regulatory-attributes` &&
       request.method() === "PATCH"

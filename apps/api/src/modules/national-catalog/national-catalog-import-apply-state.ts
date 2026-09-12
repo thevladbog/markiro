@@ -1,4 +1,5 @@
 import { photoReviewSchema } from "./national-catalog-image-state";
+import { catalogClassificationSchema } from "./national-catalog-classification";
 import {
   catalogCategoryGroupSchema,
   catalogProductGroupEntrySchema,
@@ -41,6 +42,8 @@ const entrySchema = z.discriminatedUnion("target", [
       target: z.literal("category"),
       source: z.literal("national_catalog"),
       option: optionSchema,
+      // Old saved comparisons retain their original empty classification.
+      classification: catalogClassificationSchema.optional(),
     })
     .strict(),
   z

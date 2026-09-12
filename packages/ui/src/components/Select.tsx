@@ -302,21 +302,17 @@ export function Select<TValue extends string = string>({
                   aria-label={searchLabel ?? "Search"}
                   placeholder={searchPlaceholder}
                   value={search}
-                  onChange={(event) => setSearch(event.target.value)}
+                  onChange={(event) => {
+                    setSearch(event.target.value);
+                    // Filtering can unmount the selected item, which makes
+                    // Radix refocus the list. Keep text entry in the filter.
+                    queueMicrotask(() => searchRef.current?.focus());
+                  }}
                   onKeyDown={(event) => {
-                    // Radix Select's typeahead runs before a nested input's
-                    // normal text entry. Handle printable keys here so the
-                    // filter keeps focus instead of returning to the menu.
-                    if (event.key.length === 1) {
-                      event.preventDefault();
+                    // Let the input handle text, selection, clipboard and IME.
+                    // Only menu navigation should reach Radix's typeahead.
+                    if (!["ArrowDown", "ArrowUp", "Escape", "Tab"].includes(event.key)) {
                       event.stopPropagation();
-                      setSearch((current) => current + event.key);
-                      queueMicrotask(() => searchRef.current?.focus());
-                    } else if (event.key === "Backspace") {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setSearch((current) => current.slice(0, -1));
-                      queueMicrotask(() => searchRef.current?.focus());
                     }
                   }}
                   style={{

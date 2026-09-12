@@ -140,6 +140,20 @@ it("never defaults a foreign-GTIN candidate and clears old decisions for a new p
   expect(initialChoice(preview).decision.photo).toEqual({ kind: "keep" });
   expect(currentChoice({ ...preview, id: id(99) }, undefined).decision.previewId).toBe(id(99));
 });
+it("preselects empty approved fields of an existing product and respects dependencies", () => {
+  const preview = structuredClone(previewFixture.items[0]!);
+  preview.productId = id(21);
+  const field = preview.fields[0]!;
+  preview.fields = [
+    { ...field, id: id(40), before: null, selectedByDefault: true },
+    { ...field, id: id(41), before: null, selectedByDefault: true, requiresEntryIds: [id(40)] },
+    { ...field, id: id(42), before: "Сохранённое значение", selectedByDefault: false },
+    { ...field, id: id(43), before: null, applicable: false, selectedByDefault: true },
+    { ...field, id: id(44), before: null, selectedByDefault: true, requiresEntryIds: [id(43)] },
+  ];
+  expect(initialChoice(preview).decision.acceptedEntryIds).toEqual([id(40), id(41)]);
+});
+
 it("removes dependent fields when category is unchecked and never reselects them implicitly", () => {
   const preview = structuredClone(previewFixture.items[0]!);
   preview.fields.push(

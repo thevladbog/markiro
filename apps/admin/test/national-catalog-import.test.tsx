@@ -158,7 +158,12 @@ it.each([false, true])(
         id: id(71),
         itemId: id(81),
         productId: id(91),
-        fields: fresh.fields.map((field, index) => ({ ...field, id: id(101 + index) })),
+        fields: fresh.fields.map((field, index) => ({
+          ...field,
+          before: "Сохранённое",
+          selectedByDefault: false,
+          id: id(101 + index),
+        })),
       });
       data.preparation.total = 2;
       data.preparation.completed = 2;
@@ -356,6 +361,8 @@ it("retains the active product and reviewed choices when the route receives a fr
   const server = mockServer();
   const first = server.state.preparation.items[0]!;
   first.productId = id(21);
+  first.fields[0]!.before = "Сохранённое имя";
+  first.fields[0]!.selectedByDefault = false;
   const second = structuredClone(first);
   second.id = id(50);
   second.itemId = id(51);
@@ -804,10 +811,11 @@ it("prepares a fresh request for manual names and initial category; restores sel
       "Моё название",
     ),
   );
-  await view.user.selectOptions(screen.getByLabelText("Начальная категория"), "");
+  await view.user.click(screen.getByRole("combobox", { name: "Начальная категория" }));
+  await view.user.click(screen.getByRole("option", { name: "Без привязки категории" }));
   await waitFor(() => expect(server.prepares).toHaveLength(1));
   expect(server.prepares[0]?.manualNames).toEqual([{ itemId: id(2), name: "Моё название" }]);
-  expect(server.prepares[0]?.categoryChoices).toEqual([]);
+  expect(server.prepares[0]?.categoryChoices).toEqual([{ itemId: id(2), optionId: null }]);
   expect(server.prepares[0]?.requestId).not.toBe(previewFixture.preparation.requestId);
 });
 it("allows blank draft name repair, caps manual override at200 and blocks apply until recompare", async () => {
@@ -1114,14 +1122,16 @@ it("preserves all late-polled manual and category inputs when changing category,
   );
   view.rerender(<ImportReview {...props} data={data} />);
   const user = userEvent.setup();
-  await user.selectOptions(screen.getAllByLabelText("Начальная категория")[0]!, id(41));
+  await user.click(screen.getByRole("combobox", { name: "Начальная категория" }));
+  await user.click(screen.getByRole("option", { name: "Новая" }));
   expect(prepare).toHaveBeenLastCalledWith({
     manualNames: { [first.itemId]: "Сохранённое имя", [second.itemId]: "Второе имя" },
     categoryChoices: { [first.itemId]: id(41), [second.itemId]: id(52) },
   });
   await user.clear(screen.getAllByLabelText("Название вручную")[0]!);
   view.rerender(<ImportReview {...props} data={structuredClone(data)} />);
-  await user.selectOptions(screen.getAllByLabelText("Начальная категория")[0]!, id(40));
+  await user.click(screen.getByRole("combobox", { name: "Начальная категория" }));
+  await user.click(screen.getByRole("option", { name: "Первая" }));
   expect(prepare).toHaveBeenLastCalledWith({
     manualNames: { [first.itemId]: "", [second.itemId]: "Второе имя" },
     categoryChoices: { [first.itemId]: id(40), [second.itemId]: id(52) },
@@ -1852,6 +1862,8 @@ it.each(["ru", "en"] as const)(
             id: id(100 + index),
             label: "Untranslated backend owned label",
             source: "manual",
+            before: index ? "Сохранённое имя" : null,
+            selectedByDefault: !index,
           },
         ],
         photos: [],

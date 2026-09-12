@@ -49,6 +49,7 @@ for (const width of [390, 1280]) {
               label: "Категория",
               before: null,
               after: "Молочная продукция",
+              selectedByDefault: true,
             },
             {
               id: id(41),
@@ -144,8 +145,17 @@ for (const width of [390, 1280]) {
       exact: true,
     });
     const fat = item.getByRole("radio", { name: "Жирность — Предлагаемое значение", exact: true });
+    await expect(category).toBeChecked();
+    await expect(fat).toBeEnabled();
+    await expect(fat).not.toBeChecked();
+    await fat.click();
+    await item.getByRole("radio", { name: "Категория — Сейчас в Markiro", exact: true }).click();
+    await expect(category).not.toBeChecked();
+    await expect(fat).not.toBeChecked();
     await expect(fat).toBeDisabled();
     await category.click();
+    await expect(fat).toBeEnabled();
+    await expect(fat).not.toBeChecked();
     await fat.click();
     await expect(item.getByRole("img", { name: "Подготовленное фото товара" })).toHaveJSProperty(
       "naturalWidth",

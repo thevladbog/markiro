@@ -29,6 +29,24 @@ GTIN change on a linked product requires explicit removal of the pinned revision
 in the same product transaction; a stale revision produces a conflict. Removing
 only the local link retains product values, photo, source snapshots and history.
 
+For an unbound product, preview preselects the category only when the source card
+has exactly one compatible active schema with a reviewed exact group mapping.
+Multiple compatible categories require a searchable manual choice. Omitting a
+`categoryChoices` entry allows this default; `optionId: null` explicitly opts out.
+Neither preview nor the default selection writes product data: the operator still
+reviews and confirms the apply. Missing importable fields are preselected for
+existing products; existing values, names and photos require a deliberate choice
+to replace. Dependent attributes cannot be accepted without their category.
+
+Initial category acceptance also transfers unambiguous full TN VED and OKPD2
+values from the same source GTIN. They appear with the category in comparison and
+are saved from that immutable preview. Conflicting or malformed source values
+remain visible without being selected. Existing category bindings and historical
+previews without classifiers retain their previous values and behavior.
+If Markiro has no configured categories for a product group, the editor explains
+the missing configuration instead of opening an empty selector. Opening the
+category editor alone does not block saving the product's basic fields.
+
 A source snapshot is immutable evidence. An observed projection records the latest
 provider observation; the reviewed projection records accepted choices. Background
 refresh does not overwrite accepted name, attributes, category, photo or reviewed
