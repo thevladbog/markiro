@@ -33,7 +33,14 @@ export interface UnresolvedPalletPrint {
    * rows with `closed_at IS NOT NULL`.
    */
   closedAt: string;
-  state: "pending" | "printed";
+  /**
+   * Always `"pending"`: unlike `UnresolvedBoxPrint`, a pallet has no
+   * scan-back verification path that could surface a `"printed"` row here.
+   * `findUnresolvedPalletPrint`'s query filters on `print_state = 'pending'`
+   * unconditionally, so this field can never actually be anything else
+   * (Task 15 review, Finding 5).
+   */
+  state: "pending";
   errorCode: BoxPrintErrorCode | null;
 }
 
@@ -463,7 +470,10 @@ export async function findUnresolvedPalletPrint(
     sscc: string;
     box_count: number;
     closed_at: string;
-    print_state: "pending" | "printed";
+    // The WHERE clause below filters on `print_state = 'pending'`, so this
+    // is the only value a returned row can ever carry (Task 15 review,
+    // Finding 5) -- see `UnresolvedPalletPrint.state`'s own doc comment.
+    print_state: "pending";
     print_error_code: BoxPrintErrorCode | null;
   }>(
     `SELECT p.pallet_id AS pallet_id, p.sscc AS sscc,

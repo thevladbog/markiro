@@ -185,14 +185,16 @@ export function PalletExceptions({
             <ul className="pallet-exceptions__list">
               {pallets.map((pallet) => (
                 <li key={pallet.palletId}>
-                  <button
+                  <Button
                     type="button"
+                    size="floor"
+                    variant="secondary"
                     className="pallet-exceptions__item"
                     onClick={() => selectPallet(pallet)}
                   >
-                    <span>SSCC {pallet.sscc}</span>
+                    <strong>SSCC {pallet.sscc}</strong>
                     <span>{t("pallet.boxCount", { count: pallet.boxCount })}</span>
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>

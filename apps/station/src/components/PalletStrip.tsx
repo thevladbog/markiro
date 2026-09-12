@@ -29,7 +29,11 @@ export interface PalletStripProps {
 export function PalletStrip({ boxCount, capacity, serials }: PalletStripProps) {
   const { t } = useTranslation();
   return (
-    <section className="pallet-strip" aria-label={t("pallet.title")} data-serials={serials}>
+    <section
+      className="work-instrument pallet-strip"
+      aria-label={t("pallet.title")}
+      data-serials={serials}
+    >
       <p className="pallet-strip__progress">
         {t("pallet.progress", { boxes: boxCount, capacity })}
       </p>

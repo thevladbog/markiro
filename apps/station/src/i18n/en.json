@@ -525,7 +525,8 @@
     },
     "more": "More",
     "palletOpenAtClose": "The pallet has {{count}} of {{capacity}} boxes — close it?",
-    "palletOpenAtCloseConfirm": "Close pallet and shift"
+    "palletOpenAtCloseConfirm": "Close pallet and shift",
+    "palletOpenAtCloseNoSerials": "Pallet numbers have run out. Connect the station to the network to get more."
   },
   "setup": {
     "title": "Workstation setup",
@@ -733,7 +734,10 @@
     "noSerials": "no pallet serials left",
     "closed": "Pallet closed",
     "sscc": "Pallet SSCC",
-    "boxCount": "Boxes on pallet: {{count}}",
+    "boxCount_one": "The pallet has {{count}} box",
+    "boxCount_few": "The pallet has {{count}} boxes",
+    "boxCount_many": "The pallet has {{count}} boxes",
+    "boxCount_other": "The pallet has {{count}} boxes",
     "printing": "Printing the pallet label…",
     "printed": "Label printed",
     "printUnknown": "Unknown whether the label printed",

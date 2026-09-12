@@ -525,7 +525,8 @@
     },
     "more": "Ещё",
     "palletOpenAtClose": "На паллете {{count}} из {{capacity}} коробов — закрыть?",
-    "palletOpenAtCloseConfirm": "Закрыть паллету и смену"
+    "palletOpenAtCloseConfirm": "Закрыть паллету и смену",
+    "palletOpenAtCloseNoSerials": "Номера для паллет закончились. Подключите станцию к сети, чтобы получить новые номера."
   },
   "setup": {
     "title": "Настройка рабочего места",
@@ -733,7 +734,10 @@
     "noSerials": "нет серий для паллеты",
     "closed": "Паллета закрыта",
     "sscc": "SSCC паллеты",
-    "boxCount": "Коробов на паллете: {{count}}",
+    "boxCount_one": "На паллете {{count}} короб",
+    "boxCount_few": "На паллете {{count}} короба",
+    "boxCount_many": "На паллете {{count}} коробов",
+    "boxCount_other": "На паллете {{count}} короба",
     "printing": "Печатаем этикетку паллеты…",
     "printed": "Этикетка напечатана",
     "printUnknown": "Неизвестно, напечаталась ли этикетка",

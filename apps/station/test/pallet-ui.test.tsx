@@ -235,6 +235,16 @@ describe("PalletStrip", () => {
     expect(screen.getByText(i18n.t("pallet.progress", { boxes: 3, capacity: 12 }))).toBeDefined();
     expect(screen.queryByText(i18n.t("pallet.noSerials"))).toBeNull();
   });
+
+  it("carries the shared work-instrument card class station.css actually styles (Task 15 review, Finding 2)", () => {
+    // station.css has zero rules for a bare `.pallet-strip` -- no CSS rule
+    // is directly testable in jsdom, but `work-instrument` is the class
+    // that actually supplies the card's border/background, and whether the
+    // component applies it IS testable.
+    const { container } = render(<PalletStrip boxCount={3} capacity={12} serials="available" />);
+    const root = container.querySelector(".pallet-strip");
+    expect(root?.classList.contains("work-instrument")).toBe(true);
+  });
 });
 
 describe("PalletClose", () => {
@@ -277,6 +287,20 @@ describe("PalletClose", () => {
       screen.getByRole("button", { name: i18n.t("box.printRecovery.continueWithoutLabel") }),
     );
     expect(onSkip).toHaveBeenCalledOnce();
+  });
+
+  it("pluralizes the box count correctly instead of a bare, ungrammatical string (Task 15 review, Finding 4)", () => {
+    // The dictionary itself: a bare "Коробов на паллете: {{count}}" reads
+    // wrong at count=1 ("Коробов на паллете: 1"). This file's own
+    // convention (see `hiddenByFilter_*` in ru.json) is one/few/many/other.
+    expect(i18n.t("pallet.boxCount", { count: 1 })).toBe("На паллете 1 короб");
+    expect(i18n.t("pallet.boxCount", { count: 2 })).toBe("На паллете 2 короба");
+    expect(i18n.t("pallet.boxCount", { count: 5 })).toBe("На паллете 5 коробов");
+
+    // And the component actually forwards `count` rather than hardcoding
+    // the phrase, so the rendered screen reads correctly too.
+    render(<PalletClose result={{ status: "closed", sscc: SSCC, boxCount: 1 }} print="printing" />);
+    expect(screen.getByText("На паллете 1 короб")).toBeDefined();
   });
 });
 
@@ -331,6 +355,33 @@ describe("PalletExceptions", () => {
         i18n.t("pallet.reasons.disassemble.damagedPallet"),
       ),
     );
+  });
+
+  it("uses the floor-sized picker button for the closed-pallet target list, matching ShiftBoxesPanel's box row (Task 15 review, Finding 1)", () => {
+    const other: ClosedPalletSummary = {
+      palletId: "pallet-2",
+      sscc: "103460068200000011",
+      boxCount: 5,
+      closedAt: "2026-07-29T09:20:00.000Z",
+    };
+    const { container } = render(
+      <PalletExceptions
+        pallets={[pallet, other]}
+        onReprint={vi.fn()}
+        onDisassemble={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+    // Two pallets -- `selectAction` lands on the "target" picker stage
+    // instead of skipping straight to a reason.
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.reprintAction") }));
+    const item = container.querySelector(".pallet-exceptions__item");
+    expect(item).not.toBeNull();
+    // A raw `<button>` carries none of these classes -- it loses the 64px
+    // glove-sized touch target and the floor typography that
+    // `Button size="floor"` gives ShiftBoxesPanel's identical box picker.
+    expect(item?.classList.contains("mk-btn")).toBe(true);
+    expect(item?.classList.contains("mk-btn--floor")).toBe(true);
   });
 });
 
@@ -475,6 +526,29 @@ describe("WorkScreen shift close blocked by an open pallet", () => {
 
     // ...and only THEN does the shift close actually go through.
     await waitFor(() => expect(onCloseShift).toHaveBeenCalledOnce());
+  });
+
+  it("explains a dry serial pool instead of silently re-showing the same prompt (Task 15 review, Finding 3)", async () => {
+    const exec = makeExec();
+    await seedShift(exec, { shiftId: "s1", palletBoxCapacity: 12 });
+    await seedPallet(exec, { palletId: "p1", shiftId: "s1", terminalId: "dev-1", boxCount: 7 });
+    // No `addRange`: this device's pallet serial pool is empty, so the
+    // confirmed close attempt below cannot actually close the pallet.
+    const onCloseShift = vi.fn();
+
+    renderWork({ exec, palletBoxCapacity: 12, onCloseShift });
+    await screen.findByText(i18n.t("pallet.progress", { boxes: 7, capacity: 12 }));
+
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("work.closeShift") }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: i18n.t("work.palletOpenAtCloseConfirm") }),
+    );
+
+    // The pallet is left open exactly as it was, and the same confirmation
+    // comes back -- but it must now say WHY confirming again did nothing,
+    // not just silently repeat the identical prompt.
+    expect(await screen.findByText(i18n.t("work.palletOpenAtCloseNoSerials"))).toBeDefined();
+    expect(onCloseShift).not.toHaveBeenCalled();
   });
 });
 

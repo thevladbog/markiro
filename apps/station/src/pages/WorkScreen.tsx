@@ -458,6 +458,14 @@ export function WorkScreen({
   const [palletEarlyCloseConfirm, setPalletEarlyCloseConfirm] = useState(false);
   const [shiftClosePalletConfirm, setShiftClosePalletConfirm] = useState<{
     boxCount: number;
+    /**
+     * Set when the LAST attempt to close this pallet (from this very guard)
+     * hit a dry serial pool. Without this, a second dry attempt re-shows
+     * the identical prompt with no explanation of why confirming again did
+     * nothing (Task 15 review, Finding 3) -- the strip's own
+     * `pallet.noSerials` text is hidden behind this full-covering overlay.
+     */
+    blockedBySerials?: boolean;
   } | null>(null);
   // Communicates from `confirmShiftClosePallet`/`dismissPalletClose` back to
   // `performClose`: undefined means no shift-close is waiting on a pallet
@@ -784,6 +792,10 @@ export function WorkScreen({
 
   /** The shift-close flow's confirmed continuation: close the open pallet, then retry. */
   async function confirmShiftClosePallet(): Promise<void> {
+    // Captured before clearing below -- if this attempt hits a dry serial
+    // pool, the pallet is left exactly as it was (see `close-pallet.ts`),
+    // so the re-shown prompt still names the same box count.
+    const previousBoxCount = shiftClosePalletConfirm?.boxCount ?? 0;
     setShiftClosePalletConfirm(null);
     if (issuerPrefix === null || palletBoxCapacity === null) {
       pendingShiftCloseReasonRef.current = undefined;
@@ -791,8 +803,12 @@ export function WorkScreen({
     }
     const capturedIssuerPrefix = issuerPrefix;
     const capturedPalletBoxCapacity = palletBoxCapacity;
-    await new Promise<void>((resolve) => {
+    // Resolved with the actual close attempt's outcome (rather than written
+    // to an outer local from inside the queued job) so there is nothing for
+    // `performClose` below to read except what THIS attempt produced.
+    const lastResult = await new Promise<ClosePalletResult | null>((resolve) => {
       const accepted = queue.enqueueJob(async () => {
+        let result: ClosePalletResult | null = null;
         try {
           const impl =
             closeCurrentPalletProp ??
@@ -807,20 +823,30 @@ export function WorkScreen({
                 sid,
                 opId,
               ));
-          const result = await impl(shiftId, operatorId);
+          result = await impl(shiftId, operatorId);
           await handlePalletCloseResult(result);
         } catch (err) {
           console.error("station: pallet close before shift close failed", err);
         } finally {
-          resolve();
+          resolve(result);
         }
       });
-      if (!accepted) resolve();
+      if (!accepted) resolve(null);
     });
     // No print screen was raised (empty/already-closed/invalid-serial/
     // no-serials) -- `dismissPalletClose` will never fire for this pallet,
     // so nothing else continues the shift close unless this does it now.
     if (palletCloseRef.current === null) {
+      // A dry serial pool leaves the pallet open exactly as it was:
+      // `performClose` would just find the SAME open pallet and silently
+      // re-show this identical confirmation, leaving the operator to press
+      // a button that does nothing with no explanation (Task 15 review,
+      // Finding 3). Surface the reason instead, and keep the pending
+      // shift-close reason around for whenever this device's pool refills.
+      if (lastResult?.status === "no-serials") {
+        setShiftClosePalletConfirm({ boxCount: previousBoxCount, blockedBySerials: true });
+        return;
+      }
       const reason = pendingShiftCloseReasonRef.current;
       pendingShiftCloseReasonRef.current = undefined;
       await performClose(reason);
@@ -1307,15 +1333,16 @@ export function WorkScreen({
   // row with a recorded error category becomes `failed` (retryable); one
   // with none becomes `unknown` (an interruption mid-print this device
   // cannot resolve on its own) -- and per the brief's rule, `unknown` NEVER
-  // triggers another print by itself. A `printed` row needs no screen at
-  // all: unlike boxes, pallets have no scan-back verification toggle, so a
-  // print this device already recorded as successful is simply done.
+  // triggers another print by itself. Unlike boxes, a pallet has no
+  // scan-back verification path, so `findUnresolvedPalletPrint` only ever
+  // returns a still-`pending` row -- there is no `printed` case to branch on
+  // here (Task 15 review, Finding 5).
   useEffect(() => {
     if (palletBoxCapacity === null || issuerPrefix === null) return;
     let cancelled = false;
     void findUnresolvedPalletPrint(exec, shiftId, terminalId)
       .then((unresolved) => {
-        if (cancelled || !unresolved || unresolved.state === "printed") return;
+        if (cancelled || !unresolved) return;
         updatePalletClose({
           palletId: unresolved.palletId,
           sscc: unresolved.sscc,
@@ -2498,6 +2525,9 @@ export function WorkScreen({
                 capacity: palletBoxCapacity ?? 0,
               })}
             </p>
+            {shiftClosePalletConfirm.blockedBySerials ? (
+              <p role="alert">{t("work.palletOpenAtCloseNoSerials")}</p>
+            ) : null}
             <Button size="floor" onClick={() => void confirmShiftClosePallet()}>
               {t("work.palletOpenAtCloseConfirm")}
             </Button>
