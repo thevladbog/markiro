@@ -191,7 +191,8 @@
     <string name="work_first_seen">First scanned at %1$s</string>
     <string name="work_total">Total</string>
     <string name="work_this_terminal">This handheld</string>
-    <string name="work_errors">Errors %1$d · Duplicates %2$d</string>
+    <string name="work_errors">Errors</string>
+    <string name="work_duplicates">Duplicates</string>
     <string name="work_feed_empty">No scans yet</string>
     <string name="work_more">More</string>
     <string name="work_conflicts">Conflicts (%1$d)</string>
@@ -504,4 +505,11 @@
     <string name="recovery_publication_failed">Connection could not be saved completely. Your work is retained. Retry to finish saving this connection.</string>
     <string name="recovery_success_title">Connection restored</string>
     <string name="recovery_success_text">Saved work is awaiting synchronization. Unknown print results require operator review.</string>
+    <string name="duplicate_verify_title">Scan the printed label</string>
+    <string name="duplicate_verify_hint">Take the label from the printer and scan its Data Matrix. Scan the next item after verification or an explicit skip.</string>
+    <string name="duplicate_verified_title">Label verified</string>
+    <string name="duplicate_verified_hint">Ready for the next item</string>
+    <string name="duplicate_label_problem">Label problem</string>
+    <string name="duplicate_return_to_scan">Back to scanning</string>
+    <string name="duplicate_skip_verification">Skip verification</string>
 </resources>

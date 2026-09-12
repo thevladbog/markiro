@@ -37,6 +37,17 @@ class WorkScreenTest {
         assertEquals("garbage", feedTail("garbage"))
     }
 
+    @Test
+    fun acceptedCodeWithScannerPaddingStillShowsItsSerial() {
+        val raw = " \t]d2010460068200001321ABCDEF1234\u001d93CRYPTOtail \t"
+        assertEquals("…CDEF1234", feedTail(raw))
+    }
+
+    @Test
+    fun malformedCodeDoesNotExposeAnythingAfterGs() {
+        assertEquals("…CDEF1234", feedTail("brokenABCDEF1234\u001d93CRYPTOtail"))
+    }
+
     private val ui = WorkUi(
         shift = ShiftEntityFixtures.bundled("s1"),
         last = LastScan(Verdict.DUPLICATE, "…1234567", firstSeenAt = "2026-09-10T07:42:00.000Z", at = "2026-09-10T08:00:00.000Z"),
@@ -55,7 +66,10 @@ class WorkScreenTest {
         compose.onNodeWithText("Первый скан в", substring = true).assertIsDisplayed()
         compose.onNodeWithText("${numbers.format(1240)} / ${numbers.format(3000)}").assertIsDisplayed()
         compose.onNodeWithText("312").assertIsDisplayed()
-        compose.onNodeWithText("Ошибки 4 · Дубли 2").assertIsDisplayed()
+        compose.onNodeWithText("Ошибки").assertIsDisplayed()
+        compose.onNodeWithText("4").assertIsDisplayed()
+        compose.onNodeWithText("Дубли").assertIsDisplayed()
+        compose.onNodeWithText("2").assertIsDisplayed()
         compose.onNodeWithText("Работаем офлайн · 37 сканов в очереди").assertIsDisplayed()
         compose.onNodeWithContentDescription("Ещё").performClick()
         compose.onNodeWithText("Закрыть смену").performClick()

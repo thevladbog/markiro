@@ -120,6 +120,12 @@ BEGIN/COMMIT. A durable `sending` claim precedes transport. Restart maps an unfi
 send to `delivery_unknown` without resending. Explicit reprints keep the original
 bytes and require a reason. Required verification durably compares the full code,
 including separators and crypto tail, before accepting the next unit.
+The handheld also offers an explicit verification skip after a successful send:
+`verification_skipped` settles that attempt with outcome `skipped`, preserves the
+operator and timestamp, and permits the next unit without claiming verification.
+A skip cannot settle unknown delivery or an unsent attempt. Reprinting resets
+verification to pending. Deploy the expanded event contract on the API and cabinet
+before distributing handheld builds that can emit the new event.
 
 `POST /station/scans` carries ordered `productLabelEvents` and explicit per-event
 receipts. The full combined request is pinned before HTTP and retried unchanged;

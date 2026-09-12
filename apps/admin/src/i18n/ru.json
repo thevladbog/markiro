@@ -2509,6 +2509,7 @@
         "states": {
           "prepared": "Готово к отправке",
           "sending": "Отправляется",
+          "skipped": "Проверка пропущена",
           "awaiting_verification": "Ожидает проверки",
           "attention": "Требует внимания",
           "verified": "Этикетка проверена",
@@ -2521,6 +2522,7 @@
           "failed_before_send": "Не отправлено",
           "delivery_unknown": "Результат отправки неизвестен",
           "verified": "Этикетка проверена",
+          "verification_skipped": "Проверка пропущена",
           "verification_rejected": "Проверка не пройдена"
         },
         "reasons": {

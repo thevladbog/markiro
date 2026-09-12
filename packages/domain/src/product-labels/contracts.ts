@@ -21,7 +21,7 @@ export type ProductLabelAttemptState =
   "prepared" | "sending" | "sent" | "failed_before_send" | "delivery_unknown";
 export type ProductLabelJobStatus =
   "prepared" | "sending" | "awaiting_verification" | "completed" | "attention";
-export type VerificationOutcome = "not_required" | "pending" | "verified";
+export type VerificationOutcome = "not_required" | "pending" | "verified" | "skipped";
 
 export const validationPrintInputSchema = z.discriminatedUnion("mode", [
   z.strictObject({ mode: z.literal("none") }),
@@ -110,6 +110,7 @@ export const productLabelEventSchema = z.discriminatedUnion("kind", [
     kind: z.literal("delivery_unknown"),
     errorCode: z.enum(["transport_failed", "persistence_failed", "interrupted"]),
   }),
+  eventBaseSchema.extend({ kind: z.literal("verification_skipped") }),
   eventBaseSchema.extend({ kind: z.literal("verified"), scannedPayloadDigest: digestSchema }),
   eventBaseSchema.extend({
     kind: z.literal("verification_rejected"),

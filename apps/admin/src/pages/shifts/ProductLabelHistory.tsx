@@ -113,17 +113,25 @@ export function ProductLabelHistory({ shiftId }: { shiftId: string }) {
           const key = JSON.stringify([shiftId, job.deviceId, job.jobId]);
           const open = expanded === key;
           const status =
-            job.verificationOutcome === "verified"
-              ? "verified"
-              : job.status === "completed"
-                ? "sent"
-                : job.status;
+            job.verificationOutcome === "skipped"
+              ? "skipped"
+              : job.verificationOutcome === "verified"
+                ? "verified"
+                : job.status === "completed"
+                  ? "sent"
+                  : job.status;
           return (
             <article className="mk-product-label-history__job" key={key}>
               <header>
                 <code>…{job.codeSuffix || "—"}</code>
                 <Badge
-                  tone={status === "verified" ? "ok" : status === "attention" ? "warn" : "neutral"}
+                  tone={
+                    status === "verified"
+                      ? "ok"
+                      : status === "attention" || status === "skipped"
+                        ? "warn"
+                        : "neutral"
+                  }
                 >
                   {t(`pages.shifts.productLabels.states.${status}`)}
                 </Badge>

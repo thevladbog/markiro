@@ -50,6 +50,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
@@ -169,13 +171,7 @@ data class WorkUi(
     val palletConfirm: PalletConfirm? = null,
 )
 
-/**
- * The duplicate's progress, in the last-scan zone rather than over the screen: a
- * duplicate prints on EVERY unit, so a full-screen state per scan would be
- * unusable. `awaitingVerification` is the one an operator cannot guess -- without
- * it they scan the next product, are told it is the wrong code, and have no idea
- * why.
- */
+/** Printing status; verification also opens a dedicated screen. */
 data class DuplicateUi(val printing: Boolean, val awaitingVerification: Boolean)
 
 /** Shown instead of a code tail when a scan was refused rather than read. */
@@ -254,6 +250,7 @@ class WorkViewModel(
     private val _palletCloseStep = MutableStateFlow<PalletCloseStep>(PalletCloseStep.Idle)
     val palletCloseStep: StateFlow<PalletCloseStep> = _palletCloseStep
 
+    private val scanActionMutex = Mutex()
     private val _duplicateStep = MutableStateFlow<DuplicateStep>(DuplicateStep.Idle)
     val duplicateStep: StateFlow<DuplicateStep> = _duplicateStep
     private val duplicateUi = MutableStateFlow<DuplicateUi?>(null)
@@ -389,7 +386,9 @@ class WorkViewModel(
         _planPrompt.value = false
     }
 
-    private suspend fun onScan(raw: String) {
+    private suspend fun onScan(raw: String) = scanActionMutex.withLock { handleScan(raw) }
+
+    private suspend fun handleScan(raw: String) {
         val shift = db.shiftDao().get(shiftId) ?: return
         if (shift.productGtin14 == null || shift.status == "closed") return
         // In a duplicate shift the open job decides what this scan IS, before
@@ -707,7 +706,7 @@ class WorkViewModel(
 
     private fun ScanOutcome.toLastScan(raw: String) = LastScan(
         verdict = verdict,
-        tail = (km?.serial ?: raw).let { if (it.length > 8) "…" + it.takeLast(8) else it },
+        tail = feedTail(raw),
         firstSeenAt = firstSeenAt,
         at = scannedAt,
     )
@@ -789,8 +788,13 @@ class WorkViewModel(
     private suspend fun verifyScan(jobId: String, raw: String) {
         when (duplicates.verify(jobId, raw)) {
             DuplicateMatch.MATCH -> {
-                _duplicateStep.value = DuplicateStep.Idle
+                val confirmed = DuplicateStep.Verified(jobId)
+                _duplicateStep.value = confirmed
                 signals.play(SignalKind.OK)
+                viewModelScope.launch {
+                    delay(650)
+                    if (_duplicateStep.value == confirmed) _duplicateStep.value = DuplicateStep.Idle
+                }
             }
             // A rejected verification means to the operator what an error means:
             // that scan did not count, do it again. No new signal for it.
@@ -833,6 +837,10 @@ class WorkViewModel(
 
     private suspend fun refreshDuplicate() {
         val job = duplicates.openJob(shiftId)
+        if (job?.status == JobStatus.AWAITING_VERIFICATION &&
+            (_duplicateStep.value == DuplicateStep.Idle || _duplicateStep.value is DuplicateStep.Awaiting || _duplicateStep.value.jobId() != job.jobId)) {
+            _duplicateStep.value = DuplicateStep.Awaiting(job.jobId, feedTail(job.canonicalRaw))
+        }
         duplicateUi.value = DuplicateUi(
             printing = job?.status == JobStatus.PREPARED || job?.status == JobStatus.SENDING,
             awaitingVerification = job?.status == JobStatus.AWAITING_VERIFICATION ||
@@ -877,6 +885,22 @@ class WorkViewModel(
     /** Closes the screen without settling anything; the job stays outstanding. */
     fun dismissDuplicate() {
         _duplicateStep.value = DuplicateStep.Idle
+        viewModelScope.launch { db.recovery.work(generation) { refreshDuplicate() } }
+    }
+
+    fun skipDuplicateVerification() {
+        val step = _duplicateStep.value as? DuplicateStep.Awaiting ?: return
+        val actor = session.state.value.operator?.operatorId ?: return
+        viewModelScope.launch { db.recovery.work(generation) {
+            scanActionMutex.withLock {
+                if (db.shiftDao().get(shiftId)?.status == "closed") return@withLock
+                if (duplicates.skipVerification(step.jobId, actor)) {
+                    if (_duplicateStep.value.jobId() == step.jobId) _duplicateStep.value = DuplicateStep.Idle
+                    refreshDuplicate()
+                    sync.nudge()
+                }
+            }
+        } }
     }
 
     fun leave() {

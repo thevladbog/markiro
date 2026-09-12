@@ -14,6 +14,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
 
 @RunWith(AndroidJUnit4::class)
 class DuplicateScreensTest {
@@ -29,6 +30,25 @@ class DuplicateScreensTest {
         val state = mutableStateOf(initial)
         compose.setContent { MarkiroTheme { DuplicateScreen(state.value, DuplicateCallbacks()) } }
         return state
+    }
+
+    @Test
+    @Config(qualifiers = "en")
+    fun verificationAndSkipAreLocalized() {
+        show(DuplicateStep.Awaiting("j1", "…ABC123"))
+        compose.onNodeWithText("Scan the printed label").assertIsDisplayed()
+        compose.onNodeWithText("Skip verification").assertIsDisplayed()
+    }
+
+    @Test
+    fun verificationLeadsWithThePhysicalActionAndAnExplicitSkip() {
+        var skipped = false
+        show(DuplicateStep.Awaiting("j1", "…ABC123"), DuplicateCallbacks(onSkip = { skipped = true }))
+        compose.onNodeWithText("Отсканируйте напечатанную этикетку").assertIsDisplayed()
+        compose.onNodeWithText("…ABC123").assertIsDisplayed()
+        compose.onNodeWithText("Пропустить проверку").performClick()
+        assertEquals(true, skipped)
+        compose.onNodeWithText("ПРИНЯТО").assertDoesNotExist()
     }
 
     @Test

@@ -13,7 +13,7 @@ export const productLabelHistoryRowSchema = z.strictObject({
   codeSuffix: z.string().max(6),
   acceptedAt: z.iso.datetime(),
   status: z.enum(["prepared", "sending", "awaiting_verification", "completed", "attention"]),
-  verificationOutcome: z.enum(["not_required", "pending", "verified"]),
+  verificationOutcome: z.enum(["not_required", "pending", "verified", "skipped"]),
   attemptNo: z.number().int().positive(),
   ownershipConflict: z.boolean(),
 });

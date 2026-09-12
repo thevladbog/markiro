@@ -47,7 +47,12 @@ export function productLabelStatus(
   attempt: ProductLabelAttemptState,
   verification: VerificationPolicy,
   verified: boolean,
+  skipped = false,
 ): ProductLabelJobStatus {
+  if (skipped) {
+    if (verified || attempt !== "sent" || verification !== "required") invalidTransition();
+    return "completed";
+  }
   if (verified) {
     if (attempt !== "sent" && attempt !== "delivery_unknown") invalidTransition();
     return "completed";
@@ -89,7 +94,11 @@ export function canApplyProductLabelEvent(
       event.dpi === current.dpi
     );
   }
-  if (event.attemptId !== current.attemptId || current.verificationOutcome === "verified")
+  if (
+    event.attemptId !== current.attemptId ||
+    current.verificationOutcome === "verified" ||
+    current.verificationOutcome === "skipped"
+  )
     return false;
 
   switch (event.kind) {
@@ -99,6 +108,8 @@ export function canApplyProductLabelEvent(
     case "sent":
     case "delivery_unknown":
       return current.attemptState === "sending";
+    case "verification_skipped":
+      return current.attemptState === "sent" && current.verification === "required";
     case "verified":
     case "verification_rejected": {
       const canVerify =
@@ -160,15 +171,27 @@ export function applyProductLabelEvent(
   }
 
   const attemptState =
-    event.kind === "verified" || event.kind === "verification_rejected"
+    event.kind === "verified" ||
+    event.kind === "verification_rejected" ||
+    event.kind === "verification_skipped"
       ? current.attemptState
       : event.kind;
-  const verificationOutcome = event.kind === "verified" ? "verified" : current.verificationOutcome;
+  const verificationOutcome =
+    event.kind === "verified"
+      ? "verified"
+      : event.kind === "verification_skipped"
+        ? "skipped"
+        : current.verificationOutcome;
   return {
     ...current,
     latestSequence: event.sequence,
     attemptState,
     verificationOutcome,
-    status: productLabelStatus(attemptState, verification, verificationOutcome === "verified"),
+    status: productLabelStatus(
+      attemptState,
+      verification,
+      verificationOutcome === "verified",
+      verificationOutcome === "skipped",
+    ),
   };
 }

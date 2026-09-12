@@ -345,6 +345,16 @@ class DuplicateJobs(
         return match
     }
 
+    /** Persist the operator's explicit skip and free the next unit in the same transaction. */
+    suspend fun skipVerification(jobId: String, operatorId: String): Boolean = db.recovery.commit {
+        mutex.withLock {
+            val job = db.productLabelJobDao().get(jobId) ?: return@withLock false
+            if (operatorId.isBlank() || job.status != JobStatus.AWAITING_VERIFICATION) return@withLock false
+            append(job, EventKind.VERIFICATION_SKIPPED, operatorId = operatorId)
+            true
+        }
+    }
+
     /**
      * Starts a second attempt on the same bytes.
      *
@@ -435,7 +445,8 @@ class DuplicateJobs(
         errorCode: String? = null,
         scannedPayloadDigest: String? = null,
         reason: String? = null,
-    ): ProductLabelJobEntity = db.recovery.commit { appendOwned(job, kind, errorCode, scannedPayloadDigest, reason) }
+        operatorId: String = job.operatorId,
+    ): ProductLabelJobEntity = db.recovery.commit { appendOwned(job, kind, errorCode, scannedPayloadDigest, reason, operatorId) }
 
     private suspend fun appendOwned(
         job: ProductLabelJobEntity,
@@ -443,6 +454,7 @@ class DuplicateJobs(
         errorCode: String? = null,
         scannedPayloadDigest: String? = null,
         reason: String? = null,
+        operatorId: String = job.operatorId,
     ): ProductLabelJobEntity {
         val now = Iso.format(clock())
         val event = ProductLabelEvent(
@@ -456,7 +468,7 @@ class DuplicateJobs(
             policyRevision = job.policyRevision,
             templateDigest = job.templateDigest,
             payloadDigest = job.payloadDigest,
-            operatorId = job.operatorId,
+            operatorId = operatorId,
             occurredAt = now,
             kind = kind,
             errorCode = errorCode,

@@ -57,7 +57,10 @@ vi.mock("../src/pages/shifts/api.js", async (importOriginal) => {
 });
 
 afterEach(async () => {
-  cleanup();
+  // Drain React's scheduled passive work before Vitest disposes the JSDOM window.
+  await act(async () => {
+    cleanup();
+  });
   vi.useRealTimers();
   vi.unstubAllGlobals();
   writeHookMountSpy.mockClear();

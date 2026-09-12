@@ -1,14 +1,27 @@
 package app.markiro.handheld.feature.work
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -25,15 +38,10 @@ import app.markiro.handheld.core.design.tone
 import app.markiro.handheld.core.duplicate.DuplicateReason
 import app.markiro.handheld.core.duplicate.ReprintReason
 
-/**
- * The full-screen states a duplicate gets, and only these three.
- *
- * A duplicate prints on EVERY unit, not every twentieth, so the ordinary path
- * stays in the last-scan zone and nothing takes over the screen. These are the
- * three where the line has stopped anyway and a person has to decide.
- */
 sealed interface DuplicateStep {
     data object Idle : DuplicateStep
+    data class Awaiting(val jobId: String, val tail: String) : DuplicateStep
+    data class Verified(val jobId: String) : DuplicateStep
 
     /**
      * Nothing was printed and we know why.
@@ -52,6 +60,8 @@ sealed interface DuplicateStep {
     data class Rejected(val jobId: String, val mismatch: Boolean) : DuplicateStep
 
     fun jobId(): String? = when (this) {
+        is Awaiting -> jobId
+        is Verified -> jobId
         is Failed -> jobId
         is Unknown -> jobId
         is Rejected -> jobId
@@ -64,6 +74,7 @@ data class DuplicateCallbacks(
     val onReprint: (String) -> Unit = {},
     val onScanAgain: () -> Unit = {},
     val onDismiss: () -> Unit = {},
+    val onSkip: () -> Unit = {},
 )
 
 /** The operator-facing name for a duplicate failure. Never a raw code. */
@@ -86,6 +97,10 @@ fun duplicateReasonLabel(reason: String): Int = when (reason) {
 
 @Composable
 fun DuplicateScreen(step: DuplicateStep, cb: DuplicateCallbacks) {
+    if (step is DuplicateStep.Awaiting || step is DuplicateStep.Verified) {
+        VerificationScreen(step, cb)
+        return
+    }
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     val tone = c.tone(if (step is DuplicateStep.Failed) Tone.Err else Tone.Warn)
@@ -95,7 +110,7 @@ fun DuplicateScreen(step: DuplicateStep, cb: DuplicateCallbacks) {
         verticalArrangement = Arrangement.Center,
     ) {
         when (step) {
-            DuplicateStep.Idle -> Unit
+            DuplicateStep.Idle, is DuplicateStep.Awaiting, is DuplicateStep.Verified -> Unit
 
             is DuplicateStep.Failed -> {
                 Text(stringResource(R.string.duplicate_failed_title), style = t.title, color = tone.fg, textAlign = TextAlign.Center)
@@ -171,5 +186,41 @@ private fun ReprintReasons(cb: DuplicateCallbacks) {
         SecondaryButton(stringResource(R.string.duplicate_reprint_not_printed), { cb.onReprint(ReprintReason.NOT_PRINTED) })
         SecondaryButton(stringResource(R.string.duplicate_reprint_damaged), { cb.onReprint(ReprintReason.DAMAGED) })
         SecondaryButton(stringResource(R.string.duplicate_reprint_lost), { cb.onReprint(ReprintReason.LOST) })
+    }
+}
+
+
+/** The scanner remains owned by the work route while this screen explains its new purpose. */
+@Composable
+private fun VerificationScreen(step: DuplicateStep, cb: DuplicateCallbacks) {
+    val verified = step is DuplicateStep.Verified
+    val colors = MarkiroTheme.colors.tone(if (verified) Tone.Ok else Tone.Warn)
+    val type = MarkiroTheme.type
+    var problems by remember(step.jobId()) { mutableStateOf(false) }
+    // Back may close the problem choices, but cannot silently bypass verification.
+    BackHandler { problems = false }
+    Column(Modifier.fillMaxSize().background(colors.solid).padding(MarkiroSizes.sp4)) {
+        Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp4)) {
+                Icon(if (verified) Icons.Outlined.CheckCircle else Icons.Outlined.QrCodeScanner,
+                    contentDescription = null, tint = colors.onSolid, modifier = Modifier.size(72.dp))
+                Text(stringResource(if (verified) R.string.duplicate_verified_title else R.string.duplicate_verify_title),
+                    style = type.title, color = colors.onSolid, textAlign = TextAlign.Center)
+                if (step is DuplicateStep.Awaiting) Text(step.tail, style = type.code, color = colors.onSolid)
+                Text(stringResource(if (verified) R.string.duplicate_verified_hint else R.string.duplicate_verify_hint),
+                    style = type.body, color = colors.onSolid, textAlign = TextAlign.Center)
+            }
+        }
+        if (!verified) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+                if (problems) {
+                    ReprintReasons(cb)
+                    SecondaryButton(stringResource(R.string.duplicate_return_to_scan), { problems = false })
+                } else {
+                    SecondaryButton(stringResource(R.string.duplicate_label_problem), { problems = true })
+                    SecondaryButton(stringResource(R.string.duplicate_skip_verification), cb.onSkip)
+                }
+            }
+        }
     }
 }

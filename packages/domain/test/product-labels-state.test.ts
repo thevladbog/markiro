@@ -89,7 +89,7 @@ describe("product label transitions", () => {
       name: "sent required",
       verification: "required",
       prefix: [PREPARED, SENDING, SENT],
-      allowed: ["prepared", "verified", "verification_rejected"],
+      allowed: ["prepared", "verified", "verification_rejected", "verification_skipped"],
     },
     {
       name: "sent none",
@@ -127,6 +127,7 @@ describe("product label transitions", () => {
         { ...BASE, kind: "failed_before_send", errorCode: "printer_changed", sequence },
         { ...VERIFIED, sequence },
         { ...BASE, kind: "verification_rejected", reason: "invalid", sequence },
+        { ...BASE, kind: "verification_skipped", sequence },
       ];
       for (const event of events)
         expect(domain.canApplyProductLabelEvent(current, event), event.kind).toBe(
@@ -300,5 +301,48 @@ describe("product label transitions", () => {
     ]) {
       expect(domain.canApplyProductLabelEvent(sent, event)).toBe(false);
     }
+  });
+});
+
+describe("explicit verification skip", () => {
+  const skipped: ProductLabelEvent = { ...BASE, kind: "verification_skipped", sequence: 4 };
+
+  it("records a completed but unverified attempt and permits a later reprint", () => {
+    expect(domain.productLabelEventSchema.safeParse(skipped).success).toBe(true);
+    const current = project("required", [PREPARED, SENDING, SENT, skipped]);
+    expect(current).toMatchObject({
+      status: "completed",
+      verificationOutcome: "skipped",
+      attemptState: "sent",
+    });
+    expect(domain.canApplyProductLabelEvent(current, { ...VERIFIED, sequence: 5 })).toBe(false);
+    expect(domain.canApplyProductLabelEvent(current, { ...skipped, sequence: 5 })).toBe(false);
+    const reprinted = domain.applyProductLabelEvent(
+      current,
+      {
+        ...PREPARED,
+        attemptId: SECOND,
+        attemptNo: 2,
+        reason: "lost",
+        sequence: 5,
+      },
+      "required",
+    );
+    expect(reprinted.verificationOutcome).toBe("pending");
+  });
+
+  it("does not use a verification skip to resolve unprinted or unknown output", () => {
+    for (const prefix of [[PREPARED], [PREPARED, SENDING], [PREPARED, SENDING, UNKNOWN]]) {
+      const current = project("required", prefix);
+      expect(
+        domain.canApplyProductLabelEvent(current, {
+          ...skipped,
+          sequence: current.latestSequence + 1,
+        }),
+      ).toBe(false);
+    }
+    expect(
+      domain.canApplyProductLabelEvent(project("none", [PREPARED, SENDING, SENT]), skipped),
+    ).toBe(false);
   });
 });
