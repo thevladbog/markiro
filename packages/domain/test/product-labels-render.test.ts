@@ -53,7 +53,9 @@ describe("duplicate template eligibility", () => {
       expect(() => domain.assertDuplicateTemplate(spec)).not.toThrow();
       expect(
         spec.elements.filter((element) => element.kind === "barcode" && element.data === "km.code"),
-      ).toEqual([expect.objectContaining({ format: "datamatrix", xMm: 34, yMm: 9, sizeMm: 22 })]);
+      ).toEqual([
+        expect.objectContaining({ format: "datamatrix", xMm: 34, yMm: 14.15, sizeMm: 22 }),
+      ]);
       for (const field of ["product.printName", "date", "expiry", "product.egais", "km.code"]) {
         expect(spec.elements).toContainEqual(expect.objectContaining({ kind: "field", field }));
       }
@@ -79,7 +81,9 @@ describe("duplicate template eligibility", () => {
         kind: "field",
         field: index === 0 ? "product.name" : "product.printName",
         xMm: 2,
-        maxWidthMm: 30,
+        // The name spans the label, not the 30 mm text column: that is the
+        // whole point of the rule running full width beneath it.
+        maxWidthMm: 54,
       });
       expect(() => domain.assertDuplicateTemplate(template.spec)).not.toThrow();
     }
@@ -144,11 +148,21 @@ describe("human-readable marking identity", () => {
       ...domain.sampleLabelData(),
       "km.code": "010460000000001521ABCDEFGHIJabcdefghij\u001d93Tail",
     };
+    const symbol = spec.elements.find((el) => el.id === "km");
+    if (symbol?.kind !== "barcode") throw new Error("Symbol missing");
     const textElements = spec.elements.filter((el) => el.kind === "field" || el.kind === "text");
     for (const el of textElements) {
       const bounds = domain.elementBoundsMm(el, data);
-      expect(bounds.x + bounds.w, el.id).toBeLessThanOrEqual(32);
       expect(bounds.y + bounds.h, el.id).toBeLessThanOrEqual(38);
+      // Nothing may run into the symbol. The name clears it by sitting ABOVE
+      // it across the full width; everything else clears it by staying in the
+      // text column to its left.
+      if (el.id === "product") {
+        expect(bounds.y + bounds.h, el.id).toBeLessThanOrEqual(symbol.yMm);
+        expect(bounds.x + bounds.w, el.id).toBeLessThanOrEqual(56);
+      } else {
+        expect(bounds.x + bounds.w, el.id).toBeLessThanOrEqual(32);
+      }
     }
     const groups = [
       ["cap-egais", "egais"],

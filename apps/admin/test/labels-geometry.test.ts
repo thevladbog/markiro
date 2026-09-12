@@ -437,9 +437,12 @@ it("fits the duplicate's whole 22 mm symbol while preserving legacy native matri
   const data = sampleLabelData();
   const code = spec.elements.find((element) => element.kind === "barcode");
   if (!code) throw new Error("Missing code element");
+  // Below the full-width rule, not centred against the whole height: the
+  // symbol's own placement, so this tracks the stock layout instead of
+  // re-stating it.
   expect(elementBoundsMm(code, data, { kmDataMatrix: "raster" })).toEqual({
-    x: 34,
-    y: 9,
+    x: code.xMm,
+    y: code.yMm,
     w: 22,
     h: 22,
   });

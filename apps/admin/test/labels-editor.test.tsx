@@ -50,6 +50,7 @@ import {
   buildGfaCommand,
   buildBitmapCommand,
   mmToDots,
+  buildDuplicateLabelTemplate,
   rasterizeGs1DataMatrix,
   parseLabelTemplate,
   type RasterResult,
@@ -1137,20 +1138,32 @@ it.each([
     if (!blob) throw new Error("Missing downloaded label");
     const bytes = new Uint8Array(await blob.arrayBuffer());
     const text = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+    // Read the symbol's placement off the stock template rather than repeating
+    // it as three magic numbers: this test pinned x=34, y=9, size=22 and so
+    // went stale the moment the layout moved the symbol below the rule.
+    const symbol = buildDuplicateLabelTemplate(dpi).elements.find((el) => el.id === "km");
+    if (symbol?.kind !== "barcode") throw new Error("Stock duplicate template has no symbol");
     const dm = rasterizeGs1DataMatrix(
       labelPreviewData("product_duplicate")["km.code"],
-      mmToDots(22, dpi),
+      mmToDots(symbol.sizeMm, dpi),
     );
+    const [x, y] = [mmToDots(symbol.xMm, dpi), mmToDots(symbol.yMm, dpi)];
     expect(text).toContain(
-      format === "zpl"
-        ? `^FO${mmToDots(34, dpi)},${mmToDots(9, dpi)}${buildGfaCommand(dm)}^FS`
-        : buildBitmapCommand(mmToDots(34, dpi), mmToDots(9, dpi), dm),
+      format === "zpl" ? `^FO${x},${y}${buildGfaCommand(dm)}^FS` : buildBitmapCommand(x, y, dm),
     );
     expect(text).not.toContain("^BX");
     expect(text).not.toContain("DMATRIX");
+    // Also read off the template: the name now spans the label instead of
+    // sharing the 30 mm text column with the dates.
+    const title = buildDuplicateLabelTemplate(dpi).elements.find((el) => el.id === "product");
+    if (title?.kind !== "field") throw new Error("Stock duplicate template has no name field");
     expect(raster).toHaveBeenCalledWith(
       "Кега · демонстрационная этикетка",
-      expect.objectContaining({ maxWidthPx: mmToDots(30, dpi), maxLines: 3, bold: true }),
+      expect.objectContaining({
+        maxWidthPx: mmToDots(title.maxWidthMm ?? 0, dpi),
+        maxLines: title.maxLines,
+        bold: true,
+      }),
     );
   },
 );

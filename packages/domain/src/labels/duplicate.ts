@@ -3,12 +3,176 @@ import { labelTemplateUsesField } from "./eligibility.js";
 import type { LegacyStockLabelTemplate } from "./defaults.js";
 import { labelTemplateSpecSchema, mmToDots, type LabelTemplateSpec } from "./model.js";
 
-/** Stock-label typography and rules: readable fields left, full GS1 symbol right. */
+/** The text column below the rule; the Data Matrix takes what is left of the width. */
+const TEXT_WIDTH_MM = 30;
+/** Where the full-width rule sits: under the name, above everything else. */
+const RULE_Y_MM = 12;
+const CODE_SIZE_MM = 52 - TEXT_WIDTH_MM;
+
+/**
+ * Stock duplicate label: the product name across the full width, one rule
+ * under it, then readable fields left and the GS1 symbol right.
+ *
+ * The name used to share the top with the Data Matrix, so it was boxed into
+ * the same 30 mm column as the dates and read as a caption on a crowded label.
+ * Giving it the whole width is what the rule change buys: the rule now spans
+ * the label instead of stopping at the text column, and the symbol drops below
+ * it rather than being centred against the full height.
+ *
+ * The symbol keeps its 22 mm — it carries a full KM including the crypto tail,
+ * and shrinking it to buy layout is how a duplicate stops scanning.
+ */
 export function buildDuplicateLabelTemplate(
   dpi: 203 | 300 = 203,
   nameField: "product.name" | "product.printName" = "product.printName",
 ): LabelTemplateSpec {
-  return buildDuplicateLabelLayout(dpi, nameField, 30);
+  return {
+    widthMm: 58,
+    heightMm: 40,
+    dpi,
+    language: "zpl",
+    elements: [
+      {
+        id: "product",
+        kind: "field",
+        xMm: 2,
+        yMm: 2,
+        field: nameField,
+        fontSizePt: 9,
+        bold: true,
+        maxWidthMm: 54,
+        maxLines: 2,
+      },
+      {
+        id: "sep-name",
+        kind: "line",
+        xMm: 2,
+        yMm: RULE_Y_MM,
+        x2Mm: 56,
+        y2Mm: RULE_Y_MM,
+        thicknessMm: 0.3,
+      },
+      {
+        id: "cap-date",
+        kind: "text",
+        xMm: 2,
+        yMm: 12.6,
+        text: "Дата розлива:",
+        fontSizePt: 5,
+        maxWidthMm: TEXT_WIDTH_MM / 2,
+      },
+      {
+        id: "cap-expiry",
+        kind: "text",
+        xMm: 2.5 + TEXT_WIDTH_MM / 2,
+        yMm: 12.6,
+        text: "Годен до:",
+        fontSizePt: 5,
+        maxWidthMm: TEXT_WIDTH_MM / 2 - 0.5,
+      },
+      {
+        id: "date",
+        kind: "field",
+        xMm: 2,
+        yMm: 15.5,
+        field: "date",
+        fontSizePt: 6,
+        bold: true,
+        maxWidthMm: TEXT_WIDTH_MM / 2,
+      },
+      {
+        id: "expiry",
+        kind: "field",
+        xMm: 2.5 + TEXT_WIDTH_MM / 2,
+        yMm: 15.5,
+        field: "expiry",
+        fontSizePt: 6,
+        bold: true,
+        maxWidthMm: TEXT_WIDTH_MM / 2 - 0.5,
+      },
+      {
+        id: "sep-dates",
+        kind: "line",
+        xMm: 2,
+        yMm: 19.2,
+        x2Mm: 2 + TEXT_WIDTH_MM,
+        y2Mm: 19.2,
+        thicknessMm: 0.3,
+      },
+      {
+        id: "cap-egais",
+        kind: "text",
+        xMm: 2,
+        yMm: 19.7,
+        text: "Код ЕГАИС:",
+        fontSizePt: 5,
+        maxWidthMm: TEXT_WIDTH_MM,
+      },
+      {
+        id: "egais",
+        kind: "field",
+        xMm: 2,
+        yMm: 22.6,
+        field: "product.egais",
+        fontSizePt: 6,
+        bold: true,
+        maxWidthMm: TEXT_WIDTH_MM,
+      },
+      {
+        id: "cap-marking",
+        kind: "text",
+        xMm: 2,
+        yMm: 26.2,
+        text: "Код маркировки:",
+        fontSizePt: 5,
+        maxWidthMm: TEXT_WIDTH_MM,
+      },
+      {
+        id: "marking",
+        kind: "field",
+        xMm: 2,
+        yMm: 29.1,
+        field: "km.code",
+        textFormat: "km_without_crypto",
+        fontSizePt: 5,
+        maxWidthMm: TEXT_WIDTH_MM,
+        maxLines: 2,
+      },
+      {
+        id: "sep-code",
+        kind: "line",
+        xMm: 3 + TEXT_WIDTH_MM,
+        yMm: RULE_Y_MM + 0.3,
+        x2Mm: 3 + TEXT_WIDTH_MM,
+        y2Mm: 38,
+        thicknessMm: 0.3,
+      },
+      {
+        id: "km",
+        kind: "barcode",
+        xMm: 4 + TEXT_WIDTH_MM,
+        yMm: RULE_Y_MM + 0.3 + (38 - RULE_Y_MM - 0.3 - CODE_SIZE_MM) / 2,
+        format: "datamatrix",
+        data: "km.code",
+        sizeMm: CODE_SIZE_MM,
+      },
+    ],
+  };
+}
+
+/**
+ * The layout shipped before the full-width name, kept verbatim.
+ *
+ * Two migrations read it and neither may drift: 0123 pins the 28 mm form it
+ * seeded, and the migration that introduces the layout above matches the 30 mm
+ * form byte for byte so it only rewrites rows a tenant never edited.
+ */
+export function buildPreviousDuplicateLabelLayout(
+  dpi: 203 | 300,
+  nameField: "product.name" | "product.printName",
+  textWidthMm: 28 | 30,
+): LabelTemplateSpec {
+  return buildDuplicateLabelLayout(dpi, nameField, textWidthMm);
 }
 
 function buildDuplicateLabelLayout(
@@ -167,6 +331,27 @@ export function buildDuplicateLabelTemplates(): { name: string; spec: LabelTempl
     {
       name: `${DUPLICATE_LABEL_TEMPLATE_NAME} [Краткое наименование]`,
       spec: buildDuplicateLabelTemplate(203),
+    },
+  ];
+}
+
+/**
+ * The two presets exactly as 0125 left them, for the migration that replaces
+ * their layout: it rewrites only rows matching these bytes, so a tenant that
+ * edited its copy keeps it. Provisioning does not use this.
+ */
+export function buildPreviousDuplicateLabelTemplates(): {
+  name: string;
+  spec: LabelTemplateSpec;
+}[] {
+  return [
+    {
+      name: `${DUPLICATE_LABEL_TEMPLATE_NAME} [Полное наименование]`,
+      spec: buildPreviousDuplicateLabelLayout(203, "product.name", 30),
+    },
+    {
+      name: `${DUPLICATE_LABEL_TEMPLATE_NAME} [Краткое наименование]`,
+      spec: buildPreviousDuplicateLabelLayout(203, "product.printName", 30),
     },
   ];
 }
