@@ -79,7 +79,8 @@ describe.skipIf(!databaseUrl)("working device retention forward migration", () =
   }, 120_000);
   afterAll(async () => {
     await pool.end();
-    if (created) await maintenance.query(`DROP DATABASE "${name}" WITH (FORCE)`);
+    // pool.end() can resolve before the socket closes; FORCE races that shutdown.
+    if (created) await maintenance.query(`DROP DATABASE "${name}"`);
     await maintenance.end();
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
   });
