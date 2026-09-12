@@ -43,6 +43,10 @@ interface StationApi {
     @GET("shifts/{id}/bundle")
     suspend fun bundle(@Path("id") id: String): ShiftBundleDto
 
+    @GET("shifts/{id}/code-history")
+    suspend fun codeHistory(@Path("id") id: String, @Query("cursor") cursor: String? = null,
+        @Query("snapshot") snapshot: String? = null, @Query("limit") limit: Int = 1000): ValidationHistoryPage
+
     @GET("shifts/{id}/summary")
     suspend fun summary(@Path("id") id: String): ShiftSummaryDto
 

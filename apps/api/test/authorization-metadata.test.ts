@@ -233,6 +233,8 @@ const OPERATIONAL_CONTROLLERS: readonly [
       getShiftSummary: sharedReadPolicy,
       getProductLabels: readPolicy,
       getProductLabelEvents: readPolicy,
+      getCodeHistory: sharedReadPolicy,
+      getReprocessings: readPolicy,
       getShift: readPolicy,
       createShift: sharedWritePolicy,
       updateShift: writePolicy,
@@ -331,7 +333,7 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
 
 const STATION_ONLY_CONTROLLERS: readonly [ControllerClass, readonly string[]][] = [
   [StationOperatorsController, ["listRoster"]],
-  [StationScansController, ["codeReleases", "conflictStatus", "ingest"]],
+  [StationScansController, ["codeReleases", "conflictStatus", "ingest", "occurrenceStatus"]],
   [
     StationInventoriesController,
     ["codes", "eventBatch", "join", "leave", "list", "manifest", "progress", "resolveBarcode"],

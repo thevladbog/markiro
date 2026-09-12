@@ -1,3 +1,4 @@
+import { VALIDATION_REPROCESSING_PROTOCOL } from "@markiro/domain";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, DatePicker, Input, Pager } from "@markiro/ui";
@@ -70,6 +71,7 @@ export interface NewShiftDraft {
   product: ResolvedProduct;
   productionDate: string;
   printEnabled: boolean;
+  allowPreviouslyAcceptedCodes?: boolean;
   verificationRequired: boolean;
   productTemplateId: string | null;
   productTemplates: ProductLabelTemplateList["items"];
@@ -78,7 +80,7 @@ export interface NewShiftDraft {
 
 type PrintSettings = Pick<
   NewShiftDraft,
-  "printEnabled" | "verificationRequired" | "productTemplateId"
+  "printEnabled" | "verificationRequired" | "productTemplateId" | "allowPreviouslyAcceptedCodes"
 >;
 
 function currentLocalDate(now = new Date()): string {
@@ -108,6 +110,7 @@ export function NewShift({
   const [product, setProduct] = useState<ResolvedProduct | null>(initialDraft?.product ?? null);
   const [committedPrintSettings, setCommittedPrintSettings] = useState<PrintSettings>({
     printEnabled: initialDraft?.printEnabled ?? false,
+    allowPreviouslyAcceptedCodes: initialDraft?.allowPreviouslyAcceptedCodes ?? false,
     verificationRequired: initialDraft?.verificationRequired ?? true,
     productTemplateId: initialDraft?.productTemplateId ?? null,
   });
@@ -116,6 +119,10 @@ export function NewShift({
   const [verificationRequired, setVerificationRequired] = useState(
     initialDraft?.verificationRequired ?? true,
   );
+  const [allowPreviouslyAcceptedCodes, setAllowPreviouslyAcceptedCodes] = useState(
+    initialDraft?.allowPreviouslyAcceptedCodes ?? false,
+  );
+  const [reprocessingProtocol, setReprocessingProtocol] = useState<string | null>(null);
   const [printProtocol, setPrintProtocol] = useState<string | null>(null);
   const [printSettingsLoaded, setPrintSettingsLoaded] = useState(false);
   const [printSettingsConfigured, setPrintSettingsConfigured] = useState(Boolean(initialDraft));
@@ -180,6 +187,7 @@ export function NewShift({
         setProduct(match);
         setCommittedPrintSettings({
           printEnabled: false,
+          allowPreviouslyAcceptedCodes: false,
           verificationRequired: true,
           productTemplateId: null,
         });
@@ -251,6 +259,7 @@ export function NewShift({
 
   function restorePrintSettings() {
     setPrintEnabled(committedPrintSettings.printEnabled);
+    setAllowPreviouslyAcceptedCodes(committedPrintSettings.allowPreviouslyAcceptedCodes ?? false);
     setVerificationRequired(committedPrintSettings.verificationRequired);
     setProductTemplateId(committedPrintSettings.productTemplateId);
   }
@@ -269,11 +278,15 @@ export function NewShift({
     setBusy(true);
     operationBusy.current = true;
     try {
-      const config = await client.get<{ validationPrintProtocol?: string | null }>(
-        `/shifts/planning-config?productId=${encodeURIComponent(product.id)}`,
-      );
+      const config = await client.get<{
+        validationPrintProtocol?: string | null;
+        validationReprocessingProtocol?: string | null;
+      }>(`/shifts/planning-config?productId=${encodeURIComponent(product.id)}`);
       if (!current()) return;
       setPrintProtocol(config.validationPrintProtocol ?? null);
+      setReprocessingProtocol(config.validationReprocessingProtocol ?? null);
+      if (config.validationReprocessingProtocol !== VALIDATION_REPROCESSING_PROTOCOL)
+        setAllowPreviouslyAcceptedCodes(false);
       setPrintSettingsLoaded(true);
       if (config.validationPrintProtocol !== PRODUCT_LABEL_PROTOCOL) setPrintEnabled(false);
     } catch {
@@ -322,7 +335,12 @@ export function NewShift({
       return;
     }
     if (printEnabled && !productTemplateId) return;
-    setCommittedPrintSettings({ printEnabled, verificationRequired, productTemplateId });
+    setCommittedPrintSettings({
+      printEnabled,
+      verificationRequired,
+      productTemplateId,
+      allowPreviouslyAcceptedCodes,
+    });
     setPrintSettingsConfigured(true);
     setError(null);
     setPrinterError(false);
@@ -359,9 +377,10 @@ export function NewShift({
       }
       let validationPrint: ValidationPrintInput = { mode: "none" };
       if (mode === "validation" && printEnabled) {
-        const config = await client.get<{ validationPrintProtocol?: string | null }>(
-          `/shifts/planning-config?productId=${encodeURIComponent(product.id)}`,
-        );
+        const config = await client.get<{
+          validationPrintProtocol?: string | null;
+          validationReprocessingProtocol?: string | null;
+        }>(`/shifts/planning-config?productId=${encodeURIComponent(product.id)}`);
         if (!current()) return;
         if (config.validationPrintProtocol !== PRODUCT_LABEL_PROTOCOL) {
           setError(t("shifts.printUnavailable"));
@@ -394,7 +413,17 @@ export function NewShift({
           mode: "duplicate_dm",
           templateId: selected.id,
           verification: verificationRequired ? "required" : "none",
+          allowPreviouslyAcceptedCodes,
         });
+        if (config.validationReprocessingProtocol !== VALIDATION_REPROCESSING_PROTOCOL) {
+          if (allowPreviouslyAcceptedCodes) {
+            setError(t("shifts.reprocessingUnavailable"));
+            return;
+          }
+          // Old APIs have strict input schemas; absence still means false locally.
+          if (validationPrint.mode === "duplicate_dm")
+            delete validationPrint.allowPreviouslyAcceptedCodes;
+        }
       }
       const requestedProductionDate = productionDate || null;
       const createInput = {
@@ -445,6 +474,8 @@ export function NewShift({
           authoritative.data.mode !== "duplicate_dm" ||
           authoritative.data.templateId !== validationPrint.templateId ||
           authoritative.data.verification !== validationPrint.verification ||
+          authoritative.data.allowPreviouslyAcceptedCodes !==
+            (validationPrint.allowPreviouslyAcceptedCodes ?? false) ||
           opened.mode !== "validation" ||
           opened.status !== "active"
         ) {
@@ -577,6 +608,20 @@ export function NewShift({
                 <p>
                   {t(verificationRequired ? "shifts.printRequiredHint" : "shifts.printNoneHint")}
                 </p>
+                <label className="setup-touch-choice setup-touch-choice--checkbox">
+                  <input
+                    type="checkbox"
+                    name="validation-reprocessing"
+                    checked={allowPreviouslyAcceptedCodes}
+                    disabled={busy || reprocessingProtocol !== VALIDATION_REPROCESSING_PROTOCOL}
+                    onChange={(event) => setAllowPreviouslyAcceptedCodes(event.target.checked)}
+                  />
+                  <span>{t("shifts.allowPreviouslyAcceptedCodes")}</span>
+                </label>
+                <p>{t("shifts.reprocessingHint")}</p>
+                {reprocessingProtocol !== VALIDATION_REPROCESSING_PROTOCOL ? (
+                  <p>{t("shifts.reprocessingUnavailable")}</p>
+                ) : null}
               </div>
             ) : (
               <p className="new-shift__print-hint">{t("shifts.printCopyHint")}</p>
@@ -781,6 +826,7 @@ export function NewShift({
                 setCommittedPrintSettings((previous) => ({
                   ...previous,
                   printEnabled: false,
+                  allowPreviouslyAcceptedCodes: false,
                   productTemplateId: null,
                 }));
               }}

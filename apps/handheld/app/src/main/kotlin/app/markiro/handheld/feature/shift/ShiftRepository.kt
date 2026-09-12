@@ -89,6 +89,8 @@ fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
     duplicateTemplate = existing?.duplicateTemplate,
     duplicateTemplateDigest = existing?.duplicateTemplateDigest,
     duplicatePolicyRevision = existing?.duplicatePolicyRevision,
+    allowPreviouslyAcceptedCodes = existing?.takeIf { it.bundleFetchedAt != null }?.allowPreviouslyAcceptedCodes
+        ?: validationPrint.allowPreviouslyAcceptedCodes,
 )
 
 /** Shift list cache, entry (server participation + bundle) and the local leave mark. */
@@ -99,6 +101,8 @@ class ShiftRepository(
     private val pool: SsccPool,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
+    private val history = ValidationHistoryMirror(db, api, json)
+
     fun observeShifts(): Flow<List<ShiftEntity>> = db.shiftDao().observeAll()
 
     /** Own line plus unassigned shifts; rows without a bundle that vanished from the list are dropped. */
@@ -166,6 +170,7 @@ class ShiftRepository(
                     duplicateTemplate = bundle.shift.validationPrint.snapshot?.spec?.toString(),
                     duplicateTemplateDigest = bundle.shift.validationPrint.snapshot?.digest,
                     duplicatePolicyRevision = bundle.shift.validationPrint.policyRevision,
+                    allowPreviouslyAcceptedCodes = bundle.shift.validationPrint.allowPreviouslyAcceptedCodes,
                     bundleFetchedAt = now,
                     enteredAt = now,
                     leftAt = null,
@@ -174,6 +179,7 @@ class ShiftRepository(
             // As on the station, `bundle.operators` is ignored: pairing and the roster refresh are the authoritative sources.
             db.deviceConfigDao().get()?.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = shiftId)) }
         }
+        if (bundle.shift.validationPrint.mode == "duplicate_dm") history.refresh(shiftId, bundle.product.id)
         return EnterResult.Ok
     }
 

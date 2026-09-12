@@ -96,6 +96,14 @@ describe("product label sync", () => {
     alreadyApplied: false,
     conflicts: [],
     productLabelReceipt: receipt(body.productLabelEvents ?? []),
+    validationOccurrences: [
+      {
+        shiftId: work.input.shiftId,
+        codeHash: work.input.codeHash,
+        scannedAt: work.input.acceptedAt,
+        outcome: "first_accepted",
+      },
+    ],
   });
 
   it("restores an exact pinned key-A batch under verified same-device key B without changing evidence", async () => {
@@ -358,6 +366,37 @@ describe("product label sync", () => {
     expect(requests[2]?.batchId).not.toBe(requests[1]?.batchId);
     expect(await pending()).toHaveLength(0);
     expect(work.print).toHaveBeenCalledTimes(1);
+    expect(await work.exec.all("SELECT outcome FROM validation_occurrences")).toEqual([
+      { outcome: "first_accepted" },
+    ]);
+  });
+
+  it("retries the pinned batch if durable occurrence confirmation fails before acknowledgement", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await work.exec.run(
+      "CREATE TRIGGER occurrence_ack_fault BEFORE UPDATE ON validation_occurrences BEGIN SELECT RAISE(ABORT,'RECEIPT_DISK_FAILURE'); END;",
+    );
+    const requests: SentBatch[] = [];
+    const post = client((body) => {
+      requests.push(structuredClone(body));
+      return response(body);
+    });
+    const sync = engine(post);
+    sync.nudge();
+    await sync.idle();
+    sync.stop();
+    expect(await work.exec.all("SELECT * FROM outbox")).toHaveLength(1);
+    expect(await pending()).toHaveLength(1);
+    await work.exec.run("DROP TRIGGER occurrence_ack_fault");
+    work.restart();
+    const resumed = engine(post);
+    resumed.nudge();
+    await resumed.idle();
+    expect(requests[1]).toEqual(requests[0]);
+    expect(await work.exec.all("SELECT outcome FROM validation_occurrences")).toEqual([
+      { outcome: "first_accepted" },
+    ]);
+    expect(await work.exec.all("SELECT * FROM outbox")).toHaveLength(0);
   });
 
   it("does not ACK scans or labels when the API omits the explicit label receipt", async () => {

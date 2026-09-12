@@ -9,6 +9,7 @@ export interface ScanOutcome {
   /** The accepted scan brought this shift exactly to its planned quantity. */
   planReached?: boolean;
   productLabel?: boolean;
+  duplicateReason?: "current" | "active" | "previous" | "unconfirmed";
 }
 
 export interface ScanQueueDeps<TOutcome = ScanOutcome> {

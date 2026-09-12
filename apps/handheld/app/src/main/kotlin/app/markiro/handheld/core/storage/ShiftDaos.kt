@@ -49,15 +49,18 @@ interface CodeDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(code: CodeEntity)
 
-    @Query("SELECT COUNT(*) FROM codes_mirror WHERE shiftId = :shiftId")
+    @Query("SELECT COUNT(*) FROM (" + EFFECTIVE_CODES + ") WHERE shiftId = :shiftId")
     suspend fun countForShift(shiftId: String): Int
 
-    @Query("SELECT COUNT(*) FROM codes_mirror WHERE shiftId = :shiftId")
+    @Query("SELECT COUNT(*) FROM (" + EFFECTIVE_CODES + ") WHERE shiftId = :shiftId")
     fun observeCountForShift(shiftId: String): Flow<Int>
 
     /** The undo target: the most recent accepted code of this box. */
     @Query("SELECT * FROM codes_mirror WHERE boxId = :boxId ORDER BY scannedAt DESC, codeHash DESC LIMIT 1")
     suspend fun lastIn(boxId: String): CodeEntity?
+
+    @Query("DELETE FROM codes_mirror WHERE codeHash=:hash AND shiftId=:shiftId AND scannedAt=:at")
+    suspend fun deleteExact(shiftId: String, hash: String, at: String)
 
     @Query("DELETE FROM codes_mirror WHERE codeHash = :codeHash")
     suspend fun delete(codeHash: String)

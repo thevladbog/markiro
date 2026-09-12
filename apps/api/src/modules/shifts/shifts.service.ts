@@ -1,3 +1,7 @@
+import { loadValidationReprocessingDetails } from "./validation-reprocessing-details";
+import type { ValidationReprocessingDetailsQuery } from "@markiro/domain";
+import { loadValidationCodeHistory } from "./validation-code-history";
+import type { ValidationPrintPolicy, ValidationCodeHistoryQuery } from "@markiro/domain";
 import {
   readProductLabelHistory,
   readProductLabelEventHistory,
@@ -21,6 +25,7 @@ import { schema, type Db } from "@markiro/db";
 import {
   formatShiftNumber,
   PRODUCT_LABEL_PROTOCOL,
+  VALIDATION_REPROCESSING_PROTOCOL,
   isBoxLabelTemplateEligible,
   isPalletLabelTemplateEligible,
   productLabelTemplateListSchema,
@@ -139,6 +144,7 @@ const CURRENT_SHIFT_STORAGE_SELECTION = {
   counterpartyId: schema.shifts.counterpartyId,
   ssccIssuerCounterpartyId: schema.shifts.ssccIssuerCounterpartyId,
   boxLabelTemplateId: schema.shifts.boxLabelTemplateId,
+  allowPreviouslyAcceptedCodes: schema.shifts.allowPreviouslyAcceptedCodes,
   validationPrintMode: schema.shifts.validationPrintMode,
   validationPrintVerification: schema.shifts.validationPrintVerification,
   validationPrintTemplateId: schema.shifts.validationPrintTemplateId,
@@ -282,6 +288,9 @@ export class ShiftsService {
       defaultBoxLabelTemplateId: resolved.templateId,
       defaultSource: resolved.source,
       validationPrintProtocol: this.duplicateEnabled ? PRODUCT_LABEL_PROTOCOL : null,
+      validationReprocessingProtocol: this.duplicateEnabled
+        ? VALIDATION_REPROCESSING_PROTOCOL
+        : null,
     };
   }
 
@@ -521,13 +530,15 @@ export class ShiftsService {
         }
         const outputResult = await tx.execute(sql<ShiftSummaryOutputRow>`
           with target_shift as (
-            select shift.tenant_id, shift.id, shift.mode
+            select shift.tenant_id, shift.id, shift.mode, shift.allow_previously_accepted_codes
             from shifts shift
             where shift.tenant_id = ${tenantId}
               and shift.id = ${id}
           )
           select
             target.mode as "mode",
+            target.allow_previously_accepted_codes as "allowPreviouslyAcceptedCodes",
+            (select count(*)::int from validation_code_reprocessings r where r.tenant_id = ${tenantId} and r.shift_id = ${id}) as "reprocessedUnits",
             transaction_timestamp() as "generatedAt",
             (
               select count(*)::int
@@ -670,7 +681,17 @@ export class ShiftsService {
             mode === "validation"
               ? {
                   mode,
-                  acceptedUnits: outputRow.validationAcceptedUnits,
+                  acceptedUnits:
+                    outputRow.validationAcceptedUnits +
+                    (rawOutputRow.allowPreviouslyAcceptedCodes
+                      ? Number(rawOutputRow.reprocessedUnits)
+                      : 0),
+                  ...(rawOutputRow.allowPreviouslyAcceptedCodes
+                    ? {
+                        firstAcceptedUnits: outputRow.validationAcceptedUnits,
+                        reprocessedUnits: Number(rawOutputRow.reprocessedUnits),
+                      }
+                    : {}),
                 }
               : {
                   mode,
@@ -1825,6 +1846,23 @@ export class ShiftsService {
     }
   }
 
+  getValidationReprocessingDetails(
+    tenantId: string,
+    shiftId: string,
+    query: ValidationReprocessingDetailsQuery,
+  ) {
+    return loadValidationReprocessingDetails(this.db, tenantId, shiftId, query);
+  }
+
+  getValidationCodeHistory(
+    tenantId: string,
+    deviceId: string,
+    shiftId: string,
+    query: ValidationCodeHistoryQuery,
+  ) {
+    return loadValidationCodeHistory(this.db, tenantId, deviceId, shiftId, query);
+  }
+
   private assertDuplicateEnabled(): void {
     if (!this.duplicateEnabled)
       throw new ConflictException({
@@ -1841,7 +1879,7 @@ export class ShiftsService {
    */
   private async fetchShiftOutputs(
     tenantId: string,
-    shifts: { id: string; mode: ShiftMode }[],
+    shifts: { id: string; mode: ShiftMode; validationPrint: ValidationPrintPolicy }[],
   ): Promise<Map<string, ShiftOutputDto>> {
     const validationIds = shifts.filter((s) => s.mode === "validation").map((s) => s.id);
     const aggregationIds = shifts.filter((s) => s.mode === "aggregation").map((s) => s.id);
@@ -1935,12 +1973,53 @@ export class ShiftsService {
     }
 
     await Promise.all(tasks);
+    const reprocessingIds = shifts
+      .filter(
+        (shift) =>
+          shift.validationPrint.mode === "duplicate_dm" &&
+          shift.validationPrint.allowPreviouslyAcceptedCodes,
+      )
+      .map((shift) => shift.id);
+    if (reprocessingIds.length > 0) {
+      const rows = await this.db
+        .select({
+          shiftId: schema.shifts.id,
+          reprocessedUnits: sql<number>`count(${schema.validationCodeReprocessings.codeHash})::int`,
+        })
+        .from(schema.shifts)
+        .leftJoin(
+          schema.validationCodeReprocessings,
+          and(
+            eq(schema.validationCodeReprocessings.tenantId, schema.shifts.tenantId),
+            eq(schema.validationCodeReprocessings.shiftId, schema.shifts.id),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.shifts.tenantId, tenantId),
+            inArray(schema.shifts.id, reprocessingIds),
+            eq(schema.shifts.allowPreviouslyAcceptedCodes, true),
+          ),
+        )
+        .groupBy(schema.shifts.id);
+      for (const row of rows) {
+        const first = outputs.get(row.shiftId);
+        const firstAcceptedUnits = first?.mode === "validation" ? first.acceptedUnits : 0;
+        outputs.set(row.shiftId, {
+          mode: "validation",
+          acceptedUnits: firstAcceptedUnits + row.reprocessedUnits,
+          firstAcceptedUnits,
+          reprocessedUnits: row.reprocessedUnits,
+        });
+      }
+    }
     return outputs;
   }
 
   private joinedSelection() {
     return {
       id: schema.shifts.id,
+      allowPreviouslyAcceptedCodes: schema.shifts.allowPreviouslyAcceptedCodes,
       validationPrintMode: schema.shifts.validationPrintMode,
       validationPrintVerification: schema.shifts.validationPrintVerification,
       validationPrintTemplateId: schema.shifts.validationPrintTemplateId,
@@ -1983,6 +2062,7 @@ export class ShiftsService {
 
   private mapShiftRow(row: JoinedShiftRow): Omit<ShiftDto, "output"> {
     const {
+      allowPreviouslyAcceptedCodes,
       validationPrintMode,
       validationPrintVerification,
       validationPrintTemplateId,
@@ -2007,6 +2087,7 @@ export class ShiftsService {
     return {
       ...shift,
       validationPrint: validationPrintFromStorage({
+        allowPreviouslyAcceptedCodes,
         validationPrintMode,
         validationPrintVerification,
         validationPrintTemplateId,

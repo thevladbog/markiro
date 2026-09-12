@@ -443,6 +443,8 @@ export async function clearRejectedCredentialState({
   // failure is swallowed.
   await purgeOperatorsMirror(exec);
   if (preserveRecoveryContext) return;
+  await exec.run("DELETE FROM validation_history_publications");
+  await exec.run("DELETE FROM validation_code_history");
   await exec.run("DELETE FROM shift_mirror");
   await exec.run("DELETE FROM product_mirror");
   await clearStationProductImages(exec);

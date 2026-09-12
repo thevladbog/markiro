@@ -39,7 +39,10 @@ export async function recordProductLabelAcceptance(
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("PRODUCT_LABEL_BUSY")) return { status: "busy" };
     // Only this exact constraint means a duplicate unit. Other unique/write failures must surface.
-    if (/UNIQUE constraint failed: codes_mirror\.code_hash(?:\s|$)/i.test(message)) {
+    if (
+      message.includes("VALIDATION_CODE_DUPLICATE") ||
+      /UNIQUE constraint failed: codes_mirror\.code_hash(?:\s|$)/i.test(message)
+    ) {
       await recordScan(
         exec,
         {
@@ -56,11 +59,19 @@ export async function recordProductLabelAcceptance(
     }
     throw error;
   }
-  const [stored] = await exec.all<{ command_digest: string }>(
-    "SELECT command_digest FROM product_label_accept_commands WHERE credential_ownership = ? AND job_id = ?",
+  const [stored] = await exec.all<{ command_digest: string; acceptance_json: string }>(
+    "SELECT command_digest, acceptance_json FROM product_label_accept_commands WHERE credential_ownership = ? AND job_id = ?",
     [value.credentialOwnership, value.jobId],
   );
-  if (!stored || stored.command_digest !== digest) {
+  if (
+    !stored ||
+    (stored.command_digest !== digest &&
+      !(
+        productLabelValueDigest(JSON.parse(stored.acceptance_json)) === stored.command_digest &&
+        productLabelValueDigest(parseProductLabelAcceptance(JSON.parse(stored.acceptance_json))) ===
+          digest
+      ))
+  ) {
     throw new DomainError(
       "PRODUCT_LABEL_ACCEPTANCE_ID_CONFLICT",
       "Product label job ID already carries different acceptance data",

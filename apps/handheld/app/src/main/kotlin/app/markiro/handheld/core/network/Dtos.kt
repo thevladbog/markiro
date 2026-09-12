@@ -8,7 +8,7 @@ import kotlinx.serialization.Serializable
  * validation policy prints a duplicate at all -- without it the server answers
  * `409 STATION_UPDATE_REQUIRED`.
  */
-const val HANDHELD_CAPABILITIES = "handheld-v1,subscription-state-v1,station-recovery-v1,validation-dm-duplicate-v1"
+const val HANDHELD_CAPABILITIES = "handheld-v1,subscription-state-v1,station-recovery-v1,validation-dm-duplicate-v1,validation-reprocessing-v1"
 const val REVOKED_CODE = "STATION_CREDENTIAL_REVOKED"
 const val UPDATE_REQUIRED_CODE = "STATION_UPDATE_REQUIRED"
 

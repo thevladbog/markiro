@@ -28,10 +28,11 @@ export const validationPrintInputSchema = z.discriminatedUnion("mode", [
   z.strictObject({
     mode: z.literal("duplicate_dm"),
     verification: verificationSchema,
+    allowPreviouslyAcceptedCodes: z.boolean().default(false),
     templateId: idSchema,
   }),
 ]);
-export type ValidationPrintInput = z.infer<typeof validationPrintInputSchema>;
+export type ValidationPrintInput = z.input<typeof validationPrintInputSchema>;
 
 const snapshotSchema = z
   .strictObject({
@@ -58,6 +59,7 @@ export const validationPrintPolicySchema = z.discriminatedUnion("mode", [
     .strictObject({
       mode: z.literal("duplicate_dm"),
       verification: verificationSchema,
+      allowPreviouslyAcceptedCodes: z.boolean().default(false),
       templateId: idSchema,
       snapshot: snapshotSchema,
       policyRevision: idSchema,

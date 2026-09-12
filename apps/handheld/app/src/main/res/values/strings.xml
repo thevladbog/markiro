@@ -529,4 +529,12 @@
     <string name="duplicate_label_problem">Проблема с этикеткой</string>
     <string name="duplicate_return_to_scan">Вернуться к сканированию</string>
     <string name="duplicate_skip_verification">Пропустить проверку</string>
+    <string name="validation_pending">Ожидают подтверждения: %1$d</string>
+    <string name="validation_conflict">Конфликт приёмки: %1$d. История печати сохранена.</string>
+    <string name="validation_history_as_of">История проверена в %1$s</string>
+    <string name="validation_history_unknown">История не загружена · приёмка предварительная</string>
+    <string name="validation_same_shift">Уже обработан в этой смене</string>
+    <string name="validation_previous_disallowed">Коды предыдущих смен запрещены</string>
+    <string name="validation_other_active">Код занят в другой активной смене</string>
+    <string name="validation_closure_unknown">Закрытие исходной смены не подтверждено</string>
 </resources>

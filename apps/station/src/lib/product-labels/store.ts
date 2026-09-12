@@ -74,7 +74,7 @@ export async function readProductLabelJob(
   if (
     input.credentialOwnership !== row.credential_ownership ||
     input.jobId !== jobId ||
-    productLabelValueDigest(input) !== row.command_digest
+    productLabelValueDigest(parseJson(row.acceptance_json)) !== row.command_digest
   )
     invalidStoredJob();
   const parsedEvents = z

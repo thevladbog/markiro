@@ -27,7 +27,7 @@ function executor(): { exec: SqlExecutor; statements: string[] } {
         ] as T[];
       }
       if (sql.includes("FROM shift_close_outbox")) return [];
-      if (sql.includes("FROM codes_mirror")) return [{ actualQty: 9 }] as T[];
+      if (sql.includes("FROM station_processed_codes")) return [{ actualQty: 9 }] as T[];
       if (sql.includes("openBoxCount")) return [{ openBoxCount: 0 }] as T[];
       return [{ closedBoxCount: 1 }] as T[];
     },

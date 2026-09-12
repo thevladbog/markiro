@@ -588,6 +588,8 @@ describe("credential rejection recovery", () => {
       { sql: "DELETE FROM operators_mirror", params: [] },
       { sql: "DELETE FROM operators_mirror_b", params: [] },
       { sql: "DELETE FROM station_meta WHERE key = ?", params: ["operators_slot"] },
+      { sql: "DELETE FROM validation_history_publications", params: [] },
+      { sql: "DELETE FROM validation_code_history", params: [] },
       { sql: "DELETE FROM shift_mirror", params: [] },
       { sql: "DELETE FROM product_mirror", params: [] },
       { sql: "DELETE FROM station_product_images", params: [] },

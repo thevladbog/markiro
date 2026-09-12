@@ -1,3 +1,6 @@
+import { readValidationRejectionReason } from "../lib/validation-reprocessing.js";
+import type { readValidationProcessingState } from "../lib/validation-reprocessing.js";
+import { ValidationProcessingStatus } from "../components/ValidationProcessingStatus.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -253,6 +256,9 @@ export function WorkScreen({
 
   const [accepted, setAccepted] = useState(0);
   const [rejected, setRejected] = useState(0);
+  const [processingState, setProcessingState] = useState<Awaited<
+    ReturnType<typeof readValidationProcessingState>
+  > | null>(null);
   const [signal, setSignal] = useState<{ tone: SignalTone; title: string; detail?: string } | null>(
     null,
   );
@@ -1772,7 +1778,7 @@ export function WorkScreen({
           await boxReady.current;
           let verdict = validateShiftScan(raw, {
             expectedGtin14,
-            isDuplicate: (key) => keys.current.has(key),
+            isDuplicate: (key) => !productLabelsRef.current.work && keys.current.has(key),
           });
           let duplicateFirstSeen: string | null | undefined;
           if (verdict.status === "duplicate") {
@@ -1784,7 +1790,7 @@ export function WorkScreen({
               keys.current.delete(verdict.key);
               verdict = validateShiftScan(raw, {
                 expectedGtin14,
-                isDuplicate: (key) => keys.current.has(key),
+                isDuplicate: (key) => !productLabelsRef.current.work && keys.current.has(key),
               });
             }
           }
@@ -1823,8 +1829,27 @@ export function WorkScreen({
                   raw,
                   verdict: { status: "duplicate", key: codeHash },
                   firstSeen: await findFirstSeen(exec, codeHash),
+                  duplicateReason: await readValidationRejectionReason(exec, shiftId, codeHash),
                 };
-              return { raw, verdict, firstSeen: null, productLabel: true };
+              const plannedQty = live.current.plannedQty;
+              const planReached =
+                plannedQty !== null &&
+                plannedQty !== undefined &&
+                !planReachedAcknowledgedRef.current &&
+                (
+                  await exec.all<{ actualQty: number }>(
+                    "SELECT COUNT(*) AS actualQty FROM station_processed_codes WHERE shift_id = ?",
+                    [shiftId],
+                  )
+                )[0]?.actualQty === plannedQty;
+              if (planReached) planReachedPromptRef.current = true;
+              return {
+                raw,
+                verdict,
+                firstSeen: null,
+                productLabel: true,
+                ...(planReached ? { planReached } : {}),
+              };
             }
             const result = await recordScan(
               exec,
@@ -1867,7 +1892,7 @@ export function WorkScreen({
               !planReachedAcknowledgedRef.current &&
               (
                 await exec.all<{ actualQty: number }>(
-                  "SELECT COUNT(*) AS actualQty FROM codes_mirror WHERE shift_id = ?",
+                  "SELECT COUNT(*) AS actualQty FROM station_processed_codes WHERE shift_id = ?",
                   [shiftId],
                 )
               )[0]?.actualQty === plannedQty;
@@ -1891,7 +1916,9 @@ export function WorkScreen({
             outcome.verdict.status === "ok"
               ? liveT("signal.ok")
               : outcome.verdict.status === "duplicate"
-                ? liveT("signal.duplicate")
+                ? outcome.duplicateReason
+                  ? liveT(`productLabels.refusal.${outcome.duplicateReason}`)
+                  : liveT("signal.duplicate")
                 : outcome.verdict.status === "wrong_gtin"
                   ? liveT("signal.wrongGtin")
                   : liveT("signal.wrongCode");
@@ -2294,11 +2321,19 @@ export function WorkScreen({
                 showVerdict={issuerPrefix === null && !productLabels.work}
               />
               {productLabels.work ? (
-                <ProductLabelInstrument
-                  job={productLabels.state.job}
-                  busy={productLabels.state.busy}
-                  verification={productLabels.verification}
-                />
+                <>
+                  <ValidationProcessingStatus
+                    exec={exec}
+                    shiftId={shiftId}
+                    refreshKey={accepted + rejected}
+                    onState={setProcessingState}
+                  />
+                  <ProductLabelInstrument
+                    job={productLabels.state.job}
+                    busy={productLabels.state.busy}
+                    verification={productLabels.verification}
+                  />
+                </>
               ) : null}
               {issuerPrefix !== null ? (
                 <BoxFillInstrument
@@ -2337,9 +2372,12 @@ export function WorkScreen({
             </div>
             <aside className="work-screen__secondary" aria-label={workLabels.summary}>
               <WorkCounters
-                accepted={accepted}
+                accepted={productLabels.work ? (processingState?.processed ?? 0) : accepted}
                 rejected={rejected}
-                pendingSync={pendingSync}
+                pendingSync={Math.max(
+                  pendingSync,
+                  productLabels.work ? (processingState?.pending ?? 0) : 0,
+                )}
                 locale={workLabels.locale}
                 labels={workLabels.counters}
               />

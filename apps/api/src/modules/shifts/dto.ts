@@ -4,6 +4,7 @@ import {
   validationPrintInputSchema,
   validationPrintPolicySchema,
   PRODUCT_LABEL_PROTOCOL,
+  VALIDATION_REPROCESSING_PROTOCOL,
   type ValidationPrintPolicy,
   type BoxLabelTemplateDefaultSource,
   type LabelTemplateSpec,
@@ -198,7 +199,12 @@ export interface ShiftParticipantDto {
 }
 
 export type ShiftOutputDto =
-  | { mode: "validation"; acceptedUnits: number }
+  | {
+      mode: "validation";
+      acceptedUnits: number;
+      firstAcceptedUnits?: number;
+      reprocessedUnits?: number;
+    }
   | { mode: "aggregation"; closedBoxes: number; containedUnits: number };
 
 /** GET /shifts/:id/summary response, computed from factual production events. */
@@ -227,6 +233,7 @@ export type ProductLabelTemplateProductQueryDto = z.infer<
 /** GET /shifts/planning-config response — the operations-readable planning subset only. */
 export interface ShiftPlanningConfigDto {
   validationPrintProtocol: typeof PRODUCT_LABEL_PROTOCOL | null;
+  validationReprocessingProtocol?: typeof VALIDATION_REPROCESSING_PROTOCOL | null;
   defaultBoxLabelTemplateId: string | null;
   /** Which default answered: the product's category, the organisation, or none. */
   defaultSource: BoxLabelTemplateDefaultSource | null;
@@ -421,6 +428,11 @@ export const shiftPlanningConfigOpenApiSchema: SchemaObject = {
   required: ["defaultBoxLabelTemplateId", "defaultSource", "validationPrintProtocol"],
   properties: {
     validationPrintProtocol: { type: "string", enum: [PRODUCT_LABEL_PROTOCOL], nullable: true },
+    validationReprocessingProtocol: {
+      type: "string",
+      enum: [VALIDATION_REPROCESSING_PROTOCOL],
+      nullable: true,
+    },
     defaultBoxLabelTemplateId: nullableUuidOpenApiSchema,
     defaultSource: defaultSourceOpenApiSchema,
   },
@@ -499,6 +511,8 @@ const shiftOutputOpenApiSchema: SchemaObject = {
       properties: {
         mode: { type: "string", enum: ["validation"] },
         acceptedUnits: { type: "integer", minimum: 0 },
+        firstAcceptedUnits: { type: "integer", minimum: 0 },
+        reprocessedUnits: { type: "integer", minimum: 0 },
       },
     },
     {

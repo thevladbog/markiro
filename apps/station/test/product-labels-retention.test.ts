@@ -31,6 +31,9 @@ async function acknowledge(h: Awaited<ReturnType<typeof fixture>>, quarantine = 
       : [],
   });
   await h.exec.run("DELETE FROM outbox");
+  await h.exec.run(
+    "UPDATE validation_occurrences SET outcome='first_accepted',receipt_outcome='first_accepted'",
+  );
 }
 describe("retiring delivered local print payloads", () => {
   it("keeps active-shift copies, then deletes only the current owner's closed and delivered copies", async () => {

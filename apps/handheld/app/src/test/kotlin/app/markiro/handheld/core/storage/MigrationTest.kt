@@ -45,7 +45,7 @@ class MigrationTest {
         val db = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
             .addMigrations(
                 MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
-                MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
+                MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12,
             )
             .allowMainThreadQueries()
             .build()
@@ -356,13 +356,13 @@ class MigrationTest {
         }
 
         val db = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
-            .addMigrations(MIGRATION_9_10, MIGRATION_10_11)
+            .addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
             .allowMainThreadQueries()
             .build()
         try {
             // Opening runs 9 -> 10 -> 11 and then validates every table against
             // the entities. A `pallet_exceptions` left at its v10 shape throws here.
-            assertEquals(11, db.openHelper.readableDatabase.version)
+            assertEquals(12, db.openHelper.readableDatabase.version)
             val columns = mutableListOf<String>()
             db.openHelper.readableDatabase.query("PRAGMA table_info(`pallet_exceptions`)").use { cursor ->
                 while (cursor.moveToNext()) columns += cursor.getString(cursor.getColumnIndexOrThrow("name"))

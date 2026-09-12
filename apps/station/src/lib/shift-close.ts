@@ -131,7 +131,7 @@ export async function closeShiftOffline(
   if (shift.status === "closed") throw new Error("Shift is already closed");
 
   const [{ actualQty = 0 } = {}] = await exec.all<{ actualQty: number }>(
-    "SELECT COUNT(*) AS actualQty FROM codes_mirror WHERE shift_id = ?",
+    "SELECT COUNT(*) AS actualQty FROM station_processed_codes WHERE shift_id = ?",
     [input.shiftId],
   );
   const [{ closedBoxCount = 0 } = {}] = await exec.all<{ closedBoxCount: number }>(

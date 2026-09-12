@@ -20,6 +20,7 @@ export async function purgeCompletedProductLabelJobs(
        AND NOT EXISTS (SELECT 1 FROM product_label_events event WHERE event.credential_ownership=job.credential_ownership AND event.job_id=job.job_id AND NOT EXISTS (SELECT 1 FROM product_label_receipts receipt WHERE receipt.credential_ownership=event.credential_ownership AND receipt.event_id=event.event_id AND receipt.outcome='accepted'))
        AND NOT EXISTS (SELECT 1 FROM outbox pending WHERE pending.shift_id=job.shift_id AND pending.code_hash=json_extract(job.projection_json,'$.codeHash'))
        AND NOT EXISTS (SELECT 1 FROM conflicts_mirror conflict WHERE conflict.code_hash=json_extract(job.projection_json,'$.codeHash'))
+       AND NOT EXISTS (SELECT 1 FROM validation_occurrences occurrence WHERE occurrence.shift_id=job.shift_id AND occurrence.code_hash=json_extract(job.projection_json,'$.codeHash') AND occurrence.outcome IN ('pending','conflict'))
        AND NOT EXISTS (SELECT 1 FROM shift_close_outbox closing WHERE closing.shift_id=job.shift_id)
        AND NOT EXISTS (SELECT 1 FROM station_meta WHERE key=?)
    ) RETURNING job_id`,

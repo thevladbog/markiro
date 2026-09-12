@@ -141,6 +141,16 @@ it is disabled. Hardware/Windows acceptance and staged rollout are documented in
 [the acceptance runbook](acceptance/validation-dm-duplicate.md); browser mock transport
 is not evidence that any specific printer/scanner combination is supported.
 
+For duplicate Data Matrix validation, `allowPreviouslyAcceptedCodes` defaults to false
+and freezes when the shift opens. When true, a code from a closed previous shift
+can be processed once in the current shift; current-shift duplicates and codes
+being processed in another active shift remain refused. The device must advertise
+`validation-reprocessing-v1`. Separate tenant-scoped processing facts preserve
+original code ownership and print evidence. Current processed totals equal first
+acceptances plus accepted reprocessings; the Admin report shows the full raw KM
+and source shift number. Reprocessing does not increase global production or
+aggregation, and saved historical reports and generated exports remain unchanged.
+
 ## 3. Offline & sync
 
 - Shift downloads to the station in full: product, label template,

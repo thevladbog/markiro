@@ -147,6 +147,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /shifts/:id (ShiftsController.getShift)",
       "GET /shifts/:id/summary (ShiftsController.getShiftSummary)",
       "GET /shifts/:id/product-labels (ShiftsController.getProductLabels)",
+      "GET /shifts/:id/reprocessings (ShiftsController.getReprocessings)",
       "GET /shifts/:id/product-labels/:jobId/events (ShiftsController.getProductLabelEvents)",
       "GET /shifts/:shiftId/exports (ShiftExportsController.list)",
       "GET /lines/presence (LinesController.listPresence)",
@@ -384,6 +385,10 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     ],
   },
   {
+    contract: customerContract(CABINET_STATION_GUARDS, { mode: "recovery", kind: "shift" }),
+    routes: ["GET /shifts/:id/code-history (ShiftsController.getCodeHistory)"],
+  },
+  {
     contract: customerContract(CABINET_STATION_GUARDS, { mode: "write" }),
     routes: [
       "POST /shifts/:id/enter (ShiftsController.enterShift)",
@@ -419,6 +424,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /station/inventories/:id/leave (StationInventoriesController.leave)",
       "POST /station/inventory-tasks/resolve-barcode (StationInventoriesController.resolveBarcode)",
       "POST /station/conflicts/status (StationScansController.conflictStatus)",
+      "POST /station/validation-occurrences/status (StationScansController.occurrenceStatus)",
       "POST /station/codes/releases (StationScansController.codeReleases)",
       "POST /station/scans (StationScansController.ingest)",
     ],
@@ -892,7 +898,8 @@ describe("registered subscription route inventory", () => {
         }
         const names = guards.map((guard) => guard.name);
         const stationOnlyCabinetRoute =
-          (route.controller.name === "ShiftsController" && route.handlerName === "enterShift") ||
+          (route.controller.name === "ShiftsController" &&
+            ["enterShift", "getCodeHistory"].includes(route.handlerName)) ||
           (route.controller.name === "StationShiftCloseController" &&
             route.handlerName === "close");
         const expected =

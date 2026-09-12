@@ -110,6 +110,7 @@ class HubViewModelTest {
         ShiftDto(id, number, status, mode = "validation", validationPrint = ValidationPrintDto("none"), productId = "p1", palletsEnabled = false)
 
     private fun api(fail: Boolean = false) = object : StationApi {
+        override suspend fun codeHistory(id: String, cursor: String?, snapshot: String?, limit: Int): app.markiro.handheld.core.network.ValidationHistoryPage = error("not used")
         override suspend fun identity(): IdentityResponse = throw UnsupportedOperationException()
         override suspend fun operators() = RosterResponse(emptyList())
         override suspend fun shifts(status: String?, lineId: String?): ShiftListResponse {

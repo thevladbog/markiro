@@ -21,7 +21,11 @@ import type { ComboboxOption, SelectOption } from "@markiro/ui";
 import { errorProp } from "../../lib/form-error.js";
 import type { CounterpartyDto } from "../counterparties/api.js";
 import type { ProductDto } from "../catalog/api.js";
-import { isBoxLabelTemplateEligible, isPalletLabelTemplateEligible } from "@markiro/domain";
+import {
+  isBoxLabelTemplateEligible,
+  isPalletLabelTemplateEligible,
+  VALIDATION_REPROCESSING_PROTOCOL,
+} from "@markiro/domain";
 
 import type { LabelTemplateSummaryDto } from "../labels/api.js";
 import { useProductLabelTemplates, useShiftPlanningConfig } from "./api.js";
@@ -47,6 +51,7 @@ const shiftFormSchema = z.object({
   mode: z.enum(SHIFT_MODES),
   validationPrintMode: z.enum(["none", "duplicate_dm"]).optional(),
   verificationRequired: z.boolean().optional(),
+  allowPreviouslyAcceptedCodes: z.boolean().optional(),
   productLabelTemplateId: z.string().optional(),
   plannedQty: z
     .string()
@@ -119,6 +124,7 @@ const EMPTY_VALUES: ShiftFormValues = {
   mode: "validation",
   validationPrintMode: "none",
   verificationRequired: true,
+  allowPreviouslyAcceptedCodes: false,
   productLabelTemplateId: "",
   plannedQty: "",
   plannedDate: "",
@@ -210,6 +216,7 @@ export function ShiftForm({
   const productGroupCode = selectedProduct?.chzProductGroupCode ?? null;
   const printMode = watch("validationPrintMode") ?? "none";
   const verificationRequired = watch("verificationRequired") ?? true;
+  const allowPreviouslyAcceptedCodes = watch("allowPreviouslyAcceptedCodes") ?? false;
   const productLabelTemplateId = watch("productLabelTemplateId") ?? "";
   const duplicateEnabled = shiftMode === "validation" && printMode === "duplicate_dm";
   const productLabels = useProductLabelTemplates(
@@ -229,6 +236,9 @@ export function ShiftForm({
     }
   }, [productId, productGroupCode, activeEdit, setValue]);
   const planning = useShiftPlanningConfig(hasProduct ? productId : null);
+  const reprocessingSupported =
+    planning.isSuccess &&
+    planning.data.validationReprocessingProtocol === VALIDATION_REPROCESSING_PROTOCOL;
   const resolvedDefaultId = planning.data?.defaultBoxLabelTemplateId ?? null;
   const resolvedDefaultSource = planning.data?.defaultSource ?? null;
   // A product the list cannot resolve (e.g. an old shift whose product is no
@@ -352,6 +362,14 @@ export function ShiftForm({
       values.mode === "validation" &&
       values.validationPrintMode === "duplicate_dm"
     ) {
+      if (values.allowPreviouslyAcceptedCodes && !reprocessingSupported) {
+        setError("allowPreviouslyAcceptedCodes", {
+          type: "manual",
+          message: "pages.shifts.reprocessing.unsupported",
+        });
+        return;
+      }
+      clearErrors("allowPreviouslyAcceptedCodes");
       const selectedTemplate = productLabels.data?.items.find(
         (template) => template.id === values.productLabelTemplateId,
       );
@@ -411,6 +429,7 @@ export function ShiftForm({
           productionDate: dirtyFields.productionDate === true,
           boxLabelTemplate: dirtyFields.boxLabelTemplateSelection === true,
         },
+        reprocessingSupported,
       ),
     );
   });
@@ -778,6 +797,21 @@ export function ShiftForm({
               <Alert tone="info">{t("pages.shifts.duplicate.noTemplates")}</Alert>
             ) : null}
             <Checkbox
+              label={t("pages.shifts.reprocessing.allow")}
+              checked={allowPreviouslyAcceptedCodes}
+              disabled={activeEdit || !reprocessingSupported}
+              hint={t("pages.shifts.reprocessing.help")}
+              {...errorProp(translateFieldError(t, errors.allowPreviouslyAcceptedCodes?.message))}
+              onCheckedChange={(value) =>
+                setValue("allowPreviouslyAcceptedCodes", value, { shouldDirty: true })
+              }
+            />
+            {!activeEdit && !reprocessingSupported && !errors.allowPreviouslyAcceptedCodes ? (
+              <p className="mk-shift-form__hint" role="status">
+                {t(planning.isPending ? "common.loading" : "pages.shifts.reprocessing.unsupported")}
+              </p>
+            ) : null}
+            <Checkbox
               label={t("pages.shifts.duplicate.verification")}
               checked={verificationRequired}
               disabled={activeEdit}
@@ -966,6 +1000,7 @@ function toPayload(
     productionDate: true,
     boxLabelTemplate: true,
   },
+  reprocessingSupported = false,
 ): CreateShiftInput | UpdateShiftInput {
   const plannedQty = values.plannedQty?.trim();
   const plannedDate = values.plannedDate?.trim();
@@ -1005,6 +1040,9 @@ function toPayload(
             mode: "duplicate_dm",
             templateId: values.productLabelTemplateId ?? "",
             verification: values.verificationRequired === false ? "none" : "required",
+            ...(reprocessingSupported
+              ? { allowPreviouslyAcceptedCodes: values.allowPreviouslyAcceptedCodes ?? false }
+              : {}),
           }
         : { mode: "none" };
   }

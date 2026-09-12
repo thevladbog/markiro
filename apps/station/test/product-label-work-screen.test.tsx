@@ -117,6 +117,32 @@ describe("duplicate printing through the real WorkScreen scanner", () => {
       (await h.exec.all<{ n: number }>("SELECT count(*) n FROM scan_events_mirror"))[0]?.n,
     ).toBe(1);
   });
+  it("explains the active processing refusal without a new unit or print", async () => {
+    const { h, scan, idle } = await setup("none");
+    await h.exec.run(
+      "INSERT INTO validation_code_history(shift_id,code_hash,kind,source_shift_id,shift_number,shift_status,scanned_at) VALUES(?,?,'reprocessing',?,'ACTIVE','active',?)",
+      [h.input.shiftId, h.input.codeHash, crypto.randomUUID(), h.input.acceptedAt],
+    );
+    scan(h.input.raw);
+    await idle();
+    expect(await screen.findByText("Код обрабатывается в другой активной смене")).toBeTruthy();
+    expect(h.print).not.toHaveBeenCalled();
+    expect(await h.exec.all("SELECT * FROM validation_occurrences")).toHaveLength(0);
+  });
+
+  it("restores the main processed counter and pending confirmation after remount", async () => {
+    const { h, scan, idle, view, element } = await setup("none");
+    scan(h.input.raw);
+    await idle();
+    view.unmount();
+    render(element);
+    const summary = await screen.findByRole("complementary", { name: "Итоги смены" });
+    await waitFor(() =>
+      expect(within(summary).getByText("Принято").parentElement?.textContent).toContain("1"),
+    );
+    expect(within(summary).queryByText("Синхронизировано")).toBeNull();
+  });
+
   it("recovers a committed acceptance after its reply is lost without losing the print prompt", async () => {
     const { h, scan, idle } = await setup();
     const run = h.exec.run;

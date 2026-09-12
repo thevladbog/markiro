@@ -1,3 +1,4 @@
+import { ValidationReprocessingHistory } from "./ValidationReprocessingHistory.js";
 import { ProductLabelHistory } from "./ProductLabelHistory.js";
 import {
   Alert,
@@ -93,14 +94,39 @@ function ShiftOutput({ shift }: { shift: ShiftDto }) {
   }
 
   const output = summary.data.output;
+  const duplicate = shift.validationPrint?.mode === "duplicate_dm";
+  const repeatEnabled =
+    shift.validationPrint?.mode === "duplicate_dm" &&
+    shift.validationPrint.allowPreviouslyAcceptedCodes === true;
+  const validationCounts =
+    output.mode === "validation"
+      ? {
+          processed: output.acceptedUnits,
+          first: output.firstAcceptedUnits ?? (repeatEnabled ? null : output.acceptedUnits),
+          repeated: output.reprocessedUnits ?? (repeatEnabled ? null : 0),
+        }
+      : null;
   return (
     <>
       <div className="mk-shift-details__metrics">
         {output.mode === "validation" ? (
-          <div className="mk-shift-details__metric">
-            <strong>{formatNumber(output.acceptedUnits, i18n.language)}</strong>
-            <span>{t("pages.shifts.details.acceptedUnits")}</span>
-          </div>
+          duplicate && validationCounts ? (
+            (["processed", "first", "repeated"] as const).map((key) => (
+              <div className="mk-shift-details__metric" key={key}>
+                <strong>
+                  {validationCounts[key] === null
+                    ? "—"
+                    : formatNumber(validationCounts[key], i18n.language)}
+                </strong>
+                <span>{t(`pages.shifts.reprocessing.${key}`)}</span>
+              </div>
+            ))
+          ) : (
+            <div className="mk-shift-details__metric">
+              <strong>{formatNumber(output.acceptedUnits, i18n.language)}</strong>
+              <span>{t("pages.shifts.details.acceptedUnits")}</span>
+            </div>
+          )
         ) : (
           <>
             <div className="mk-shift-details__metric">
@@ -399,6 +425,16 @@ export function ShiftDetailsPanel({ shift, onClose }: { shift: ShiftDto; onClose
                 <dd>{shift.validationPrint.snapshot.name}</dd>
               </div>
               <div>
+                <dt>{t("pages.shifts.reprocessing.allow")}</dt>
+                <dd>
+                  {t(
+                    shift.validationPrint.allowPreviouslyAcceptedCodes
+                      ? "pages.shifts.reprocessing.allowed"
+                      : "pages.shifts.reprocessing.disallowed",
+                  )}
+                </dd>
+              </div>
+              <div>
                 <dt>{t("pages.shifts.duplicate.verification")}</dt>
                 <dd>
                   {t(
@@ -416,6 +452,11 @@ export function ShiftDetailsPanel({ shift, onClose }: { shift: ShiftDto; onClose
         ) : null}
         {shift.validationPrint?.mode === "duplicate_dm" && shift.status !== "planned" ? (
           <ProductLabelHistory key={shift.id} shiftId={shift.id} />
+        ) : null}
+        {shift.validationPrint?.mode === "duplicate_dm" &&
+        shift.validationPrint.allowPreviouslyAcceptedCodes &&
+        shift.status !== "planned" ? (
+          <ValidationReprocessingHistory key={shift.id} shiftId={shift.id} />
         ) : null}
         {shift.palletsEnabled ? <ShiftPallets shift={shift} /> : null}
         <section className="mk-shift-details__section">

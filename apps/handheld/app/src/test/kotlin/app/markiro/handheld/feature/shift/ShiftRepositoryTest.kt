@@ -127,7 +127,7 @@ class ShiftRepositoryTest {
     /** A validation shift whose policy prints a duplicate, as the server sends it. */
     private val duplicateShiftJson = activeShiftJson.replace(
         """"validationPrint":{"mode":"none"}""",
-        """"validationPrint":{"mode":"duplicate_dm","verification":"required","templateId":"dt1",""" +
+        """"validationPrint":{"mode":"duplicate_dm","verification":"required","allowPreviouslyAcceptedCodes":true,"templateId":"dt1",""" +
             """"policyRevision":"rev-1","snapshot":{"id":"dt1","name":"Дубликат 30×20",""" +
             """"spec":{"widthMm":30,"heightMm":20,"dpi":203,"language":"zpl","elements":[]},"digest":"abc"}}""",
     )
@@ -279,9 +279,11 @@ class ShiftRepositoryTest {
     fun enteringADuplicateShiftStoresItsPolicy() = runTest {
         server.enqueue(MockResponse().setBody(duplicateShiftJson))
         server.enqueue(MockResponse().setBody(duplicateBundleJson))
+        server.enqueue(MockResponse().setResponseCode(404))
         assertEquals(EnterResult.Ok, repo().enter("s1"))
         val shift = db.shiftDao().get("s1")!!
         assertEquals("duplicate_dm", shift.validationPrintMode)
+        assertTrue(shift.allowPreviouslyAcceptedCodes)
         assertEquals("required", shift.duplicateVerification)
         assertEquals("abc", shift.duplicateTemplateDigest)
         assertEquals("rev-1", shift.duplicatePolicyRevision)
@@ -296,6 +298,7 @@ class ShiftRepositoryTest {
         // nothing on screen connecting that to a list refresh.
         server.enqueue(MockResponse().setBody(duplicateShiftJson))
         server.enqueue(MockResponse().setBody(duplicateBundleJson))
+        server.enqueue(MockResponse().setResponseCode(404))
         assertEquals(EnterResult.Ok, repo().enter("s1"))
 
         server.enqueue(MockResponse().setBody("""{"items":[$duplicateShiftJson]}"""))

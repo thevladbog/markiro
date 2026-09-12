@@ -195,11 +195,13 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       defaultBoxLabelTemplateId,
       defaultSource: "organization",
       validationPrintProtocol: null,
+      validationReprocessingProtocol: null,
     });
     expect(Object.keys(response.body)).toEqual([
       "defaultBoxLabelTemplateId",
       "defaultSource",
       "validationPrintProtocol",
+      "validationReprocessingProtocol",
     ]);
   });
 
@@ -1871,18 +1873,21 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const beerConfig = await agent.get(`/shifts/planning-config?productId=${beer}`).expect(200);
     expect(beerConfig.body).toEqual({
       validationPrintProtocol: null,
+      validationReprocessingProtocol: null,
       defaultBoxLabelTemplateId: beerDefault,
       defaultSource: "category",
     });
     const milkConfig = await agent.get(`/shifts/planning-config?productId=${milk}`).expect(200);
     expect(milkConfig.body).toEqual({
       validationPrintProtocol: null,
+      validationReprocessingProtocol: null,
       defaultBoxLabelTemplateId: orgDefault,
       defaultSource: "organization",
     });
     const orgConfig = await agent.get("/shifts/planning-config").expect(200);
     expect(orgConfig.body).toEqual({
       validationPrintProtocol: null,
+      validationReprocessingProtocol: null,
       defaultBoxLabelTemplateId: orgDefault,
       defaultSource: "organization",
     });

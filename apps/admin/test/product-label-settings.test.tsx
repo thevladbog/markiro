@@ -23,6 +23,7 @@ const product: ProductDto = {
   defaultCounterpartyId: null,
   createdAt: "2026-01-01T00:00:00.000Z",
 };
+const repeatLabel = "Разрешить повторную обработку кодов из предыдущих смен";
 const template = {
   id: "44444444-4444-4444-8444-444444444444",
   name: "Внешняя этикетка",
@@ -49,7 +50,12 @@ async function choose(label: string, name: string) {
   fireEvent.click(await screen.findByRole("option", { name }));
 }
 
-async function setup() {
+async function setup(
+  protocol: Record<string, unknown> = {
+    validationReprocessingProtocol: "validation-reprocessing-v1",
+  },
+  edit?: { status: "planned" | "active"; enabled: boolean },
+) {
   await i18n.changeLanguage("ru");
   const submit = vi.fn();
   vi.stubGlobal(
@@ -64,6 +70,7 @@ async function setup() {
                   defaultBoxLabelTemplateId: "22222222-2222-4222-8222-222222222222",
                   defaultSource: "organization",
                   validationPrintProtocol: "validation-dm-duplicate-v1",
+                  ...protocol,
                 },
           ),
           { headers: { "content-type": "application/json" } },
@@ -75,7 +82,23 @@ async function setup() {
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
       <ShiftForm
-        mode="create"
+        mode={edit ? "edit" : "create"}
+        {...(edit
+          ? {
+              editStatus: edit.status,
+              initialValues: {
+                productId: product.id,
+                mode: "validation" as const,
+                validationPrintMode: "duplicate_dm" as const,
+                allowPreviouslyAcceptedCodes: edit.enabled,
+                verificationRequired: true,
+                productLabelTemplateId: template.id,
+                boxLabelTemplateSelection: "none",
+                palletLabelTemplateId: "",
+                palletsEnabled: false,
+              },
+            }
+          : {})}
         products={[
           product,
           { ...product, id: "33333333-3333-4333-8333-333333333333", name: "Сыр" },
@@ -89,10 +112,20 @@ async function setup() {
       />
     </QueryClientProvider>,
   );
-  await choose("Продукт", "Молоко");
-  await waitFor(() =>
-    expect(screen.getByLabelText("Дублировать Data Matrix").hasAttribute("disabled")).toBe(false),
-  );
+  if (!edit) await choose("Продукт", "Молоко");
+  if (edit?.status !== "active") {
+    await waitFor(() =>
+      expect(screen.getByLabelText("Дублировать Data Matrix").hasAttribute("disabled")).toBe(false),
+    );
+    if (edit)
+      await waitFor(() =>
+        expect(
+          screen
+            .getByRole("combobox", { name: "Шаблон этикетки продукции" })
+            .hasAttribute("disabled"),
+        ).toBe(false),
+      );
+  }
   return submit;
 }
 
@@ -107,6 +140,7 @@ it("requires explicit template selection and starts with verification required",
   await screen.findByText("Выберите шаблон этикетки продукции");
   expect(submit).not.toHaveBeenCalled();
   await choose("Шаблон этикетки продукции", "Внешняя этикетка · 58 × 40 мм · 203 dpi");
+  expect(screen.getByLabelText(repeatLabel).getAttribute("aria-checked")).toBe("false");
   fireEvent.click(screen.getByLabelText("Обязательная проверка этикетки"));
   expect(
     screen.getByText("После отправки на принтер можно сканировать следующую единицу"),
@@ -115,7 +149,12 @@ it("requires explicit template selection and starts with verification required",
   await waitFor(() =>
     expect(submit).toHaveBeenCalledWith(
       expect.objectContaining({
-        validationPrint: { mode: "duplicate_dm", templateId: template.id, verification: "none" },
+        validationPrint: {
+          mode: "duplicate_dm",
+          templateId: template.id,
+          verification: "none",
+          allowPreviouslyAcceptedCodes: false,
+        },
       }),
     ),
   );
@@ -138,7 +177,9 @@ it.each(["Без печати", "Агрегация"])("clears duplicate policy 
   const submit = await setup();
   fireEvent.click(screen.getByLabelText("Дублировать Data Matrix"));
   await choose("Шаблон этикетки продукции", "Внешняя этикетка · 58 × 40 мм · 203 dpi");
+  fireEvent.click(screen.getByLabelText(repeatLabel));
   fireEvent.click(screen.getByLabelText(label));
+  expect(screen.queryByLabelText(repeatLabel)).toBeNull();
   expect(screen.queryByLabelText("Обязательная проверка этикетки")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
   await waitFor(() =>
@@ -165,6 +206,7 @@ it.each(["planned", "active"] as const)(
                     defaultBoxLabelTemplateId: null,
                     defaultSource: null,
                     validationPrintProtocol: "validation-dm-duplicate-v1",
+                    validationReprocessingProtocol: "validation-reprocessing-v1",
                   },
             ),
             { headers: { "content-type": "application/json" } },
@@ -183,6 +225,7 @@ it.each(["planned", "active"] as const)(
             mode: "validation",
             validationPrintMode: "duplicate_dm",
             verificationRequired: false,
+            allowPreviouslyAcceptedCodes: true,
             productLabelTemplateId: template.id,
             boxLabelTemplateSelection: "none",
             palletLabelTemplateId: "",
@@ -207,6 +250,10 @@ it.each(["planned", "active"] as const)(
     expect(screen.getByLabelText("Обязательная проверка этикетки").hasAttribute("disabled")).toBe(
       status === "active",
     );
+    expect(screen.getByLabelText(repeatLabel).getAttribute("aria-checked")).toBe("true");
+    await waitFor(() =>
+      expect(screen.getByLabelText(repeatLabel).hasAttribute("disabled")).toBe(status === "active"),
+    );
     if (status === "planned")
       await waitFor(() =>
         expect(
@@ -224,6 +271,7 @@ it.each(["planned", "active"] as const)(
         mode: "duplicate_dm",
         templateId: template.id,
         verification: "none",
+        allowPreviouslyAcceptedCodes: true,
       });
   },
 );
@@ -245,6 +293,7 @@ it("ignores a late template response from the previous product", async () => {
         defaultBoxLabelTemplateId: null,
         defaultSource: null,
         validationPrintProtocol: "validation-dm-duplicate-v1",
+        validationReprocessingProtocol: "validation-reprocessing-v1",
       });
     }),
   );
@@ -268,8 +317,99 @@ it("ignores a late template response from the previous product", async () => {
   await waitFor(() =>
     expect(submit).toHaveBeenCalledWith(
       expect.objectContaining({
-        validationPrint: { mode: "duplicate_dm", templateId: next.id, verification: "required" },
+        validationPrint: {
+          mode: "duplicate_dm",
+          templateId: next.id,
+          verification: "required",
+          allowPreviouslyAcceptedCodes: false,
+        },
       }),
     ),
   );
+});
+
+it("submits an explicitly enabled reprocessing policy", async () => {
+  const submit = await setup();
+  fireEvent.click(screen.getByLabelText("Дублировать Data Matrix"));
+  await choose("Шаблон этикетки продукции", "Внешняя этикетка · 58 × 40 мм · 203 dpi");
+  fireEvent.click(screen.getByLabelText(repeatLabel));
+  fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
+  await waitFor(() =>
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        validationPrint: {
+          mode: "duplicate_dm",
+          templateId: template.id,
+          verification: "required",
+          allowPreviouslyAcceptedCodes: true,
+        },
+      }),
+    ),
+  );
+});
+
+const unsupportedPlanning = [
+  ["missing", {}],
+  ["null", { validationReprocessingProtocol: null }],
+  ["unknown", { validationReprocessingProtocol: "validation-reprocessing-v2" }],
+] as const;
+it.each(unsupportedPlanning)(
+  "omits the false property for %s planning support and blocks enabling",
+  async (_, protocol) => {
+    const submit = await setup(protocol);
+    fireEvent.click(screen.getByLabelText("Дублировать Data Matrix"));
+    await choose("Шаблон этикетки продукции", "Внешняя этикетка · 58 × 40 мм · 203 dpi");
+    const checkbox = screen.getByLabelText(repeatLabel);
+    expect(checkbox.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(checkbox);
+    expect(checkbox.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
+    await waitFor(() =>
+      expect(submit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          validationPrint: {
+            mode: "duplicate_dm",
+            templateId: template.id,
+            verification: "required",
+          },
+        }),
+      ),
+    );
+  },
+);
+it.each(unsupportedPlanning)(
+  "preserves a planned true policy and refuses to submit it with %s support",
+  async (_, protocol) => {
+    const submit = await setup(protocol, { status: "planned", enabled: true });
+    expect(screen.getByLabelText(repeatLabel).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText(repeatLabel).getAttribute("aria-invalid")).toBe("true"),
+    );
+    expect(screen.getByLabelText(repeatLabel).getAttribute("aria-checked")).toBe("true");
+    expect(submit).not.toHaveBeenCalled();
+  },
+);
+it("omits false while editing an old planned duplicate-print shift", async () => {
+  const submit = await setup({}, { status: "planned", enabled: false });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+  await waitFor(() =>
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        validationPrint: {
+          mode: "duplicate_dm",
+          templateId: template.id,
+          verification: "required",
+        },
+      }),
+    ),
+  );
+});
+it("preserves a frozen true policy while allowing active metadata edits without negotiation", async () => {
+  const submit = await setup({}, { status: "active", enabled: true });
+  expect(screen.getByLabelText(repeatLabel).hasAttribute("disabled")).toBe(true);
+  expect(screen.getByLabelText(repeatLabel).getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+  await waitFor(() => expect(submit).toHaveBeenCalled());
+  expect(submit.mock.calls[0]?.[0]).not.toHaveProperty("validationPrint");
 });

@@ -29,6 +29,7 @@ async function setup(
   options: {
     hardware?: HardwareConfig;
     protocol?: boolean;
+    reprocessing?: boolean;
     stale?: () => boolean;
     pendingTemplates?: Promise<Response>;
     empty?: boolean;
@@ -37,7 +38,9 @@ async function setup(
     returnNoPrint?: boolean;
   } = {},
 ) {
-  const fixture = productLabelAcceptanceFixture();
+  const fixture = productLabelAcceptanceFixture({
+    allowPreviouslyAcceptedCodes: options.reprocessing ?? false,
+  });
   const requests: Array<{ path: string; body: unknown }> = [];
   const onStarted = vi.fn();
   const onSetup = vi.fn<(draft: NewShiftDraft) => void>();
@@ -54,6 +57,9 @@ async function setup(
     if (path === "/shifts/planning-config")
       return Response.json({
         validationPrintProtocol: options.protocol === false ? null : "validation-dm-duplicate-v1",
+        ...(options.reprocessing
+          ? { validationReprocessingProtocol: "validation-reprocessing-v1" }
+          : {}),
       });
     if (path === "/shifts/product-label-templates")
       return (
@@ -529,4 +535,25 @@ it("sends an explicit no-print policy when printing is disabled in settings", as
   expect(h.requests).toEqual([
     { path: "/shifts", body: expect.objectContaining({ validationPrint: { mode: "none" } }) },
   ]);
+});
+
+it("creates an enabled repeat shift only after selecting the negotiated setting", async () => {
+  const h = await setup({ reprocessing: true });
+  await waitFor(() =>
+    expect(screen.getByLabelText("Print duplicate Data Matrix").hasAttribute("disabled")).toBe(
+      false,
+    ),
+  );
+  fireEvent.click(screen.getByLabelText("Print duplicate Data Matrix"));
+  const repeat = screen.getByLabelText("Allow reprocessing codes from previous shifts");
+  expect((repeat as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(repeat);
+  fireEvent.click(screen.getByRole("button", { name: "Select a template" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Product label/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+  fireEvent.click(screen.getByRole("button", { name: "Start" }));
+  await waitFor(() => expect(h.onStarted).toHaveBeenCalled());
+  expect(h.requests[0]?.body).toMatchObject({
+    validationPrint: { allowPreviouslyAcceptedCodes: true },
+  });
 });

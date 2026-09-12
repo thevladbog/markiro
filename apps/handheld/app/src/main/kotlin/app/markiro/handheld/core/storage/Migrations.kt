@@ -271,3 +271,18 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_pallet_exceptions_ackedAt` ON `pallet_exceptions` (`ackedAt`)")
     }
 }
+
+/** v12 retains the original registry and immutable scan/job bytes; only new occurrence facts are added. */
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE shift_mirror ADD COLUMN allowPreviouslyAcceptedCodes INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("CREATE TABLE IF NOT EXISTS validation_occurrences (shiftId TEXT NOT NULL, codeHash TEXT NOT NULL, scannedAt TEXT NOT NULL, raw TEXT NOT NULL, gtin14 TEXT NOT NULL, serial TEXT NOT NULL, operatorId TEXT, deviceId TEXT NOT NULL, sourceShiftId TEXT, sourceShiftNumber TEXT, kind TEXT NOT NULL, outcome TEXT NOT NULL, lastReceipt TEXT, originalProjected INTEGER NOT NULL, PRIMARY KEY(shiftId,codeHash))")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_validation_occurrences_codeHash ON validation_occurrences(codeHash)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS validation_history_publications (shiftId TEXT NOT NULL PRIMARY KEY, productId TEXT NOT NULL, publication TEXT NOT NULL, snapshot TEXT NOT NULL, fetchedAt TEXT NOT NULL, expiresAt TEXT NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS validation_history (publication TEXT NOT NULL, codeHash TEXT NOT NULL, kind TEXT NOT NULL, shiftId TEXT NOT NULL, shiftNumber TEXT NOT NULL, shiftStatus TEXT NOT NULL, scannedAt TEXT NOT NULL, PRIMARY KEY(publication,codeHash,kind,shiftId))")
+        // Prefer the effective registry occurrence after a legacy release/reacceptance.
+        // Legacy intake already projected ordinary ownership locally. Preserve that marker to
+        // prevent receipt replay restoring a released owner; no server receipt is invented.
+        db.execSQL("INSERT OR IGNORE INTO validation_occurrences SELECT e.shiftId,e.codeHash,e.scannedAt,e.raw,COALESCE(c.gtin14,s.productGtin14,''),COALESCE(c.serial,''),e.operatorId,COALESCE((SELECT deviceId FROM device_config LIMIT 1),''),NULL,NULL,'first_accepted','pending',NULL,1 FROM scan_events e JOIN shift_mirror s ON s.id=e.shiftId LEFT JOIN codes_mirror c ON c.codeHash=e.codeHash AND c.shiftId=e.shiftId AND c.scannedAt=e.scannedAt WHERE s.validationPrintMode='duplicate_dm' AND e.verdict='ok' AND e.codeHash IS NOT NULL ORDER BY (c.codeHash IS NOT NULL) DESC,e.id DESC")
+    }
+}

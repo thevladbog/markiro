@@ -85,6 +85,7 @@ describe.skipIf(!ready)("validation print policy lifecycle", () => {
     const floor = await request(app.getHttpServer())
       .get("/shifts/planning-config")
       .set("x-api-key", f.station.apiKey)
+      .set("x-station-capabilities", `${PRODUCT_LABEL_PROTOCOL},validation-reprocessing-v1`)
       .query({ productId: f.productId })
       .expect(200);
     expect(floor.body).toEqual(office.body);
@@ -92,6 +93,7 @@ describe.skipIf(!ready)("validation print policy lifecycle", () => {
       defaultBoxLabelTemplateId: null,
       defaultSource: null,
       validationPrintProtocol: PRODUCT_LABEL_PROTOCOL,
+      validationReprocessingProtocol: "validation-reprocessing-v1",
     });
     await request(app.getHttpServer()).get("/shifts/planning-config").expect(401);
   });
@@ -231,7 +233,10 @@ describe.skipIf(!ready)("validation print policy lifecycle", () => {
       .set("x-api-key", f.station.apiKey)
       .set("x-station-capabilities", PRODUCT_LABEL_PROTOCOL)
       .expect(200);
-    expect(recovery.body.shift.validationPrint).toEqual(active.body.validationPrint);
+    expect(recovery.body.shift.validationPrint).not.toHaveProperty("allowPreviouslyAcceptedCodes");
+    expect(validationPrintPolicySchema.parse(recovery.body.shift.validationPrint)).toEqual(
+      active.body.validationPrint,
+    );
     await request(disabled.getHttpServer())
       .post(`/shifts/${created.body.id}/enter`)
       .set("x-api-key", f.station.apiKey)
@@ -326,7 +331,9 @@ describe.skipIf(!ready)("validation print policy lifecycle", () => {
     expect(start.status).toBe(200);
     expect([200, 409]).toContain(patch.status);
     const final = await f.agent.get(`/shifts/${created.body.id}`).expect(200);
-    expect(final.body.validationPrint).toEqual(start.body.validationPrint);
+    expect(final.body.validationPrint).toEqual(
+      validationPrintPolicySchema.parse(start.body.validationPrint),
+    );
     expect(final.body.validationPrint.verification).toBe(
       patch.status === 200 ? "none" : "required",
     );

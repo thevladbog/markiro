@@ -71,7 +71,7 @@ export async function readProductLabelHistory(
       }>(sql`
    SELECT job.job_id AS "jobId",job.device_id AS "deviceId",COALESCE(right(code.serial,6),'') AS "codeSuffix",job.accepted_at AS "acceptedAt",
      job.projection->>'status' AS status,job.projection->>'verificationOutcome' AS "verificationOutcome",(job.projection->>'attemptNo')::int AS "attemptNo",
-     EXISTS (SELECT 1 FROM station_sync_quarantine denied WHERE denied.tenant_id=job.tenant_id AND denied.terminal_id=job.device_id AND denied.shift_id=job.shift_id AND denied.record_kind='product_label_event' AND denied.reason='ownership_conflict' AND denied.payload->>'jobId'=job.job_id::text) AS "ownershipConflict"
+     (EXISTS (SELECT 1 FROM code_conflicts conflict WHERE conflict.tenant_id=job.tenant_id AND conflict.losing_shift_id=job.shift_id AND conflict.losing_terminal_id=job.device_id::text AND conflict.code_hash=job.code_hash AND conflict.losing_scanned_at=job.accepted_at) OR EXISTS (SELECT 1 FROM station_sync_quarantine denied WHERE denied.tenant_id=job.tenant_id AND denied.terminal_id=job.device_id AND denied.shift_id=job.shift_id AND denied.record_kind='product_label_event' AND denied.reason='ownership_conflict' AND denied.payload->>'jobId'=job.job_id::text)) AS "ownershipConflict"
    FROM product_label_jobs job
    LEFT JOIN codes code ON code.tenant_id=job.tenant_id AND code.shift_id=job.shift_id AND code.code_hash=job.code_hash AND code.scanned_at=job.accepted_at
    WHERE job.tenant_id=${tenantId} AND job.shift_id=${shiftId}

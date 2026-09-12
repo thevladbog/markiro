@@ -462,10 +462,11 @@ class WorkViewModelTest {
         ]}
     """.trimIndent()
 
-    private suspend fun duplicateShift(verification: String = "none") {
+    private suspend fun duplicateShift(verification: String = "none", allowPreviouslyAcceptedCodes: Boolean = false) {
         db.shiftDao().upsert(
             ShiftEntityFixtures.bundled("s1").copy(
                 validationPrintMode = "duplicate_dm",
+                allowPreviouslyAcceptedCodes = allowPreviouslyAcceptedCodes,
                 duplicateVerification = verification,
                 duplicateTemplate = duplicateTemplate,
                 duplicateTemplateDigest = "a".repeat(64),
@@ -558,10 +559,51 @@ class WorkViewModelTest {
         assertTrue(restored.duplicateStep.value is DuplicateStep.Awaiting)
     }
 
+    @Test fun previousCodeRefusalCreatesNeitherNewUnitNorNewPrintJob() = runTest {
+        duplicateShift()
+        val raw=duplicateRaw("PREVIOUS")
+        val km=app.markiro.handheld.core.km.KmCodec.canonicalize(raw)
+        val hash=app.markiro.handheld.core.km.KmCodec.hash(km)
+        db.codeDao().insert(app.markiro.handheld.core.storage.CodeEntity(hash,"old",km.gtin14,km.serial,"2026-09-01T00:00:00Z"))
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("old").copy(status="closed"))
+        val vm=vm(); advanceUntilIdle()
+        scans.tryEmit(ScanEvent(raw,null,"debug",0)); advanceUntilIdle()
+        vm.state.first { it.last?.refusal==app.markiro.handheld.core.scan.ValidationRefusal.PREVIOUS_DISALLOWED }
+        assertEquals(0,transport.sent)
+        assertEquals(0,db.codeDao().countForShift("s1"))
+        assertEquals(0,db.productLabelEventDao().observeUnackedCount().first())
+        assertNull(db.validationDao().get("s1",hash))
+    }
+
+    @Test fun enabledRepeatPrintsOnceAndRestoresPendingCounterOnViewModelRecreation() = runTest {
+        duplicateShift(allowPreviouslyAcceptedCodes=true)
+        val raw=duplicateRaw("REPEAT1")
+        val km=app.markiro.handheld.core.km.KmCodec.canonicalize(raw); val hash=app.markiro.handheld.core.km.KmCodec.hash(km)
+        val old=app.markiro.handheld.core.storage.CodeEntity(hash,"old",km.gtin14,km.serial,"2026-09-01T00:00:00Z")
+        db.codeDao().insert(old)
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("old").copy(status="closed"))
+        db.validationDao().stage(listOf(app.markiro.handheld.core.storage.ValidationHistoryEntity("pub",hash,"original","old","OLD-001","closed",old.scannedAt)))
+        db.validationDao().publish(app.markiro.handheld.core.storage.ValidationHistoryPublication("s1","p1","pub","a".repeat(64),"2026-09-12T00:00:00Z","2026-09-12T01:00:00Z"))
+        val first=vm(); advanceUntilIdle()
+        scans.tryEmit(ScanEvent(raw,null,"debug",0)); advanceUntilIdle()
+        first.state.first { it.thisTerminal==1 }
+        db.productLabelEventDao().observeUnackedCount().first { it == 3 }
+        val sent=transport.sent
+        scans.tryEmit(ScanEvent(raw,null,"debug",0)); advanceUntilIdle()
+        first.state.first { it.last?.refusal == app.markiro.handheld.core.scan.ValidationRefusal.SAME_SHIFT }
+        assertEquals(sent,transport.sent)
+        assertEquals(old,db.codeDao().get(hash))
+        assertEquals(app.markiro.handheld.core.scan.ValidationRefusal.SAME_SHIFT,first.state.value.last?.refusal)
+        val restarted=vm(); advanceUntilIdle()
+        val state=restarted.state.first { it.thisTerminal==1 }
+        assertEquals(1,state.validation?.pending)
+        assertTrue(state.sync.pending>0)
+    }
+
     /** Scanning the printed sticker back completes the unit. */
     @Test
     fun scanningTheStickerBackCompletesTheUnit() = runTest {
-        duplicateShift(verification = "required")
+        duplicateShift(verification = "required", allowPreviouslyAcceptedCodes = true)
         val vm = vm()
         advanceUntilIdle()
         val raw = duplicateRaw("AAA111")

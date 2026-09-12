@@ -3615,6 +3615,345 @@ export const STATION_MIGRATIONS: string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS pallets_mirror_open_terminal_uk
      ON pallets_mirror (shift_id, COALESCE(terminal_id, ''))
      WHERE closed_at IS NULL;`,
+  `CREATE TABLE IF NOT EXISTS validation_history_publications (
+ shift_id TEXT PRIMARY KEY, product_id TEXT NOT NULL, snapshot TEXT NOT NULL,
+ fetched_at TEXT NOT NULL, expires_at TEXT NOT NULL, items_json TEXT NOT NULL CHECK(json_valid(items_json))
+);`,
+  `CREATE TABLE IF NOT EXISTS validation_code_history (
+ shift_id TEXT NOT NULL, code_hash TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('original','reprocessing')),
+ source_shift_id TEXT NOT NULL, shift_number TEXT NOT NULL,
+ shift_status TEXT NOT NULL CHECK(shift_status IN ('planned','active','closed')), scanned_at TEXT NOT NULL,
+ PRIMARY KEY(shift_id,code_hash,kind,source_shift_id)
+);`,
+  `CREATE TRIGGER IF NOT EXISTS validation_history_publish_insert AFTER INSERT ON validation_history_publications
+ BEGIN
+ DELETE FROM validation_code_history WHERE shift_id=NEW.shift_id;
+ INSERT INTO validation_code_history(shift_id,code_hash,kind,source_shift_id,shift_number,shift_status,scanned_at)
+ SELECT NEW.shift_id,json_extract(value,'$.codeHash'),json_extract(value,'$.kind'),json_extract(value,'$.shiftId'),json_extract(value,'$.shiftNumber'),json_extract(value,'$.shiftStatus'),json_extract(value,'$.scannedAt') FROM json_each(NEW.items_json);
+ END;`,
+  `CREATE TRIGGER IF NOT EXISTS validation_history_publish_update AFTER UPDATE ON validation_history_publications
+ BEGIN
+ DELETE FROM validation_code_history WHERE shift_id=NEW.shift_id;
+ INSERT INTO validation_code_history(shift_id,code_hash,kind,source_shift_id,shift_number,shift_status,scanned_at)
+ SELECT NEW.shift_id,json_extract(value,'$.codeHash'),json_extract(value,'$.kind'),json_extract(value,'$.shiftId'),json_extract(value,'$.shiftNumber'),json_extract(value,'$.shiftStatus'),json_extract(value,'$.scannedAt') FROM json_each(NEW.items_json);
+ END;`,
+  `CREATE TABLE IF NOT EXISTS validation_occurrences (
+ shift_id TEXT NOT NULL, code_hash TEXT NOT NULL, scanned_at TEXT NOT NULL,
+ credential_ownership TEXT NOT NULL, terminal_id TEXT NOT NULL, operator_id TEXT,
+ source_shift_id TEXT, canonical_raw TEXT NOT NULL,
+ outcome TEXT NOT NULL DEFAULT 'pending' CHECK(outcome IN ('pending','first_accepted','reprocessed','conflict')),
+ receipt_outcome TEXT CHECK(receipt_outcome IN ('first_accepted','reprocessed','conflict')),
+ PRIMARY KEY(shift_id,code_hash)
+);`,
+  `INSERT INTO validation_occurrences(shift_id,code_hash,scanned_at,credential_ownership,terminal_id,operator_id,canonical_raw)
+ SELECT shift_id,code_hash,accepted_at,credential_ownership,terminal_id,operator_id,json_extract(acceptance_json,'$.canonicalRaw') FROM product_label_accept_commands command WHERE true
+ ORDER BY EXISTS(SELECT 1 FROM codes_mirror code WHERE code.shift_id=command.shift_id AND code.code_hash=command.code_hash AND code.scanned_at=command.accepted_at) DESC,accepted_at DESC
+ ON CONFLICT DO NOTHING;`,
+  `CREATE VIEW IF NOT EXISTS station_processed_codes AS
+ SELECT code.shift_id,code.code_hash,code.scanned_at FROM codes_mirror code
+ WHERE NOT EXISTS (SELECT 1 FROM validation_occurrences occurrence WHERE occurrence.shift_id=code.shift_id AND occurrence.code_hash=code.code_hash)
+ UNION ALL
+ SELECT occurrence.shift_id,occurrence.code_hash,occurrence.scanned_at FROM validation_occurrences occurrence
+ WHERE outcome<>'conflict' AND (source_shift_id IS NOT NULL OR outcome='reprocessed' OR receipt_outcome='reprocessed'
+ OR EXISTS(SELECT 1 FROM codes_mirror code WHERE code.shift_id=occurrence.shift_id AND code.code_hash=occurrence.code_hash AND code.scanned_at=occurrence.scanned_at));`,
+  `CREATE TRIGGER IF NOT EXISTS validation_occurrence_conflict AFTER UPDATE OF outcome ON validation_occurrences WHEN NEW.outcome='conflict'
+ BEGIN
+ UPDATE product_label_jobs SET ownership_conflict=1 WHERE credential_ownership=NEW.credential_ownership AND shift_id=NEW.shift_id
+ AND json_extract(projection_json,'$.codeHash')=NEW.code_hash AND json_extract(projection_json,'$.acceptedAt')=NEW.scanned_at;
+ DELETE FROM codes_mirror WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND scanned_at=NEW.scanned_at;
+ END;`,
+  `DROP TRIGGER product_label_accept_command_apply;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_accept_command_apply
+   AFTER INSERT ON product_label_accept_commands
+   BEGIN
+     SELECT CASE WHEN EXISTS (
+       SELECT 1 FROM product_label_jobs
+       WHERE credential_ownership = NEW.credential_ownership AND status <> 'completed'
+     ) THEN RAISE(ABORT, 'PRODUCT_LABEL_BUSY') END;
+
+     SELECT CASE WHEN
+       EXISTS (SELECT 1 FROM validation_occurrences WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash)
+       OR EXISTS (SELECT 1 FROM validation_code_history WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND (source_shift_id=NEW.shift_id OR shift_status<>'closed'))
+       OR EXISTS (SELECT 1 FROM validation_occurrences other LEFT JOIN shift_mirror shift ON shift.id=other.shift_id WHERE other.code_hash=NEW.code_hash AND other.shift_id<>NEW.shift_id AND other.outcome<>'conflict' AND COALESCE(shift.status,'active')<>'closed')
+       OR (COALESCE(json_extract(NEW.acceptance_json,'$.policy.allowPreviouslyAcceptedCodes'),0)=0 AND (
+         EXISTS(SELECT 1 FROM codes_mirror WHERE code_hash=NEW.code_hash)
+         OR EXISTS(SELECT 1 FROM validation_code_history WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash)))
+       OR EXISTS (SELECT 1 FROM codes_mirror code WHERE code.code_hash=NEW.code_hash AND (
+         code.shift_id=NEW.shift_id OR NOT EXISTS(SELECT 1 FROM validation_code_history h WHERE h.shift_id=NEW.shift_id AND h.code_hash=NEW.code_hash AND h.kind='original' AND h.shift_status='closed' AND h.source_shift_id=code.shift_id)))
+       THEN RAISE(ABORT,'VALIDATION_CODE_DUPLICATE') END;
+
+     INSERT INTO validation_occurrences(shift_id,code_hash,scanned_at,credential_ownership,terminal_id,operator_id,source_shift_id,canonical_raw)
+     VALUES(NEW.shift_id,NEW.code_hash,NEW.accepted_at,NEW.credential_ownership,NEW.terminal_id,NEW.operator_id,
+       (SELECT source_shift_id FROM validation_code_history WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND kind='original' AND shift_status='closed' LIMIT 1),json_extract(NEW.acceptance_json,'$.canonicalRaw'));
+
+     INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+     SELECT NEW.code_hash, NEW.shift_id, NEW.gtin14, NEW.serial, NEW.accepted_at, NULL
+     WHERE NOT EXISTS(SELECT 1 FROM codes_mirror WHERE code_hash=NEW.code_hash)
+       AND NOT EXISTS(SELECT 1 FROM validation_code_history WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND kind='original');
+
+     INSERT INTO scan_events_mirror (shift_id, terminal_id, raw, verdict, scanned_at, operator_id)
+     VALUES (NEW.shift_id, NEW.terminal_id, NEW.raw, 'ok', NEW.accepted_at, NEW.operator_id);
+
+     INSERT INTO outbox (shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial, box_id, operator_id)
+     VALUES (NEW.shift_id, NEW.terminal_id, NEW.raw, 'ok', NEW.accepted_at, NEW.code_hash, NEW.gtin14, NEW.serial, NULL, NEW.operator_id);
+
+     INSERT INTO product_label_jobs (credential_ownership, job_id, shift_id, projection_json, status, updated_at)
+     VALUES (NEW.credential_ownership, NEW.job_id, NEW.shift_id, NEW.projection_json, 'prepared', NEW.accepted_at);
+
+     INSERT INTO product_label_attempts (credential_ownership, attempt_id, job_id, attempt_no, prepared_json, state)
+     VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.attemptId'), NEW.job_id, 1,
+             json_extract(NEW.acceptance_json, '$.preparedEvent'), 'prepared');
+
+     INSERT INTO product_label_events (credential_ownership, event_id, job_id, sequence, event_json)
+     VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.eventId'), NEW.job_id, 1,
+             json_extract(NEW.acceptance_json, '$.preparedEvent'));
+
+     INSERT INTO product_label_outbox (credential_ownership, event_id, queued_at)
+     VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.eventId'), NEW.accepted_at);
+   END;`,
+  `DROP TRIGGER product_label_mirror_guard_insert;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_mirror_guard_insert
+   BEFORE INSERT ON shift_mirror
+   WHEN EXISTS (
+     SELECT 1 FROM shift_mirror current
+     WHERE current.id = NEW.id AND current.status <> 'planned'
+       AND json_extract(current.validation_print_context, '$.policy.mode') = 'duplicate_dm'
+       AND (NEW.mode <> 'validation' OR NEW.status = 'planned'
+         OR (json_remove(json_extract(NEW.validation_print_context, '$.policy'),'$.allowPreviouslyAcceptedCodes') IS NOT json_remove(json_extract(current.validation_print_context, '$.policy'),'$.allowPreviouslyAcceptedCodes') OR COALESCE(json_extract(NEW.validation_print_context,'$.policy.allowPreviouslyAcceptedCodes'),0) IS NOT COALESCE(json_extract(current.validation_print_context,'$.policy.allowPreviouslyAcceptedCodes'),0)))
+   ) OR EXISTS (
+     SELECT 1 FROM product_label_accept_commands accepted
+     WHERE accepted.shift_id = NEW.id
+       AND (NEW.mode <> 'validation' OR NEW.status = 'planned'
+         OR (json_remove(json_extract(NEW.validation_print_context, '$.policy'),'$.allowPreviouslyAcceptedCodes') IS NOT json_remove(json_extract(accepted.acceptance_json, '$.policy'),'$.allowPreviouslyAcceptedCodes') OR COALESCE(json_extract(NEW.validation_print_context,'$.policy.allowPreviouslyAcceptedCodes'),0) IS NOT COALESCE(json_extract(accepted.acceptance_json,'$.policy.allowPreviouslyAcceptedCodes'),0)))
+   )
+   BEGIN SELECT RAISE(ABORT, 'PRODUCT_LABEL_POLICY_FROZEN'); END;`,
+  `DROP TRIGGER product_label_mirror_guard_update;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_mirror_guard_update
+   BEFORE UPDATE ON shift_mirror
+   WHEN (
+     OLD.status <> 'planned'
+     AND json_extract(OLD.validation_print_context, '$.policy.mode') = 'duplicate_dm'
+     AND (NEW.mode <> 'validation' OR NEW.status = 'planned'
+       OR (json_remove(json_extract(NEW.validation_print_context, '$.policy'),'$.allowPreviouslyAcceptedCodes') IS NOT json_remove(json_extract(OLD.validation_print_context, '$.policy'),'$.allowPreviouslyAcceptedCodes') OR COALESCE(json_extract(NEW.validation_print_context,'$.policy.allowPreviouslyAcceptedCodes'),0) IS NOT COALESCE(json_extract(OLD.validation_print_context,'$.policy.allowPreviouslyAcceptedCodes'),0)))
+   ) OR EXISTS (
+     SELECT 1 FROM product_label_accept_commands accepted
+     WHERE accepted.shift_id = NEW.id
+       AND (NEW.mode <> 'validation' OR NEW.status = 'planned'
+         OR (json_remove(json_extract(NEW.validation_print_context, '$.policy'),'$.allowPreviouslyAcceptedCodes') IS NOT json_remove(json_extract(accepted.acceptance_json, '$.policy'),'$.allowPreviouslyAcceptedCodes') OR COALESCE(json_extract(NEW.validation_print_context,'$.policy.allowPreviouslyAcceptedCodes'),0) IS NOT COALESCE(json_extract(accepted.acceptance_json,'$.policy.allowPreviouslyAcceptedCodes'),0)))
+   )
+   BEGIN SELECT RAISE(ABORT, 'PRODUCT_LABEL_POLICY_FROZEN'); END;`,
+  `DROP TRIGGER product_label_event_command_apply;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_event_command_apply
+   AFTER INSERT ON product_label_event_commands
+   BEGIN
+     SELECT CASE WHEN NOT EXISTS (
+       SELECT 1 FROM product_label_jobs job
+       WHERE job.credential_ownership = NEW.credential_ownership AND job.job_id = NEW.job_id
+         AND json_extract(job.projection_json, '$.latestSequence') = NEW.expected_sequence
+         AND json_extract(job.projection_json, '$.attemptId') = NEW.expected_attempt_id
+     ) THEN RAISE(ABORT, 'PRODUCT_LABEL_STALE') END;
+     SELECT CASE WHEN json_extract(NEW.event_json, '$.sequence') IS NOT NEW.expected_sequence + 1
+       OR json_extract(NEW.event_json, '$.jobId') IS NOT NEW.job_id
+       OR json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id
+       OR json_extract(NEW.projection_json, '$.latestSequence') IS NOT NEW.expected_sequence + 1
+       THEN RAISE(ABORT, 'PRODUCT_LABEL_EVENT_INVALID') END;
+     SELECT CASE WHEN json_extract(NEW.event_json, '$.kind') IN ('prepared','sending') AND (
+       EXISTS (SELECT 1 FROM product_label_jobs job WHERE job.credential_ownership = NEW.credential_ownership AND job.job_id = NEW.job_id AND job.ownership_conflict = 1)
+       OR (NOT EXISTS(SELECT 1 FROM validation_occurrences WHERE shift_id=json_extract(NEW.event_json,'$.shiftId') AND code_hash=json_extract(NEW.event_json,'$.codeHash')) AND EXISTS (SELECT 1 FROM conflicts_mirror conflict WHERE conflict.code_hash = json_extract(NEW.event_json, '$.codeHash')))
+       OR NOT EXISTS (SELECT 1 FROM station_processed_codes code WHERE code.code_hash = json_extract(NEW.event_json, '$.codeHash')
+         AND code.shift_id = json_extract(NEW.event_json, '$.shiftId') AND code.scanned_at = json_extract(NEW.event_json, '$.acceptedAt'))
+     ) THEN RAISE(ABORT, 'PRODUCT_LABEL_OWNERSHIP_CONFLICT') END;
+     SELECT CASE WHEN json_extract(NEW.event_json, '$.kind') = 'prepared' AND EXISTS (
+       SELECT 1 FROM product_label_jobs job WHERE job.credential_ownership = NEW.credential_ownership
+         AND job.job_id <> NEW.job_id AND job.status <> 'completed'
+     ) THEN RAISE(ABORT, 'PRODUCT_LABEL_BUSY') END;
+
+     INSERT INTO product_label_events(credential_ownership,event_id,job_id,sequence,event_json)
+     VALUES(NEW.credential_ownership,NEW.event_id,NEW.job_id,json_extract(NEW.event_json,'$.sequence'),NEW.event_json);
+     INSERT INTO product_label_attempts(credential_ownership,attempt_id,job_id,attempt_no,prepared_json,state)
+     SELECT NEW.credential_ownership,json_extract(NEW.event_json,'$.attemptId'),NEW.job_id,
+       json_extract(NEW.event_json,'$.attemptNo'),NEW.event_json,'prepared'
+     WHERE json_extract(NEW.event_json,'$.kind') = 'prepared';
+     UPDATE product_label_attempts SET state=json_extract(NEW.projection_json,'$.attemptState'),
+       verified_at=CASE WHEN json_extract(NEW.event_json,'$.kind')='verified' THEN json_extract(NEW.event_json,'$.occurredAt') ELSE verified_at END,
+       verified_by=CASE WHEN json_extract(NEW.event_json,'$.kind')='verified' THEN json_extract(NEW.event_json,'$.operatorId') ELSE verified_by END
+     WHERE credential_ownership=NEW.credential_ownership AND job_id=NEW.job_id AND attempt_id=json_extract(NEW.event_json,'$.attemptId');
+     UPDATE product_label_jobs SET projection_json=NEW.projection_json,
+       status=json_extract(NEW.projection_json,'$.status'),updated_at=json_extract(NEW.event_json,'$.occurredAt')
+     WHERE credential_ownership=NEW.credential_ownership AND job_id=NEW.job_id;
+     INSERT INTO product_label_outbox(credential_ownership,event_id,queued_at)
+     VALUES(NEW.credential_ownership,NEW.event_id,json_extract(NEW.event_json,'$.occurredAt'));
+   END;`,
+  `DROP TRIGGER product_label_close_snapshot_guard;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_close_snapshot_guard BEFORE INSERT ON shift_close_outbox
+   WHEN EXISTS (SELECT 1 FROM shift_mirror WHERE id=NEW.shift_id AND json_extract(validation_print_context,'$.policy.mode')='duplicate_dm')
+   BEGIN
+     SELECT CASE WHEN NEW.actual_qty<>(SELECT COUNT(*) FROM station_processed_codes WHERE shift_id=NEW.shift_id)
+       OR NEW.planned_qty_snapshot IS NOT (SELECT planned_qty FROM shift_mirror WHERE id=NEW.shift_id)
+       THEN RAISE(ABORT,'PRODUCT_LABEL_CLOSE_CHANGED') END;
+   END;`,
+  `DROP TRIGGER product_label_accept_active_guard;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_accept_active_guard BEFORE INSERT ON product_label_accept_commands
+   WHEN NOT EXISTS (SELECT 1 FROM product_label_accept_commands WHERE credential_ownership=NEW.credential_ownership AND job_id=NEW.job_id)
+   BEGIN
+     SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM shift_mirror WHERE id=NEW.shift_id AND status='active'
+       AND json_extract(validation_print_context,'$.policy.policyRevision')=json_extract(NEW.acceptance_json,'$.policy.policyRevision')
+       AND json_extract(validation_print_context,'$.policy.snapshot.digest')=json_extract(NEW.acceptance_json,'$.policy.snapshot.digest')
+       AND json_extract(validation_print_context,'$.policy.mode')='duplicate_dm'
+       AND json_extract(validation_print_context,'$.policy.verification')=json_extract(NEW.acceptance_json,'$.policy.verification')
+       AND json_extract(validation_print_context,'$.policy.templateId')=json_extract(NEW.acceptance_json,'$.policy.templateId')
+       AND COALESCE(json_extract(validation_print_context,'$.policy.allowPreviouslyAcceptedCodes'),0)=COALESCE(json_extract(NEW.acceptance_json,'$.policy.allowPreviouslyAcceptedCodes'),0))
+       OR EXISTS (SELECT 1 FROM shift_close_outbox WHERE shift_id=NEW.shift_id)
+       THEN RAISE(ABORT,'PRODUCT_LABEL_SHIFT_CLOSED') END;
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS validation_occurrence_reprocessed AFTER UPDATE OF outcome ON validation_occurrences
+   WHEN NEW.outcome='reprocessed'
+   BEGIN
+     DELETE FROM codes_mirror WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND scanned_at=NEW.scanned_at;
+     UPDATE validation_occurrences SET source_shift_id=COALESCE(source_shift_id,
+       (SELECT source_shift_id FROM validation_code_history WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND kind='original' LIMIT 1))
+       WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash;
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS validation_occurrence_first_accepted AFTER UPDATE OF outcome ON validation_occurrences
+   WHEN NEW.outcome='first_accepted' AND OLD.receipt_outcome IS NULL AND OLD.source_shift_id IS NOT NULL
+   BEGIN
+     UPDATE validation_occurrences SET source_shift_id=NULL WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash;
+     INSERT INTO codes_mirror(code_hash,shift_id,gtin14,serial,scanned_at,box_id)
+     SELECT code_hash,shift_id,gtin14,serial,accepted_at,NULL FROM product_label_accept_commands
+       WHERE credential_ownership=NEW.credential_ownership AND shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND accepted_at=NEW.scanned_at
+     ON CONFLICT(code_hash) DO UPDATE SET shift_id=excluded.shift_id,gtin14=excluded.gtin14,serial=excluded.serial,scanned_at=excluded.scanned_at,box_id=NULL;
+   END;`,
+  // An explicitly released ordinary acceptance is retained evidence, not an active owner.
+  // Effective pending intake and accepted repeats still block another active shift.
+  `DROP TRIGGER product_label_accept_command_apply;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_accept_command_apply
+   AFTER INSERT ON product_label_accept_commands
+   BEGIN
+     SELECT CASE WHEN EXISTS (
+       SELECT 1 FROM product_label_jobs
+       WHERE credential_ownership = NEW.credential_ownership AND status <> 'completed'
+     ) THEN RAISE(ABORT, 'PRODUCT_LABEL_BUSY') END;
+
+     SELECT CASE WHEN
+       EXISTS (SELECT 1 FROM validation_occurrences WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash)
+       OR EXISTS (SELECT 1 FROM validation_code_history WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND (source_shift_id=NEW.shift_id OR shift_status<>'closed'))
+       OR EXISTS (SELECT 1 FROM validation_occurrences other
+         JOIN station_processed_codes effective ON effective.shift_id=other.shift_id AND effective.code_hash=other.code_hash
+         LEFT JOIN shift_mirror shift ON shift.id=other.shift_id WHERE other.code_hash=NEW.code_hash AND other.shift_id<>NEW.shift_id AND other.outcome<>'conflict' AND COALESCE(shift.status,'active')<>'closed')
+       OR (COALESCE(json_extract(NEW.acceptance_json,'$.policy.allowPreviouslyAcceptedCodes'),0)=0 AND (
+         EXISTS(SELECT 1 FROM codes_mirror WHERE code_hash=NEW.code_hash)
+         OR EXISTS(SELECT 1 FROM validation_code_history WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash)))
+       OR EXISTS (SELECT 1 FROM codes_mirror code WHERE code.code_hash=NEW.code_hash AND (
+         code.shift_id=NEW.shift_id OR NOT EXISTS(SELECT 1 FROM validation_code_history h WHERE h.shift_id=NEW.shift_id AND h.code_hash=NEW.code_hash AND h.kind='original' AND h.shift_status='closed' AND h.source_shift_id=code.shift_id)))
+       THEN RAISE(ABORT,'VALIDATION_CODE_DUPLICATE') END;
+
+     INSERT INTO validation_occurrences(shift_id,code_hash,scanned_at,credential_ownership,terminal_id,operator_id,source_shift_id,canonical_raw)
+     VALUES(NEW.shift_id,NEW.code_hash,NEW.accepted_at,NEW.credential_ownership,NEW.terminal_id,NEW.operator_id,
+       (SELECT source_shift_id FROM validation_code_history WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND kind='original' AND shift_status='closed' LIMIT 1),json_extract(NEW.acceptance_json,'$.canonicalRaw'));
+
+     INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+     SELECT NEW.code_hash, NEW.shift_id, NEW.gtin14, NEW.serial, NEW.accepted_at, NULL
+     WHERE NOT EXISTS(SELECT 1 FROM codes_mirror WHERE code_hash=NEW.code_hash)
+       AND NOT EXISTS(SELECT 1 FROM validation_code_history WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND kind='original');
+
+     INSERT INTO scan_events_mirror (shift_id, terminal_id, raw, verdict, scanned_at, operator_id)
+     VALUES (NEW.shift_id, NEW.terminal_id, NEW.raw, 'ok', NEW.accepted_at, NEW.operator_id);
+
+     INSERT INTO outbox (shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial, box_id, operator_id)
+     VALUES (NEW.shift_id, NEW.terminal_id, NEW.raw, 'ok', NEW.accepted_at, NEW.code_hash, NEW.gtin14, NEW.serial, NULL, NEW.operator_id);
+
+     INSERT INTO product_label_jobs (credential_ownership, job_id, shift_id, projection_json, status, updated_at)
+     VALUES (NEW.credential_ownership, NEW.job_id, NEW.shift_id, NEW.projection_json, 'prepared', NEW.accepted_at);
+
+     INSERT INTO product_label_attempts (credential_ownership, attempt_id, job_id, attempt_no, prepared_json, state)
+     VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.attemptId'), NEW.job_id, 1,
+             json_extract(NEW.acceptance_json, '$.preparedEvent'), 'prepared');
+
+     INSERT INTO product_label_events (credential_ownership, event_id, job_id, sequence, event_json)
+     VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.eventId'), NEW.job_id, 1,
+             json_extract(NEW.acceptance_json, '$.preparedEvent'));
+
+     INSERT INTO product_label_outbox (credential_ownership, event_id, queued_at)
+     VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.eventId'), NEW.accepted_at);
+   END;`,
+  // Authoritative source closure supersedes stale or absent source metadata only for that exact source.
+  `DROP TRIGGER product_label_accept_command_apply;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_accept_command_apply
+   AFTER INSERT ON product_label_accept_commands
+   BEGIN
+     SELECT CASE WHEN EXISTS (
+       SELECT 1 FROM product_label_jobs
+       WHERE credential_ownership = NEW.credential_ownership AND status <> 'completed'
+     ) THEN RAISE(ABORT, 'PRODUCT_LABEL_BUSY') END;
+
+     SELECT CASE WHEN
+       EXISTS (SELECT 1 FROM validation_occurrences WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash)
+       OR EXISTS (SELECT 1 FROM validation_code_history WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND (source_shift_id=NEW.shift_id OR shift_status<>'closed'))
+       OR EXISTS (SELECT 1 FROM validation_occurrences other
+         JOIN station_processed_codes effective ON effective.shift_id=other.shift_id AND effective.code_hash=other.code_hash
+         LEFT JOIN shift_mirror shift ON shift.id=other.shift_id WHERE other.code_hash=NEW.code_hash AND other.shift_id<>NEW.shift_id AND other.outcome<>'conflict' AND COALESCE(shift.status,'active')<>'closed'
+           AND NOT EXISTS(SELECT 1 FROM validation_code_history confirmed WHERE confirmed.shift_id=NEW.shift_id AND confirmed.code_hash=other.code_hash AND confirmed.kind='original' AND confirmed.source_shift_id=other.shift_id AND confirmed.shift_status='closed'))
+       OR (COALESCE(json_extract(NEW.acceptance_json,'$.policy.allowPreviouslyAcceptedCodes'),0)=0 AND (
+         EXISTS(SELECT 1 FROM codes_mirror WHERE code_hash=NEW.code_hash)
+         OR EXISTS(SELECT 1 FROM validation_code_history WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash)))
+       OR EXISTS (SELECT 1 FROM codes_mirror code WHERE code.code_hash=NEW.code_hash AND (
+         code.shift_id=NEW.shift_id OR NOT EXISTS(SELECT 1 FROM validation_code_history h WHERE h.shift_id=NEW.shift_id AND h.code_hash=NEW.code_hash AND h.kind='original' AND h.shift_status='closed' AND h.source_shift_id=code.shift_id)))
+       THEN RAISE(ABORT,'VALIDATION_CODE_DUPLICATE') END;
+
+     INSERT INTO validation_occurrences(shift_id,code_hash,scanned_at,credential_ownership,terminal_id,operator_id,source_shift_id,canonical_raw)
+     VALUES(NEW.shift_id,NEW.code_hash,NEW.accepted_at,NEW.credential_ownership,NEW.terminal_id,NEW.operator_id,
+       (SELECT source_shift_id FROM validation_code_history WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND kind='original' AND shift_status='closed' LIMIT 1),json_extract(NEW.acceptance_json,'$.canonicalRaw'));
+
+     INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+     SELECT NEW.code_hash, NEW.shift_id, NEW.gtin14, NEW.serial, NEW.accepted_at, NULL
+     WHERE NOT EXISTS(SELECT 1 FROM codes_mirror WHERE code_hash=NEW.code_hash)
+       AND NOT EXISTS(SELECT 1 FROM validation_code_history WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND kind='original');
+
+     INSERT INTO scan_events_mirror (shift_id, terminal_id, raw, verdict, scanned_at, operator_id)
+     VALUES (NEW.shift_id, NEW.terminal_id, NEW.raw, 'ok', NEW.accepted_at, NEW.operator_id);
+
+     INSERT INTO outbox (shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial, box_id, operator_id)
+     VALUES (NEW.shift_id, NEW.terminal_id, NEW.raw, 'ok', NEW.accepted_at, NEW.code_hash, NEW.gtin14, NEW.serial, NULL, NEW.operator_id);
+
+     INSERT INTO product_label_jobs (credential_ownership, job_id, shift_id, projection_json, status, updated_at)
+     VALUES (NEW.credential_ownership, NEW.job_id, NEW.shift_id, NEW.projection_json, 'prepared', NEW.accepted_at);
+
+     INSERT INTO product_label_attempts (credential_ownership, attempt_id, job_id, attempt_no, prepared_json, state)
+     VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.attemptId'), NEW.job_id, 1,
+             json_extract(NEW.acceptance_json, '$.preparedEvent'), 'prepared');
+
+     INSERT INTO product_label_events (credential_ownership, event_id, job_id, sequence, event_json)
+     VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.eventId'), NEW.job_id, 1,
+             json_extract(NEW.acceptance_json, '$.preparedEvent'));
+
+     INSERT INTO product_label_outbox (credential_ownership, event_id, queued_at)
+     VALUES (NEW.credential_ownership, json_extract(NEW.acceptance_json, '$.preparedEvent.eventId'), NEW.accepted_at);
+   END;`,
+  `ALTER TABLE validation_occurrences ADD COLUMN ownership_released INTEGER NOT NULL DEFAULT 0 CHECK(ownership_released IN (0,1));`,
+  `DROP VIEW station_processed_codes;`,
+  `CREATE VIEW IF NOT EXISTS station_processed_codes AS
+ SELECT code.shift_id,code.code_hash,code.scanned_at FROM codes_mirror code
+ WHERE NOT EXISTS (SELECT 1 FROM validation_occurrences occurrence WHERE occurrence.shift_id=code.shift_id AND occurrence.code_hash=code.code_hash)
+ UNION ALL
+ SELECT occurrence.shift_id,occurrence.code_hash,occurrence.scanned_at FROM validation_occurrences occurrence
+ WHERE ownership_released=0 AND outcome<>'conflict' AND (source_shift_id IS NOT NULL OR outcome='reprocessed' OR receipt_outcome='reprocessed'
+ OR EXISTS(SELECT 1 FROM codes_mirror code WHERE code.shift_id=occurrence.shift_id AND code.code_hash=occurrence.code_hash AND code.scanned_at=occurrence.scanned_at));`,
+  `DROP TRIGGER validation_occurrence_first_accepted;`,
+  `CREATE TRIGGER IF NOT EXISTS validation_occurrence_first_accepted AFTER UPDATE OF outcome ON validation_occurrences
+   WHEN NEW.outcome='first_accepted' AND NEW.ownership_released=0 AND OLD.receipt_outcome IS NULL AND OLD.source_shift_id IS NOT NULL
+   BEGIN
+     UPDATE validation_occurrences SET source_shift_id=NULL WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash;
+     INSERT INTO codes_mirror(code_hash,shift_id,gtin14,serial,scanned_at,box_id)
+     SELECT code_hash,shift_id,gtin14,serial,accepted_at,NULL FROM product_label_accept_commands
+       WHERE credential_ownership=NEW.credential_ownership AND shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND accepted_at=NEW.scanned_at
+     ON CONFLICT(code_hash) DO UPDATE SET shift_id=excluded.shift_id,gtin14=excluded.gtin14,serial=excluded.serial,scanned_at=excluded.scanned_at,box_id=NULL;
+   END;`,
+  `CREATE TRIGGER IF NOT EXISTS validation_occurrence_released AFTER UPDATE OF ownership_released ON validation_occurrences
+   WHEN NEW.ownership_released=1
+   BEGIN
+     DELETE FROM codes_mirror WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash AND scanned_at=NEW.scanned_at;
+     UPDATE validation_occurrences SET source_shift_id=NULL WHERE shift_id=NEW.shift_id AND code_hash=NEW.code_hash;
+   END;`,
 ];
 
 export interface StationMigrationEntry {

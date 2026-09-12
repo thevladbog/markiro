@@ -1,3 +1,8 @@
+import {
+  applyValidationOutcomes,
+  parseValidationOutcomes,
+  reconcileValidationOccurrences,
+} from "./validation-reprocessing.js";
 import { deviceRecoveryAllowsWork } from "./device-recovery.js";
 import { purgeCompletedProductLabelJobs } from "./product-labels/retention.js";
 import {
@@ -185,6 +190,7 @@ interface BatchResponse {
   ssccBlock?: BatchSsccBlock;
   denied?: DeniedStationRecord[];
   productLabelReceipt?: unknown;
+  validationOccurrences?: unknown;
 }
 
 interface ConflictStatusResponse {
@@ -1591,6 +1597,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           try {
             const commitIsCurrent = () => !pauseInvalidated() && !credentialGeneration.sealed;
             if (!commitIsCurrent()) break drainLoop;
+            if (owner && res.validationOccurrences !== undefined) {
+              await applyValidationOutcomes(
+                deps.exec,
+                owner,
+                parseValidationOutcomes(res.validationOccurrences),
+              );
+              if (!commitIsCurrent()) break drainLoop;
+            }
             // Filtered element-by-element, not all-or-nothing: dropping only
             // the malformed entry (Finding 2) keeps the rest of this batch's
             // conflicts intact. That matters more here than it would somewhere
@@ -1818,6 +1832,29 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         } catch (err) {
           if (isStationCredentialRejection(err)) await rejectCredential();
           else console.error("station: code release reconciliation failed", err);
+        }
+      }
+      if (!pauseInvalidated() && !credentialGeneration.sealed && retryTimer === null) {
+        try {
+          const lease = acquireCredentialCommitLease(credentialGeneration);
+          if (lease) {
+            try {
+              const owner = await productLabelOwnership;
+              if (owner)
+                await reconcileValidationOccurrences(
+                  deps.exec,
+                  deps.client,
+                  owner,
+                  () => !pauseInvalidated() && !credentialGeneration.sealed,
+                );
+            } finally {
+              lease.release();
+            }
+          }
+        } catch (err) {
+          // Sealing must run after releasing our own lease, otherwise it waits on itself.
+          if (isStationCredentialRejection(err)) await rejectCredential();
+          else console.warn("station: validation occurrence confirmation pending");
         }
       }
     } catch (err) {

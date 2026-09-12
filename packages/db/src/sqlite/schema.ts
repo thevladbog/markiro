@@ -1154,3 +1154,50 @@ export const stationDeviceOwners = sqliteTable("station_device_owners", {
   credentialHash: text("credential_hash").primaryKey(),
   ownerJson: text("owner_json").notNull(),
 });
+
+/** A complete server snapshot; its trigger replaces all entries in one statement. */
+export const validationHistoryPublications = sqliteTable("validation_history_publications", {
+  shiftId: text("shift_id").primaryKey(),
+  productId: text("product_id").notNull(),
+  snapshot: text("snapshot").notNull(),
+  fetchedAt: text("fetched_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  itemsJson: text("items_json").notNull(),
+});
+export const validationCodeHistory = sqliteTable(
+  "validation_code_history",
+  {
+    shiftId: text("shift_id").notNull(),
+    codeHash: text("code_hash").notNull(),
+    kind: text("kind", { enum: ["original", "reprocessing"] }).notNull(),
+    sourceShiftId: text("source_shift_id").notNull(),
+    shiftNumber: text("shift_number").notNull(),
+    shiftStatus: text("shift_status", { enum: ["planned", "active", "closed"] }).notNull(),
+    scannedAt: text("scanned_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.shiftId, table.codeHash, table.kind, table.sourceShiftId] }),
+  ],
+);
+/** Separate processing facts preserve the global code mirror and survive print-copy retention. */
+export const validationOccurrences = sqliteTable(
+  "validation_occurrences",
+  {
+    shiftId: text("shift_id").notNull(),
+    codeHash: text("code_hash").notNull(),
+    scannedAt: text("scanned_at").notNull(),
+    credentialOwnership: text("credential_ownership").notNull(),
+    terminalId: text("terminal_id").notNull(),
+    operatorId: text("operator_id"),
+    sourceShiftId: text("source_shift_id"),
+    canonicalRaw: text("canonical_raw").notNull(),
+    outcome: text("outcome", { enum: ["pending", "first_accepted", "reprocessed", "conflict"] })
+      .notNull()
+      .default("pending"),
+    ownershipReleased: integer("ownership_released", { mode: "boolean" }).notNull().default(false),
+    receiptOutcome: text("receipt_outcome", {
+      enum: ["first_accepted", "reprocessed", "conflict"],
+    }),
+  },
+  (table) => [primaryKey({ columns: [table.shiftId, table.codeHash] })],
+);

@@ -2534,6 +2534,26 @@
         },
         "attempts_few": "{{count}} attempts",
         "attempts_many": "{{count}} attempts"
+      },
+      "reprocessing": {
+        "allow": "Allow reprocessing codes from previous shifts",
+        "help": "A code may be reprocessed only from a previous closed shift, once per current shift. Codes from active shifts and duplicates within the current shift remain blocked. This setting is frozen when the shift opens.",
+        "allowed": "Allowed",
+        "disallowed": "Not allowed",
+        "processed": "Processed",
+        "first": "First accepted",
+        "repeated": "Reprocessed",
+        "title": "Reprocessed codes",
+        "empty": "No reprocessed codes yet",
+        "loadError": "Could not load reprocessed codes",
+        "source": "Source shift",
+        "missingSource": "Source shift unavailable",
+        "missingCode": "Full code unavailable",
+        "missingProduct": "Product unavailable",
+        "missingDate": "Date unavailable",
+        "processedAt": "Processed {{date}}",
+        "hint": "Each code counts once towards the current shift’s processed total. Reprocessing does not increase overall production.",
+        "unsupported": "The server has not confirmed support for reprocessing. You cannot enable this setting or save a planned shift with it enabled."
       }
     },
     "boxes": {

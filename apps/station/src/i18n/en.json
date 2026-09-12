@@ -200,7 +200,10 @@
     "printHardwareRequired": "Configure the printer and its resolution before starting duplicate printing.",
     "printerSettings": "Printer settings",
     "productTemplateUnavailable": "The selected template is no longer available. Choose another one.",
-    "printPolicyNotConfirmed": "The server did not confirm printing settings. Open the shift from the list after checking its settings."
+    "printPolicyNotConfirmed": "The server did not confirm printing settings. Open the shift from the list after checking its settings.",
+    "allowPreviouslyAcceptedCodes": "Allow reprocessing codes from previous shifts",
+    "reprocessingUnavailable": "Reprocessing is not supported by this server",
+    "reprocessingHint": "Only codes from closed shifts. Each code can be processed once in the current shift."
   },
   "inventory": {
     "warehouseTitle": "Warehouse operations",
@@ -830,6 +833,19 @@
     "resume": "Resume saved label",
     "resumeHint": "Finish the saved job first. Printing does not restart automatically.",
     "closeChanged": "Shift results changed. Check the quantity and close again.",
-    "closeBlocked": "Finish the saved label jobs for this shift before closing."
+    "closeBlocked": "Finish the saved label jobs for this shift before closing.",
+    "historyChecked": "History checked: {{date}}",
+    "historyUnknown": "History has not been checked. Acceptance is provisional until sync.",
+    "processingPending": "Awaiting confirmation: {{count}}",
+    "processingConflicts": "Server rejected: {{count}}. Print history is preserved.",
+    "processed": "Processed: {{count}}",
+    "reprocessingEnabled": "Reprocessing allowed",
+    "reprocessingDisabled": "Reprocessing disabled",
+    "refusal": {
+      "current": "Code already processed in this shift",
+      "active": "Code is being processed in another active shift",
+      "previous": "Code from a previous shift: reprocessing is disabled",
+      "unconfirmed": "Previous shift closure has not been confirmed"
+    }
   }
 }

@@ -207,6 +207,9 @@ export const shifts = pgTable(
     validationPrintTemplateId: uuid("validation_print_template_id"),
     validationPrintSnapshot: jsonb("validation_print_snapshot").$type<Record<string, unknown>>(),
     validationPrintPolicyRevision: uuid("validation_print_policy_revision"),
+    allowPreviouslyAcceptedCodes: boolean("allow_previously_accepted_codes")
+      .notNull()
+      .default(false),
     status: shiftStatus("status").notNull().default("planned"),
     mode: shiftMode("mode").notNull(),
     plannedQty: integer("planned_qty"),
@@ -264,6 +267,7 @@ export const shifts = pgTable(
       "shifts_validation_print_policy_check",
       sql`
       (${t.validationPrintMode} = 'none'
+        AND ${t.allowPreviouslyAcceptedCodes} = false
         AND ${t.validationPrintVerification} = 'none'
         AND ${t.validationPrintTemplateId} IS NULL
         AND ${t.validationPrintSnapshot} IS NULL

@@ -1,4 +1,15 @@
 import {
+  validationReprocessingDetailsQuerySchema,
+  validationReprocessingDetailsSchema,
+  type ValidationReprocessingDetailsQuery,
+} from "@markiro/domain";
+import { projectDeviceValidationPrint, projectDeviceShiftOutput } from "./validation-print-policy";
+import {
+  validationCodeHistoryQuerySchema,
+  validationCodeHistorySchema,
+  type ValidationCodeHistoryQuery,
+} from "@markiro/domain";
+import {
   productLabelHistoryQuerySchema,
   productLabelEventsQuerySchema,
   type ProductLabelHistoryQuery,
@@ -73,13 +84,9 @@ import {
   type CloseShiftDto,
   type CreateShiftDto,
   type ListShiftsQueryDto,
-  type ListShiftsResponseDto,
   type ShiftBoxLabelTemplatesDto,
-  type ShiftBundleDto,
   type ShiftDto,
   type ShiftPlanningConfigDto,
-  type ShiftReferenceBundleDto,
-  type ShiftSummaryDto,
   type UpdateShiftDto,
   boxLabelTemplateProductQuerySchema,
   type BoxLabelTemplateProductQueryDto,
@@ -110,12 +117,20 @@ export class ShiftsController {
   async listShifts(
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(listShiftsQuerySchema)) query: ListShiftsQueryDto,
-  ): Promise<ListShiftsResponseDto> {
+  ) {
     const effectiveQuery: EffectiveListShiftsQuery =
       req.authKind === "station" && query.lineId === undefined && req.deviceLineId
         ? { ...query, lineId: req.deviceLineId, includeUnassigned: true }
         : query;
-    return this.shiftsService.listShifts(req.tenantId!, effectiveQuery);
+    const result = await this.shiftsService.listShifts(req.tenantId!, effectiveQuery);
+    return req.authKind === "station"
+      ? {
+          ...result,
+          items: result.items.map((item) =>
+            projectDeviceValidationPrint(item, req.get("x-station-capabilities")),
+          ),
+        }
+      : result;
   }
 
   @Get("product-label-templates")
@@ -155,7 +170,20 @@ export class ShiftsController {
     @Query(new ZodValidationPipe(boxLabelTemplateProductQuerySchema))
     query: BoxLabelTemplateProductQueryDto,
   ): Promise<ShiftPlanningConfigDto> {
-    return this.shiftsService.getPlanningConfig(req.tenantId!, query.productId);
+    const result = await this.shiftsService.getPlanningConfig(req.tenantId!, query.productId);
+    if (
+      req.authKind === "station" &&
+      !req
+        .get("x-station-capabilities")
+        ?.split(",")
+        .map((token) => token.trim())
+        .includes("validation-reprocessing-v1")
+    ) {
+      const { validationReprocessingProtocol: supported, ...legacy } = result;
+      void supported;
+      return legacy;
+    }
+    return result;
   }
 
   // Station-readable template summaries for the NewShift picker. Specs stay
@@ -180,6 +208,45 @@ export class ShiftsController {
     query: BoxLabelTemplateProductQueryDto,
   ): Promise<ShiftBoxLabelTemplatesDto> {
     return this.shiftsService.listBoxLabelTemplates(req.tenantId!, query.productId);
+  }
+
+  @Get(":id/reprocessings")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiCabinetAuth()
+  @ApiOperation({
+    summary: "Read repeated validation occurrences and their original source shifts",
+  })
+  @ApiParam({ name: "id", format: "uuid" })
+  @ApiZodQuery(validationReprocessingDetailsQuerySchema)
+  @ApiOkResponse({ schema: zodApiSchema(validationReprocessingDetailsSchema) })
+  @ApiHttpErrors(400, 401, 403, 404)
+  getReprocessings(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Query(new ZodValidationPipe(validationReprocessingDetailsQuerySchema))
+    query: ValidationReprocessingDetailsQuery,
+  ) {
+    return this.shiftsService.getValidationReprocessingDetails(req.tenantId!, id, query);
+  }
+
+  @Get(":id/code-history")
+  @UseGuards(StationOnlyGuard)
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @AllowSubscriptionRecovery("shift")
+  @ApiStationAuth()
+  @ApiOperation({ summary: "Read a coherent page of validation code ownership history" })
+  @ApiParam({ name: "id", format: "uuid" })
+  @ApiZodQuery(validationCodeHistoryQuerySchema)
+  @ApiOkResponse({ schema: zodApiSchema(validationCodeHistorySchema) })
+  @ApiHttpErrors(400, 401, 403, 404, 409)
+  getCodeHistory(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Query(new ZodValidationPipe(validationCodeHistoryQuerySchema))
+    query: ValidationCodeHistoryQuery,
+  ) {
+    if (!req.deviceId) throw new Error("Station device identity is missing");
+    return this.shiftsService.getValidationCodeHistory(req.tenantId!, req.deviceId, id, query);
   }
 
   @Get(":id/product-labels")
@@ -230,15 +297,15 @@ export class ShiftsController {
   @ApiParam({ name: "id", format: "uuid" })
   @ApiOkResponse({ schema: shiftSummaryOpenApiSchema })
   @ApiHttpErrors(401, 403, 404)
-  async getShiftSummary(
-    @Req() req: RequestWithTenant,
-    @Param("id") id: string,
-  ): Promise<ShiftSummaryDto> {
-    return this.shiftsService.getShiftSummary(
+  async getShiftSummary(@Req() req: RequestWithTenant, @Param("id") id: string) {
+    const result = await this.shiftsService.getShiftSummary(
       req.tenantId!,
       id,
       req.authKind === "station" ? (req.deviceId ?? null) : null,
     );
+    return req.authKind === "station"
+      ? projectDeviceShiftOutput(result, req.get("x-station-capabilities"))
+      : result;
   }
 
   // Cabinet-only: a device reading an
@@ -276,15 +343,18 @@ export class ShiftsController {
   async createShift(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createShiftSchema)) body: CreateShiftDto,
-  ): Promise<ShiftDto> {
+  ) {
     if (req.authKind === "station") {
-      return this.shiftsService.createShift(
-        req.tenantId!,
-        {
-          ...body,
-          lineId: req.deviceLineId ?? null,
-        },
-        "station",
+      return projectDeviceValidationPrint(
+        await this.shiftsService.createShift(
+          req.tenantId!,
+          {
+            ...body,
+            lineId: req.deviceLineId ?? null,
+          },
+          "station",
+          req.get("x-station-capabilities"),
+        ),
         req.get("x-station-capabilities"),
       );
     }
@@ -364,13 +434,16 @@ export class ShiftsController {
   @ApiParam({ name: "id", format: "uuid" })
   @ApiOkResponse({ schema: shiftOpenApiSchema })
   @ApiHttpErrors(401, 403, 404, 409, 429)
-  async openShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftDto> {
-    return this.shiftsService.openShift(
+  async openShift(@Req() req: RequestWithTenant, @Param("id") id: string) {
+    const result = await this.shiftsService.openShift(
       req.tenantId!,
       id,
       req.deviceId,
       req.get("x-station-capabilities"),
     );
+    return req.authKind === "station"
+      ? projectDeviceValidationPrint(result, req.get("x-station-capabilities"))
+      : result;
   }
 
   @Post(":id/enter")
@@ -391,14 +464,15 @@ export class ShiftsController {
   @ApiParam({ name: "id", format: "uuid" })
   @ApiOkResponse({ schema: shiftOpenApiSchema })
   @ApiHttpErrors(401, 403, 404, 409, 429)
-  async enterShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftDto> {
+  async enterShift(@Req() req: RequestWithTenant, @Param("id") id: string) {
     if (!req.deviceId) throw new Error("Station device identity is missing");
-    return this.shiftsService.enterShift(
+    const result = await this.shiftsService.enterShift(
       req.tenantId!,
       id,
       req.deviceId,
       req.get("x-station-capabilities"),
     );
+    return projectDeviceValidationPrint(result, req.get("x-station-capabilities"));
   }
 
   @Get(":id/bundle")
@@ -418,13 +492,19 @@ export class ShiftsController {
   @ApiParam({ name: "id", format: "uuid" })
   @ApiOkResponse({ schema: shiftBundleOpenApiSchema })
   @ApiHttpErrors(400, 401, 403, 404, 409, 429)
-  async getBundle(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftBundleDto> {
-    return this.shiftsService.getBundle(
+  async getBundle(@Req() req: RequestWithTenant, @Param("id") id: string) {
+    const result = await this.shiftsService.getBundle(
       req.tenantId!,
       id,
       req.deviceId ?? null,
       req.get("x-station-capabilities"),
     );
+    return req.authKind === "station"
+      ? {
+          ...result,
+          shift: projectDeviceValidationPrint(result.shift, req.get("x-station-capabilities")),
+        }
+      : result;
   }
 
   @Get(":id/reference-bundle")
@@ -443,15 +523,18 @@ export class ShiftsController {
   @ApiParam({ name: "id", format: "uuid" })
   @ApiOkResponse({ schema: shiftReferenceBundleOpenApiSchema })
   @ApiHttpErrors(401, 403, 404, 409, 429)
-  async getReferenceBundle(
-    @Req() req: RequestWithTenant,
-    @Param("id") id: string,
-  ): Promise<ShiftReferenceBundleDto> {
-    return this.shiftsService.getReferenceBundle(
+  async getReferenceBundle(@Req() req: RequestWithTenant, @Param("id") id: string) {
+    const result = await this.shiftsService.getReferenceBundle(
       req.tenantId!,
       id,
       req.authKind === "station",
       req.get("x-station-capabilities"),
     );
+    return req.authKind === "station"
+      ? {
+          ...result,
+          shift: projectDeviceValidationPrint(result.shift, req.get("x-station-capabilities")),
+        }
+      : result;
   }
 }

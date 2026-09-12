@@ -334,3 +334,5 @@ export type {
   ShiftExportPart,
   ShiftExportSource,
 } from "./shift-exports.js";
+
+export * from "./validation-reprocessing.js";

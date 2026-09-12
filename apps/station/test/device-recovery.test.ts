@@ -349,6 +349,9 @@ it("explicitly reprints saved bytes, verifies and retains an old job under the r
     quarantined: [],
   });
   await ackThrough(work.exec, 1);
+  await work.exec.run(
+    "UPDATE validation_occurrences SET outcome='first_accepted',receipt_outcome='first_accepted'",
+  );
   await work.exec.run("UPDATE shift_mirror SET status='closed' WHERE id=?", [work.input.shiftId]);
   expect(await purgeCompletedProductLabelJobs(work.exec, hash)).toBe(1);
 });

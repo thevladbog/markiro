@@ -1,3 +1,7 @@
+import {
+  validationOccurrenceOutcomeSchema,
+  type ValidationOccurrenceOutcome,
+} from "@markiro/domain";
 import { z } from "zod";
 import type { SchemaObject } from "@nestjs/swagger";
 import {
@@ -373,6 +377,7 @@ export interface DeniedStationRecordDto {
 }
 
 export interface SyncBatchResponseDto {
+  validationOccurrences?: ValidationOccurrenceOutcome[];
   applied: number;
   alreadyApplied: boolean;
   /**
@@ -457,6 +462,10 @@ export const syncBatchResponseOpenApiSchema: SchemaObject = {
   additionalProperties: false,
   required: ["applied", "alreadyApplied", "conflicts"],
   properties: {
+    validationOccurrences: {
+      type: "array",
+      items: zodApiSchema(validationOccurrenceOutcomeSchema),
+    },
     applied: { type: "integer", minimum: 0 },
     alreadyApplied: { type: "boolean" },
     productLabelReceipt: zodApiSchema(productLabelReceiptSchema),

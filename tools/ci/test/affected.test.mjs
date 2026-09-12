@@ -323,3 +323,14 @@ test("CLI full mode writes every output as true", () => {
     ["full=true", ...jobNames.map((name) => `${name}=true`), ""].join("\n"),
   );
 });
+
+test("validation reprocessing wire producers select Android parity", () => {
+  for (const path of [
+    "packages/domain/src/validation-reprocessing.ts",
+    "packages/domain/src/validation-reprocessing-fixtures.ts",
+    "packages/domain/src/product-labels/contracts.ts",
+    "packages/domain/scripts/export-validation-reprocessing-fixtures.mjs",
+    "packages/domain/test/validation-reprocessing-fixtures.test.ts",
+  ])
+    assert.equal(classifyChangedFiles([path]).jobs.handheld_android, true, path);
+});

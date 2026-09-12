@@ -18,7 +18,7 @@ class DeviceRecoveryMigrationTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
     private fun database(name: String) = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
         .allowMainThreadQueries()
-        .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11).build()
+        .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12).build()
 
     /**
      * Turns the file Room just built at the CURRENT version back into a real v7
@@ -33,6 +33,9 @@ class DeviceRecoveryMigrationTest {
      * byte-for-byte what an installed terminal would be holding.
      */
     private fun rewindToVersionSeven(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE validation_occurrences")
+        db.execSQL("DROP TABLE validation_history")
+        db.execSQL("DROP TABLE validation_history_publications")
         db.execSQL("DROP TABLE device_recovery")
         // `IF EXISTS` is kept rather than tightened: `pallet_exceptions` gained
         // its entity only at v11 (`MIGRATION_10_11`), so a file built by an
@@ -86,7 +89,7 @@ class DeviceRecoveryMigrationTest {
                     assertEquals("exact\u001dscan", upgraded.outboxDao().head(5).single().raw)
                     assertEquals(1L, upgraded.outboxDao().head(5).single().id)
                     assertEquals("{\"batch\":\"saved\\u001dbytes\"}", upgraded.metaDao().get("inventory_pending_batch:i1"))
-                    assertEquals(11, upgraded.openHelper.readableDatabase.version)
+                    assertEquals(12, upgraded.openHelper.readableDatabase.version)
                 }
                 database(name).useDb { restarted ->
                     val recovery = DeviceRecovery(restarted, credentials)

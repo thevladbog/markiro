@@ -6,15 +6,16 @@ import {
   assertDuplicateTemplate,
   parseLabelTemplate,
   PRODUCT_LABEL_PROTOCOL,
+  VALIDATION_REPROCESSING_PROTOCOL,
   productLabelValueDigest,
   validationPrintPolicySchema,
   type ValidationPrintInput,
   type ValidationPrintPolicy,
 } from "@markiro/domain";
-import type { ShiftMode } from "./dto";
+import type { ShiftMode, ShiftOutputDto } from "./dto";
 
 export const VALIDATION_DM_DUPLICATE_ENABLED = Symbol("VALIDATION_DM_DUPLICATE_ENABLED");
-export type ValidationPrintStorage = Pick<
+export type ValidationPrintStorage = { allowPreviouslyAcceptedCodes?: boolean | undefined } & Pick<
   typeof schema.shifts.$inferSelect,
   | "validationPrintMode"
   | "validationPrintVerification"
@@ -36,9 +37,21 @@ export function assertValidationPrintCompatible(
 }
 
 export function assertProductLabelCapability(
-  policy: Pick<ValidationPrintPolicy, "mode">,
+  policy: { mode: string; allowPreviouslyAcceptedCodes?: boolean | undefined },
   capabilities: string | undefined,
 ): void {
+  if (
+    policy.allowPreviouslyAcceptedCodes &&
+    !capabilities
+      ?.split(",")
+      .map((value) => value.trim())
+      .includes(VALIDATION_REPROCESSING_PROTOCOL)
+  ) {
+    throw new ConflictException({
+      code: "STATION_UPDATE_REQUIRED",
+      message: "Update the station before reprocessing codes",
+    });
+  }
   if (
     policy.mode === "duplicate_dm" &&
     !capabilities
@@ -56,6 +69,9 @@ export function assertProductLabelCapability(
 export function validationPrintFromStorage(row: ValidationPrintStorage): ValidationPrintPolicy {
   return validationPrintPolicySchema.parse({
     mode: row.validationPrintMode,
+    ...(row.validationPrintMode === "duplicate_dm"
+      ? { allowPreviouslyAcceptedCodes: row.allowPreviouslyAcceptedCodes ?? false }
+      : {}),
     verification: row.validationPrintVerification,
     templateId: row.validationPrintTemplateId,
     snapshot: row.validationPrintSnapshot,
@@ -67,6 +83,8 @@ export function validationPrintToStorage(value: ValidationPrintPolicy): Validati
   const policy = validationPrintPolicySchema.parse(value);
   return {
     validationPrintMode: policy.mode,
+    allowPreviouslyAcceptedCodes:
+      policy.mode === "duplicate_dm" && policy.allowPreviouslyAcceptedCodes,
     validationPrintVerification: policy.verification,
     validationPrintTemplateId: policy.templateId,
     validationPrintSnapshot: policy.snapshot,
@@ -80,6 +98,7 @@ export function validationPrintInput(policy: ValidationPrintPolicy): ValidationP
     : {
         mode: policy.mode,
         verification: policy.verification,
+        allowPreviouslyAcceptedCodes: policy.allowPreviouslyAcceptedCodes,
         templateId: policy.templateId,
       };
 }
@@ -137,7 +156,8 @@ export async function snapshotValidationPrintPolicy(
   if (
     previous?.mode === "duplicate_dm" &&
     previous.snapshot.digest === digest &&
-    previous.verification === input.verification
+    previous.verification === input.verification &&
+    previous.allowPreviouslyAcceptedCodes === (input.allowPreviouslyAcceptedCodes ?? false)
   )
     return previous;
   return validationPrintPolicySchema.parse({
@@ -145,4 +165,40 @@ export async function snapshotValidationPrintPolicy(
     snapshot: { ...content, digest },
     policyRevision: randomUUID(),
   });
+}
+
+/** Legacy strict parsers cannot accept even a new false property. */
+export function projectDeviceValidationPrint<
+  T extends { validationPrint: ValidationPrintPolicy; output: ShiftOutputDto },
+>(value: T, capabilities: string | undefined) {
+  if (
+    capabilities
+      ?.split(",")
+      .map((token) => token.trim())
+      .includes(VALIDATION_REPROCESSING_PROTOCOL)
+  )
+    return value;
+  if (value.validationPrint.mode === "none") return projectDeviceShiftOutput(value, capabilities);
+  const { allowPreviouslyAcceptedCodes: enabled, ...legacy } = value.validationPrint;
+  // Listing may describe an unavailable shift; open/enter/bundle separately enforce capability.
+  void enabled;
+  return { ...projectDeviceShiftOutput(value, capabilities), validationPrint: legacy };
+}
+
+export function projectDeviceShiftOutput<T extends { output: ShiftOutputDto }>(
+  value: T,
+  capabilities: string | undefined,
+) {
+  if (
+    value.output.mode !== "validation" ||
+    capabilities
+      ?.split(",")
+      .map((token) => token.trim())
+      .includes(VALIDATION_REPROCESSING_PROTOCOL)
+  )
+    return value;
+  return {
+    ...value,
+    output: { mode: "validation" as const, acceptedUnits: value.output.acceptedUnits },
+  };
 }

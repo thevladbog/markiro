@@ -63,6 +63,99 @@ describe("atomic product label acceptance", () => {
     return result;
   }
 
+  it("accepts one closed-source repeat atomically and preserves original identity", async () => {
+    const input = productLabelAcceptanceFixture({
+      allowPreviouslyAcceptedCodes: true,
+      verification: "none",
+    });
+    await seedProductLabelShift(exec, input);
+    const source = randomUUID();
+    await exec.run(
+      "INSERT INTO codes_mirror(code_hash,shift_id,gtin14,serial,scanned_at) VALUES(?,?,?,?,?)",
+      [input.codeHash, source, input.gtin14, input.serial, "2026-09-01T00:00:00.000Z"],
+    );
+    await exec.run(
+      "INSERT INTO validation_code_history(shift_id,code_hash,kind,source_shift_id,shift_number,shift_status,scanned_at) VALUES(?,?,'original',?,'OLD-1','closed',?)",
+      [input.shiftId, input.codeHash, source, "2026-09-01T00:00:00.000Z"],
+    );
+    expect(await recordProductLabelAcceptance(exec, input)).toEqual({
+      status: "accepted",
+      jobId: input.jobId,
+    });
+    expect(await exec.all("SELECT shift_id FROM codes_mirror")).toEqual([{ shift_id: source }]);
+    expect(
+      await exec.all("SELECT shift_id,source_shift_id,outcome FROM validation_occurrences"),
+    ).toEqual([{ shift_id: input.shiftId, source_shift_id: source, outcome: "pending" }]);
+    await markFixtureSent(exec, input);
+    const next = {
+      ...input,
+      jobId: randomUUID(),
+      preparedEvent: {
+        ...input.preparedEvent,
+        jobId: "",
+        eventId: randomUUID(),
+        attemptId: randomUUID(),
+      },
+    };
+    next.preparedEvent.jobId = next.jobId;
+    expect(await recordProductLabelAcceptance(exec, next)).toEqual({ status: "duplicate" });
+    expect((await exec.all("SELECT * FROM product_label_jobs")).length).toBe(1);
+  });
+
+  it.each([false, true])(
+    "refuses an active processing entry without an original owner (flag %s)",
+    async (allowPreviouslyAcceptedCodes) => {
+      const input = productLabelAcceptanceFixture({ allowPreviouslyAcceptedCodes });
+      await seedProductLabelShift(exec, input);
+      await exec.run(
+        "INSERT INTO validation_code_history(shift_id,code_hash,kind,source_shift_id,shift_number,shift_status,scanned_at) VALUES(?,?,'reprocessing',?,'ACTIVE-1','active',?)",
+        [input.shiftId, input.codeHash, randomUUID(), input.acceptedAt],
+      );
+      expect(await recordProductLabelAcceptance(exec, input)).toEqual({ status: "duplicate" });
+      expect((await exec.all("SELECT * FROM product_label_jobs")).length).toBe(0);
+    },
+  );
+
+  it("refuses a known local source without server-confirmed closed history", async () => {
+    const input = productLabelAcceptanceFixture({ allowPreviouslyAcceptedCodes: true });
+    await seedProductLabelShift(exec, input);
+    await exec.run(
+      "INSERT INTO codes_mirror(code_hash,shift_id,gtin14,serial,scanned_at) VALUES(?,?,?,?,?)",
+      [input.codeHash, randomUUID(), input.gtin14, input.serial, input.acceptedAt],
+    );
+    expect(await recordProductLabelAcceptance(exec, input)).toEqual({ status: "duplicate" });
+    expect((await exec.all("SELECT * FROM product_label_jobs")).length).toBe(0);
+  });
+
+  it("blocks a locally retained active occurrence missing from stale downloaded history", async () => {
+    const input = productLabelAcceptanceFixture({ allowPreviouslyAcceptedCodes: true });
+    await seedProductLabelShift(exec, input);
+    await exec.run(
+      "INSERT INTO validation_occurrences(shift_id,code_hash,scanned_at,credential_ownership,terminal_id,canonical_raw,outcome) VALUES(?,?,?,?,?,?,'reprocessed')",
+      [
+        randomUUID(),
+        input.codeHash,
+        input.acceptedAt,
+        input.credentialOwnership,
+        input.terminalId,
+        input.canonicalRaw,
+      ],
+    );
+    expect(await recordProductLabelAcceptance(exec, input)).toEqual({ status: "duplicate" });
+    expect(await exec.all("SELECT * FROM product_label_jobs")).toHaveLength(0);
+  });
+
+  it("refuses a closed historical code under false even without a local registry row", async () => {
+    const input = productLabelAcceptanceFixture();
+    await seedProductLabelShift(exec, input);
+    await exec.run(
+      "INSERT INTO validation_code_history(shift_id,code_hash,kind,source_shift_id,shift_number,shift_status,scanned_at) VALUES(?,?,'original',?,'OLD','closed',?)",
+      [input.shiftId, input.codeHash, randomUUID(), input.acceptedAt],
+    );
+    expect(await recordProductLabelAcceptance(exec, input)).toEqual({ status: "duplicate" });
+    expect(await exec.all("SELECT * FROM product_label_jobs")).toHaveLength(0);
+  });
+
   it("atomically keeps full data, attribution, print bytes and one acceptance; retries are stable", async () => {
     const input = productLabelAcceptanceFixture();
     expect(await acceptFixture(exec, input)).toEqual({
