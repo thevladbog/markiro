@@ -23,6 +23,10 @@ export type ListConflictsQueryDto = z.infer<typeof listConflictsQuerySchema>;
 export interface ConflictDto {
   id: string;
   codeHash: string;
+  /** Full stored KM from the losing scan, including GS separators and crypto tail. */
+  rawKm: string | null;
+  losingTerminalName: string | null;
+  winningTerminalName: string | null;
   losingShiftId: string;
   losingTerminalId: string | null;
   losingScannedAt: Date;
@@ -47,6 +51,9 @@ export const conflictOpenApiSchema: SchemaObject = {
   required: [
     "id",
     "codeHash",
+    "rawKm",
+    "losingTerminalName",
+    "winningTerminalName",
     "losingShiftId",
     "losingTerminalId",
     "losingScannedAt",
@@ -59,6 +66,13 @@ export const conflictOpenApiSchema: SchemaObject = {
   properties: {
     id: uuidSchema,
     codeHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    rawKm: {
+      type: "string",
+      nullable: true,
+      description: "Full stored KM of the losing scan; null when the source is unavailable.",
+    },
+    losingTerminalName: { type: "string", nullable: true },
+    winningTerminalName: { type: "string", nullable: true },
     losingShiftId: uuidSchema,
     losingTerminalId: { ...uuidSchema, nullable: true },
     losingScannedAt: dateTimeSchema,

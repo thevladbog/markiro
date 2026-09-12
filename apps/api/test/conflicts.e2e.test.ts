@@ -1,3 +1,9 @@
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import { createDb, schema, type Db } from "@markiro/db";
+import { eq } from "drizzle-orm";
+import { DB } from "../src/auth/auth.module";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
@@ -18,9 +24,25 @@ const ready = Boolean(
 describe.skipIf(!ready)("conflicts e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
+  const databaseName = `markiro_conflicts_${randomUUID().replaceAll("-", "_")}`;
+  const maintenance = createDb(process.env.DATABASE_URL ?? "postgres://invalid");
+  let databaseCreated = false;
 
   beforeAll(async () => {
-    const env = loadEnv();
+    const scratchUrl = new URL(process.env.DATABASE_URL ?? "postgres://invalid");
+    scratchUrl.pathname = `/${databaseName}`;
+    scratchUrl.search = "";
+    await maintenance.pool.query(`CREATE DATABASE "${databaseName}"`);
+    databaseCreated = true;
+    const connection = createDb(scratchUrl.toString());
+    try {
+      await migrate(connection.db, {
+        migrationsFolder: join(__dirname, "../../../packages/db/migrations"),
+      });
+    } finally {
+      await connection.pool.end();
+    }
+    const env = loadEnv({ ...process.env, DATABASE_URL: scratchUrl.toString() });
     setup = setupAuth(env);
 
     const ref = await Test.createTestingModule({
@@ -33,10 +55,13 @@ describe.skipIf(!ready)("conflicts e2e", () => {
     server.use(express.json());
     await app.init();
     await listenOnLoopback(app);
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await app?.close();
+    if (databaseCreated)
+      await maintenance.pool.query(`DROP DATABASE "${databaseName}" WITH (FORCE)`);
+    await maintenance.pool.end();
   });
 
   async function deviceKey(agent: ReturnType<typeof request.agent>): Promise<string> {
@@ -123,6 +148,11 @@ describe.skipIf(!ready)("conflicts e2e", () => {
     const items = (list.body as { items: { id: string; reviewedAt: string | null }[] }).items;
     expect(items).toHaveLength(1);
     expect(items[0]!.reviewedAt).toBeNull();
+    expect(list.body.items[0]).toMatchObject({
+      rawKm: first.raw,
+      losingTerminalName: "Line 1",
+      winningTerminalName: "Line 1",
+    });
 
     const stillOpen = await request(app!.getHttpServer())
       .post("/station/conflicts/status")
@@ -133,6 +163,11 @@ describe.skipIf(!ready)("conflicts e2e", () => {
 
     const reviewed = await agent.post(`/conflicts/${items[0]!.id}/review`).expect(200);
     expect((reviewed.body as { reviewedAt: string | null }).reviewedAt).not.toBeNull();
+    expect(reviewed.body).toMatchObject({
+      rawKm: first.raw,
+      losingTerminalName: "Line 1",
+      winningTerminalName: "Line 1",
+    });
 
     const stationStatus = await request(app!.getHttpServer())
       .post("/station/conflicts/status")
@@ -243,7 +278,11 @@ describe.skipIf(!ready)("conflicts e2e", () => {
     const shift2 = await openShiftForProduct(agent, productId);
 
     // Terminal A, shift 1, arrives first but scanned LATER.
-    const scanA = { ...item(shift1, 5), terminalId: "A" };
+    const scanA = {
+      ...item(shift1, 5),
+      terminalId: "A",
+      raw: `${item(shift1, 5).raw}\u001d91X\u001d92LOSING`,
+    };
     await request(app!.getHttpServer())
       .post("/station/scans")
       .set("x-api-key", deviceA.apiKey)
@@ -256,6 +295,7 @@ describe.skipIf(!ready)("conflicts e2e", () => {
     // the only place this shows up.
     const scanB = {
       ...scanA,
+      raw: `${item(shift1, 5).raw}\u001d91Y\u001d92WINNING`,
       terminalId: "B",
       shiftId: shift2,
       scannedAt: new Date(Date.parse(scanA.scannedAt) - 5000).toISOString(),
@@ -283,6 +323,53 @@ describe.skipIf(!ready)("conflicts e2e", () => {
     expect(items[0]!.losingShiftId).not.toBe(items[0]!.winningShiftId);
     expect(items[0]!.losingTerminalId).toBe(deviceA.deviceId);
     expect(items[0]!.winningTerminalId).toBe(deviceB.deviceId);
+    expect(list.body.items[0]).toMatchObject({
+      rawKm: scanA.raw,
+      losingTerminalName: "Terminal A",
+      winningTerminalName: "Terminal B",
+    });
+  });
+
+  it("keeps missing historical sources nullable and excludes foreign terminal names", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    await signUpAndActivate(owner);
+    const shiftId = await openShift(owner);
+    const foreign = request.agent(app!.getHttpServer());
+    await signUpAndActivate(foreign);
+    const foreignDevice = await createTestStationDevice(app!, foreign, "Foreign secret name");
+    const db = app!.get<Db>(DB);
+    const [shift] = await db.select().from(schema.shifts).where(eq(schema.shifts.id, shiftId));
+    if (!shift) throw new Error("expected fixture shift");
+    const [conflict] = await db
+      .insert(schema.codeConflicts)
+      .values({
+        tenantId: shift.tenantId,
+        codeHash: "a".repeat(64),
+        losingShiftId: shiftId,
+        winningShiftId: shiftId,
+        losingTerminalId: foreignDevice.deviceId,
+        winningTerminalId: "legacy-terminal",
+        losingScannedAt: new Date("2026-07-28T10:00:00Z"),
+        winningScannedAt: new Date("2026-07-28T09:00:00Z"),
+      })
+      .returning();
+    if (!conflict) throw new Error("expected fixture conflict");
+    const list = await owner.get(`/conflicts?shiftId=${shiftId}`).expect(200);
+    expect(list.body.items).toHaveLength(1);
+    expect(list.body.items[0]).toMatchObject({
+      id: conflict.id,
+      rawKm: null,
+      losingTerminalName: null,
+      winningTerminalName: null,
+    });
+    const reviewed = await owner.post(`/conflicts/${conflict.id}/review`).expect(200);
+    expect(reviewed.body).toMatchObject({
+      rawKm: null,
+      losingTerminalName: null,
+      winningTerminalName: null,
+    });
+    const otherList = await foreign.get("/conflicts").expect(200);
+    expect(otherList.body.items).toEqual([]);
   });
 
   it("filters the list by reviewed status", async () => {

@@ -61,9 +61,10 @@ export function ConflictsPage() {
   const shiftFilterOptions: SelectOption[] = useMemo(
     () => [
       { value: "all", label: t("pages.conflicts.filters.shiftAll") },
-      ...[...shifts]
-        .reverse()
-        .map((shift) => ({ value: shift.id, label: shiftLabel(shift, i18n.language) })),
+      ...[...shifts].reverse().map((shift) => ({
+        value: shift.id,
+        label: shiftLabel(shift, i18n.language, t("pages.conflicts.unavailableShift")),
+      })),
     ],
     [t, shifts, i18n.language],
   );
@@ -80,10 +81,17 @@ export function ConflictsPage() {
   const baseColumns: TableColumn<ConflictDto>[] = useMemo(
     () => [
       {
-        key: "codeHash",
+        key: "rawKm",
         title: t("pages.conflicts.table.code"),
         mono: true,
-        render: (row) => <span title={row.codeHash}>{truncateHash(row.codeHash)}</span>,
+        render: (row) =>
+          row.rawKm ? (
+            <span className="mk-conflicts-code" title={row.rawKm}>
+              {row.rawKm}
+            </span>
+          ) : (
+            t("pages.conflicts.unavailableCode")
+          ),
       },
       {
         key: "shift",
@@ -91,8 +99,10 @@ export function ConflictsPage() {
         render: (row) => {
           const shift = shiftsById.get(row.losingShiftId);
           return (
-            <span title={row.losingShiftId}>
-              {shift ? shiftLabel(shift, i18n.language) : row.losingShiftId}
+            <span>
+              {shift
+                ? shiftLabel(shift, i18n.language, t("pages.conflicts.unavailableShift"))
+                : t("pages.conflicts.unavailableShift")}
             </span>
           );
         },
@@ -102,7 +112,14 @@ export function ConflictsPage() {
         title: t("pages.conflicts.table.losing"),
         render: (row) => (
           <div style={{ display: "flex", flexDirection: "column" }}>
-            <span>{row.losingTerminalId ?? "—"}</span>
+            <span>
+              {row.losingTerminalName?.trim() ||
+                t(
+                  row.losingTerminalId
+                    ? "pages.conflicts.unavailableTerminal"
+                    : "pages.conflicts.unspecifiedTerminal",
+                )}
+            </span>
             <span style={{ font: "var(--text-caption)", color: "var(--fg-3)" }}>
               {formatScanTime(row.losingScannedAt, i18n.language)}
             </span>
@@ -114,7 +131,14 @@ export function ConflictsPage() {
         title: t("pages.conflicts.table.winning"),
         render: (row) => (
           <div style={{ display: "flex", flexDirection: "column" }}>
-            <span>{row.winningTerminalId ?? "—"}</span>
+            <span>
+              {row.winningTerminalName?.trim() ||
+                t(
+                  row.winningTerminalId
+                    ? "pages.conflicts.unavailableTerminal"
+                    : "pages.conflicts.unspecifiedTerminal",
+                )}
+            </span>
             <span style={{ font: "var(--text-caption)", color: "var(--fg-3)" }}>
               {formatScanTime(row.winningScannedAt, i18n.language)}
             </span>
@@ -243,18 +267,8 @@ function AuthorizedConflictsTable({
 }
 
 /** Short, human-identifiable label for a shift filter option / shift column cell. */
-function shiftLabel(shift: ShiftDto, language: string): string {
+function shiftLabel(shift: ShiftDto, language: string, fallback: string): string {
   const date = shift.plannedDate ? formatDate(shift.plannedDate, language) : null;
   if (date && shift.productName) return `${date} — ${shift.productName}`;
-  return shift.productName ?? date ?? shift.id;
-}
-
-/**
- * `codeHash` is a 64-char hex string that would otherwise dominate the
- * table's width -- shown truncated with the full value in the cell's
- * `title` (see the `codeHash` column's render above).
- */
-function truncateHash(hash: string): string {
-  if (hash.length <= 18) return hash;
-  return `${hash.slice(0, 10)}…${hash.slice(-6)}`;
+  return shift.productName || date || shift.number || fallback;
 }
