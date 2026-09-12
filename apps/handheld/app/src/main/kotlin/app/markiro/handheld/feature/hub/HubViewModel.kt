@@ -14,6 +14,7 @@ import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.scan.ScanPreferences
 import app.markiro.handheld.core.scan.ScanSourceKind
 import app.markiro.handheld.core.scan.VendorProfiles
+import app.markiro.handheld.core.storage.CodeDao
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.InventoryTaskDao
@@ -22,6 +23,8 @@ import app.markiro.handheld.core.storage.ShiftDao
 import app.markiro.handheld.core.storage.ShiftEntity
 import app.markiro.handheld.core.sync.SyncEngine
 import app.markiro.handheld.core.sync.SyncState
+import app.markiro.handheld.feature.work.TeamRefresher
+import app.markiro.handheld.feature.work.TeamState
 import app.markiro.handheld.feature.signin.SessionHolder
 import app.markiro.handheld.feature.signin.SessionState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -32,6 +35,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -58,7 +63,11 @@ data class HubUi(
     val printerConfigured: Boolean = false,
     /** Closed boxes on this device whose label is still owed, across every shift. */
     val unprintedLabels: Int = 0,
+    val activeShift: HubActiveShift? = null,
 )
+
+/** Same accepted-unit total as the work screen; a missing summary is explicitly local. */
+data class HubActiveShift(val shift: ShiftEntity, val acceptedUnits: Int, val summaryAt: Long? = null)
 
 enum class HubTile { SHIFT, INVENTORY, SETTINGS }
 
@@ -81,9 +90,11 @@ class HubViewModel(
     inventories: InventoryTaskDao,
     printers: PrinterDao,
     boxes: BoxRepository,
+    codes: CodeDao,
+    team: TeamRefresher,
     private val scannerLabel: () -> String,
     private val now: () -> Long = System::currentTimeMillis,
-    /** Re-evaluates the online indicator while nothing else changes; tests pass a single tick. */
+    /** Refreshes the online indicator and the joined shift summary; tests pass controlled ticks. */
     tick: Flow<Unit> = flow {
         while (true) {
             emit(Unit)
@@ -105,6 +116,8 @@ class HubViewModel(
         inventories: InventoryTaskDao,
         printers: PrinterDao,
         boxes: BoxRepository,
+        codes: CodeDao,
+        team: TeamRefresher,
         scan: ScanPreferences,
     ) : this(
         recovery,
@@ -118,6 +131,8 @@ class HubViewModel(
         inventories,
         printers,
         boxes,
+        codes,
+        team,
         scannerLabel = {
             when (scan.sourceKind) {
                 ScanSourceKind.BUILTIN_INTENT -> VendorProfiles.byId(scan.profileId).label.substringBefore(" ·")
@@ -127,8 +142,30 @@ class HubViewModel(
         },
     )
 
-    private val activeShift: Flow<ShiftEntity?> =
-        config.observe().flatMapLatest { cfg -> cfg?.activeShiftId?.let { shifts.observe(it) } ?: flowOf(null) }
+    private val activeShift: Flow<HubActiveShift?> = config.observe()
+        .map { it?.activeShiftId }
+        .distinctUntilChanged()
+        .flatMapLatest { id ->
+            if (id == null) return@flatMapLatest flowOf(null)
+            shifts.observe(id).flatMapLatest shiftFlow@ { shift ->
+                if (shift == null || shift.status == "closed") return@shiftFlow flowOf(null)
+                val summary: Flow<TeamState?> = flow {
+                    var last: TeamState? = null
+                    emit(null)
+                    tick.collect {
+                        last = recovery.work { team.refresh(id) } ?: last
+                        emit(last)
+                    }
+                }
+                combine(codes.observeCountForShift(id), summary) { local, shared ->
+                    HubActiveShift(
+                        shift = shift,
+                        acceptedUnits = maxOf(shared?.acceptedUnits ?: 0, local),
+                        summaryAt = shared?.takeIf { it.acceptedUnits != null }?.at,
+                    )
+                }
+            }
+        }
 
     private val activeInventory: Flow<InventoryTaskEntity?> =
         config.observe().flatMapLatest { cfg -> cfg?.activeInventoryId?.let { inventories.observe(it) } ?: flowOf(null) }
@@ -141,7 +178,7 @@ class HubViewModel(
         val ses = values[1] as SessionState
         val lastOk = values[2] as Long?
         val syncState = values[4] as SyncState
-        val current = (values[5] as ShiftEntity?)?.takeIf { it.status != "closed" }
+        val current = (values[5] as HubActiveShift?)?.takeIf { it.shift.id == cfg?.activeShiftId }
         val inventoryState = values[6] as InventorySyncState
         val inventory = (values[7] as InventoryTaskEntity?)?.takeIf { it.state == "active" }
         val printer = values[8] as PrinterEntity?
@@ -158,12 +195,13 @@ class HubViewModel(
             scannerLabel = scannerLabel(),
             queue = syncState.pending + inventoryState.pending,
             stuck = syncState.stuck || inventoryState.stuck,
-            activeShiftId = current?.id,
-            continueShiftNumber = current?.number,
+            activeShiftId = current?.shift?.id,
+            continueShiftNumber = current?.shift?.number,
+            activeShift = current,
             activeInventoryId = inventory?.inventoryId,
             continueInventoryNumber = inventory?.inventoryNumber,
         )
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, HubUi())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HubUi())
 
     /** Fetches live counts; on any failure the cached counts and their timestamp stay untouched. */
     fun refresh() {

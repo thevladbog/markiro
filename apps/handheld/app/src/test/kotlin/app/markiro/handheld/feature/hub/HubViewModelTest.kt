@@ -29,6 +29,7 @@ import app.markiro.handheld.core.network.ShiftListResponse
 import app.markiro.handheld.core.network.ShiftSummaryDto
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.network.ValidationPrintDto
+import app.markiro.handheld.core.storage.CodeEntity
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.InventoryFixtures
@@ -36,13 +37,23 @@ import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.sync.SyncEngine
 import app.markiro.handheld.core.sync.SyncTransport
 import app.markiro.handheld.feature.shift.ShiftEntityFixtures
+import app.markiro.handheld.feature.work.TeamRefresher
+import app.markiro.handheld.feature.work.TeamState
 import app.markiro.handheld.feature.signin.SessionHolder
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import org.junit.After
@@ -54,6 +65,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.IOException
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(AndroidJUnit4::class)
 class HubViewModelTest {
     @get:Rule
@@ -123,7 +135,7 @@ class HubViewModelTest {
         override suspend fun leaveInventory(id: String, body: LeaveInventoryRequest): LeaveInventoryResponse = throw UnsupportedOperationException()
     }
 
-    private fun vm(api: StationApi): HubViewModel {
+    private fun vm(api: StationApi, team: TeamRefresher = TeamRefresher { null }, tick: Flow<Unit> = flowOf(Unit)): HubViewModel {
         val engine = SyncEngine(
             db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), engineScope,
@@ -135,7 +147,7 @@ class HubViewModelTest {
         return main.track(
             HubViewModel(recovery = db.recovery,
                 api, db.deviceConfigDao(), session, reachability, engine, db.shiftDao(), inventoryEngine, db.inventoryTaskDao(), db.printerDao(),
-                BoxRepository(db), scannerLabel = { "встроенный" }, now = { clock }, tick = flowOf(Unit),
+                BoxRepository(db), db.codeDao(), team, scannerLabel = { "встроенный" }, now = { clock }, tick = tick,
             ),
         )
     }
@@ -181,6 +193,75 @@ class HubViewModelTest {
         assertEquals("SEP26-001", ui.continueShiftNumber)
         db.shiftDao().setStatus("s1", "closed")
         assertNull(vm.state.first { it.activeShiftId == null }.continueShiftNumber)
+    }
+
+    @Test
+    fun activeCardUsesTheJoinedShiftsMetadataAndObservesLocalAcceptedUnits() = runTest {
+        val shift = ShiftEntityFixtures.bundled("s1").copy(productPrintName = "Вода 0,5 л", plannedQty = 3000, mode = "aggregation")
+        db.shiftDao().upsert(shift)
+        db.deviceConfigDao().upsert(paired.copy(activeShiftId = "s1"))
+        val model = vm(api())
+        val first = model.state.first { it.activeShift != null }.activeShift!!
+        assertEquals(shift, first.shift)
+        assertEquals(0, first.acceptedUnits)
+        assertNull(first.summaryAt)
+        db.codeDao().insert(CodeEntity("hash-1", "s1", "04600682000013", "one", "2026-09-12T10:00:00Z"))
+        assertEquals(1, model.state.first { it.activeShift?.acceptedUnits == 1 }.activeShift?.acceptedUnits)
+        db.deviceConfigDao().upsert(paired.copy(activeShiftId = null))
+        assertNull(model.state.first { it.activeShiftId == null }.activeShift)
+    }
+
+    @Test
+    fun aFailedRefreshKeepsTheLastSummaryButAnotherShiftNeverInheritsIt() = runTest {
+        db.shiftDao().upsertAll(listOf(ShiftEntityFixtures.bundled("s1"), ShiftEntityFixtures.bundled("s2")))
+        db.deviceConfigDao().upsert(paired.copy(activeShiftId = "s1"))
+        val ticks = MutableSharedFlow<Unit>(replay = 1).apply { tryEmit(Unit) }
+        var result: TeamState? = TeamState(emptyList(), 2, 123L)
+        var calls = 0
+        val model = vm(api(), TeamRefresher { calls++; result }, ticks)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.state.collect() }
+        assertEquals(2, model.state.first { it.activeShift?.summaryAt == 123L }.activeShift?.acceptedUnits)
+        result = null
+        ticks.emit(Unit)
+        runCurrent()
+        assertEquals(2, calls)
+        assertEquals(123L, model.state.value.activeShift?.summaryAt)
+        repeat(3) { index ->
+            db.codeDao().insert(CodeEntity("hash-$index", "s1", "04600682000013", "$index", "2026-09-12T10:00:00Z"))
+        }
+        assertEquals(123L, model.state.first { it.activeShift?.acceptedUnits == 3 }.activeShift?.summaryAt)
+        db.deviceConfigDao().upsert(paired.copy(activeShiftId = "s2"))
+        val next = model.state.first { it.activeShiftId == "s2" }.activeShift!!
+        assertEquals(0, next.acceptedUnits)
+        assertNull(next.summaryAt)
+        db.shiftDao().setStatus("s2", "closed")
+        assertNull(model.state.first { it.activeShiftId == null }.activeShift)
+    }
+
+    @Test
+    fun aSummaryWithoutAnAcceptedUnitTotalKeepsTheCountExplicitlyLocal() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1").copy(mode = "aggregation"))
+        db.deviceConfigDao().upsert(paired.copy(activeShiftId = "s1"))
+        db.codeDao().insert(CodeEntity("hash-1", "s1", "04600682000013", "one", "2026-09-12T10:00:00Z"))
+        var fetched = false
+        val model = vm(api(), TeamRefresher { fetched = true; TeamState(emptyList(), null, 123L) })
+        val active = model.state.first { it.activeShift != null }.activeShift!!
+        runCurrent()
+        assertEquals(true, fetched)
+        assertEquals(1, active.acceptedUnits)
+        assertNull(model.state.value.activeShift?.summaryAt)
+    }
+
+    @Test
+    fun summaryPollingStopsWhenTheHubHasNoVisibleSubscriber() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1"))
+        db.deviceConfigDao().upsert(paired.copy(activeShiftId = "s1"))
+        val ticks = MutableSharedFlow<Unit>(replay = 1).apply { tryEmit(Unit) }
+        val model = vm(api(), TeamRefresher { TeamState(emptyList(), 1, 123L) }, ticks)
+        model.state.first { it.activeShift?.summaryAt == 123L }
+        advanceTimeBy(5_001)
+        runCurrent()
+        assertEquals(0, ticks.subscriptionCount.value)
     }
 
     @Test

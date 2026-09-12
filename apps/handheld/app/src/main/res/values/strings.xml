@@ -54,6 +54,11 @@
     <string name="signin_number_short">№ %1$s</string>
     <string name="signin_pin">PIN</string>
 
+    <string name="hub_active_shift">АКТИВНАЯ СМЕНА</string>
+    <string name="hub_active_shift_title">Смена %1$s</string>
+    <string name="hub_active_shift_aggregation">агрегация</string>
+    <string name="hub_active_shift_local">На этом ТСД</string>
+    <string name="hub_active_shift_continue">Продолжить</string>
     <string name="hub_network">Сеть</string>
     <string name="hub_offline">Офлайн</string>
     <string name="hub_queue">Очередь %1$d</string>
