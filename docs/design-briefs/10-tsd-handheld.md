@@ -190,12 +190,15 @@ after**.
 
 ### 7. Exceptions
 
-Four action rows of 64 dp: «Расформировать короб», «Заменить единицу»,
-«Перепечатать этикетку», «Отменить последнее действие». Each flow is a
-stepper: header «Шаг 1 из 3 · Отсканируйте этикетку короба», the thing to
-scan now shown large, confirmation by scan only, a text «Отмена» to abort.
-Replace unit = scan box → scan unit out → scan unit in. Reprint = last label
-or scan an SSCC.
+Three action rows of 64 dp: «Расформировать короб», «Перепечатать
+этикетку», «Отменить последнее действие». Each flow is a stepper: header
+«Шаг 1 из 3 · Отсканируйте этикетку короба», the thing to scan now shown
+large, confirmation by scan only, a text «Отмена» to abort. Reprint = last
+label or scan an SSCC.
+
+Drawn as four rows on 2026-09-10; «Заменить единицу» (scan box → scan unit
+out → scan unit in) is out of v1 and the row is not built. See «Out of v1»
+below for why.
 
 ### 8. Printing and recovery
 
@@ -360,6 +363,16 @@ before the next.
 
 ## Out of v1 (leave room)
 
+- **«Заменить единицу» (replace-in-box).** Swapping one code for another
+  inside an already-closed box, without touching the rest of it. Deferred by
+  spec `2026-07-30-station-exceptions-design.md` §1 for want of an identified
+  client need, and because it is a strictly harder variant of the mechanics
+  that undo/clear/disassemble already ship. Reconfirmed 2026-09-12 when
+  contour 06 closed: §7 above had kept drawing it, so design and spec had
+  quietly disagreed for two months. Today a defective unit in an open box is
+  handled by «Отменить последний скан», and in a closed one by
+  «Расформировать короб». Neither the station nor the handheld offers a
+  replace action, and no shipped UI promises one.
 - Receiving, shipping, movements and write-offs on the handheld.
 - Pallet building outside a shift; disposal; box-sell display.
 - Actions from the code-check card (reprint, disassemble).
