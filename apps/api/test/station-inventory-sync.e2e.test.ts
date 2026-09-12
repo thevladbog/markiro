@@ -1002,7 +1002,7 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
     expect(inventory?.status).toBe("running");
   });
 
-  it("owns repack boxes and membership on the server across real competing devices", async () => {
+  it("preserves repack history when an earlier scan arrives after another device committed", async () => {
     const repackInventoryId = randomUUID();
     const repackSnapshotId = randomUUID();
     const raceCode = code(`REPACK-${randomUUID()}`);
@@ -1377,26 +1377,95 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
     const losingItemId = randomUUID();
     const winner = add("a", boxAId, winningItemId, "2026-08-25T12:00:01.000Z");
     const loser = add("b", boxBId, losingItemId, "2026-08-25T12:00:02.000Z");
-    await Promise.all([
+    // Force the arrival order that concurrent devices can produce: the later
+    // scan commits first, then the earlier scan must displace its membership.
+    await service.ingest(
+      tenantId,
+      deviceBId,
+      repackInventoryId,
+      repackBatch("repack-race-b", [loser], 1),
+    );
+    const priorMembership = await db
+      .select()
+      .from(schema.inventoryRepackItems)
+      .where(eq(schema.inventoryRepackItems.inventoryId, repackInventoryId));
+    const priorResult = await db
+      .select()
+      .from(schema.inventoryCodeResults)
+      .where(eq(schema.inventoryCodeResults.inventoryId, repackInventoryId));
+    const priorBoxes = await db
+      .select()
+      .from(schema.inventoryRepackBoxes)
+      .where(eq(schema.inventoryRepackBoxes.inventoryId, repackInventoryId))
+      .orderBy(asc(schema.inventoryRepackBoxes.id));
+    if (winner.repack?.action !== "add-item") throw new Error("test requires add-item");
+    const invalidWinner = { ...winner, repack: { ...winner.repack, position: 2 } };
+    await expect(
       service.ingest(
         tenantId,
         deviceAId,
         repackInventoryId,
-        repackBatch("repack-race-a", [winner], 1),
+        repackBatch("repack-invalid-winner", [invalidWinner], 1),
       ),
-      service.ingest(
-        tenantId,
-        deviceBId,
-        repackInventoryId,
-        repackBatch("repack-race-b", [loser], 1),
-      ),
-    ]);
+    ).rejects.toSatisfy(
+      (error: unknown) => errorCode(error) === "INVENTORY_REPACK_CAPACITY_MISMATCH",
+    );
+    expect(
+      await db
+        .select()
+        .from(schema.inventoryRepackItems)
+        .where(eq(schema.inventoryRepackItems.inventoryId, repackInventoryId)),
+    ).toEqual(priorMembership);
+    expect(
+      await db
+        .select()
+        .from(schema.inventoryCodeResults)
+        .where(eq(schema.inventoryCodeResults.inventoryId, repackInventoryId)),
+    ).toEqual(priorResult);
+    expect(
+      await db
+        .select()
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.inventoryId, repackInventoryId))
+        .orderBy(asc(schema.inventoryRepackBoxes.id)),
+    ).toEqual(priorBoxes);
+    const winningRequest = repackBatch("repack-race-a", [winner], 1);
+    const winningResponse = await service.ingest(
+      tenantId,
+      deviceAId,
+      repackInventoryId,
+      winningRequest,
+    );
+    await expect(
+      service.ingest(tenantId, deviceAId, repackInventoryId, winningRequest),
+    ).resolves.toEqual(winningResponse);
     expect(
       await db
         .select({ id: schema.inventoryRepackItems.id, boxId: schema.inventoryRepackItems.boxId })
         .from(schema.inventoryRepackItems)
-        .where(eq(schema.inventoryRepackItems.inventoryId, repackInventoryId)),
+        .where(
+          and(
+            eq(schema.inventoryRepackItems.inventoryId, repackInventoryId),
+            isNull(schema.inventoryRepackItems.removedAt),
+          ),
+        ),
     ).toEqual([{ id: winningItemId, boxId: boxAId }]);
+    expect(
+      await db
+        .select()
+        .from(schema.inventoryRepackItems)
+        .where(eq(schema.inventoryRepackItems.id, losingItemId)),
+    ).toEqual([
+      expect.objectContaining({
+        tenantId,
+        inventoryId: repackInventoryId,
+        boxId: boxBId,
+        sourceEventId: loser.eventId,
+        productionDate: terminalDateB,
+        activeObservedProductionDate: null,
+        removedAt: expect.any(Date),
+      }),
+    ]);
     expect(
       await db
         .select({ id: schema.inventoryRepackBoxes.id, state: schema.inventoryRepackBoxes.state })
@@ -1495,6 +1564,54 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
           ),
         ),
     ).toEqual([{ id: replacementItemId }]);
+    expect(
+      await db
+        .select({ state: schema.inventoryRepackBoxes.state })
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.id, boxAId)),
+    ).toEqual([{ state: "open" }]);
+
+    // Device sequence is authoritative for mutation order even when its clock
+    // moved backwards. Removing then re-adding in one batch must keep the box open.
+    const clockRemoveAt = "2026-08-25T12:00:04.250Z";
+    const clockRemove = repackEvent("a", {
+      scannedAt: clockRemoveAt,
+      kind: "repack_action",
+      normalizedIdentity: `repack_action:remove-last:${boxAId}`,
+      codeHash: null,
+      canonicalRaw: null,
+      localVerdict: "repack-action",
+      repack: {
+        action: "remove-last",
+        boxId: boxAId,
+        itemId: replacementItemId,
+        changedAt: clockRemoveAt,
+      },
+    });
+    const clockItemId = randomUUID();
+    const clockAdd = add("a", boxAId, clockItemId, "2026-08-25T12:00:00.750Z");
+    const clockRequest = repackBatch("repack-clock-rollback", [clockRemove, clockAdd], 1);
+    const clockResponse = await service.ingest(
+      tenantId,
+      deviceAId,
+      repackInventoryId,
+      clockRequest,
+    );
+    expect(clockResponse.outcomes.map(({ status }) => status)).toEqual(["applied", "applied"]);
+    await expect(
+      service.ingest(tenantId, deviceAId, repackInventoryId, clockRequest),
+    ).resolves.toEqual(clockResponse);
+    expect(
+      await db
+        .select({ id: schema.inventoryRepackItems.id })
+        .from(schema.inventoryRepackItems)
+        .where(
+          and(
+            eq(schema.inventoryRepackItems.boxId, boxAId),
+            isNull(schema.inventoryRepackItems.removedAt),
+          ),
+        ),
+    ).toEqual([{ id: clockItemId }]);
     expect(
       await db
         .select({ state: schema.inventoryRepackBoxes.state })
