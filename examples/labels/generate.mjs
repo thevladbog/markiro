@@ -135,6 +135,69 @@ function box(category, width, height) {
   return l.finish();
 }
 
+/**
+ * A pallet label (06d), and the two counts are what make it one.
+ *
+ * `qty.boxes` and `qty` lead the layout, side by side and equally large:
+ * a goods-in clerk counts boxes off the stack and checks them against the
+ * label, and the units figure is what the next system reconciles. They carry
+ * «кор.» and «шт.» from the shared display formatter, so the pair stays
+ * unambiguous even where a caption is missed.
+ *
+ * Type scales with the media rather than staying fixed: a 100 mm label is read
+ * at arm's length and an A5 one from a forklift, so `s` grows the whole scale
+ * with the width instead of leaving A5 with 100 mm type surrounded by white.
+ */
+function pallet(category, width, height) {
+  const l = layout(width, height);
+  const half = width / 2;
+  const column = half - 8;
+  const inner = width - 8;
+  const s = width / 100;
+  l.text(4, height * 0.028, 9 * s, `ПАЛЛЕТА · ${category.heading}`, inner);
+  l.text(4, height * 0.085, 14 * s, "{{product.printName}}", inner);
+  l.rule(4, height * 0.165, inner);
+  l.text(4, height * 0.195, 7 * s, "Коробов", column);
+  l.text(half, height * 0.195, 7 * s, "Единиц", column);
+  l.text(4, height * 0.235, 16 * s, "{{qty.boxes}}", column);
+  l.text(half, height * 0.235, 16 * s, "{{qty}}", column);
+  l.text(4, height * 0.33, 7 * s, "Изготовлено", column);
+  l.text(half, height * 0.33, 7 * s, "Годен до", column);
+  l.text(4, height * 0.37, 11 * s, "{{date}}", column);
+  l.text(half, height * 0.37, 11 * s, "{{expiry}}", column);
+  l.text(4, height * 0.46, 7 * s, "Смена", column);
+  l.text(half, height * 0.46, 7 * s, "GTIN", column);
+  l.text(4, height * 0.5, 11 * s, "{{shift.no}}", column);
+  l.text(half, height * 0.5, 11 * s, "{{product.gtin}}", column);
+  l.rule(4, height * 0.59, inner);
+  l.sscc(height * 0.66, height * 0.15);
+  l.text(4, height * 0.85, 12 * s, "{{sscc}}", inner, "C");
+  return l.finish();
+}
+
+const LAYOUTS = { unit, box, pallet };
+
+/**
+ * The demonstration values each kind carries. Synthetic, never production.
+ *
+ * The SSCCs differ in their FIRST digit on purpose: Markiro cuts box serials
+ * from extension digit 0 and pallet serials from 1 (`BOX_EXTENSION_DIGIT` /
+ * `PALLET_EXTENSION_DIGIT` in `apps/api/src/modules/sscc/sscc.service.ts`),
+ * and those spaces must never interleave. A preview is the one place a reader
+ * sees what a real SSCC looks like, so showing a box with a pallet-range
+ * number would teach the wrong shape.
+ *
+ * `qty.boxes` is empty for a unit and a box and set only for a pallet: neither
+ * of the first two holds boxes, and a "0" would print as «0 кор.» on any
+ * template that binds the field. The pallet's own `qty` is the total across
+ * its boxes (24 × 12), not one box's count.
+ */
+const DEMO = {
+  unit: { sscc: "", qty: "1", "qty.boxes": "" },
+  box: { sscc: "046006820000000013", qty: "12", "qty.boxes": "" },
+  pallet: { sscc: "146006820000000027", qty: "288", "qty.boxes": "24" },
+};
+
 const manifest = [];
 for (const category of categories) {
   for (const [kind, sizes] of [
@@ -155,16 +218,26 @@ for (const category of categories) {
         [100, 150],
       ],
     ],
+    // No small format here, unlike boxes: a pallet label is read across an
+    // aisle, and 148 × 210 is the A5 the GS1 logistic label is cut to.
+    [
+      "pallet",
+      [
+        [100, 100],
+        [100, 150],
+        [148, 210],
+      ],
+    ],
   ]) {
     for (const [width, height] of sizes) {
       const id = `${category.id}/${kind}-${width}x${height}`;
       await mkdir(`${root}${category.id}`, { recursive: true });
-      await writeFile(`${root}${id}.zpl`, (kind === "unit" ? unit : box)(category, width, height));
+      await writeFile(`${root}${id}.zpl`, LAYOUTS[kind](category, width, height));
       manifest.push({
         id,
         category: category.title,
         group: category.group,
-        purpose: kind === "unit" ? "product_duplicate" : "box",
+        purpose: kind === "unit" ? "product_duplicate" : kind,
         widthMm: width,
         heightMm: height,
         importDpi: dpi,
@@ -176,16 +249,10 @@ for (const category of categories) {
           "product.gtin": "04600000000015",
           "product.egais": "",
           "km.code": "010460000000001521DEMO-LABEL-42\u001d93Abcd",
-          sscc: kind === "unit" ? "" : "146006820000000010",
           "shift.no": "2026-000042",
           date: "11.09.2026",
           expiry: "10.09.2027",
-          qty: kind === "unit" ? "1" : "12",
-          // 06d added `qty.boxes` to the label field set. A box or unit
-          // label holds no boxes, so it is empty exactly as `boxLabelData`
-          // leaves it -- a "0" would print as «0 кор.» on any template
-          // that binds the field.
-          "qty.boxes": "",
+          ...DEMO[kind],
           operator: "Оператор",
           "counterparty.name": "",
         },
