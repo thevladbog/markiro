@@ -9,6 +9,9 @@ import androidx.security.crypto.MasterKey
 interface CredentialStore {
     fun read(): String?
     fun write(apiKey: String)
+    fun stage(publication: String)
+    fun staged(): String?
+    fun clearStaged()
     fun clear()
 }
 
@@ -27,12 +30,16 @@ class EncryptedCredentialStore(context: Context) : CredentialStore {
     override fun read(): String? = prefs.getString(KEY, null)
 
     override fun write(apiKey: String) {
-        prefs.edit().putString(KEY, apiKey).commit()
+        check(prefs.edit().putString(KEY, apiKey).commit()) { "Credential publication failed" }
     }
 
     override fun clear() {
-        prefs.edit().remove(KEY).commit()
+        check(prefs.edit().remove(KEY).remove("publication").commit()) { "Credential removal failed" }
     }
+
+    override fun stage(publication: String) { check(prefs.edit().putString("publication", publication).commit()) }
+    override fun staged(): String? = prefs.getString("publication", null)
+    override fun clearStaged() { check(prefs.edit().remove("publication").commit()) }
 
     private companion object {
         const val KEY = "api_key"
@@ -41,11 +48,16 @@ class EncryptedCredentialStore(context: Context) : CredentialStore {
 
 class InMemoryCredentialStore : CredentialStore {
     private var value: String? = null
+    private var publication: String? = null
+    override fun stage(publication: String) { this.publication = publication }
+    override fun staged(): String? = publication
+    override fun clearStaged() { publication = null }
     override fun read(): String? = value
     override fun write(apiKey: String) {
         value = apiKey
     }
     override fun clear() {
         value = null
+        publication = null
     }
 }

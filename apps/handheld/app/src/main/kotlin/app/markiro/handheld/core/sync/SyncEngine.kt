@@ -1,6 +1,5 @@
 package app.markiro.handheld.core.sync
 
-import androidx.room.withTransaction
 import app.markiro.handheld.core.network.BatchConflictDto
 import app.markiro.handheld.core.network.BoxClosureDto
 import app.markiro.handheld.core.network.ConflictStatusRequest
@@ -100,7 +99,7 @@ class SyncEngine(
             while (true) {
                 withTimeoutOrNull(delayMs) { nudges.receive() }
                 tick()
-                delayMs = if (drainAll()) {
+                delayMs = if (try { drainAll() } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) { false }) {
                     backoff.reset()
                     heartbeatMs
                 } else {
@@ -136,7 +135,9 @@ class SyncEngine(
 
     internal enum class Step { SENT, EMPTY, FAILED }
 
-    internal suspend fun drainOnce(): Step {
+    internal suspend fun drainOnce(): Step = try { db.recovery.work { drainOnceOwned() } } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) { Step.FAILED }
+
+    private suspend fun drainOnceOwned(): Step {
         val cfg = config.get() ?: return Step.EMPTY
         val pendingCeiling = meta.get(MetaStore.SYNC_PENDING_CEILING)?.toLongOrNull()
         val rows = if (pendingCeiling != null) db.outboxDao().headThrough(pendingCeiling, BATCH_SIZE) else db.outboxDao().head(BATCH_SIZE)
@@ -190,13 +191,15 @@ class SyncEngine(
             // The box set is folded in. Without it, a box closing while this batch
             // awaits acknowledgement would be resent under an id the server has
             // already applied, and the closure would vanish silently.
-            val id = "${cfg.deviceId}:${meta.installId()}:$maxId:${idSignature(boxIds)}:" +
+            val id = "${cfg.deviceId}:${db.recovery.commit { meta.installId() }}:$maxId:${idSignature(boxIds)}:" +
                 "${idSignature(labelRows.map { it.eventId })}:${idSignature(exceptionRows.map { it.id.toString() })}"
+            db.recovery.commit {
             meta.put(MetaStore.SYNC_PENDING_CEILING, maxId.toString())
             meta.put(MetaStore.SYNC_PENDING_BOX_COUNT, boxIds.size.toString())
             meta.put(MetaStore.SYNC_PENDING_LABEL_COUNT, labelRows.size.toString())
             meta.put(MetaStore.SYNC_PENDING_EXCEPTION_COUNT, exceptionRows.size.toString())
             meta.put(MetaStore.SYNC_PENDING_BATCH_ID, id)
+            }
             id
         }
         val body = json.encodeToString(
@@ -215,7 +218,7 @@ class SyncEngine(
         // A fresh batch is applied whole (`applied == items.length`) or replayed (`alreadyApplied`); anything else is not this endpoint.
         if (!parsed.alreadyApplied && parsed.applied != rows.size) return Step.FAILED
         val at = clock()
-        db.withTransaction {
+        db.recovery.commit {
             db.conflictDao().insertIgnore(
                 parsed.conflicts.map { ConflictEntity(it.codeHash, it.winningTerminalId, it.winningScannedAt!!, Iso.format(at)) },
             )
@@ -257,7 +260,9 @@ class SyncEngine(
         return Step.SENT
     }
 
-    private suspend fun clearPending() {
+    private suspend fun clearPending() = db.recovery.commit { clearPendingOwned() }
+
+    private suspend fun clearPendingOwned() {
         meta.remove(MetaStore.SYNC_PENDING_BATCH_ID)
         meta.remove(MetaStore.SYNC_PENDING_CEILING)
         meta.remove(MetaStore.SYNC_PENDING_BOX_COUNT)
@@ -339,7 +344,9 @@ class SyncEngine(
         return ProductLabelReceipt(accepted, quarantined)
     }
 
-    private suspend fun drainCloses(): Boolean {
+    private suspend fun drainCloses(): Boolean = try { db.recovery.work { drainClosesOwned() } } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) { false }
+
+    private suspend fun drainClosesOwned(): Boolean {
         for (row in db.shiftCloseDao().pending()) {
             val body = json.encodeToString(ShiftCloseRequest.serializer(), row.toRequest())
             val result = transport.post("/station/shift-closures", body) as? TransportResult.Ok ?: return false
@@ -347,15 +354,17 @@ class SyncEngine(
             val response = runCatching { json.decodeFromString(ShiftCloseResponse.serializer(), result.body) }.getOrNull() ?: return false
             when (response.outcome) {
                 // The row stays as the idempotency marker: a second close of the same shift returns it instead of a new event.
-                "accepted", "already_resolved" -> db.shiftCloseDao().markAccepted(row.eventId, Iso.format(clock()))
-                "conflict" -> db.shiftCloseDao().markConflict(row.eventId, response.conflictCode ?: "multiple_devices", Iso.format(clock()))
+                "accepted", "already_resolved" -> db.recovery.commit { db.shiftCloseDao().markAccepted(row.eventId, Iso.format(clock())) }
+                "conflict" -> db.recovery.commit { db.shiftCloseDao().markConflict(row.eventId, response.conflictCode ?: "multiple_devices", Iso.format(clock())) }
                 else -> return false
             }
         }
         return true
     }
 
-    private suspend fun reconcileConflicts() {
+    private suspend fun reconcileConflicts() = try { db.recovery.work { reconcileConflictsOwned() } } catch (_: app.markiro.handheld.core.storage.RecoveryBlocked) { Unit }
+
+    private suspend fun reconcileConflictsOwned() {
         var after = ""
         while (true) {
             val page = db.conflictDao().pageHashes(after, RECONCILE_PAGE)
@@ -366,7 +375,7 @@ class SyncEngine(
             val reviewed = runCatching { json.decodeFromString(ConflictStatusResponse.serializer(), result.body) }
                 .getOrNull()?.reviewedCodeHashes ?: return
             val gone = reviewed.filter { it in page }
-            if (gone.isNotEmpty()) db.conflictDao().delete(gone)
+            if (gone.isNotEmpty()) db.recovery.commit { db.conflictDao().delete(gone) }
             if (page.size < RECONCILE_PAGE) return
             after = page.last()
         }

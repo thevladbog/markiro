@@ -106,6 +106,13 @@ function jobsForPath(path) {
     return [...sharedJobs["platform-contracts"], ...signerJobs];
   }
 
+  if (
+    path === "packages/platform-contracts/src/station-recovery.ts" ||
+    path.startsWith("packages/platform-contracts/fixtures/station-recovery/")
+  ) {
+    return [...sharedJobs["platform-contracts"], "handheld_android"];
+  }
+
   if (path.startsWith("apps/signer/")) {
     if (
       path.startsWith("apps/signer/src-tauri/") ||

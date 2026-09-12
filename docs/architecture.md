@@ -35,9 +35,10 @@ apps/
               shift whose validation policy prints a duplicate: one job at a time,
               bytes prepared once and replayed rather than re-rendered, and an
               unknown delivery resolved by scanning the printed sticker under either
-              policy. Those jobs carry NO credential ownership, unlike the station's,
-              because revoking a handheld wipes its database -- a rule that holds only
-              while DeviceWipe names both tables)
+              policy. Durable work belongs to the normalized server origin, tenant,
+              device ID and handheld kind. Credential rejection seals that owner's
+              database generation, removes the rejected secret and operator roster,
+              and preserves operational rows for authorized same-device recovery.)
   kiosk/      React 19 + Vite 8 + IndexedDB — offline-first self-service
               pickup kiosk (installable PWA), paired to the api by device token
   landing/    Astro 7 — marketing site

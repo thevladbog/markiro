@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.exceptions
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -50,6 +51,7 @@ class DisassembleViewModelTest {
                 lineId = "l1", lineName = "Линия 2", kind = "handheld", serverUrl = "http://x", pairedAt = 1L,
             ),
         )
+        db.initializeRecoveryForTest()
     }
 
     @After

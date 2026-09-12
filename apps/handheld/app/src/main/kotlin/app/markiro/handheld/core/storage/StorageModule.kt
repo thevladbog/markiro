@@ -19,7 +19,7 @@ object StorageModule {
     @Singleton
     fun database(@ApplicationContext context: Context): HandheldDatabase =
         Room.databaseBuilder(context, HandheldDatabase::class.java, "handheld.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
             .build()
 
     @Provides
@@ -69,7 +69,7 @@ object StorageModule {
 
     @Provides
     @Singleton
-    fun metaStore(db: HandheldDatabase): MetaStore = MetaStore(db.metaDao())
+    fun metaStore(db: HandheldDatabase): MetaStore = MetaStore(db)
 
     @Provides
     @Singleton
@@ -77,7 +77,7 @@ object StorageModule {
 
     @Provides
     @Singleton
-    fun rosterStore(dao: OperatorDao): RosterStore = RosterStore(dao)
+    fun rosterStore(dao: OperatorDao, recovery: DeviceRecovery): RosterStore = RosterStore(dao, recovery)
 
     @Provides
     fun roster(store: RosterStore): OperatorRoster = store
@@ -86,5 +86,9 @@ object StorageModule {
     fun operatorAuth(roster: OperatorRoster): OperatorAuth = OperatorAuth(roster)
 
     @Provides
-    fun deviceWipe(db: HandheldDatabase, credential: CredentialStore): DeviceWipe = DeviceWipe(db, credential)
+    @Singleton
+    fun deviceRecovery(db: HandheldDatabase, credential: CredentialStore): DeviceRecovery = DeviceRecovery(db, credential)
+
+    @Provides
+    fun deviceWipe(recovery: DeviceRecovery): DeviceWipe = DeviceWipe(recovery)
 }

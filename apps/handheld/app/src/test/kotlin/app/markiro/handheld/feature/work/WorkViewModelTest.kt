@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.work
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -103,6 +104,7 @@ class WorkViewModelTest {
             ),
         )
         db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1"))
+        db.initializeRecoveryForTest()
     }
 
     @After
@@ -117,7 +119,7 @@ class WorkViewModelTest {
 
     private fun vm(team: TeamRefresher = TeamRefresher { null }): WorkViewModel {
         val engine = SyncEngine(
-            db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
+            db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { "http://127.0.0.1:1/" },
             NetworkModule.strictJson(), engineScope,
         )
         val boxes = BoxRepository(db)

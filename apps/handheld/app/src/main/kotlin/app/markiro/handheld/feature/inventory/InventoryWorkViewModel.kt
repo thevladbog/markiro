@@ -32,6 +32,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import app.markiro.handheld.core.storage.DeviceRecovery
 import javax.inject.Inject
 
 data class InventoryLastScan(
@@ -81,6 +83,12 @@ class InventoryWorkViewModel(
     private val session: SessionHolder,
     reachability: ReachabilityTracker,
 ) : ViewModel() {
+    private val generation = db.recovery.token()
+
+    private fun launchOwned(block: suspend CoroutineScope.() -> Unit) = viewModelScope.launch {
+        db.recovery.work(generation) { block() }
+    }
+
     @Inject
     constructor(
         handle: SavedStateHandle,
@@ -155,7 +163,7 @@ class InventoryWorkViewModel(
     )
 
     init {
-        viewModelScope.launch { scans.events.collect { onScan(it.raw) } }
+        launchOwned { scans.events.collect { onScan(it.raw) } }
         sync.nudge()
     }
 
@@ -197,8 +205,8 @@ class InventoryWorkViewModel(
     fun applyDateAndAccept() {
         val h = held.value ?: return
         val date = h.codeDate ?: return
-        viewModelScope.launch {
-            val operatorId = session.state.value.operator?.operatorId ?: return@launch
+        launchOwned {
+            val operatorId = session.state.value.operator?.operatorId ?: return@launchOwned
             recorder.setActiveDate(inventoryId, date, operatorId)
             onScan(h.raw, acceptMismatch = true)
         }
@@ -206,7 +214,7 @@ class InventoryWorkViewModel(
 
     fun acceptAsIs() {
         val h = held.value ?: return
-        viewModelScope.launch { onScan(h.raw, acceptMismatch = true) }
+        launchOwned { onScan(h.raw, acceptMismatch = true) }
     }
 
     fun skipHeld() {
@@ -214,8 +222,8 @@ class InventoryWorkViewModel(
     }
 
     fun setDate(date: String) {
-        viewModelScope.launch {
-            val operatorId = session.state.value.operator?.operatorId ?: return@launch
+        launchOwned {
+            val operatorId = session.state.value.operator?.operatorId ?: return@launchOwned
             runCatching { recorder.setActiveDate(inventoryId, date, operatorId) }
         }
     }

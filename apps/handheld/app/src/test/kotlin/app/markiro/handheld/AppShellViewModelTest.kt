@@ -7,7 +7,7 @@ import app.cash.turbine.test
 import app.markiro.handheld.core.auth.OperatorRecord
 import app.markiro.handheld.core.network.RevocationBus
 import app.markiro.handheld.core.storage.DeviceConfigEntity
-import app.markiro.handheld.core.storage.DeviceWipe
+import app.markiro.handheld.core.storage.DeviceRecovery
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.InMemoryCredentialStore
 import app.markiro.handheld.feature.signin.SessionHolder
@@ -29,6 +29,7 @@ class AppShellViewModelTest {
     @get:Rule
     val main = MainDispatcherRule()
 
+    private lateinit var recovery: DeviceRecovery
     private lateinit var db: HandheldDatabase
     private val credential = InMemoryCredentialStore()
     private val session = SessionHolder()
@@ -51,6 +52,7 @@ class AppShellViewModelTest {
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java)
             .allowMainThreadQueries()
             .build()
+        recovery = DeviceRecovery(db, credential)
     }
 
     @After
@@ -63,7 +65,7 @@ class AppShellViewModelTest {
     }
 
     private fun vm() = main.track(
-        AppShellViewModel(db.deviceConfigDao(), session, revocation, DeviceWipe(db, credential), idleMs = 5 * 60 * 1000L),
+        AppShellViewModel(db.deviceConfigDao(), session, revocation, recovery, idleMs = 5 * 60 * 1000L),
     )
 
     @Test
@@ -71,29 +73,37 @@ class AppShellViewModelTest {
         // Room answers observe() from its own executor, so wait for the first value instead of advancing.
         val a = vm()
         assertEquals(StartDestination.PAIRING, a.start.first { it != null })
-        db.deviceConfigDao().upsert(paired)
-        val b = vm()
-        assertEquals(StartDestination.SIGN_IN, b.start.first { it != null })
     }
 
     @Test
-    fun revocationWipesEverythingAndEmitsAnEvent() = runTest {
+    fun startsAtSignInOnlyAfterOwnerBootstrap() = runTest {
+        db.deviceConfigDao().upsert(paired)
+        credential.write("mk_live_abc")
+        assertEquals(StartDestination.SIGN_IN, vm().start.first { it != null })
+    }
+
+    @Test
+    fun revocationSealsConfigAndEmitsAnEvent() = runTest {
         db.deviceConfigDao().upsert(paired)
         credential.write("mk_live_abc")
         session.signIn(anna)
         val shell = vm()
-        advanceUntilIdle()
+        shell.start.first { it != null }
         shell.events.test {
-            revocation.raise()
+            revocation.raise(recovery.token())
             assertEquals(ShellEvent.Revoked, awaitItem())
         }
-        assertNull(db.deviceConfigDao().get())
+        recovery.state.first { it.phase == app.markiro.handheld.core.storage.RecoveryPhase.SEALED }
+        assertEquals(paired, db.deviceConfigDao().get())
         assertNull(credential.read())
         assertNull(session.state.value.operator)
     }
 
     @Test
     fun idleTimeLocksASignedInSession() = runTest {
+        db.deviceConfigDao().upsert(paired)
+        credential.write("mk_live_abc")
+        recovery.initialize()
         session.signIn(anna)
         val shell = vm()
         shell.events.test {
@@ -107,4 +117,23 @@ class AppShellViewModelTest {
         }
         assertTrue(session.state.value.locked)
     }
+    @Test fun firstSealWriteFailureStillSignsOutAndRoutesToRecovery() = runTest {
+        db.deviceConfigDao().upsert(paired)
+        credential.write("synthetic-key")
+        session.signIn(anna)
+        val shell = vm()
+        shell.start.first { it != null }
+        db.openHelper.writableDatabase.execSQL("CREATE TRIGGER fail_intent BEFORE INSERT ON device_recovery BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END")
+        shell.events.test {
+            assertTrue(runCatching { recovery.reject(recovery.token()) }.isFailure)
+            assertEquals(ShellEvent.Revoked, awaitItem())
+            assertNull(session.state.value.operator)
+            assertEquals("synthetic-key", credential.read())
+            db.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_intent")
+            recovery.initialize()
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertNull(credential.read())
+    }
+
 }

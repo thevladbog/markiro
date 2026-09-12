@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.scan
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -38,6 +39,7 @@ class ScanRecorderTest {
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HandheldDatabase::class.java)
             .allowMainThreadQueries()
             .build()
+        db.initializeRecoveryForTest()
     }
 
     @After

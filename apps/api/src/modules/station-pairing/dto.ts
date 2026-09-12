@@ -10,7 +10,12 @@ export const pairStationSchema = z.object({
 export type PairStationDto = z.infer<typeof pairStationSchema>;
 
 export type StationPairErrorCode =
-  "PAIR_INVALID" | "PAIR_EXPIRED" | "PAIR_LOCKED" | "PAIR_RATE_LIMITED" | "PAIR_KIND_MISMATCH";
+  | "PAIR_INVALID"
+  | "PAIR_EXPIRED"
+  | "PAIR_LOCKED"
+  | "PAIR_RATE_LIMITED"
+  | "PAIR_KIND_MISMATCH"
+  | "PAIR_RECOVERY_MISMATCH";
 
 /** 401 body of POST /station/pair; rate limiting also surfaces here, not as 429. */
 export const stationPairErrorOpenApiSchema: SchemaObject = {
@@ -25,6 +30,7 @@ export const stationPairErrorOpenApiSchema: SchemaObject = {
         "PAIR_LOCKED",
         "PAIR_RATE_LIMITED",
         "PAIR_KIND_MISMATCH",
+        "PAIR_RECOVERY_MISMATCH",
       ],
     },
   },

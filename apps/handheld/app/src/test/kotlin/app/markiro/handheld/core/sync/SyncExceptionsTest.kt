@@ -1,5 +1,7 @@
 package app.markiro.handheld.core.sync
 
+import app.markiro.handheld.core.storage.reconnectSameDeviceForTest
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -60,6 +62,7 @@ class SyncExceptionsTest {
                 serverUrl = server.url("/").toString(), pairedAt = 1L,
             ),
         )
+        db.initializeRecoveryForTest()
     }
 
     @After
@@ -71,10 +74,10 @@ class SyncExceptionsTest {
 
     private fun engine(): SyncEngine {
         val client = OkHttpClient.Builder()
-            .addInterceptor(RevocationInterceptor(bus, Json { ignoreUnknownKeys = true })).build()
+            .addInterceptor(RevocationInterceptor(bus, db.recovery, Json { ignoreUnknownKeys = true })).build()
         return SyncEngine(
-            db = db, meta = MetaStore(db.metaDao()), config = db.deviceConfigDao(),
-            transport = SyncTransport(client) { server.url("/").toString() },
+            db = db, meta = MetaStore(db), config = db.deviceConfigDao(),
+            transport = SyncTransport(app.markiro.handheld.core.network.GenerationCallFactory(client, db.recovery)) { server.url("/").toString() },
             json = strict, scope = engineScope, clock = { clock },
         )
     }
@@ -200,4 +203,21 @@ class SyncExceptionsTest {
         queue("clear")
         assertEquals(1, engine().state.first { it.pending > 0 }.pending)
     }
+    @Test fun recoveryResendsExceptionAndItsScanWithIdenticalBatchIdentity() = runTest {
+        outbox("exact\u001dscan")
+        queue("undo", afterOutboxId = db.outboxDao().maxId())
+        val e = engine()
+        server.enqueue(MockResponse().setResponseCode(401).setBody("""{"code":"STATION_CREDENTIAL_REVOKED"}"""))
+        assertFalse(e.drainAll())
+        val original = server.takeRequest().body.readUtf8()
+        assertEquals(1, db.boxExceptionDao().unackedCount())
+        db.reconnectSameDeviceForTest()
+        server.enqueue(ok(1))
+        assertTrue(e.drainAll())
+        val retry = server.takeRequest()
+        assertEquals(original, retry.body.readUtf8())
+        assertEquals("restored-synthetic-key", retry.getHeader("x-api-key"))
+        assertEquals(0, db.boxExceptionDao().unackedCount())
+    }
+
 }

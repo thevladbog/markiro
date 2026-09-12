@@ -61,6 +61,7 @@ sealed interface TestPrintStep {
 
 @HiltViewModel
 class PrinterViewModel(
+    private val recovery: app.markiro.handheld.core.storage.DeviceRecovery,
     private val printers: PrinterDao,
     private val transport: PrinterTransport,
     private val renderer: LabelRenderer,
@@ -69,11 +70,12 @@ class PrinterViewModel(
 ) : ViewModel() {
     @Inject
     constructor(
+        recovery: app.markiro.handheld.core.storage.DeviceRecovery,
         printers: PrinterDao,
         transport: PrinterTransport,
         renderer: LabelRenderer,
         bluetooth: BluetoothPrinterConnector,
-    ) : this(printers, transport, renderer, { bluetooth.pairedPrinters() }, System::currentTimeMillis)
+    ) : this(recovery, printers, transport, renderer, { bluetooth.pairedPrinters() }, System::currentTimeMillis)
 
     private val local = MutableStateFlow(PrinterUi())
     val state: StateFlow<PrinterUi> = combine(printers.observeAll(), local) { rows, ui ->
@@ -95,11 +97,11 @@ class PrinterViewModel(
     val saved: SharedFlow<Unit> = _saved
 
     fun select(id: String) {
-        viewModelScope.launch { printers.select(id) }
+        viewModelScope.launch { recovery.work { recovery.commit { printers.select(id) } } }
     }
 
     fun remove(id: String) {
-        viewModelScope.launch { printers.delete(id) }
+        viewModelScope.launch { recovery.work { recovery.commit { printers.delete(id) } } }
     }
 
     /** Enters the add flow with an empty form. */
@@ -133,7 +135,7 @@ class PrinterViewModel(
         val transportWire = form.transport.wire
         val address = if (form.transport == TransportKind.WIFI) "${form.host}:$port" else form.host
         _addForm.update { it.copy(checking = true, error = null) }
-        viewModelScope.launch {
+        viewModelScope.launch { recovery.work {
             // Adding the same address twice means the same printer, so its row is updated rather
             // than duplicated. Without this a second press of the check button leaves two identical
             // entries the operator cannot tell apart.
@@ -151,29 +153,29 @@ class PrinterViewModel(
             )
             when (val status = transport.status(candidate)) {
                 is PrinterStatus.Ready -> {
-                    printers.upsert(candidate.copy(lastStatus = "ready", lastSeenAt = clock()))
-                    printers.select(candidate.id)
+                    recovery.commit { printers.upsert(candidate.copy(lastStatus = "ready", lastSeenAt = clock())) }
+                    recovery.commit { printers.select(candidate.id) }
                     _addForm.value = AddPrinterForm()
                     _saved.tryEmit(Unit)
                 }
                 is PrinterStatus.NotReady -> _addForm.update { it.copy(checking = false, error = status.reason) }
             }
-        }
+        } }
     }
 
     fun loadPairedDevices() {
-        viewModelScope.launch {
+        viewModelScope.launch { recovery.work {
             val found = runCatching { pairedPrinters() }.getOrElse {
                 local.update { ui -> ui.copy(permissionNeeded = true) }
-                return@launch
+                return@work
             }
             local.update { it.copy(paired = found, permissionNeeded = false) }
-        }
+        } }
     }
 
     fun pickPairedDevice(device: DiscoveredPrinter) {
         val form = _addForm.value
-        viewModelScope.launch {
+        viewModelScope.launch { recovery.work {
             // The same device picked twice is the same printer, exactly as for a network address.
             // Without this the list fills with identical rows the operator cannot tell apart.
             val existing = printers.findByAddress(TransportKind.BLUETOOTH.wire, device.address)
@@ -188,9 +190,9 @@ class PrinterViewModel(
                 lastStatus = null,
                 lastSeenAt = null,
             )
-            printers.upsert(printer)
-            printers.select(printer.id)
-        }
+            recovery.commit { printers.upsert(printer) }
+            recovery.commit { printers.select(printer.id) }
+        } }
     }
 
     /**
@@ -201,12 +203,12 @@ class PrinterViewModel(
     fun printTest() {
         val printer = state.value.selected ?: return
         _testStep.value = TestPrintStep.Sending
-        viewModelScope.launch {
+        viewModelScope.launch { recovery.work {
             val status = transport.status(printer)
             if (status is PrinterStatus.NotReady) {
                 _testStep.value = TestPrintStep.Failed(status.reason)
-                printers.setStatus(printer.id, null, clock())
-                return@launch
+                recovery.commit { printers.setStatus(printer.id, null, clock()) }
+                return@work
             }
             val document = renderer.render(
                 TestLabel.spec(),
@@ -214,13 +216,13 @@ class PrinterViewModel(
                 PrinterLanguage.fromWire(printer.language),
                 printer.dpi,
             )
-            _testStep.value = when (val outcome = transport.send(printer, document)) {
+            _testStep.value = recovery.printing { when (val outcome = transport.send(printer, document)) {
                 is SendOutcome.Delivered -> TestPrintStep.Sent("${printer.name} · ${printer.address}")
                 is SendOutcome.Refused -> TestPrintStep.Failed(outcome.reason)
                 is SendOutcome.Unknown -> TestPrintStep.Unknown(outcome.cause)
-            }
-            printers.setStatus(printer.id, if (_testStep.value is TestPrintStep.Sent) "ready" else null, clock())
-        }
+            } }
+            recovery.commit { printers.setStatus(printer.id, if (_testStep.value is TestPrintStep.Sent) "ready" else null, clock()) }
+        } }
     }
 
     /** The operator looked at the printer and says the label is there. Nothing is sent. */

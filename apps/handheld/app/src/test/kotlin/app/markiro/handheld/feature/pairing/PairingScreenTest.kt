@@ -1,9 +1,12 @@
 package app.markiro.handheld.feature.pairing
 
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.core.network.PairingError
@@ -50,4 +53,40 @@ class PairingScreenTest {
         compose.onNodeWithText("ТСД привязан").assertIsDisplayed()
         compose.onNodeWithText("ООО «Родник» · Линия 2").assertIsDisplayed()
     }
+    @Test fun recoveryShowsSavedChannelsAndOffersOnlySameDeviceConnection() {
+        var reconnect = false
+        compose.setContent {
+            MarkiroTheme { PairingScreen(PairingUi.Recovery("saved-device", mapOf("scans" to 12L, "inventory" to 4L,
+                "labels" to 3L, "boxes" to 2L, "exceptions" to 1L, "closes" to 1L, "conflicts" to 2L, "unknownPrints" to 1L), false),
+                PairingCallbacks(onRetry = { reconnect = true })) }
+        }
+        compose.onNodeWithText("Доступ к устройству приостановлен").assertIsDisplayed()
+        compose.onNodeWithText("Ожидают отправки: сканы 12", substring = true).assertExists()
+        compose.onNodeWithText("Подключить прежнее устройство").performScrollTo().performClick()
+        assertEquals(true, reconnect)
+    }
+
+    @Test fun unresolvedOwnerExplainsUnknownCountsWithoutOfferingReassignment() {
+        compose.setContent { MarkiroTheme { PairingScreen(PairingUi.Recovery(null, null, true), PairingCallbacks()) } }
+        compose.onNodeWithText("Не удалось определить владельца данных").assertIsDisplayed()
+        compose.onNodeWithText("Количество сохранённых записей пока недоступно.", substring = true).assertExists()
+        compose.onNodeWithText("Подключить прежнее устройство").assertDoesNotExist()
+    }
+
+    @Test fun recoveryActionRemainsReachableOnAShortViewportWithLargeText() {
+        var reconnect = false
+        compose.setContent {
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(1f, 1.5f)) {
+                MarkiroTheme {
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.requiredSize(320.dp, 300.dp)) {
+                        PairingScreen(PairingUi.Recovery("saved-device", mapOf("scans" to 12L), false), PairingCallbacks(onRetry = { reconnect = true }))
+                    }
+                }
+            }
+        }
+        compose.onNodeWithText("Ожидают отправки: сканы 12", substring = true).assertExists()
+        compose.onNodeWithText("Подключить прежнее устройство").performScrollTo().performClick()
+        assertEquals(true, reconnect)
+    }
+
 }

@@ -1,3 +1,5 @@
+import { initializeDeviceRecovery, sealDeviceRecovery } from "../src/lib/device-recovery.js";
+import { createCredentialGeneration } from "../src/lib/credential-recovery.js";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import type { StationConfig } from "../src/lib/config.js";
@@ -126,10 +128,25 @@ describe("persistStationProvisioning", () => {
       "INSERT INTO outbox (shift_id, terminal_id, raw, verdict, scanned_at) VALUES (?, ?, ?, ?, ?)",
       ["shift-1", "device-1", "sealed-work", "ok", "2026-08-06T00:00:00.000Z"],
     );
+    const config = {
+      machineId: "machine-1",
+      deviceId: provisioning.deviceId,
+      tenantId: provisioning.tenantId,
+      serverUrl: provisioning.serverUrl,
+      apiKey: "old-key",
+    };
+    const recovery = await initializeDeviceRecovery(exec, config);
+    if (!recovery.owner) throw new Error("missing owner");
+    await sealDeviceRecovery(exec, config, createCredentialGeneration("old-key"));
     const writeConfig = vi.fn().mockRejectedValue(new Error("disk full"));
 
     await expect(
-      persistStationProvisioning(provisioning, { machineId: "machine-1", exec, writeConfig }),
+      persistStationProvisioning(provisioning, {
+        machineId: "machine-1",
+        exec,
+        writeConfig,
+        expectedOwner: recovery.owner,
+      }),
     ).rejects.toThrow("disk full");
     expect(await exec.all<{ raw: string }>("SELECT raw FROM outbox ORDER BY id")).toEqual([
       { raw: "sealed-work" },

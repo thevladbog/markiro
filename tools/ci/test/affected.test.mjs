@@ -188,6 +188,26 @@ test("only the mirrored CHZ Signer contract selects native Signer verification",
   }
 });
 
+test("shared Station recovery contract and fixtures select handheld verification", () => {
+  for (const path of [
+    "packages/platform-contracts/src/station-recovery.ts",
+    "packages/platform-contracts/fixtures/station-recovery/requests.json",
+    "packages/platform-contracts/fixtures/station-recovery/responses.json",
+  ]) {
+    assert.deepEqual(
+      enabledJobs(classifyChangedFiles([path])),
+      [
+        "verify_static",
+        "verify_api_tests",
+        "verify_app_tests",
+        "production_bundle",
+        "handheld_android",
+      ],
+      path,
+    );
+  }
+});
+
 test("deployment and release tooling selects its consuming jobs", () => {
   const cases = [
     ["deploy/production/preflight.mjs", ["production_bundle"]],

@@ -1,6 +1,5 @@
 package app.markiro.handheld.feature.shift
 
-import androidx.room.withTransaction
 import app.markiro.handheld.core.box.ServerRange
 import app.markiro.handheld.core.box.SsccPool
 import app.markiro.handheld.core.network.ErrorBody
@@ -90,10 +89,12 @@ class ShiftRepository(
     fun observeShifts(): Flow<List<ShiftEntity>> = db.shiftDao().observeAll()
 
     /** Own line plus unassigned shifts; rows without a bundle that vanished from the list are dropped. */
-    suspend fun refreshList(): Boolean = try {
+    suspend fun refreshList(): Boolean = db.recovery.work { refreshListOwned() }
+
+    private suspend fun refreshListOwned(): Boolean = try {
         val items = api.shifts().items
         val now = clock()
-        db.withTransaction {
+        db.recovery.commit {
             val existing = db.shiftDao().all().associateBy { it.id }
             db.shiftDao().upsertAll(items.map { it.toEntity(existing[it.id], now) })
             db.shiftDao().dropListedExcept(items.map { it.id })
@@ -116,7 +117,9 @@ class ShiftRepository(
      * together made a missing product or label template look like a closed
      * shift.
      */
-    suspend fun enter(shiftId: String): EnterResult {
+    suspend fun enter(shiftId: String): EnterResult = db.recovery.work { enterOwned(shiftId) }
+
+    private suspend fun enterOwned(shiftId: String): EnterResult {
         val cached = db.shiftDao().get(shiftId)
         val entered = try {
             api.enter(shiftId)
@@ -134,7 +137,7 @@ class ShiftRepository(
         }
         val now = clock()
         applySsccBlock(bundle)
-        db.withTransaction {
+        db.recovery.commit {
             db.shiftDao().upsert(
                 bundle.shift.toEntity(cached, now).copy(
                     status = entered.status,
@@ -210,15 +213,19 @@ class ShiftRepository(
         )
     }
 
-    private suspend fun enterOffline(cached: ShiftEntity) {
+    private suspend fun enterOffline(cached: ShiftEntity) = db.recovery.commit { enterOfflineOwned(cached) }
+
+    private suspend fun enterOfflineOwned(cached: ShiftEntity) {
         val now = clock()
-        db.withTransaction {
+        db.recovery.commit {
             db.shiftDao().upsert(cached.copy(enteredAt = now, leftAt = null))
             db.deviceConfigDao().get()?.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = cached.id)) }
         }
     }
 
-    suspend fun leave(shiftId: String) = db.shiftDao().setLeftAt(shiftId, clock())
+    suspend fun leave(shiftId: String) = db.recovery.commit { leaveOwned(shiftId) }
+
+    private suspend fun leaveOwned(shiftId: String) = db.shiftDao().setLeftAt(shiftId, clock())
 
     private fun errorCode(e: HttpException): String? =
         runCatching { json.decodeFromString(ErrorBody.serializer(), e.response()?.errorBody()?.string().orEmpty()).code }.getOrNull()

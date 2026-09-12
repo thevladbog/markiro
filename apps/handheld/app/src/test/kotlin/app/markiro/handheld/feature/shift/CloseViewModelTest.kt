@@ -1,5 +1,6 @@
 package app.markiro.handheld.feature.shift
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -57,6 +58,7 @@ class CloseViewModelTest {
             ),
         )
         db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1").copy(plannedQty = 5))
+        db.initializeRecoveryForTest()
     }
 
     @After
@@ -72,7 +74,7 @@ class CloseViewModelTest {
 
     private fun vm(): CloseViewModel {
         val engine = SyncEngine(
-            db, MetaStore(db.metaDao()), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { server.url("/").toString() },
+            db, MetaStore(db), db.deviceConfigDao(), SyncTransport(OkHttpClient()) { server.url("/").toString() },
             NetworkModule.strictJson(), engineScope,
         )
         return main.track(

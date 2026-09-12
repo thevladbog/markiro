@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.inventory
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -47,6 +48,7 @@ class InventoryRecorderTest {
                 InventoryFixtures.code("snap", hash("R1"), serial = "R1", status = "RETIRED", expected = false),
             ),
         )
+        db.initializeRecoveryForTest()
     }
 
     @After

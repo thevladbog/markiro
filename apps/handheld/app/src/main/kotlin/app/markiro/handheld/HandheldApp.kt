@@ -20,16 +20,22 @@ class HandheldApp : Application() {
 
     @Inject lateinit var connectivity: ConnectivityNudger
 
+    @Inject lateinit var recovery: app.markiro.handheld.core.storage.DeviceRecovery
+
     @Inject lateinit var boxes: BoxRepository
 
     override fun onCreate() {
         super.onCreate()
-        syncEngine.start()
-        inventorySync.start()
-        connectivity.register()
+
         // A print the app died in the middle of is unknown, never resumed:
         // resuming would be an automatic resend of a label that may already be on
         // a box the server has accepted.
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { boxes.demoteInterruptedPrints() }
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            runCatching { recovery.initialize() }
+            if (recovery.current().phase == app.markiro.handheld.core.storage.RecoveryPhase.ACTIVE) boxes.demoteInterruptedPrints()
+            syncEngine.start()
+            inventorySync.start()
+            connectivity.register()
+        }
     }
 }

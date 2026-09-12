@@ -1,7 +1,6 @@
 package app.markiro.handheld.core.duplicate
 
 import android.util.Base64
-import androidx.room.withTransaction
 import app.markiro.handheld.core.box.PrintReason
 import app.markiro.handheld.core.km.KmException
 import app.markiro.handheld.core.label.LabelRenderException
@@ -156,6 +155,15 @@ class DuplicateJobs(
         operatorId: String,
         operatorName: String?,
         acceptedAt: String,
+    ): DuplicateOutcome = db.recovery.exclusive { acceptOwned(shift, canonicalRaw, codeHash, operatorId, operatorName, acceptedAt) }
+
+    private suspend fun acceptOwned(
+        shift: ShiftEntity,
+        canonicalRaw: String,
+        codeHash: String,
+        operatorId: String,
+        operatorName: String?,
+        acceptedAt: String,
     ): DuplicateOutcome = mutex.withLock {
         if (db.productLabelJobDao().openJob(shift.id) != null) {
             return DuplicateOutcome.Refused(DuplicateReason.JOB_OUTSTANDING)
@@ -209,7 +217,7 @@ class DuplicateJobs(
         val verification = shift.duplicateVerification ?: Verification.NONE
         val projection = applyProductLabelEvent(null, event, verification)
 
-        db.withTransaction {
+        db.recovery.commit {
             db.productLabelJobDao().insert(
                 ProductLabelJobEntity(
                     jobId = jobId,
@@ -248,7 +256,9 @@ class DuplicateJobs(
      * printer that no longer matches could never be reprinted afterwards -- the
      * refusal here is what keeps it out of that dead end.
      */
-    suspend fun send(jobId: String): DuplicateSend = mutex.withLock {
+    suspend fun send(jobId: String): DuplicateSend = db.recovery.printing { sendOwned(jobId) }
+
+    private suspend fun sendOwned(jobId: String): DuplicateSend = mutex.withLock {
         val job = db.productLabelJobDao().get(jobId) ?: return DuplicateSend.Failed(DuplicateReason.RENDER_FAILED)
         val bytes = job.bytesBase64?.let { Base64.decode(it, Base64.NO_WRAP) }
             ?: return fail(job, DuplicateReason.RENDER_FAILED)
@@ -263,6 +273,9 @@ class DuplicateJobs(
         if (status is PrinterStatus.NotReady) return fail(job, status.reason.wire())
 
         val sending = append(job, EventKind.SENDING)
+        if (!db.recovery.valid(checkNotNull(app.markiro.handheld.core.storage.DeviceRecovery.generationContext.get()))) {
+            throw app.markiro.handheld.core.storage.RecoveryBlocked()
+        }
         return when (val outcome = transport.send(printer, bytes)) {
             SendOutcome.Delivered -> {
                 append(sending, EventKind.SENT)
@@ -296,7 +309,9 @@ class DuplicateJobs(
      * accepts only `sent` or `delivery_unknown` out of `sending`, so a job left
      * there across a restart would be frozen: no reprint, no verification.
      */
-    suspend fun demoteInterrupted() = mutex.withLock {
+    suspend fun demoteInterrupted() = db.recovery.commit { demoteInterruptedOwned() }
+
+    private suspend fun demoteInterruptedOwned() = mutex.withLock {
         for (job in db.productLabelJobDao().interrupted()) {
             append(job, EventKind.DELIVERY_UNKNOWN, errorCode = "interrupted")
         }
@@ -311,7 +326,9 @@ class DuplicateJobs(
      * be recorded as `verified`: the domain checks the digest too and would
      * refuse the event, so lying here fails loudly rather than quietly.
      */
-    suspend fun verify(jobId: String, scannedRaw: String): DuplicateMatch = mutex.withLock {
+    suspend fun verify(jobId: String, scannedRaw: String): DuplicateMatch = db.recovery.commit { verifyOwned(jobId, scannedRaw) }
+
+    private suspend fun verifyOwned(jobId: String, scannedRaw: String): DuplicateMatch = mutex.withLock {
         val job = db.productLabelJobDao().get(jobId) ?: return DuplicateMatch.INVALID
         val match = compareDuplicateKm(job.canonicalRaw, scannedRaw)
         // A verified attempt takes no further event; the job is already settled.
@@ -337,7 +354,9 @@ class DuplicateJobs(
      * whose bytes retention has dropped can no longer be reprinted at all
      * rather than being re-rendered into a symbol the stored digest disowns.
      */
-    suspend fun reprint(jobId: String, reason: String): DuplicateOutcome = mutex.withLock {
+    suspend fun reprint(jobId: String, reason: String): DuplicateOutcome = db.recovery.commit { reprintOwned(jobId, reason) }
+
+    private suspend fun reprintOwned(jobId: String, reason: String): DuplicateOutcome = mutex.withLock {
         val job = db.productLabelJobDao().get(jobId) ?: return DuplicateOutcome.Refused(DuplicateReason.BYTES_GONE)
         if (job.bytesBase64 == null) return DuplicateOutcome.Refused(DuplicateReason.BYTES_GONE)
         if (job.attemptState == AttemptState.PREPARED || job.attemptState == AttemptState.SENDING) {
@@ -366,7 +385,7 @@ class DuplicateJobs(
             bytesDigest = job.bytesDigest,
         )
         val projection = applyProductLabelEvent(job.toProjection(), event, job.verification)
-        db.withTransaction {
+        db.recovery.commit {
             db.productLabelJobDao().update(
                 job.copy(
                     latestSequence = projection.latestSequence,
@@ -395,7 +414,9 @@ class DuplicateJobs(
      * The attempt therefore stays `prepared` in that case, which is also what
      * lets «Повторить печать» work once the paper is back.
      */
-    private suspend fun fail(job: ProductLabelJobEntity, reason: String): DuplicateSend.Failed {
+    private suspend fun fail(job: ProductLabelJobEntity, reason: String): DuplicateSend.Failed = db.recovery.commit { failOwned(job, reason) }
+
+    private suspend fun failOwned(job: ProductLabelJobEntity, reason: String): DuplicateSend.Failed {
         db.productLabelJobDao().setLastFailure(job.jobId, reason)
         if (reason == DuplicateReason.PRINTER_UNCONFIGURED || reason == DuplicateReason.PRINTER_CHANGED) {
             append(job, EventKind.FAILED_BEFORE_SEND, errorCode = reason)
@@ -409,6 +430,14 @@ class DuplicateJobs(
      * operator one, so it propagates rather than being swallowed.
      */
     private suspend fun append(
+        job: ProductLabelJobEntity,
+        kind: String,
+        errorCode: String? = null,
+        scannedPayloadDigest: String? = null,
+        reason: String? = null,
+    ): ProductLabelJobEntity = db.recovery.commit { appendOwned(job, kind, errorCode, scannedPayloadDigest, reason) }
+
+    private suspend fun appendOwned(
         job: ProductLabelJobEntity,
         kind: String,
         errorCode: String? = null,
@@ -441,7 +470,7 @@ class DuplicateJobs(
             verificationOutcome = projection.verificationOutcome,
             status = projection.status,
         )
-        db.withTransaction {
+        db.recovery.commit {
             db.productLabelJobDao().update(updated)
             db.productLabelEventDao().insert(event.toEntity())
         }

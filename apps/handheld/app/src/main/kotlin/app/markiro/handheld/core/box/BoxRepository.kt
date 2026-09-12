@@ -33,7 +33,9 @@ class BoxRepository(
      * Serialised so two scans arriving together cannot each open a box and
      * leave the shift with two open ones, which no later query could tell apart.
      */
-    suspend fun currentBox(shiftId: String): BoxEntity = mutex.withLock {
+    suspend fun currentBox(shiftId: String): BoxEntity = db.recovery.commit { currentBoxOwned(shiftId) }
+
+    private suspend fun currentBoxOwned(shiftId: String): BoxEntity = mutex.withLock {
         db.boxDao().open(shiftId) ?: BoxEntity(
             boxId = UUID.randomUUID().toString(),
             shiftId = shiftId,
@@ -70,7 +72,9 @@ class BoxRepository(
 
     suspend fun closedCount(shiftId: String): Int = db.boxDao().closedCount(shiftId)
 
-    suspend fun setPrintState(boxId: String, state: String, reason: String?) =
+    suspend fun setPrintState(boxId: String, state: String, reason: String?) = db.recovery.commit { setPrintStateOwned(boxId, state, reason) }
+
+    private suspend fun setPrintStateOwned(boxId: String, state: String, reason: String?) =
         db.boxDao().setPrintState(boxId, state, reason)
 
     /**
@@ -79,5 +83,7 @@ class BoxRepository(
      * resuming would be an automatic resend of a label that may already be on
      * a box the server has accepted.
      */
-    suspend fun demoteInterruptedPrints(): Int = db.boxDao().demoteInterruptedPrints()
+    suspend fun demoteInterruptedPrints(): Int = db.recovery.commit { demoteInterruptedPrintsOwned() }
+
+    private suspend fun demoteInterruptedPrintsOwned(): Int = db.boxDao().demoteInterruptedPrints()
 }

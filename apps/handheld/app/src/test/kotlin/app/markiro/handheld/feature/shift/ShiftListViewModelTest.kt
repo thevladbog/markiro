@@ -10,6 +10,7 @@ import app.markiro.handheld.core.network.ReachabilityTracker
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -51,6 +52,7 @@ class ShiftListViewModelTest {
                 lineId = "l1", lineName = "Линия 2", kind = "handheld", serverUrl = "http://x", pairedAt = 1L,
             ),
         )
+        db.initializeRecoveryForTest()
     }
 
     @After
@@ -67,6 +69,7 @@ class ShiftListViewModelTest {
         ShiftListViewModel(
             ShiftRepository(api, db, NetworkModule.json(), SsccPool(db)) { 1_757_500_000_000L },
             db.deviceConfigDao(),
+            db.recovery,
             ReachabilityTracker { 1_757_500_000_000L },
             flowOf(Unit),
         ),

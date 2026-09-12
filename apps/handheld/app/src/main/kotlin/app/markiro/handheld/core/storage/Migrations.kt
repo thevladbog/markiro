@@ -183,3 +183,10 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_box_exceptions_ackedAt` ON `box_exceptions` (`ackedAt`)")
     }
 }
+
+/** Recovery metadata is additive: operational payloads and local sequence are untouched. */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `device_recovery` (`id` INTEGER NOT NULL, `serverOrigin` TEXT, `tenantId` TEXT, `deviceId` TEXT, `kind` TEXT, `generation` INTEGER NOT NULL, `phase` TEXT NOT NULL, `pendingId` TEXT, PRIMARY KEY(`id`))")
+    }
+}

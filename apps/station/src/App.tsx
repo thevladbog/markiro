@@ -1,3 +1,12 @@
+import { RecoveryWorkSummary } from "./ui/RecoveryWorkSummary.js";
+import {
+  initializeDeviceRecovery,
+  readDeviceRecovery,
+  sealDeviceRecovery,
+  sealUnresolvedDeviceRecovery,
+  persistDeviceRecoverySealing,
+  type DeviceRecoveryView,
+} from "./lib/device-recovery.js";
 import {
   useCallback,
   useEffect,
@@ -21,6 +30,7 @@ import {
 import {
   createStationClient,
   StationApiError,
+  isStationCredentialRejection,
   type ServerReachability,
   type StationClient,
 } from "./lib/api-client.js";
@@ -215,6 +225,9 @@ export function scannerIndicator(
 export function App() {
   const { t } = useTranslation();
   const [config, setConfig] = useState<StationConfig | null>(null);
+  const [deviceRecovery, setDeviceRecovery] = useState<DeviceRecoveryView | null>(null);
+  const [startupRecoveryFailed, setStartupRecoveryFailed] = useState(false);
+  const [savedWork, setSavedWork] = useState<SealedWorkSummary | undefined>();
   const configRef = useRef<StationConfig | null>(null);
   const configTransitions = useRef(new ConfigTransitionCoordinator());
   const [operator, setOperator] = useState<OperatorMirrorRecord | null>(null);
@@ -291,6 +304,7 @@ export function App() {
   );
   const [legacyIdentityState, setLegacyIdentityState] = useState<LegacyIdentityState>(null);
   const legacyIdentityAttempt = useRef<Promise<unknown> | null>(null);
+  const rejectedLegacyIdentityOrigin = useRef<StationConfig | null>(null);
   const recoveryCleanupStarted = useRef<CredentialRejectedEvent | null>(null);
   const floorWorkRegistry = useMemo(() => createFloorWorkRegistry(), []);
   const operatorRetirement = useRef<FloorWorkRetirement | null>(null);
@@ -610,9 +624,27 @@ export function App() {
         await applyMigrations(tauriExecutor);
       } catch (err) {
         console.error("station: applyMigrations failed", err);
+        if (!cancelled) setStartupRecoveryFailed(true);
+        return;
       }
-      const cfg = await readConfig();
-      if (!cancelled) publishConfig(cfg);
+      try {
+        let cfg = await readConfig();
+        let recovery = await initializeDeviceRecovery(tauriExecutor, cfg);
+        const pending =
+          recovery.phase === "active" ? undefined : await readSealedWorkSummary(tauriExecutor);
+        if (recovery.phase === "sealed" && cfg.apiKey) {
+          await clearCredential();
+          cfg = await readConfig();
+          recovery = await initializeDeviceRecovery(tauriExecutor, cfg);
+        }
+        if (!cancelled) {
+          setDeviceRecovery(recovery);
+          setSavedWork(pending);
+          publishConfig(cfg);
+        }
+      } catch {
+        if (!cancelled) setStartupRecoveryFailed(true);
+      }
     })();
     return () => {
       cancelled = true;
@@ -655,11 +687,13 @@ export function App() {
     [config?.apiKey, config?.deviceId, config?.serverUrl, legacyApiUrl],
   );
 
-  const verifiedClient = config?.deviceId ? client : null;
+  const verifiedClient = config?.deviceId && deviceRecovery?.phase === "active" ? client : null;
 
   const attemptLegacyIdentity = useCallback(() => {
     if (
       !config ||
+      configRef.current !== config ||
+      rejectedLegacyIdentityOrigin.current === config ||
       !client ||
       !legacyApiUrl ||
       config.deviceId ||
@@ -678,6 +712,7 @@ export function App() {
           isOriginCurrent: () => configRef.current === origin,
           transition: async () => {
             await writeConfig(backfilled);
+            setDeviceRecovery(await initializeDeviceRecovery(tauriExecutor, backfilled));
             return backfilled;
           },
           publish: (committed) => {
@@ -686,8 +721,35 @@ export function App() {
           },
         });
       })
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
         if (!configTransitions.current.isCurrent(generation) || configRef.current !== origin) {
+          return;
+        }
+        // A queued resolving effect can run after finally releases the attempt,
+        // before React commits rejection. Fence this origin synchronously, even
+        // if credential cleanup fails, without blocking a later config origin.
+        if (error instanceof StationApiError && error.status === 401) {
+          rejectedLegacyIdentityOrigin.current = origin;
+        }
+        if (isStationCredentialRejection(error)) {
+          try {
+            await configTransitions.current.commit({
+              generation,
+              isOriginCurrent: () => configRef.current === origin,
+              transition: async () => {
+                await sealUnresolvedDeviceRecovery(tauriExecutor, origin, clearCredential);
+                return readConfig();
+              },
+              publish: (cleared) => {
+                setOperator(null);
+                setDeviceRecovery({ owner: null, phase: "owner_unresolved" });
+                publishConfig(cleared);
+                setLegacyIdentityState("rejected");
+              },
+            });
+          } catch {
+            setStartupRecoveryFailed(true);
+          }
           return;
         }
         setLegacyIdentityState(
@@ -722,10 +784,26 @@ export function App() {
   // One shared generation per authenticated key, not per sync-engine instance.
   // This makes React StrictMode overlap and any late async response obey the
   // same terminal seal. A newly provisioned apiKey creates a fresh generation.
-  const credentialGeneration = useMemo(
-    () => (verifiedClient && config?.apiKey ? createCredentialGeneration(config.apiKey) : null),
-    [config?.apiKey, verifiedClient],
-  );
+  const credentialGeneration = useMemo(() => {
+    const apiKey = config?.apiKey;
+    const machineId = config?.machineId;
+    const deviceId = config?.deviceId;
+    const tenantId = config?.tenantId;
+    const serverUrl = config?.serverUrl;
+    if (!verifiedClient || !apiKey || !machineId || !deviceId || !tenantId || !serverUrl)
+      return null;
+    const identity = { machineId, deviceId, tenantId, serverUrl };
+    return createCredentialGeneration(apiKey, (generation) =>
+      persistDeviceRecoverySealing(tauriExecutor, identity, generation),
+    );
+  }, [
+    config?.apiKey,
+    config?.machineId,
+    config?.deviceId,
+    config?.tenantId,
+    config?.serverUrl,
+    verifiedClient,
+  ]);
   const currentCredentialGeneration = useRef<CredentialGeneration | null>(null);
   currentCredentialGeneration.current = credentialGeneration;
 
@@ -939,11 +1017,13 @@ export function App() {
         // The recovery render above has already removed every authenticated
         // action. Count all durable unsent facts in one SQLite snapshot before
         // deleting any reproducible state; a count failure stays fail-closed.
+        await sealDeviceRecovery(tauriExecutor, previous, credentialRecovery.event.generation);
         const sealed = await readSealedWorkSummary(tauriExecutor, floorWorkRegistry.current());
         await clearRejectedCredentialState({
           exec: tauriExecutor,
           clearCredential,
           credentialGeneration: credentialRecovery.event.generation,
+          preserveRecoveryContext: true,
         });
         const cleared = await readConfig();
         if (
@@ -954,9 +1034,11 @@ export function App() {
         ) {
           throw new Error("credential recovery clear contract violation");
         }
-        return { cleared, sealed };
+        return { cleared, sealed, recovery: await readDeviceRecovery(tauriExecutor) };
       },
-      ({ cleared, sealed }) => {
+      ({ cleared, sealed, recovery }) => {
+        setDeviceRecovery(recovery);
+        setSavedWork(sealed);
         publishConfig(cleared);
         setCredentialRecovery((current) =>
           current?.event === credentialRecovery.event
@@ -1000,7 +1082,11 @@ export function App() {
   }, [nudgeSync, refreshOperatorRoster]);
 
   async function refreshConfig() {
-    await runConfigTransition(readConfig, publishConfig);
+    await runConfigTransition(async () => {
+      const next = await readConfig();
+      setDeviceRecovery(await initializeDeviceRecovery(tauriExecutor, next));
+      return next;
+    }, publishConfig);
   }
 
   async function finishCredentialRecovery() {
@@ -1015,6 +1101,7 @@ export function App() {
           ) {
             throw new Error("credential recovery identity changed");
           }
+          setDeviceRecovery(await initializeDeviceRecovery(tauriExecutor, refreshed));
           return refreshed;
         },
         (refreshed) => {
@@ -1038,6 +1125,10 @@ export function App() {
     const previous = configRef.current;
     if (!previous) throw new Error(t("setup.resetCredentialFailed"));
     try {
+      if (!credentialGeneration) throw new Error("Credential unavailable");
+      await sealDeviceRecovery(tauriExecutor, previous, credentialGeneration);
+      setDeviceRecovery(await readDeviceRecovery(tauriExecutor));
+      setSavedWork(await readSealedWorkSummary(tauriExecutor));
       await resetCredentialConfig(previous, {
         clearCredential,
         readConfig,
@@ -1121,6 +1212,20 @@ export function App() {
     );
   }
 
+  if (startupRecoveryFailed || deviceRecovery?.phase === "owner_unresolved") {
+    return withWindowChrome(
+      <main className="station-centered-screen">
+        <Card style={{ maxWidth: 720, padding: 32 }}>
+          <h1>{t("enroll.recoveryTitle")}</h1>
+          <p role="alert">
+            {t(startupRecoveryFailed ? "enroll.recoveryFailed" : "enroll.errors.owner_unresolved")}
+          </p>
+          <RecoveryWorkSummary {...(savedWork ? { summary: savedWork } : {})} />
+        </Card>
+      </main>,
+    );
+  }
+
   if (!config) {
     return withWindowChrome(
       <main className="station-centered-screen">
@@ -1146,6 +1251,7 @@ export function App() {
         <Enrollment
           machineId={config.machineId}
           {...(config.deviceId ? { expectedDeviceId: config.deviceId } : {})}
+          {...(deviceRecovery?.owner ? { expectedOwner: deviceRecovery.owner } : {})}
           sealedWork={credentialRecovery.sealed}
           onEnrolled={() => void finishCredentialRecovery()}
           runConfigTransition={runEnrollmentConfigTransition}
@@ -1209,6 +1315,28 @@ export function App() {
     </FloorFooter>
   ) : null;
 
+  if (legacyKeyedConfig) {
+    return withWindowChrome(
+      <main className="station-centered-screen">
+        <Card style={{ maxWidth: 720, padding: 32 }}>
+          <h1>{t("legacyIdentity.title")}</h1>
+          <p role="status">
+            {t(
+              legacyIdentityState === "degraded"
+                ? "legacyIdentity.degraded"
+                : "legacyIdentity.resolving",
+            )}
+          </p>
+          {legacyIdentityState === "degraded" ? (
+            <Button size="floor" onClick={attemptLegacyIdentity}>
+              {t("legacyIdentity.retry")}
+            </Button>
+          ) : null}
+        </Card>
+      </main>,
+    );
+  }
+
   // `config` is narrowed to non-null for the rest of this render.
   const stage = legacyKeyedConfig
     ? operator
@@ -1237,6 +1365,8 @@ export function App() {
       <Enrollment
         machineId={config.machineId}
         {...(config.deviceId ? { expectedDeviceId: config.deviceId } : {})}
+        {...(deviceRecovery?.owner ? { expectedOwner: deviceRecovery.owner } : {})}
+        {...(savedWork ? { sealedWork: savedWork } : {})}
         onEnrolled={() => void refreshConfig()}
         runConfigTransition={runEnrollmentConfigTransition}
         onSetup={() => setShowSetup(true)}

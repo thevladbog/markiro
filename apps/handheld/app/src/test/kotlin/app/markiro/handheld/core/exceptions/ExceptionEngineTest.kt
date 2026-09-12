@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.exceptions
 
+import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -38,6 +39,7 @@ class ExceptionEngineTest {
                 closedAt = null, operatorId = "op-1", printState = "pending", printReason = null, ackedAt = null,
             ),
         )
+        db.initializeRecoveryForTest()
     }
 
     @After

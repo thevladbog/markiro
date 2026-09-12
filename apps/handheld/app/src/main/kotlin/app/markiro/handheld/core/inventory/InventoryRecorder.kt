@@ -1,6 +1,5 @@
 package app.markiro.handheld.core.inventory
 
-import androidx.room.withTransaction
 import app.markiro.handheld.core.km.KmCodec
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.InventoryEventEntity
@@ -59,17 +58,27 @@ class InventoryRecorder(private val db: HandheldDatabase, private val clock: () 
     suspend fun activeDate(inventoryId: String): String? =
         db.inventoryTerminalStateDao().get(inventoryId)?.activeProductionDate ?: db.inventoryTaskDao().get(inventoryId)?.productionDateFrom
 
-    suspend fun setActiveDate(inventoryId: String, date: String, operatorId: String) = mutex.withLock {
+    suspend fun setActiveDate(inventoryId: String, date: String, operatorId: String) = db.recovery.commit { setActiveDateOwned(inventoryId, date, operatorId) }
+
+    private suspend fun setActiveDateOwned(inventoryId: String, date: String, operatorId: String) = mutex.withLock {
         val task = checkNotNull(db.inventoryTaskDao().get(inventoryId)) { "inventory $inventoryId is not on this device" }
         require(date >= task.productionDateFrom && date <= task.productionDateTo) { "date outside the task range" }
         val at = Iso.format(clock())
-        db.withTransaction {
+        db.recovery.commit {
             val state = db.inventoryTerminalStateDao().get(inventoryId) ?: terminal(task, operatorId, at)
             db.inventoryTerminalStateDao().upsert(state.copy(activeProductionDate = date, operatorId = operatorId, updatedAt = at))
         }
     }
 
     suspend fun record(
+        inventoryId: String,
+        raw: String,
+        operatorId: String,
+        acceptMismatch: Boolean = false,
+        eventId: String = UUID.randomUUID().toString(),
+    ): RecordOutcome = db.recovery.commit { recordOwned(inventoryId, raw, operatorId, acceptMismatch, eventId) }
+
+    private suspend fun recordOwned(
         inventoryId: String,
         raw: String,
         operatorId: String,
@@ -86,17 +95,17 @@ class InventoryRecorder(private val db: HandheldDatabase, private val clock: () 
             return RecordOutcome.Recorded(InventoryVerdict.INVALID, "invalid", null, 0, 0, null, null, scannedAt, null, classification.reason)
         }
         val deviceId = db.deviceConfigDao().get()?.deviceId ?: "dev-local"
-        db.withTransaction {
+        db.recovery.commit {
             val state = db.inventoryTerminalStateDao().get(inventoryId) ?: terminal(task, operatorId, scannedAt)
             val active = state.activeProductionDate ?: task.productionDateFrom
             var activeDate = active
             if (!acceptMismatch) {
                 when (val source = InventoryClassifier.sourceDate(classification, ctx)) {
                     SourceDate.None -> Unit
-                    SourceDate.Mixed -> return@withTransaction RecordOutcome.DateMismatch(active, null, true, raw)
+                    SourceDate.Mixed -> return@commit RecordOutcome.DateMismatch(active, null, true, raw)
                     is SourceDate.Single -> if (source.productionDate != active) {
                         if (db.inventoryEventDao().hasAny(inventoryId)) {
-                            return@withTransaction RecordOutcome.DateMismatch(active, source.productionDate, false, raw)
+                            return@commit RecordOutcome.DateMismatch(active, source.productionDate, false, raw)
                         }
                         // The first scan of this terminal silently adopts the code's date, as on the station.
                         activeDate = source.productionDate
