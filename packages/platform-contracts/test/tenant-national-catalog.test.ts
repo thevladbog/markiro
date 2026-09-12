@@ -169,6 +169,14 @@ describe("tenant National Catalog import input contracts", () => {
     expect(
       importPrepareSchema.parse({
         requestId: ID_3,
+        itemIds: [ID_1],
+        manualNames: [],
+        categoryChoices: [{ itemId: ID_1, optionId: null }],
+      }).categoryChoices,
+    ).toEqual([{ itemId: ID_1, optionId: null }]);
+    expect(
+      importPrepareSchema.parse({
+        requestId: ID_3,
         itemIds: ids(100),
         manualNames: [{ itemId: ID_1, name: "  Товар  " }],
         categoryChoices: [],

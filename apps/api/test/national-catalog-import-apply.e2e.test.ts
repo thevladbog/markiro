@@ -534,7 +534,7 @@ describe("atomic National Catalog product application (real PostgreSQL services)
     source.categories = [{ id: 30064, name: "Категория" }];
     const p = await preview(undefined, undefined, [23]);
     const group = p.fields.find((field) => field.labelKey === "chz_product_group_code");
-    expect(group).toMatchObject({ applicable: true, selectedByDefault: false });
+    expect(group).toMatchObject({ applicable: true, selectedByDefault: true });
     const body = decision(p);
     body.decisions[0]!.acceptedEntryIds = [group!.id];
     const result = await apply(body);

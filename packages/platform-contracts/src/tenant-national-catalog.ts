@@ -160,7 +160,8 @@ const manualNameSchema = z
   .object({ itemId: platformUuidSchema, name: z.string().trim().min(1).max(200) })
   .strict();
 const categoryChoiceSchema = z
-  .object({ itemId: platformUuidSchema, optionId: platformUuidSchema })
+  // null is an explicit opt-out; omission allows a unique compatible default.
+  .object({ itemId: platformUuidSchema, optionId: platformUuidSchema.nullable() })
   .strict();
 
 export const importPrepareSchema = z

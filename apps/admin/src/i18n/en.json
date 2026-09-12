@@ -1838,7 +1838,7 @@
       },
       "regulatory": {
         "readiness": "Readiness",
-        "readinessHint": "Production, code ordering and putting goods into circulation are checked separately.",
+        "readinessHint": "Readiness is checked against saved Markiro data separately for each operation.",
         "dimensions": {
           "production": "Production",
           "code_ordering": "Code ordering",
@@ -1871,7 +1871,7 @@
         "tnVed": "TN VED",
         "okpd": "OKPD2",
         "source": "Source",
-        "unbound": "The National Catalog category is not confirmed yet. Select a category to fill in its attributes.",
+        "unbound": "Match the product with a Chestny ZNAK card to import its category and attributes. The category refines the selected product group. If no card is available, choose a category manually.",
         "chooseCategory": "Select category",
         "changeCategory": "Change category",
         "chooseOption": "Select a category",
@@ -1881,7 +1881,7 @@
         "transferHint": "Selected values will transfer to the new category. Others will remain in history and no longer count towards current readiness.",
         "noTransfer": "There are no saved attributes to transfer.",
         "confirmCategory": "Confirm category",
-        "noCategories": "No schemas are available for this product group yet. A National Catalog schema must be loaded and confirmed.",
+        "noCategories": "Categories for this product group have not been configured in Markiro yet. Contact Markiro support. You can view the card using “Open Chestny ZNAK data” below and save the basic product fields.",
         "optionsError": "Could not load categories.",
         "numberedAttribute": "Attribute {{index}}",
         "dispositions": {
@@ -1935,7 +1935,8 @@
         "openChz": "Open Chestny ZNAK data",
         "viewTitle": "Product details",
         "reloadError": "Could not load the current product. Your edits are still in the form; try again.",
-        "cachedDataError": "Could not refresh the main details. The last loaded product is shown; your edits are still in the form."
+        "cachedDataError": "Could not refresh the main details. The last loaded product is shown; your edits are still in the form.",
+        "categorySearch": "Search categories"
       }
     },
     "counterparties": {

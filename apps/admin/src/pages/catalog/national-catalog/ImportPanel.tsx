@@ -460,8 +460,7 @@ function ScopedImportPanel({ identity }: { identity: string }) {
         .map(([itemId, name]) => ({ itemId, name: name.trim() }))
         .sort((a, b) => a.itemId.localeCompare(b.itemId)),
       categoryChoices: Object.entries(drafts.categoryChoices)
-        .filter(([, optionId]) => optionId)
-        .map(([itemId, optionId]) => ({ itemId, optionId }))
+        .map(([itemId, optionId]) => ({ itemId, optionId: optionId || null }))
         .sort((a, b) => a.itemId.localeCompare(b.itemId)),
     };
     void run(() =>

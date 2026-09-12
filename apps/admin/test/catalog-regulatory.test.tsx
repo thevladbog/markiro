@@ -37,6 +37,7 @@ function mount(
     customProfile?: RegulatoryProfile;
     mapping?: "exact" | "ambiguous";
     entries?: CategoryProposal["diff"]["entries"];
+    emptyCategories?: boolean;
   } = {},
 ) {
   const group = options.group ?? 23;
@@ -86,15 +87,17 @@ function mount(
       if (url.endsWith("/readiness")) return response(readiness);
       if (url.endsWith("/regulatory-category-options"))
         return response({
-          items: [
-            {
-              schemaVersionId: SCHEMA_ID,
-              categoryId: String(group),
-              categoryName: "Категория примера",
-              selectors: {},
-              mappingState: options.mapping ?? "exact",
-            },
-          ],
+          items: options.emptyCategories
+            ? []
+            : [
+                {
+                  schemaVersionId: SCHEMA_ID,
+                  categoryId: String(group),
+                  categoryName: "Категория примера",
+                  selectors: {},
+                  mappingState: options.mapping ?? "exact",
+                },
+              ],
         });
       return response({ items: [] });
     }),
@@ -205,10 +208,10 @@ it("retains dirty input when background data changes and keeps its old revision 
 it("requires explicit review and confirmation to bind a category", async () => {
   const { user, writes } = mount({ unbound: true });
   await user.click(await screen.findByRole("button", { name: "Выбрать категорию" }));
-  await user.selectOptions(
-    await screen.findByLabelText("Категория Национального каталога"),
-    SCHEMA_ID,
+  await user.click(
+    await screen.findByRole("combobox", { name: "Категория Национального каталога" }),
   );
+  await user.click(screen.getByRole("option", { name: "Категория примера" }));
   await user.click(screen.getByRole("button", { name: "Проверить изменения" }));
   expect(await screen.findByRole("button", { name: "Подтвердить категорию" })).toBeDefined();
   expect(writes).toHaveLength(1);
@@ -220,6 +223,30 @@ it("requires explicit review and confirmation to bind a category", async () => {
     }),
   );
 });
+it("searches categories with the shared custom select", async () => {
+  const { user, writes } = mount({ unbound: true });
+  await user.click(await screen.findByRole("button", { name: "Выбрать категорию" }));
+  await user.click(
+    await screen.findByRole("combobox", { name: "Категория Национального каталога" }),
+  );
+  const search = await screen.findByRole("searchbox", { name: "Поиск категории" });
+  await user.type(search, "несуществующая");
+  expect(screen.queryByRole("option", { name: "Категория примера" })).toBeNull();
+  await user.clear(search);
+  await user.type(search, "примера");
+  await user.click(screen.getByRole("option", { name: "Категория примера" }));
+  expect(writes).toEqual([]);
+});
+
+it("does not open an empty editor or lock product saving when no categories are available", async () => {
+  const { onDirtyChange } = mount({ unbound: true, emptyCategories: true });
+  expect(await screen.findByText(/Обратитесь в поддержку Markiro/)).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Выбрать категорию" })).toBeNull();
+  expect(screen.queryByRole("combobox", { name: "Категория Национального каталога" })).toBeNull();
+  expect(screen.queryByLabelText("ТН ВЭД")).toBeNull();
+  expect(onDirtyChange).not.toHaveBeenCalledWith(true);
+});
+
 it("shows data but no mutation controls without write permission", async () => {
   const { writes } = mount({ readonly: true });
   expect(await screen.findByRole("heading", { name: "Характеристики категории" })).toBeDefined();
@@ -322,10 +349,10 @@ it("edits string, date, enum and repeated enum values according to the pinned sc
 it("requires an explicit group-mapping acknowledgement for an ambiguous category", async () => {
   const { user, writes } = mount({ unbound: true, mapping: "ambiguous" });
   await user.click(await screen.findByRole("button", { name: "Выбрать категорию" }));
-  await user.selectOptions(
-    await screen.findByLabelText("Категория Национального каталога"),
-    SCHEMA_ID,
+  await user.click(
+    await screen.findByRole("combobox", { name: "Категория Национального каталога" }),
   );
+  await user.click(screen.getByRole("option", { name: "Категория примера" }));
   expect(screen.getByRole("button", { name: "Проверить изменения" })).toHaveProperty(
     "disabled",
     true,
@@ -366,10 +393,10 @@ it("reviews and selectively transfers compatible values, while incompatible valu
     ],
   });
   await user.click(await screen.findByRole("button", { name: "Сменить категорию" }));
-  await user.selectOptions(
-    await screen.findByLabelText("Категория Национального каталога"),
-    SCHEMA_ID,
+  await user.click(
+    await screen.findByRole("combobox", { name: "Категория Национального каталога" }),
   );
+  await user.click(screen.getByRole("option", { name: "Категория примера" }));
   await user.click(screen.getByRole("button", { name: "Проверить изменения" }));
   const toggle = await screen.findByRole("checkbox", { name: "Объём" });
   expect(toggle.getAttribute("aria-checked")).toBe("true");
