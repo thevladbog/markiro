@@ -2308,7 +2308,7 @@ describe("App", () => {
       await expandStatusPanelIfCollapsed();
       expect(screen.getByText("Maria")).toBeDefined();
       await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("4 / 10"));
-      const counters = within(screen.getByRole("region", { name: "Accepted, Rejected" }));
+      const counters = within(screen.getByRole("region", { name: "Accepted, Errors, Duplicates" }));
       expect(counters.getAllByRole("definition")[0]?.textContent).toBe("0");
 
       act(() => floor.emitScan(SECOND_KM));

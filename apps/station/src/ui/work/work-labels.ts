@@ -26,7 +26,8 @@ export function buildWorkLabels(t: TFunction, language: string, boxNumber: numbe
     },
     counters: {
       accepted: t("work.accepted"),
-      rejected: t("work.rejected"),
+      errors: t("work.errors"),
+      duplicates: t("work.duplicates"),
       synchronized: t("work.synchronized"),
       pending: (count: number) => t("work.pendingSync", { count }),
     },

@@ -4,6 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
 import type { LabelTemplateSpec } from "@markiro/domain";
 import i18n from "../src/i18n/index.js";
+import { PalletContents } from "../src/components/PalletContents.js";
 import { PalletClose } from "../src/components/PalletClose.js";
 import { PalletExceptions } from "../src/components/PalletExceptions.js";
 import { PalletStrip } from "../src/components/PalletStrip.js";
@@ -221,6 +222,29 @@ function renderWork(overrides: RenderWorkOptions = {}) {
 }
 
 describe("PalletStrip", () => {
+  it("shows 42 of 66 as a continuous progress bar and exposes the two pallet actions", () => {
+    const onShowContents = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <PalletStrip
+        boxCount={42}
+        capacity={66}
+        serials="available"
+        lastBoxSscc="004601234560000017"
+        onShowContents={onShowContents}
+        onClose={onClose}
+      />,
+    );
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("42");
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuemax")).toBe("66");
+    expect(screen.getByText(i18n.t("pallet.remaining", { count: 24 }))).toBeDefined();
+    expect(screen.getByText(/64\s*%/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.contents") }));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.closeCurrent") }));
+    expect(onShowContents).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("shows the box/capacity readout and warns without blocking when the pallet pool is dry", () => {
     render(<PalletStrip boxCount={13} capacity={12} serials="empty" />);
     expect(screen.getByText(i18n.t("pallet.progress", { boxes: 13, capacity: 12 }))).toBeDefined();
@@ -244,6 +268,39 @@ describe("PalletStrip", () => {
     const { container } = render(<PalletStrip boxCount={3} capacity={12} serials="available" />);
     const root = container.querySelector(".pallet-strip");
     expect(root?.classList.contains("work-instrument")).toBe(true);
+  });
+});
+
+describe("PalletContents", () => {
+  it("waits for accepted scans to drain and reads local membership with retry after a read failure", async () => {
+    const exec = makeExec();
+    await seedShift(exec, { shiftId: "s1", palletBoxCapacity: 66 });
+    await seedPallet(exec, { palletId: "p1", shiftId: "s1", terminalId: "dev-1", boxCount: 2 });
+    let drain: () => void = () => {};
+    const idle = new Promise<void>((resolve) => {
+      drain = resolve;
+    });
+    const all = vi.spyOn(exec, "all").mockRejectedValueOnce(new Error("read failed"));
+    const onClose = vi.fn();
+    render(
+      <PalletContents
+        exec={exec}
+        shiftId="s1"
+        terminalId="dev-1"
+        palletId="p1"
+        waitForIdle={() => idle}
+        onClose={onClose}
+      />,
+    );
+    expect(screen.getByText(i18n.t("pallet.contentsLoading"))).toBeDefined();
+    expect(all).not.toHaveBeenCalled();
+    drain();
+    await screen.findByText(i18n.t("pallet.contentsError"));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("productLabels.retry") }));
+    await screen.findByText("sscc-p1-box-1");
+    expect(screen.getAllByRole("row")).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.backToAssembly") }));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });
 
@@ -386,6 +443,42 @@ describe("PalletExceptions", () => {
 });
 
 describe("WorkScreen pallet strip", () => {
+  it("opens local contents from the card, swallows scans there, and resumes scanning after return", async () => {
+    const exec = makeExec();
+    const source = manualSource();
+    await seedShift(exec, { shiftId: "s1", palletBoxCapacity: 66 });
+    await seedPallet(exec, { palletId: "p1", shiftId: "s1", terminalId: "dev-1", boxCount: 42 });
+    await seedPallet(exec, { palletId: "other", shiftId: "s1", terminalId: "dev-2", boxCount: 1 });
+    renderWork({ exec, source, palletBoxCapacity: 66 });
+    await screen.findByText(i18n.t("pallet.progress", { boxes: 42, capacity: 66 }));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.contents") }));
+    await screen.findByText("sscc-p1-box-41");
+    expect(screen.queryByText("sscc-other-box-0")).toBeNull();
+    expect(screen.getAllByRole("row")).toHaveLength(43);
+    const raw = "010460000000001521TEST-CONTENTS";
+    source.emit(raw);
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.backToAssembly") }));
+    expect(await exec.all("SELECT * FROM scan_events_mirror")).toHaveLength(0);
+    source.emit(raw);
+    await waitFor(async () =>
+      expect(await exec.all("SELECT * FROM scan_events_mirror")).toHaveLength(1),
+    );
+  });
+
+  it("opens the existing partial-close confirmation directly from the card", async () => {
+    const exec = makeExec();
+    await seedShift(exec, { shiftId: "s1", palletBoxCapacity: 66 });
+    await seedPallet(exec, { palletId: "p1", shiftId: "s1", terminalId: "dev-1", boxCount: 42 });
+    renderWork({ exec, palletBoxCapacity: 66 });
+    await screen.findByText(i18n.t("pallet.progress", { boxes: 42, capacity: 66 }));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("pallet.closeCurrent") }));
+    await screen.findByText(i18n.t("pallet.earlyCloseDetail", { count: 42, capacity: 66 }));
+    const rows = await exec.all<{ closed_at: string | null }>(
+      "SELECT closed_at FROM pallets_mirror WHERE pallet_id='p1'",
+    );
+    expect(rows[0]?.closed_at).toBeNull();
+  });
+
   it("shows the pallet strip only when the shift has pallets", async () => {
     const exec = makeExec();
     await seedShift(exec, { shiftId: "s1", palletBoxCapacity: 12 });

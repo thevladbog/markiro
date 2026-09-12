@@ -4,6 +4,7 @@ import {
 } from "../ui/persistent-station-states.js";
 
 const VISUAL_STRESS_GALLERY_STATE_IDS = [
+  "work-pallet-66",
   "work-aggregation-waiting",
   "pairing-recovery",
   "floor-header-actions",
@@ -105,6 +106,12 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
     variant: "required",
     source: "synthetic",
   },
+  {
+    id: "validation-print-skipped",
+    kind: "product-label",
+    variant: "skipped",
+    source: "synthetic",
+  },
   { id: "validation-print-none", kind: "product-label", variant: "none", source: "synthetic" },
   {
     id: "validation-print-unknown",
@@ -194,6 +201,12 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
     variant: "not-found",
     source: "synthetic",
   },
+  {
+    id: "new-shift-pallet-template",
+    kind: "new-shift",
+    variant: "pallet-template",
+    source: "synthetic",
+  },
   { id: "new-shift-template", kind: "new-shift", variant: "template", source: "synthetic" },
   {
     id: "validation-print-create-required",
@@ -219,6 +232,7 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
   { id: "shift-page-1", kind: "shift", variant: "1", source: "synthetic" },
   { id: "shift-page-2", kind: "shift", variant: "2", source: "synthetic" },
   { id: "work-validation", kind: "work", variant: "validation", source: "synthetic" },
+  { id: "work-pallet-66", kind: "work", variant: "aggregation-pallet", source: "synthetic" },
   { id: "work-aggregation", kind: "work", variant: "aggregation", source: "synthetic" },
   {
     id: "work-aggregation-waiting",

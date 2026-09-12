@@ -120,12 +120,12 @@ BEGIN/COMMIT. A durable `sending` claim precedes transport. Restart maps an unfi
 send to `delivery_unknown` without resending. Explicit reprints keep the original
 bytes and require a reason. Required verification durably compares the full code,
 including separators and crypto tail, before accepting the next unit.
-The handheld also offers an explicit verification skip after a successful send:
+Station and handheld offer an explicit verification skip after a successful send:
 `verification_skipped` settles that attempt with outcome `skipped`, preserves the
 operator and timestamp, and permits the next unit without claiming verification.
 A skip cannot settle unknown delivery or an unsent attempt. Reprinting resets
 verification to pending. Deploy the expanded event contract on the API and cabinet
-before distributing handheld builds that can emit the new event.
+before distributing Station or handheld builds that can emit the new event.
 
 `POST /station/scans` carries ordered `productLabelEvents` and explicit per-event
 receipts. The full combined request is pinned before HTTP and retried unchanged;
@@ -146,6 +146,17 @@ is not evidence that any specific printer/scanner combination is supported.
 - Shift downloads to the station in full: product, label template,
   capacities, counterparty GLN, **pre-allocated SSCC serial ranges per
   terminal** — boxes/pallets print offline with no collisions.
+- The Station assembly screen shows the device's current pallet as a live box
+  count, continuous progress bar, remaining capacity and last box SSCC suffix.
+  Its contents open from the local mirror after queued scans finish; new scans
+  are paused while the list is open. Removed boxes are excluded. Closing from
+  the card uses the existing partial-close confirmation and durable print flow.
+- When creating an aggregation shift on Station, the operator chooses whether
+  to assemble pallets and selects box and pallet labels separately. Pallet
+  capacity is displayed from the product card and is never sent as an override;
+  the server snapshots the product's current value when creating the shift.
+  The pallet template picker reads tenant/category-filtered summaries through
+  `GET /shifts/pallet-label-templates`, with category then organisation defaults.
 - Product snapshots carry an optional private image descriptor. Device mirrors
   treat an absent `image` field as a legacy/unknown value and retain any
   already-published local pointer; only explicit `image: null` clears it. This

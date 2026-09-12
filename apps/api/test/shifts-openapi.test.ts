@@ -123,6 +123,13 @@ describe("shifts OpenAPI contract", () => {
     const app = moduleRef.createNestApplication();
     try {
       const document = SwaggerModule.createDocument(app, new DocumentBuilder().build());
+      const palletPicker = responseSchema(document, "/shifts/pallet-label-templates", "get", "200");
+      expectProperties(palletPicker, ["items", "defaultPalletLabelTemplateId", "defaultSource"]);
+      expectRequired(palletPicker, ["items", "defaultPalletLabelTemplateId", "defaultSource"]);
+      const palletItem = property(palletPicker, "items").items;
+      expect(palletItem).toBeDefined();
+      if (!palletItem) throw new Error("Missing pallet option schema");
+      expectProperties(palletItem, ["id", "name", "widthMm", "heightMm", "dpi", "language"]);
       const planning = responseSchema(document, "/shifts/planning-config", "get", "200");
       expectRequired(planning, [
         "defaultBoxLabelTemplateId",

@@ -1,3 +1,5 @@
+import { PalletContents } from "../components/PalletContents.js";
+import { PalletStrip } from "../components/PalletStrip.js";
 import type { ProductLabelJobView } from "../lib/product-labels/types.js";
 import type { ProductLabelWork, ProductLabelWorkState } from "../lib/use-product-label-work.js";
 import { ProductLabelInstrument } from "../ui/work/ProductLabelInstrument.js";
@@ -1127,7 +1129,7 @@ function LoginFixture({ variant, locale }: { variant: string; locale: GalleryLoc
 }
 
 /** Drives the real creation form to a review state. This client cannot create/open shifts. */
-function DuplicateNewShiftFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
+function NewShiftPlanningFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   const root = useRef<HTMLDivElement>(null);
   const client = useMemo<StationClient>(
     () => ({
@@ -1139,10 +1141,37 @@ function DuplicateNewShiftFixture({ variant, locale }: { variant: string; locale
                 id: "11111111-1111-4111-8111-111111111111",
                 gtin14: "04600000000015",
                 name: locale === "ru" ? "Кега · тестовый продукт" : "Keg · sample product",
-                boxCapacity: null,
+                boxCapacity: variant === "pallet-template" ? 10 : null,
+                palletBoxCapacity: 66,
               },
             ],
           } as T);
+        if (
+          path.startsWith("/shifts/box-label-templates") ||
+          path.startsWith("/shifts/pallet-label-templates")
+        ) {
+          const pallet = path.startsWith("/shifts/pallet-label-templates");
+          return Promise.resolve({
+            items: [
+              {
+                id: "gallery-template",
+                name: pallet
+                  ? locale === "ru"
+                    ? "Паллета 100×150"
+                    : "Pallet 100×150"
+                  : locale === "ru"
+                    ? "Короб 58×40"
+                    : "Box 58×40",
+                widthMm: pallet ? 100 : 58,
+                heightMm: pallet ? 150 : 40,
+                dpi: 203,
+                language: "zpl",
+              },
+            ],
+            [pallet ? "defaultPalletLabelTemplateId" : "defaultBoxLabelTemplateId"]:
+              "gallery-template",
+          } as T);
+        }
         if (path.startsWith("/shifts/planning-config"))
           return Promise.resolve({ validationPrintProtocol: "validation-dm-duplicate-v1" } as T);
         if (path.startsWith("/shifts/product-label-templates"))
@@ -1167,7 +1196,7 @@ function DuplicateNewShiftFixture({ variant, locale }: { variant: string; locale
       download: () => Promise.reject(new Error("Gallery download unavailable")),
       whoami: () => Promise.resolve({ ok: true }),
     }),
-    [locale],
+    [locale, variant],
   );
   const source = useMemo<ScanSource>(
     () => ({
@@ -1188,6 +1217,24 @@ function DuplicateNewShiftFixture({ variant, locale }: { variant: string; locale
     if (!container) return;
     let step = 0;
     const advance = () => {
+      if (variant === "pallet-template") {
+        const keys = [
+          "shifts.modeAggregation",
+          "shifts.palletsOn",
+          "shifts.start",
+          "shifts.palletNext",
+        ];
+        const key = keys[step];
+        if (!key) return;
+        const label = i18n.getFixedT(locale)(key);
+        const button = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+          (button) => button.textContent?.trim() === label && !button.disabled,
+        );
+        if (!button) return;
+        step += 1;
+        button.click();
+        return;
+      }
       if (step === 0) {
         const button = container.querySelector<HTMLButtonElement>(
           '[data-testid="new-shift-print-settings"]',
@@ -1221,7 +1268,7 @@ function DuplicateNewShiftFixture({ variant, locale }: { variant: string; locale
     observer.observe(container, { childList: true, subtree: true, attributes: true });
     advance();
     return () => observer.disconnect();
-  }, [variant]);
+  }, [variant, locale]);
   return (
     <div ref={root} style={{ height: "100%", minHeight: 0 }}>
       <NewShift
@@ -1236,8 +1283,8 @@ function DuplicateNewShiftFixture({ variant, locale }: { variant: string; locale
 }
 
 function NewShiftFixture({ view, locale }: { view: string; locale: GalleryLocale }) {
-  if (view.startsWith("print-"))
-    return <DuplicateNewShiftFixture key={view} variant={view} locale={locale} />;
+  if (view.startsWith("print-") || view === "pallet-template")
+    return <NewShiftPlanningFixture key={view} variant={view} locale={locale} />;
   const ru = locale === "ru";
   const notFound = view === "not-found";
   const found = view === "found";
@@ -1470,7 +1517,7 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
 }
 
 function ProductLabelFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
-  const completed = variant === "none" || variant === "verified";
+  const completed = variant === "none" || variant === "verified" || variant === "skipped";
   const job: ProductLabelJobView | null =
     variant === "waiting"
       ? null
@@ -1503,7 +1550,13 @@ function ProductLabelFixture({ variant, locale }: { variant: string; locale: Gal
                     : "sent",
           verification: variant === "none" ? "none" : "required",
           verificationOutcome:
-            variant === "verified" ? "verified" : variant === "none" ? "not_required" : "pending",
+            variant === "skipped"
+              ? "skipped"
+              : variant === "verified"
+                ? "verified"
+                : variant === "none"
+                  ? "not_required"
+                  : "pending",
           ownershipConflict: false,
           acceptedAt: "2026-09-08T10:00:00.000Z",
           updatedAt: "2026-09-08T10:00:01.000Z",
@@ -1529,6 +1582,7 @@ function ProductLabelFixture({ variant, locale }: { variant: string; locale: Gal
     idle: async () => {},
     accept: () => Promise.resolve({ status: "busy" }),
     verify: () => Promise.resolve("stale"),
+    skip: () => Promise.resolve(false),
     resumePrepared: async () => {},
     reprint: async () => {},
     retry: async () => {},
@@ -1545,6 +1599,20 @@ function ProductLabelFixture({ variant, locale }: { variant: string; locale: Gal
   );
 }
 
+const galleryPalletExecutor: SqlExecutor = {
+  all<T>() {
+    return Promise.resolve(
+      Array.from({ length: 42 }, (_, index) => ({
+        box_id: `gallery-pallet-box-${index}`,
+        sscc: `00460123456${String(42 - index).padStart(7, "0")}`,
+        closed_at: new Date(Date.UTC(2026, 8, 12, 11, 42 - index)).toISOString(),
+      })) as T[],
+    );
+  },
+  async run() {},
+};
+const galleryPalletIdle = async () => {};
+
 function WorkFixture({
   mode,
   locale,
@@ -1554,6 +1622,7 @@ function WorkFixture({
   locale: GalleryLocale;
   productLabel?: { job: ProductLabelJobView | null; busy: boolean };
 }) {
+  const [showPalletContents, setShowPalletContents] = useState(false);
   const ru = locale === "ru";
   const t = i18n.getFixedT(locale);
   // "box-full" is a filled box moments before it closes -- still an ordinary
@@ -1629,11 +1698,22 @@ function WorkFixture({
                 onClear={() => undefined}
               />
             ) : null}
+            {mode === "aggregation-pallet" ? (
+              <PalletStrip
+                boxCount={42}
+                capacity={66}
+                serials="available"
+                lastBoxSscc="004601234560000042"
+                onShowContents={() => setShowPalletContents(true)}
+                onClose={() => undefined}
+              />
+            ) : null}
           </div>
           <aside className="work-screen__secondary" aria-label={workLabels.summary}>
             <WorkCounters
               accepted={waiting ? 0 : 1248}
               rejected={waiting ? 0 : 3}
+              duplicates={waiting ? 0 : 1}
               pendingSync={mode === "offline" ? 7 : 0}
               locale={workLabels.locale}
               labels={workLabels.counters}
@@ -1653,6 +1733,16 @@ function WorkFixture({
         onPause={() => undefined}
         onClose={() => undefined}
       />
+      {showPalletContents ? (
+        <PalletContents
+          exec={galleryPalletExecutor}
+          shiftId="gallery-shift"
+          terminalId="gallery-terminal"
+          palletId="gallery-pallet"
+          waitForIdle={galleryPalletIdle}
+          onClose={() => setShowPalletContents(false)}
+        />
+      ) : null}
     </main>
   );
 }

@@ -143,6 +143,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /shifts (ShiftsController.listShifts)",
       "GET /shifts/planning-config (ShiftsController.getPlanningConfig)",
       "GET /shifts/box-label-templates (ShiftsController.listBoxLabelTemplates)",
+      "GET /shifts/pallet-label-templates (ShiftsController.listPalletLabelTemplates)",
       "GET /shifts/product-label-templates (ShiftsController.listProductLabelTemplates)",
       "GET /shifts/:id (ShiftsController.getShift)",
       "GET /shifts/:id/summary (ShiftsController.getShiftSummary)",

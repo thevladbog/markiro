@@ -59,6 +59,7 @@ function isStationRequest(req: Request): boolean {
     (method === "GET" && (path === "/station/identity" || path === "/station/operators")) ||
     ((method === "GET" || method === "POST") && path === "/shifts") ||
     (method === "GET" && path === "/shifts/box-label-templates") ||
+    (method === "GET" && path === "/shifts/pallet-label-templates") ||
     (method === "GET" && path === "/shifts/product-label-templates") ||
     (method === "GET" && path === "/shifts/planning-config") ||
     (method === "GET" && path === "/products") ||

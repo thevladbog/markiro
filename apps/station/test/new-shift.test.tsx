@@ -716,6 +716,110 @@ describe("NewShift", () => {
   // only half the job: 12:00 UTC is still the 14th in Moscow but already the
   // 15th in Kiritimati (UTC+14), which would fail the body assertion below.
   // Pinning the zone makes the literal date mean one thing everywhere.
+  it("enables pallets using the product capacity and a separate pallet label without sending capacity overrides", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ gtin14: resolvedProduct.gtin14, owner: "own" }))
+      .mockResolvedValueOnce(
+        Response.json({ items: [{ ...resolvedProduct, boxCapacity: 10, palletBoxCapacity: 66 }] }),
+      )
+      .mockResolvedValueOnce(Response.json(templateLibrary))
+      .mockResolvedValueOnce(
+        Response.json({
+          items: [{ ...templateLibrary.items[0], id: "pallet-template", name: "Pallet 100x150" }],
+          defaultPalletLabelTemplateId: "pallet-template",
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ id: "s9", status: "planned", mode: "aggregation" }))
+      .mockResolvedValueOnce(Response.json({ id: "s9", status: "active", mode: "aggregation" }));
+    const onStarted = vi.fn();
+    render(
+      <NewShift client={client} source={silentSource} onStarted={onStarted} onBack={() => {}} />,
+    );
+    submitGtin();
+    await screen.findByText("Cola");
+    fireEvent.click(screen.getByRole("button", { name: "Aggregation" }));
+    fireEvent.click(screen.getByRole("button", { name: "With pallets" }));
+    expect(screen.getByText("66 boxes per pallet · from the product card")).toBeDefined();
+    expect(screen.queryByRole("spinbutton")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await screen.findByText("Box label template");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("Pallet label template");
+    expect(
+      screen.getByRole("button", { name: /Pallet 100x150/ }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(onStarted).toHaveBeenCalled());
+    expect(fetchMock.mock.calls[3]?.[0]).toBe(
+      "http://localhost:3000/shifts/pallet-label-templates?productId=p1",
+    );
+    const body = JSON.parse(fetchMock.mock.calls[4]?.[1]?.body as string);
+    expect(body).toMatchObject({
+      mode: "aggregation",
+      palletsEnabled: true,
+      palletLabelTemplateId: "pallet-template",
+      boxLabelTemplateId: "tpl-default",
+    });
+    expect(body).not.toHaveProperty("palletBoxCapacity");
+    expect(body).not.toHaveProperty("boxCapacity");
+  });
+
+  it("recovers a failed pallet-template read and requires explicit selection when no default exists", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ gtin14: resolvedProduct.gtin14, owner: "own" }))
+      .mockResolvedValueOnce(
+        Response.json({ items: [{ ...resolvedProduct, boxCapacity: 10, palletBoxCapacity: 66 }] }),
+      )
+      .mockResolvedValueOnce(Response.json(templateLibrary))
+      .mockResolvedValueOnce(Response.json({ message: "Unavailable" }, { status: 503 }))
+      .mockResolvedValueOnce(
+        Response.json({
+          items: [{ ...templateLibrary.items[0], id: "pallet-template", name: "Pallet 100x150" }],
+          defaultPalletLabelTemplateId: null,
+        }),
+      );
+    render(
+      <NewShift client={client} source={silentSource} onStarted={vi.fn()} onBack={() => {}} />,
+    );
+    submitGtin();
+    await screen.findByText("Cola");
+    fireEvent.click(screen.getByRole("button", { name: "Aggregation" }));
+    fireEvent.click(screen.getByRole("button", { name: "With pallets" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await screen.findByText("Box label template");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("Pallet label template");
+    expectButtonDisabled(screen.getByRole("button", { name: "Start" }), true);
+    fireEvent.click(screen.getByRole("button", { name: /Pallet 100x150/ }));
+    expectButtonDisabled(screen.getByRole("button", { name: "Start" }), false);
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await screen.findByText("Box label template");
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Without pallets" }));
+    expect(
+      screen.getByRole("button", { name: "Without pallets" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
+  it("explains missing product capacity and prevents enabling pallets", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ gtin14: resolvedProduct.gtin14, owner: "own" }))
+      .mockResolvedValueOnce(Response.json({ items: [resolvedProduct] }));
+    render(
+      <NewShift client={client} source={silentSource} onStarted={vi.fn()} onBack={() => {}} />,
+    );
+    submitGtin();
+    await screen.findByText("Cola");
+    fireEvent.click(screen.getByRole("button", { name: "Aggregation" }));
+    expectButtonDisabled(screen.getByRole("button", { name: "With pallets" }), true);
+    expect(
+      screen.getByText("Set the number of boxes per pallet in the product card in the cabinet."),
+    ).toBeDefined();
+  });
+
   it("opens the template picker for aggregation with the org default preselected and snapshots it on start", async () => {
     useTimeZone("Europe/Moscow");
     vi.useFakeTimers({ toFake: ["Date"] });

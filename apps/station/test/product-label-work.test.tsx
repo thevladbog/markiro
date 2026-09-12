@@ -26,6 +26,39 @@ afterEach(() => {
   for (const h of resources.splice(0)) h.close();
 });
 describe("product label floor controller", () => {
+  it("serializes a skip with scanning and unlocks only after the durable commit", async () => {
+    const { h, work, generation } = await setup();
+    await work.resumePrepared();
+    const job = work.getSnapshot().job;
+    if (!job) throw new Error("missing job");
+    expect(await work.skip(job.jobId, "stale-attempt")).toBe(false);
+    work.setVerificationPaused(true);
+    expect(await work.skip(job.jobId, job.attemptId)).toBe(false);
+    work.setVerificationPaused(false);
+    let release!: () => void;
+    const run = h.exec.run;
+    h.exec.run = async (sql, params) => {
+      if (
+        sql.includes("INSERT INTO product_label_event_commands") &&
+        String(params?.[7]).includes('"kind":"verification_skipped"')
+      )
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      await run(sql, params);
+    };
+    const skipping = work.skip(job.jobId, job.attemptId);
+    await waitFor(() => expect(release).toBeTypeOf("function"));
+    expect(work.canAccept()).toBe(false);
+    expect(await work.verify(h.input.raw)).toBe("stale");
+    expect(await work.skip(job.jobId, job.attemptId)).toBe(false);
+    release();
+    expect(await skipping).toBe(true);
+    expect(work.canAccept()).toBe(true);
+    expect(work.getSnapshot().job?.verificationOutcome).toBe("skipped");
+    await sealCredentialGeneration(generation);
+    expect(await work.skip(job.jobId, job.attemptId)).toBe(false);
+  });
   it("restores a prepared label without automatically printing and blocks new units", async () => {
     const { h, work } = await setup();
     expect(h.print).not.toHaveBeenCalled();
