@@ -316,7 +316,6 @@ export class AgreementDocumentsService {
       identityLabel: agreement.number,
       showMetadata: false,
       showSummary: false,
-      centredWordmark: true,
     };
 
     if (agreement.documentForm === "ru_en") {

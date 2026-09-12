@@ -49,6 +49,7 @@ import {
   renderMarkiroSymbolPng,
   renderMarkiroSymbolSvg,
 } from "./brand.js";
+import { isLegacyWordmarkRelease } from "./legacy-wordmark.js";
 import { assertLegalArtifactRequest, type LegalArtifactRequest } from "./names.js";
 
 const PAGE_WIDTH = 11906;
@@ -117,13 +118,12 @@ export interface LegalDocxDraft extends LegalDocxMeta {
    */
   readonly showSummary?: boolean;
   /**
-   * Centres the wordmark against the symbol instead of sitting it on the
-   * baseline, where it reads as having slipped below the mark. Off by
-   * default: every published artifact is pinned byte-for-byte, so correcting
-   * the shared header means re-issuing the whole registry — a release
-   * decision rather than a rendering one.
+   * Sets the wordmark on the baseline beside the symbol, where it reads as
+   * having slipped below the mark. Only for releases published before the
+   * header was corrected, which keep the bytes their revision pins. See
+   * `legacy-wordmark.ts`.
    */
-  readonly centredWordmark?: boolean;
+  readonly legacyWordmark?: boolean;
   readonly operatorProfileId: LegalOperatorProfileId;
   readonly content: LegalDocumentLocaleContent;
 }
@@ -182,6 +182,7 @@ export async function renderLegalDocx(
           ? copy[input.locale].instructionClass
           : copy[input.locale].documentClass,
       operatorProfileId: release.operatorProfileId,
+      legacyWordmark: isLegacyWordmarkRelease(input.code, input.revision),
       content: requireLegalContent(findLegalDocument(input.code, input.revision), input.locale),
     },
     assets,
@@ -362,7 +363,7 @@ async function renderLegalDocxShell(
     readonly classLabel: string;
     readonly operatorProfileId: LegalOperatorProfileId;
     readonly identityLabel?: string;
-    readonly centredWordmark?: boolean;
+    readonly legacyWordmark?: boolean;
   },
   title: string,
   summary: string,
@@ -517,7 +518,7 @@ function legalDocxIdentity(input: LegalDocxMeta & { readonly identityLabel?: str
 function createHeader(
   input: LegalDocxMeta & {
     readonly identityLabel?: string;
-    readonly centredWordmark?: boolean;
+    readonly legacyWordmark?: boolean;
   },
   markSvg: string,
   markPng: Uint8Array,
@@ -526,7 +527,7 @@ function createHeader(
   classLabel: string,
 ): Table {
   const localeWordmark = input.locale === "ru" ? "маркиро" : "MARKIRO";
-  const centred = input.centredWordmark === true;
+  const centred = input.legacyWordmark !== true;
   return new Table({
     width: { size: CONTENT_WIDTH, type: WidthType.DXA },
     columnWidths: [HEADER_WORDMARK_WIDTH, HEADER_IDENTITY_WIDTH],

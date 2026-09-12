@@ -68,7 +68,6 @@ const BILINGUAL_DRAFTS: readonly BilingualArtifact[] = [
       identityLabel: "[номер]",
       showMetadata: false,
       showSummary: false,
-      centredWordmark: true,
       content: pairLocaleContent(
         buildTenantAgreement({ customer: EMPTY_CUSTOMER }, "ru"),
         buildTenantAgreement({ customer: EMPTY_CUSTOMER }, "en"),
@@ -92,7 +91,6 @@ const DRAFTS: readonly DraftArtifact[] = [
       identityLabel: "[номер]",
       showMetadata: false,
       showSummary: false,
-      centredWordmark: true,
       content: buildTenantAgreement({ customer: EMPTY_CUSTOMER }, "ru"),
     },
   },
