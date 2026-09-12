@@ -13,7 +13,16 @@ import { z } from "zod";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 
-import { Alert, Button, Checkbox, ConfirmDialog, Input, Select, StatusChip } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  ConfirmDialog,
+  Input,
+  Select,
+  StatusChip,
+  Textarea,
+} from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import {
@@ -626,7 +635,7 @@ export function CatalogVersionPanel({
                     : null
                 }
                 policyId={form.watch("lifecyclePolicyId")}
-                policies={context.data?.lifecyclePolicies ?? []}
+                policies={context.data?.lifecyclePolicies}
                 onFeatureChange={(key, value) => form.setValue(key, value, { shouldDirty: true })}
                 onPolicyChange={(value) =>
                   form.setValue("lifecyclePolicyId", value, { shouldDirty: true })
@@ -660,17 +669,23 @@ export function CatalogVersionPanel({
                       ]}
                     />
                   ) : (
-                    <p>{t("commercial.subject.software_license")}</p>
-                  )}
-                  {form.watch("vatRateBps") !== null ? (
-                    <Checkbox
-                      label={t("catalog.vat.includedHint")}
-                      checked={form.watch("vatIncluded")}
-                      onCheckedChange={(value) =>
-                        form.setValue("vatIncluded", value, { shouldDirty: true })
-                      }
+                    <Input
+                      label={t("catalog.form.subject")}
+                      value={t("commercial.subject.software_license")}
+                      readOnly
                     />
-                  ) : null}
+                  )}
+                  <CatalogUnitField
+                    kind={item.kind}
+                    value={form.watch("unit")}
+                    onChange={(value) =>
+                      form.setValue("unit", value, { shouldDirty: true, shouldValidate: true })
+                    }
+                    {...(() => {
+                      const error = fieldError(form.formState.errors.unit, t);
+                      return error ? { error } : {};
+                    })()}
+                  />
                   <Input
                     label={t("catalog.form.nameRu")}
                     required
@@ -683,24 +698,15 @@ export function CatalogVersionPanel({
                     {...inputErrorProps(form.formState.errors.nameEn, t)}
                     {...form.register("nameEn")}
                   />
-                  <label className="native-field">
-                    <span>{t("catalog.form.descriptionRu")}</span>
-                    <textarea rows={3} {...form.register("descriptionRu")} />
-                  </label>
-                  <label className="native-field">
-                    <span>{t("catalog.form.descriptionEn")}</span>
-                    <textarea rows={3} {...form.register("descriptionEn")} />
-                  </label>
-                  <CatalogUnitField
-                    kind={item.kind}
-                    value={form.watch("unit")}
-                    onChange={(value) =>
-                      form.setValue("unit", value, { shouldDirty: true, shouldValidate: true })
-                    }
-                    {...(() => {
-                      const error = fieldError(form.formState.errors.unit, t);
-                      return error ? { error } : {};
-                    })()}
+                  <Textarea
+                    label={t("catalog.form.descriptionRu")}
+                    rows={3}
+                    {...form.register("descriptionRu")}
+                  />
+                  <Textarea
+                    label={t("catalog.form.descriptionEn")}
+                    rows={3}
+                    {...form.register("descriptionEn")}
                   />
                   {!isSupport && item.unitPrice !== undefined ? (
                     <>
@@ -729,6 +735,16 @@ export function CatalogVersionPanel({
                         })()}
                       />
                     </>
+                  ) : null}
+                  {form.watch("vatRateBps") !== null ? (
+                    <Checkbox
+                      className="catalog-form__full-width"
+                      label={t("catalog.vat.includedHint")}
+                      checked={form.watch("vatIncluded")}
+                      onCheckedChange={(value) =>
+                        form.setValue("vatIncluded", value, { shouldDirty: true })
+                      }
+                    />
                   ) : null}
                 </div>
               </fieldset>

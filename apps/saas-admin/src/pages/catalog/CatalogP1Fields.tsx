@@ -18,7 +18,7 @@ export function CatalogP1Fields({
 }: {
   values: P1DraftFeatures | null;
   policyId: string | null;
-  policies: readonly { id: string; policyKey: string; version: number }[];
+  policies: readonly { id: string; policyKey: string; version: number }[] | undefined;
   onFeatureChange: (
     key: Exclude<EntitlementFeatureKey, "labelEditor" | "publicApi" | "pallets">,
     value: boolean | null,
@@ -29,11 +29,13 @@ export function CatalogP1Fields({
   const { t } = useTranslation();
   return (
     <fieldset disabled={disabled}>
-      <legend>{t("entitlements.candidate")}</legend>
-      {values
-        ? P1_FEATURE_KEYS.map((key) => (
+      <legend>{t("entitlements.catalogAccess")}</legend>
+      {values ? (
+        <div className="form-grid form-grid--two">
+          {P1_FEATURE_KEYS.map((key) => (
             <Select
               key={key}
+              disabled={disabled}
               label={t(`entitlements.features.${key}`)}
               value={values[key] === null ? "unknown" : String(values[key])}
               onValueChange={(value) =>
@@ -45,25 +47,32 @@ export function CatalogP1Fields({
                 { value: "false", label: t("entitlements.disabled") },
               ]}
             />
-          ))
-        : null}
+          ))}
+        </div>
+      ) : null}
       {values && P1_FEATURE_KEYS.some((key) => values[key] === null) ? (
         <Alert tone="info">{t("entitlements.mappingRequired")}</Alert>
       ) : null}
       <Select
         label={t("entitlements.policy")}
+        hint={t("entitlements.policyHint")}
+        disabled={disabled || !policies?.length}
         value={policyId ?? ""}
         onValueChange={(value) => onPolicyChange(value || null)}
         options={[
           { value: "", label: t("entitlements.policySelect") },
-          ...policies.map((policy) => ({
+          ...(policies ?? []).map((policy) => ({
             value: policy.id,
             label: `${policy.policyKey} · v${policy.version}`,
           })),
         ]}
       />
-      {!policies.some((policy) => policy.id === policyId) ? (
-        <Alert tone="info">{t("entitlements.policyMissing")}</Alert>
+      {policies && !policies.some((policy) => policy.id === policyId) ? (
+        <Alert tone="info">
+          {t(
+            policies.length === 0 ? "entitlements.policyUnavailable" : "entitlements.policyMissing",
+          )}
+        </Alert>
       ) : null}
     </fieldset>
   );

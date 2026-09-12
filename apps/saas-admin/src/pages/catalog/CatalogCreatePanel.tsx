@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Checkbox, Input, Select } from "@markiro/ui";
+import { Alert, Button, Checkbox, Input, Select, Textarea } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import {
@@ -251,6 +251,7 @@ export function CatalogCreatePanel({
           <div className="form-grid form-grid--two">
             <Input
               label={t("catalog.form.code")}
+              className="catalog-form__full-width"
               value={code}
               onChange={(event) => setCode(event.target.value)}
               placeholder="plan-pro"
@@ -268,50 +269,18 @@ export function CatalogCreatePanel({
               onChange={(event) => setNameEn(event.target.value)}
               required
             />
-            <label className="native-field">
-              <span>{t("catalog.form.descriptionRu")}</span>
-              <textarea
-                aria-label={t("catalog.form.descriptionRu")}
-                value={descriptionRu}
-                onChange={(event) => setDescriptionRu(event.target.value)}
-                rows={3}
-              />
-            </label>
-            <label className="native-field">
-              <span>{t("catalog.form.descriptionEn")}</span>
-              <textarea
-                aria-label={t("catalog.form.descriptionEn")}
-                value={descriptionEn}
-                onChange={(event) => setDescriptionEn(event.target.value)}
-                rows={3}
-              />
-            </label>
-            <CatalogUnitField kind={kind} value={unit} onChange={setUnit} />
-            <Input
-              label={t("catalog.form.unitPrice")}
-              value={price}
-              onChange={(event) => setPrice(event.target.value)}
-              inputMode="decimal"
-              required
+            <Textarea
+              label={t("catalog.form.descriptionRu")}
+              value={descriptionRu}
+              onChange={(event) => setDescriptionRu(event.target.value)}
+              rows={3}
             />
-            <CatalogVatField
-              value={vatRateBps}
-              policy={context.data?.taxPolicy}
-              onChange={(value) => {
-                setTaxTouched(true);
-                setVatRateBps(value);
-              }}
+            <Textarea
+              label={t("catalog.form.descriptionEn")}
+              value={descriptionEn}
+              onChange={(event) => setDescriptionEn(event.target.value)}
+              rows={3}
             />
-            {vatRateBps !== null ? (
-              <Checkbox
-                label={t("catalog.vat.includedHint")}
-                checked={vatIncluded}
-                onCheckedChange={(value) => {
-                  setTaxTouched(true);
-                  setVatIncluded(value);
-                }}
-              />
-            ) : null}
             <Input
               label={t("catalog.form.documentNameRu")}
               value={documentNameRu}
@@ -333,8 +302,39 @@ export function CatalogCreatePanel({
                 ]}
               />
             ) : (
-              <p>{t("commercial.subject.software_license")}</p>
+              <Input
+                label={t("catalog.form.subject")}
+                value={t("commercial.subject.software_license")}
+                readOnly
+              />
             )}
+            <CatalogUnitField kind={kind} value={unit} onChange={setUnit} />
+            <Input
+              label={t("catalog.form.unitPrice")}
+              value={price}
+              onChange={(event) => setPrice(event.target.value)}
+              inputMode="decimal"
+              required
+            />
+            <CatalogVatField
+              value={vatRateBps}
+              policy={context.data?.taxPolicy}
+              onChange={(value) => {
+                setTaxTouched(true);
+                setVatRateBps(value);
+              }}
+            />
+            {vatRateBps !== null ? (
+              <Checkbox
+                className="catalog-form__full-width"
+                label={t("catalog.vat.includedHint")}
+                checked={vatIncluded}
+                onCheckedChange={(value) => {
+                  setTaxTouched(true);
+                  setVatIncluded(value);
+                }}
+              />
+            ) : null}
           </div>
         </fieldset>
         {kind === "plan" ? (
@@ -424,7 +424,7 @@ export function CatalogCreatePanel({
         <CatalogP1Fields
           values={kind === "plan" ? p1Features : null}
           policyId={lifecyclePolicyId}
-          policies={context.data?.lifecyclePolicies ?? []}
+          policies={context.data?.lifecyclePolicies}
           onFeatureChange={(key, value) =>
             setP1Features((current) => ({ ...current, [key]: value }))
           }
