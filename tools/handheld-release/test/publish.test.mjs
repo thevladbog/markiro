@@ -7,6 +7,7 @@ import { test } from "node:test";
 
 import { buildHandheldManifest, handheldChannelBaseUrl } from "../manifest.mjs";
 import { handheldManifestKey, handheldObjectKey } from "../object-storage.mjs";
+import { readNotes } from "../changelog.mjs";
 import { publishHandheldRelease } from "../publish.mjs";
 
 const apkBytes = Buffer.from("PK pretend this is an APK");
@@ -203,4 +204,23 @@ test("a failed download alias update fails the release and preserves its verifie
     /refused the copy/,
   );
   assert.equal(store.objects.has(handheldManifestKey("stable")), true);
+});
+
+test("a computed version with no changelog entry publishes automatic notes to both manifests", async () => {
+  const store = fakeStore();
+  const dir = await mkdtemp(join(tmpdir(), "handheld-release-without-changelog-"));
+  const notes = await readNotes(versionName, join(dir, "CHANGELOG.md"));
+  assert.equal(notes, "Markiro ТСД 0.2.0. Обновление приложения для терминалов сбора данных.");
+  const result = await publishHandheldRelease({
+    ...(await release({ notes })),
+    store,
+    fetchImpl: fakeFetch(store),
+  });
+  assert.equal(result.manifest.notes, notes);
+  for (const key of [
+    handheldManifestKey("stable"),
+    handheldObjectKey({ channel: "stable", versionName, filename: "manifest.json" }),
+  ]) {
+    assert.equal(JSON.parse(store.objects.get(key).body.toString("utf8")).notes, notes);
+  }
 });
