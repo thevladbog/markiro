@@ -86,10 +86,34 @@ test("the object-storage credential reaches the publish step and nothing else", 
   );
 });
 
+test("the version is computed, never typed", () => {
+  // A typed `versionCode` is a repeat waiting to happen, and a repeat is an
+  // update every installed terminal silently refuses.
+  const inputs = workflow.on.workflow_dispatch.inputs;
+  assert.equal(inputs.version_name, undefined);
+  assert.equal(inputs.version_code, undefined);
+  assert.deepEqual(inputs.bump.options, ["patch", "minor", "major"]);
+  assert.deepEqual(Object.keys(workflow.jobs.authorize.outputs), ["version_name", "version_code"]);
+  // Resolved in `authorize`, so everything it can refuse is refused before the
+  // release job puts a signing key on a runner. The channel pointer is public,
+  // so this needs no credential.
+  const resolve = workflow.jobs.authorize.steps.find((step) => step.id === "version");
+  assert.ok(resolve, "authorize must resolve the version");
+  assert.match(resolve.run, /tools\/handheld-release\/resolve\.mjs/);
+  for (const step of steps) {
+    assert.ok(
+      !JSON.stringify(step).includes("inputs.version_name"),
+      `${step.name} still reads a typed version`,
+    );
+  }
+});
+
 test("publishing refuses a version the changelog does not describe", () => {
   // Checked in `authorize`, which is why that job checks the repository out at
   // all: the refusal must happen before a signing key reaches a runner.
-  assert.match(text, /grep -qxF "## \$VERSION_NAME" apps\/handheld\/CHANGELOG\.md/);
+  // Enforced by `resolve.mjs`, which is why `authorize` checks the repository
+  // out at all; its own tests cover the refusal and the message it carries.
+  assert.match(text, /tools\/handheld-release\/resolve\.mjs/);
   assert.ok(
     workflow.jobs.authorize.steps.some((step) => (step.uses ?? "").startsWith("actions/checkout@")),
   );
