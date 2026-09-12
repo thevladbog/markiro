@@ -14,17 +14,25 @@ key, matching CI's own `verify-api-tests` job. Two things the implementation
 learned that this spec did not anticipate:
 
 - **§5 Templates promised an organisation-wide and per-category pallet
-  default; neither shipped.** `org_profiles.default_pallet_label_template_id`
-  and `org_pallet_label_template_defaults` exist in the schema and are read by
-  the box-label-template-eligibility checks (so a template a default points at
-  still cannot be disabled), but `PUT /org/profile`'s DTO only ever grew
-  `defaultBoxLabelTemplateId`, never a pallet counterpart, and the admin
-  `OrgProfilePage` never grew the picker either. A tenant can author a pallet
-  template (purpose `pallet`) and pick one explicitly per shift
-  (`ShiftForm.palletLabelTemplateId`), but there is no way to make one the
-  standing default the way box templates already have. Tracked as follow-up
-  work, not silently dropped: nothing writes to those columns today, so there
-  is no orphaned or unreachable state to migrate later.
+  default; the API half shipped late, the admin picker has not shipped at
+  all.** `org_profiles.default_pallet_label_template_id` and
+  `org_pallet_label_template_defaults` exist in the schema and are read by the
+  box-label-template-eligibility checks (so a template a default points at
+  cannot be disabled), and `PUT /org/profile` originally grew only
+  `defaultBoxLabelTemplateId`. An earlier revision of this header claimed
+  "nothing writes to those columns today"; that was **false**. Migration 0130
+  seeds the stock «Паллета 100×150» for every organisation and points
+  `default_pallet_label_template_id` at it, and
+  `LABEL_TEMPLATE_REFERENCE_CONSTRAINTS` includes
+  `org_profiles_pallet_label_template_tenant_fk` — so with no write path that
+  stock template was permanently undisableable and undeletable for every
+  tenant. `PUT`/`GET /org/profile` now carry
+  `defaultPalletLabelTemplateId` and `categoryPalletLabelTemplateDefaults` in
+  full symmetry with the box fields (same eligibility rules, same
+  tenant-scoped denial, same full-replacement semantics and audit action
+  `tenant.pallet_label_template_defaults.updated`). The admin `OrgProfilePage`
+  picker remains follow-up work; until it lands the defaults are reachable
+  through the API only.
 - **`pallets.e2e.test.ts`'s reported flake was neither dev-Postgres contention
   nor test ordering — it was two different clocks.** `contentsChangedAfterClose`
   compares a member box's `disassembled_at` against the pallet's own

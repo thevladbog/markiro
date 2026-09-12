@@ -60,6 +60,8 @@ describe("OrgProfileService box label defaults", () => {
     timeZone: "Europe/Moscow",
     defaultBoxLabelTemplateId: null,
     categoryBoxLabelTemplateDefaults: [],
+    defaultPalletLabelTemplateId: null,
+    categoryPalletLabelTemplateDefaults: [],
     productGroupsInUse: [],
     pickupLimitsEnabled: true,
     logoRevision: null,
@@ -173,6 +175,32 @@ describe("OrgProfileService box label defaults", () => {
     expect(rejection).toBeInstanceOf(BadRequestException);
     if (!(rejection instanceof BadRequestException)) throw rejection;
     expect(rejection.message).toBe("Unknown box label template for this organization");
+    expect(getProfile).not.toHaveBeenCalled();
+  });
+
+  it("maps the PALLET default's own FK violation to the pallet message, not the box one", async () => {
+    // Two composite tenant FKs now guard this one upsert. Answering "unknown
+    // box label template" for a rejected pallet id would send an operator to
+    // the wrong library entirely.
+    const foreignKey = Object.assign(new Error("foreign key leak"), {
+      code: "23503",
+      constraint: "org_profiles_pallet_label_template_tenant_fk",
+    });
+    const { db } = profileUpsertDb(foreignKey, [
+      { ...ELIGIBLE_TEMPLATE, purpose: "pallet", id: "a0000000-0000-4000-8000-000000000002" },
+    ]);
+    const service = profileService(db);
+    const getProfile = vi.spyOn(service, "getProfile");
+
+    const rejection = await caught(
+      service.upsertProfile("tenant-a", "actor-a", {
+        defaultPalletLabelTemplateId: "a0000000-0000-4000-8000-000000000002",
+      }),
+    );
+
+    expect(rejection).toBeInstanceOf(BadRequestException);
+    if (!(rejection instanceof BadRequestException)) throw rejection;
+    expect(rejection.message).toBe("Unknown pallet label template for this organization");
     expect(getProfile).not.toHaveBeenCalled();
   });
 });
