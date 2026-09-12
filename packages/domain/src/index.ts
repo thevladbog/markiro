@@ -27,6 +27,7 @@ export {
   buildDuplicateLabelTemplate,
   buildDuplicateLabelTemplates,
   buildLegacyDuplicateLabelTemplates,
+  buildPreviousDuplicateLabelTemplates,
   DUPLICATE_LABEL_TEMPLATE_NAME,
 } from "./labels/duplicate.js";
 export {

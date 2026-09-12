@@ -598,6 +598,8 @@ export class StationInventorySyncService {
           };
           const [current] = await tx
             .select({
+              id: schema.inventoryCodeResults.id,
+              observedProductionDate: schema.inventoryCodeResults.observedProductionDate,
               codeHash: schema.inventoryCodeResults.codeHash,
               eventId: schema.inventoryCodeResults.firstAcceptedEventId,
               deviceId: schema.inventoryCodeResults.winningDeviceId,
@@ -630,6 +632,15 @@ export class StationInventorySyncService {
             const currentWinner = asWinner(current);
             if (winnerPrecedes(candidate, currentWinner)) {
               displacedEvents.add(current.eventId);
+              // Release the old active-date FK before changing the winner's date.
+              // The inventory transaction rolls this history change back if the
+              // incoming repack mutation is rejected later.
+              if (
+                inventory.mode === "repack" &&
+                current.observedProductionDate !== event.activeProductionDate
+              ) {
+                await this.retireDisplacedRepackItems(tx, tenantId, inventoryId, current.id);
+              }
               await tx
                 .update(schema.inventoryCodeResults)
                 .set({
@@ -1306,6 +1317,54 @@ export class StationInventorySyncService {
     }));
   }
 
+  private async retireDisplacedRepackItems(
+    tx: Transaction,
+    tenantId: string,
+    inventoryId: string,
+    resultId: string,
+  ): Promise<void> {
+    const displaced = await tx
+      .select({ id: schema.inventoryRepackItems.id, boxId: schema.inventoryRepackItems.boxId })
+      .from(schema.inventoryRepackItems)
+      .where(
+        and(
+          eq(schema.inventoryRepackItems.tenantId, tenantId),
+          eq(schema.inventoryRepackItems.inventoryId, inventoryId),
+          eq(schema.inventoryRepackItems.resultId, resultId),
+          isNull(schema.inventoryRepackItems.removedAt),
+        ),
+      )
+      .for("update");
+    if (displaced.length > 0) {
+      await tx
+        .update(schema.inventoryRepackItems)
+        .set({ removedAt: new Date(), activeObservedProductionDate: null })
+        .where(
+          inArray(
+            schema.inventoryRepackItems.id,
+            displaced.map((row) => row.id),
+          ),
+        );
+      await tx
+        .update(schema.inventoryRepackBoxes)
+        .set({
+          state: "invalidated",
+          // A box the cabinet already invalidated stays irreversible even when a
+          // later scan conflict displaces one of its items, so the first
+          // invalidation keeps both its source and its timestamp.
+          invalidationSource: sql`coalesce(${schema.inventoryRepackBoxes.invalidationSource}, 'claim_lost'::inventory_repack_invalidation_source)`,
+          invalidatedAt: sql`coalesce(${schema.inventoryRepackBoxes.invalidatedAt}, now())`,
+          updatedAt: new Date(),
+        })
+        .where(
+          inArray(
+            schema.inventoryRepackBoxes.id,
+            displaced.map((row) => row.boxId),
+          ),
+        );
+    }
+  }
+
   private async applyRepackMutation(
     tx: Transaction,
     tenantId: string,
@@ -1669,32 +1728,7 @@ export class StationInventorySyncService {
         throw new ConflictException({ code: "INVENTORY_REPACK_ITEM_ALREADY_MEMBER" });
       }
       if (displaced.length > 0) {
-        await tx
-          .update(schema.inventoryRepackItems)
-          .set({ removedAt: new Date(), activeObservedProductionDate: null })
-          .where(
-            inArray(
-              schema.inventoryRepackItems.id,
-              displaced.map((row) => row.id),
-            ),
-          );
-        await tx
-          .update(schema.inventoryRepackBoxes)
-          .set({
-            state: "invalidated",
-            // A box the cabinet already invalidated stays irreversible even when a
-            // later scan conflict displaces one of its items, so the first
-            // invalidation keeps both its source and its timestamp.
-            invalidationSource: sql`coalesce(${schema.inventoryRepackBoxes.invalidationSource}, 'claim_lost'::inventory_repack_invalidation_source)`,
-            invalidatedAt: sql`coalesce(${schema.inventoryRepackBoxes.invalidatedAt}, now())`,
-            updatedAt: new Date(),
-          })
-          .where(
-            inArray(
-              schema.inventoryRepackBoxes.id,
-              displaced.map((row) => row.boxId),
-            ),
-          );
+        await this.retireDisplacedRepackItems(tx, tenantId, inventoryId, result.id);
       }
       const [activeCount] = await tx
         .select({ count: sql<number>`count(*)::int` })

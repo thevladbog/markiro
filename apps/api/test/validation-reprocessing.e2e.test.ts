@@ -686,7 +686,7 @@ describe.skipIf(!ready)("validation reprocessing admission", () => {
       .delete(table)
       .where(and(eq(table.tenantId, tenantId), eq(table.shiftId, current.shiftId)));
     const migration = await readFile(
-      resolve(__dirname, "../../../packages/db/migrations/0143_validation_acceptance.sql"),
+      resolve(__dirname, "../../../packages/db/migrations/0144_validation_acceptance.sql"),
       "utf8",
     );
     const backfill = migration.slice(migration.indexOf("-- Only the effective registry"));
