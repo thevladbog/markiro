@@ -10,6 +10,8 @@ import app.markiro.handheld.core.box.BoxPrinter
 import app.markiro.handheld.core.box.PrintReason
 import app.markiro.handheld.core.box.BoxRepository
 import app.markiro.handheld.core.box.CloseBox
+import app.markiro.handheld.core.box.ClosePallet
+import app.markiro.handheld.core.box.PalletRepository
 import app.markiro.handheld.core.duplicate.DuplicateJobs
 import app.markiro.handheld.core.duplicate.DuplicateReason
 import app.markiro.handheld.core.box.CloseResult
@@ -117,13 +119,18 @@ class WorkViewModelTest {
         )
         val boxes = BoxRepository(db)
         val pool = SsccPool(db)
+        // The fixture shift carries no `palletBoxCapacity`, so these are wired
+        // up only to satisfy `CloseBox`'s constructor -- nothing here joins a
+        // pallet. That path has its own suite, `ClosePalletTest`.
+        val pallets = PalletRepository(db)
+        val closePallet = ClosePallet(db, pool)
         // `main.track` is #506's leak guard; the duplicate engine is this slice's
         // own argument. Both belong.
         return main.track(
             WorkViewModel(
                 SavedStateHandle(mapOf("shiftId" to "s1")), db, ScanRecorder(db), ScanRouterAdapter(scans),
                 { kind -> played += kind }, engine, session, ReachabilityTracker(), team, null,
-                boxes, CloseBox(db, boxes, pool), BoxPrinter(db, boxes, LabelRenderer(rasterize), transport),
+                boxes, CloseBox(db, boxes, pool, pallets, closePallet), BoxPrinter(db, boxes, LabelRenderer(rasterize), transport),
                 DuplicateJobs(db, LabelRenderer(rasterize), transport), flowOf(Unit),
             ),
         )

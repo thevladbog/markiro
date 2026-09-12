@@ -13,6 +13,15 @@ sealed interface CloseResult {
         val sscc: String,
         val itemCount: Int,
         val closedAt: String,
+        /**
+         * What happened to the pallet this box joined (06d), or null when the
+         * shift carries no pallet capacity at all (`palletBoxCapacity == null`)
+         * or the joined pallet had not yet reached it. Reaching capacity closes
+         * the pallet as part of THIS same close, so the operator gets one
+         * outcome for one scan rather than a box confirmation followed by a
+         * separate, easy-to-miss pallet event.
+         */
+        val pallet: ClosePalletResult? = null,
     ) : CloseResult
 
     /** No box is open, or the open one holds nothing. Nothing was burned. */
@@ -46,11 +55,20 @@ sealed interface CloseResult {
  * never pre-emptively. That is why a serial is burned here, at close, rather
  * than when the box was opened: a box abandoned at shift end then costs nothing
  * either.
+ *
+ * Pallets (06d): a closing box also joins the shift's open pallet and, at
+ * capacity, closes it -- through `ClosePallet`, this class's own analogue one
+ * level down -- inside this SAME transaction. A pallet closed without the box
+ * that filled it would leave the two out of step for exactly the reason a
+ * box's own burn-then-close must be one transaction: nothing could put them
+ * back together afterward.
  */
 class CloseBox(
     private val db: HandheldDatabase,
     private val boxes: BoxRepository,
     private val pool: SsccPool,
+    private val pallets: PalletRepository,
+    private val closePallet: ClosePallet,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     /**
@@ -88,7 +106,30 @@ class CloseBox(
                 // and «Годен до» derive from it, and a recovery print the next
                 // morning must stamp the same two dates rather than that morning's.
                 val closedAt = Iso.format(clock())
+
+                // Pallets (06d): a box joins the shift's open pallet at CLOSE
+                // time, never at open -- same as the station. `palletBoxCapacity
+                // == null` means the shift carries no pallets at all, so nothing
+                // joins. The count is read BEFORE this box's own row lands, so
+                // the `+ 1` below counts this box exactly once, matching the
+                // station's `boxCount + 1 >= palletBoxCapacity`.
+                val capacity = db.shiftDao().get(shiftId)?.palletBoxCapacity
+                val pallet = if (capacity != null) pallets.currentPallet(shiftId) else null
+                val boxCountBeforeJoin = pallet?.let { db.palletDao().boxCount(it.palletId) } ?: 0
+
                 if (db.boxDao().close(box.boxId, sscc, closedAt, operatorId) == 0) throw AlreadyClosed()
+                if (pallet != null) db.boxDao().setPallet(box.boxId, pallet.palletId)
+
+                // One over-capacity pallet, never a second: if the pallet pool is
+                // dry this returns NoSerials and the SAME pallet stays open, over
+                // capacity, for the next box to retry -- exhaustion blocks
+                // closing a pallet, never scanning or closing a box.
+                val palletResult = if (pallet != null && capacity != null && boxCountBeforeJoin + 1 >= capacity) {
+                    closePallet.close(shiftId, issuerPrefix, operatorId)
+                } else {
+                    null
+                }
+
                 CloseResult.Closed(
                     box = box.copy(
                         sscc = sscc,
@@ -96,10 +137,12 @@ class CloseBox(
                         operatorId = operatorId,
                         printState = BoxPrint.PENDING,
                         printReason = null,
+                        palletId = pallet?.palletId,
                     ),
                     sscc = sscc,
                     itemCount = itemCount,
                     closedAt = closedAt,
+                    pallet = palletResult,
                 )
             }
         } catch (_: AlreadyClosed) {

@@ -48,6 +48,17 @@ interface BoxDao {
     )
     suspend fun close(boxId: String, sscc: String, closedAt: String, operatorId: String?): Int
 
+    /**
+     * Threads a just-closed box onto the pallet it joined (06d).
+     *
+     * A separate write from `close` rather than one more column on its guarded
+     * UPDATE: the join is decided from the pallet's own row, read after this
+     * box's serial is already burned, and keeping it a distinct statement
+     * means `close`'s existing guard and callers are untouched.
+     */
+    @Query("UPDATE boxes SET palletId = :palletId WHERE boxId = :boxId")
+    suspend fun setPallet(boxId: String, palletId: String)
+
     @Query("UPDATE boxes SET printState = :state, printReason = :reason WHERE boxId = :boxId")
     suspend fun setPrintState(boxId: String, state: String, reason: String?)
 

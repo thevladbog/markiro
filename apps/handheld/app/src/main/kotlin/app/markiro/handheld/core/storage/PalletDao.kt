@@ -29,6 +29,18 @@ interface PalletDao {
     @Query("SELECT COUNT(*) FROM boxes WHERE palletId = :palletId")
     fun observeBoxCount(palletId: String): Flow<Int>
 
+    /**
+     * Units across every box this pallet holds, derived rather than stored for
+     * the same reason `boxCount` is: it cannot disagree with what the pallet's
+     * boxes actually carry. Feeds the pallet label's own `qty`, which is a unit
+     * count, not the box count `qty.boxes` carries.
+     */
+    @Query(
+        "SELECT COUNT(*) FROM codes_mirror WHERE boxId IN " +
+            "(SELECT boxId FROM boxes WHERE palletId = :palletId)",
+    )
+    suspend fun itemCount(palletId: String): Int
+
     /** Guarded by `closedAt IS NULL` so a replayed close cannot reclose a pallet. */
     @Query(
         "UPDATE pallets SET sscc = :sscc, closedAt = :closedAt, operatorId = :operatorId, " +
