@@ -369,7 +369,7 @@ function DraftActions({ doc }: { doc: DocumentDetailDto }) {
         open={confirmApply}
         title={t("pages.disaggregation.detail.applyConfirmTitle")}
         description={t("pages.disaggregation.detail.applyConfirm", {
-          boxes: doc.lineCount,
+          lines: doc.lineCount,
           codes: doc.codeCount,
         })}
         confirmLabel={t("pages.disaggregation.detail.applyConfirmAction")}

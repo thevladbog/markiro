@@ -32,6 +32,7 @@ const LINE_OK_1 = {
   ssccInput: "100000000000000008",
   sscc: "00100000000000000008",
   boxId: "b1",
+  palletId: null,
   status: "ok",
   productId: "p1",
   productName: "Вода 0.5",
@@ -44,6 +45,7 @@ const LINE_OK_2 = {
   ssccInput: "200000000000000007",
   sscc: "00200000000000000007",
   boxId: "b2",
+  palletId: null,
   status: "ok",
   productId: "p2",
   productName: "Вода 1.5",
@@ -52,6 +54,22 @@ const LINE_OK_2 = {
 };
 
 const LINE_WRITTEN_OFF = { ...LINE_OK_2, status: "written_off" };
+
+// Task 21 (06d): a line naming a PALLET has `boxId: null`/`palletId` set --
+// the exact inverse of LINE_OK_1/2 -- so the "Level" column can distinguish
+// them (see DocumentDetail.tsx's `level` table column).
+const LINE_OK_PALLET = {
+  id: "l3",
+  ssccInput: "300000000000000006",
+  sscc: "00300000000000000006",
+  boxId: null,
+  palletId: "pl1",
+  status: "ok",
+  productId: "p1",
+  productName: "Вода 0.5",
+  codeCount: 35,
+  validatedAt: "2026-08-20T08:03:00.000Z",
+};
 
 const DOC_DRAFT_READY = {
   id: "d1",
@@ -210,6 +228,14 @@ describe("DisaggregationDocumentPage", () => {
 
     const applyButton = screen.getByRole("button", { name: "Провести" });
     expect(applyButton.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("renders the Level column: box lines as Короб, pallet lines as Паллета", async () => {
+    renderPage({ ...DOC_DRAFT_READY, lines: [LINE_OK_1, LINE_OK_PALLET] });
+
+    await screen.findByText("DSG-26-0001");
+    expect(screen.getByText("Короб")).toBeTruthy();
+    expect(screen.getByText("Паллета")).toBeTruthy();
   });
 
   it("disables Apply when a line is written_off or the reason is missing", async () => {

@@ -2852,7 +2852,7 @@
         "deleteLineError": "Could not delete the line. Please try again.",
         "applyAction": "Apply",
         "applyConfirmTitle": "Apply this document?",
-        "applyConfirm": "This will disassemble {{boxes}} box(es), {{codes}} code(s).",
+        "applyConfirm": "This will disassemble {{lines}} line(s), {{codes}} code(s).",
         "applyConfirmAction": "Apply",
         "applyBlocked": "Some lines changed status and are not ready to apply. Check the table below.",
         "applyError": "Could not apply the document. Please try again.",
