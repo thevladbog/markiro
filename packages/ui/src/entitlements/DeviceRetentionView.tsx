@@ -64,14 +64,27 @@ export function DeviceRetentionView({
   // Recovery owns its original observation even when the live boundary disappears.
   const observation =
     attempt.preview?.observation ?? (locked ? (attempt.observation ?? live) : live);
-  const saved = inspection.data?.selections.find(
-    (item) => item.selection.observation.boundary.effectiveAt === live?.boundary.effectiveAt,
-  );
+  const saved = inspection.data?.selections
+    .filter((item) => item.selection.observation.boundary.key === live?.boundary.key)
+    .reduce<(typeof inspection.data.selections)[number] | undefined>(
+      (latest, item) =>
+        !latest || item.selection.revision > latest.selection.revision ? item : latest,
+      undefined,
+    );
+  // Membership belongs to the boundary key; concurrency belongs to the stored date.
+  const revision =
+    inspection.data?.selections.reduce((latest, item) => {
+      const boundary = item.selection.observation.boundary;
+      return live &&
+        (boundary.key === live.boundary.key ||
+          Date.parse(boundary.effectiveAt) === Date.parse(live.boundary.effectiveAt))
+        ? Math.max(latest, item.selection.revision)
+        : latest;
+    }, 0) ?? 0;
   const stale =
     attempt.notice === "conflict" ||
     (attempt.boundaryKey !== undefined &&
-      (attempt.boundaryKey !== live?.boundary.key ||
-        attempt.expectedRevision !== (saved?.selection.revision ?? 0)));
+      (attempt.boundaryKey !== live?.boundary.key || attempt.expectedRevision !== revision));
   const editable =
     writable && !locked && !stale && (!saved || attempt.expectedRevision !== undefined);
   const invalid =
@@ -93,7 +106,7 @@ export function DeviceRetentionView({
       ...(attempt.receipt ? { receipt: attempt.receipt } : {}),
       ids,
       reason,
-      expectedRevision: attempt.expectedRevision ?? 0,
+      expectedRevision: attempt.expectedRevision ?? revision,
       boundaryKey: live.boundary.key,
     });
   };
@@ -104,7 +117,7 @@ export function DeviceRetentionView({
       ...(current.receipt ? { receipt: current.receipt } : {}),
       ids: saved && !blank ? [...saved.selection.selectedDeviceIds] : [],
       reason: "",
-      expectedRevision: saved?.selection.revision ?? 0,
+      expectedRevision: revision,
       boundaryKey: live.boundary.key,
     });
   };
@@ -119,7 +132,7 @@ export function DeviceRetentionView({
             requestId: createRequestId(),
             boundaryKey: live.boundary.key,
             selectedDeviceIds: [...current.ids],
-            expectedRevision: current.expectedRevision ?? 0,
+            expectedRevision: current.expectedRevision ?? revision,
             reason: current.reason.trim(),
           }
         : undefined);

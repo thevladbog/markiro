@@ -167,7 +167,7 @@ export function DeviceLicensingPanel({
         ) : null}
       </Card>
       <DeviceReplacementPanel pool={pool} canWrite={canWrite} />
-      <DeviceRetentionPanel tenantId={pool.tenantId} canWrite={canWrite} />
+      <DeviceRetentionPanel tenantId={tenantId} canWrite={canWrite} />
     </>
   );
 }
