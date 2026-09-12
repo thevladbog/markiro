@@ -82,7 +82,18 @@ android {
             // Unsigned when the material is absent, which is what a checkout
             // without the key should produce -- not a build that fails.
             signingConfig = if (releaseSigning != null) signingConfigs.getByName("release") else null
-            isMinifyEnabled = false
+            // Off by default, and that is a deliberate refusal rather than an
+            // oversight. R8 shrinks this APK from 49.5 MB to 5.8 MB, which
+            // matters when twenty terminals update over one factory Wi-Fi --
+            // but Room, Hilt and kotlinx.serialization break at RUNTIME when a
+            // keep rule is wrong, and neither a green build nor the unit suite
+            // notices. Turning it on is a walked-through shift on a real
+            // terminal away:
+            //
+            //   ./gradlew :app:assembleRelease -Pmarkiro.minify=true
+            //
+            // Once that passes on a terminal, flip this default to `true`.
+            isMinifyEnabled = (findProperty("markiro.minify") as String?) == "true"
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import process from "node:process";
 
+import { readNotes } from "./changelog.mjs";
 import { assertSupersedes, buildHandheldManifest, handheldChannelBaseUrl } from "./manifest.mjs";
 import {
   contentTypeFor,
@@ -116,14 +117,16 @@ export async function publishHandheldRelease({
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll("\\", "/"))) {
   const [apkPath, versionName, versionCode, channel] = process.argv.slice(2);
-  const notes = process.env.MARKIRO_HANDHELD_RELEASE_NOTES;
   const sourceSha = process.env.GITHUB_SHA;
-  if (!apkPath || !versionName || !versionCode || !notes || !sourceSha) {
+  if (!apkPath || !versionName || !versionCode || !sourceSha) {
     console.error(
-      "usage: MARKIRO_HANDHELD_RELEASE_NOTES=… GITHUB_SHA=… node tools/handheld-release/publish.mjs <apk> <versionName> <versionCode> [channel]",
+      "usage: GITHUB_SHA=… node tools/handheld-release/publish.mjs <apk> <versionName> <versionCode> [channel]",
     );
     process.exit(2);
   }
+  // From the file, reviewed with the change it describes -- not from a box
+  // somebody filled in while dispatching.
+  const notes = await readNotes(versionName);
   const result = await publishHandheldRelease({
     apkPath,
     versionName,

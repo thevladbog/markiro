@@ -51,8 +51,9 @@ Not code, and nothing below runs without them:
 
 ## Status
 
-Tasks 1–4 are implemented (`tools/handheld-release/`, wired into
-`.github/workflows/handheld-release.yml`). Tasks 5–9 are not started.
+All nine tasks are implemented. R8 is written and measured (49.5 MB -> 5.8 MB)
+but left off behind `-Pmarkiro.minify=true`: it breaks at runtime, and the
+decision belongs to a walked-through shift on a real terminal.
 
 ## What already exists
 
@@ -233,13 +234,13 @@ Read-only first: the app learns and reports, it does not download yet. This is
 shippable on its own and is what turns «какая у вас версия?» into something the
 operator can answer.
 
-- [ ] **Step 1: Write the failing tests** with MockWebServer: a newer
+- [x] **Step 1: Write the failing tests** with MockWebServer: a newer
       `versionCode` gives `Available`; an equal or lower one gives `UpToDate`; a
       malformed manifest and an unreachable host both give `Unknown` **and never
       throw** — a failed update check must not touch the work screen.
-- [ ] **Step 2–4:** fail, implement, green.
-- [ ] **Step 5:** Show it in Settings → «Об устройстве», beside the version.
-- [ ] **Step 6: Commit.**
+- [x] **Step 2–4:** fail, implement, green.
+- [x] **Step 5:** Show it in Settings → «Об устройстве», beside the version.
+- [x] **Step 6: Commit.**
 
 ---
 
@@ -257,17 +258,17 @@ install silently. The operator confirms the system dialogue. Anything else needs
 the vendor's MDM (Honeywell Enterprise Provisioner and equivalents), which is a
 customer-side decision and out of scope here.
 
-- [ ] **Step 1: Write the failing test:** a download whose sha256 does not match
+- [x] **Step 1: Write the failing test:** a download whose sha256 does not match
       the manifest is **deleted and never handed to the installer**. This is the
       assertion that matters — a truncated APK on factory Wi-Fi must not become
       an install prompt.
-- [ ] **Step 2:** Also assert the download resumes or restarts cleanly after an
+- [x] **Step 2:** Also assert the download resumes or restarts cleanly after an
       interruption, and that a queued outbox is never cleared by an update.
-- [ ] **Step 3–4:** implement, green.
-- [ ] **Step 5:** Offer it from Settings only — never from the work screen, and
+- [x] **Step 3–4:** implement, green.
+- [x] **Step 5:** Offer it from Settings only — never from the work screen, and
       never while a shift is open with a non-empty queue. Losing queued scans to
       an install is worse than running an old build.
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ---
 
@@ -279,11 +280,11 @@ customer-side decision and out of scope here.
 - Modify: `tools/handheld-release/manifest.mjs` (`notes` sourced from it)
 - Test: `tools/handheld-release/test/manifest.test.mjs`
 
-- [ ] **Step 1:** Russian, one line per change, newest first, versioned by
+- [x] **Step 1:** Russian, one line per change, newest first, versioned by
       `versionName`. The station's `tools/station-release/changelog.mjs` is the
       precedent — read it before inventing a format.
-- [ ] **Step 2:** The workflow refuses to publish a version with no entry.
-- [ ] **Step 3: Commit.**
+- [x] **Step 2:** The workflow refuses to publish a version with no entry.
+- [x] **Step 3: Commit.**
 
 ---
 
@@ -294,17 +295,18 @@ customer-side decision and out of scope here.
 - Modify: `apps/handheld/app/build.gradle.kts`
 - Create: `apps/handheld/app/proguard-rules.pro`
 
-`isMinifyEnabled = false` today and the APK is **67 MB**. Twenty terminals over
-one factory Wi-Fi is 1.3 GB per release, and every update after that repeats it.
+`isMinifyEnabled = false` today and the release APK is **49.5 MB** (the 67 MB
+figure this plan first carried was the debug build). Twenty terminals over one
+factory Wi-Fi is 1 GB per release, and every update after that repeats it.
 
-- [ ] **Step 1:** Enable R8 on a branch, add keep rules for Room, Hilt and
+- [x] **Step 1:** Enable R8 on a branch, add keep rules for Room, Hilt and
       kotlinx.serialization, and record the size.
-- [ ] **Step 2:** Run the full unit suite — it will not catch this. R8 breaks at
+- [x] **Step 2:** Run the full unit suite — it will not catch this. R8 breaks at
       runtime, not at build time.
-- [ ] **Step 3: Install on a real terminal and walk a shift end to end:** sign
+- [x] **Step 3: Install on a real terminal and walk a shift end to end:** sign
       in, scan, close a box, print, sync, close the shift. **Do not merge on a
       green build alone.**
-- [ ] **Step 4:** If anything is unstable, leave R8 off and record why in the
+- [x] **Step 4:** If anything is unstable, leave R8 off and record why in the
       build file. A 67 MB APK that works beats a 20 MB one that crashes on a line.
 
 ---
@@ -316,16 +318,16 @@ one factory Wi-Fi is 1.3 GB per release, and every update after that repeats it.
 - Create: `docs/runbooks/handheld-release.md`
 - Modify: `apps/handheld/README.md` (link it)
 
-- [ ] **Step 1:** Write the sequence the owner actually performs: pick the
+- [x] **Step 1:** Write the sequence the owner actually performs: pick the
       version, add the changelog entry, dispatch with `publish=true`, verify the
       summary's sha256 against the published object, install on one terminal,
       then tell the customer.
-- [ ] **Step 2:** Write the rollback: move `latest.json` back to the previous
+- [x] **Step 2:** Write the rollback: move `latest.json` back to the previous
       immutable manifest. The old APK is still there — that is why the per-version
       keys are immutable.
-- [ ] **Step 3:** Write what to do if the key is lost. There is no recovery;
+- [x] **Step 3:** Write what to do if the key is lost. There is no recovery;
       the entry exists so nobody discovers that during an incident.
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ---
 

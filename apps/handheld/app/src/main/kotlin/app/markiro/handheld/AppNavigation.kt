@@ -9,6 +9,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -445,6 +446,9 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             }
             composable(Routes.SETTINGS) {
                 val vm: SettingsViewModel = hiltViewModel()
+                // The system installer is an activity and the operator confirms it.
+                val activity = LocalContext.current
+                LaunchedEffect(vm) { vm.launchInstall.collect { activity.startActivity(it) } }
                 val state by vm.state.collectAsStateWithLifecycle()
                 val config by vm.config.collectAsStateWithLifecycle()
                 SettingsScreen(
@@ -459,6 +463,8 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     onVolume = vm::setVolume,
                     onToggleVibration = vm::toggleVibration,
                     onTest = vm::testSignal,
+                    onCheckUpdate = vm::checkForUpdate,
+                    onInstallUpdate = vm::installUpdate,
                 )
             }
             navigation(startDestination = Routes.PRINTER, route = Routes.PRINTER_GRAPH) {

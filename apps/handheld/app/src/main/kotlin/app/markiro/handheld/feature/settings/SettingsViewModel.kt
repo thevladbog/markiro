@@ -17,10 +17,17 @@ import app.markiro.handheld.core.signal.SignalKind
 import app.markiro.handheld.core.signal.Signaller
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.DeviceConfigEntity
+import android.content.Intent
+import app.markiro.handheld.core.update.DownloadResult
+import app.markiro.handheld.core.update.UpdateCheck
+import app.markiro.handheld.core.update.UpdateInstaller
+import app.markiro.handheld.core.update.UpdateState
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.sync.SyncEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -45,7 +52,23 @@ data class SettingsUi(
     val installId: String = "",
     /** `null` until a printer is configured; the settings row falls back to a hint. */
     val printerLabel: String? = null,
+    /** `null` until the check has answered; it is read-only and never blocks a screen. */
+    val update: UpdateState? = null,
+    val install: InstallStep? = null,
 )
+
+sealed interface InstallStep {
+    data object Downloading : InstallStep
+
+    /**
+     * Refused because this device still owes the server work. An install
+     * restarts the app and can end in a downgrade prompt or a wipe; losing
+     * queued scans to it is worse than running an old build for another hour.
+     */
+    data object QueueNotEmpty : InstallStep
+
+    data class Failed(val failure: DownloadResult.Failure) : InstallStep
+}
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -59,6 +82,8 @@ class SettingsViewModel @Inject constructor(
     inventorySync: InventorySyncEngine,
     meta: MetaStore,
     printers: PrinterDao,
+    private val updates: UpdateCheck,
+    private val installer: UpdateInstaller,
 ) : ViewModel() {
     private val _state = MutableStateFlow(
         SettingsUi(
@@ -83,6 +108,38 @@ class SettingsViewModel @Inject constructor(
             printers.observeSelected().collect { printer ->
                 val label = printer?.let { "${it.name} · ${it.language.uppercase()} ${it.dpi} dpi" }
                 _state.update { it.copy(printerLabel = label) }
+            }
+        }
+    }
+
+    /**
+     * Asked for, not polled. The terminal is offline most of a shift, and a
+     * background poll would spend its battery to learn «не знаю» over and over.
+     */
+    fun checkForUpdate() {
+        _state.update { it.copy(update = null) }
+        viewModelScope.launch { val state = updates.check(); _state.update { it.copy(update = state) } }
+    }
+
+    /** One-shot: the system installer is an activity, and the operator confirms it. */
+    private val _launchInstall = MutableSharedFlow<Intent>(extraBufferCapacity = 1)
+    val launchInstall: SharedFlow<Intent> = _launchInstall
+
+    fun installUpdate() {
+        val available = (_state.value.update as? UpdateState.Available)?.manifest ?: return
+        if (_state.value.install == InstallStep.Downloading) return
+        if (_state.value.queue > 0) {
+            _state.update { it.copy(install = InstallStep.QueueNotEmpty) }
+            return
+        }
+        _state.update { it.copy(install = InstallStep.Downloading) }
+        viewModelScope.launch {
+            when (val result = installer.download(available)) {
+                is DownloadResult.Ready -> {
+                    _state.update { it.copy(install = null) }
+                    _launchInstall.emit(installer.installIntent(result.file))
+                }
+                is DownloadResult.Failed -> _state.update { it.copy(install = InstallStep.Failed(result.failure)) }
             }
         }
     }

@@ -152,7 +152,13 @@ class WorkViewModelTest {
         advanceUntilIdle()
         scans.tryEmit(ScanEvent("garbage", null, "debug", 0))
         advanceUntilIdle()
-        val s = vm.state.first { it.feed.size == 4 && it.errors == 2 }
+        // Waits for WHICH scan is last, then asserts what it was judged to be.
+        // `feed` and `errors` come from Room's flows and `last` from this view
+        // model, so a predicate on counters alone is satisfied by a state whose
+        // `last` is still the previous scan -- which is how this read
+        // «expected:<INVALID> but was:<WRONG_GTIN>» on a loaded CI runner and
+        // never once on a developer machine.
+        val s = vm.state.first { it.feed.size == 4 && it.errors == 2 && it.last?.tail == "garbage" }
         assertEquals(Verdict.INVALID, s.last?.verdict)
         assertEquals(1, s.thisTerminal)
         assertEquals(2, s.errors)

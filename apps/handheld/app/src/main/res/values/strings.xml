@@ -103,6 +103,19 @@
     <string name="settings_vendor">Производитель</string>
     <!-- A company domain, not copy: the same in every locale. -->
     <string name="settings_vendor_value" translatable="false">v-b.tech</string>
+    <string name="settings_update">Обновление</string>
+    <string name="settings_update_check">проверить</string>
+    <string name="settings_update_checking">проверяем…</string>
+    <string name="settings_update_current">установлена последняя</string>
+    <string name="settings_update_available">есть %1$s — нажмите</string>
+    <string name="settings_update_unreachable">сервер обновлений недоступен</string>
+    <string name="settings_update_refused">сервер обновлений отказал</string>
+    <string name="settings_update_malformed">ответ сервера не распознан</string>
+    <string name="settings_update_install">скачать и установить</string>
+    <string name="settings_update_downloading">скачиваем…</string>
+    <string name="settings_update_queue">сначала дождитесь отправки очереди</string>
+    <string name="settings_update_failed_corrupt">файл скачался повреждённым</string>
+    <string name="settings_update_failed_space">не хватило места</string>
     <string name="settings_name">Имя</string>
     <string name="settings_server">Сервер</string>
     <string name="settings_version">Версия</string>
