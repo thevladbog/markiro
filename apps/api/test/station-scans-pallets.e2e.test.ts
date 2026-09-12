@@ -300,6 +300,114 @@ describe.skipIf(!ready)("station-scans pallet ingest (06d Task 9)", () => {
     expect((replay.body as { alreadyApplied: boolean }).alreadyApplied).toBe(true);
   });
 
+  it("keeps the payload digest of a pre-06d BOX CLOSURE byte-identical", async () => {
+    // The test above uses `boxes: []`, which cannot catch this: an empty
+    // array carries no closure for a new key to appear inside. The actual
+    // wedge lives one level down. `devicePalletId` carries a zod
+    // `.default(null)`, and a zod default ADDS THE KEY to the parsed object
+    // -- `parse({boxId:"b1"})` yields `{boxId:"b1",devicePalletId:null}`.
+    // `payloadDigest` hashes `boxes`, so the SAME wire payload that hashed to
+    // D before this slice would hash to D' after it.
+    //
+    // The failure is the ordinary offline-first case, not an edge one: a
+    // terminal holding a pinned, unacked batch carrying a box closure when
+    // the link is down at deploy time retries that identical payload
+    // afterwards, is answered `station_batch_mismatch` (409), and -- because
+    // both drains treat every non-401 as retryable and never drop data --
+    // resends it forever. Scans, box closures, pallets and label events from
+    // that terminal stop permanently.
+    const batchId = `pallet-digest-boxes-${randomUUID()}`;
+    await postBatch({ items: [item("km1", "b1")] });
+
+    const sscc = nextBoxSscc();
+    // Byte-for-byte what a pre-06d station puts on the wire: print outcomes
+    // (06c) spelled out, and no `devicePalletId` key at all.
+    const legacyClosure = {
+      boxId: "b1",
+      shiftId,
+      terminalId: "t1",
+      sscc,
+      closedAt: ISO,
+      operatorId: null,
+      printVerifiedAt: ISO,
+      printSkippedAt: null,
+    };
+    await postRaw({ batchId, items: [], boxes: [legacyClosure], exceptions: [] });
+
+    // Keys sorted the way `canonicalJson` sorts them, `terminalId` replaced
+    // by the authenticated device id exactly as the ingest replaces it, and
+    // no `devicePalletId` member -- the pre-06d bytes.
+    const legacyCanonicalBox = [
+      `{"boxId":"b1"`,
+      `"closedAt":${JSON.stringify(ISO)}`,
+      `"operatorId":null`,
+      `"printSkippedAt":null`,
+      `"printVerifiedAt":${JSON.stringify(ISO)}`,
+      `"shiftId":${JSON.stringify(shiftId)}`,
+      `"sscc":${JSON.stringify(sscc)}`,
+      `"terminalId":${JSON.stringify(deviceId)}}`,
+    ].join(",");
+    const legacyCanonical = `{"batchId":${JSON.stringify(batchId)},"boxes":[${legacyCanonicalBox}],"exceptions":[],"items":[]}`;
+    const [row] = await db
+      .select({ payloadDigest: schema.syncBatches.payloadDigest })
+      .from(schema.syncBatches)
+      .where(
+        and(eq(schema.syncBatches.tenantId, tenantId), eq(schema.syncBatches.batchId, batchId)),
+      );
+    expect(row!.payloadDigest).toBe(createHash("sha256").update(legacyCanonical).digest("hex"));
+
+    // And the retry of that same pinned payload is acknowledged, not 409ed.
+    const replay = await postRaw({ batchId, items: [], boxes: [legacyClosure], exceptions: [] });
+    expect((replay.body as { alreadyApplied: boolean }).alreadyApplied).toBe(true);
+  });
+
+  it("folds devicePalletId into the digest when the box does stand on a pallet", async () => {
+    // The other half of C1's rule: omitting the key unconditionally would
+    // make two DIFFERENT payloads -- the same box closed onto a pallet and
+    // off one -- share a digest, so a genuinely different batch replayed
+    // under a pinned id would be silently acknowledged instead of rejected.
+    const batchId = `pallet-digest-on-pallet-${randomUUID()}`;
+    await postBatch({ items: [item("km1", "b1")] });
+
+    const sscc = nextBoxSscc();
+    const offPallet = {
+      boxId: "b1",
+      shiftId,
+      terminalId: "t1",
+      sscc,
+      closedAt: ISO,
+      operatorId: null,
+      printVerifiedAt: ISO,
+      printSkippedAt: null,
+    };
+    const onPallet = { ...offPallet, devicePalletId: "p1" };
+    await postRaw({ batchId, items: [], boxes: [onPallet], exceptions: [] });
+
+    const canonicalBox = [
+      `{"boxId":"b1"`,
+      `"closedAt":${JSON.stringify(ISO)}`,
+      `"devicePalletId":"p1"`,
+      `"operatorId":null`,
+      `"printSkippedAt":null`,
+      `"printVerifiedAt":${JSON.stringify(ISO)}`,
+      `"shiftId":${JSON.stringify(shiftId)}`,
+      `"sscc":${JSON.stringify(sscc)}`,
+      `"terminalId":${JSON.stringify(deviceId)}}`,
+    ].join(",");
+    const canonical = `{"batchId":${JSON.stringify(batchId)},"boxes":[${canonicalBox}],"exceptions":[],"items":[]}`;
+    const [row] = await db
+      .select({ payloadDigest: schema.syncBatches.payloadDigest })
+      .from(schema.syncBatches)
+      .where(
+        and(eq(schema.syncBatches.tenantId, tenantId), eq(schema.syncBatches.batchId, batchId)),
+      );
+    expect(row!.payloadDigest).toBe(createHash("sha256").update(canonical).digest("hex"));
+
+    // Same batch id, same box, but now claimed to be off the pallet: a
+    // different payload, and the ingest must refuse to acknowledge it.
+    await postRaw({ batchId, items: [], boxes: [offPallet], exceptions: [] }, 409);
+  });
+
   it("closes the pallet and records the consumed pallet serial", async () => {
     const sscc = palletSscc(4);
     await postBatch({

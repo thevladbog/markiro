@@ -147,8 +147,23 @@ function payloadDigest(body: SyncBatchDto): string {
   // Each channel is folded in independently, so adding one never disturbs
   // another's pinned digests. `canonicalJson` sorts keys, so the order in
   // which they are re-attached here is irrelevant.
-  const { productLabelEvents, pallets, palletExceptions, ...legacy } = body;
-  const canonical: Record<string, unknown> = { ...legacy };
+  //
+  // The same rule applies one level DOWN, to a new field inside an existing
+  // channel, and there it is easy to miss: `boxClosureSchema.devicePalletId`
+  // carries a zod `.default(null)`, and a zod default ADDS THE KEY to the
+  // parsed object -- `parse({boxId:"b1"})` yields
+  // `{boxId:"b1",devicePalletId:null}`. Folding that key in unconditionally
+  // would move the digest of every pinned pre-06d batch that carries a box
+  // closure, which is the ordinary offline-first case, not an edge one. So a
+  // box that stands on no pallet hashes exactly as it did before 06d, and
+  // only a box that names one contributes the key.
+  const { productLabelEvents, pallets, palletExceptions, boxes, ...legacy } = body;
+  const canonical: Record<string, unknown> = {
+    ...legacy,
+    boxes: boxes.map(({ devicePalletId, ...box }) =>
+      devicePalletId === null ? box : { ...box, devicePalletId },
+    ),
+  };
   if (productLabelEvents.length > 0) canonical.productLabelEvents = productLabelEvents;
   if (pallets.length > 0) canonical.pallets = pallets;
   if (palletExceptions.length > 0) canonical.palletExceptions = palletExceptions;
