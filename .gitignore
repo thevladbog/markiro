@@ -62,3 +62,12 @@ docs/registration/rospatent/build/
 # Locally rendered legal drafts that are not registry releases; published
 # artifacts live under apps/landing/public/legal/.
 packages/legal-documents/.local/
+
+# Signing material, wherever it lands. `apps/handheld/.gitignore` covered only
+# that directory, and a keystore generated at the repository root was tracked
+# like any other file -- which is exactly how one reached a remote.
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties

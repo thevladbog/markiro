@@ -7,14 +7,12 @@ name: Build handheld release
 on:
   workflow_dispatch:
     inputs:
-      version_name:
-        description: Semantic version shown to the operator, for example 0.2.0
+      bump:
+        description: Which part of the version this release moves
         required: true
-        type: string
-      version_code:
-        description: Monotonic integer; a terminal refuses an update that does not grow it
-        required: true
-        type: string
+        type: choice
+        default: patch
+        options: [patch, minor, major]
       owner_confirmation:
         description: Type BUILD-HANDHELD-RELEASE; only the repository owner may dispatch
         required: true
@@ -45,6 +43,9 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+    outputs:
+      version_name: ${{ steps.version.outputs.version_name }}
+      version_code: ${{ steps.version.outputs.version_code }}
     steps:
       # Only so the changelog can be read: the refusal has to happen here,
       # before the release job puts a signing key on a runner.
@@ -57,30 +58,30 @@ jobs:
           OWNER_CONFIRMATION: ${{ inputs.owner_confirmation }}
           RELEASE_ACTOR: ${{ github.actor }}
           RELEASE_OWNER: ${{ github.repository_owner }}
-          VERSION_NAME: ${{ inputs.version_name }}
-          VERSION_CODE: ${{ inputs.version_code }}
-          PUBLISH: ${{ inputs.publish }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
           test "$RELEASE_ACTOR" = "$RELEASE_OWNER"
           test "$OWNER_CONFIRMATION" = "BUILD-HANDHELD-RELEASE"
-          # A store rejects a malformed name and silently orders by the code, so
-          # both are checked before any signing material is touched.
-          printf '%s' "$VERSION_NAME" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
-          # `versionCode` is an Android int. Without the bound the value passes
-          # here and only fails inside Gradle -- by which time the key has
-          # already been written to the runner.  Ten digits at most keeps the
-          # comparison below inside shell arithmetic.
-          printf '%s' "$VERSION_CODE" | grep -Eq '^[1-9][0-9]{0,9}$'
-          test "$VERSION_CODE" -le 2147483647
-          # Refused here rather than after the key is on the runner: a build
-          # published with nothing to say about it is how a line ends up asking
-          # the office what changed. The notes live in the changelog, reviewed
-          # with the change they describe.
-          if [ "$PUBLISH" = "true" ]; then
-            grep -qxF "## $VERSION_NAME" apps/handheld/CHANGELOG.md
-          fi
+
+      # The version is computed from what the channel actually serves, never
+      # typed. `versionCode` especially: typed by hand it is a repeat waiting to
+      # happen, and a repeat is an update every installed terminal silently
+      # refuses -- visible on a factory floor and nowhere else.
+      #
+      # The channel pointer is public, so this needs no credential, and it runs
+      # here so that everything it can refuse is refused before the release job
+      # puts a signing key on a runner.
+      - name: Resolve the next version
+        id: version
+        shell: bash
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          BUMP: ${{ inputs.bump }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          node tools/handheld-release/resolve.mjs
 
   release:
     if: github.ref == 'refs/heads/main'
@@ -138,13 +139,13 @@ jobs:
         run: |
           set -euo pipefail
           ./gradlew --no-daemon assembleRelease \
-            -Pmarkiro.versionName="${{ inputs.version_name }}" \
-            -Pmarkiro.versionCode="${{ inputs.version_code }}"
+            -Pmarkiro.versionName="${{ needs.authorize.outputs.version_name }}" \
+            -Pmarkiro.versionCode="${{ needs.authorize.outputs.version_code }}"
 
       - name: Prove the artifact is signed and name it
         shell: bash
         env:
-          VERSION_NAME: ${{ inputs.version_name }}
+          VERSION_NAME: ${{ needs.authorize.outputs.version_name }}
         run: |
           set -euo pipefail
           # An unsigned APK is what an absent key produces, and it installs
@@ -157,7 +158,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/out"
           cp "$APK" "$RUNNER_TEMP/out/markiro-tsd-$VERSION_NAME.apk"
           {
-            echo "### Markiro ТСД $VERSION_NAME (${{ inputs.version_code }})"
+            echo "### Markiro ТСД $VERSION_NAME (${{ needs.authorize.outputs.version_code }})"
             echo
             echo "- source: \`$GITHUB_SHA\`"
             echo "- sha256: \`$(shasum -a 256 "$APK" | cut -d' ' -f1)\`"
@@ -192,9 +193,9 @@ jobs:
           set -euo pipefail
           test ! -f "$RUNNER_TEMP/handheld.jks"
           node tools/handheld-release/publish.mjs \
-            "$RUNNER_TEMP/out/markiro-tsd-${{ inputs.version_name }}.apk" \
-            "${{ inputs.version_name }}" \
-            "${{ inputs.version_code }}" \
+            "$RUNNER_TEMP/out/markiro-tsd-${{ needs.authorize.outputs.version_name }}.apk" \
+            "${{ needs.authorize.outputs.version_name }}" \
+            "${{ needs.authorize.outputs.version_code }}" \
             "${{ inputs.channel }}" | tee "$RUNNER_TEMP/published.txt"
           {
             echo
@@ -206,7 +207,7 @@ jobs:
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: markiro-tsd-${{ inputs.version_name }}
-          path: ${{ runner.temp }}/out/markiro-tsd-${{ inputs.version_name }}.apk
+          name: markiro-tsd-${{ needs.authorize.outputs.version_name }}
+          path: ${{ runner.temp }}/out/markiro-tsd-${{ needs.authorize.outputs.version_name }}.apk
           if-no-files-found: error
           retention-days: 30

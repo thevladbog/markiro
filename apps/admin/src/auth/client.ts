@@ -87,22 +87,37 @@ export interface AuthClientLike {
  * by default (see node_modules/better-auth/dist/client/config.mjs), so the
  * session cookie is sent without extra config.
  */
-const realAuthClient = createAuthClient({
-  plugins: [
-    organizationClient({
-      // Better Auth's client option is declared as the non-generic base
-      // `AccessControl`, while the shared configuration keeps its narrower
-      // statement set for role authorization. Widen only at this client
-      // boundary; `organizationRoles` retains the concrete manager role.
-      ac: organizationAccessControl as AccessControl,
-      roles: organizationRoles,
-    }),
-  ],
-}) as unknown as AuthClientLike;
+let realAuthClient: AuthClientLike | undefined;
 
-export { realAuthClient as authClient };
+/**
+ * Built on first use, not on import.
+ *
+ * Creating it eagerly started Better Auth's session store the moment anything
+ * imported this module -- including a test that then injects its own client and
+ * never touches the real one. That store keeps a nanostores lifecycle timer
+ * which unmounts a second after its last listener goes, and its destroyer
+ * reaches for `window`. In a test file that finishes inside that second, JSDOM
+ * is already gone: every assertion passes and the run still fails on
+ * `ReferenceError: window is not defined`.
+ */
+export function authClient(): AuthClientLike {
+  realAuthClient ??= createAuthClient({
+    plugins: [
+      organizationClient({
+        // Better Auth's client option is declared as the non-generic base
+        // `AccessControl`, while the shared configuration keeps its narrower
+        // statement set for role authorization. Widen only at this client
+        // boundary; `organizationRoles` retains the concrete manager role.
+        ac: organizationAccessControl as AccessControl,
+        roles: organizationRoles,
+      }),
+    ],
+  }) as unknown as AuthClientLike;
+  return realAuthClient;
+}
 
-const AuthClientContext = createContext<AuthClientLike>(realAuthClient);
+/** `null` means «nobody injected one», resolved to the real client on use. */
+const AuthClientContext = createContext<AuthClientLike | null>(null);
 
 export function AuthClientProvider({
   client,
@@ -115,5 +130,5 @@ export function AuthClientProvider({
 }
 
 export function useAuthClient(): AuthClientLike {
-  return useContext(AuthClientContext);
+  return useContext(AuthClientContext) ?? authClient();
 }
