@@ -7,6 +7,9 @@ import app.markiro.handheld.MainDispatcherRule
 import app.markiro.handheld.core.box.BoxPrint
 import app.markiro.handheld.core.box.BoxPrinter
 import app.markiro.handheld.core.box.BoxRepository
+import app.markiro.handheld.core.box.PalletLock
+import app.markiro.handheld.core.box.PalletPrinter
+import app.markiro.handheld.core.box.PalletRepository
 import app.markiro.handheld.core.label.LabelRenderer
 import app.markiro.handheld.core.label.RasterResult
 import app.markiro.handheld.core.label.RasterizeText
@@ -16,6 +19,8 @@ import app.markiro.handheld.core.print.PrinterTransport
 import app.markiro.handheld.core.print.SendOutcome
 import app.markiro.handheld.core.storage.BoxEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.PalletEntity
+import app.markiro.handheld.core.storage.PalletPrint
 import app.markiro.handheld.core.storage.ShiftEntity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -59,6 +64,8 @@ class LabelQueueViewModelTest {
                 listFetchedAt = 1L, shelfLifeDays = 365, ssccIssuerPrefix = "468008990",
                 boxLabelTemplate = """{"widthMm":58,"heightMm":40,"dpi":203,"language":"zpl","elements":[
                     {"kind":"field","id":"s","xMm":2,"yMm":2,"field":"sscc","fontSizePt":8}]}""",
+                palletLabelTemplateSpec = """{"widthMm":100,"heightMm":150,"dpi":203,"language":"zpl","elements":[
+                    {"kind":"field","id":"s","xMm":2,"yMm":2,"field":"sscc","fontSizePt":8}]}""",
             ),
         )
         db.printerDao().upsert(
@@ -80,12 +87,26 @@ class LabelQueueViewModelTest {
         ),
     )
 
-    private fun model() = main.track(
-        LabelQueueViewModel(
-            BoxRepository(db),
-            BoxPrinter(db, BoxRepository(db), LabelRenderer(RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) }), transport),
+    private suspend fun pallet(id: String, sscc: String, state: String, shiftId: String = "s1") = db.palletDao().insert(
+        PalletEntity(
+            palletId = id, shiftId = shiftId, terminalId = null, sscc = sscc, openedAt = "2026-09-10T07:00:00.000Z",
+            closedAt = "2026-09-10T08:00:00.000Z", operatorId = null, printState = state,
+            printReason = if (state == PalletPrint.FAILED) "no_paper" else null, ackedAt = null,
         ),
     )
+
+    private fun model(): LabelQueueViewModel {
+        val palletLock = PalletLock(db)
+        val pallets = PalletRepository(db, palletLock)
+        return main.track(
+            LabelQueueViewModel(
+                BoxRepository(db),
+                BoxPrinter(db, BoxRepository(db), LabelRenderer(RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) }), transport),
+                pallets,
+                PalletPrinter(db, pallets, LabelRenderer(RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) }), transport),
+            ),
+        )
+    }
 
     @Test
     fun theQueueListsOnlyClosedBoxesWhoseLabelIsNotResolved() = runTest {
@@ -139,5 +160,53 @@ class LabelQueueViewModelTest {
         box("b1", "046800899000000018", BoxPrint.FAILED)
         db.shiftDao().get("s1")!!.let { db.shiftDao().upsert(it.copy(status = "closed")) }
         assertEquals(1, model().state.first { it.items.isNotEmpty() }.items.size)
+    }
+
+    // -- The pallet half of the queue (06d): `PalletPrinter` mirrors
+    // `BoxPrinter`, so its deferred and failed labels ride this same queue. --
+
+    @Test
+    fun theQueueAlsoListsClosedPalletsWhoseLabelIsNotResolved() = runTest {
+        box("b1", "046800899000000018", BoxPrint.PRINTED)
+        pallet("p1", "146800899000000012", PalletPrint.FAILED)
+        pallet("p2", "146800899000000029", PalletPrint.PRINTED)
+        val items = model().state.first { it.items.size == 1 }.items
+        assertEquals(listOf("p1"), items.map { it.boxId })
+        assertEquals(LabelKind.PALLET, items.single().kind)
+    }
+
+    @Test
+    fun aQueuedPalletCanBePrintedOneAtATimeByAPerson() = runTest {
+        pallet("p1", "146800899000000012", PalletPrint.FAILED)
+        val vm = model()
+        vm.state.first { it.items.size == 1 }
+        vm.printOne("p1")
+        vm.state.first { it.items.isEmpty() }
+        assertEquals(1, transport.printed.size)
+        assertEquals(PalletPrint.PRINTED, db.palletDao().get("p1")?.printState)
+    }
+
+    @Test
+    fun printAllReachesBothBoxesAndPalletsButSkipsWhicheverIsUnknown() = runTest {
+        box("b1", "046800899000000018", BoxPrint.FAILED)
+        pallet("p1", "146800899000000012", PalletPrint.UNKNOWN)
+        val vm = model()
+        vm.state.first { it.items.size == 2 }
+        vm.printAll()
+        vm.state.first { it.items.size == 1 }
+        assertEquals(1, transport.printed.size)
+        assertTrue(transport.printed.single().contains("046800899000000018"))
+        assertEquals(PalletPrint.UNKNOWN, db.palletDao().get("p1")?.printState)
+    }
+
+    @Test
+    fun resolvingAnUnknownPalletSendsNothing() = runTest {
+        pallet("p1", "146800899000000012", PalletPrint.UNKNOWN)
+        val vm = model()
+        vm.state.first { it.items.size == 1 }
+        vm.resolveUnknown("p1")
+        vm.state.first { it.items.isEmpty() }
+        assertEquals(0, transport.printed.size)
+        assertEquals(PalletPrint.PRINTED, db.palletDao().get("p1")?.printState)
     }
 }

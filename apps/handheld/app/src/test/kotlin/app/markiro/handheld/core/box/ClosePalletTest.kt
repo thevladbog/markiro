@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.storage.BoxEntity
 import app.markiro.handheld.core.storage.CodeEntity
+import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.ShiftEntity
 import kotlinx.coroutines.async
@@ -220,6 +221,24 @@ class ClosePalletTest {
         val result = fillAndCloseBox("b1")
         assertNull(result.pallet)
         assertNull(result.box.palletId)
+    }
+
+    @Test
+    fun aBoxThatOpensAPalletStampsItWithThisDevicesOwnId() = runTest {
+        // `PalletRepository.currentPallet`'s `terminalId` used to be hardcoded
+        // null from this call site; the station's equivalent guard is keyed on
+        // `(shiftId, terminalId)`, so a pallet row that never carries which
+        // device opened it cannot answer that question later.
+        db.deviceConfigDao().upsert(
+            DeviceConfigEntity(
+                deviceId = "dev-42", deviceName = "ТСД", tenantId = "t", organizationName = "ООО",
+                lineId = "l1", lineName = "Линия 2", kind = "handheld", serverUrl = "http://x", pairedAt = 1L,
+            ),
+        )
+        givenShift(boxCapacity = 2, palletBoxCapacity = 2)
+        seedBoxPool()
+        val result = fillAndCloseBox("b1")
+        assertEquals("dev-42", pallets.get(result.box.palletId!!)!!.terminalId)
     }
 
     @Test

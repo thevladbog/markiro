@@ -39,17 +39,24 @@ import app.markiro.handheld.core.box.BoxPrint
 import app.markiro.handheld.core.box.CloseResult
 import app.markiro.handheld.core.box.PrintReason
 import app.markiro.handheld.feature.work.BoxCloseCallbacks
+import app.markiro.handheld.core.box.ClosePalletResult
 import app.markiro.handheld.core.duplicate.DuplicateReason
 import app.markiro.handheld.feature.work.BoxCloseScreen
+import app.markiro.handheld.feature.work.ClosedPalletUi
 import app.markiro.handheld.feature.work.DuplicateCallbacks
 import app.markiro.handheld.feature.work.DuplicateScreen
 import app.markiro.handheld.feature.work.DuplicateStep
 import app.markiro.handheld.feature.work.BoxCloseStep
 import app.markiro.handheld.feature.work.ClosedBoxUi
+import app.markiro.handheld.feature.work.LabelKind
 import app.markiro.handheld.feature.work.LabelQueueCallbacks
 import app.markiro.handheld.feature.work.LabelQueueItem
 import app.markiro.handheld.feature.work.LabelQueueScreen
 import app.markiro.handheld.feature.work.LabelQueueUi
+import app.markiro.handheld.feature.work.PalletCloseCallbacks
+import app.markiro.handheld.feature.work.PalletCloseScreen
+import app.markiro.handheld.feature.work.PalletCloseStep
+import app.markiro.handheld.feature.work.PalletStrip
 import app.markiro.handheld.feature.pairing.PairingCallbacks
 import app.markiro.handheld.feature.pairing.PairingScreen
 import app.markiro.handheld.feature.pairing.PairingUi
@@ -213,6 +220,33 @@ class EnglishRenderTest {
     }
 
     @Test
+    fun theStripBeneathTheBoxGridRendersInEnglish() {
+        compose.setContent { MarkiroTheme { PalletStrip(boxCount = 3, capacity = 12) } }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun aClosedPalletAwaitingItsLabelRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme {
+                PalletCloseScreen(
+                    PalletCloseStep.Failed(ClosedPalletUi("p1", "103460068200000004", 12), PrintReason.NO_PAPER),
+                    PalletCloseCallbacks(),
+                )
+            }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
+    fun aPalletRefusedForWantOfSerialsRendersInEnglish() {
+        compose.setContent {
+            MarkiroTheme { PalletCloseScreen(PalletCloseStep.Refused(ClosePalletResult.NoSerials), PalletCloseCallbacks()) }
+        }
+        assertNoCyrillic()
+    }
+
+    @Test
     fun theLabelQueueRendersInEnglish() {
         compose.setContent {
             MarkiroTheme {
@@ -221,6 +255,10 @@ class EnglishRenderTest {
                         listOf(
                             LabelQueueItem("b1", "046800899000000018", "2026-09-10T08:00:00.000Z", BoxPrint.FAILED, PrintReason.NO_PAPER),
                             LabelQueueItem("b2", "046800899000000025", "2026-09-10T08:10:00.000Z", BoxPrint.UNKNOWN, null),
+                            LabelQueueItem(
+                                "p1", "146800899000000012", "2026-09-10T08:20:00.000Z", BoxPrint.FAILED,
+                                PrintReason.NO_PAPER, LabelKind.PALLET,
+                            ),
                         ),
                     ),
                     LabelQueueCallbacks(),

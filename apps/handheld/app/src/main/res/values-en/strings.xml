@@ -340,6 +340,12 @@
     <!-- Aggregation: boxes -->
     <string name="work_box_header">Box %1$d · %2$d / %3$d</string>
     <string name="work_close_box_early">Close the box early (%1$d)</string>
+    <!-- Aggregation: pallets (06d) -->
+    <string name="pallet_strip">%1$d / %2$d boxes</string>
+    <string name="work_close_pallet_early">Close the pallet early</string>
+    <string name="pallet_close_confirm_title">Close the pallet early?</string>
+    <string name="pallet_close_confirm_body">The pallet holds %1$d of %2$d boxes.</string>
+    <string name="pallet_close_confirm_confirm">Close the pallet</string>
     <plurals name="work_labels_unprinted">
         <item quantity="one">%d label not printed</item>
         <item quantity="other">%d labels not printed</item>
@@ -363,6 +369,11 @@
     <string name="box_refused_invalid_serial">The number does not fit the prefix</string>
     <string name="box_refused_invalid_serial_hint">The box stayed open. Try closing it again.</string>
     <string name="box_refused_dismiss">Got it</string>
+    <string name="pallet_close_title">Pallet closed</string>
+    <string name="pallet_close_boxes">%1$d boxes</string>
+    <string name="pallet_refused_empty">The pallet has no boxes</string>
+    <string name="pallet_refused_no_serials_hint">The pallet stayed open. Connect to the network and the device will be granted a new block.</string>
+    <string name="pallet_refused_invalid_serial_hint">The pallet stayed open. Try closing it again.</string>
     <string name="print_reason_no_paper">Out of paper</string>
     <string name="print_reason_head_open">The head is open</string>
     <string name="print_reason_unreachable">The printer is not answering</string>
@@ -379,6 +390,8 @@
     <string name="label_queue_unknown_skipped">Skipped: the result is unknown</string>
     <string name="label_queue_deferred">Set aside</string>
     <string name="label_queue_resolve">The label printed</string>
+    <string name="label_queue_kind_box">Box</string>
+    <string name="label_queue_kind_pallet">Pallet</string>
 
     <!-- Duplicate Data Matrix printing -->
     <string name="duplicate_failed_title">The duplicate did not print</string>

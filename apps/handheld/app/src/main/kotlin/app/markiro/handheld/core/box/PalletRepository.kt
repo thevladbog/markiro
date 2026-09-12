@@ -71,6 +71,11 @@ class PalletRepository(
     suspend fun setPrintState(palletId: String, state: String, reason: String?) =
         db.palletDao().setPrintState(palletId, state, reason)
 
+    /** Closed pallets whose label is not resolved -- the label queue's pallet half. */
+    fun observeUnprinted(): Flow<List<PalletEntity>> = db.palletDao().observeUnprinted()
+
+    fun observeUnprintedCount(): Flow<Int> = db.palletDao().observeUnprintedCount()
+
     /**
      * Called once at startup. Anything left mid-print is unknown, never resumed:
      * the app died between handing bytes to the printer and hearing back, and

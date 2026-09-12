@@ -8,6 +8,7 @@ import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -168,6 +169,20 @@ class PalletStorageTest {
         db.palletDao().demoteInterruptedPrints()
         assertEquals(PalletPrint.UNKNOWN, db.palletDao().get("p1")?.printState)
         assertEquals(PalletPrint.PENDING, db.palletDao().get("p2")?.printState)
+    }
+
+    /**
+     * `PalletPrinter` mirrors `BoxPrinter`, so a deferred or failed pallet
+     * label must ride the same label queue a box's does -- this is the query
+     * the queue screen's pallet half is built on.
+     */
+    @Test
+    fun theUnprintedQueueListsOnlyClosedPalletsWhoseLabelIsNotResolved() = runTest {
+        db.palletDao().insert(pallet("p1", "s1", closedAt = "2026-09-11T09:00:00.000Z").copy(printState = PalletPrint.FAILED))
+        db.palletDao().insert(pallet("p2", "s1", closedAt = "2026-09-11T09:10:00.000Z").copy(printState = PalletPrint.PRINTED))
+        db.palletDao().insert(pallet("p3", "s1", closedAt = "2026-09-11T09:20:00.000Z").copy(printState = PalletPrint.DEFERRED))
+        assertEquals(2, db.palletDao().observeUnprintedCount().first())
+        assertEquals(listOf("p1", "p3"), db.palletDao().observeUnprinted().first().map { it.palletId })
     }
 
     @Test

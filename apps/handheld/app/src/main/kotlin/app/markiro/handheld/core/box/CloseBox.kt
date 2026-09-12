@@ -143,7 +143,12 @@ class CloseBox(
                     // this box exactly once, matching the station's
                     // `boxCount + 1 >= palletBoxCapacity`.
                     val capacity = db.shiftDao().get(shiftId)?.palletBoxCapacity
-                    val pallet = if (capacity != null) pallets.currentPallet(held, shiftId) else null
+                    // The paired device's own id, threaded through rather than left
+                    // null: the station's equivalent guard is keyed on
+                    // `(shiftId, terminalId)`, and a pallet row that never carries
+                    // which terminal opened it cannot answer that question later.
+                    val terminalId = db.deviceConfigDao().get()?.deviceId
+                    val pallet = if (capacity != null) pallets.currentPallet(held, shiftId, terminalId) else null
                     val boxCountBeforeJoin = pallet?.let { db.palletDao().boxCount(it.palletId) } ?: 0
 
                     // Closure and membership in ONE guarded statement: see the class

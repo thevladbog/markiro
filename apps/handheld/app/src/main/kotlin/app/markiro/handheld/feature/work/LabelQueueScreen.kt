@@ -17,6 +17,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
 import app.markiro.handheld.R
 import app.markiro.handheld.core.design.AppBar
+import app.markiro.handheld.core.design.MarkiroChip
 import app.markiro.handheld.core.design.MarkiroSizes
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.core.design.MarkiroTextButton
@@ -64,7 +65,16 @@ fun LabelQueueScreen(state: LabelQueueUi, cb: LabelQueueCallbacks) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(item.sscc, style = t.code.copy(fontSize = 16.sp), color = c.fg1)
+                        Row(horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2), verticalAlignment = Alignment.CenterVertically) {
+                            // 06d: a queue row can be a box's label or the pallet it
+                            // filled; the chip is the only thing telling them apart.
+                            MarkiroChip(
+                                stringResource(
+                                    if (item.kind == LabelKind.PALLET) R.string.label_queue_kind_pallet else R.string.label_queue_kind_box,
+                                ),
+                            )
+                            Text(item.sscc, style = t.code.copy(fontSize = 16.sp), color = c.fg1)
+                        }
                         Text(
                             Iso.parse(item.closedAt)?.let { TimeText.hhmm(it) } ?: "",
                             style = t.caption,

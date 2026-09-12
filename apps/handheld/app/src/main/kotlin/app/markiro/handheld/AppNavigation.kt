@@ -77,6 +77,9 @@ import app.markiro.handheld.feature.work.DuplicateStep
 import app.markiro.handheld.feature.work.LabelQueueCallbacks
 import app.markiro.handheld.feature.work.LabelQueueScreen
 import app.markiro.handheld.feature.work.LabelQueueViewModel
+import app.markiro.handheld.feature.work.PalletCloseCallbacks
+import app.markiro.handheld.feature.work.PalletCloseScreen
+import app.markiro.handheld.feature.work.PalletCloseStep
 import app.markiro.handheld.feature.work.WorkCallbacks
 import app.markiro.handheld.feature.work.WorkScreen
 import app.markiro.handheld.feature.work.WorkViewModel
@@ -232,6 +235,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                 val vm: WorkViewModel = hiltViewModel()
                 val state by vm.state.collectAsStateWithLifecycle()
                 val closeStep by vm.closeStep.collectAsStateWithLifecycle()
+                val palletCloseStep by vm.palletCloseStep.collectAsStateWithLifecycle()
                 val duplicateStep by vm.duplicateStep.collectAsStateWithLifecycle()
                 val shiftId = entry.arguments?.getString("shiftId").orEmpty()
                 WorkScreen(
@@ -245,6 +249,9 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         onConflicts = { nav.navigate(Routes.conflicts(shiftId)) },
                         onCloseBoxEarly = vm::closeEarly,
                         onLabelQueue = { nav.navigate(Routes.LABEL_QUEUE) },
+                        onRequestEarlyPalletClose = vm::requestEarlyPalletClose,
+                        onConfirmEarlyPalletClose = vm::confirmEarlyPalletClose,
+                        onCancelEarlyPalletClose = vm::cancelEarlyPalletClose,
                     ),
                 )
                 // Drawn over the work screen rather than as a route of its own, so
@@ -261,6 +268,27 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                             onDefer = vm::deferLabel,
                             onConfirmPrinted = vm::confirmPrinted,
                             onDismiss = vm::dismissClose,
+                        ),
+                    )
+                }
+                // Drawn AFTER the box's own overlay, so it takes the top of the
+                // stack when a box that fills a pallet closes both at once: one
+                // outcome for one scan (`CloseBox`'s own contract), rather than two
+                // sequential confirmations. The box screen underneath is not lost --
+                // once the pallet screen steps aside, an unresolved box print still
+                // shows and still needs a person.
+                if (palletCloseStep != PalletCloseStep.Idle) {
+                    PalletCloseScreen(
+                        palletCloseStep,
+                        PalletCloseCallbacks(
+                            onRetry = vm::retryPalletPrint,
+                            onOtherPrinter = {
+                                vm.deferPalletLabel()
+                                nav.navigate(Routes.PRINTER_GRAPH)
+                            },
+                            onDefer = vm::deferPalletLabel,
+                            onConfirmPrinted = vm::confirmPalletPrinted,
+                            onDismiss = vm::dismissPalletClose,
                         ),
                     )
                 }
