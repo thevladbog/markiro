@@ -82,13 +82,14 @@ export function DeviceLicensingPanel({
         qc.invalidateQueries({ queryKey: ["platform", "tenants", tenantId, "entitlements"] }),
       ]);
     } catch (error) {
-      if (error instanceof ApiRequestError && error.status === 409) {
+      if (error instanceof ApiRequestError && error.kind === "domain" && error.status === 409) {
         qc.removeQueries({ queryKey: key, exact: true });
         setSelected(null);
         setStale(true);
         await qc.invalidateQueries({ queryKey: poolKey(tenantId) });
       } else if (
         error instanceof ApiRequestError &&
+        error.kind === "authorization" &&
         (error.status === 401 || error.status === 403)
       ) {
         qc.removeQueries({ queryKey: key, exact: true });

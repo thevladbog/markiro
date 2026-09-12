@@ -41,7 +41,7 @@ export function DeviceActions({
     if (reservationCancelledOrUnknown && !isKiosk) return;
     setRevokeError(null);
     try {
-      if (device.type === "station") await revokeStation.mutateAsync(device.id);
+      if (device.type !== "kiosk") await revokeStation.mutateAsync(device.id);
       else await unbindKiosk.mutateAsync(device.id);
       setConfirmingRevoke(false);
     } catch {

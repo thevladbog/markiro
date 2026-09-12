@@ -48,7 +48,7 @@ export const workingDeviceEvents = pgTable(
     }).onDelete("cascade"),
     check(
       "working_device_events_actor_check",
-      sql`${t.actorDomain} in ('migration','system','cabinet','platform','device') and (${t.actorDomain} <> 'migration' or ${t.actorId} is null)`,
+      sql`${t.actorDomain} in ('migration','system','cabinet','platform','device') and (${t.actorDomain} <> 'migration' or ${t.actorId} is null) and (${t.actorDomain} not in ('cabinet','platform','device') or ${t.actorId} is not null)`,
     ),
     check(
       "working_device_events_action_check",

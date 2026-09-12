@@ -1048,6 +1048,54 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     expect(keys).toEqual([{ id: station!.apiKeyId! }]);
   });
 
+  it("revokes a paired handheld through the station endpoint and retires its credential", async () => {
+    const created = await agent
+      .post("/station-devices")
+      .send({ name: "Handheld revocation", kind: "handheld", lineId: null })
+      .expect(201);
+    const handheldId = created.body.id as string;
+    const issued = await agent
+      .post(`/station-devices/${handheldId}/pairing-code`)
+      .send({})
+      .expect(201);
+    await recoveryPair(
+      issued.body.code as string,
+      { tenantId, deviceId: handheldId, kind: "handheld" },
+      "handheld-v1",
+    ).expect(201);
+    const [before] = await db
+      .select()
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, handheldId));
+    if (!before?.apiKeyId) throw new Error("Paired handheld credential missing");
+
+    await agent.delete(`/station-devices/${handheldId}`).expect(204);
+
+    const [after] = await db
+      .select()
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, handheldId));
+    expect(after).toMatchObject({
+      id: handheldId,
+      tenantId,
+      kind: "handheld",
+      apiKeyId: null,
+      revokedAt: expect.any(Date),
+      pairedAt: before.pairedAt,
+    });
+    expect(
+      await db
+        .select({ id: schema.apikey.id })
+        .from(schema.apikey)
+        .where(eq(schema.apikey.id, before.apiKeyId)),
+    ).toEqual([]);
+    const [assignment] = await db
+      .select()
+      .from(schema.workingDeviceAssignments)
+      .where(eq(schema.workingDeviceAssignments.deviceId, handheldId));
+    expect(assignment).toMatchObject({ state: "released", releaseReason: "security_revoked" });
+  });
+
   it("re-pairs the same revoked durable station record", async () => {
     await agent.delete(`/station-devices/${deviceId}`).expect(204);
     const issued = await agent

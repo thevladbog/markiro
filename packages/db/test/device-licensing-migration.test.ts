@@ -23,6 +23,7 @@ describe.skipIf(!databaseUrl)("working device forward migration", () => {
   let created = false;
   let beforeDevices: unknown;
   let legacyOccupied: unknown;
+  let beforeActorConstraint: unknown;
   beforeAll(async () => {
     await maintenance.query(`CREATE DATABASE "${name}"`);
     created = true;
@@ -65,6 +66,15 @@ describe.skipIf(!databaseUrl)("working device forward migration", () => {
         "SELECT tenant_id,count(*)::int AS count FROM station_devices WHERE revoked_at IS NULL GROUP BY tenant_id ORDER BY tenant_id",
       )
     ).rows;
+    const initialAssignments = join(temporaryRoot, "initial-assignments");
+    await copyMigrationsThroughIndex({
+      sourceFolder: migrationsFolder,
+      targetFolder: initialAssignments,
+      lastIncludedIndex: 133,
+    });
+    await migrate(drizzle(pool), { migrationsFolder: initialAssignments });
+    beforeActorConstraint = (await pool.query("SELECT * FROM working_device_events ORDER BY id"))
+      .rows;
     await runRuntimeMigrations({
       databaseUrl: url.toString(),
       migrationsFolder,
@@ -78,6 +88,9 @@ describe.skipIf(!databaseUrl)("working device forward migration", () => {
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
   });
   it("preserves all legacy rows, occupied totals and honest migration observations", async () => {
+    expect((await pool.query("SELECT * FROM working_device_events ORDER BY id")).rows).toEqual(
+      beforeActorConstraint,
+    );
     expect((await pool.query("SELECT * FROM station_devices ORDER BY id")).rows).toEqual(
       beforeDevices,
     );
@@ -115,6 +128,26 @@ describe.skipIf(!databaseUrl)("working device forward migration", () => {
       log: () => undefined,
     });
     expect((await pool.query("SELECT * FROM working_device_events")).rows).toEqual(observations);
+  });
+  it.each(["cabinet", "platform", "device"])(
+    "requires identity for %s events",
+    async (actorDomain) => {
+      const insert = `INSERT INTO working_device_events (tenant_id,device_id,actor_domain,actor_id,action,"after")
+      SELECT tenant_id,id,$1,$2,'observed','{}' FROM station_devices WHERE tenant_id='device-a' AND name='unpaired'`;
+      await expect(pool.query(insert, [actorDomain, null])).rejects.toMatchObject({
+        code: "23514",
+      });
+      expect((await pool.query(insert, [actorDomain, "actor-identity"])).rowCount).toBe(1);
+    },
+  );
+  it.each(["migration", "system"])("retains anonymous %s observations", async (actorDomain) => {
+    const result = await pool.query(
+      `INSERT INTO working_device_events (tenant_id,device_id,actor_domain,actor_id,action,"after")
+      SELECT tenant_id,id,$1,null,'observed','{}' FROM station_devices WHERE tenant_id='device-a' AND name='unpaired'
+      RETURNING actor_domain,actor_id`,
+      [actorDomain],
+    );
+    expect(result.rows).toEqual([{ actor_domain: actorDomain, actor_id: null }]);
   });
   it("pins last events to the same device, deduplicates requests and permits security reacquisition", async () => {
     const rows = (

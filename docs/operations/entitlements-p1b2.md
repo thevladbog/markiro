@@ -13,6 +13,11 @@ existing key means assigned; otherwise the device is reserved. Observation time
 is migration time, not a reconstructed purchase or enrollment time. Existing
 station device rows, including contradictory historical values, are preserved.
 
+Migration `0134_working_device_actor_identity` requires an actor ID for cabinet,
+platform and device events. Migration observations and system events retain their
+nullable actor identity. This forward constraint change does not rewrite journal
+records or the already-applied migration 0133.
+
 Before rollout, save a database backup through the existing production procedure.
 Apply the migration through the existing immutable-image deployment workflow.
 Compare each tenant's pre-migration `station_devices WHERE revoked_at IS NULL`

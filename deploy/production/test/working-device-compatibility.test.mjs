@@ -12,7 +12,8 @@ function implementation() {
     assignmentOccupied(device, assignment) {
       if (!assignment) return device.revokedAt === null;
       if (assignment.state !== "released") return true;
-      if (assignment.releaseReason === "reservation_cancelled") return device.apiKeyId !== null;
+      if (assignment.releaseReason === "reservation_cancelled")
+        return device.apiKeyId !== null || device.pairedAt !== null || device.lastSeenAt !== null;
       return device.revokedAt === null;
     },
     assertReservationOpen(assignment) {
@@ -57,3 +58,18 @@ test("rejects fail-open missing assignments and resurrectable cancelled reservat
     /incompatible/,
   );
 });
+
+for (const omittedField of ["pairedAt", "lastSeenAt"]) {
+  test(`rejects a cancelled-assignment reader that ignores ${omittedField}`, () => {
+    const valid = implementation();
+    assert.throws(
+      () =>
+        verifyWorkingDeviceImplementation({
+          ...valid,
+          assignmentOccupied: (device, assignment) =>
+            valid.assignmentOccupied({ ...device, [omittedField]: null }, assignment),
+        }),
+      /incompatible/,
+    );
+  });
+}

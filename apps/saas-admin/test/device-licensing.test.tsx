@@ -133,7 +133,16 @@ it("closes confirmation and reports a known session denial on 401", async () => 
   vi.stubGlobal(
     "fetch",
     vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
-      init?.method === "POST" ? response({ message: "Unauthorized" }, 401) : response(POOL),
+      init?.method === "POST"
+        ? response(
+            {
+              code: "unauthorized",
+              message: "Unauthorized",
+              requestId: "55555555-5555-4555-8555-555555555555",
+            },
+            401,
+          )
+        : response(POOL),
     ),
   );
   render(
@@ -196,7 +205,14 @@ it("requires a fresh confirmation and request after a revision conflict", async 
         bodies.push(JSON.parse(String(init.body)));
         if (bodies.length === 1) {
           revision = 2;
-          return response({ message: "Conflict" }, 409);
+          return response(
+            {
+              code: "conflict",
+              message: "Conflict",
+              requestId: "55555555-5555-4555-8555-555555555555",
+            },
+            409,
+          );
         }
         return response({
           requestId: bodies[1]!.requestId,
@@ -243,60 +259,85 @@ it("requires a fresh confirmation and request after a revision conflict", async 
   ]);
 });
 
-it("retries an uncertain result after remount with the same request", async () => {
-  vi.stubGlobal("crypto", { randomUUID: () => "33333333-3333-4333-8333-333333333333" });
-  const bodies: unknown[] = [];
-  let posts = 0;
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.method === "POST") {
-        bodies.push(JSON.parse(String(init.body)));
-        posts += 1;
-        if (posts === 1) throw new TypeError("response lost");
-        return response({
-          requestId: "33333333-3333-4333-8333-333333333333",
-          deviceId: POOL.devices[0]!.deviceId,
-          assignmentId: POOL.devices[0]!.assignmentId,
-          revision: 2,
-          state: "released",
-          releaseReason: "reservation_cancelled",
-          releasedAt: "2026-09-12T10:00:00.000Z",
-        });
-      }
-      return response(POOL);
-    }),
-  );
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  const frame = (
-    <I18nextProvider i18n={i18n}>
-      <QueryClientProvider client={client}>
-        <ThemeProvider defaultTheme="light">
-          <DeviceLicensingPanel tenantId="tenant-1" canWrite />
-        </ThemeProvider>
-      </QueryClientProvider>
-    </I18nextProvider>
-  );
-  const view = render(frame);
-  const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "Отменить резерв" }));
-  await user.click(
-    within(screen.getByRole("alertdialog")).getByRole("button", { name: "Освободить место" }),
-  );
-  await screen.findByText(/Результат неизвестен/);
-  view.unmount();
-  render(frame);
-  await user.click(await screen.findByRole("button", { name: "Отменить резерв" }));
-  await user.click(
-    within(screen.getByRole("alertdialog")).getByRole("button", { name: "Освободить место" }),
-  );
-  expect(bodies).toEqual([
-    { requestId: "33333333-3333-4333-8333-333333333333", expectedRevision: 1 },
-    { requestId: "33333333-3333-4333-8333-333333333333", expectedRevision: 1 },
-  ]);
-});
+it.each(["network", 401, 403, 409] as const)(
+  "retries an uncertain %s result after remount with the same request",
+  async (failure) => {
+    const randomUUID = vi
+      .fn()
+      .mockReturnValueOnce("33333333-3333-4333-8333-333333333333")
+      .mockReturnValue("44444444-4444-4444-8444-444444444444");
+    vi.stubGlobal("crypto", { randomUUID });
+    const bodies: unknown[] = [];
+    let posts = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "POST") {
+          bodies.push(JSON.parse(String(init.body)));
+          posts += 1;
+          if (posts === 1) {
+            if (failure === "network") throw new TypeError("response lost");
+            return response({ message: "Malformed error without code or requestId" }, failure);
+          }
+          return response({
+            requestId: "33333333-3333-4333-8333-333333333333",
+            deviceId: POOL.devices[0]!.deviceId,
+            assignmentId: POOL.devices[0]!.assignmentId,
+            revision: 2,
+            state: "released",
+            releaseReason: "reservation_cancelled",
+            releasedAt: "2026-09-12T10:00:00.000Z",
+          });
+        }
+        return response(POOL);
+      }),
+    );
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const frame = (
+      <I18nextProvider i18n={i18n}>
+        <QueryClientProvider client={client}>
+          <ThemeProvider defaultTheme="light">
+            <DeviceLicensingPanel tenantId="tenant-1" canWrite />
+          </ThemeProvider>
+        </QueryClientProvider>
+      </I18nextProvider>
+    );
+    const view = render(frame);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Отменить резерв" }));
+    await user.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Освободить место" }),
+    );
+    await screen.findByText(/Результат неизвестен/);
+    expect(authRefetch).not.toHaveBeenCalled();
+    expect(
+      client.getQueryData([
+        "platform",
+        "tenants",
+        "tenant-1",
+        "device-licensing",
+        "cancel-attempt",
+        POOL.devices[0]!.deviceId,
+      ]),
+    ).toEqual({
+      requestId: "33333333-3333-4333-8333-333333333333",
+      expectedRevision: 1,
+    });
+    view.unmount();
+    render(frame);
+    await user.click(await screen.findByRole("button", { name: "Отменить резерв" }));
+    await user.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Освободить место" }),
+    );
+    expect(bodies).toEqual([
+      { requestId: "33333333-3333-4333-8333-333333333333", expectedRevision: 1 },
+      { requestId: "33333333-3333-4333-8333-333333333333", expectedRevision: 1 },
+    ]);
+    expect(randomUUID).toHaveBeenCalledTimes(1);
+  },
+);
 
 it("renders zero unlimited usage in English", async () => {
   await i18n.changeLanguage("en");

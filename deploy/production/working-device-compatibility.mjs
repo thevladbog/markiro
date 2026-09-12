@@ -26,6 +26,8 @@ export function verifyWorkingDeviceImplementation(implementation) {
     implementation.assignmentOccupied(device, reserved) !== true ||
     implementation.assignmentOccupied(device, cancelled) !== false ||
     implementation.assignmentOccupied({ ...device, apiKeyId: "fixture" }, cancelled) !== true ||
+    implementation.assignmentOccupied({ ...device, pairedAt: new Date(0) }, cancelled) !== true ||
+    implementation.assignmentOccupied({ ...device, lastSeenAt: new Date(0) }, cancelled) !== true ||
     implementation.assignmentOccupied(device, securityReleased) !== true ||
     implementation.assignmentOccupied({ ...device, revokedAt: new Date(0) }, securityReleased) !==
       false ||
