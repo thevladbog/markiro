@@ -51,6 +51,7 @@ import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -168,6 +169,31 @@ class WorkViewModelTest {
         scans.tryEmit(ScanEvent("010460068200001321abc${gs}93AAAA", null, "debug", 0))
         advanceUntilIdle()
         assertEquals(1, vm.state.first { it.thisTerminal == 1 }.total)
+    }
+
+    /**
+     * Offered on the crossing, and only once. A plain `total >= plan` would raise
+     * this again on every scan past the plan, and would greet an operator who
+     * merely re-entered a shift that was already finished.
+     */
+    @Test
+    fun theCloseOfferComesOnceWhenTheShiftCrossesItsPlan() = runTest {
+        db.shiftDao().upsert(ShiftEntityFixtures.bundled("s1").copy(plannedQty = 2))
+        val vm = vm()
+        advanceUntilIdle()
+        assertFalse(vm.planPrompt.value)
+
+        scans.tryEmit(ScanEvent("010460068200001321one${gs}93AAAA", null, "debug", 0))
+        advanceUntilIdle()
+        assertFalse("below the plan, nothing is offered", vm.planPrompt.value)
+
+        scans.tryEmit(ScanEvent("010460068200001321two${gs}93BBBB", null, "debug", 0))
+        assertTrue(vm.planPrompt.first { it })
+
+        vm.dismissPlanPrompt()
+        scans.tryEmit(ScanEvent("010460068200001321three${gs}93CCCC", null, "debug", 0))
+        advanceUntilIdle()
+        assertFalse("past the plan it must not ask again", vm.planPrompt.value)
     }
 
     @Test

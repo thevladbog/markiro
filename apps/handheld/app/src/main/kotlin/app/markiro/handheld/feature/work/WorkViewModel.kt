@@ -197,6 +197,19 @@ class WorkViewModel(
     val duplicateStep: StateFlow<DuplicateStep> = _duplicateStep
     private val duplicateUi = MutableStateFlow<DuplicateUi?>(null)
 
+    /**
+     * Offered once, when the shift's accepted count crosses its plan.
+     *
+     * Deliberately a crossing and not «total >= plan»: entering a shift that is
+     * already over plan is not the moment anyone wants to be asked, and a plain
+     * comparison would raise this again on every scan after the first. Scanning
+     * is never blocked -- the prompt sits over the screen while the router keeps
+     * recording, because a line does not stop for a dialogue.
+     */
+    private val _planPrompt = MutableStateFlow(false)
+    val planPrompt: StateFlow<Boolean> = _planPrompt
+    private var belowPlanSeen = false
+
     private data class Counters(val mine: Int, val errors: Int, val duplicates: Int)
 
     private val counters = combine(
@@ -282,6 +295,26 @@ class WorkViewModel(
         viewModelScope.launch { db.recovery.work(generation) {
             teamTicks.collect { teamState.value = team.refresh(shiftId) ?: teamState.value }
         } }
+        // Under the same generation guard as every other launch here. This one
+        // writes nothing and holds no credential, so the guard buys no safety --
+        // but an unguarded launch among four guarded ones reads as an oversight,
+        // and after a recovery the prompt is meaningless anyway.
+        viewModelScope.launch { db.recovery.work(generation) {
+            state.collect { ui ->
+                val plan = ui.plan ?: return@collect
+                if (plan <= 0) return@collect
+                if (ui.total < plan) {
+                    belowPlanSeen = true
+                } else if (belowPlanSeen) {
+                    belowPlanSeen = false
+                    _planPrompt.value = true
+                }
+            }
+        } }
+    }
+
+    fun dismissPlanPrompt() {
+        _planPrompt.value = false
     }
 
     private suspend fun onScan(raw: String) {

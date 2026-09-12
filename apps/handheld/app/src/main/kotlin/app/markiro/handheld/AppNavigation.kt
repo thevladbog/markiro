@@ -76,6 +76,7 @@ import app.markiro.handheld.feature.work.DuplicateScreen
 import app.markiro.handheld.feature.work.DuplicateStep
 import app.markiro.handheld.feature.work.LabelQueueCallbacks
 import app.markiro.handheld.feature.work.LabelQueueScreen
+import app.markiro.handheld.feature.work.PlanReachedScreen
 import app.markiro.handheld.feature.exceptions.DisassembleCallbacks
 import app.markiro.handheld.feature.exceptions.DisassembleScreen
 import app.markiro.handheld.feature.exceptions.DisassembleViewModel
@@ -254,6 +255,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                 val state by vm.state.collectAsStateWithLifecycle()
                 val closeStep by vm.closeStep.collectAsStateWithLifecycle()
                 val duplicateStep by vm.duplicateStep.collectAsStateWithLifecycle()
+                val planPrompt by vm.planPrompt.collectAsStateWithLifecycle()
                 val shiftId = entry.arguments?.getString("shiftId").orEmpty()
                 WorkScreen(
                     state,
@@ -298,6 +300,20 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                             onScanAgain = vm::dismissDuplicate,
                             onDismiss = vm::dismissDuplicate,
                         ),
+                    )
+                }
+                // Last of the three overlays: a box close or a duplicate is about
+                // the unit in the operator's hand and must win over a prompt about
+                // the shift as a whole.
+                if (planPrompt && closeStep == BoxCloseStep.Idle && duplicateStep == DuplicateStep.Idle) {
+                    PlanReachedScreen(
+                        total = state.total,
+                        plan = state.plan ?: 0,
+                        onClose = {
+                            vm.dismissPlanPrompt()
+                            nav.navigate(Routes.close(shiftId))
+                        },
+                        onContinue = vm::dismissPlanPrompt,
                     )
                 }
             }
