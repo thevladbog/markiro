@@ -206,6 +206,7 @@ function EditShiftPanel() {
             counterpartyId: shift.counterpartyId ?? "",
             ssccIssuerCounterpartyId: shift.ssccIssuerCounterpartyId ?? "",
             boxLabelTemplateSelection: shift.boxLabelTemplateId ?? BOX_TEMPLATE_SELECTION.none,
+            palletLabelTemplateId: shift.palletLabelTemplateId ?? "",
             boxCapacity: shift.boxCapacity === null ? "" : String(shift.boxCapacity),
             palletBoxCapacity:
               shift.palletBoxCapacity === null ? "" : String(shift.palletBoxCapacity),
@@ -224,6 +225,7 @@ function EditShiftPanel() {
       shift?.validationPrint,
       shift?.openedAt,
       shift?.palletBoxCapacity,
+      shift?.palletLabelTemplateId,
       shift?.palletsEnabled,
       shift?.plannedDate,
       shift?.plannedQty,

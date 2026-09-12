@@ -9,9 +9,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
 import { apiFetch } from "../../api/client.js";
-import type { SsccCounterStateDto } from "../../lib/sscc-counter.js";
+import type { SsccCounterListDto, SsccCounterStateDto } from "../../lib/sscc-counter.js";
 
-export type { SsccCounterStateDto } from "../../lib/sscc-counter.js";
+export type { SsccCounterListDto, SsccCounterStateDto } from "../../lib/sscc-counter.js";
 
 /** Mirrors `apps/api/src/modules/counterparties/dto.ts`'s `CounterpartyDto`. */
 export interface CounterpartyDto {
@@ -120,8 +120,9 @@ export function useDeleteCounterparty(): UseMutationResult<void, Error, string> 
   });
 }
 
-function fetchCounterpartySscc(id: string): Promise<SsccCounterStateDto> {
-  return apiFetch<SsccCounterStateDto>(`/counterparties/${id}/sscc`);
+async function fetchCounterpartySscc(id: string): Promise<SsccCounterStateDto[]> {
+  const response = await apiFetch<SsccCounterListDto>(`/counterparties/${id}/sscc`);
+  return response.counters;
 }
 
 function putCounterpartySscc(id: string, input: SsccCounterDto): Promise<SsccCounterDto> {
@@ -132,12 +133,14 @@ function putCounterpartySscc(id: string, input: SsccCounterDto): Promise<SsccCou
 }
 
 /**
- * `GET /counterparties/:id/sscc` -- this counterparty's own box SSCC counter
- * (06c Task 5). Only meaningful for an existing counterparty, so `id` is
+ * `GET /counterparties/:id/sscc` -- this counterparty's own SSCC counters,
+ * one per extension digit (boxes and pallets since 06d, keyed by
+ * `extensionDigit` rather than by position). Only meaningful for an existing
+ * counterparty, so `id` is
  * optional and the query stays disabled (never fires) until one is given --
  * covers the create-modal case, which has no id yet.
  */
-export function useCounterpartySscc(id: string | undefined): UseQueryResult<SsccCounterStateDto> {
+export function useCounterpartySscc(id: string | undefined): UseQueryResult<SsccCounterStateDto[]> {
   return useQuery({
     queryKey: ssccQueryKey(id ?? ""),
     queryFn: () => fetchCounterpartySscc(id!),

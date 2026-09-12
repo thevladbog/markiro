@@ -50,6 +50,7 @@ const SHIFT: ShiftDto = {
   counterpartyName: null,
   ssccIssuerCounterpartyId: null,
   boxLabelTemplateId: null,
+  palletLabelTemplateId: null,
   plannedQty: 500,
   plannedDate: "2026-08-06",
   productionDate: null,

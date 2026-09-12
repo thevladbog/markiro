@@ -146,13 +146,26 @@ it("guards a dirty create panel from Back until discard is confirmed", async () 
   await waitFor(() => expect(router.state.location.pathname).toBe("/counterparties"));
 });
 
+/**
+ * `GET /counterparties/:id/sscc` returns one counter per extension digit
+ * (06d Task 11), so both are mocked here -- the panel renders a section each.
+ */
+const SSCC_COUNTERS = {
+  counters: [
+    { extensionDigit: 0, nextSerial: 10, minSerial: 1, blockedBy: null },
+    { extensionDigit: 1, nextSerial: 4, minSerial: 0, blockedBy: null },
+  ],
+};
+const BOX_SERIAL_LABEL = "Начальный серийный номер короба";
+const BOX_SAVE_LABEL = "Сохранить счётчик коробов";
+
 it("saves the SSCC section independently and clears its dirty state", async () => {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (String(url).endsWith("/counterparties/1/sscc") && init?.method === "PUT") {
       return jsonResponse(200, { extensionDigit: 0, nextSerial: 42 });
     }
     if (String(url).endsWith("/counterparties/1/sscc")) {
-      return jsonResponse(200, { extensionDigit: 0, nextSerial: 10 });
+      return jsonResponse(200, SSCC_COUNTERS);
     }
     return jsonResponse(200, { items: [ACME] });
   });
@@ -160,9 +173,9 @@ it("saves the SSCC section independently and clears its dirty state", async () =
   const { router, user } = renderPanel(["/counterparties/1/edit"]);
 
   fireEvent.change(await screen.findByLabelText("Название"), { target: { value: "" } });
-  const serial = await screen.findByLabelText("Начальный серийный номер");
+  const serial = await screen.findByLabelText(BOX_SERIAL_LABEL);
   fireEvent.change(serial, { target: { value: "42" } });
-  await user.click(screen.getByRole("button", { name: "Сохранить SSCC" }));
+  await user.click(screen.getByRole("button", { name: BOX_SAVE_LABEL }));
 
   await waitFor(() =>
     expect(fetchMock).toHaveBeenCalledWith(
@@ -184,13 +197,13 @@ it("treats an unsaved SSCC serial as panel-level dirty state", async () => {
     "fetch",
     vi.fn(async (url: string) =>
       String(url).endsWith("/counterparties/1/sscc")
-        ? jsonResponse(200, { extensionDigit: 0, nextSerial: 10 })
+        ? jsonResponse(200, SSCC_COUNTERS)
         : jsonResponse(200, { items: [ACME] }),
     ),
   );
   const { user } = renderPanel(["/counterparties", "/counterparties/1/edit"]);
 
-  fireEvent.change(await screen.findByLabelText("Начальный серийный номер"), {
+  fireEvent.change(await screen.findByLabelText(BOX_SERIAL_LABEL), {
     target: { value: "11" },
   });
   await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Закрыть" }));

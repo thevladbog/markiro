@@ -497,7 +497,7 @@ function LabelEditorContent({
               markDirty();
             }}
           />
-          {editingExisting ? (
+          {editingExisting && purpose !== "pallet" ? (
             <Button
               type="button"
               variant="secondary"
@@ -509,6 +509,18 @@ function LabelEditorContent({
             >
               {t("pages.labels.purpose.copy")}
             </Button>
+          ) : null}
+          {/*
+            Copying builds a CREATE, and `POST /label-templates` accepts only
+            "box" or "product_duplicate" (`purposeSchema`, apps/api's
+            label-templates/dto.ts) -- a pallet copy would come back as an
+            opaque 400 after the operator had already laid the label out. The
+            stock pallet template can still be edited in place; only minting a
+            second one is unavailable, and the page says so rather than
+            offering a button that cannot work.
+          */}
+          {purpose === "pallet" ? (
+            <Alert tone="info">{t("pages.labels.purpose.palletCopyUnavailable")}</Alert>
           ) : null}
           {copying ? <Alert tone="info">{t("pages.labels.purpose.copyHint")}</Alert> : null}
           {duplicateInvalid ? (

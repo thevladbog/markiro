@@ -219,6 +219,7 @@ const INITIAL_SHIFT_FORM_VALUES: ShiftFormValues = {
   counterpartyId: "",
   ssccIssuerCounterpartyId: "",
   boxLabelTemplateSelection: BOX_TEMPLATE_SELECTION.none,
+  palletLabelTemplateId: "",
   boxCapacity: "",
   palletBoxCapacity: "",
   palletsEnabled: false,

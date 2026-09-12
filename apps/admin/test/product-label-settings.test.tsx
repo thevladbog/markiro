@@ -185,6 +185,7 @@ it.each(["planned", "active"] as const)(
             verificationRequired: false,
             productLabelTemplateId: template.id,
             boxLabelTemplateSelection: "none",
+            palletLabelTemplateId: "",
             palletsEnabled: false,
           }}
           products={[product]}

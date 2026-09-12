@@ -8,9 +8,10 @@ import {
   SidePanel,
   Spinner,
   StatusChip,
+  Table,
 } from "@markiro/ui";
-import type { StatusChipStatus } from "@markiro/ui";
-import { CABINET_CAPABILITY } from "@markiro/domain";
+import type { StatusChipStatus, TableColumn } from "@markiro/ui";
+import { CABINET_CAPABILITY, formatSsccHri } from "@markiro/domain";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router";
@@ -26,6 +27,7 @@ import {
   type ShiftDto,
   type ShiftParticipantDto,
 } from "./api.js";
+import { usePallets, type PalletDto } from "./pallets-api.js";
 import { ShiftExportsContent } from "./ShiftExportsDialog.js";
 import type { ShiftsPanelLocationState } from "./ShiftPanelRoute.js";
 
@@ -138,6 +140,102 @@ function ShiftOutput({ shift }: { shift: ShiftDto }) {
         )}
       </section>
     </>
+  );
+}
+
+/**
+ * The shift's pallets, beside the box registry rather than inside it: a
+ * pallet is the second aggregation level, not a box attribute, and only a
+ * shift that switched pallets on has any.
+ *
+ * Rendered only when `shift.palletsEnabled` -- see `usePallets`'s own note on
+ * why a known-empty query is not worth a request per panel open. The error
+ * branch says so out loud instead of falling back to the empty state:
+ * `GET /pallets` 404s for a shift it cannot see, so "no rows" and "could not
+ * ask" are different answers and a manager must be able to tell them apart.
+ */
+function ShiftPallets({ shift }: { shift: ShiftDto }) {
+  const { t, i18n } = useTranslation();
+  const pallets = usePallets(shift.palletsEnabled ? shift.id : undefined);
+
+  const columns: TableColumn<PalletDto>[] = [
+    {
+      key: "sscc",
+      title: t("pages.shifts.pallets.table.sscc"),
+      mono: true,
+      render: (row) => (row.sscc ? formatSsccHri(row.sscc) : "—"),
+    },
+    {
+      key: "lineName",
+      title: t("pages.shifts.pallets.table.line"),
+      render: (row) => row.lineName ?? "—",
+    },
+    {
+      key: "boxCount",
+      title: t("pages.shifts.pallets.table.boxCount"),
+      align: "right",
+      mono: true,
+      render: (row) => formatNumber(row.boxCount, i18n.language),
+    },
+    {
+      key: "unitCount",
+      title: t("pages.shifts.pallets.table.unitCount"),
+      align: "right",
+      mono: true,
+      render: (row) => formatNumber(row.unitCount, i18n.language),
+    },
+    {
+      key: "closedAt",
+      title: t("pages.shifts.pallets.table.closedAt"),
+      render: (row) => (row.closedAt ? formatCreatedAt(row.closedAt, i18n.language) : "—"),
+    },
+    {
+      key: "status",
+      title: t("pages.shifts.pallets.table.status"),
+      wrap: true,
+      // Two independent facts, both non-colour-only: a pallet can have been
+      // taken apart AND have lost a box before that.
+      render: (row) => (
+        <>
+          {row.disassembledAt ? (
+            <Badge tone="neutral">{t("pages.shifts.pallets.disassembled")}</Badge>
+          ) : null}
+          {row.contentsChangedAfterClose ? (
+            <Badge tone="warn">{t("pages.shifts.pallets.contentsChangedAfterClose")}</Badge>
+          ) : null}
+        </>
+      ),
+    },
+  ];
+
+  return (
+    <section className="mk-shift-details__section" aria-label={t("pages.shifts.pallets.title")}>
+      <h3>{t("pages.shifts.pallets.title")}</h3>
+      {pallets.isPending ? (
+        <Spinner label={t("common.loading")} />
+      ) : pallets.isError ? (
+        <Alert tone="error">
+          <div className="mk-shift-details__load-error">
+            <span>{t("pages.shifts.pallets.loadError")}</span>
+            <Button
+              type="button"
+              size="compact"
+              variant="secondary"
+              onClick={() => void pallets.refetch()}
+            >
+              {t("pages.shifts.form.retry")}
+            </Button>
+          </div>
+        </Alert>
+      ) : (
+        <Table
+          columns={columns}
+          rows={pallets.data}
+          empty={t("pages.shifts.pallets.empty")}
+          scrollLabel={t("pages.shifts.pallets.title")}
+        />
+      )}
+    </section>
   );
 }
 
@@ -313,6 +411,7 @@ export function ShiftDetailsPanel({ shift, onClose }: { shift: ShiftDto; onClose
         {shift.validationPrint?.mode === "duplicate_dm" && shift.status !== "planned" ? (
           <ProductLabelHistory key={shift.id} shiftId={shift.id} />
         ) : null}
+        {shift.palletsEnabled ? <ShiftPallets shift={shift} /> : null}
         <section className="mk-shift-details__section">
           <h3>{t("pages.shifts.details.parametersTitle")}</h3>
           <dl className="mk-shift-details__properties">
@@ -342,6 +441,16 @@ export function ShiftDetailsPanel({ shift, onClose }: { shift: ShiftDto; onClose
               <dt>{t("pages.shifts.details.counterparty")}</dt>
               <dd>{shift.counterpartyName ?? "—"}</dd>
             </div>
+            {shift.palletsEnabled ? (
+              <div>
+                <dt>{t("pages.shifts.form.palletBoxCapacityLabel")}</dt>
+                <dd>
+                  {shift.palletBoxCapacity === null
+                    ? "—"
+                    : formatNumber(shift.palletBoxCapacity, i18n.language)}
+                </dd>
+              </div>
+            ) : null}
           </dl>
         </section>
         <section className="mk-shift-details__section">

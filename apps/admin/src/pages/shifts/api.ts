@@ -41,10 +41,13 @@ export interface ShiftDto {
   /** Whose numbers this shift's boxes carry; null means the tenant's own organisation. */
   ssccIssuerCounterpartyId: string | null;
   boxLabelTemplateId: string | null;
+  /** Resolved at plan time from the category/organisation pallet default; null while pallets are off. */
+  palletLabelTemplateId: string | null;
   plannedQty: number | null;
   plannedDate: string | null;
   productionDate: string | null;
   boxCapacity: number | null;
+  /** How many BOXES fit on a pallet -- not product units; see `products.palletBoxCapacity`. */
   palletBoxCapacity: number | null;
   palletsEnabled: boolean;
   createdFrom: ShiftOrigin;
@@ -70,6 +73,12 @@ export interface CreateShiftInput {
   counterpartyId?: string | null;
   ssccIssuerCounterpartyId?: string | null;
   boxLabelTemplateId?: string | null;
+  /**
+   * Omitted entirely to let the server resolve the category → organisation
+   * pallet default (it only does so while `palletsEnabled`); an explicit id
+   * must name a `purpose: "pallet"` template or the server 400s.
+   */
+  palletLabelTemplateId?: string | null;
   plannedQty?: number | null;
   plannedDate?: string | null;
   productionDate?: string | null;

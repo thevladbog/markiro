@@ -26,6 +26,7 @@ const SHIFT = {
   labelTemplateName: null,
   ssccIssuerCounterpartyId: null,
   boxLabelTemplateId: null,
+  palletLabelTemplateId: null,
   plannedQty: 200,
   plannedDate: "2026-08-13",
   productionDate: null,
