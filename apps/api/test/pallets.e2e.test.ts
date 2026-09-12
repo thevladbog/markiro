@@ -306,6 +306,39 @@ describe.skipIf(!ready)("pallets e2e", () => {
   });
 
   it("counts a disassembled box out of the pallet but flags the change", async () => {
+    // Captured fresh rather than derived from `BOX1_ITEM_COUNT` minus the
+    // previous test's own exclusions: this `it` and the "excludes displaced
+    // and operator-removed items" one above are SIBLINGS, not a single test
+    // -- vitest runs a file's tests in declared order, but a failure (or a
+    // timeout under a loaded full-suite run) in one sibling does not stop
+    // the next from executing. An absolute expectation baked from assuming
+    // the previous test's two exceptions had already landed would then fail
+    // HERE, misattributing an upstream flake to this test's own disassembly
+    // logic -- exactly the failure this file's own docstring warns about.
+    // Asserting the DELTA this test itself produces keeps this test's
+    // pass/fail meaning tied only to the mutation it performs.
+    const before = await agent.get(`/pallets?shiftId=${shiftId}`).expect(200);
+    const beforePallet = before.body.items[0];
+
+    // `contentsChangedAfterClose` compares this box exception's DEVICE-supplied
+    // `occurredAt` against the pallet's SERVER-assigned `closureReceivedAt`
+    // (`now()`, captured in `beforeAll` when the pallet closed) -- two
+    // independent clock reads, exactly as production compares a device's own
+    // clock against the server's. A bare `new Date()` here is NOT safe: this
+    // repo's dev/test Postgres runs in a Docker container, which on macOS gets
+    // its own virtualized clock that can drift from the host process running
+    // this test, and the drift measurably widens under the CPU load a full
+    // `pnpm turbo test` run puts on the machine. Reproduced directly: a full
+    // gate run recorded `boxes.disassembled_at` (this test's `new Date()`)
+    // landing 8.9ms BEFORE `pallets.closure_received_at` (Postgres's `now()`
+    // for the SAME pallet's earlier closure), flipping this exact assertion to
+    // `false`, even though the disassembly happened several HTTP round trips
+    // -- and therefore strictly later in real, causal, application-level time
+    // -- after the closure. A generous forward buffer keeps this test
+    // asserting the comparison's LOGIC rather than betting on sub-second
+    // agreement between two different machines' clocks.
+    const occurredAt = new Date(Date.now() + 60_000).toISOString();
+
     await request(app!.getHttpServer())
       .post("/station/scans")
       .set("x-api-key", stationKey)
@@ -322,7 +355,7 @@ describe.skipIf(!ready)("pallets e2e", () => {
             terminalId: "t1",
             operatorId: null,
             reason: "переставлен на другой поддон",
-            occurredAt: new Date().toISOString(),
+            occurredAt,
           },
         ],
       })
@@ -330,10 +363,11 @@ describe.skipIf(!ready)("pallets e2e", () => {
 
     const res = await agent.get(`/pallets?shiftId=${shiftId}`).expect(200);
     const pallet = res.body.items[0];
-    // Only b1 (20 items, minus the 2 excluded above) still counts; b2's 15
-    // items left with it.
-    expect(pallet.boxCount).toBe(1);
-    expect(pallet.unitCount).toBe(BOX1_ITEM_COUNT - 2);
+    // Disassembling b2 takes exactly one box and exactly its own 15 items
+    // off the pallet's counts, regardless of what b1's own count was going
+    // in (that number is the sibling test's own assertion to make).
+    expect(pallet.boxCount).toBe(beforePallet.boxCount - 1);
+    expect(pallet.unitCount).toBe(beforePallet.unitCount - BOX2_ITEM_COUNT);
     expect(pallet.contentsChangedAfterClose).toBe(true);
   });
 

@@ -2,7 +2,59 @@
 
 **Date:** 2026-09-11
 
-**Status:** Approved in brainstorming on 2026-09-11. Not implemented.
+**Status:** Implemented on `claude/contour-6-pallets-369979` (commits
+`da03defc4`..`471f7812a` and the task-23 gate/isolation fix; no PR opened yet
+as of 2026-09-12). Automated gates green: `pnpm turbo lint typecheck test
+build --concurrency=1 --force`, `pnpm format:check`, `git diff --check`, and
+from `apps/handheld`, `./gradlew --no-daemon testDebugUnitTest lintDebug
+assembleDebug` (536/536 unit tests). The two `signer-agents.e2e.test.ts` tests
+that fail on this worktree's own `.env` (`CHZ_TOKEN_ENCRYPTION_KEY` commented
+out) are unrelated and predate this slice — confirmed green with a throwaway
+key, matching CI's own `verify-api-tests` job. Two things the implementation
+learned that this spec did not anticipate:
+
+- **§5 Templates promised an organisation-wide and per-category pallet
+  default; neither shipped.** `org_profiles.default_pallet_label_template_id`
+  and `org_pallet_label_template_defaults` exist in the schema and are read by
+  the box-label-template-eligibility checks (so a template a default points at
+  still cannot be disabled), but `PUT /org/profile`'s DTO only ever grew
+  `defaultBoxLabelTemplateId`, never a pallet counterpart, and the admin
+  `OrgProfilePage` never grew the picker either. A tenant can author a pallet
+  template (purpose `pallet`) and pick one explicitly per shift
+  (`ShiftForm.palletLabelTemplateId`), but there is no way to make one the
+  standing default the way box templates already have. Tracked as follow-up
+  work, not silently dropped: nothing writes to those columns today, so there
+  is no orphaned or unreachable state to migrate later.
+- **`pallets.e2e.test.ts`'s reported flake was neither dev-Postgres contention
+  nor test ordering — it was two different clocks.** `contentsChangedAfterClose`
+  compares a member box's `disassembled_at` against the pallet's own
+  `closure_received_at`. For a pallet-level "disassemble" exception this is
+  two SERVER `now()` reads (`pallet-ingest.ts` sets both), but a _box_-level
+  "disassemble" (what actually takes a box off a pallet, and what this test
+  exercises) sets `boxes.disassembled_at` from the DEVICE-supplied
+  `occurredAt`, unlike the box-level flag this one claims to mirror — which
+  compares `box_items.displaced_at` (also server `now()`) against
+  `boxes.closure_received_at`. Reproduced directly during this task's own full
+  gate run: this repo's dev/test Postgres runs in a Docker container, which on
+  macOS keeps its own virtualized clock that measurably drifts from the host
+  process under the CPU load a full `pnpm turbo test` run creates. The failing
+  run recorded `boxes.disassembled_at` (`test`'s `new Date()`) landing 8.9ms
+  _before_ `pallets.closure_received_at` (Postgres's `now()` for that same
+  pallet's earlier closure) even though the disassembly happened several HTTP
+  round trips later in real, causal, application time. Test fixed by giving
+  the exception's `occurredAt` a 60s forward buffer instead of a bare
+  `new Date()`, so the assertion tests the comparison's logic rather than
+  sub-second agreement between two machines' clocks; a second, independent
+  hardening also makes the file's last test assert its own effect as a delta
+  against a freshly observed baseline rather than a hard-coded count that
+  silently assumed an earlier sibling `it` had already landed its mutations.
+  The underlying inconsistency — box disassembly keeps the device's claimed
+  time while pallet disassembly was deliberately built on server time — is a
+  real latent risk for `contentsChangedAfterClose` against a genuinely skewed
+  station/handheld clock in production (box closures have no
+  `assertScannedAtWithinWindow`-style bound at all) and is tracked as
+  follow-up work, not fixed here: it is a production behavior question, not a
+  test question.
 
 **Scope:** The pallet slice of roadmap contour 06
 (`docs/superpowers/plans/2026-07-21-markiro-mvp-roadmap.md`), unblocked by 06c
