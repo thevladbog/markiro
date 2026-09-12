@@ -4,10 +4,12 @@ import { platformCapabilitiesForRole, type PlatformRole } from "@markiro/platfor
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createDb, schema } from "@markiro/db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DeviceReplacementService } from "../src/modules/device-licensing/device-replacement.service";
+import { createDeviceReplacementListFactReader } from "../src/modules/device-licensing/device-replacement-facts";
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 import { EntitlementsService } from "../src/subscriptions/entitlements.service";
 import { transitionWorkingAssignment } from "../src/subscriptions/working-device-assignments";
@@ -234,6 +236,178 @@ describe.skipIf(!process.env.DATABASE_URL)("device replacement preparation", () 
       response: receipt,
       after: { state: "prepared" },
     });
+  });
+  it("lists one coherent read-only snapshot without operational changes", async () => {
+    const f = await fixture();
+    const p = await service.preview(f.tenantId, f.device.id, f.intent, f.actor);
+    await service.confirm(
+      f.tenantId,
+      f.device.id,
+      { requestId: p.requestId, previewId: p.id },
+      f.actor,
+    );
+    const before = await operationalRows(f.tenantId);
+    const resolve = entitlements.resolveSnapshotInTransaction.bind(entitlements);
+    const snapshot = vi
+      .spyOn(entitlements, "resolveSnapshotInTransaction")
+      .mockImplementation(async (tenantId, tx) => {
+        const settings = await tx.execute<{ read_only: string; isolation: string }>(
+          sql`select current_setting('transaction_read_only') as read_only, current_setting('transaction_isolation') as isolation`,
+        );
+        expect(settings.rows[0]).toEqual({ read_only: "on", isolation: "repeatable read" });
+        // Keep the listing transaction open while an independent writer obtains
+        // the source/revision locks. Roll back so the side-effect assertion also
+        // covers every operational table after the read completes.
+        const writer = await connection.pool.connect();
+        try {
+          await writer.query("BEGIN");
+          await writer.query("set local statement_timeout='1000ms'");
+          await writer.query("update station_devices set name='Concurrent writer' where id=$1", [
+            f.device.id,
+          ]);
+        } finally {
+          await writer.query("ROLLBACK");
+          writer.release();
+        }
+        return resolve(tenantId, tx);
+      });
+    try {
+      expect((await service.list(f.tenantId, f.actor)).items).toHaveLength(1);
+      expect(await operationalRows(f.tenantId)).toEqual(before);
+    } finally {
+      snapshot.mockRestore();
+    }
+  });
+  it("does not create an entitlement revision when listing an empty tenant", async () => {
+    const tenantId = await createOrganization(db);
+    const actor = await platformActor("support");
+    expect(
+      await db
+        .select()
+        .from(schema.entitlementRevisions)
+        .where(eq(schema.entitlementRevisions.tenantId, tenantId)),
+    ).toEqual([]);
+    expect(await service.list(tenantId, actor)).toEqual({ canPrepare: false, items: [] });
+    expect(
+      await db
+        .select()
+        .from(schema.entitlementRevisions)
+        .where(eq(schema.entitlementRevisions.tenantId, tenantId)),
+    ).toEqual([]);
+  });
+  it("lists committed facts while a device writer holds tenant and source locks", async () => {
+    const f = await fixture();
+    const p = await service.preview(f.tenantId, f.device.id, f.intent, f.actor);
+    await service.confirm(
+      f.tenantId,
+      f.device.id,
+      { requestId: p.requestId, previewId: p.id },
+      f.actor,
+    );
+    const readerUrl = new URL(url);
+    readerUrl.searchParams.set("options", "-c statement_timeout=1000");
+    const reader = createDb(readerUrl.toString());
+    const readService = new DeviceReplacementService(
+      reader.db,
+      new EntitlementsService(reader.db, "managed_only"),
+      new PlatformAuditService(),
+    );
+    const writer = await connection.pool.connect();
+    try {
+      await writer.query("BEGIN");
+      await writer.query("select pg_advisory_xact_lock(hashtext($1),$2)", [
+        `subscription-quota:${f.tenantId}`,
+        2,
+      ]);
+      await writer.query("update station_devices set name='Uncommitted rename' where id=$1", [
+        f.device.id,
+      ]);
+      const list = await readService.list(f.tenantId, f.actor);
+      expect(list.items[0]).toMatchObject({
+        needsReview: false,
+        preparation: { sourceDeviceId: f.device.id },
+      });
+      await writer.query("COMMIT");
+      expect((await readService.list(f.tenantId, f.actor)).items[0]?.needsReview).toBe(true);
+    } finally {
+      await writer.query("ROLLBACK");
+      writer.release();
+      await reader.pool.end();
+    }
+  });
+  it("reads tenant-wide facts once for distinct prepared devices and preserves target fingerprints", async () => {
+    const f = await fixture();
+    const [second] = await db
+      .insert(schema.stationDevices)
+      .values({ tenantId: f.tenantId, name: "Second source", pairedAt: new Date() })
+      .returning();
+    if (!second) throw new Error("fixture");
+    await db.transaction((tx) => transitionWorkingAssignment(tx, second));
+    for (const [index, device] of [f.device, second].entries()) {
+      const p = await service.preview(
+        f.tenantId,
+        device.id,
+        {
+          ...f.intent,
+          requestId: randomUUID(),
+          target: { name: `Replacement ${index}`, kind: index === 0 ? "station" : "handheld" },
+        },
+        f.actor,
+      );
+      await service.confirm(
+        f.tenantId,
+        device.id,
+        { requestId: p.requestId, previewId: p.id },
+        f.actor,
+      );
+    }
+    const queries: string[] = [];
+    const observedDb = drizzle(connection.pool, {
+      logger: {
+        logQuery(query) {
+          queries.push(query);
+        },
+      },
+    });
+    const resolver = new EntitlementsService(observedDb, "managed_only");
+    const resolve = vi.spyOn(resolver, "resolveSnapshotInTransaction");
+    const observedService = new DeviceReplacementService(
+      observedDb,
+      resolver,
+      new PlatformAuditService(),
+    );
+    const result = await observedService.list(f.tenantId, f.actor);
+    expect(result.items.map((item) => item.needsReview)).toEqual([false, false]);
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(
+      queries.filter(
+        (query) =>
+          query.includes('"station_devices"."name"') &&
+          query.includes('"working_device_assignments"."id"'),
+      ),
+    ).toHaveLength(1);
+    expect(queries.some((query) => /for (update|share)|pg_advisory|^insert /i.test(query))).toBe(
+      false,
+    );
+  });
+  it("retains the complete target for the same source within a shared fact reader", async () => {
+    const f = await fixture();
+    await db.transaction(
+      async (tx) => {
+        const readFacts = createDeviceReplacementListFactReader(tx, f.tenantId, entitlements);
+        const first = await readFacts(f.device.id, { name: "First", kind: "station" });
+        const renamed = await readFacts(f.device.id, { name: "Second", kind: "station" });
+        const handheld = await readFacts(f.device.id, { name: "Second", kind: "handheld" });
+        expect(first.observation.target).toEqual({ name: "First", kind: "station" });
+        expect(renamed.observation.target).toEqual({ name: "Second", kind: "station" });
+        expect(handheld.observation.target).toEqual({ name: "Second", kind: "handheld" });
+        expect(new Set([first.fingerprint, renamed.fingerprint, handheld.fingerprint]).size).toBe(
+          3,
+        );
+        expect(await readFacts(f.device.id, { name: "First", kind: "station" })).toEqual(first);
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
   });
   it("ignores heartbeat time but invalidates durable source and allows stale cancellation", async () => {
     const f = await fixture();
@@ -609,11 +783,12 @@ describe.skipIf(!process.env.DATABASE_URL)("device replacement preparation", () 
   async function waitBlocked(pid: number) {
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
-      const result = await connection.pool.query<{ waiting: boolean }>(
-        "select exists(select 1 from pg_stat_activity where datname=current_database() and $1=any(pg_blocking_pids(pid))) as waiting",
+      const result = await connection.pool.query<{ pid: number }>(
+        "select pid from pg_stat_activity where datname=current_database() and $1=any(pg_blocking_pids(pid))",
         [pid],
       );
-      if (result.rows[0]?.waiting) return;
+      const waitingPid = result.rows[0]?.pid;
+      if (waitingPid !== undefined) return waitingPid;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     throw new Error("Expected transaction barrier was not reached");
@@ -662,16 +837,12 @@ describe.skipIf(!process.env.DATABASE_URL)("device replacement preparation", () 
         // connection proves revoke is waiting on the confirmation transaction.
         await blocker.query("select id from member where user_id=$1 for update", [f.actor.id]);
         result = service.confirm(f.tenantId, f.device.id, body, f.actor);
-        await waitBlocked(pid);
+        const confirmingPid = await waitBlocked(pid);
         const revoker = await connection.pool.connect();
         try {
           await revoker.query("BEGIN");
           const revoke = revoker.query(mutateSql, [mutateId]);
-          const waiting = await connection.pool.query<{ pid: number }>(
-            "select pid from pg_stat_activity where datname=current_database() and $1=any(pg_blocking_pids(pid))",
-            [pid],
-          );
-          await waitBlocked(waiting.rows[0]!.pid);
+          await waitBlocked(confirmingPid);
           await blocker.query("COMMIT");
           expect(await result).toMatchObject({ preparation: { state: "prepared" } });
           await revoke;

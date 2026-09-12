@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@markiro/ui";
@@ -467,4 +467,121 @@ it("keeps uncertain cancellation visible and its identity intact when write perm
   expect(screen.queryByRole("button", { name: "Cancel preparation" })).toBeNull();
   expect(view.client.getQueryData<CancelAttempt>(key)?.request).toEqual(originalRequest);
   expect(randomUUID).toHaveBeenCalledTimes(1);
+});
+
+it.each(["preview", "confirm"])(
+  "preserves the uncertain %s request and preview through attempted form edits and retry",
+  async (action) => {
+    let lost = false;
+    fail = (url) => {
+      if (url.endsWith("/" + action) && !lost) {
+        lost = true;
+        return Promise.reject(new TypeError("lost"));
+      }
+    };
+    const view = setup();
+    await fill();
+    await userEvent.click(screen.getByRole("button", { name: "Preview preparation" }));
+    if (action === "confirm") {
+      await userEvent.click(await screen.findByRole("button", { name: "Save preparation" }));
+    }
+    await screen.findByText(/Result is unknown/);
+    const key = replacementKeys.prepare(pool.tenantId, SOURCE);
+    const request = {
+      requestId: "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
+      target: { name: "Future device", kind: "handheld" },
+      reason: "Private support reason",
+    };
+    const expected = {
+      intent: { name: "Future device", kind: "handheld", reason: "Private support reason" },
+      request,
+      ...(action === "confirm" ? { preview: preview(request.requestId) } : {}),
+      pending: false,
+      notice: "uncertain",
+    };
+    expect(view.client.getQueryData<PrepareAttempt>(key)).toEqual(expected);
+    // Direct change events also exercise the handler guard behind disabled inputs.
+    fireEvent.change(screen.getByLabelText("Future device name"), {
+      target: { value: "Different device" },
+    });
+    expect(view.client.getQueryData<PrepareAttempt>(key)).toEqual(expected);
+    fireEvent.change(screen.getByLabelText("Reason"), {
+      target: { value: "Different reason" },
+    });
+    expect(view.client.getQueryData<PrepareAttempt>(key)).toEqual(expected);
+    await userEvent.click(screen.getByRole("combobox", { name: "Future device kind" }));
+    expect(screen.queryByRole("option", { name: "Station" })).toBeNull();
+    expect(view.client.getQueryData<PrepareAttempt>(key)).toEqual(expected);
+    expect(screen.getByLabelText("Future device name").closest("fieldset")?.disabled).toBe(true);
+    const retry = screen.getByRole("button", {
+      name: action === "preview" ? "Preview preparation" : "Save preparation",
+    });
+    expect(retry.hasAttribute("disabled")).toBe(false);
+    await userEvent.click(retry);
+    if (action === "preview") {
+      await screen.findByRole("button", { name: "Save preparation" });
+      expect(view.client.getQueryData<PrepareAttempt>(key)).toEqual({
+        intent: expected.intent,
+        request,
+        preview: preview(request.requestId),
+      });
+    } else {
+      await screen.findByText("Prepared");
+    }
+    const attempts = bodies.filter((entry) => entry.url.endsWith("/" + action));
+    const expectedBody =
+      action === "preview"
+        ? request
+        : { requestId: request.requestId, previewId: "33333333-3333-4333-8333-333333333333" };
+    expect(attempts.map((entry) => entry.body)).toEqual([expectedBody, expectedBody]);
+    expect(randomUUID).toHaveBeenCalledTimes(1);
+  },
+);
+
+it("clears a cancellation conflict after a successful fresh attempt", async () => {
+  saved = true;
+  let conflicted = false;
+  fail = (url) => {
+    if (url.endsWith("/cancel") && !conflicted) {
+      conflicted = true;
+      cancelled = false;
+      return response({ code: "device_replacement_stale" }, 409);
+    }
+  };
+  const view = setup();
+  await userEvent.click(await screen.findByRole("button", { name: "Cancel preparation" }));
+  await userEvent.click(
+    within(screen.getByRole("alertdialog")).getByRole("button", { name: "Confirm cancellation" }),
+  );
+  await screen.findByText(/Facts changed/);
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Cancel preparation" }));
+  await userEvent.click(
+    within(screen.getByRole("alertdialog")).getByRole("button", { name: "Confirm cancellation" }),
+  );
+  await screen.findByText("Cancelled");
+  expect(screen.queryByText(/Facts changed/)).toBeNull();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Cancel preparation" })).toBeNull();
+  expect(bodies.map((entry) => entry.body)).toEqual([
+    { requestId: "aaaaaaaa-aaaa-4aaa-8aaa-000000000001", expectedRevision: 1 },
+    { requestId: "aaaaaaaa-aaaa-4aaa-8aaa-000000000002", expectedRevision: 1 },
+  ]);
+  expect(view.client.getQueryData(replacementKeys.list(pool.tenantId))).toEqual({
+    canPrepare: true,
+    items: [
+      {
+        preparation: {
+          ...preparation,
+          state: "cancelled",
+          revision: 2,
+          cancelledAt: "2026-09-12T10:01:00.000Z",
+        },
+        needsReview: true,
+      },
+    ],
+  });
+  expect(
+    view.client.getQueryData(replacementKeys.cancel(pool.tenantId, SOURCE, preparation.id)),
+  ).toBeNull();
 });

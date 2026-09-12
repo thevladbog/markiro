@@ -51,7 +51,7 @@ describe("platform page API paths", () => {
       "/api/platform/tenants/tenant-1/device-licensing",
       `/api/platform/tenants/tenant-1/device-licensing/${deviceId}/cancel-reservation`,
     ]);
-    expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(JSON.stringify(request));
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual(request);
   });
 
   it("uses the client platform base exactly once for team and audit", async () => {

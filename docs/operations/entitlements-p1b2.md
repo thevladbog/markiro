@@ -25,6 +25,15 @@ rewriting existing device, assignment or journal rows. Apply it through the same
 deployment workflow before serving replacement routes; it does not add a new
 working-device binary compatibility floor.
 
+The two journal checks are added as `NOT VALID` in 0135: new writes are checked
+immediately. Migration `0136_validate_working_device_events` validates existing
+rows after the runtime runner commits 0135 and releases its writer-blocking table
+lock. The runner retains its session migration lock across both transactions. If
+validation fails, keep the committed schema and journal; diagnose the failure and
+rerun the same runtime migration command. It resumes validation without replaying
+0135 or losing history. Separate SQL files alone do not provide this boundary:
+the ordinary Drizzle migrator groups pending files in one transaction.
+
 Before rollout, save a database backup through the existing production procedure.
 Apply the migration through the existing immutable-image deployment workflow.
 Compare each tenant's pre-migration `station_devices WHERE revoked_at IS NULL`

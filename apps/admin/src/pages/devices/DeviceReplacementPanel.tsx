@@ -134,7 +134,8 @@ function PreparationEditor({
   const busy = useReplacementPending(tenantId);
   const refresh = useRefresh(tenantId);
   const edit = (patch: Partial<PrepareAttempt["intent"]>) => {
-    if (!busy) setAttempt({ intent: { ...attempt.intent, ...patch } });
+    if (!busy && attempt.notice !== "uncertain")
+      setAttempt({ intent: { ...attempt.intent, ...patch } });
   };
   const run = async (confirm: boolean) => {
     // Read the cache again: a second click or a remounted observer must not race.
@@ -176,7 +177,7 @@ function PreparationEditor({
   return (
     <div style={{ display: "grid", gap: "var(--sp-3)", marginBlock: "var(--sp-4)" }}>
       <fieldset
-        disabled={busy || !canWrite}
+        disabled={busy || !canWrite || attempt.notice === "uncertain"}
         style={{ display: "grid", gap: "var(--sp-3)", border: 0, padding: 0, margin: 0 }}
       >
         <Input
@@ -187,6 +188,7 @@ function PreparationEditor({
         />
         <Select
           label={t("deviceReplacement.targetKind")}
+          disabled={busy || !canWrite || attempt.notice === "uncertain"}
           value={attempt.intent.kind}
           onValueChange={(kind) => edit({ kind })}
           options={[
@@ -270,6 +272,7 @@ function SavedPreparation({
     try {
       await cancelDeviceReplacement(tenantId, preparation.id, next.request);
       setAttempt(null);
+      setNotice(null);
       setOpen(false);
       await refresh();
     } catch (error) {

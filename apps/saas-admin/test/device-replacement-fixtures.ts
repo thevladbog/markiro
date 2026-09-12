@@ -1,4 +1,9 @@
-import type { DeviceReplacementObservation, WorkingDevicePool } from "@markiro/platform-contracts";
+import type {
+  DeviceReplacementObservation,
+  DeviceReplacementPreparation,
+  DeviceReplacementPreview,
+  WorkingDevicePool,
+} from "@markiro/platform-contracts";
 export const SOURCE = "11111111-1111-4111-8111-111111111111";
 export const SECOND = "22222222-2222-4222-8222-222222222222";
 export const PREVIEW = "33333333-3333-4333-8333-333333333333";
@@ -55,16 +60,16 @@ export const observation: DeviceReplacementObservation = {
     ],
   },
 };
-export const preparation = {
+export const preparation: DeviceReplacementPreparation = {
   id: PROJECT,
   sourceDeviceId: SOURCE,
   revision: 1,
-  state: "prepared" as const,
+  state: "prepared",
   preparedAt: "2026-09-12T10:00:00.000Z",
   cancelledAt: null,
   observation,
 };
-export function preview(requestId: string) {
+export function preview(requestId: string): DeviceReplacementPreview {
   return {
     id: PREVIEW,
     requestId,

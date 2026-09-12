@@ -21,21 +21,55 @@ export function replacementDigest(value: unknown) {
   return entitlementDigest(JSON.parse(JSON.stringify(value)));
 }
 
+async function readDevicePool(tx: SubscriptionTransaction, tenantId: string) {
+  const d = schema.stationDevices;
+  const a = schema.workingDeviceAssignments;
+  return tx
+    .select({ device: d, assignment: a })
+    .from(d)
+    .leftJoin(a, and(eq(a.tenantId, d.tenantId), eq(a.deviceId, d.id)))
+    .where(eq(d.tenantId, tenantId))
+    .orderBy(asc(d.id));
+}
+
+/** Shared only within one read-only repeatable-read list transaction. */
+export function createDeviceReplacementListFactReader(
+  tx: SubscriptionTransaction,
+  tenantId: string,
+  entitlements: EntitlementsService,
+) {
+  let tenantFacts: Promise<ReadOnlyTenantFacts> | undefined;
+  return async (deviceId: string, target: DeviceReplacementTarget) => {
+    tenantFacts ??= (async () => ({
+      rows: await readDevicePool(tx, tenantId),
+      facts: await entitlements.resolveSnapshotInTransaction(tenantId, tx),
+    }))();
+    // Device and target facts are never cached by device ID alone.
+    return readDeviceReplacementFacts(
+      tx,
+      tenantId,
+      deviceId,
+      target,
+      entitlements,
+      await tenantFacts,
+    );
+  };
+}
+
+type ReadOnlyTenantFacts = {
+  rows: Awaited<ReturnType<typeof readDevicePool>>;
+  facts: Awaited<ReturnType<EntitlementsService["resolveSnapshotInTransaction"]>>;
+};
+
 export async function readDeviceReplacementFacts(
   tx: SubscriptionTransaction,
   tenantId: string,
   deviceId: string,
   target: DeviceReplacementTarget,
   entitlements: EntitlementsService,
+  readOnlyFacts?: ReadOnlyTenantFacts,
 ) {
-  const d = schema.stationDevices;
-  const a = schema.workingDeviceAssignments;
-  const rows = await tx
-    .select({ device: d, assignment: a })
-    .from(d)
-    .leftJoin(a, and(eq(a.tenantId, d.tenantId), eq(a.deviceId, d.id)))
-    .where(eq(d.tenantId, tenantId))
-    .orderBy(asc(d.id));
+  const rows = readOnlyFacts?.rows ?? (await readDevicePool(tx, tenantId));
   const source = rows.find((row) => row.device.id === deviceId);
   if (!source) throw new NotFoundException();
   if (!rows.every((row) => assignmentConsistent(row.device, row.assignment)))
@@ -75,21 +109,24 @@ export async function readDeviceReplacementFacts(
       !(assignment.state === "released" && assignment.releaseReason === "security_revoked"))
   )
     throw new ConflictException({ code: "device_replacement_source_ineligible" });
+  const credentialQuery = (apiKeyId: string) =>
+    tx
+      .select({
+        id: schema.apikey.id,
+        configId: schema.apikey.configId,
+        referenceId: schema.apikey.referenceId,
+        enabled: schema.apikey.enabled,
+        expiresAt: schema.apikey.expiresAt,
+        permissions: schema.apikey.permissions,
+        metadata: schema.apikey.metadata,
+      })
+      .from(schema.apikey)
+      .where(eq(schema.apikey.id, apiKeyId));
   const credential = device.apiKeyId
     ? ((
-        await tx
-          .select({
-            id: schema.apikey.id,
-            configId: schema.apikey.configId,
-            referenceId: schema.apikey.referenceId,
-            enabled: schema.apikey.enabled,
-            expiresAt: schema.apikey.expiresAt,
-            permissions: schema.apikey.permissions,
-            metadata: schema.apikey.metadata,
-          })
-          .from(schema.apikey)
-          .where(eq(schema.apikey.id, device.apiKeyId))
-          .for("share")
+        await (readOnlyFacts
+          ? credentialQuery(device.apiKeyId)
+          : credentialQuery(device.apiKeyId).for("share"))
       )[0] ?? null)
     : null;
   const shifts = await tx
@@ -171,24 +208,26 @@ export async function readDeviceReplacementFacts(
       ),
     )
     .orderBy(asc(schema.stationSyncQuarantine.id));
-  const facts = await entitlements.resolveSnapshotInTransaction(tenantId, tx);
-  if (facts.versionIds.length)
+  const facts =
+    readOnlyFacts?.facts ?? (await entitlements.resolveSnapshotInTransaction(tenantId, tx));
+  if (!readOnlyFacts && facts.versionIds.length)
     await tx
       .select({ id: schema.catalogItemVersions.id })
       .from(schema.catalogItemVersions)
       .where(inArray(schema.catalogItemVersions.id, facts.versionIds))
       .orderBy(asc(schema.catalogItemVersions.id))
       .for("share");
-  if (facts.policyIds.length)
+  if (!readOnlyFacts && facts.policyIds.length)
     await tx
       .select({ id: schema.entitlementLifecyclePolicies.id })
       .from(schema.entitlementLifecyclePolicies)
       .where(inArray(schema.entitlementLifecyclePolicies.id, facts.policyIds))
       .orderBy(asc(schema.entitlementLifecyclePolicies.id))
       .for("share");
-  await tx.execute(
-    sql`select tenant_id from entitlement_revisions where tenant_id=${tenantId} for update`,
-  );
+  if (!readOnlyFacts)
+    await tx.execute(
+      sql`select tenant_id from entitlement_revisions where tenant_id=${tenantId} for update`,
+    );
   const occupied = assignmentOccupied(device, assignment);
   const usage = rows.filter((row) => assignmentOccupied(row.device, row.assignment)).length;
   const limit = facts.snapshot.current.quotas.stations.limit;

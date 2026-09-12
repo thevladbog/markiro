@@ -67,7 +67,12 @@ export async function runRuntimeMigrations(
       if (offerVariantIndex < 0) {
         await migrate(db, { migrationsFolder: options.migrationsFolder });
       } else {
-        await migrateWithOnlineOfferVariants(client, options.migrationsFolder, offerVariantIndex);
+        await migrateWithOnlineOfferVariants(
+          client,
+          options.migrationsFolder,
+          offerVariantIndex,
+          packaged.indexOf("0136_validate_working_device_events"),
+        );
       }
     } catch (error) {
       migrationError = error;
@@ -124,6 +129,7 @@ async function migrateWithOnlineOfferVariants(
   client: pg.PoolClient,
   migrationsFolder: string,
   index: number,
+  validationIndex: number,
 ): Promise<void> {
   const { readMigrationFiles } = await import("drizzle-orm/migrator");
   const { PgDialect } = await import("drizzle-orm/pg-core");
@@ -170,7 +176,20 @@ async function migrateWithOnlineOfferVariants(
       await client.query("SELECT set_config('lock_timeout', $1, false)", [previousTimeout]);
     }
   }
-  await dialect.migrate(migrations.slice(index + 1), session, { migrationsFolder });
+  if (validationIndex > index) {
+    // Drizzle otherwise wraps every pending migration in one transaction. Release
+    // 0135's ADD CONSTRAINT lock before 0136 scans the existing event journal.
+    // Retain the session advisory lock and each migration's atomic journal entry.
+    await dialect.migrate(migrations.slice(index + 1, validationIndex), session, {
+      migrationsFolder,
+    });
+    await dialect.migrate(migrations.slice(validationIndex, validationIndex + 1), session, {
+      migrationsFolder,
+    });
+    await dialect.migrate(migrations.slice(validationIndex + 1), session, { migrationsFolder });
+  } else {
+    await dialect.migrate(migrations.slice(index + 1), session, { migrationsFolder });
+  }
 }
 
 async function prepareOnlineOfferVariants(client: pg.PoolClient): Promise<void> {

@@ -37,7 +37,11 @@ import {
   requireDeviceLicensingActor,
   type DeviceLicensingActor,
 } from "./device-licensing-authority";
-import { readDeviceReplacementFacts, replacementDigest } from "./device-replacement-facts";
+import {
+  createDeviceReplacementListFactReader,
+  readDeviceReplacementFacts,
+  replacementDigest,
+} from "./device-replacement-facts";
 
 type Preparation = typeof schema.workingDeviceReplacementPreparations.$inferSelect;
 type Preview = typeof schema.workingDeviceReplacementPreviews.$inferSelect;
@@ -78,39 +82,40 @@ export class DeviceReplacementService {
     private readonly audit: PlatformAuditService,
   ) {}
   async list(tenantId: string, actor: DeviceLicensingActor): Promise<DeviceReplacementList> {
-    return this.transaction(tenantId, async (tx) => {
-      const authority = await requireDeviceLicensingActor(tx, tenantId, actor, false);
-      const rows = await tx
-        .select()
-        .from(schema.workingDeviceReplacementPreparations)
-        .where(eq(schema.workingDeviceReplacementPreparations.tenantId, tenantId))
-        .orderBy(
-          asc(schema.workingDeviceReplacementPreparations.preparedAt),
-          asc(schema.workingDeviceReplacementPreparations.id),
-        );
-      const items = [];
-      for (const row of rows) {
-        let needsReview = false;
-        if (row.state === "prepared") {
-          try {
-            const facts = await readDeviceReplacementFacts(
-              tx,
-              tenantId,
-              row.deviceId,
-              deviceReplacementObservationSchema.parse(row.observation).target,
-              this.entitlements,
-            );
-            needsReview = facts.fingerprint !== row.factsFingerprint;
-          } catch (error) {
-            if (error instanceof ConflictException || error instanceof NotFoundException)
-              needsReview = true;
-            else throw error;
+    return this.db.transaction(
+      async (tx) => {
+        const authority = await requireDeviceLicensingActor(tx, tenantId, actor, false);
+        const rows = await tx
+          .select()
+          .from(schema.workingDeviceReplacementPreparations)
+          .where(eq(schema.workingDeviceReplacementPreparations.tenantId, tenantId))
+          .orderBy(
+            asc(schema.workingDeviceReplacementPreparations.preparedAt),
+            asc(schema.workingDeviceReplacementPreparations.id),
+          );
+        const readFacts = createDeviceReplacementListFactReader(tx, tenantId, this.entitlements);
+        const items = [];
+        for (const row of rows) {
+          let needsReview = false;
+          if (row.state === "prepared") {
+            try {
+              const facts = await readFacts(
+                row.deviceId,
+                deviceReplacementObservationSchema.parse(row.observation).target,
+              );
+              needsReview = facts.fingerprint !== row.factsFingerprint;
+            } catch (error) {
+              if (error instanceof ConflictException || error instanceof NotFoundException)
+                needsReview = true;
+              else throw error;
+            }
           }
+          items.push({ preparation: publicPreparation(row), needsReview });
         }
-        items.push({ preparation: publicPreparation(row), needsReview });
-      }
-      return deviceReplacementListSchema.parse({ canPrepare: authority.canCancel, items });
-    });
+        return deviceReplacementListSchema.parse({ canPrepare: authority.canCancel, items });
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
   }
   async preview(
     tenantId: string,
