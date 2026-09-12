@@ -447,6 +447,12 @@ const ORG_PROFILE = {
   gs1Prefixes: ["4606203"],
   defaultBoxLabelTemplateId: null,
   categoryBoxLabelTemplateDefaults: [],
+  // Mirrors the real `OrgProfileDto` (apps/api/src/modules/org-profile/dto.ts):
+  // `OrgProfilePage` reads these unconditionally in `toProfileFormValues`, so
+  // an org-profile fixture that omits them throws (`Cannot read properties of
+  // undefined (reading 'map')`) the moment the page's profile query resolves.
+  defaultPalletLabelTemplateId: null,
+  categoryPalletLabelTemplateDefaults: [],
   productGroupsInUse: [],
   pickupLimitsEnabled: false,
   logoUrl: null,
