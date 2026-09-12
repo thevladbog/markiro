@@ -3,6 +3,7 @@ package app.markiro.handheld.feature.shift
 import androidx.room.withTransaction
 import app.markiro.handheld.core.box.ServerRange
 import app.markiro.handheld.core.box.SsccPool
+import app.markiro.handheld.core.network.BundleSsccDto
 import app.markiro.handheld.core.network.ErrorBody
 import app.markiro.handheld.core.network.LineDto
 import app.markiro.handheld.core.network.ShiftBundleDto
@@ -58,6 +59,10 @@ fun ShiftDto.toEntity(existing: ShiftEntity?, now: Long) = ShiftEntity(
     // issuer and the box template off a shift already entered, and boxes stop
     // closing for a reason nothing on the screen connects to a list refresh.
     boxLabelTemplate = existing?.boxLabelTemplate,
+    // 06d: the pallet template is bundle-only for exactly the same reason, and
+    // losing it is the same failure one level up -- every pallet label refuses
+    // with `template_missing` and the queue fills with labels nothing can print.
+    palletLabelTemplateSpec = existing?.palletLabelTemplateSpec,
     shelfLifeDays = existing?.shelfLifeDays,
     egaisCode = existing?.egaisCode,
     ssccIssuerPrefix = existing?.ssccIssuerPrefix,
@@ -112,6 +117,7 @@ class ShiftRepository(
                         productName = bundle.product.name,
                         productPrintName = bundle.product.printName ?: bundle.shift.productPrintName,
                         boxLabelTemplate = bundle.boxLabelTemplate?.spec?.toString(),
+                        palletLabelTemplateSpec = bundle.palletLabelTemplate?.spec?.toString(),
                         shelfLifeDays = bundle.product.shelfLifeDays,
                         egaisCode = bundle.product.egaisCode,
                         ssccIssuerPrefix = bundle.sscc?.issuerPrefix,
@@ -145,17 +151,49 @@ class ShiftRepository(
     }
 
     /**
-     * Revoked blocks are dropped BEFORE the new one is applied. Burning picks
-     * the lowest `fromSerial` with room, so a revoked range left in place keeps
-     * winning over the replacement an admin just cut, and the reseeded number
-     * never reaches a label.
+     * Both serial streams the bundle carries: boxes (extension digit 0) and,
+     * since 06d, pallets (digit 1).
+     *
+     * The pallet block is fully independent of the box one and goes through the
+     * identical revoke-then-add path, as `apps/station/src/lib/shift-bundle.ts`
+     * does. A device that applies only the box block still joins boxes to a
+     * local pallet and still reaches capacity -- and then refuses every close
+     * from the capacity-th box onward with `NoSerials`, for the rest of the shift.
      *
      * Outside the shift transaction on purpose: the pool is device-wide, not
      * this shift's, and it holds its own lock.
      */
     private suspend fun applySsccBlock(bundle: ShiftBundleDto) {
-        val block = bundle.sscc ?: return
-        pool.dropRanges(block.issuerPrefix, block.extensionDigit, bundle.ssccRevokedFrom)
+        applyBlock(bundle.sscc, bundle.ssccRevokedFrom)
+        applyBlock(bundle.palletSscc, bundle.palletSsccRevokedFrom)
+    }
+
+    /**
+     * Revoked blocks are dropped BEFORE the new one is applied. Burning picks
+     * the lowest `fromSerial` with room, so a revoked range left in place keeps
+     * winning over the replacement an admin just cut, and the reseeded number
+     * never reaches a label.
+     *
+     * The bundle's OWN block is excluded from that list, belt and braces with
+     * the server's matching exclusion. Two blocks can share a `fromSerial` -- a
+     * revoked one and the replacement cut after an admin reseeded the counter
+     * back to a value already seeded before -- and deleting that row here is
+     * unrecoverable: the delete takes the local cursor with it, and `addRange`
+     * then rebuilds it from the server's `consumedThroughSerial`, still null
+     * while this device's printed labels sit unsent. Burning would hand out
+     * serials that are already on physical labels, which no later sync repairs.
+     *
+     * Scoped to the prefix AND digit the block itself names: `dropRanges` keys
+     * on all three, so crossing the streams would let a pallet revocation
+     * delete a box range that merely shares a `fromSerial`.
+     */
+    private suspend fun applyBlock(block: BundleSsccDto?, revokedFrom: List<Long>) {
+        if (block == null) return
+        pool.dropRanges(
+            block.issuerPrefix,
+            block.extensionDigit,
+            revokedFrom.filter { it != block.fromSerial },
+        )
         pool.addRange(
             ServerRange(
                 issuerPrefix = block.issuerPrefix,

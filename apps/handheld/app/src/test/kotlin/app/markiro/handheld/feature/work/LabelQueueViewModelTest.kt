@@ -22,6 +22,7 @@ import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.PalletEntity
 import app.markiro.handheld.core.storage.PalletPrint
 import app.markiro.handheld.core.storage.ShiftEntity
+import app.markiro.handheld.demoteInterruptedPrints
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -31,6 +32,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.IOException
 
 @RunWith(AndroidJUnit4::class)
 class LabelQueueViewModelTest {
@@ -208,5 +210,40 @@ class LabelQueueViewModelTest {
         vm.state.first { it.items.isEmpty() }
         assertEquals(0, transport.printed.size)
         assertEquals(PalletPrint.PRINTED, db.palletDao().get("p1")?.printState)
+    }
+
+    @Test
+    fun aPalletPrintTheAppDiedInIsDemotedAtStartupAndThenSkippedByPrintAll() = runTest {
+        // `PalletPrinter` persists `printing` BEFORE the send, so an app death
+        // between handing bytes to the printer and hearing back leaves the row
+        // there permanently. `skippedByPrintAll` tests `unknown`, so a stuck
+        // `printing` row is not skipped and «Напечатать все» resends a label
+        // that may already be physically on the stack.
+        box("b1", "046800899000000018", BoxPrint.FAILED)
+        pallet("p1", "146800899000000012", PalletPrint.PENDING)
+
+        // The state is produced by the real printer dying mid-send, not written by hand.
+        val palletLock = PalletLock(db)
+        val pallets = PalletRepository(db, palletLock)
+        val dying = object : PrinterTransport {
+            override suspend fun status(printer: PrinterEntity) = PrinterStatus.Ready
+            override suspend fun send(printer: PrinterEntity, document: ByteArray): SendOutcome =
+                throw IOException("the process died holding the socket")
+        }
+        val renderer = LabelRenderer(RasterizeText { _, _ -> RasterResult("AA", 1, 1, 8, 8) })
+        runCatching { PalletPrinter(db, pallets, renderer, dying).print("p1") }
+        assertEquals(PalletPrint.PRINTING, db.palletDao().get("p1")?.printState)
+
+        // Startup, through the exact function `HandheldApp.onCreate` runs.
+        demoteInterruptedPrints(BoxRepository(db), pallets)
+        assertEquals(PalletPrint.UNKNOWN, db.palletDao().get("p1")?.printState)
+
+        val vm = model()
+        vm.state.first { it.items.size == 2 }
+        vm.printAll()
+        vm.state.first { it.items.size == 1 }
+        assertEquals(1, transport.printed.size)
+        assertTrue(transport.printed.single().contains("046800899000000018"))
+        assertEquals(PalletPrint.UNKNOWN, db.palletDao().get("p1")?.printState)
     }
 }
