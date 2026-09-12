@@ -166,7 +166,7 @@ function lineHeightMm(sizePt: number): number {
  * reason `barcodeXMm` below can CENTRE the symbol without a layout engine and
  * without an alignment property in the model.
  */
-const SSCC_BARCODE_MODULES = code128ModuleCount("0".repeat(20), true);
+export const SSCC_BARCODE_MODULES = code128ModuleCount("0".repeat(20), true);
 
 /**
  * The column captions, named so `fitPt` sizes the type against the SAME
@@ -212,7 +212,7 @@ const SSCC_HRI_SPECIMEN = `(00)${"0".repeat(18)}`;
  * label, so the 203 dpi templates are as wide as the standard permits and
  * only centring and height were ever available to them.
  */
-function ssccModuleWidthMm(contentWMm: number, dpi: 203 | 300): number {
+export function ssccModuleWidthMm(contentWMm: number, dpi: 203 | 300): number {
   const dotMm = 25.4 / dpi;
   const perDotMm = (SSCC_BARCODE_MODULES + 2 * GS1_128_QUIET_ZONE_MODULES) * dotMm;
   const dots = Math.max(1, Math.floor(contentWMm / perDotMm));

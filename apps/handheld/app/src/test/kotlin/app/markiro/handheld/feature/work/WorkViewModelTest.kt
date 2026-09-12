@@ -12,6 +12,10 @@ import app.markiro.handheld.core.box.PrintReason
 import app.markiro.handheld.core.box.BoxRepository
 import app.markiro.handheld.core.exceptions.ExceptionEngine
 import app.markiro.handheld.core.box.CloseBox
+import app.markiro.handheld.core.box.ClosePallet
+import app.markiro.handheld.core.box.PalletLock
+import app.markiro.handheld.core.box.PalletPrinter
+import app.markiro.handheld.core.box.PalletRepository
 import app.markiro.handheld.core.duplicate.DuplicateJobs
 import app.markiro.handheld.core.duplicate.DuplicateReason
 import app.markiro.handheld.core.box.CloseResult
@@ -125,14 +129,24 @@ class WorkViewModelTest {
         )
         val boxes = BoxRepository(db)
         val pool = SsccPool(db)
+        // The fixture shift carries no `palletBoxCapacity`, so these are wired
+        // up only to satisfy `CloseBox`'s constructor -- nothing here joins a
+        // pallet unless a test opts in with `aggregatingWithPallets`. That path
+        // also has its own dedicated suite, `ClosePalletTest`.
+        val palletLock = PalletLock(db)
+        val pallets = PalletRepository(db, palletLock)
+        val closePallet = ClosePallet(db, pool, palletLock)
+        val palletPrinter = PalletPrinter(db, pallets, LabelRenderer(rasterize), transport)
         // `main.track` is #506's leak guard; the duplicate engine is this slice's
         // own argument. Both belong.
         return main.track(
             WorkViewModel(
                 SavedStateHandle(mapOf("shiftId" to "s1")), db, ScanRecorder(db), ScanRouterAdapter(scans),
                 { kind -> played += kind }, engine, session, ReachabilityTracker(), team, null,
-                boxes, CloseBox(db, boxes, pool), BoxPrinter(db, boxes, LabelRenderer(rasterize), transport),
-                DuplicateJobs(db, LabelRenderer(rasterize), transport), ExceptionEngine(db), flowOf(Unit),
+                boxes, CloseBox(db, boxes, pool, pallets, closePallet, palletLock),
+                BoxPrinter(db, boxes, LabelRenderer(rasterize), transport),
+                DuplicateJobs(db, LabelRenderer(rasterize), transport),
+                pallets, closePallet, palletPrinter, ExceptionEngine(db), flowOf(Unit),
             ),
         )
     }

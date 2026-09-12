@@ -12,10 +12,17 @@ import org.junit.Rule
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.markiro.handheld.core.box.BoxPrint
+import app.markiro.handheld.core.box.ClosePallet
+import app.markiro.handheld.core.box.ClosePalletResult
+import app.markiro.handheld.core.box.PalletLock
+import app.markiro.handheld.core.box.PalletRepository
 import app.markiro.handheld.core.box.ServerRange
+import app.markiro.handheld.core.box.Sscc
 import app.markiro.handheld.core.box.SsccPool
 import app.markiro.handheld.core.network.NetworkModule
 import app.markiro.handheld.core.network.StationApi
+import app.markiro.handheld.core.storage.BoxEntity
 import app.markiro.handheld.core.storage.DeviceConfigEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import kotlinx.coroutines.flow.first
@@ -27,6 +34,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -47,7 +55,7 @@ class ShiftRepositoryTest {
 
     private val shiftJson = """{"id":"s1","number":"SEP26-001","status":"planned","mode":"validation","validationPrint":{"mode":"none"},
         "productId":"p1","productName":"Вода","productPrintName":null,"lineId":"l1","lineName":"Линия 2","counterpartyName":null,
-        "plannedQty":100,"plannedDate":"2026-09-10","productionDate":null,"boxCapacity":null,"palletCapacity":null,"palletsEnabled":false,
+        "plannedQty":100,"plannedDate":"2026-09-10","productionDate":null,"boxCapacity":null,"palletBoxCapacity":null,"palletsEnabled":false,
         "openedAt":null,"closedAt":null,"stationCloseAccess":{"kind":"admin_only"}}"""
     private val activeShiftJson = shiftJson.replace("\"status\":\"planned\"", "\"status\":\"active\"")
     private val bundleJson = """{"shift":$activeShiftJson,
@@ -59,14 +67,62 @@ class ShiftRepositoryTest {
         .replace("\"mode\":\"validation\"", "\"mode\":\"aggregation\"")
         .replace("\"boxCapacity\":null", "\"boxCapacity\":20")
 
-    /** An aggregation shift as the server sends it: a box template and a serial block. */
+    /**
+     * An aggregation shift as the server sends it: a box template and a serial
+     * block. `ssccRevokedFrom` names a LOWER block than the one carried here --
+     * a bundle never asks a device to drop the range it is itself naming, and
+     * the fixture must not conflate the two.
+     */
     private val aggregationBundleJson = """{"shift":$aggregationShiftJson,
         "product":{"id":"p1","gtin14":"04600682000013","name":"Вода 0,5","printName":"Вода","shelfLifeDays":365,"egaisCode":null},
         "labelTemplate":null,
         "boxLabelTemplate":{"id":"t1","name":"Коробка 58×40","spec":{"widthMm":58,"heightMm":40,"dpi":203,"language":"zpl","elements":[]}},
+        "counterpartyGln":null,"palletLabelTemplate":null,
+        "sscc":{"issuerPrefix":"468008990","extensionDigit":0,"fromSerial":101,"toSerial":1000,"consumedThroughSerial":100},
+        "ssccRevokedFrom":[1],"palletSscc":null,"palletSsccRevokedFrom":[],"operators":[]}"""
+
+    private val palletShiftJson = aggregationShiftJson
+        .replace("\"palletBoxCapacity\":null", "\"palletBoxCapacity\":20")
+        .replace("\"palletsEnabled\":false", "\"palletsEnabled\":true")
+
+    /**
+     * Pallets OFF, but `palletBoxCapacity` populated anyway -- exactly what
+     * `GET /shifts` legitimately sends once a product has prefilled it
+     * (migration 0137) and pallets were never turned on for this shift. The
+     * cabinet needs the raw column, so the server does not gate it; the
+     * device must.
+     */
+    private val listOnlyPalletCapacityJson = aggregationShiftJson
+        .replace("\"palletBoxCapacity\":null", "\"palletBoxCapacity\":12")
+
+    /**
+     * A pallets-enabled shift as the server sends it (06d): a SECOND serial
+     * block on extension digit 1 and a pallet label template, alongside the box
+     * pair. See `apps/api/src/modules/shifts/dto.ts`.
+     */
+    private val palletBundleJson = """{"shift":$palletShiftJson,
+        "product":{"id":"p1","gtin14":"04600682000013","name":"Вода 0,5","printName":"Вода","shelfLifeDays":365,"egaisCode":null},
+        "labelTemplate":null,
+        "boxLabelTemplate":{"id":"t1","name":"Коробка 58×40","spec":{"widthMm":58,"heightMm":40,"dpi":203,"language":"zpl","elements":[]}},
+        "palletLabelTemplate":{"id":"t2","name":"Паллета 100×150","spec":{"widthMm":100,"heightMm":150,"dpi":203,"language":"zpl","elements":[]}},
         "counterpartyGln":null,
-        "sscc":{"issuerPrefix":"468008990","extensionDigit":0,"fromSerial":1,"toSerial":1000,"consumedThroughSerial":100},
-        "ssccRevokedFrom":[1],"operators":[]}"""
+        "sscc":{"issuerPrefix":"468008990","extensionDigit":0,"fromSerial":101,"toSerial":1000,"consumedThroughSerial":100},
+        "ssccRevokedFrom":[1],
+        "palletSscc":{"issuerPrefix":"468008990","extensionDigit":1,"fromSerial":1,"toSerial":500,"consumedThroughSerial":null},
+        "palletSsccRevokedFrom":[],"operators":[]}"""
+
+    /**
+     * The same shift re-fetched after an admin reseeded BOTH counters back to a
+     * value already seeded before, so each stream's revocation list repeats the
+     * `fromSerial` of the very block the same bundle is handing out.
+     */
+    private val reissuedBundleJson = palletBundleJson
+        .replace("\"ssccRevokedFrom\":[1],", "\"ssccRevokedFrom\":[1,101],")
+        .replace("\"palletSsccRevokedFrom\":[]", "\"palletSsccRevokedFrom\":[1,201]")
+        .replace(
+            """"palletSscc":{"issuerPrefix":"468008990","extensionDigit":1,"fromSerial":1,"toSerial":500,"consumedThroughSerial":null}""",
+            """"palletSscc":{"issuerPrefix":"468008990","extensionDigit":1,"fromSerial":201,"toSerial":700,"consumedThroughSerial":null}""",
+        )
 
     /** A validation shift whose policy prints a duplicate, as the server sends it. */
     private val duplicateShiftJson = activeShiftJson.replace(
@@ -274,6 +330,107 @@ class ShiftRepositoryTest {
         assertEquals("Вода 0,5", shift.productName)
         assertEquals("Вода", shift.productPrintName)
     }
+
+    @Test
+    fun refreshingTheListNeverTurnsOnThePalletGateForAPalletsOffShift() = runTest {
+        // `CloseBox.kt` and `WorkViewModel.kt` both read this shift's
+        // `palletBoxCapacity` column as THE pallets-on signal -- there is no
+        // separate flag on that read path. `GET /shifts` returns the column
+        // ungated (the cabinet needs the raw value), so storing it verbatim
+        // would flip that local signal on for a shift whose pallets are off,
+        // and the device would show the full-screen pallet refusal overlay
+        // for a shift that never asked for one.
+        server.enqueue(MockResponse().setBody("""{"items":[$listOnlyPalletCapacityJson]}"""))
+        assertTrue(repo().refreshList())
+
+        val shift = db.shiftDao().get("s1")!!
+        assertFalse(shift.palletsEnabled)
+        assertNull(shift.palletBoxCapacity)
+    }
+
+    // -- The pallet stream (06d). Nothing below seeds a pool row or a template
+    // by hand: the only way either reaches the device is a bundle arriving. --
+
+    @Test
+    fun aPalletsBundleLeavesTheDeviceAbleToActuallyCloseAPallet() = runTest {
+        server.enqueue(MockResponse().setBody(palletShiftJson))
+        server.enqueue(MockResponse().setBody(palletBundleJson))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+
+        // The pallet block is a SECOND, independent block. Applying only the box
+        // one leaves the device joining boxes to a pallet it can never number,
+        // so every close from the capacity-th box onward refuses with NoSerials.
+        val pool = SsccPool(db)
+        val palletLock = PalletLock(db)
+        val pallets = PalletRepository(db, palletLock) { clock }
+        val pallet = pallets.currentPallet("s1")
+        db.boxDao().insert(
+            BoxEntity(
+                boxId = "b1", shiftId = "s1", sscc = "046800899000000018",
+                openedAt = "2026-09-11T07:00:00.000Z", closedAt = "2026-09-11T08:00:00.000Z",
+                operatorId = "op1", printState = BoxPrint.PENDING, printReason = null, ackedAt = null,
+                palletId = pallet.palletId,
+            ),
+        )
+        val shift = db.shiftDao().get("s1")!!
+        val closed = ClosePallet(db, pool, palletLock) { clock }
+            .close("s1", shift.ssccIssuerPrefix, "op1") as ClosePalletResult.Closed
+        // Extension digit 1: the leading character of a pallet SSCC, and a
+        // number cut from the block the bundle itself delivered.
+        assertEquals('1', closed.sscc.first())
+        assertEquals(Sscc.build(SsccPool.PALLET_EXTENSION_DIGIT, "468008990", 1), closed.sscc)
+        // The box stream is untouched by any of it.
+        assertEquals(101L, pool.burn("468008990", SsccPool.BOX_EXTENSION_DIGIT))
+    }
+
+    @Test
+    fun aPalletsBundleStoresThePalletTemplateAndARefreshDoesNotWipeIt() = runTest {
+        // Without the template every pallet label refuses with `template_missing`,
+        // and the list carries no template at all -- the same trap the box
+        // template and the SSCC issuer already had.
+        server.enqueue(MockResponse().setBody(palletShiftJson))
+        server.enqueue(MockResponse().setBody(palletBundleJson))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+        assertTrue(db.shiftDao().get("s1")!!.palletLabelTemplateSpec!!.contains("\"heightMm\":150"))
+
+        server.enqueue(MockResponse().setBody("""{"items":[$palletShiftJson]}"""))
+        assertTrue(repo().refreshList())
+
+        val shift = db.shiftDao().get("s1")!!
+        assertTrue(shift.palletLabelTemplateSpec!!.contains("\"heightMm\":150"))
+        assertNotNull(shift.boxLabelTemplate)
+        assertTrue(shift.palletsEnabled)
+        assertEquals(20, shift.palletBoxCapacity)
+    }
+
+    @Test
+    fun neitherStreamDropsTheBlockTheSameBundleIsNaming() = runTest {
+        // Two blocks can share a `fromSerial` -- a revoked one and the
+        // replacement cut after an admin reseeded the counter back to a value
+        // already seeded before -- so a revocation list can repeat the
+        // `fromSerial` of the block being handed out. Deleting that row takes
+        // the local cursor with it, and the rebuilt one starts from the
+        // server's `consumedThroughSerial`, still null while this device's
+        // printed labels sit unsent: the next burn reissues serials already on
+        // physical labels, which no later sync repairs.
+        val pool = SsccPool(db)
+        pool.addRange(ServerRange("468008990", SsccPool.BOX_EXTENSION_DIGIT, 1, 100, null))
+        pool.addRange(ServerRange("468008990", SsccPool.BOX_EXTENSION_DIGIT, 101, 1000, 200))
+        pool.addRange(ServerRange("468008990", SsccPool.PALLET_EXTENSION_DIGIT, 1, 200, null))
+        pool.addRange(ServerRange("468008990", SsccPool.PALLET_EXTENSION_DIGIT, 201, 700, 250))
+
+        server.enqueue(MockResponse().setBody(palletShiftJson))
+        server.enqueue(MockResponse().setBody(reissuedBundleJson))
+        assertEquals(EnterResult.Ok, repo().enter("s1"))
+
+        // The genuinely revoked lower block is gone from both streams -- burning
+        // picks the lowest `fromSerial` with room, so leaving it would keep
+        // winning over the replacement. The named block keeps its own advanced
+        // cursor instead of restarting at its lower bound.
+        assertEquals(201L, pool.burn("468008990", SsccPool.BOX_EXTENSION_DIGIT))
+        assertEquals(251L, pool.burn("468008990", SsccPool.PALLET_EXTENSION_DIGIT))
+    }
+
     @Test fun delayedBundleCannotReplaceSavedShiftOrSsccPoolUnderNewGeneration() = runTest {
         val original = ShiftEntityFixtures.bundled("s1").copy(leftAt = 17L)
         db.shiftDao().upsert(original)
@@ -375,5 +532,4 @@ class ShiftRepositoryTest {
         assertEquals(cached, db.shiftDao().get("s1"))
         assertNull(db.deviceConfigDao().get()?.activeShiftId)
     }
-
 }

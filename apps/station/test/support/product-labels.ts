@@ -43,6 +43,8 @@ export function productLabelAcceptanceFixture(
     date: "08.09.2026",
     expiry: "",
     qty: "1",
+    // A unit label carries no box count.
+    "qty.boxes": "",
     operator: "Оператор",
     "counterparty.name": "",
   };

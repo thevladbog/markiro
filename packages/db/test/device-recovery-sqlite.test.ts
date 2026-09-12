@@ -14,10 +14,22 @@ describe("durable Station recovery migration", () => {
           if (!String(error).includes("duplicate column name")) throw error;
         }
       }
-      const index = STATION_MIGRATIONS.findIndex((sql) =>
+      // Bounded to the recovery block itself rather than "everything from here
+      // on". Only these statements claim to be repeatable; the 06d pallet
+      // statements appended after them include `ALTER TABLE ... ADD COLUMN`,
+      // which SQLite cannot express conditionally. That is not a defect --
+      // `STATION_MIGRATION_ENTRIES` applies each entry exactly once by its
+      // index-derived id -- but re-running one does raise "duplicate column
+      // name", so re-running them here would test the wrong thing.
+      const first = STATION_MIGRATIONS.findIndex((sql) =>
         sql.includes("CREATE TABLE IF NOT EXISTS station_device_recovery"),
       );
-      for (const statement of STATION_MIGRATIONS.slice(index)) db.exec(statement);
+      const last = STATION_MIGRATIONS.findIndex((sql) =>
+        sql.includes("product_label_durable_reprint_guard"),
+      );
+      expect(first).toBeGreaterThanOrEqual(0);
+      expect(last).toBeGreaterThanOrEqual(first);
+      for (const statement of STATION_MIGRATIONS.slice(first, last + 1)) db.exec(statement);
       expect(getTableName(stationDeviceRecovery)).toBe("station_device_recovery");
       expect(getTableName(stationDeviceOwners)).toBe("station_device_owners");
       expect(

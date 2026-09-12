@@ -28,10 +28,15 @@ const boxes: ShiftExportSource = {
   ],
 };
 
-function render(
-  formatId: "shift_txt_flat" | "shift_txt_boxes" | "shift_csv_flat" | "shift_csv_boxes",
-  source: ShiftExportSource,
-) {
+type TextualShiftExportFormatId =
+  | "shift_txt_flat"
+  | "shift_txt_boxes"
+  | "shift_csv_flat"
+  | "shift_csv_boxes"
+  | "shift_txt_pallets"
+  | "shift_csv_pallets";
+
+function render(formatId: TextualShiftExportFormatId, source: ShiftExportSource) {
   const [part] = renderParts(formatId, source);
 
   if (!part) {
@@ -42,7 +47,7 @@ function render(
 }
 
 function renderParts(
-  formatId: "shift_txt_flat" | "shift_txt_boxes" | "shift_csv_flat" | "shift_csv_boxes",
+  formatId: TextualShiftExportFormatId,
   source: ShiftExportSource,
   maxLines: number | null = null,
 ) {
@@ -98,6 +103,30 @@ describe("shift export formats", () => {
         extension: "xml",
         mimeType: "application/xml; charset=utf-8",
         boxMode: "boxes",
+      },
+      {
+        id: "shift_txt_pallets",
+        version: 1,
+        label: "[TXT][Паллеты] Отчет смены",
+        extension: "txt",
+        mimeType: "text/plain; charset=utf-8",
+        boxMode: "pallets",
+      },
+      {
+        id: "shift_csv_pallets",
+        version: 1,
+        label: "[CSV][Паллеты] Отчет смены",
+        extension: "csv",
+        mimeType: "text/csv; charset=utf-8",
+        boxMode: "pallets",
+      },
+      {
+        id: "shift_xml_gismt_aggregation_pallets",
+        version: 1,
+        label: "[XML][ГИСМТ] Паллетная агрегация",
+        extension: "xml",
+        mimeType: "application/xml; charset=utf-8",
+        boxMode: "pallets",
       },
     ]);
     expect(getShiftExportFormat("shift_txt_flat", 1)).toBe(SHIFT_EXPORT_FORMATS[0]);
@@ -635,5 +664,232 @@ describe("GISMT aggregation XML format", () => {
     expect(() =>
       renderXml({ mode: "boxes", boxes: [{ sscc: "046800899000256001", codes: [km(serial)] }] }),
     ).toThrow(new ShiftExportDomainError("INVALID_CIS"));
+  });
+});
+
+describe("pallets shift export formats", () => {
+  const boxA = "046800899000256001";
+  const boxB = "046800899000256018";
+  const looseBox = "046800899000256032";
+  const palletSscc = "046800899000256025";
+  const PALLETS_GTIN = "04680089900017";
+  const palletsKm = (serial: string) => `01${PALLETS_GTIN}21${serial}`;
+
+  /** One pallet stacking two boxes, plus one box that stands on no pallet. */
+  const palletsSource: ShiftExportSource = {
+    mode: "pallets",
+    pallets: [
+      {
+        sscc: palletSscc,
+        boxes: [
+          { sscc: boxA, codes: ["KM-1", "KM-2"] },
+          { sscc: boxB, codes: ["KM-3"] },
+        ],
+      },
+    ],
+    looseBoxes: [{ sscc: looseBox, codes: ["KM-4"] }],
+  };
+
+  /** Same box/pallet layout, but with real, parseable KM codes for the XML format. */
+  const xmlPalletsSource: ShiftExportSource = {
+    mode: "pallets",
+    pallets: [
+      {
+        sscc: palletSscc,
+        boxes: [
+          { sscc: boxA, codes: [palletsKm("SERIAL-A"), palletsKm("SERIAL-B")] },
+          { sscc: boxB, codes: [palletsKm("SERIAL-C")] },
+        ],
+      },
+    ],
+    looseBoxes: [{ sscc: looseBox, codes: [palletsKm("SERIAL-D")] }],
+  };
+
+  function renderPalletParts(
+    formatId: "shift_txt_pallets" | "shift_csv_pallets",
+    source: ShiftExportSource,
+    maxLines: number | null = null,
+  ) {
+    return renderShiftExport({
+      formatId,
+      formatVersion: 1,
+      productName: "Сидр",
+      shiftDate: "2026-08-19",
+      maxLines,
+      source,
+    });
+  }
+
+  function renderXmlPallets(
+    source: ShiftExportSource,
+    maxLines: number | null = null,
+    organizationInn: string | null = "9705119097",
+  ) {
+    return renderShiftExport({
+      formatId: "shift_xml_gismt_aggregation_pallets",
+      formatVersion: 1,
+      productName: "Сидр",
+      shiftDate: "2026-08-19",
+      maxLines,
+      source,
+      organizationInn,
+    });
+  }
+
+  it("renders the TXT pallet format with the pallet SSCC ahead of its boxes, loose boxes after", () => {
+    const [part, ...rest] = renderPalletParts("shift_txt_pallets", palletsSource);
+
+    expect(rest).toEqual([]);
+    expect(decode(part!.bytes)).toBe(
+      [
+        `00${palletSscc}`,
+        `00${boxA}`,
+        "KM-1",
+        "KM-2",
+        "",
+        `00${boxB}`,
+        "KM-3",
+        "",
+        `00${looseBox}`,
+        "KM-4",
+        "",
+        "",
+      ].join("\n"),
+    );
+    expect(part).toMatchObject({
+      codeCount: 4,
+      boxCount: 3,
+      filename: "Сидр_4pcs_3box_2026-08-19.txt",
+    });
+  });
+
+  it("renders the CSV pallet format with pallet_sscc, box_sscc, code and an empty pallet column for a loose box", () => {
+    const [part] = renderPalletParts("shift_csv_pallets", palletsSource);
+
+    expect(stripBom(part!.bytes)).toBe(
+      "pallet_sscc;box_sscc;code\r\n" +
+        `00${palletSscc};00${boxA};KM-1\r\n` +
+        `00${palletSscc};00${boxA};KM-2\r\n` +
+        `00${palletSscc};00${boxB};KM-3\r\n` +
+        `;00${looseBox};KM-4\r\n`,
+    );
+  });
+
+  it("renders the XML pallet aggregation with every box before the pallet that names it", () => {
+    const [part] = renderXmlPallets(xmlPalletsSource);
+    const xml = decode(part!.bytes);
+
+    expect(xml.indexOf(`<pack_code>00${palletSscc}</pack_code>`)).toBeGreaterThan(
+      xml.indexOf(`<pack_code>00${boxB}</pack_code>`),
+    );
+    expect(xml).toContain(`<sscc>00${boxA}</sscc>`);
+    expect(xml).toContain(`<sscc>00${boxB}</sscc>`);
+  });
+
+  it("emits unpalletized boxes with the others and in no pallet", () => {
+    const [part] = renderXmlPallets(xmlPalletsSource);
+    const xml = decode(part!.bytes);
+
+    expect(xml).toContain(`<pack_code>00${looseBox}</pack_code>`);
+    expect(xml.match(/<sscc>/g) ?? []).toHaveLength(2);
+  });
+
+  it("keeps a pallet block whole when splitting by line limit", () => {
+    // Header (10) + the pallet block (boxA:5 + boxB:4 + wrapper:5 = 14) = 24,
+    // which fits in one part at this limit; the loose box (4 lines) does not
+    // also fit alongside it (24 + 4 = 28 > 26), so it starts a second part.
+    const parts = renderXmlPallets(xmlPalletsSource, 26);
+
+    expect(parts).toHaveLength(2);
+    const palletParts = parts.filter((p) => decode(p.bytes).includes("<sscc>"));
+    expect(palletParts).toHaveLength(1);
+  });
+
+  it("names a whole pallet group's own line-limit overflow distinctly from a single box's", () => {
+    // The pallet block is 1 (pallet line) + boxA (4 lines) + boxB (3 lines) =
+    // 8 physical lines; a limit of 7 cannot fit it even alone in an empty
+    // part, and TXT has no header overhead to blame instead.
+    expect(() => renderPalletParts("shift_txt_pallets", palletsSource, 7)).toThrow(
+      new ShiftExportDomainError("PALLET_EXCEEDS_LINE_LIMIT"),
+    );
+    // A lone box (not in a pallet group) hitting the same kind of overflow
+    // still reports the box-shaped code, proving the two paths stay distinct.
+    const looseOnly: ShiftExportSource = {
+      mode: "pallets",
+      pallets: [],
+      looseBoxes: [{ sscc: boxA, codes: ["KM-1", "KM-2"] }],
+    };
+    expect(() => renderPalletParts("shift_txt_pallets", looseOnly, 3)).toThrow(
+      new ShiftExportDomainError("BOX_EXCEEDS_LINE_LIMIT"),
+    );
+  });
+
+  it("rejects a flat or boxes source for a pallets-mode format, and vice versa", () => {
+    expect(() =>
+      renderShiftExport({
+        formatId: "shift_txt_pallets",
+        formatVersion: 1,
+        productName: "Сидр",
+        shiftDate: "2026-08-19",
+        maxLines: null,
+        source: flat,
+      }),
+    ).toThrow(new ShiftExportDomainError("FORMAT_SOURCE_MISMATCH"));
+    expect(() =>
+      renderShiftExport({
+        formatId: "shift_txt_boxes",
+        formatVersion: 2,
+        productName: "Сидр",
+        shiftDate: "2026-08-19",
+        maxLines: null,
+        source: palletsSource,
+      }),
+    ).toThrow(new ShiftExportDomainError("FORMAT_SOURCE_MISMATCH"));
+  });
+
+  it("rejects a malformed pallet SSCC as INVALID_BOX_SSCC across every pallet format", () => {
+    const malformedPallet: ShiftExportSource = {
+      mode: "pallets",
+      pallets: [{ sscc: "not-an-sscc", boxes: [{ sscc: boxA, codes: ["KM-1"] }] }],
+      looseBoxes: [],
+    };
+    const malformedPalletXml: ShiftExportSource = {
+      mode: "pallets",
+      pallets: [{ sscc: "not-an-sscc", boxes: [{ sscc: boxA, codes: [palletsKm("SERIAL-A")] }] }],
+      looseBoxes: [],
+    };
+
+    expect(() => renderPalletParts("shift_txt_pallets", malformedPallet)).toThrow(
+      new ShiftExportDomainError("INVALID_BOX_SSCC"),
+    );
+    expect(() => renderPalletParts("shift_csv_pallets", malformedPallet)).toThrow(
+      new ShiftExportDomainError("INVALID_BOX_SSCC"),
+    );
+    expect(() => renderXmlPallets(malformedPalletXml)).toThrow(
+      new ShiftExportDomainError("INVALID_BOX_SSCC"),
+    );
+  });
+
+  it("rejects a malformed member box SSCC inside a pallet", () => {
+    const malformedBox: ShiftExportSource = {
+      mode: "pallets",
+      pallets: [{ sscc: palletSscc, boxes: [{ sscc: "not-an-sscc", codes: ["KM-1"] }] }],
+      looseBoxes: [],
+    };
+
+    expect(() => renderPalletParts("shift_txt_pallets", malformedBox)).toThrow(
+      new ShiftExportDomainError("INVALID_BOX_SSCC"),
+    );
+    expect(() => renderXmlPallets(malformedBox)).toThrow(
+      new ShiftExportDomainError("INVALID_BOX_SSCC"),
+    );
+  });
+
+  it("rejects an empty pallets source as EMPTY_SOURCE", () => {
+    const empty: ShiftExportSource = { mode: "pallets", pallets: [], looseBoxes: [] };
+
+    expect(() => renderPalletParts("shift_txt_pallets", empty)).toThrow(
+      new ShiftExportDomainError("EMPTY_SOURCE"),
+    );
   });
 });

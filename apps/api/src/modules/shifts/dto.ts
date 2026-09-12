@@ -25,6 +25,11 @@ export type BoxTemplateResolution =
   | { ok: true; boxLabelTemplateId: string | null }
   | { ok: false; code: "BOX_LABEL_TEMPLATE_REQUIRED" };
 
+/** Same shape as `BoxTemplateResolution`, for `palletLabelTemplateId`. */
+export type PalletTemplateResolution =
+  | { ok: true; palletLabelTemplateId: string | null }
+  | { ok: false; code: "PALLET_LABEL_TEMPLATE_REQUIRED" };
+
 export type StationCloseAccess =
   { kind: "single_device"; ownerDeviceId: string } | { kind: "admin_only" };
 
@@ -54,7 +59,7 @@ const plannedDateSchema = civilDateSchema("plannedDate");
 const productionDateSchema = civilDateSchema("productionDate");
 
 /**
- * POST /shifts schema. `boxCapacity`/`palletCapacity`/`counterpartyId`
+ * POST /shifts schema. `boxCapacity`/`palletBoxCapacity`/`counterpartyId`
  * are server-prefilled from the product when omitted (`undefined`); an
  * explicit `null` opts out of the prefill (see ShiftsService.createShift).
  */
@@ -76,11 +81,18 @@ export const createShiftSchema = z.object({
    * opts out; aggregation-mode validation then rejects the null snapshot.
    */
   boxLabelTemplateId: z.string().uuid().nullable().optional(),
+  /**
+   * Omitted snapshots the organisation's current pallet default when pallets
+   * are enabled; explicit null opts out (see the pallet resolution block in
+   * ShiftsService.createShift). Meaningless when pallets are not enabled --
+   * the service never resolves a default in that case.
+   */
+  palletLabelTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),
   productionDate: productionDateSchema.nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
-  palletCapacity: z.number().int().min(1).nullable().optional(),
+  palletBoxCapacity: z.number().int().min(1).nullable().optional(),
   palletsEnabled: z.boolean().optional(),
 });
 export type CreateShiftDto = z.infer<typeof createShiftSchema>;
@@ -97,11 +109,13 @@ export const updateShiftSchema = z.object({
   ssccIssuerCounterpartyId: z.string().uuid().nullable().optional(),
   /** Updates the existing snapshot only when explicitly present. */
   boxLabelTemplateId: z.string().uuid().nullable().optional(),
+  /** Updates the existing pallet-label snapshot only when explicitly present. */
+  palletLabelTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),
   productionDate: productionDateSchema.nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
-  palletCapacity: z.number().int().min(1).nullable().optional(),
+  palletBoxCapacity: z.number().int().min(1).nullable().optional(),
   palletsEnabled: z.boolean().optional(),
 });
 export type UpdateShiftDto = z.infer<typeof updateShiftSchema>;
@@ -148,11 +162,12 @@ export interface ShiftDto {
   /** Whose numbers this shift's boxes carry; null means the tenant's own organisation. */
   ssccIssuerCounterpartyId: string | null;
   boxLabelTemplateId: string | null;
+  palletLabelTemplateId: string | null;
   plannedQty: number | null;
   plannedDate: string | null;
   productionDate: string | null;
   boxCapacity: number | null;
-  palletCapacity: number | null;
+  palletBoxCapacity: number | null;
   palletsEnabled: boolean;
   createdFrom: ShiftOrigin;
   openedAt: Date | null;
@@ -274,6 +289,14 @@ export interface ShiftBundleDto {
    * falls back to the retired item-label compatibility slot.
    */
   boxLabelTemplate: { id: string; name: string; spec: LabelTemplateSpec } | null;
+  /**
+   * The shift's pallet-label snapshot, resolved from
+   * `shift.palletLabelTemplateId`. Null exactly when that snapshot is null --
+   * a shift without pallets, or one whose tenant configured no pallet
+   * template. A device that gets null cannot render a pallet label and says
+   * so rather than printing an empty one.
+   */
+  palletLabelTemplate: { id: string; name: string; spec: LabelTemplateSpec } | null;
   counterpartyGln: string | null;
   operators: OperatorMirrorRecord[];
   /**
@@ -311,13 +334,25 @@ export interface ShiftBundleDto {
    * reference-only bundle, which never touches allocation state at all).
    */
   ssccRevokedFrom: number[];
+  /**
+   * This device's pallet serial block (extension digit 1). Non-null only for
+   * a shift with pallets enabled; null for every other reason `sscc` is null
+   * (no issuer prefix, exhausted capacity, read-only subscription), because
+   * the device must still receive its product, templates and roster.
+   */
+  palletSscc: ShiftBundleDto["sscc"];
+  /** `ssccRevokedFrom` for the pallet stream. Always present, `[]` when empty. */
+  palletSsccRevokedFrom: number[];
 }
 
 /**
  * GET /shifts/:id/reference-bundle response. It carries only mirrored
  * reference data and can never allocate or reconcile an SSCC block.
  */
-export type ShiftReferenceBundleDto = Omit<ShiftBundleDto, "sscc"> & { sscc: null };
+export type ShiftReferenceBundleDto = Omit<ShiftBundleDto, "sscc" | "palletSscc"> & {
+  sscc: null;
+  palletSscc: null;
+};
 
 export const productionDateOpenApiSchema = {
   type: "string",
@@ -343,11 +378,12 @@ export const createShiftOpenApiSchema = {
     counterpartyId: nullableUuidOpenApiSchema,
     ssccIssuerCounterpartyId: nullableUuidOpenApiSchema,
     boxLabelTemplateId: nullableUuidOpenApiSchema,
+    palletLabelTemplateId: nullableUuidOpenApiSchema,
     plannedQty: nullablePositiveIntegerOpenApiSchema,
     plannedDate: nullableDateOpenApiSchema,
     productionDate: productionDateOpenApiSchema,
     boxCapacity: nullablePositiveIntegerOpenApiSchema,
-    palletCapacity: nullablePositiveIntegerOpenApiSchema,
+    palletBoxCapacity: nullablePositiveIntegerOpenApiSchema,
     palletsEnabled: { type: "boolean" },
   },
 };
@@ -363,11 +399,12 @@ export const updateShiftOpenApiSchema = {
     counterpartyId: nullableUuidOpenApiSchema,
     ssccIssuerCounterpartyId: nullableUuidOpenApiSchema,
     boxLabelTemplateId: nullableUuidOpenApiSchema,
+    palletLabelTemplateId: nullableUuidOpenApiSchema,
     plannedQty: nullablePositiveIntegerOpenApiSchema,
     plannedDate: nullableDateOpenApiSchema,
     productionDate: productionDateOpenApiSchema,
     boxCapacity: nullablePositiveIntegerOpenApiSchema,
-    palletCapacity: nullablePositiveIntegerOpenApiSchema,
+    palletBoxCapacity: nullablePositiveIntegerOpenApiSchema,
     palletsEnabled: { type: "boolean" },
   },
 };
@@ -492,11 +529,12 @@ const shiftRequiredFields = [
   "counterpartyName",
   "ssccIssuerCounterpartyId",
   "boxLabelTemplateId",
+  "palletLabelTemplateId",
   "plannedQty",
   "plannedDate",
   "productionDate",
   "boxCapacity",
-  "palletCapacity",
+  "palletBoxCapacity",
   "palletsEnabled",
   "createdFrom",
   "openedAt",
@@ -527,11 +565,12 @@ export const shiftOpenApiSchema = {
     counterpartyName: { type: "string", nullable: true },
     ssccIssuerCounterpartyId: nullableUuidOpenApiSchema,
     boxLabelTemplateId: nullableUuidOpenApiSchema,
+    palletLabelTemplateId: nullableUuidOpenApiSchema,
     plannedQty: nullablePositiveIntegerOpenApiSchema,
     plannedDate: nullableDateOpenApiSchema,
     productionDate: productionDateOpenApiSchema,
     boxCapacity: nullablePositiveIntegerOpenApiSchema,
-    palletCapacity: nullablePositiveIntegerOpenApiSchema,
+    palletBoxCapacity: nullablePositiveIntegerOpenApiSchema,
     palletsEnabled: { type: "boolean" },
     createdFrom: { type: "string", enum: ["admin", "station"] },
     openedAt: nullableDateTimeOpenApiSchema,
@@ -614,7 +653,7 @@ const stationBundleProductOpenApiSchema = {
     "name",
     "productGroup",
     "boxCapacity",
-    "palletCapacity",
+    "palletBoxCapacity",
     "status",
     "archived",
     "defaultCounterpartyId",
@@ -633,7 +672,7 @@ const stationBundleProductOpenApiSchema = {
     name: { type: "string" },
     productGroup: { type: "string", nullable: true },
     boxCapacity: nullablePositiveIntegerOpenApiSchema,
-    palletCapacity: nullablePositiveIntegerOpenApiSchema,
+    palletBoxCapacity: nullablePositiveIntegerOpenApiSchema,
     status: { type: "string", enum: ["draft", "active"] },
     archived: { type: "boolean" },
     defaultCounterpartyId: nullableUuidOpenApiSchema,
@@ -694,10 +733,13 @@ const shiftBundleRequiredFields = [
   "product",
   "labelTemplate",
   "boxLabelTemplate",
+  "palletLabelTemplate",
   "counterpartyGln",
   "operators",
   "sscc",
   "ssccRevokedFrom",
+  "palletSscc",
+  "palletSsccRevokedFrom",
 ];
 
 export const shiftBundleOpenApiSchema = {
@@ -709,10 +751,13 @@ export const shiftBundleOpenApiSchema = {
     product: stationBundleProductOpenApiSchema,
     labelTemplate: { type: "string", nullable: true, enum: [null] },
     boxLabelTemplate: boxLabelTemplateOpenApiSchema,
+    palletLabelTemplate: boxLabelTemplateOpenApiSchema,
     counterpartyGln: { type: "string", nullable: true },
     operators: { type: "array", items: operatorMirrorOpenApiSchema },
     sscc: ssccBundleOpenApiSchema,
     ssccRevokedFrom: { type: "array", items: { type: "integer", minimum: 0 } },
+    palletSscc: ssccBundleOpenApiSchema,
+    palletSsccRevokedFrom: { type: "array", items: { type: "integer", minimum: 0 } },
   },
 };
 
@@ -721,5 +766,6 @@ export const shiftReferenceBundleOpenApiSchema = {
   properties: {
     ...shiftBundleOpenApiSchema.properties,
     sscc: { type: "object", nullable: true, enum: [null] },
+    palletSscc: { type: "object", nullable: true, enum: [null] },
   },
 };

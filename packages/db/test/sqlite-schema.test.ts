@@ -2400,3 +2400,255 @@ describe("inventory receipt trigger admission", () => {
     ).toEqual({ progress_cursor: null, progress_result_revision: 0 });
   });
 });
+
+describe("pallet mirror", () => {
+  it("creates the pallet mirror with its print-recovery columns", () => {
+    const db = migratedDb();
+    const columns = (
+      db.prepare("PRAGMA table_info(pallets_mirror)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    expect(columns).toEqual(
+      expect.arrayContaining([
+        "pallet_id",
+        "shift_id",
+        "terminal_id",
+        "sscc",
+        "opened_at",
+        "closed_at",
+        "closed_by",
+        "acked_at",
+        "print_verified_at",
+        "print_skipped_at",
+        "disassembled_at",
+        "print_state",
+        "print_error_code",
+      ]),
+    );
+  });
+
+  it("links a box to its pallet", () => {
+    const db = migratedDb();
+    const columns = (
+      db.prepare("PRAGMA table_info(boxes_mirror)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    expect(columns).toContain("pallet_id");
+  });
+
+  /**
+   * An installed station already HAS boxes_mirror, so a changed
+   * `CREATE TABLE IF NOT EXISTS` would be skipped silently and the column
+   * would never appear. Only an ALTER reaches a device that is already in the
+   * field — this test is what keeps that true.
+   */
+  it("adds the box column to a station that already holds boxes", () => {
+    const db = new DatabaseSync(":memory:");
+    applyStationMigrations(db);
+    db.exec(
+      "INSERT INTO boxes_mirror (box_id, shift_id, opened_at) VALUES ('b1','s1','2026-09-11T07:00:00.000Z')",
+    );
+    // Re-running the whole list is what a restart does; it must be a no-op.
+    applyStationMigrations(db);
+    expect(db.prepare("SELECT pallet_id FROM boxes_mirror WHERE box_id='b1'").get()).toEqual({
+      pallet_id: null,
+    });
+  });
+
+  it("carries the shift's pallet capacity and label spec", () => {
+    const db = migratedDb();
+    const columns = (
+      db.prepare("PRAGMA table_info(shift_mirror)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    expect(columns).toEqual(
+      expect.arrayContaining(["pallet_box_capacity", "pallet_label_template_spec"]),
+    );
+    const productColumns = (
+      db.prepare("PRAGMA table_info(product_mirror)").all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    expect(productColumns).toContain("pallet_box_capacity");
+  });
+
+  it("queues pallet exceptions with a monotonic id", () => {
+    const db = migratedDb();
+    db.exec(
+      `INSERT INTO pallet_exceptions_mirror (kind, pallet_id, shift_id, terminal_id, operator_id, reason, occurred_at)
+       VALUES ('disassemble','p1','s1','t1','op1','повреждён поддон','2026-09-11T08:00:00.000Z')`,
+    );
+    db.exec(
+      `INSERT INTO pallet_exceptions_mirror (kind, pallet_id, shift_id, terminal_id, operator_id, reason, occurred_at)
+       VALUES ('reprint','p1','s1','t1','op1','смазалась','2026-09-11T08:01:00.000Z')`,
+    );
+    expect(db.prepare("SELECT id, kind FROM pallet_exceptions_mirror ORDER BY id").all()).toEqual([
+      { id: 1, kind: "disassemble" },
+      { id: 2, kind: "reprint" },
+    ]);
+  });
+
+  // Task 12 review finding 1: without `pallet_exception_disassemble_local`,
+  // queuing the exception fact never touches `pallets_mirror` at all -- this
+  // is the DB-level proof that the trigger, not application code, is what
+  // makes the two effects land in one atomic INSERT.
+  it("marks a pallet disassembled atomically through its exception trigger", () => {
+    const db = migratedDb();
+    db.prepare(
+      `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+       VALUES ('p1', 's1', 't1', '2026-09-11T07:00:00.000Z')`,
+    ).run();
+
+    db.prepare(
+      `INSERT INTO pallet_exceptions_mirror (kind, pallet_id, shift_id, terminal_id, operator_id, reason, occurred_at)
+       VALUES ('disassemble', 'p1', 's1', 't1', 'op1', 'повреждён поддон', '2026-09-11T08:00:00.000Z')`,
+    ).run();
+
+    expect(
+      db.prepare("SELECT disassembled_at FROM pallets_mirror WHERE pallet_id = 'p1'").get(),
+    ).toEqual({ disassembled_at: "2026-09-11T08:00:00.000Z" });
+  });
+
+  it("leaves other pallets untouched when one is disassembled", () => {
+    const db = migratedDb();
+    // Different terminals -- both still open at once, which is only legal
+    // because they don't share (shift_id, terminal_id); see
+    // `pallets_mirror_open_terminal_uk` below.
+    db.prepare(
+      `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+       VALUES ('p1', 's1', 't1', '2026-09-11T07:00:00.000Z'),
+              ('p2', 's1', 't2', '2026-09-11T07:01:00.000Z')`,
+    ).run();
+
+    db.prepare(
+      `INSERT INTO pallet_exceptions_mirror (kind, pallet_id, shift_id, terminal_id, operator_id, reason, occurred_at)
+       VALUES ('disassemble', 'p1', 's1', 't1', 'op1', 'повреждён поддон', '2026-09-11T08:00:00.000Z')`,
+    ).run();
+
+    expect(
+      db.prepare("SELECT disassembled_at FROM pallets_mirror WHERE pallet_id = 'p2'").get(),
+    ).toEqual({ disassembled_at: null });
+  });
+
+  it("does not mark a pallet disassembled for a queued reprint", () => {
+    const db = migratedDb();
+    db.prepare(
+      `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+       VALUES ('p1', 's1', 't1', '2026-09-11T07:00:00.000Z')`,
+    ).run();
+
+    db.prepare(
+      `INSERT INTO pallet_exceptions_mirror (kind, pallet_id, shift_id, terminal_id, operator_id, reason, occurred_at)
+       VALUES ('reprint', 'p1', 's1', 't1', 'op1', 'этикетка испорчена', '2026-09-11T08:00:00.000Z')`,
+    ).run();
+
+    expect(
+      db.prepare("SELECT disassembled_at FROM pallets_mirror WHERE pallet_id = 'p1'").get(),
+    ).toEqual({ disassembled_at: null });
+  });
+
+  // Task 13 review, finding B4: without a database guard, two concurrent
+  // closers (two terminals, or a retry racing itself) that both see no open
+  // pallet can each INSERT one, leaving two simultaneously open pallets for
+  // one shift/terminal -- `currentPallet`'s own scoped read (apps/station's
+  // pallets.ts) is a check, not an enforcement.
+  describe("pallets_mirror_open_terminal_uk", () => {
+    it("rejects a second concurrently-open pallet for the same shift and terminal", () => {
+      const db = migratedDb();
+      db.prepare(
+        `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+         VALUES ('p1', 's1', 't1', '2026-09-11T07:00:00.000Z')`,
+      ).run();
+
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+             VALUES ('p2', 's1', 't1', '2026-09-11T07:01:00.000Z')`,
+          )
+          .run(),
+      ).toThrow(/UNIQUE constraint failed/);
+    });
+
+    // SQLite's own rule: two NULLs compared inside a UNIQUE index are NOT
+    // equal to each other, so a plain `UNIQUE (shift_id, terminal_id)`
+    // partial index would leave every null-terminal device (a station
+    // before pairing, or any caller that legitimately passes
+    // `terminalId: null`) completely unconstrained -- confirmed directly
+    // against this repo's bundled `node:sqlite` (3.53.4): a bare
+    // column-based version of this index lets an unlimited number of
+    // open, null-terminal pallets coexist for one shift. The migration
+    // folds the NULL into the sentinel `COALESCE(terminal_id, '')` before
+    // comparing specifically to close that gap -- this test is what keeps
+    // it closed. (`node:sqlite` 3.53.4 also has no `NULLS NOT DISTINCT`
+    // index syntax at all -- it is a hard syntax error -- so that was not
+    // an available alternative.)
+    it("also rejects a second open pallet when both rows report a null terminal_id", () => {
+      const db = migratedDb();
+      db.prepare(
+        `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+         VALUES ('p1', 's1', NULL, '2026-09-11T07:00:00.000Z')`,
+      ).run();
+
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+             VALUES ('p2', 's1', NULL, '2026-09-11T07:01:00.000Z')`,
+          )
+          .run(),
+      ).toThrow(/UNIQUE constraint failed/);
+    });
+
+    it("allows a different terminal, a different shift, or a since-closed pallet to coexist", () => {
+      const db = migratedDb();
+      db.prepare(
+        `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+         VALUES ('p1', 's1', 't1', '2026-09-11T07:00:00.000Z')`,
+      ).run();
+
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+             VALUES ('p2', 's1', 't2', '2026-09-11T07:01:00.000Z')`,
+          )
+          .run(),
+      ).not.toThrow();
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+             VALUES ('p3', 's2', 't1', '2026-09-11T07:01:00.000Z')`,
+          )
+          .run(),
+      ).not.toThrow();
+
+      db.prepare(
+        `UPDATE pallets_mirror SET closed_at = '2026-09-11T08:00:00.000Z' WHERE pallet_id = 'p1'`,
+      ).run();
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+             VALUES ('p4', 's1', 't1', '2026-09-11T09:00:00.000Z')`,
+          )
+          .run(),
+      ).not.toThrow();
+    });
+
+    it("survives being re-created on every station start", () => {
+      const db = migratedDb();
+      db.prepare(
+        `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+         VALUES ('p1', 's1', 't1', '2026-09-11T07:00:00.000Z')`,
+      ).run();
+
+      expect(() => applyStationMigrations(db)).not.toThrow();
+
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO pallets_mirror (pallet_id, shift_id, terminal_id, opened_at)
+             VALUES ('p2', 's1', 't1', '2026-09-11T07:01:00.000Z')`,
+          )
+          .run(),
+      ).toThrow(/UNIQUE constraint failed/);
+    });
+  });
+});

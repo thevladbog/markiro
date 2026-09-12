@@ -90,7 +90,7 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
       name: "Напиток",
       chzProductGroupCode: 23,
       boxCapacity: 12,
-      palletCapacity: 60,
+      palletBoxCapacity: 60,
       status: "active",
     });
     await db.insert(schema.nationalCatalogSchemaVersions).values({
@@ -144,7 +144,7 @@ describe.skipIf(!ready)("product regulatory e2e", () => {
       name: "Новый товар",
       chzProductGroupCode: groupCode,
       boxCapacity: 12,
-      palletCapacity: 60,
+      palletBoxCapacity: 60,
       status: "active",
     });
     return productId;

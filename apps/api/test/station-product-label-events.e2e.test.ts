@@ -414,8 +414,14 @@ describe.skipIf(!ready)("station product label events", () => {
   it("keeps pre-feature batch digest replay compatible when the new channel is empty", async () => {
     const f = await fixture();
     const parsed = syncBatchSchema.parse({ batchId: `old:${randomUUID()}`, items: [f.item] });
-    const { productLabelEvents, ...legacy } = parsed;
+    // Every channel added after a batch was pinned must be stripped here, not
+    // just the first one: `legacy` models the body as it existed when the
+    // stored digest was computed, and an empty new channel that leaked into it
+    // would make this test pass while real pre-feature devices 409.
+    const { productLabelEvents, pallets, palletExceptions, ...legacy } = parsed;
     expect(productLabelEvents).toEqual([]);
+    expect(pallets).toEqual([]);
+    expect(palletExceptions).toEqual([]);
     const bound = {
       ...legacy,
       items: legacy.items.map((item) => ({ ...item, terminalId: station.deviceId })),

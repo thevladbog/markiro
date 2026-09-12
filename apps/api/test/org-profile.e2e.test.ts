@@ -135,6 +135,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       timeZone: "Europe/Moscow",
       defaultBoxLabelTemplateId: null,
       categoryBoxLabelTemplateDefaults: [],
+      defaultPalletLabelTemplateId: null,
+      categoryPalletLabelTemplateDefaults: [],
       productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
@@ -161,6 +163,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       timeZone: "Europe/Moscow",
       defaultBoxLabelTemplateId: null,
       categoryBoxLabelTemplateDefaults: [],
+      defaultPalletLabelTemplateId: null,
+      categoryPalletLabelTemplateDefaults: [],
       productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
@@ -189,6 +193,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       timeZone: "Europe/Moscow",
       defaultBoxLabelTemplateId: null,
       categoryBoxLabelTemplateDefaults: [],
+      defaultPalletLabelTemplateId: null,
+      categoryPalletLabelTemplateDefaults: [],
       productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
@@ -278,6 +284,226 @@ describe.skipIf(!ready)("org profile e2e", () => {
     expect(profile.body.defaultBoxLabelTemplateId).toBeNull();
   });
 
+  /** A pallet-purpose template with a non-empty spec, created through the API. */
+  async function createPalletTemplate(
+    agent: ReturnType<typeof request.agent>,
+    name: string,
+    overrides: Record<string, unknown> = {},
+  ): Promise<string> {
+    const created = await agent
+      .post("/label-templates")
+      .send({
+        name,
+        purpose: "pallet",
+        spec: {
+          widthMm: 100,
+          heightMm: 150,
+          dpi: 203,
+          language: "zpl",
+          elements: [{ kind: "text", id: "cap", xMm: 2, yMm: 2, text: "Паллета", fontSizePt: 12 }],
+        },
+        ...overrides,
+      })
+      .expect(201);
+    return created.body.id as string;
+  }
+
+  it("PUT /org/profile sets, preserves, and clears a same-tenant pallet label default", async () => {
+    // Without this write path the stock «Паллета 100×150» that migration 0137
+    // pins to `org_profiles.default_pallet_label_template_id` is permanently
+    // undisableable for every tenant: `LABEL_TEMPLATE_REFERENCE_CONSTRAINTS`
+    // refuses to disable a template a default still names, and nothing could
+    // repoint that default.
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpWithInactiveOrg(agent);
+    await agent
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: orgId })
+      .expect(200);
+    const templateId = await createPalletTemplate(agent, "Organisation pallet default");
+
+    const set = await agent
+      .put("/org/profile")
+      .send({ defaultPalletLabelTemplateId: templateId })
+      .expect(200);
+    expect(set.body.defaultPalletLabelTemplateId).toBe(templateId);
+    // The box default is a separate column and must not move with it.
+    expect(set.body.defaultBoxLabelTemplateId).toBeNull();
+
+    const omitted = await agent.put("/org/profile").send({ inn: "7701234567" }).expect(200);
+    expect(omitted.body.defaultPalletLabelTemplateId).toBe(templateId);
+
+    // While it IS the default, the template cannot be disabled...
+    await agent.patch(`/label-templates/${templateId}`).send({ enabled: false }).expect(409);
+
+    const cleared = await agent
+      .put("/org/profile")
+      .send({ defaultPalletLabelTemplateId: null })
+      .expect(200);
+    expect(cleared.body.defaultPalletLabelTemplateId).toBeNull();
+
+    // ...and once cleared it can, which is the whole point of the write path.
+    await agent.patch(`/label-templates/${templateId}`).send({ enabled: false }).expect(200);
+  });
+
+  it("PUT /org/profile refuses a pallet default that is not an enabled all-category pallet template", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpWithInactiveOrg(agent);
+    await agent
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: orgId })
+      .expect(200);
+
+    // A BOX template in the pallet slot: well-formed, same tenant, wrong kind.
+    const boxTemplate = await agent
+      .post("/label-templates")
+      .send({
+        name: "Box in the pallet slot",
+        spec: {
+          widthMm: 58,
+          heightMm: 40,
+          dpi: 203,
+          language: "zpl",
+          elements: [{ kind: "text", id: "t", xMm: 2, yMm: 2, text: "Box", fontSizePt: 12 }],
+        },
+      })
+      .expect(201);
+    const wrongPurpose = await agent
+      .put("/org/profile")
+      .send({ defaultPalletLabelTemplateId: boxTemplate.body.id })
+      .expect(400);
+    expect(wrongPurpose.body.code).toBe("PALLET_LABEL_TEMPLATE_NOT_ELIGIBLE");
+    expect(wrongPurpose.body.field).toBe("defaultPalletLabelTemplateId");
+
+    // A pallet template narrowed to one category cannot be the organisation
+    // default, exactly as for boxes.
+    const scoped = await createPalletTemplate(agent, "Category-scoped pallet", {
+      chzProductGroupCodes: [8],
+    });
+    await agent.put("/org/profile").send({ defaultPalletLabelTemplateId: scoped }).expect(400);
+
+    // A disabled pallet template cannot be the organisation default either.
+    const disabled = await createPalletTemplate(agent, "Disabled pallet", { enabled: false });
+    await agent.put("/org/profile").send({ defaultPalletLabelTemplateId: disabled }).expect(400);
+
+    expect(
+      (await agent.get("/org/profile").expect(200)).body.defaultPalletLabelTemplateId,
+    ).toBeNull();
+  });
+
+  it("PUT /org/profile refuses another tenant's pallet label template without leaking tenant data", async () => {
+    const first = request.agent(app!.getHttpServer());
+    const firstOrg = await signUpWithInactiveOrg(first);
+    await first
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: firstOrg })
+      .expect(200);
+
+    const second = request.agent(app!.getHttpServer());
+    const secondOrg = await signUpWithInactiveOrg(second);
+    await second
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: secondOrg })
+      .expect(200);
+    const foreignTemplateId = await createPalletTemplate(second, "Other organisation pallet");
+
+    await first
+      .put("/org/profile")
+      .send({ defaultPalletLabelTemplateId: "not-a-uuid" })
+      .expect(400);
+    const rejected = await first
+      .put("/org/profile")
+      .send({ defaultPalletLabelTemplateId: foreignTemplateId })
+      .expect(400);
+    expect(rejected.body.message).toBe("Unknown pallet label template for this organization");
+    expect(JSON.stringify(rejected.body)).not.toContain(firstOrg);
+    expect(JSON.stringify(rejected.body)).not.toContain(secondOrg);
+    expect(JSON.stringify(rejected.body)).not.toContain(
+      "org_profiles_pallet_label_template_tenant_fk",
+    );
+
+    // The neighbour's own default is untouched, and ours never took.
+    expect(
+      (await first.get("/org/profile").expect(200)).body.defaultPalletLabelTemplateId,
+    ).toBeNull();
+    expect(
+      (await second.get("/org/profile").expect(200)).body.defaultPalletLabelTemplateId,
+    ).toBeNull();
+
+    // The same denial for the per-category list.
+    const byCategory = await first
+      .put("/org/profile")
+      .send({
+        categoryPalletLabelTemplateDefaults: [
+          { chzProductGroupCode: 8, templateId: foreignTemplateId },
+        ],
+      })
+      .expect(400);
+    expect(byCategory.body.code).toBe("PALLET_LABEL_TEMPLATE_NOT_ELIGIBLE");
+    expect(JSON.stringify(byCategory.body)).not.toContain(secondOrg);
+    expect(
+      (await first.get("/org/profile").expect(200)).body.categoryPalletLabelTemplateDefaults,
+    ).toEqual([]);
+  });
+
+  it("PUT /org/profile replaces the per-category pallet defaults and audits the change", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpWithInactiveOrg(agent);
+    await agent
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: orgId })
+      .expect(200);
+    const templateId = await createPalletTemplate(agent, "Category 8 pallet", {
+      chzProductGroupCodes: [8],
+    });
+
+    const set = await agent
+      .put("/org/profile")
+      .send({
+        categoryPalletLabelTemplateDefaults: [{ chzProductGroupCode: 8, templateId }],
+      })
+      .expect(200);
+    expect(set.body.categoryPalletLabelTemplateDefaults).toEqual([
+      { chzProductGroupCode: 8, templateId },
+    ]);
+    // The box list is a separate table and must not move with it.
+    expect(set.body.categoryBoxLabelTemplateDefaults).toEqual([]);
+
+    const [audit] = await db
+      .select({
+        action: schema.tenantAuditEvents.action,
+        outcome: schema.tenantAuditEvents.outcome,
+        targetType: schema.tenantAuditEvents.targetType,
+        targetId: schema.tenantAuditEvents.targetId,
+        before: schema.tenantAuditEvents.before,
+        after: schema.tenantAuditEvents.after,
+      })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, orgId),
+          eq(schema.tenantAuditEvents.action, "tenant.pallet_label_template_defaults.updated"),
+        ),
+      )
+      .orderBy(desc(schema.tenantAuditEvents.createdAt));
+    expect(audit).toEqual({
+      action: "tenant.pallet_label_template_defaults.updated",
+      outcome: "success",
+      targetType: "tenant",
+      targetId: orgId,
+      before: { defaults: [] },
+      after: { defaults: [{ chzProductGroupCode: 8, templateId }] },
+    });
+
+    // A full replacement with an empty list clears it, releasing the template.
+    const emptied = await agent
+      .put("/org/profile")
+      .send({ categoryPalletLabelTemplateDefaults: [] })
+      .expect(200);
+    expect(emptied.body.categoryPalletLabelTemplateDefaults).toEqual([]);
+    await agent.patch(`/label-templates/${templateId}`).send({ enabled: false }).expect(200);
+  });
+
   it("PUT /org/profile rejects an invalid GLN format with 400", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpWithInactiveOrg(agent);
@@ -320,6 +546,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       timeZone: "Europe/Moscow",
       defaultBoxLabelTemplateId: null,
       categoryBoxLabelTemplateDefaults: [],
+      defaultPalletLabelTemplateId: null,
+      categoryPalletLabelTemplateDefaults: [],
       productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
@@ -335,6 +563,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       timeZone: "Europe/Moscow",
       defaultBoxLabelTemplateId: null,
       categoryBoxLabelTemplateDefaults: [],
+      defaultPalletLabelTemplateId: null,
+      categoryPalletLabelTemplateDefaults: [],
       productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
@@ -366,6 +596,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       timeZone: "Europe/Moscow",
       defaultBoxLabelTemplateId: null,
       categoryBoxLabelTemplateDefaults: [],
+      defaultPalletLabelTemplateId: null,
+      categoryPalletLabelTemplateDefaults: [],
       productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
@@ -397,6 +629,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       timeZone: "Europe/Moscow",
       defaultBoxLabelTemplateId: null,
       categoryBoxLabelTemplateDefaults: [],
+      defaultPalletLabelTemplateId: null,
+      categoryPalletLabelTemplateDefaults: [],
       productGroupsInUse: [],
       pickupLimitsEnabled: false,
       logoUrl: null,

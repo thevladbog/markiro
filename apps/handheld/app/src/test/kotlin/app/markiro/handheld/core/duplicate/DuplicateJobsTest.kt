@@ -73,7 +73,7 @@ class DuplicateJobsTest {
         plannedDate = "2026-09-11",
         productionDate = "2026-09-11",
         boxCapacity = null,
-        palletCapacity = null,
+        palletBoxCapacity = null,
         palletsEnabled = false,
         validationPrintMode = "duplicate_dm",
         closePolicyKind = "admin_only",

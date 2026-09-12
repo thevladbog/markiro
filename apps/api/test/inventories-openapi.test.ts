@@ -76,6 +76,10 @@ const EXPECTED_LABEL_FIELDS = [
   "date",
   "expiry",
   "qty",
+  // Added by slice 06d. An inventory repack prints BOX labels, which leave
+  // this empty, but the field is part of the shared label contract and the
+  // schema enumerates all of it.
+  "qty.boxes",
   "operator",
   "counterparty.name",
 ] as const;

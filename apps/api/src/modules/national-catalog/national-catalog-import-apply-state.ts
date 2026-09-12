@@ -195,7 +195,7 @@ export const previousValuesSchema = z
     initialProduct: z.object({
       chzProductGroupCode: z.number().nullable(),
       boxCapacity: z.null(),
-      palletCapacity: z.null(),
+      palletBoxCapacity: z.null(),
       status: z.literal("draft"),
     }),
     expectedAbsentGtin: z.string().nullable(),

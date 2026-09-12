@@ -58,7 +58,7 @@ const CURRENT_PRODUCT_SELECTION = {
   printName: schema.products.printName,
   chzProductGroupCode: schema.products.chzProductGroupCode,
   boxCapacity: schema.products.boxCapacity,
-  palletCapacity: schema.products.palletCapacity,
+  palletBoxCapacity: schema.products.palletBoxCapacity,
   status: schema.products.status,
   archived: schema.products.archived,
   defaultCounterpartyId: schema.products.defaultCounterpartyId,
@@ -215,8 +215,8 @@ export class ProductsService {
             ? data.chzProductGroupCode
             : current.chzProductGroupCode;
         const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : current.boxCapacity;
-        const palletCapacity =
-          data.palletCapacity !== undefined ? data.palletCapacity : current.palletCapacity;
+        const palletBoxCapacity =
+          data.palletBoxCapacity !== undefined ? data.palletBoxCapacity : current.palletBoxCapacity;
         const defaultCounterpartyId =
           data.defaultCounterpartyId !== undefined
             ? data.defaultCounterpartyId
@@ -224,14 +224,14 @@ export class ProductsService {
         const status = this.writer.computeStatus({
           chzProductGroupCode,
           boxCapacity,
-          palletCapacity,
+          palletBoxCapacity,
         });
         const set: Partial<typeof schema.products.$inferInsert> = {
           gtin14,
           name,
           chzProductGroupCode,
           boxCapacity,
-          palletCapacity,
+          palletBoxCapacity,
           defaultCounterpartyId,
           status,
         };
@@ -966,7 +966,7 @@ export class ProductsService {
       productGroup: row.productGroupName,
       chzProductGroupCode: row.chzProductGroupCode,
       boxCapacity: row.boxCapacity,
-      palletCapacity: row.palletCapacity,
+      palletBoxCapacity: row.palletBoxCapacity,
       status: row.status,
       archived: row.archived,
       defaultCounterpartyId: row.defaultCounterpartyId,

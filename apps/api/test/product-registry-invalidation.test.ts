@@ -87,7 +87,7 @@ describe("ProductsService update registry boundary", () => {
     name: "Before",
     chzProductGroupCode: null,
     boxCapacity: null,
-    palletCapacity: null,
+    palletBoxCapacity: null,
     status: "draft" as const,
     defaultCounterpartyId: null,
     defaultLabelTemplateId: null,

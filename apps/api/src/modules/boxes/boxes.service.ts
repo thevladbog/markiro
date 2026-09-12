@@ -16,6 +16,7 @@ interface BoxRow {
   itemCount: number;
   contentsChangedAfterClose: boolean;
   disassembledAt: Date | null;
+  palletSscc: string | null;
 }
 
 @Injectable()
@@ -60,6 +61,15 @@ export class BoxesService {
    * device clock). `closureReceivedAt` and `displacedAt` are both
    * server-assigned, so they are always measured on the SAME clock.
    *
+   * That "both server-assigned" half was re-verified when the PALLET list's
+   * own flag turned out to be ordering a DEVICE timestamp against
+   * `closure_received_at` (Task 24): every writer of `box_items.displaced_at`
+   * -- the ownership-race branches in `StationScansService` and
+   * `displaceBoxMembership` in box-membership.ts -- sets it with SQL `now()`,
+   * never a value off the wire, so THIS flag never had the defect. Any new
+   * writer must keep that true; a device-supplied `displacedAt` would
+   * reintroduce it here silently.
+   *
    * `GROUP BY boxes.id` alone (not every selected `boxes.*` column) is valid
    * Postgres: grouping by a table's primary key lets every other column of
    * that same table be selected ungrouped, since the key already determines
@@ -67,6 +77,12 @@ export class BoxesService {
    *
    * Ordered by `closed_at DESC NULLS FIRST` so a still-open box -- the one a
    * manager is most likely to be working right now -- sorts to the top.
+   *
+   * `palletSscc` comes from a fourth LEFT JOIN, on the box's own
+   * `palletId` (also tenant-matched in the join condition). LEFT, not INNER:
+   * most boxes stand on no pallet at all, and an INNER join would drop them
+   * from their own shift's list. `pallets.id` joins the GROUP BY for the same
+   * primary-key reason `stationDevices.id`/`lines.id` already do.
    */
   async listBoxes(tenantId: string, query: ListBoxesQueryDto): Promise<ListBoxesResponseDto> {
     const rows: BoxRow[] = await this.db
@@ -78,6 +94,7 @@ export class BoxesService {
         operatorId: schema.boxes.operatorId,
         closedAt: schema.boxes.closedAt,
         disassembledAt: schema.boxes.disassembledAt,
+        palletSscc: schema.pallets.sscc,
         itemCount:
           sql<number>`count(${schema.boxItems.codeHash}) filter (where ${schema.boxItems.displacedAt} is null and ${schema.boxItems.removedAt} is null)`.mapWith(
             Number,
@@ -109,8 +126,15 @@ export class BoxesService {
           eq(schema.lines.id, schema.stationDevices.lineId),
         ),
       )
+      .leftJoin(
+        schema.pallets,
+        and(
+          eq(schema.pallets.tenantId, schema.boxes.tenantId),
+          eq(schema.pallets.id, schema.boxes.palletId),
+        ),
+      )
       .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.shiftId, query.shiftId)))
-      .groupBy(schema.boxes.id, schema.stationDevices.id, schema.lines.id)
+      .groupBy(schema.boxes.id, schema.stationDevices.id, schema.lines.id, schema.pallets.id)
       .orderBy(sql`${schema.boxes.closedAt} desc nulls first`);
 
     return { items: rows.map((row) => this.toDto(row)) };
@@ -206,6 +230,7 @@ export class BoxesService {
       closedAt: row.closedAt,
       contentsChangedAfterClose: row.contentsChangedAfterClose,
       disassembledAt: row.disassembledAt,
+      palletSscc: row.palletSscc === null ? null : formatSsccWithAi(row.palletSscc),
     };
   }
 }

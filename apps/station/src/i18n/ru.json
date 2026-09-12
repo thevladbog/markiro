@@ -530,7 +530,11 @@
       "production_order_changed": "Изменение производственного задания",
       "planned_quantity_error": "Ошибка в плановом количестве",
       "other_production_deviation": "Другое производственное отклонение"
-    }
+    },
+    "more": "Ещё",
+    "palletOpenAtClose": "На паллете {{count}} из {{capacity}} коробов — закрыть?",
+    "palletOpenAtCloseConfirm": "Закрыть паллету и смену",
+    "palletOpenAtCloseNoSerials": "Номера для паллет закончились. Подключите станцию к сети, чтобы получить новые номера."
   },
   "setup": {
     "title": "Настройка рабочего места",
@@ -741,6 +745,44 @@
     "hiddenByFilter_many": "Ещё {{count}} коробов скрыто фильтром — сотрите цифры, чтобы увидеть все",
     "hiddenByFilter_other": "Ещё {{count}} короба скрыто фильтром — сотрите цифры, чтобы увидеть все",
     "noTailMatches": "Нет коробов с такими последними цифрами"
+  },
+  "pallet": {
+    "title": "Паллета",
+    "progress": "{{boxes}} / {{capacity}} коробов",
+    "noSerials": "нет серий для паллеты",
+    "closed": "Паллета закрыта",
+    "sscc": "SSCC паллеты",
+    "boxCount_one": "На паллете {{count}} короб",
+    "boxCount_few": "На паллете {{count}} короба",
+    "boxCount_many": "На паллете {{count}} коробов",
+    "boxCount_other": "На паллете {{count}} короба",
+    "printing": "Печатаем этикетку паллеты…",
+    "printed": "Этикетка напечатана",
+    "printUnknown": "Неизвестно, напечаталась ли этикетка",
+    "retry": "Повторить печать",
+    "confirmPrinted": "Этикетка напечаталась",
+    "reprint": "Напечатать ещё раз",
+    "earlyClose": "Закрыть паллету досрочно",
+    "earlyCloseDetail": "На паллете {{count}} из {{capacity}} коробов",
+    "reprintAction": "Перепечатать паллету",
+    "disassembleAction": "Расформировать паллету",
+    "exceptionsAction": "Действия с паллетой",
+    "selectTarget": "Выберите закрытую паллету",
+    "noPallets": "Сейчас нет закрытых паллет.",
+    "disassembleIrreversibleTitle": "Расформировать паллету безвозвратно?",
+    "reasons": {
+      "disassemble": {
+        "damagedPallet": "Поддон повреждён",
+        "wrongBoxes": "Не те короба на паллете",
+        "qualityRejected": "Отклонено контролем качества"
+      },
+      "reprint": {
+        "damagedLabel": "Этикетка повреждена",
+        "unreadableLabel": "Этикетка не читается",
+        "printerJam": "Замятие принтера / нет печати",
+        "qualityRequest": "Запрос контроля качества"
+      }
+    }
   },
   "productLabels": {
     "title": "Дубликат Data Matrix",

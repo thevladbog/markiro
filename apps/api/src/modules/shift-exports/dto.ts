@@ -8,6 +8,9 @@ export const createShiftExportSchema = z.strictObject({
     "shift_csv_flat",
     "shift_csv_boxes",
     "shift_xml_gismt_aggregation",
+    "shift_txt_pallets",
+    "shift_csv_pallets",
+    "shift_xml_gismt_aggregation_pallets",
   ]),
   formatVersion: z.number().int().min(1),
   maxLines: z.number().int().min(2).max(1_000_000).nullable(),
@@ -70,13 +73,16 @@ export const shiftExportFormatOpenApiSchema = {
         "shift_csv_flat",
         "shift_csv_boxes",
         "shift_xml_gismt_aggregation",
+        "shift_txt_pallets",
+        "shift_csv_pallets",
+        "shift_xml_gismt_aggregation_pallets",
       ],
     },
     version: { type: "integer", enum: [1, 2] },
     label: { type: "string" },
     extension: { type: "string", enum: ["txt", "csv", "xml"] },
     mimeType: { type: "string" },
-    boxMode: { type: "string", enum: ["flat", "boxes"] },
+    boxMode: { type: "string", enum: ["flat", "boxes", "pallets"] },
   },
 };
 
@@ -150,7 +156,14 @@ export const shiftExportOpenApiSchema = {
     formatVersion: { type: "integer", minimum: 1 },
     maxLines: { type: "integer", nullable: true, minimum: 2, maximum: 1_000_000 },
     status: { type: "string", enum: ["queued", "processing", "ready", "failed"] },
-    errorCode: { type: "string", nullable: true },
+    errorCode: {
+      type: "string",
+      nullable: true,
+      description:
+        'Present only when status is "failed". SHIFT_HAS_NO_PALLETS covers two distinct ' +
+        "shift histories: no box in the shift ever stood on a pallet, or pallets were used " +
+        "but none of them has closed yet -- not only the former.",
+    },
     productNameSnapshot: { type: "string", nullable: true },
     shiftDateSnapshot: { type: "string", format: "date", nullable: true },
     totalCodeCount: { type: "integer", nullable: true, minimum: 1 },

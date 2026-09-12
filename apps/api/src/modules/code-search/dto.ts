@@ -185,6 +185,14 @@ export interface BoxCardDto {
   openedAt: Date;
   closedAt: Date | null;
   disassembledAt: Date | null;
+  /**
+   * The pallet this box stands on, or null (06d). Shaped exactly like
+   * `CodeCardDto.currentBox`, the module's existing "link to the aggregation
+   * level above" field: the `sscc` is what the card shows an operator, the
+   * `id` is only what the link navigates to. `sscc` is null while that pallet
+   * is still open, since `pallets.sscc` is assigned by its own closure.
+   */
+  pallet: { id: string; sscc: string | null } | null;
   items: BoxCardItemDto[];
   exceptions: {
     kind: string;
@@ -195,6 +203,70 @@ export interface BoxCardDto {
     disaggregationDocNo: string | null;
   }[];
   pickupOrders: { orderId: string; orderNo: string; status: string }[];
+}
+
+/**
+ * One member box of a pallet: the collapsed row the pallet card shows per
+ * box, deliberately WITHOUT that box's own codes. Each row links to the full
+ * box card, which is where a code list belongs -- a pallet holds tens of
+ * boxes, so inlining every box's items would be a several-thousand-row page.
+ */
+export interface PalletCardBoxDto {
+  id: string;
+  /** 20-значный код с GS1 AI "00"; null, пока короб не закрыт. */
+  sscc: string | null;
+  /**
+   * Live items only (`displaced_at IS NULL AND removed_at IS NULL`), the same
+   * count `BoxDto.itemCount` reports for this box in the box list.
+   */
+  itemCount: number;
+  closedAt: Date | null;
+  /**
+   * Non-null once the box itself was taken apart. Such a box is physically
+   * OFF the stack but keeps its `palletId` (see `boxes.palletId`'s schema
+   * comment), so it still appears here -- flagged, never silently dropped:
+   * it is the only on-screen evidence that a labelled pallet left short.
+   */
+  disassembledAt: Date | null;
+}
+
+/**
+ * `GET /code-search/pallets/:palletId` response. Mirrors `BoxCardDto`, the
+ * module's existing aggregate card: same identity/status/timestamp block,
+ * same shift/product join, its members in place of `items`, and its own
+ * `pallet_exceptions` in place of `box_exceptions`. A pallet has no pickup
+ * orders of its own -- pickup locks boxes -- so there is no `pickupOrders`.
+ *
+ * `status` is derived exactly as a box's is: `disassembled` wins over
+ * `closed`, and a pallet with neither timestamp is still being stacked.
+ */
+export interface PalletCardDto {
+  id: string;
+  sscc: string | null;
+  status: "open" | "closed" | "disassembled";
+  shiftId: string;
+  /** Saved human-readable shift number, e.g. `AUG26-003/S`. */
+  shiftNumber: string | null;
+  productId: string | null;
+  productName: string | null;
+  terminalId: string | null;
+  /** Assigned production line of the station that reported this pallet. */
+  lineName: string | null;
+  operatorId: string | null;
+  openedAt: Date;
+  closedAt: Date | null;
+  disassembledAt: Date | null;
+  /** Every member box, disassembled ones included. Closed first, newest first. */
+  boxes: PalletCardBoxDto[];
+  exceptions: {
+    kind: string;
+    /** `pallet_exceptions.reason` is NOT NULL, unlike a box exception's. */
+    reason: string;
+    occurredAt: Date;
+    operatorId: string | null;
+    disaggregationDocumentId: string | null;
+    disaggregationDocNo: string | null;
+  }[];
 }
 
 const uuidSchema = { type: "string", format: "uuid" } as const;
@@ -472,6 +544,7 @@ export const boxCardOpenApiSchema: SchemaObject = {
     "openedAt",
     "closedAt",
     "disassembledAt",
+    "pallet",
     "items",
     "exceptions",
     "pickupOrders",
@@ -489,6 +562,15 @@ export const boxCardOpenApiSchema: SchemaObject = {
     openedAt: dateTimeSchema,
     closedAt: { ...dateTimeSchema, nullable: true },
     disassembledAt: { ...dateTimeSchema, nullable: true },
+    pallet: {
+      type: "object",
+      nullable: true,
+      additionalProperties: false,
+      required: ["id", "sscc"],
+      properties: { id: uuidSchema, sscc: { ...ssccSchema, nullable: true } },
+      description:
+        "The pallet this box stands on; null when the box is on no pallet. Its sscc is null while that pallet is still open.",
+    },
     items: { type: "array", items: boxCardItemOpenApiSchema },
     exceptions: {
       type: "array",
@@ -523,6 +605,98 @@ export const boxCardOpenApiSchema: SchemaObject = {
           orderId: uuidSchema,
           orderNo: { type: "string" },
           status: { type: "string" },
+        },
+      },
+    },
+  },
+};
+
+const palletCardBoxOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "sscc", "itemCount", "closedAt", "disassembledAt"],
+  properties: {
+    id: uuidSchema,
+    sscc: { ...ssccSchema, nullable: true },
+    itemCount: {
+      type: "integer",
+      minimum: 0,
+      description:
+        "Live items only (neither displaced by a rival scan nor removed by an operator exception).",
+    },
+    closedAt: { ...dateTimeSchema, nullable: true },
+    disassembledAt: {
+      ...dateTimeSchema,
+      nullable: true,
+      description:
+        "Non-null once this box was taken apart. It keeps its pallet membership and stays listed, flagged.",
+    },
+  },
+};
+
+export const palletCardOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "sscc",
+    "status",
+    "shiftId",
+    "shiftNumber",
+    "productId",
+    "productName",
+    "terminalId",
+    "lineName",
+    "operatorId",
+    "openedAt",
+    "closedAt",
+    "disassembledAt",
+    "boxes",
+    "exceptions",
+  ],
+  properties: {
+    id: uuidSchema,
+    sscc: { ...ssccSchema, nullable: true },
+    status: { type: "string", enum: ["open", "closed", "disassembled"] },
+    shiftId: uuidSchema,
+    shiftNumber: { type: "string", nullable: true },
+    productId: { ...uuidSchema, nullable: true },
+    productName: { type: "string", nullable: true },
+    terminalId: { type: "string", nullable: true },
+    lineName: {
+      type: "string",
+      nullable: true,
+      description: "Assigned production line of the station that reported this pallet.",
+    },
+    operatorId: { ...uuidSchema, nullable: true },
+    openedAt: dateTimeSchema,
+    closedAt: { ...dateTimeSchema, nullable: true },
+    disassembledAt: { ...dateTimeSchema, nullable: true },
+    boxes: {
+      type: "array",
+      items: palletCardBoxOpenApiSchema,
+      description: "Every member box, disassembled ones included. Closed first, newest first.",
+    },
+    exceptions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "kind",
+          "reason",
+          "occurredAt",
+          "operatorId",
+          "disaggregationDocumentId",
+          "disaggregationDocNo",
+        ],
+        properties: {
+          kind: { type: "string", enum: ["disassemble", "reprint"] },
+          reason: { type: "string" },
+          occurredAt: dateTimeSchema,
+          operatorId: { ...uuidSchema, nullable: true },
+          disaggregationDocumentId: { ...uuidSchema, nullable: true },
+          disaggregationDocNo: { type: "string", nullable: true },
         },
       },
     },

@@ -1,5 +1,5 @@
 import { getTableName } from "drizzle-orm";
-import { getTableConfig, type AnyPgTable } from "drizzle-orm/pg-core";
+import { getTableConfig, PgDialect, type AnyPgTable } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import { schema } from "../src/index.js";
 
@@ -57,5 +57,31 @@ describe("station sync recovery schema", () => {
     expect(config.indexes.map((item) => item.config.name)).toContain(
       "station_sync_quarantine_tenant_time_idx",
     );
+  });
+
+  it("accepts every record kind the station ingest can deny, including both pallet kinds", () => {
+    // A kind the ingest denies but this CHECK omits is not a missing row: the
+    // insert raises 23514 and 500s the whole batch, and the device's drain
+    // retries a 5xx forever. The alternative the API took before 06d --
+    // dropping the unlistable kind with a log line -- silently lost the
+    // closure of a pallet that had already been physically labelled, because
+    // `sync_batches` keeps a digest and never the body.
+    const table = (schema as unknown as Record<string, AnyPgTable | undefined>)
+      .stationSyncQuarantine;
+    const check = getTableConfig(table!).checks.find(
+      (item) => item.name === "station_sync_quarantine_record_kind_check",
+    );
+    expect(check).toBeDefined();
+    const rendered = new PgDialect().sqlToQuery(check!.value).sql;
+    for (const kind of [
+      "item",
+      "box",
+      "exception",
+      "product_label_event",
+      "pallet",
+      "pallet_exception",
+    ]) {
+      expect(rendered).toContain(`'${kind}'`);
+    }
   });
 });

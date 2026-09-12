@@ -39,6 +39,7 @@ export function buildWorkLabels(t: TFunction, language: string, boxNumber: numbe
       exceptions: t("work.exceptions"),
       pause: t("work.pause"),
       close: t("work.closeShift"),
+      more: t("work.more"),
     },
     summary: t("work.summary"),
     locale: language.startsWith("ru") ? "ru-RU" : "en-US",

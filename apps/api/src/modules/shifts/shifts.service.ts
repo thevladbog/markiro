@@ -22,6 +22,7 @@ import {
   formatShiftNumber,
   PRODUCT_LABEL_PROTOCOL,
   isBoxLabelTemplateEligible,
+  isPalletLabelTemplateEligible,
   productLabelTemplateListSchema,
   parseLabelTemplate,
   shiftMonthKey,
@@ -32,11 +33,13 @@ import { DB } from "../../auth/auth.module";
 import {
   findLabelTemplateEligibility,
   resolveDefaultBoxLabelTemplate,
+  resolveDefaultPalletLabelTemplate,
 } from "../label-templates/box-label-template-eligibility";
 import { OperatorsService } from "../operators/operators.service";
 import type { ProductImageDescriptor } from "../products/dto";
 import {
   BOX_EXTENSION_DIGIT,
+  PALLET_EXTENSION_DIGIT,
   SsccCapacityExhaustedException,
   SsccService,
 } from "../sscc/sscc.service";
@@ -46,6 +49,7 @@ import type {
   CreateShiftDto,
   ListShiftsQueryDto,
   ListShiftsResponseDto,
+  PalletTemplateResolution,
   ShiftBoxLabelTemplateOptionDto,
   ShiftBoxLabelTemplatesDto,
   ShiftBundleDto,
@@ -145,8 +149,9 @@ const CURRENT_SHIFT_STORAGE_SELECTION = {
   productionDate: schema.shifts.productionDate,
   firstBoxClosureAt: schema.shifts.firstBoxClosureAt,
   boxCapacity: schema.shifts.boxCapacity,
-  palletCapacity: schema.shifts.palletCapacity,
+  palletBoxCapacity: schema.shifts.palletBoxCapacity,
   palletsEnabled: schema.shifts.palletsEnabled,
+  palletLabelTemplateId: schema.shifts.palletLabelTemplateId,
   createdFrom: schema.shifts.createdFrom,
   stationClosePolicy: schema.shifts.stationClosePolicy,
   stationCloseOwnerDeviceId: schema.shifts.stationCloseOwnerDeviceId,
@@ -168,7 +173,7 @@ const CURRENT_PRODUCT_SELECTION = {
   chzProductGroupCode: schema.products.chzProductGroupCode,
   productGroupName: schema.chzProductGroups.name,
   boxCapacity: schema.products.boxCapacity,
-  palletCapacity: schema.products.palletCapacity,
+  palletBoxCapacity: schema.products.palletBoxCapacity,
   status: schema.products.status,
   archived: schema.products.archived,
   defaultCounterpartyId: schema.products.defaultCounterpartyId,
@@ -185,6 +190,13 @@ const CURRENT_PRODUCT_SELECTION = {
  * a burnt serial costs nothing — SSCCs need not be contiguous.
  */
 const BOX_BLOCK_SIZE = 2000;
+/**
+ * A tenth of the box block. A pallet is consumed `palletBoxCapacity` times
+ * more slowly than a box, so 200 matches 2000 boxes' offline reach at a
+ * pallet of ten boxes and exceeds it above that — and a device that never
+ * fills them has not burned 2000 numbers into the sand.
+ */
+const PALLET_BLOCK_SIZE = 200;
 
 @Injectable()
 export class ShiftsService {
@@ -393,13 +405,47 @@ export class ShiftsService {
     if (template.purpose !== "box") {
       throw new BadRequestException({
         code: "BOX_LABEL_TEMPLATE_NOT_ELIGIBLE",
-        message: "A product duplicate template cannot label a box",
+        // Names the rule, not one offending purpose: since 06d a tenant can
+        // mint pallet templates of its own, so "a product duplicate
+        // template" was simply the wrong noun for half the rejections.
+        message: "Only a box-purpose template can label a box",
       });
     }
     if (!isBoxLabelTemplateEligible(template, chzProductGroupCode)) {
       throw new UnprocessableEntityException({
         code: "BOX_LABEL_TEMPLATE_NOT_ELIGIBLE",
         message: "Box label template is disabled or does not apply to the product's category",
+      });
+    }
+  }
+
+  /**
+   * Same shape as `assertBoxTemplateEligible`, for `palletLabelTemplateId`.
+   * Unlike the box check, a wrong purpose here is a 422 rather than a 400: a
+   * pallet-purpose assignment is itself an invalid *pallet configuration*
+   * (the same family of rule `assertPalletConfiguration` enforces), not a
+   * malformed request -- the template id is well-formed and known, it is
+   * just the wrong KIND of template for this field.
+   */
+  private async assertPalletTemplateEligible(
+    tenantId: string,
+    templateId: string,
+    chzProductGroupCode: number | null,
+  ): Promise<void> {
+    const template = await findLabelTemplateEligibility(this.db, tenantId, templateId);
+    if (!template) {
+      throw new BadRequestException("Unknown pallet label template for this organization");
+    }
+    if (template.purpose !== "pallet") {
+      throw new UnprocessableEntityException({
+        code: "PALLET_LABEL_TEMPLATE_NOT_ELIGIBLE",
+        message: "Only a pallet-purpose template can label a pallet",
+      });
+    }
+    if (!isPalletLabelTemplateEligible(template, chzProductGroupCode)) {
+      throw new UnprocessableEntityException({
+        code: "PALLET_LABEL_TEMPLATE_NOT_ELIGIBLE",
+        message: "Pallet label template is disabled or does not apply to the product's category",
       });
     }
   }
@@ -640,7 +686,7 @@ export class ShiftsService {
   }
 
   /**
-   * Create a shift. `boxCapacity`/`palletCapacity`/`counterpartyId` default
+   * Create a shift. `boxCapacity`/`palletBoxCapacity`/`counterpartyId` default
    * from the product when omitted (`undefined`); explicit null opts out.
    * Draft products are rejected outright (422).
    */
@@ -669,8 +715,8 @@ export class ShiftsService {
     }
 
     const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : product.boxCapacity;
-    const palletCapacity =
-      data.palletCapacity !== undefined ? data.palletCapacity : product.palletCapacity;
+    const palletBoxCapacity =
+      data.palletBoxCapacity !== undefined ? data.palletBoxCapacity : product.palletBoxCapacity;
     const counterpartyId =
       data.counterpartyId !== undefined ? data.counterpartyId : product.defaultCounterpartyId;
     const chzProductGroupCode = product.chzProductGroupCode ?? null;
@@ -686,9 +732,34 @@ export class ShiftsService {
       }
     }
     const palletsEnabled = data.palletsEnabled ?? false;
+    // Resolved only when pallets are enabled -- a shift without pallets
+    // carries no pallet-label snapshot at all (see the field comment on
+    // ShiftBundleDto.palletLabelTemplate), so there is nothing useful to
+    // default an omitted field to.
+    let palletLabelTemplateId: string | null;
+    if (data.palletLabelTemplateId === undefined) {
+      palletLabelTemplateId = palletsEnabled
+        ? (await resolveDefaultPalletLabelTemplate(this.db, tenantId, chzProductGroupCode))
+            .templateId
+        : null;
+    } else {
+      palletLabelTemplateId = data.palletLabelTemplateId;
+      if (palletLabelTemplateId !== null) {
+        await this.assertPalletTemplateEligible(
+          tenantId,
+          palletLabelTemplateId,
+          chzProductGroupCode,
+        );
+      }
+    }
 
-    this.assertCapacityRules(data.mode, boxCapacity, palletsEnabled, palletCapacity);
+    assertPalletConfiguration({ mode: data.mode, palletsEnabled, boxCapacity, palletBoxCapacity });
+    this.assertCapacityRules(data.mode, boxCapacity);
     this.assertBoxTemplateRule(data.mode, boxLabelTemplateId);
+    // A fresh shift has no prior state: `palletsEnabled` here IS the moment
+    // pallets are enabled, so this always applies -- unlike the update path,
+    // there is no "operator already cleared it" history to preserve.
+    this.assertPalletTemplateRule(palletsEnabled, palletLabelTemplateId);
 
     const monthKey = shiftMonthKey(data.plannedDate ?? new Date().toISOString().slice(0, 10));
 
@@ -725,12 +796,13 @@ export class ShiftsService {
             // organisation").
             ssccIssuerCounterpartyId: data.ssccIssuerCounterpartyId ?? null,
             boxLabelTemplateId,
+            palletLabelTemplateId,
             mode: data.mode,
             plannedQty: data.plannedQty ?? null,
             plannedDate: data.plannedDate ?? null,
             productionDate: data.productionDate ?? null,
             boxCapacity: boxCapacity ?? null,
-            palletCapacity: palletCapacity ?? null,
+            palletBoxCapacity: palletBoxCapacity ?? null,
             palletsEnabled,
             createdFrom,
             numberMonthKey: monthKey,
@@ -778,7 +850,7 @@ export class ShiftsService {
     }
     if (
       preflightCurrent.status === "planned" &&
-      (data.palletsEnabled === true || data.palletCapacity !== undefined)
+      (data.palletsEnabled === true || data.palletBoxCapacity !== undefined)
     ) {
       await this.entitlements.assertFeatureAccess(tenantId, "pallets");
     }
@@ -882,6 +954,20 @@ export class ShiftsService {
           );
         }
 
+        // Same rule, mirrored for the pallet-label snapshot.
+        if (
+          data.palletLabelTemplateId !== undefined &&
+          data.palletLabelTemplateId !== null &&
+          data.palletLabelTemplateId !== current.palletLabelTemplateId
+        ) {
+          const product = await this.findProductRow(tenantId, current.productId);
+          await this.assertPalletTemplateEligible(
+            tenantId,
+            data.palletLabelTemplateId,
+            product?.chzProductGroupCode ?? null,
+          );
+        }
+
         if (current.status === "active") {
           const allowedFields = new Set<keyof UpdateShiftDto>([
             "lineId",
@@ -979,18 +1065,65 @@ export class ShiftsService {
           data.boxLabelTemplateId !== undefined
             ? data.boxLabelTemplateId
             : current.boxLabelTemplateId;
+        let palletLabelTemplateId =
+          data.palletLabelTemplateId !== undefined
+            ? data.palletLabelTemplateId
+            : current.palletLabelTemplateId;
         const plannedQty = data.plannedQty !== undefined ? data.plannedQty : current.plannedQty;
         const plannedDate = data.plannedDate !== undefined ? data.plannedDate : current.plannedDate;
         const productionDate =
           data.productionDate !== undefined ? data.productionDate : current.productionDate;
         const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : current.boxCapacity;
-        const palletCapacity =
-          data.palletCapacity !== undefined ? data.palletCapacity : current.palletCapacity;
+        const palletBoxCapacity =
+          data.palletBoxCapacity !== undefined ? data.palletBoxCapacity : current.palletBoxCapacity;
         const palletsEnabled =
           data.palletsEnabled !== undefined ? data.palletsEnabled : current.palletsEnabled;
 
-        this.assertCapacityRules(mode, boxCapacity, palletsEnabled, palletCapacity);
+        // `createShift` resolves category default -> organisation default ->
+        // none at the moment pallets become enabled. Turning them on by PATCH
+        // is the same moment and must resolve the same way: without this, a
+        // planned shift edited to enable pallets keeps a null
+        // `palletLabelTemplateId` (an omitted field means "keep current"),
+        // `assertPalletConfiguration` checks only capacities, and the shift
+        // goes on to close pallets and burn pallet serials with no template
+        // to print a pallet label from.
+        //
+        // Deliberately scoped to the off -> ON transition and to a template
+        // that is still null: an explicit `palletLabelTemplateId: null`
+        // (a cleared template on a shift whose pallets are already on) is an
+        // operator's decision, and a later unrelated PATCH must not quietly
+        // resurrect the organisation default over it.
+        if (
+          data.palletLabelTemplateId === undefined &&
+          palletsEnabled &&
+          !current.palletsEnabled &&
+          palletLabelTemplateId === null
+        ) {
+          const product = await this.findProductRow(tenantId, current.productId);
+          palletLabelTemplateId = (
+            await resolveDefaultPalletLabelTemplate(
+              tx,
+              tenantId,
+              product?.chzProductGroupCode ?? null,
+            )
+          ).templateId;
+        }
+
+        assertPalletConfiguration({ mode, palletsEnabled, boxCapacity, palletBoxCapacity });
+        this.assertCapacityRules(mode, boxCapacity);
         this.assertBoxTemplateRule(mode, boxLabelTemplateId);
+        // Scoped to the same off -> ON transition as the default resolution
+        // just above, not to every update: an operator who explicitly clears
+        // the template on a shift whose pallets are already on keeps that as
+        // their own decision (see the comment above), and a later unrelated
+        // PATCH must not be rejected for a state that update itself did not
+        // create. This is what closes the gap: previously the resolve
+        // attempt right above could quietly settle on `null` (now that a
+        // tenant can clear its own default) and nothing refused it, so
+        // pallets went live with no template to print a label from.
+        if (palletsEnabled && !current.palletsEnabled) {
+          this.assertPalletTemplateRule(palletsEnabled, palletLabelTemplateId);
+        }
 
         const [updated] = await tx
           .update(schema.shifts)
@@ -1001,11 +1134,12 @@ export class ShiftsService {
             counterpartyId,
             ssccIssuerCounterpartyId,
             boxLabelTemplateId,
+            palletLabelTemplateId,
             plannedQty,
             plannedDate,
             productionDate,
             boxCapacity,
-            palletCapacity,
+            palletBoxCapacity,
             palletsEnabled,
           })
           .where(
@@ -1134,6 +1268,15 @@ export class ShiftsService {
       if (current.status !== "planned")
         throw new ConflictException("Shift can only be opened while planned");
       if (current.palletsEnabled) await this.entitlements.assertFeatureAccess(tenantId, "pallets");
+      // A shift planned before this slice can hold palletsEnabled with a
+      // null capacity; opening it must fail loudly rather than hand a
+      // terminal an unfulfillable configuration.
+      assertPalletConfiguration({
+        mode: current.mode,
+        palletsEnabled: current.palletsEnabled,
+        boxCapacity: current.boxCapacity,
+        palletBoxCapacity: current.palletBoxCapacity,
+      });
       const previous = validationPrintFromStorage(current);
       const policy = await snapshotValidationPrintPolicy(
         tx,
@@ -1183,6 +1326,13 @@ export class ShiftsService {
       if (shift.status === "closed") throw new ConflictException("Closed shifts cannot be entered");
       if (shift.status === "planned") {
         if (shift.palletsEnabled) await this.entitlements.assertFeatureAccess(tenantId, "pallets");
+        // Same guard as openShift, for the device-entry path into an active shift.
+        assertPalletConfiguration({
+          mode: shift.mode,
+          palletsEnabled: shift.palletsEnabled,
+          boxCapacity: shift.boxCapacity,
+          palletBoxCapacity: shift.palletBoxCapacity,
+        });
         const policy = await snapshotValidationPrintPolicy(
           tx,
           tenantId,
@@ -1253,7 +1403,7 @@ export class ShiftsService {
     const allocation =
       referenceBundle.shift.mode === "aggregation" && deviceId
         ? await this.bundleSscc(tenantId, referenceBundle.shift.id, deviceId)
-        : { sscc: null, ssccRevokedFrom: [] };
+        : { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
     return { ...referenceBundle, ...allocation };
   }
 
@@ -1279,7 +1429,7 @@ export class ShiftsService {
       name: productRow.name,
       productGroup: productRow.productGroupName,
       boxCapacity: productRow.boxCapacity,
-      palletCapacity: productRow.palletCapacity,
+      palletBoxCapacity: productRow.palletBoxCapacity,
       status: productRow.status,
       archived: productRow.archived,
       defaultCounterpartyId: productRow.defaultCounterpartyId,
@@ -1294,6 +1444,7 @@ export class ShiftsService {
     };
 
     const boxLabelTemplate = await this.findLabelTemplate(tenantId, shift.boxLabelTemplateId);
+    const palletLabelTemplate = await this.findLabelTemplate(tenantId, shift.palletLabelTemplateId);
 
     const bundleShift: ShiftBundleDto["shift"] = {
       id: shift.id,
@@ -1313,11 +1464,27 @@ export class ShiftsService {
       labelTemplateName: null,
       ssccIssuerCounterpartyId: shift.ssccIssuerCounterpartyId,
       boxLabelTemplateId: shift.boxLabelTemplateId,
+      palletLabelTemplateId: shift.palletLabelTemplateId,
       plannedQty: shift.plannedQty,
       plannedDate: shift.plannedDate,
       productionDate: shift.productionDate,
       boxCapacity: shift.boxCapacity,
-      palletCapacity: shift.palletCapacity,
+      // The BUNDLE's capacity, unlike the cabinet shift's, is the device's
+      // pallets-on/off signal: both `close-box.ts` and `CloseBox.kt` decide
+      // whether a closed box joins a pallet purely from
+      // `palletBoxCapacity !== null`, with no separate flag. The server's own
+      // signal is `shifts.pallets_enabled`, and the two diverge on an
+      // ordinary path: with pallets off the admin omits `palletBoxCapacity`,
+      // `createShift` reads an omitted value as "take the product's", and
+      // migration 0137 backfilled `products.pallet_box_capacity` broadly --
+      // so a pallets-DISABLED shift routinely carries a capacity. Emitting it
+      // would make both devices show the pallet strip, join boxes to local
+      // pallets and send `devicePalletId`, creating server pallet rows that
+      // can never be numbered (`bundleSscc` gates `palletSscc` on
+      // `palletsEnabled`). Gating here makes the device's signal BE the
+      // server's; `palletsEnabled` still rides along unchanged for a consumer
+      // that wants the flag itself.
+      palletBoxCapacity: shift.palletsEnabled ? shift.palletBoxCapacity : null,
       palletsEnabled: shift.palletsEnabled,
       createdFrom: shift.createdFrom,
       openedAt: shift.openedAt,
@@ -1353,10 +1520,13 @@ export class ShiftsService {
       product,
       labelTemplate: null,
       boxLabelTemplate,
+      palletLabelTemplate,
       counterpartyGln,
       operators,
       sscc: null,
       ssccRevokedFrom: [],
+      palletSscc: null,
+      palletSsccRevokedFrom: [],
     };
   }
 
@@ -1406,31 +1576,40 @@ export class ShiftsService {
    * local pool (`sscc-pool.ts`'s `burnSerial` returning null), so degrading
    * to `sscc: null` here lands the device in that SAME, already-handled
    * state rather than losing the whole bundle over it.
+   *
+   * The pallet block (extension digit 1, Task 7) is layered on top of all of
+   * the above, only for a shift with `palletsEnabled`: it shares the box
+   * block's issuer prefix and transaction, but its own exhaustion degrades
+   * only `palletSscc` to null -- never the whole bundle, and never the box
+   * block already secured in this same call.
    */
   private async bundleSscc(
     tenantId: string,
     shiftId: string,
     deviceId: string,
-  ): Promise<Pick<ShiftBundleDto, "sscc" | "ssccRevokedFrom">> {
+  ): Promise<
+    Pick<ShiftBundleDto, "sscc" | "ssccRevokedFrom" | "palletSscc" | "palletSsccRevokedFrom">
+  > {
     return this.db.transaction(async (tx) => {
       const [shift] = await tx
         .select({
           status: schema.shifts.status,
           mode: schema.shifts.mode,
           openedAt: schema.shifts.openedAt,
+          palletsEnabled: schema.shifts.palletsEnabled,
         })
         .from(schema.shifts)
         .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, shiftId)))
         .for("update");
       if (!shift || shift.status !== "active" || shift.mode !== "aggregation") {
-        return { sscc: null, ssccRevokedFrom: [] };
+        return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
       }
 
       const access = await this.entitlements.resolveRecovery(tenantId, tx, new Date());
       if (access.access === "read_only") {
         const endsAt = access.subscription?.endsAt;
         if (!endsAt || !shift.openedAt || shift.openedAt >= endsAt) {
-          return { sscc: null, ssccRevokedFrom: [] };
+          return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
         }
       }
 
@@ -1448,7 +1627,7 @@ export class ShiftsService {
         this.logger.warn(
           `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
         );
-        return { sscc: null, ssccRevokedFrom: [] };
+        return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
       }
       try {
         const sscc = await this.sscc.allocateForBundle(
@@ -1469,13 +1648,48 @@ export class ShiftsService {
           deviceId,
           tx,
         );
-        return { sscc, ssccRevokedFrom };
+
+        let palletSscc: ShiftBundleDto["palletSscc"] = null;
+        let palletSsccRevokedFrom: number[] = [];
+        if (shift.palletsEnabled) {
+          try {
+            palletSscc = await this.sscc.allocateForBundle(
+              tenantId,
+              issuerPrefix,
+              PALLET_EXTENSION_DIGIT,
+              deviceId,
+              PALLET_BLOCK_SIZE,
+              tx,
+            );
+            // Read AFTER allocation, in the same transaction, for the same
+            // reason the box read is: allocation may have just cut the
+            // replacement for a revoked block, and the two must describe one
+            // consistent moment.
+            palletSsccRevokedFrom = await this.sscc.revokedFromSerials(
+              tenantId,
+              issuerPrefix,
+              PALLET_EXTENSION_DIGIT,
+              deviceId,
+              tx,
+            );
+          } catch (error) {
+            if (!(error instanceof SsccCapacityExhaustedException)) throw error;
+            // Degraded exactly like the box block: the station has a
+            // graceful "no serials" state, and landing it there beats
+            // costing the operator product, templates and roster.
+            this.logger.warn(
+              `Shift ${shiftId} (tenant ${tenantId}) bundle has no pallet serial block -- ${error.message}`,
+            );
+          }
+        }
+
+        return { sscc, ssccRevokedFrom, palletSscc, palletSsccRevokedFrom };
       } catch (error) {
         if (!(error instanceof SsccCapacityExhaustedException)) throw error;
         this.logger.warn(
           `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
         );
-        return { sscc: null, ssccRevokedFrom: [] };
+        return { sscc: null, ssccRevokedFrom: [], palletSscc: null, palletSsccRevokedFrom: [] };
       }
     });
   }
@@ -1542,20 +1756,17 @@ export class ShiftsService {
   }
 
   /**
-   * aggregation mode needs an effective box capacity; a pallets-enabled
-   * aggregation shift additionally needs an effective pallet capacity.
+   * aggregation mode needs an effective box capacity. The pallet-specific
+   * boxes-per-pallet rule used to live here too (a second `BadRequestException`
+   * alongside `assertPalletConfiguration`'s own check); it was folded into
+   * that single 422 check instead of keeping two rules that could disagree.
+   * Every call site runs `assertPalletConfiguration` before this method, so a
+   * pallet-enabled shift with no box capacity already failed with the
+   * pallet-specific 422 before reaching this generic 400.
    */
-  private assertCapacityRules(
-    mode: ShiftMode,
-    boxCapacity: number | null,
-    palletsEnabled: boolean,
-    palletCapacity: number | null,
-  ): void {
+  private assertCapacityRules(mode: ShiftMode, boxCapacity: number | null): void {
     if (mode === "aggregation" && !boxCapacity) {
       throw new BadRequestException("Aggregation mode requires a box capacity");
-    }
-    if (palletsEnabled && mode === "aggregation" && !palletCapacity) {
-      throw new BadRequestException("Pallet-enabled aggregation shifts require a pallet capacity");
     }
   }
 
@@ -1575,6 +1786,41 @@ export class ShiftsService {
       throw new UnprocessableEntityException({
         code: resolution.code,
         message: "Aggregation shifts require a box label template",
+      });
+    }
+  }
+
+  /**
+   * Same shape as `resolveBoxTemplate`, for `palletLabelTemplateId`. Unlike
+   * the box rule, this is NOT called unconditionally on every request: an
+   * operator can still explicitly clear the template on a shift whose
+   * pallets are already on (see the update-path comment above
+   * `resolveDefaultPalletLabelTemplate`), and a later unrelated PATCH must
+   * not be turned into a 422 by that earlier, deliberate choice. Callers
+   * invoke this only at the moment pallets are being newly ENABLED -- create,
+   * or the update path's off -> ON transition -- which is exactly where
+   * migration 0137 used to guarantee a resolvable default and, since the I6
+   * fix let a tenant clear its own, no longer does.
+   */
+  private resolvePalletTemplate(
+    palletsEnabled: boolean,
+    palletLabelTemplateId: string | null,
+  ): PalletTemplateResolution {
+    if (palletsEnabled && palletLabelTemplateId === null) {
+      return { ok: false, code: "PALLET_LABEL_TEMPLATE_REQUIRED" };
+    }
+    return { ok: true, palletLabelTemplateId };
+  }
+
+  private assertPalletTemplateRule(
+    palletsEnabled: boolean,
+    palletLabelTemplateId: string | null,
+  ): void {
+    const resolution = this.resolvePalletTemplate(palletsEnabled, palletLabelTemplateId);
+    if (!resolution.ok) {
+      throw new UnprocessableEntityException({
+        code: resolution.code,
+        message: "Pallets require a pallet label template",
       });
     }
   }
@@ -1715,11 +1961,12 @@ export class ShiftsService {
       counterpartyName: schema.counterparties.name,
       ssccIssuerCounterpartyId: schema.shifts.ssccIssuerCounterpartyId,
       boxLabelTemplateId: schema.shifts.boxLabelTemplateId,
+      palletLabelTemplateId: schema.shifts.palletLabelTemplateId,
       plannedQty: schema.shifts.plannedQty,
       plannedDate: schema.shifts.plannedDate,
       productionDate: schema.shifts.productionDate,
       boxCapacity: schema.shifts.boxCapacity,
-      palletCapacity: schema.shifts.palletCapacity,
+      palletBoxCapacity: schema.shifts.palletBoxCapacity,
       palletsEnabled: schema.shifts.palletsEnabled,
       createdFrom: schema.shifts.createdFrom,
       openedAt: schema.shifts.openedAt,
@@ -1837,6 +2084,9 @@ export class ShiftsService {
       if (constraint === "shifts_tenant_box_label_template_fk") {
         throw new BadRequestException("Unknown box label template for this organization");
       }
+      if (constraint === "shifts_tenant_pallet_label_template_fk") {
+        throw new BadRequestException("Unknown pallet label template for this organization");
+      }
       throw new BadRequestException(
         "Referenced entity does not belong to this organization or does not exist",
       );
@@ -1849,6 +2099,39 @@ function defaultShiftOutput(mode: ShiftMode): ShiftOutputDto {
   return mode === "validation"
     ? { mode, acceptedUnits: 0 }
     : { mode, closedBoxes: 0, containedUnits: 0 };
+}
+
+/**
+ * A shift may enable pallets only when both capacities are known. Checked
+ * AFTER the product prefill, not in the Zod schema, because an omitted field
+ * means "take the product's value" and the schema cannot see it.
+ *
+ * Without this a shift could enable pallets with no box count, and the
+ * terminal would build a pallet that never reaches capacity and never closes.
+ *
+ * Runs BEFORE `ShiftsService.assertCapacityRules` at every call site: that
+ * generic rule already rejects an aggregation shift with no box capacity
+ * (400, "Aggregation mode requires a box capacity"), but a pallet-enabled
+ * shift in the same state must fail with the pallet-specific 422 below
+ * instead, not the generic 400 -- reconciling what used to be two competing
+ * checks (this one, and a `BadRequestException` this replaces) into one.
+ */
+function assertPalletConfiguration(input: {
+  mode: ShiftMode;
+  palletsEnabled: boolean;
+  boxCapacity: number | null;
+  palletBoxCapacity: number | null;
+}): void {
+  if (!input.palletsEnabled) return;
+  if (input.mode !== "aggregation") {
+    throw new UnprocessableEntityException("Pallets require an aggregation shift");
+  }
+  if (input.boxCapacity === null || input.boxCapacity < 1) {
+    throw new UnprocessableEntityException("Pallets require a box capacity");
+  }
+  if (input.palletBoxCapacity === null || input.palletBoxCapacity < 1) {
+    throw new UnprocessableEntityException("Pallets require a boxes-per-pallet count");
+  }
 }
 
 function toDatabaseNumber(value: unknown, label: string): number {

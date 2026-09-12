@@ -21,7 +21,7 @@ import type { ComboboxOption, SelectOption } from "@markiro/ui";
 import { errorProp } from "../../lib/form-error.js";
 import type { CounterpartyDto } from "../counterparties/api.js";
 import type { ProductDto } from "../catalog/api.js";
-import { isBoxLabelTemplateEligible } from "@markiro/domain";
+import { isBoxLabelTemplateEligible, isPalletLabelTemplateEligible } from "@markiro/domain";
 
 import type { LabelTemplateSummaryDto } from "../labels/api.js";
 import { useProductLabelTemplates, useShiftPlanningConfig } from "./api.js";
@@ -34,7 +34,7 @@ const SHIFT_MODES = ["validation", "aggregation"] as const;
  * (apps/api/src/modules/shifts/dto.ts): productId required (only meaningful
  * on create -- the product can't change once a shift exists, since
  * `updateShiftSchema` has no `productId` field at all), mode is one of the
- * two enum values, plannedQty/boxCapacity/palletCapacity are optional
+ * two enum values, plannedQty/boxCapacity/palletBoxCapacity are optional
  * positive integers entered as text (kept as strings in form state, parsed
  * to number|null on submit by `toPayload`), plannedDate keeps its ISO
  * `YYYY-MM-DD` value (matching the server's
@@ -59,12 +59,14 @@ const shiftFormSchema = z.object({
   counterpartyId: z.string().trim().optional(),
   ssccIssuerCounterpartyId: z.string().trim().optional(),
   boxLabelTemplateSelection: z.string(),
+  /** "" means "let the server resolve the category/organisation pallet default". */
+  palletLabelTemplateId: z.string(),
   boxCapacity: z
     .string()
     .trim()
     .optional()
     .refine((v) => !v || /^[1-9]\d*$/.test(v), "pages.shifts.form.errors.capacityInvalid"),
-  palletCapacity: z
+  palletBoxCapacity: z
     .string()
     .trim()
     .optional()
@@ -77,6 +79,15 @@ export type ShiftFormValues = z.infer<typeof shiftFormSchema>;
 export interface ShiftFormContext {
   /** Enabled templates only; the form narrows them to the selected product's category. */
   labelTemplates: LabelTemplateSummaryDto[];
+  /**
+   * Whether the tenant's subscription carries the `pallets` feature
+   * (`/access/me`'s `features.pallets`). Required, not optional: the server
+   * answers a shift that switches pallets on without it with a 403
+   * (`ShiftsService` calls `assertFeatureAccess(tenantId, "pallets")` on
+   * create and on any update that enables them), so every caller has to say
+   * which side of that line it is on rather than silently defaulting.
+   */
+  palletsEntitled: boolean;
 }
 
 export interface ShiftFormProps {
@@ -116,8 +127,9 @@ const EMPTY_VALUES: ShiftFormValues = {
   counterpartyId: "",
   ssccIssuerCounterpartyId: "",
   boxLabelTemplateSelection: BOX_TEMPLATE_SELECTION.organization,
+  palletLabelTemplateId: "",
   boxCapacity: "",
-  palletCapacity: "",
+  palletBoxCapacity: "",
   palletsEnabled: false,
 };
 
@@ -180,7 +192,16 @@ export function ShiftForm({
   const ssccIssuerCounterpartyId = watch("ssccIssuerCounterpartyId");
   const boxLabelTemplateSelection = watch("boxLabelTemplateSelection");
   const palletsEnabled = watch("palletsEnabled");
+  const palletLabelTemplateId = watch("palletLabelTemplateId");
   const activeEdit = formMode === "edit" && editStatus === "active";
+  /**
+   * Locked only while the box is OFF. A shift planned back when the tenant
+   * still had the entitlement keeps a usable checkbox so pallets can be
+   * switched off again -- the server permits exactly that (its
+   * `assertFeatureAccess` fires on `palletsEnabled === true`, never on
+   * turning them off), and disabling the control would strand such a shift.
+   */
+  const palletsLocked = !formContext.palletsEntitled && !palletsEnabled;
 
   // The box-template default and the eligible template list both depend on
   // the selected product's ЧЗ category (see the 2026-09-02 scope design).
@@ -220,6 +241,39 @@ export function ShiftForm({
         )
       : formContext.labelTemplates.filter((template) => template.purpose !== "product_duplicate");
 
+  /**
+   * Pallet templates are a separate, non-overlapping pool: the server rejects
+   * anything whose `purpose` is not `"pallet"` with a 400
+   * (`assertPalletTemplateEligible`), so offering a box template here would
+   * only produce a save the operator cannot explain. Same enabled +
+   * category-scope rule as the box pool, via the shared domain predicate.
+   */
+  const eligiblePalletTemplates = formContext.labelTemplates.filter((template) =>
+    isPalletLabelTemplateEligible(template, productGroupCode),
+  );
+  /**
+   * A saved template that no longer qualifies (disabled, or re-scoped away
+   * from this product's category) still has to be visible, or the select
+   * silently reads as "organisation default" -- a different shift than the
+   * one that was saved. Shown disabled, exactly as the box picker does.
+   */
+  const palletTemplateIsUnavailable =
+    palletLabelTemplateId !== "" &&
+    !eligiblePalletTemplates.some((template) => template.id === palletLabelTemplateId);
+  const palletLabelTemplateOptions: SelectOption[] = [
+    { value: "", label: t("pages.shifts.form.palletLabelTemplateDefault") },
+    ...eligiblePalletTemplates.map((template) => ({ value: template.id, label: template.name })),
+    ...(palletTemplateIsUnavailable
+      ? [
+          {
+            value: palletLabelTemplateId,
+            label: t("pages.shifts.form.boxLabelTemplateUnavailable"),
+            disabled: true,
+          },
+        ]
+      : []),
+  ];
+
   const isDirtyRef = useRef(false);
 
   useEffect(() => {
@@ -255,8 +309,8 @@ export function ShiftForm({
     setValue("counterpartyId", product.defaultCounterpartyId ?? "");
     setValue("boxCapacity", product.boxCapacity !== null ? String(product.boxCapacity) : "");
     setValue(
-      "palletCapacity",
-      product.palletCapacity !== null ? String(product.palletCapacity) : "",
+      "palletBoxCapacity",
+      product.palletBoxCapacity !== null ? String(product.palletBoxCapacity) : "",
     );
   }, [formMode, productId, products, setValue]);
 
@@ -790,20 +844,57 @@ export function ShiftForm({
                   <Checkbox
                     label={t("pages.shifts.form.palletsEnabledLabel")}
                     checked={field.value}
-                    disabled={activeEdit}
+                    disabled={activeEdit || palletsLocked}
                     onCheckedChange={field.onChange}
                   />
                 )}
               />
+              {/*
+                An explanation, never a bare greyed-out box: without one, the
+                only feedback a tenant outside the pallets plan ever got was
+                a 403 after saving.
+              */}
+              {!formContext.palletsEntitled ? (
+                <div className="mk-shift-form__wide">
+                  <Alert tone="info">
+                    {t(
+                      palletsEnabled
+                        ? "pages.shifts.form.palletsNotEntitledEnabled"
+                        : "pages.shifts.form.palletsNotEntitled",
+                    )}
+                  </Alert>
+                </div>
+              ) : null}
               {palletsEnabled ? (
                 <Input
-                  label={t("pages.shifts.form.palletCapacityLabel")}
+                  label={t("pages.shifts.form.palletBoxCapacityLabel")}
+                  // The field changed MEANING in 06d (product units -> a box
+                  // count), so it says what it counts rather than relying on
+                  // an operator reading the renamed label carefully.
+                  hint={t("pages.shifts.form.palletBoxCapacityHint")}
                   mono
                   inputMode="numeric"
-                  {...errorProp(translateFieldError(t, errors.palletCapacity?.message))}
+                  {...errorProp(translateFieldError(t, errors.palletBoxCapacity?.message))}
                   disabled={activeEdit}
-                  {...register("palletCapacity")}
+                  {...register("palletBoxCapacity")}
                 />
+              ) : null}
+              {palletsEnabled ? (
+                <div className="mk-shift-form__wide">
+                  <Select
+                    label={t("pages.shifts.form.palletLabelTemplateLabel")}
+                    hint={t("pages.shifts.form.palletLabelTemplateHint")}
+                    options={palletLabelTemplateOptions}
+                    value={palletLabelTemplateId}
+                    disabled={activeEdit}
+                    searchable
+                    searchLabel={t("pages.shifts.form.boxLabelTemplateSearch")}
+                    searchPlaceholder={t("pages.shifts.form.boxLabelTemplateSearch")}
+                    onValueChange={(value) =>
+                      setValue("palletLabelTemplateId", value, { shouldDirty: true })
+                    }
+                  />
+                </div>
               ) : null}
             </div>
           </section>
@@ -836,7 +927,7 @@ export function ShiftForm({
  *   UUID. Create omits a missing value so validation shifts may use the API's
  *   absence semantics; edit always sends the selected snapshot, including an
  *   explicit null snapshot.
- * - `boxCapacity`/`palletCapacity`: once the aggregation
+ * - `boxCapacity`/`palletBoxCapacity`: once the aggregation
  *   fields are visible, whatever value is *shown* is always sent (never
  *   omitted, touched or not), because the user can see a concrete number in
  *   the input and expects that exact value to be saved. They're omitted only
@@ -883,7 +974,8 @@ function toPayload(
   const counterpartyId = values.counterpartyId?.trim();
   const ssccIssuerCounterpartyId = values.ssccIssuerCounterpartyId?.trim();
   const boxCapacity = values.boxCapacity?.trim();
-  const palletCapacity = values.palletCapacity?.trim();
+  const palletBoxCapacity = values.palletBoxCapacity?.trim();
+  const palletLabelTemplateId = values.palletLabelTemplateId.trim();
 
   const payload: UpdateShiftInput = {
     mode: values.mode,
@@ -929,7 +1021,12 @@ function toPayload(
     payload.boxCapacity = boxCapacity ? Number(boxCapacity) : null;
     payload.palletsEnabled = values.palletsEnabled;
     if (values.palletsEnabled) {
-      payload.palletCapacity = palletCapacity ? Number(palletCapacity) : null;
+      payload.palletBoxCapacity = palletBoxCapacity ? Number(palletBoxCapacity) : null;
+      // "" is the "let the server resolve it" option, and the server only
+      // resolves the category → organisation pallet default when the field is
+      // ABSENT (an explicit null opts out and leaves the shift unlabelled).
+      // So the empty selection omits the key rather than sending null.
+      if (palletLabelTemplateId) payload.palletLabelTemplateId = palletLabelTemplateId;
     }
   }
 

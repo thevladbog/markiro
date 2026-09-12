@@ -1,5 +1,9 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { ShiftExportFormatDescriptor, ShiftExportSource } from "@markiro/domain";
+import type {
+  ShiftExportFormatDescriptor,
+  ShiftExportPalletGroup,
+  ShiftExportSource,
+} from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { and, eq, sql } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
@@ -9,6 +13,7 @@ export type ShiftExportSourceErrorCode =
   | "SHIFT_HAS_NO_CODES"
   | "SHIFT_DATE_MISSING"
   | "BOX_COVERAGE_INCOMPLETE"
+  | "SHIFT_HAS_NO_PALLETS"
   | "ORG_INN_MISSING";
 
 export class ShiftExportSourceError extends Error {
@@ -24,6 +29,17 @@ export interface ShiftExportSnapshot {
   shiftDate: string;
   /** Tenant's ИНН; loaded only for formats that embed it (GISMT XML). */
   organizationInn: string | null;
+  /**
+   * Eligible boxes rendered LOOSE only because the pallet they closed onto has
+   * not itself closed yet (no SSCC to name it with) -- always 0 outside
+   * pallets mode. This is a real, silent gap in the rendered document (see
+   * `toPalletsSource`): the box's pallet-aggregation obligation is not yet
+   * discharged, and the factory must re-export once that pallet closes. Never
+   * counts a box that stands on no pallet at all, nor one whose `palletId`
+   * fails to resolve for any other reason (wrong tenant/shift, vanished row) --
+   * both stay ordinary, unremarkable loose boxes.
+   */
+  openPalletSuppressedBoxCount: number;
   source: ShiftExportSource;
 }
 
@@ -44,9 +60,27 @@ interface BoxMembershipRow {
   sscc: string | null;
   closedAt: Date | null;
   disassembledAt: Date | null;
+  /** The pallet this box stood on when it closed, or null for a loose box. */
+  palletId: string | null;
   codeHash: string;
   displacedAt: Date | null;
   removedAt: Date | null;
+}
+
+/** One eligible (closed, non-disassembled, fully covered) box, still with its pallet reference. */
+interface EligibleBox {
+  boxId: string;
+  sscc: string;
+  palletId: string | null;
+  codes: string[];
+}
+
+interface PalletRow {
+  tenantId: string;
+  shiftId: string;
+  id: string;
+  sscc: string | null;
+  closedAt: Date | null;
 }
 
 type ShiftExportTransaction = Pick<Db, "select" | "execute">;
@@ -166,26 +200,42 @@ export class ShiftExportSourceService {
       throw new ShiftExportSourceError("SHIFT_HAS_NO_CODES");
     }
 
-    const source =
-      format.boxMode === "flat"
-        ? ({ mode: "flat", codes: authoritative.map((row) => row.canonicalRaw) } as const)
-        : await this.loadBoxes(tx, tenantId, shiftId, authoritative);
+    let source: ShiftExportSource;
+    let openPalletSuppressedBoxCount = 0;
+    if (format.boxMode === "flat") {
+      source = { mode: "flat", codes: authoritative.map((row) => row.canonicalRaw) };
+    } else {
+      const eligibleBoxes = await this.loadEligibleBoxes(tx, tenantId, shiftId, authoritative);
+      if (format.boxMode === "boxes") {
+        source = this.toBoxesSource(eligibleBoxes);
+      } else {
+        const pallets = await this.toPalletsSource(tx, tenantId, shiftId, eligibleBoxes);
+        source = pallets.source;
+        openPalletSuppressedBoxCount = pallets.openPalletSuppressedBoxCount;
+      }
+    }
 
     return {
       sourceSnapshotStartedAt,
       productName: shift.productName ?? "Продукция",
       shiftDate,
       organizationInn,
+      openPalletSuppressedBoxCount,
       source,
     };
   }
 
-  private async loadBoxes(
+  /**
+   * Every closed, non-disassembled box that fully (and exactly) covers the
+   * shift's authoritative codes -- shared by both the `boxes` and `pallets`
+   * box modes, which differ only in how they GROUP these same boxes.
+   */
+  private async loadEligibleBoxes(
     tx: ShiftExportTransaction,
     tenantId: string,
     shiftId: string,
     authoritative: readonly AuthoritativeCodeRow[],
-  ): Promise<ShiftExportSource> {
+  ): Promise<EligibleBox[]> {
     const membershipRows: BoxMembershipRow[] = await tx
       .select({
         tenantId: schema.boxItems.tenantId,
@@ -194,6 +244,7 @@ export class ShiftExportSourceService {
         sscc: schema.boxes.sscc,
         closedAt: schema.boxes.closedAt,
         disassembledAt: schema.boxes.disassembledAt,
+        palletId: schema.boxes.palletId,
         codeHash: schema.boxItems.codeHash,
         displacedAt: schema.boxItems.displacedAt,
         removedAt: schema.boxItems.removedAt,
@@ -233,7 +284,10 @@ export class ShiftExportSourceService {
       throw new ShiftExportSourceError("BOX_COVERAGE_INCOMPLETE");
     }
 
-    const rowsByBox = new Map<string, { sscc: string; rows: BoxMembershipRow[] }>();
+    const rowsByBox = new Map<
+      string,
+      { sscc: string; palletId: string | null; rows: BoxMembershipRow[] }
+    >();
     for (const row of eligible) {
       const existing = rowsByBox.get(row.boxId);
       if (existing) {
@@ -242,24 +296,134 @@ export class ShiftExportSourceService {
         }
         existing.rows.push(row);
       } else {
-        rowsByBox.set(row.boxId, { sscc: row.sscc, rows: [row] });
+        rowsByBox.set(row.boxId, { sscc: row.sscc, palletId: row.palletId, rows: [row] });
       }
     }
 
-    const boxes = [...rowsByBox.values()]
+    return [...rowsByBox.entries()].map(([boxId, box]) => ({
+      boxId,
+      sscc: box.sscc,
+      palletId: box.palletId,
+      codes: box.rows
+        .flatMap((row) => {
+          const authoritativeRow = authoritativeByHash.get(row.codeHash);
+          return authoritativeRow ? [authoritativeRow] : [];
+        })
+        .sort(compareAuthoritativeCodes)
+        .map((row) => row.canonicalRaw),
+    }));
+  }
+
+  private toBoxesSource(eligibleBoxes: readonly EligibleBox[]): ShiftExportSource {
+    const boxes = [...eligibleBoxes]
       .sort((left, right) => compareCodeUnits(left.sscc, right.sscc))
-      .map((box) => ({
-        sscc: box.sscc,
-        codes: box.rows
-          .flatMap((row) => {
-            const authoritativeRow = authoritativeByHash.get(row.codeHash);
-            return authoritativeRow ? [authoritativeRow] : [];
-          })
-          .sort(compareAuthoritativeCodes)
-          .map((row) => row.canonicalRaw),
-      }));
+      .map((box) => ({ sscc: box.sscc, codes: box.codes }));
 
     return { mode: "boxes", boxes };
+  }
+
+  /**
+   * Groups the same eligible boxes by `pallet_id`: a box on a pallet joins
+   * that pallet's group (ordered by the PALLET's own `closed_at`, tiebroken by
+   * the pallet's own SSCC so two pallets sharing one timestamp -- a legitimate
+   * offline batch-close artifact -- still render in the SAME order on every
+   * run, regardless of the arrival order of an unordered SQL join); a box with
+   * no pallet, or whose pallet has not itself closed (no `sscc` to name yet),
+   * is rendered loose, after every pallet. A shift can close before every
+   * pallet does (`closeShift` does not gate on it), so a still-open pallet is
+   * treated the same as no pallet at all rather than surfacing a document
+   * that names a pallet with nothing to call it -- but that box is counted in
+   * `openPalletSuppressedBoxCount` (see `ShiftExportSnapshot`) so the omission
+   * is not silent.
+   */
+  private async toPalletsSource(
+    tx: ShiftExportTransaction,
+    tenantId: string,
+    shiftId: string,
+    eligibleBoxes: readonly EligibleBox[],
+  ): Promise<{ source: ShiftExportSource; openPalletSuppressedBoxCount: number }> {
+    const palletRows: PalletRow[] = await tx
+      .select({
+        tenantId: schema.pallets.tenantId,
+        shiftId: schema.pallets.shiftId,
+        id: schema.pallets.id,
+        sscc: schema.pallets.sscc,
+        closedAt: schema.pallets.closedAt,
+      })
+      .from(schema.pallets)
+      .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.shiftId, shiftId)));
+    const tenantPalletRows = palletRows.filter(
+      (row) => row.tenantId === tenantId && row.shiftId === shiftId,
+    );
+    /** Every pallet this shift knows about, closed or not -- used only to tell "still open" apart from "does not resolve at all". */
+    const palletById = new Map(tenantPalletRows.map((row) => [row.id, row]));
+    const closedPalletById = new Map(
+      tenantPalletRows
+        .filter((row): row is PalletRow & { sscc: string } => row.sscc !== null)
+        .map((row) => [row.id, { sscc: row.sscc, closedAt: row.closedAt }]),
+    );
+
+    const groups = new Map<
+      string,
+      { sscc: string; closedAt: Date | null; boxes: { sscc: string; codes: string[] }[] }
+    >();
+    const looseBoxes: { sscc: string; codes: string[] }[] = [];
+    let openPalletSuppressedBoxCount = 0;
+
+    for (const box of eligibleBoxes) {
+      if (box.palletId === null) {
+        looseBoxes.push({ sscc: box.sscc, codes: box.codes });
+        continue;
+      }
+      const pallet = closedPalletById.get(box.palletId);
+      if (pallet === undefined) {
+        if (palletById.get(box.palletId)?.sscc === null) {
+          openPalletSuppressedBoxCount += 1;
+        }
+        looseBoxes.push({ sscc: box.sscc, codes: box.codes });
+        continue;
+      }
+      const existing = groups.get(box.palletId);
+      if (existing) {
+        existing.boxes.push({ sscc: box.sscc, codes: box.codes });
+      } else {
+        groups.set(box.palletId, {
+          sscc: pallet.sscc,
+          closedAt: pallet.closedAt,
+          boxes: [{ sscc: box.sscc, codes: box.codes }],
+        });
+      }
+    }
+
+    if (groups.size === 0) {
+      // Fires whenever every eligible box ends up loose -- which covers TWO
+      // distinct shift histories: no box in this shift ever stood on a
+      // pallet, OR pallets were used but NONE of them has closed yet (so
+      // there is no pallet SSCC available to aggregate onto). Both mean the
+      // same thing for this export: no pallet-level aggregate exists yet to
+      // submit. Do not read this code as "this shift never used pallets".
+      throw new ShiftExportSourceError("SHIFT_HAS_NO_PALLETS");
+    }
+
+    const pallets: ShiftExportPalletGroup[] = [...groups.values()]
+      .sort(
+        (left, right) =>
+          compareNullableDates(left.closedAt, right.closedAt) ||
+          compareCodeUnits(left.sscc, right.sscc),
+      )
+      .map((group) => ({
+        sscc: group.sscc,
+        boxes: [...group.boxes].sort((left, right) => compareCodeUnits(left.sscc, right.sscc)),
+      }));
+
+    return {
+      source: {
+        mode: "pallets",
+        pallets,
+        looseBoxes: looseBoxes.sort((left, right) => compareCodeUnits(left.sscc, right.sscc)),
+      },
+      openPalletSuppressedBoxCount,
+    };
   }
 }
 
@@ -275,4 +439,12 @@ function compareAuthoritativeCodes(
 
 function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** Ascending by `closed_at`; a null (should not occur once a group exists) sorts first. */
+function compareNullableDates(left: Date | null, right: Date | null): number {
+  if (left === null && right === null) return 0;
+  if (left === null) return -1;
+  if (right === null) return 1;
+  return left.getTime() - right.getTime();
 }

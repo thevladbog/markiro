@@ -23,6 +23,7 @@ describe("label code import contract", () => {
       "date",
       "expiry",
       "qty",
+      "qty.boxes",
       "operator",
       "counterparty.name",
     ]);

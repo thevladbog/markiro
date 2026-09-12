@@ -836,6 +836,11 @@ describe("sync engine", () => {
         { key: "sync_pending_box_ceiling", value: "0" },
         { key: "sync_pending_ceiling", value: "2" },
         { key: "sync_pending_exception_ceiling", value: "0" },
+        // Both pallet channels pin explicitly empty (06d), exactly as the box
+        // and exception channels do, so a resend cannot acquire pallet rows
+        // the sealed batch never carried.
+        { key: "sync_pending_pallet_ceiling", value: "0" },
+        { key: "sync_pending_pallet_exception_ceiling", value: "0" },
         { key: "sync_pending_product_label_ceiling", value: "0" },
       ]);
       engine.stop();
@@ -2245,6 +2250,7 @@ describe("sync engine: pools and closures", () => {
         operatorId: null,
         printVerifiedAt: null,
         printSkippedAt: null,
+        devicePalletId: null,
       },
     ]);
   });
@@ -2268,6 +2274,7 @@ describe("sync engine: pools and closures", () => {
         operatorId: null,
         printVerifiedAt: ISO,
         printSkippedAt: null,
+        devicePalletId: null,
       },
     ]);
   });
@@ -2288,6 +2295,7 @@ describe("sync engine: pools and closures", () => {
         operatorId: null,
         printVerifiedAt: null,
         printSkippedAt: ISO,
+        devicePalletId: null,
       },
     ]);
   });
@@ -2345,6 +2353,7 @@ describe("sync engine: pools and closures", () => {
         operatorId: null,
         printVerifiedAt: null,
         printSkippedAt: null,
+        devicePalletId: null,
       },
     ]);
 
@@ -2362,6 +2371,7 @@ describe("sync engine: pools and closures", () => {
         operatorId: null,
         printVerifiedAt: ISO,
         printSkippedAt: null,
+        devicePalletId: null,
       },
     ]);
 
@@ -2400,6 +2410,7 @@ describe("sync engine: pools and closures", () => {
         operatorId: null,
         printVerifiedAt: null,
         printSkippedAt: ISO,
+        devicePalletId: null,
       },
     ]);
   });
@@ -2509,6 +2520,7 @@ describe("sync engine: pools and closures", () => {
         operatorId: null,
         printVerifiedAt: null,
         printSkippedAt: null,
+        devicePalletId: null,
       },
     ]);
   });

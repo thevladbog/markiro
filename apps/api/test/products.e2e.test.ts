@@ -229,7 +229,7 @@ describe.skipIf(!ready)("products e2e", () => {
       productGroup: null,
       chzProductGroupCode: null,
       boxCapacity: null,
-      palletCapacity: null,
+      palletBoxCapacity: null,
       status: "draft",
       defaultCounterpartyId: null,
     });
@@ -348,7 +348,7 @@ describe.skipIf(!ready)("products e2e", () => {
 
     const activateRes = await agent
       .patch(`/products/${id}`)
-      .send({ chzProductGroupCode: 8, boxCapacity: 12, palletCapacity: 48 })
+      .send({ chzProductGroupCode: 8, boxCapacity: 12, palletBoxCapacity: 48 })
       .expect(200);
     expect(activateRes.body).toMatchObject({
       status: "active",
@@ -357,18 +357,18 @@ describe.skipIf(!ready)("products e2e", () => {
       // no second request.
       productGroup: "Молочная продукция",
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
 
     const downgradeRes = await agent
       .patch(`/products/${id}`)
-      .send({ palletCapacity: null })
+      .send({ palletBoxCapacity: null })
       .expect(200);
     expect(downgradeRes.body).toMatchObject({
       status: "draft",
       chzProductGroupCode: 8,
       boxCapacity: 12,
-      palletCapacity: null,
+      palletBoxCapacity: null,
     });
   });
 
@@ -487,7 +487,7 @@ describe.skipIf(!ready)("products e2e", () => {
 
     await agent
       .patch(`/products/${widgetRes.body.id}`)
-      .send({ chzProductGroupCode: 8, boxCapacity: 10, palletCapacity: 20 })
+      .send({ chzProductGroupCode: 8, boxCapacity: 10, palletBoxCapacity: 20 })
       .expect(200);
 
     const byName = await agent.get("/products").query({ search: "Widget" }).expect(200);
@@ -523,7 +523,7 @@ describe.skipIf(!ready)("products e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
 
-    const complete = { chzProductGroupCode: 8, boxCapacity: 10, palletCapacity: 20 };
+    const complete = { chzProductGroupCode: 8, boxCapacity: 10, palletBoxCapacity: 20 };
     await agent
       .post("/products")
       .send({ gtin: EAN13_WIDGET_A, name: "Live Widget", ...complete })

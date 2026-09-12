@@ -120,7 +120,7 @@ class ShiftStorageTest {
         id = "s1", number = "SEP26-001", status = "planned", mode = "validation", productId = "p1",
         productName = "Вода", productPrintName = null, productGtin14 = null, lineId = "l1", lineName = "Линия 2",
         counterpartyName = null, plannedQty = 100, plannedDate = "2026-09-10", productionDate = null,
-        boxCapacity = null, palletCapacity = null, palletsEnabled = false, validationPrintMode = "none",
+        boxCapacity = null, palletBoxCapacity = null, palletsEnabled = false, validationPrintMode = "none",
         closePolicyKind = null, closeOwnerDeviceId = null, openedAt = null, listFetchedAt = 1L,
     )
 }

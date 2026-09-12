@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatGismtAggregationSscc,
   GISMT_AGGREGATION_OVERHEAD_LINE_COUNT,
   GismtAggregationError,
   gismtAggregationBoxLineCount,
+  gismtAggregationPalletLineCount,
   renderGismtAggregationXml,
 } from "../src/gismt-aggregation.js";
 
@@ -75,5 +77,101 @@ describe("GISMT aggregation XML", () => {
     ],
   ] as const)("rejects %s", (_case, input, code) => {
     expect(() => renderGismtAggregationXml(input)).toThrow(new GismtAggregationError(code));
+  });
+});
+
+describe("GISMT aggregation XML pallets", () => {
+  const boxA = "046800899000256001";
+  const boxB = "046800899000256018";
+  const palletA = "046800899000256025";
+  const km1 = "010468008990001721SERIAL-A93crypto";
+  const km2 = "010468008990001721SERIAL-B93crypto";
+  const boxes = [
+    { sscc: boxA, codes: [km1] },
+    { sscc: boxB, codes: [km2] },
+  ];
+
+  it("emits every box before any pallet", () => {
+    const xml = decoder.decode(
+      renderGismtAggregationXml({
+        organizationInn: "7701234567",
+        boxes,
+        pallets: [{ sscc: palletA, boxSsccs: [boxA, boxB] }],
+      }).bytes,
+    );
+    expect(xml.indexOf(formatGismtAggregationSscc(palletA))).toBeGreaterThan(
+      xml.indexOf(formatGismtAggregationSscc(boxB)),
+    );
+  });
+
+  it("nests boxes under a pallet as sscc children, not cis", () => {
+    const xml = decoder.decode(
+      renderGismtAggregationXml({
+        organizationInn: "7701234567",
+        boxes,
+        pallets: [{ sscc: palletA, boxSsccs: [boxA, boxB] }],
+      }).bytes,
+    );
+    expect(xml).toContain(`<sscc>${formatGismtAggregationSscc(boxA)}</sscc>`);
+    expect(xml).toContain(`<sscc>${formatGismtAggregationSscc(boxB)}</sscc>`);
+    expect(xml).not.toContain(`<cis>${boxA}`);
+  });
+
+  it("prefixes every pallet SSCC with the 00 application identifier", () => {
+    const xml = decoder.decode(
+      renderGismtAggregationXml({
+        organizationInn: "7701234567",
+        boxes,
+        pallets: [{ sscc: palletA, boxSsccs: [boxA, boxB] }],
+      }).bytes,
+    );
+    expect(xml).toContain(`<pack_code>00${palletA}</pack_code>`);
+  });
+
+  it("renders exactly today's document when no pallets are given", () => {
+    const before = renderGismtAggregationXml({ organizationInn: "7701234567", boxes });
+    const after = renderGismtAggregationXml({ organizationInn: "7701234567", boxes, pallets: [] });
+    expect(decoder.decode(after.bytes)).toBe(decoder.decode(before.bytes));
+  });
+
+  it("counts a pallet block as one plus its boxes plus its two wrapper lines", () => {
+    const baseline = renderGismtAggregationXml({ organizationInn: "7701234567", boxes });
+    const pallet3 = { sscc: palletA, boxSsccs: [boxA, boxB, "046800899000256032"] };
+    const result = renderGismtAggregationXml({
+      organizationInn: "7701234567",
+      boxes,
+      pallets: [pallet3],
+    });
+    expect(gismtAggregationPalletLineCount(pallet3)).toBe(6);
+    expect(result.physicalLineCount).toBe(baseline.physicalLineCount + 1 + 3 + 2);
+  });
+
+  it("does not count pallets towards codeCount or boxCount", () => {
+    const result = renderGismtAggregationXml({
+      organizationInn: "7701234567",
+      boxes,
+      pallets: [{ sscc: palletA, boxSsccs: [boxA, boxB] }],
+    });
+    expect(result).toMatchObject({ codeCount: 2, boxCount: 2 });
+  });
+
+  it("rejects a malformed pallet SSCC", () => {
+    expect(() =>
+      renderGismtAggregationXml({
+        organizationInn: "7701234567",
+        boxes,
+        pallets: [{ sscc: "not-an-sscc", boxSsccs: [boxA] }],
+      }),
+    ).toThrow(new GismtAggregationError("INVALID_SSCC"));
+  });
+
+  it("rejects a pallet naming a malformed member box SSCC", () => {
+    expect(() =>
+      renderGismtAggregationXml({
+        organizationInn: "7701234567",
+        boxes,
+        pallets: [{ sscc: palletA, boxSsccs: ["not-an-sscc"] }],
+      }),
+    ).toThrow(new GismtAggregationError("INVALID_SSCC"));
   });
 });

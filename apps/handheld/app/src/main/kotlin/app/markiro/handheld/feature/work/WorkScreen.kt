@@ -48,7 +48,9 @@ import app.markiro.handheld.core.design.StateAction
 import app.markiro.handheld.core.km.KmCodec
 import app.markiro.handheld.core.design.MarkiroChip
 import app.markiro.handheld.core.design.MarkiroSizes
+import app.markiro.handheld.core.design.MarkiroTextButton
 import app.markiro.handheld.core.design.MarkiroTheme
+import app.markiro.handheld.core.design.PrimaryButton
 import app.markiro.handheld.core.design.StatusItem
 import app.markiro.handheld.core.design.StatusStrip
 import app.markiro.handheld.core.design.Tone
@@ -65,6 +67,9 @@ data class WorkCallbacks(
     val onConflicts: () -> Unit = {},
     val onCloseBoxEarly: () -> Unit = {},
     val onLabelQueue: () -> Unit = {},
+    val onRequestEarlyPalletClose: () -> Unit = {},
+    val onConfirmEarlyPalletClose: () -> Unit = {},
+    val onCancelEarlyPalletClose: () -> Unit = {},
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -137,6 +142,15 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                             },
                         )
                     }
+                    if (state.pallet != null) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.work_close_pallet_early)) },
+                            onClick = {
+                                menu = false
+                                cb.onRequestEarlyPalletClose()
+                            },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.work_exceptions)) },
                         onClick = {
@@ -174,6 +188,7 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
             // and the recent-scan feed gives way; the strip above already carries the
             // last verdict.
             BoxFill(box.filled, box.capacity, Modifier.weight(0.62f).padding(MarkiroSizes.sp4))
+            state.pallet?.let { PalletStrip(it.boxCount, it.capacity) }
         } else {
             LastScanZone(state.last, state.duplicate, Modifier.weight(0.4f))
         }
@@ -238,6 +253,24 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                     }
                 }
                 state.team?.let { Text(stringResource(R.string.common_data_as_of, TimeText.hhmm(it.at)), style = t.caption, color = c.fg3) }
+            }
+        }
+    }
+    // «Закрыть паллету досрочно» names the box count before doing anything
+    // (design brief 10 §6), rather than closing on the first tap the way the
+    // box's own overflow entry does.
+    val palletConfirm = state.palletConfirm
+    if (palletConfirm != null) {
+        ModalBottomSheet(onDismissRequest = cb.onCancelEarlyPalletClose, containerColor = c.surfaceCard) {
+            Column(Modifier.padding(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp2)) {
+                Text(stringResource(R.string.pallet_close_confirm_title), style = t.strong, color = c.fg1)
+                Text(
+                    stringResource(R.string.pallet_close_confirm_body, palletConfirm.boxCount, palletConfirm.capacity),
+                    style = t.body,
+                    color = c.fg2,
+                )
+                PrimaryButton(stringResource(R.string.pallet_close_confirm_confirm), cb.onConfirmEarlyPalletClose)
+                MarkiroTextButton(stringResource(R.string.common_cancel), cb.onCancelEarlyPalletClose)
             }
         }
     }

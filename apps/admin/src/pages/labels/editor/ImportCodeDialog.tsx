@@ -40,6 +40,7 @@ const FIELD_COPY_KEYS: Record<LabelField, string> = {
   date: "date",
   expiry: "expiry",
   qty: "qty",
+  "qty.boxes": "qty.boxes",
   operator: "operator",
   "counterparty.name": "counterparty.name",
 };

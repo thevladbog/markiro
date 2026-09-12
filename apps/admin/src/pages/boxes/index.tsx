@@ -74,6 +74,14 @@ export function BoxesPage() {
         render: (row) => (row.sscc ? formatSsccHri(row.sscc) : "—"),
       },
       {
+        key: "palletSscc",
+        title: t("pages.boxes.table.pallet"),
+        mono: true,
+        // A box on no pallet is the ordinary case, so the dash is the same
+        // "nothing here" the other optional columns use, not a warning.
+        render: (row) => (row.palletSscc ? formatSsccHri(row.palletSscc) : "—"),
+      },
+      {
         key: "lineName",
         title: t("pages.boxes.table.line"),
         render: (row) => row.lineName ?? "—",

@@ -17,7 +17,51 @@ import java.util.UUID
 class DeviceRecoveryMigrationTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
     private fun database(name: String) = Room.databaseBuilder(context, HandheldDatabase::class.java, name)
-        .allowMainThreadQueries().addMigrations(MIGRATION_7_8).build()
+        .allowMainThreadQueries().addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10).build()
+
+    /**
+     * Turns the file Room just built at the CURRENT version back into a real v7
+     * one, so the upgrade under test is the one an installed v7 terminal takes.
+     *
+     * Everything added after v7 comes off: `device_recovery` (v8), and 06d's
+     * pallet tables and columns (v9, v10). The two ALTERed tables are dropped
+     * and recreated at their v7 shape rather than losing columns, because the
+     * SQLite behind Robolectric has no `ALTER TABLE ... DROP COLUMN`; both are
+     * empty in this fixture, and the DDL below is the v1/v4-to-v5/v5-to-v6/
+     * v6-to-v7 statements from `Migrations.kt` verbatim, so what is rebuilt is
+     * byte-for-byte what an installed terminal would be holding.
+     */
+    private fun rewindToVersionSeven(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE device_recovery")
+        // `IF EXISTS`: `pallet_exceptions` has no Room entity by design (nothing
+        // reads it until the handheld's pallet exceptions screen lands), so a
+        // Room-built file never has it -- only a migrated one does.
+        db.execSQL("DROP TABLE IF EXISTS pallet_exceptions")
+        db.execSQL("DROP TABLE pallets")
+        db.execSQL("DROP TABLE boxes")
+        db.execSQL(
+            "CREATE TABLE `boxes` (`boxId` TEXT NOT NULL, `shiftId` TEXT NOT NULL, `sscc` TEXT, " +
+                "`openedAt` TEXT NOT NULL, `closedAt` TEXT, `operatorId` TEXT, `printState` TEXT NOT NULL, " +
+                "`printReason` TEXT, `ackedAt` TEXT, PRIMARY KEY(`boxId`))",
+        )
+        db.execSQL("CREATE INDEX `index_boxes_shiftId_closedAt` ON `boxes` (`shiftId`, `closedAt`)")
+        db.execSQL("ALTER TABLE `boxes` ADD COLUMN `disassembledAt` TEXT")
+        db.execSQL("DROP TABLE shift_mirror")
+        db.execSQL(
+            "CREATE TABLE `shift_mirror` (`id` TEXT NOT NULL, `number` TEXT NOT NULL, `status` TEXT NOT NULL, " +
+                "`mode` TEXT NOT NULL, `productId` TEXT NOT NULL, `productName` TEXT, `productPrintName` TEXT, `productGtin14` TEXT, " +
+                "`lineId` TEXT, `lineName` TEXT, `counterpartyName` TEXT, `plannedQty` INTEGER, `plannedDate` TEXT, `productionDate` TEXT, " +
+                "`boxCapacity` INTEGER, `palletCapacity` INTEGER, `palletsEnabled` INTEGER NOT NULL, `validationPrintMode` TEXT NOT NULL, " +
+                "`closePolicyKind` TEXT, `closeOwnerDeviceId` TEXT, `openedAt` TEXT, `listFetchedAt` INTEGER NOT NULL, " +
+                "`bundleFetchedAt` INTEGER, `enteredAt` INTEGER, `leftAt` INTEGER, PRIMARY KEY(`id`))",
+        )
+        for (column in listOf("boxLabelTemplate", "shelfLifeDays", "egaisCode", "ssccIssuerPrefix")) {
+            db.execSQL("ALTER TABLE `shift_mirror` ADD COLUMN `$column` ${if (column == "shelfLifeDays") "INTEGER" else "TEXT"}")
+        }
+        for (column in listOf("duplicateVerification", "duplicateTemplate", "duplicateTemplateDigest", "duplicatePolicyRevision")) {
+            db.execSQL("ALTER TABLE `shift_mirror` ADD COLUMN `$column` TEXT")
+        }
+    }
 
     @Test fun realVersionSevenUpgradePreservesPayloadsAndBindsOnlyObservedConfig() = runTest {
         for (withConfig in listOf(true, false)) {
@@ -29,8 +73,7 @@ class DeviceRecoveryMigrationTest {
                     if (withConfig) old.deviceConfigDao().upsert(config)
                     old.metaDao().put(MetaEntity("inventory_pending_batch:i1", "{\"batch\":\"saved\\u001dbytes\"}"))
                     old.outboxDao().insert(OutboxEntity(shiftId = "s1", raw = "exact\u001dscan", verdict = "invalid", scannedAt = "2026-09-11T00:00:00Z", operatorId = "op", codeHash = null, gtin14 = null, serial = null))
-                    // The entire v7 schema is the v8 schema minus the one additive recovery table.
-                    old.openHelper.writableDatabase.execSQL("DROP TABLE device_recovery")
+                    old.openHelper.writableDatabase.let(::rewindToVersionSeven)
                     old.openHelper.writableDatabase.version = 7
                 }
                 database(name).useDb { upgraded ->
@@ -40,7 +83,7 @@ class DeviceRecoveryMigrationTest {
                     assertEquals("exact\u001dscan", upgraded.outboxDao().head(5).single().raw)
                     assertEquals(1L, upgraded.outboxDao().head(5).single().id)
                     assertEquals("{\"batch\":\"saved\\u001dbytes\"}", upgraded.metaDao().get("inventory_pending_batch:i1"))
-                    assertEquals(8, upgraded.openHelper.readableDatabase.version)
+                    assertEquals(10, upgraded.openHelper.readableDatabase.version)
                 }
                 database(name).useDb { restarted ->
                     val recovery = DeviceRecovery(restarted, credentials)

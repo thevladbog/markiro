@@ -102,6 +102,81 @@ describe("boxes", () => {
     ]);
   });
 
+  it("writes pallet_id in the same statement as closed_at, when given one", async () => {
+    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
+    const closed = await closeBox(
+      exec,
+      "b1",
+      "004601234560000017",
+      "2026-07-29T10:05:00.000Z",
+      "op1",
+      "pallet-1",
+    );
+    expect(closed).toBe(true);
+    const rows = await exec.all<{ closed_at: string | null; pallet_id: string | null }>(
+      `SELECT closed_at, pallet_id FROM boxes_mirror WHERE box_id = ?`,
+      ["b1"],
+    );
+    expect(rows[0]).toEqual({ closed_at: "2026-07-29T10:05:00.000Z", pallet_id: "pallet-1" });
+  });
+
+  it("defaults pallet_id to null, leaving a box-only close exactly as before", async () => {
+    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
+    const closed = await closeBox(
+      exec,
+      "b1",
+      "004601234560000017",
+      "2026-07-29T10:05:00.000Z",
+      null,
+    );
+    expect(closed).toBe(true);
+    const rows = await exec.all<{ pallet_id: string | null }>(
+      `SELECT pallet_id FROM boxes_mirror WHERE box_id = ?`,
+      ["b1"],
+    );
+    expect(rows[0]?.pallet_id).toBeNull();
+  });
+
+  // Task 14 review, Finding 1: the `closed_at IS NULL` guard on the merged
+  // statement must reject a double close rather than silently rewrite an
+  // already-assigned SSCC/pallet -- mirroring `closePallet`'s own guard in
+  // `pallets.ts` exactly.
+  it("does not let a second close overwrite an already-closed box's sscc or pallet", async () => {
+    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
+    const first = await closeBox(
+      exec,
+      "b1",
+      "004601234560000017",
+      "2026-07-29T10:05:00.000Z",
+      "op1",
+      "pallet-1",
+    );
+    expect(first).toBe(true);
+
+    const second = await closeBox(
+      exec,
+      "b1",
+      "123456789012345675",
+      "2026-07-29T10:06:00.000Z",
+      "op2",
+      "pallet-2",
+    );
+    expect(second).toBe(false);
+
+    const rows = await exec.all<{
+      sscc: string;
+      closed_at: string;
+      pallet_id: string | null;
+      closed_by: string | null;
+    }>(`SELECT sscc, closed_at, pallet_id, closed_by FROM boxes_mirror WHERE box_id = ?`, ["b1"]);
+    expect(rows[0]).toEqual({
+      sscc: "004601234560000017",
+      closed_at: "2026-07-29T10:05:00.000Z",
+      pallet_id: "pallet-1",
+      closed_by: "op1",
+    });
+  });
+
   it("keeps boxes of different shifts apart", async () => {
     await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
     expect(await currentBox(exec, "s2")).toBeNull();

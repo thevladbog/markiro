@@ -108,5 +108,8 @@ class SsccPool(private val db: HandheldDatabase) {
     companion object {
         /** Boxes. Pallets use 1, and the two must never mix in one range. */
         const val BOX_EXTENSION_DIGIT = 0
+
+        /** Pallets. See BOX_EXTENSION_DIGIT. */
+        const val PALLET_EXTENSION_DIGIT = 1
     }
 }

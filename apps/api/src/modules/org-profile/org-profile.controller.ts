@@ -46,14 +46,14 @@ import {
   orgProfileOpenApiSchema,
   organizationLogoOpenApiSchema,
   putOrgProfileSchema,
+  ssccCounterListOpenApiSchema,
   ssccCounterSchema,
-  ssccCounterStateOpenApiSchema,
   type OrgProfileDto,
   type OrganizationLogoDto,
   type PutOrgProfileDto,
   type SsccCounterDto,
 } from "./dto";
-import type { SsccCounterStateDto } from "../sscc/dto";
+import type { SsccCounterListDto } from "../sscc/dto";
 import { OrgProfileService } from "./org-profile.service";
 
 @ApiTags("org-profile")
@@ -159,22 +159,22 @@ export class OrgProfileController {
 
   @Get("sscc")
   @ApiOperation({
-    summary: "Get the box SSCC counter state",
+    summary: "Get the tenant's box and pallet SSCC counter states",
     description:
-      "The tenant's own box counter plus the seeding rules: the current floor and the blocker, if any, that prevents reseeding. Requires the profile to have a GLN.",
+      "The tenant's own counters, one per extension digit (box, then pallet), plus each one's seeding rules: the current floor and the blocker, if any, that prevents reseeding. Requires the profile to have a GLN.",
   })
-  @ApiResponse({ status: 200, schema: ssccCounterStateOpenApiSchema })
+  @ApiResponse({ status: 200, schema: ssccCounterListOpenApiSchema })
   @ApiHttpErrors(400, 401, 403)
-  async getSscc(@Req() req: RequestWithTenant): Promise<SsccCounterStateDto> {
+  async getSscc(@Req() req: RequestWithTenant): Promise<SsccCounterListDto> {
     return this.orgProfileService.getSscc(req.tenantId!);
   }
 
   @Put("sscc")
   @RequireSubscriptionWrite()
   @ApiOperation({
-    summary: "Seed the box SSCC counter",
+    summary: "Seed the box or pallet SSCC counter",
     description:
-      "Reseeds the counter and revokes serial blocks devices still hold. Refused while a shift is open or a device holding a live block is out of sync.",
+      "Reseeds the counter named by extensionDigit and revokes serial blocks devices still hold for it. Refused while a shift is open or a device holding a live block is out of sync.",
   })
   @ApiZodBody(ssccCounterSchema)
   @ApiZodResponse({ status: 200, schema: ssccCounterSchema })

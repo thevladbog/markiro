@@ -22,9 +22,15 @@ import {
 import { ApiRequestError } from "../../api/client.js";
 import { errorProp } from "../../lib/form-error.js";
 import {
+  BOX_EXTENSION_DIGIT,
   describeSsccBlocker,
   describeSsccNextLabelHint,
   describeSsccSeedError,
+  ssccCounterTitle,
+  ssccFirstSerial,
+  ssccNextSerialLabel,
+  ssccSaveLabel,
+  type SsccCounterStateDto,
 } from "../../lib/sscc-counter.js";
 import { toast } from "../../lib/toast.js";
 import {
@@ -39,16 +45,6 @@ import {
 import { OPERATIONAL_TIME_ZONES } from "./time-zones.js";
 import { useChzProductGroups } from "../catalog/api.js";
 import { useLabelTemplates } from "../labels/api.js";
-
-/**
- * Boxes take extension digit 0; 1 is reserved for pallets (06d) -- see
- * `apps/api/src/modules/sscc/sscc.service.ts`'s `BOX_EXTENSION_DIGIT`. This
- * page only ever edits the box counter, so the digit is fixed here rather
- * than exposed as an editable field: `GET /org/profile/sscc` always reads
- * extension digit 0, so a form that let the digit drift would silently stop
- * reflecting whatever it just saved.
- */
-const BOX_EXTENSION_DIGIT = 0;
 
 /** A GS1 GLN is always exactly 13 digits; the issuer prefix is its first 9 -- mirrors the server's `deriveIssuerPrefix`. */
 const GLN_PATTERN = /^\d{13}$/;
@@ -112,21 +108,33 @@ const EMPTY_PROFILE_VALUES: ProfileFormValues = {
 
 /**
  * Mirrors `apps/api/src/modules/org-profile/dto.ts`'s `ssccCounterSchema`
- * (`nextSerial`: 1..9_999_999 -- a 9-digit prefix leaves a 7-digit serial).
+ * (`nextSerial`: ..9_999_999 -- a 9-digit prefix leaves a 7-digit serial).
  * Kept as a string in form state (like `ProductForm.tsx`'s capacity fields)
  * so an empty/in-progress value doesn't fight the numeric input.
+ *
+ * The LOWER bound is per extension digit, exactly as the server's own
+ * `superRefine` has it: only digit 0 (boxes) must be at least 1; a pallet
+ * counter may legitimately sit at 0. A schema hard-coded to 1 would reject a
+ * value the server would have accepted, and would also refuse to display the
+ * 0 the server just returned.
  */
-const ssccFormSchema = z.object({
-  nextSerial: z
-    .string()
-    .trim()
-    .refine((v) => /^\d+$/.test(v), "pages.settings.sscc.errors.nextSerialInvalid")
-    .refine(
-      (v) => Number(v) >= 1 && Number(v) <= 9_999_999,
-      "pages.settings.sscc.errors.nextSerialInvalid",
-    ),
-});
-type SsccFormValues = z.infer<typeof ssccFormSchema>;
+function buildSsccFormSchema(extensionDigit: number) {
+  const floor = ssccFirstSerial(extensionDigit);
+  // The message has to state the range it actually enforces; "from 1" under a
+  // field that accepts 0 is worse than no message.
+  const message =
+    floor === 0
+      ? "pages.settings.sscc.errors.nextSerialInvalidFromZero"
+      : "pages.settings.sscc.errors.nextSerialInvalid";
+  return z.object({
+    nextSerial: z
+      .string()
+      .trim()
+      .refine((v) => /^\d+$/.test(v), message)
+      .refine((v) => Number(v) >= floor && Number(v) <= 9_999_999, message),
+  });
+}
+type SsccFormValues = { nextSerial: string };
 
 /** Converts a possibly-undefined zod issue message (an i18n key) into translated text. */
 function translateFieldError(t: TFunction, message: string | undefined): string | undefined {
@@ -188,9 +196,10 @@ function toProfileFormValues(profile: {
 
 /**
  * The tenant's own organisation profile (GLN, tax id, GS1 prefixes) plus its
- * box SSCC counter (06c Task 5) -- what a plant migrating off another system
- * sets so it continues issuing SSCCs under the same GLN-derived prefix
- * instead of re-handing-out serials that system already used.
+ * SSCC counters (06c Task 5; one per extension digit -- boxes and pallets --
+ * since 06d) -- what a plant migrating off another system sets so it
+ * continues issuing SSCCs under the same GLN-derived prefix instead of
+ * re-handing-out serials that system already used.
  */
 export function OrgProfilePage() {
   const { t } = useTranslation();
@@ -629,55 +638,22 @@ function OrganizationLogoCard({ logoUrl }: { logoUrl: string | null }) {
 function OrgProfileSsccCard({ derivedPrefix }: { derivedPrefix: string | null }) {
   const { t } = useTranslation();
   const ssccQuery = useOrgProfileSscc({ enabled: derivedPrefix !== null });
-  const updateSscc = useUpdateOrgProfileSscc();
-
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors },
-  } = useForm<SsccFormValues>({
-    resolver: zodResolver(ssccFormSchema),
-    defaultValues: { nextSerial: "1" },
-  });
-
-  useEffect(() => {
-    if (ssccQuery.data) {
-      reset({ nextSerial: String(Math.max(1, ssccQuery.data.nextSerial)) });
-    }
-  }, [ssccQuery.data, reset]);
-
-  const blocked = describeSsccBlocker(t, ssccQuery.data?.blockedBy ?? null);
-  const minSerial = ssccQuery.data?.minSerial ?? 1;
-
-  const submit = handleSubmit(async (values) => {
-    try {
-      await updateSscc.mutateAsync({
-        extensionDigit: BOX_EXTENSION_DIGIT,
-        nextSerial: Number(values.nextSerial),
-      });
-      toast("ok", t("pages.settings.sscc.toasts.updateSuccess"));
-    } catch (error) {
-      toast(
-        "error",
-        describeSsccSeedError(t, error, minSerial) ??
-          (error instanceof ApiRequestError
-            ? error.message
-            : t("pages.settings.sscc.toasts.updateError")),
-      );
-      // The floor and the blocker both live server-side; a rejection means
-      // this form's copy of them is stale.
-      await ssccQuery.refetch();
-    }
-  });
 
   // Once there's no prefix, the query above is disabled and never
   // transitions out of TanStack Query's "pending" status on its own -- so
   // these only reflect the query's real loading/error states while a prefix
   // exists to fetch a counter for. With no prefix, neither is true and the
-  // form below renders straight into its prefix-unavailable state.
+  // card below renders straight into its prefix-unavailable state.
   const isLoading = derivedPrefix !== null && ssccQuery.isPending;
   const isError = derivedPrefix !== null && ssccQuery.isError;
+  // With no prefix there is nothing to fetch, but the page still shows the
+  // box counter read-only so an operator can see what the form WILL offer
+  // once a GLN is entered. It is the only digit guaranteed to exist.
+  const counters: SsccCounterStateDto[] =
+    ssccQuery.data ??
+    (derivedPrefix === null
+      ? [{ extensionDigit: BOX_EXTENSION_DIGIT, nextSerial: 1, minSerial: 1, blockedBy: null }]
+      : []);
 
   return (
     <Card title={t("pages.settings.sscc.cardTitle")}>
@@ -692,11 +668,7 @@ function OrgProfileSsccCard({ derivedPrefix }: { derivedPrefix: string | null })
       ) : isError ? (
         <Alert tone="error">{t("common.loadError")}</Alert>
       ) : (
-        <form
-          onSubmit={(event) => void submit(event)}
-          noValidate
-          style={{ display: "flex", flexDirection: "column", gap: 16 }}
-        >
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           <Input
             label={t("pages.settings.sscc.prefixLabel")}
             mono
@@ -704,32 +676,113 @@ function OrgProfileSsccCard({ derivedPrefix }: { derivedPrefix: string | null })
             disabled
             value={derivedPrefix ?? t("pages.settings.sscc.prefixUnavailable")}
           />
-          <Input
-            label={t("pages.settings.sscc.nextSerialLabel")}
-            mono
-            inputMode="numeric"
-            disabled={blocked !== null}
-            {...errorProp(translateFieldError(t, errors.nextSerial?.message))}
-            {...register("nextSerial")}
-          />
-          {blocked ? (
-            <Alert tone="warn">{blocked}</Alert>
-          ) : (
-            <p style={{ font: "var(--text-caption)", color: "var(--fg-2)", margin: 0 }}>
-              {describeSsccNextLabelHint(t, minSerial)}
-            </p>
-          )}
-          <div>
-            <Button
-              type="submit"
-              loading={updateSscc.isPending}
-              disabled={!derivedPrefix || blocked !== null}
-            >
-              {t("pages.settings.sscc.save")}
-            </Button>
-          </div>
-        </form>
+          {counters.map((counter) => (
+            <OrgProfileSsccCounterForm
+              key={counter.extensionDigit}
+              counter={counter}
+              hasPrefix={derivedPrefix !== null}
+              onStaleReject={() => void ssccQuery.refetch()}
+            />
+          ))}
+        </div>
       )}
     </Card>
+  );
+}
+
+/**
+ * One extension digit's counter: its own field, its own floor, its own
+ * blocker and its own save. Deliberately a component rather than a loop body
+ * inside the card -- each counter needs its own `useForm` state, and a hook
+ * cannot live inside a `.map()`.
+ *
+ * Nothing here is shared between digits except the derived prefix: a station
+ * holding a live BOX block blocks only the box counter, and seeding one digit
+ * never touches another.
+ */
+function OrgProfileSsccCounterForm({
+  counter,
+  hasPrefix,
+  onStaleReject,
+}: {
+  counter: SsccCounterStateDto;
+  hasPrefix: boolean;
+  onStaleReject: () => void;
+}) {
+  const { t } = useTranslation();
+  const updateSscc = useUpdateOrgProfileSscc();
+  const floor = ssccFirstSerial(counter.extensionDigit);
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm<SsccFormValues>({
+    resolver: zodResolver(buildSsccFormSchema(counter.extensionDigit)),
+    defaultValues: { nextSerial: String(Math.max(floor, counter.nextSerial)) },
+  });
+
+  useEffect(() => {
+    reset({ nextSerial: String(Math.max(floor, counter.nextSerial)) });
+  }, [counter.nextSerial, floor, reset]);
+
+  const blocked = describeSsccBlocker(t, counter.blockedBy);
+  const title = ssccCounterTitle(t, counter.extensionDigit);
+
+  const submit = handleSubmit(async (values) => {
+    try {
+      await updateSscc.mutateAsync({
+        extensionDigit: counter.extensionDigit,
+        nextSerial: Number(values.nextSerial),
+      });
+      toast("ok", t("pages.settings.sscc.toasts.updateSuccess"));
+    } catch (error) {
+      toast(
+        "error",
+        describeSsccSeedError(t, error, counter) ??
+          (error instanceof ApiRequestError
+            ? error.message
+            : t("pages.settings.sscc.toasts.updateError")),
+      );
+      // The floor and the blocker both live server-side; a rejection means
+      // this form's copy of them is stale.
+      onStaleReject();
+    }
+  });
+
+  return (
+    <form
+      onSubmit={(event) => void submit(event)}
+      noValidate
+      aria-label={title}
+      style={{ display: "flex", flexDirection: "column", gap: 12 }}
+    >
+      <h3 style={{ margin: 0, font: "600 14px/20px var(--font-ui)" }}>{title}</h3>
+      <Input
+        label={ssccNextSerialLabel(t, counter.extensionDigit)}
+        mono
+        inputMode="numeric"
+        disabled={blocked !== null}
+        {...errorProp(translateFieldError(t, errors.nextSerial?.message))}
+        {...register("nextSerial")}
+      />
+      {blocked ? (
+        <Alert tone="warn">{blocked}</Alert>
+      ) : (
+        <p style={{ font: "var(--text-caption)", color: "var(--fg-2)", margin: 0 }}>
+          {describeSsccNextLabelHint(t, counter)}
+        </p>
+      )}
+      <div>
+        <Button
+          type="submit"
+          loading={updateSscc.isPending}
+          disabled={!hasPrefix || blocked !== null}
+        >
+          {ssccSaveLabel(t, counter.extensionDigit)}
+        </Button>
+      </div>
+    </form>
   );
 }

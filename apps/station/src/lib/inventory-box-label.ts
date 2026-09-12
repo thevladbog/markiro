@@ -36,6 +36,9 @@ export function inventoryBoxLabelFields(input: InventoryBoxLabelInput): Record<L
     date: formatLabelDate(input.productionDate),
     expiry: formatLabelDate(expiry),
     qty: String(input.quantity),
+    // A box holds units, not boxes. Empty rather than "0": a zero would print
+    // as «0 кор.» on any template that binds the field.
+    "qty.boxes": "",
     operator: "",
     "counterparty.name": "",
   };

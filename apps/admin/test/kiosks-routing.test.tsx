@@ -89,7 +89,7 @@ const PRODUCT = {
   productGroup: "Молочная продукция",
   chzProductGroupCode: 8,
   boxCapacity: 12,
-  palletCapacity: 48,
+  palletBoxCapacity: 48,
   unitPrice: null,
   egaisCode: null,
   externalRef: null,

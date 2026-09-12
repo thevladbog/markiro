@@ -149,8 +149,26 @@ export async function openBox(
 }
 
 /**
- * Closes a box once its SSCC has been assigned. The same UPDATE records the
- * local pending label, so a crash cannot persist the close without recovery.
+ * Closes a box once its SSCC has been assigned, and, on a pallet-enabled
+ * shift, joins it onto `palletId` in the SAME statement (or leaves
+ * `pallet_id` untouched at its default null on a shift with no pallets --
+ * `palletId` is null there too, so the write is a no-op for that column).
+ *
+ * Closure and pallet membership are meant to be ONE fact, not two (Task 14
+ * review, Finding 1): writing them as separate statements -- `closeBox` then
+ * a later `joinPallet` -- leaves a window where a drain, or a plain power
+ * cut, can observe or persist `closed_at` without `pallet_id`, and nothing
+ * later re-derives it. The pallet would then show one box short in the
+ * cabinet forever, even though its SSCC still syncs fine. Folding the two
+ * into this one UPDATE closes that window: either both land or neither does.
+ *
+ * Guards on `closed_at IS NULL` -- mirroring `closePallet`'s own guard, and
+ * for the same reason: a double close (two concurrent callers racing the
+ * same open box, e.g. two terminals sharing one shift's single open box)
+ * must not silently rewrite an already-assigned SSCC or pallet. Returns
+ * whether THIS call performed the close, not void, so a caller that lost the
+ * race cannot hand a label an sscc/palletId the database never actually
+ * stored -- the same reasoning `closePallet`'s own return value documents.
  */
 export async function closeBox(
   exec: SqlExecutor,
@@ -158,14 +176,17 @@ export async function closeBox(
   sscc: string,
   closedAt: string,
   operatorId: string | null,
-): Promise<void> {
-  await exec.run(
+  palletId: string | null = null,
+): Promise<boolean> {
+  const rows = await exec.all<{ box_id: string }>(
     `UPDATE boxes_mirror
-        SET sscc = ?, closed_at = ?, closed_by = ?,
+        SET sscc = ?, closed_at = ?, closed_by = ?, pallet_id = ?,
             print_state = 'pending', print_error_code = NULL
-      WHERE box_id = ?`,
-    [sscc, closedAt, operatorId, boxId],
+      WHERE box_id = ? AND closed_at IS NULL
+      RETURNING box_id`,
+    [sscc, closedAt, operatorId, palletId, boxId],
   );
+  return rows.length === 1;
 }
 
 /** Records an actionable category without persisting a native printer error. */

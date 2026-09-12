@@ -26,13 +26,21 @@ export class ProductReadinessService {
         id: schema.products.id,
         chzProductGroupCode: schema.products.chzProductGroupCode,
         boxCapacity: schema.products.boxCapacity,
-        palletCapacity: schema.products.palletCapacity,
+        palletBoxCapacity: schema.products.palletBoxCapacity,
         egaisCode: schema.products.egaisCode,
       })
       .from(schema.products)
       .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)))
       .limit(1);
     if (!product) throw new NotFoundException();
+    // @markiro/domain's ProductReadinessInput keeps the pre-06d field name
+    // `palletCapacity` -- it is a presence check only, indifferent to the
+    // 06d units->boxes meaning change, and is not part of this task's scope.
+    const production = {
+      chzProductGroupCode: product.chzProductGroupCode,
+      boxCapacity: product.boxCapacity,
+      palletCapacity: product.palletBoxCapacity,
+    };
 
     const [profile] = await this.db
       .select()
@@ -74,7 +82,7 @@ export class ProductReadinessService {
           attributes: [],
         },
         values: {},
-        production: product,
+        production,
         egais: {
           applicable: isEgaisApplicable(product.chzProductGroupCode),
           codes: egaisCodes,
@@ -137,7 +145,7 @@ export class ProductReadinessService {
         schemaVersionId: profile.schemaVersionId,
         schema: definition,
         values,
-        production: product,
+        production,
         egais: {
           applicable: isEgaisApplicable(product.chzProductGroupCode),
           codes: egaisCodes,

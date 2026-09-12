@@ -13,7 +13,7 @@ const product: ProductDto = {
   productGroup: "Молочная продукция",
   chzProductGroupCode: 8,
   boxCapacity: 12,
-  palletCapacity: 48,
+  palletBoxCapacity: 48,
   unitPrice: null,
   egaisCode: null,
   shelfLifeDays: null,
@@ -82,7 +82,7 @@ async function setup() {
         ]}
         lines={[]}
         counterparties={[]}
-        formContext={{ labelTemplates: [] }}
+        formContext={{ labelTemplates: [], palletsEntitled: true }}
         onSubmit={submit}
         onDirtyChange={() => undefined}
         onClose={() => undefined}
@@ -185,12 +185,13 @@ it.each(["planned", "active"] as const)(
             verificationRequired: false,
             productLabelTemplateId: template.id,
             boxLabelTemplateSelection: "none",
+            palletLabelTemplateId: "",
             palletsEnabled: false,
           }}
           products={[product]}
           lines={[]}
           counterparties={[]}
-          formContext={{ labelTemplates: [] }}
+          formContext={{ labelTemplates: [], palletsEntitled: true }}
           onSubmit={submit}
           onDirtyChange={() => undefined}
           onClose={() => undefined}

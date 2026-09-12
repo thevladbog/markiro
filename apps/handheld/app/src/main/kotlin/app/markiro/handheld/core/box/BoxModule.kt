@@ -25,8 +25,33 @@ object BoxModule {
     @Singleton
     fun boxRepository(db: HandheldDatabase): BoxRepository = BoxRepository(db)
 
+    /**
+     * A singleton because opening a pallet, joining a box to it and closing it
+     * are only serialised -- and only have an order between them -- if every
+     * caller shares one lock (06d). See `PalletLock` for the ordering rule it
+     * enforces.
+     */
     @Provides
-    fun closeBox(db: HandheldDatabase, boxes: BoxRepository, pool: SsccPool): CloseBox = CloseBox(db, boxes, pool)
+    @Singleton
+    fun palletLock(db: HandheldDatabase): PalletLock = PalletLock(db)
+
+    @Provides
+    @Singleton
+    fun palletRepository(db: HandheldDatabase, lock: PalletLock): PalletRepository = PalletRepository(db, lock)
+
+    @Provides
+    @Singleton
+    fun closePallet(db: HandheldDatabase, pool: SsccPool, lock: PalletLock): ClosePallet = ClosePallet(db, pool, lock)
+
+    @Provides
+    fun closeBox(
+        db: HandheldDatabase,
+        boxes: BoxRepository,
+        pool: SsccPool,
+        pallets: PalletRepository,
+        closePallet: ClosePallet,
+        palletLock: PalletLock,
+    ): CloseBox = CloseBox(db, boxes, pool, pallets, closePallet, palletLock)
 
     @Provides
     fun boxPrinter(
@@ -35,4 +60,12 @@ object BoxModule {
         renderer: LabelRenderer,
         transport: PrinterTransport,
     ): BoxPrinter = BoxPrinter(db, boxes, renderer, transport)
+
+    @Provides
+    fun palletPrinter(
+        db: HandheldDatabase,
+        pallets: PalletRepository,
+        renderer: LabelRenderer,
+        transport: PrinterTransport,
+    ): PalletPrinter = PalletPrinter(db, pallets, renderer, transport)
 }

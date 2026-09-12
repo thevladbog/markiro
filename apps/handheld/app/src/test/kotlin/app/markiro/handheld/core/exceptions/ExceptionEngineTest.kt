@@ -47,7 +47,9 @@ class ExceptionEngineTest {
 
     /** Closed and acknowledged: a reprint or a disassembly only ever names such a box. */
     private suspend fun closeAndAck(boxId: String = "box-1") {
-        db.boxDao().close(boxId, "000000000000000017", "2026-09-11T08:00:00.000Z", "op-1")
+        // Null pallet: this fixture closes a box by hand, and a box closed
+        // outside `CloseBox` joins no pallet (06d).
+        db.boxDao().close(boxId, "000000000000000017", "2026-09-11T08:00:00.000Z", "op-1", null)
         db.boxDao().markAcked(listOf(boxId), "2026-09-11T08:00:05.000Z")
     }
 

@@ -17,8 +17,8 @@ export class ProductWriter {
     const gtin14 = this.normalizeOrThrow(data.gtin);
     const chzProductGroupCode = data.chzProductGroupCode ?? null;
     const boxCapacity = data.boxCapacity ?? null;
-    const palletCapacity = data.palletCapacity ?? null;
-    const status = this.computeStatus({ chzProductGroupCode, boxCapacity, palletCapacity });
+    const palletBoxCapacity = data.palletBoxCapacity ?? null;
+    const status = this.computeStatus({ chzProductGroupCode, boxCapacity, palletBoxCapacity });
 
     const [row] = await tx
       .insert(schema.products)
@@ -28,7 +28,7 @@ export class ProductWriter {
         name: data.name,
         chzProductGroupCode,
         boxCapacity,
-        palletCapacity,
+        palletBoxCapacity,
         status,
         archived: data.archived ?? false,
         defaultCounterpartyId: data.defaultCounterpartyId ?? null,
@@ -143,11 +143,11 @@ export class ProductWriter {
   computeStatus(fields: {
     chzProductGroupCode: number | null;
     boxCapacity: number | null;
-    palletCapacity: number | null;
+    palletBoxCapacity: number | null;
   }): ProductStatus {
     return fields.chzProductGroupCode !== null &&
       fields.boxCapacity !== null &&
-      fields.palletCapacity !== null
+      fields.palletBoxCapacity !== null
       ? "active"
       : "draft";
   }

@@ -50,10 +50,26 @@ const PROFILE = {
 };
 const EMPTY_PROFILE = { ...PROFILE, gln: null, gs1Prefixes: [], inn: null };
 const COUNTER = { extensionDigit: 0, nextSerial: 45_000, minSerial: 40_000, blockedBy: null };
+const PALLET_COUNTER = { extensionDigit: 1, nextSerial: 300, minSerial: 250, blockedBy: null };
 const COUNTER_BLOCKED = {
   ...COUNTER,
   blockedBy: { kind: "active_shift", shiftId: "s-1", shiftNumber: "AUG26-003" },
 };
+
+/**
+ * `GET /org/profile/sscc` returns a LIST of counters, one per extension digit
+ * (06d Task 11) -- NOT a single flat counter. Mocking the old flat shape is
+ * what let the admin ship reading `undefined` off it, so every mock here goes
+ * through this helper and the pallet counter is always present.
+ */
+function ssccList(...counters: unknown[]) {
+  return { counters: counters.length > 0 ? counters : [COUNTER, PALLET_COUNTER] };
+}
+
+/** Card title, and the box counter's own field/button names within it. */
+const SSCC_CARD = "Счётчики SSCC";
+const BOX_SERIAL_LABEL = "Начальный серийный номер короба";
+const BOX_SAVE_LABEL = "Сохранить счётчик коробов";
 const LABEL_TEMPLATES = [
   {
     id: "11111111-1111-4111-8111-111111111111",
@@ -98,7 +114,7 @@ function routeFetch(overrides: {
       return overrides.logo ? overrides.logo(init) : jsonResponse(204, undefined);
     }
     if (url === "/api/org/profile/sscc") {
-      return overrides.sscc ? overrides.sscc(init) : jsonResponse(200, COUNTER);
+      return overrides.sscc ? overrides.sscc(init) : jsonResponse(200, ssccList());
     }
     if (url === "/api/label-templates") {
       return overrides.labelTemplates
@@ -646,8 +662,8 @@ describe("OrgProfilePage", () => {
     expect(
       await screen.findByDisplayValue("Укажите GLN выше, чтобы увидеть производный префикс"),
     ).toBeDefined();
-    const ssccCard = await cardOf("Счётчик SSCC для коробов");
-    expect(within(ssccCard).getByRole("button", { name: "Сохранить" })).toHaveProperty(
+    const ssccCard = await cardOf(SSCC_CARD);
+    expect(within(ssccCard).getByRole("button", { name: BOX_SAVE_LABEL })).toHaveProperty(
       "disabled",
       true,
     );
@@ -670,7 +686,7 @@ describe("OrgProfilePage", () => {
 
     renderPage();
 
-    const ssccCard = await cardOf("Счётчик SSCC для коробов");
+    const ssccCard = await cardOf(SSCC_CARD);
     expect(
       await within(ssccCard).findByText(
         "Не удалось загрузить данные. Обновите страницу или войдите заново.",
@@ -767,7 +783,7 @@ describe("OrgProfilePage", () => {
       },
       sscc: () => {
         ssccGetCount += 1;
-        return jsonResponse(200, COUNTER);
+        return jsonResponse(200, ssccList());
       },
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -810,7 +826,7 @@ describe("OrgProfilePage", () => {
     expect(fetchMock.mock.calls.length).toBe(callsBeforeSubmit);
   });
 
-  it("submits the starting serial via PUT /org/profile/sscc, fixed to extension digit 0", async () => {
+  it("submits the box starting serial via PUT /org/profile/sscc under extension digit 0", async () => {
     let didUpdate = false;
     const fetchMock = routeFetch({
       sscc: (init) => {
@@ -818,16 +834,19 @@ describe("OrgProfilePage", () => {
           didUpdate = true;
           return jsonResponse(200, { extensionDigit: 0, nextSerial: 100 });
         }
-        return jsonResponse(200, didUpdate ? { extensionDigit: 0, nextSerial: 100 } : COUNTER);
+        return jsonResponse(
+          200,
+          didUpdate ? ssccList({ ...COUNTER, nextSerial: 100 }) : ssccList(),
+        );
       },
     });
     vi.stubGlobal("fetch", fetchMock);
 
     renderPage();
-    const ssccCard = await cardOf("Счётчик SSCC для коробов");
-    const nextSerialInput = await within(ssccCard).findByLabelText("Начальный серийный номер");
+    const ssccCard = await cardOf(SSCC_CARD);
+    const nextSerialInput = await within(ssccCard).findByLabelText(BOX_SERIAL_LABEL);
     fireEvent.change(nextSerialInput, { target: { value: "100" } });
-    fireEvent.click(within(ssccCard).getByRole("button", { name: "Сохранить" }));
+    fireEvent.click(within(ssccCard).getByRole("button", { name: BOX_SAVE_LABEL }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -845,14 +864,14 @@ describe("OrgProfilePage", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     renderPage();
-    const ssccCard = await cardOf("Счётчик SSCC для коробов");
-    const nextSerialInput = await within(ssccCard).findByLabelText("Начальный серийный номер");
+    const ssccCard = await cardOf(SSCC_CARD);
+    const nextSerialInput = await within(ssccCard).findByLabelText(BOX_SERIAL_LABEL);
     fireEvent.change(nextSerialInput, { target: { value: "not-a-number" } });
 
     const putCallsBefore = fetchMock.mock.calls.filter(
       (call) => (call[1] as RequestInit | undefined)?.method === "PUT",
     ).length;
-    fireEvent.click(within(ssccCard).getByRole("button", { name: "Сохранить" }));
+    fireEvent.click(within(ssccCard).getByRole("button", { name: BOX_SAVE_LABEL }));
 
     expect(await screen.findByText("Введите целое число от 1 до 9 999 999")).toBeDefined();
     const putCallsAfter = fetchMock.mock.calls.filter(
@@ -863,14 +882,14 @@ describe("OrgProfilePage", () => {
 
   it("normalizes a historical zero counter to one and refuses a new zero value", async () => {
     const fetchMock = routeFetch({
-      sscc: () => jsonResponse(200, { extensionDigit: 0, nextSerial: 0 }),
+      sscc: () => jsonResponse(200, ssccList({ ...COUNTER, nextSerial: 0, minSerial: 1 })),
     });
     vi.stubGlobal("fetch", fetchMock);
 
     renderPage();
-    const ssccCard = await cardOf("Счётчик SSCC для коробов");
+    const ssccCard = await cardOf(SSCC_CARD);
     const nextSerialInput = (await within(ssccCard).findByLabelText(
-      "Начальный серийный номер",
+      BOX_SERIAL_LABEL,
     )) as HTMLInputElement;
     expect(nextSerialInput.value).toBe("1");
 
@@ -878,7 +897,7 @@ describe("OrgProfilePage", () => {
     const putCallsBefore = fetchMock.mock.calls.filter(
       (call) => (call[1] as RequestInit | undefined)?.method === "PUT",
     ).length;
-    fireEvent.click(within(ssccCard).getByRole("button", { name: "Сохранить" }));
+    fireEvent.click(within(ssccCard).getByRole("button", { name: BOX_SAVE_LABEL }));
 
     expect(await screen.findByText("Введите целое число от 1 до 9 999 999")).toBeDefined();
     const putCallsAfter = fetchMock.mock.calls.filter(
@@ -888,14 +907,17 @@ describe("OrgProfilePage", () => {
   });
 
   it("locks the sscc counter while a shift is active and names the shift", async () => {
-    vi.stubGlobal("fetch", routeFetch({ sscc: () => jsonResponse(200, COUNTER_BLOCKED) }));
+    vi.stubGlobal(
+      "fetch",
+      routeFetch({ sscc: () => jsonResponse(200, ssccList(COUNTER_BLOCKED)) }),
+    );
     renderPage();
 
-    const card = await cardOf("Счётчик SSCC для коробов");
-    const input = await within(card).findByLabelText("Начальный серийный номер");
+    const card = await cardOf(SSCC_CARD);
+    const input = await within(card).findByLabelText(BOX_SERIAL_LABEL);
     await waitFor(() => expect(input).toHaveProperty("disabled", true));
     expect(within(card).getByText(/AUG26-003/)).toBeDefined();
-    expect(within(card).getByRole("button", { name: "Сохранить" })).toHaveProperty(
+    expect(within(card).getByRole("button", { name: BOX_SAVE_LABEL })).toHaveProperty(
       "disabled",
       true,
     );
@@ -905,13 +927,13 @@ describe("OrgProfilePage", () => {
     vi.stubGlobal("fetch", routeFetch({}));
     renderPage();
 
-    const card = await cardOf("Счётчик SSCC для коробов");
+    const card = await cardOf(SSCC_CARD);
     // 45 000 is the counter (the value the next BLOCK is cut from -- not the
     // next label's serial, which is wherever the station's current block has
     // got to), 40 000 the floor -- both come from the server; the form must
     // not invent either.
     await waitFor(() => expect(within(card).getByText(/40\s?000/)).toBeDefined());
-    expect(within(card).getByRole("button", { name: "Сохранить" })).toHaveProperty(
+    expect(within(card).getByRole("button", { name: BOX_SAVE_LABEL })).toHaveProperty(
       "disabled",
       false,
     );
@@ -923,11 +945,13 @@ describe("OrgProfilePage", () => {
     // "Уже напечатано до 0".
     vi.stubGlobal(
       "fetch",
-      routeFetch({ sscc: () => jsonResponse(200, { ...COUNTER, nextSerial: 1, minSerial: 1 }) }),
+      routeFetch({
+        sscc: () => jsonResponse(200, ssccList({ ...COUNTER, nextSerial: 1, minSerial: 1 })),
+      }),
     );
     renderPage();
 
-    const card = await cardOf("Счётчик SSCC для коробов");
+    const card = await cardOf(SSCC_CARD);
     await waitFor(() => expect(within(card).getByText(/Ещё ничего не напечатано/)).toBeDefined());
     expect(within(card).queryByText(/напечатано до 0/)).toBeNull();
   });

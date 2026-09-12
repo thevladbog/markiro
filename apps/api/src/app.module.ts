@@ -30,6 +30,7 @@ import { ConflictsModule } from "./modules/conflicts/conflicts.module";
 import { PickupRejectionsModule } from "./modules/pickup-rejections/pickup-rejections.module";
 import { SsccModule } from "./modules/sscc/sscc.module";
 import { BoxesModule } from "./modules/boxes/boxes.module";
+import { PalletsModule } from "./modules/pallets/pallets.module";
 import { BoxExceptionsModule } from "./modules/box-exceptions/box-exceptions.module";
 import { CodeSearchModule } from "./modules/code-search/code-search.module";
 import { AuthorizationModule } from "./authorization/authorization.module";
@@ -151,6 +152,7 @@ export class AppModule {
         PickupRejectionsModule,
         SsccModule,
         BoxesModule,
+        PalletsModule,
         BoxExceptionsModule,
         CodeSearchModule,
         StorageModule.forRoot(env),

@@ -35,7 +35,10 @@ export const labelTemplates = pgTable(
     tenantId: tenantId(),
     name: text("name").notNull(),
     spec: jsonb("spec").notNull(),
-    purpose: text("purpose").$type<"box" | "product_duplicate">().notNull().default("box"),
+    purpose: text("purpose")
+      .$type<"box" | "product_duplicate" | "pallet">()
+      .notNull()
+      .default("box"),
     /**
      * Admin-controlled visibility. A disabled template is hidden from every
      * template picker in the admin and on the station. It can never be a
@@ -58,7 +61,10 @@ export const labelTemplates = pgTable(
   // see Task 7) target a same-tenant row via a composite FK.
   (t) => [
     unique("label_templates_tenant_id_uq").on(t.tenantId, t.id),
-    check("label_templates_purpose_check", sql`${t.purpose} IN ('box', 'product_duplicate')`),
+    check(
+      "label_templates_purpose_check",
+      sql`${t.purpose} IN ('box', 'product_duplicate', 'pallet')`,
+    ),
     check(
       "label_templates_product_group_codes_nonempty",
       sql`${t.chzProductGroupCodes} IS NULL OR cardinality(${t.chzProductGroupCodes}) > 0`,

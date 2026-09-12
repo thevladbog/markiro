@@ -21,7 +21,7 @@ import type {
   ListDocumentsQueryDto,
   UpdateDocumentDto,
 } from "./dto";
-import { validateBoxCandidates } from "./line-validation";
+import { resolveLineTargets } from "./line-validation";
 import type { DisaggregationReportCode, DisaggregationReportData } from "./report";
 
 const PAGE_SIZE = 50;
@@ -219,7 +219,7 @@ export class DisaggregationService {
 
       // Re-validate everything under the lock.
       const ssccs = lines.map((l) => l.sscc).filter((s): s is string => s !== null);
-      const candidates = await validateBoxCandidates(tx, tenantId, ssccs);
+      const candidates = await resolveLineTargets(tx, tenantId, ssccs);
       for (const line of lines) {
         const fresh =
           line.sscc === null
@@ -232,6 +232,8 @@ export class DisaggregationService {
               status: fresh,
               validatedAt: sql`now()`,
               boxId: line.sscc !== null ? (candidates.get(line.sscc)?.boxId ?? null) : line.boxId,
+              palletId:
+                line.sscc !== null ? (candidates.get(line.sscc)?.palletId ?? null) : line.palletId,
               codeCount:
                 line.sscc !== null ? (candidates.get(line.sscc)?.codeCount ?? 0) : line.codeCount,
             })
@@ -261,93 +263,144 @@ export class DisaggregationService {
       if (!reason) throw new ConflictException({ code: "reason_required" });
       const reasonText = doc.comment ? `${reason.name}: ${doc.comment}` : reason.name;
 
-      const boxIds = ssccs.map((s) => candidates.get(s)!.boxId);
-      const boxRows = await tx
-        .select({
-          id: schema.boxes.id,
-          shiftId: schema.boxes.shiftId,
-          terminalId: schema.boxes.terminalId,
-        })
-        .from(schema.boxes)
-        .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.id, boxIds)));
-
-      const activeItems = await tx
-        .select({
-          codeHash: schema.boxItems.codeHash,
-          scannedAt: schema.boxItems.addedAt,
-          shiftId: schema.boxes.shiftId,
-          terminalId: schema.boxes.terminalId,
-        })
-        .from(schema.boxItems)
-        .innerJoin(
-          schema.boxes,
-          and(
-            eq(schema.boxes.tenantId, schema.boxItems.tenantId),
-            eq(schema.boxes.id, schema.boxItems.boxId),
-          ),
-        )
-        .where(
-          and(
-            eq(schema.boxItems.tenantId, tenantId),
-            inArray(schema.boxItems.boxId, boxIds),
-            isNull(schema.boxItems.displacedAt),
-            isNull(schema.boxItems.removedAt),
-          ),
-        )
-        .orderBy(schema.boxItems.codeHash);
-
-      // Match station-side disassembly: release only the exact scan that
-      // still owns this hash. If ownership moved to another terminal in the
-      // meantime, the precise predicate is a harmless no-op.
-      for (const item of activeItems) {
-        const terminalCondition =
-          item.terminalId === null
-            ? isNull(schema.codeRegistry.terminalId)
-            : eq(schema.codeRegistry.terminalId, item.terminalId);
-        await tx
-          .delete(schema.codeRegistry)
-          .where(
-            and(
-              eq(schema.codeRegistry.tenantId, tenantId),
-              eq(schema.codeRegistry.codeHash, item.codeHash),
-              eq(schema.codeRegistry.shiftId, item.shiftId),
-              terminalCondition,
-              eq(schema.codeRegistry.scannedAt, item.scannedAt),
-            ),
-          );
+      // Every "ok" line resolved to exactly one target (the CHECK constraint
+      // and `resolveLineTargets` both guarantee at most one of boxId/palletId).
+      const boxIds: string[] = [];
+      const palletIds: string[] = [];
+      for (const sscc of ssccs) {
+        const candidate = candidates.get(sscc);
+        if (candidate?.boxId) boxIds.push(candidate.boxId);
+        else if (candidate?.palletId) palletIds.push(candidate.palletId);
       }
 
-      // Same mechanics as the station's "disassemble" branch
-      // (station-scans.service.ts): retire the box, release its live items.
-      await tx
-        .update(schema.boxes)
-        .set({ disassembledAt: sql`now()` })
-        .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.id, boxIds)));
-      await tx
-        .update(schema.boxItems)
-        .set({ removedAt: sql`now()` })
-        .where(
-          and(
-            eq(schema.boxItems.tenantId, tenantId),
-            inArray(schema.boxItems.boxId, boxIds),
-            isNull(schema.boxItems.displacedAt),
-            isNull(schema.boxItems.removedAt),
-          ),
+      if (boxIds.length > 0) {
+        const boxRows = await tx
+          .select({
+            id: schema.boxes.id,
+            shiftId: schema.boxes.shiftId,
+            terminalId: schema.boxes.terminalId,
+          })
+          .from(schema.boxes)
+          .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.id, boxIds)));
+
+        const activeItems = await tx
+          .select({
+            codeHash: schema.boxItems.codeHash,
+            scannedAt: schema.boxItems.addedAt,
+            shiftId: schema.boxes.shiftId,
+            terminalId: schema.boxes.terminalId,
+          })
+          .from(schema.boxItems)
+          .innerJoin(
+            schema.boxes,
+            and(
+              eq(schema.boxes.tenantId, schema.boxItems.tenantId),
+              eq(schema.boxes.id, schema.boxItems.boxId),
+            ),
+          )
+          .where(
+            and(
+              eq(schema.boxItems.tenantId, tenantId),
+              inArray(schema.boxItems.boxId, boxIds),
+              isNull(schema.boxItems.displacedAt),
+              isNull(schema.boxItems.removedAt),
+            ),
+          )
+          .orderBy(schema.boxItems.codeHash);
+
+        // Match station-side disassembly: release only the exact scan that
+        // still owns this hash. If ownership moved to another terminal in the
+        // meantime, the precise predicate is a harmless no-op.
+        for (const item of activeItems) {
+          const terminalCondition =
+            item.terminalId === null
+              ? isNull(schema.codeRegistry.terminalId)
+              : eq(schema.codeRegistry.terminalId, item.terminalId);
+          await tx
+            .delete(schema.codeRegistry)
+            .where(
+              and(
+                eq(schema.codeRegistry.tenantId, tenantId),
+                eq(schema.codeRegistry.codeHash, item.codeHash),
+                eq(schema.codeRegistry.shiftId, item.shiftId),
+                terminalCondition,
+                eq(schema.codeRegistry.scannedAt, item.scannedAt),
+              ),
+            );
+        }
+
+        // Same mechanics as the station's "disassemble" branch
+        // (station-scans.service.ts): retire the box, release its live items.
+        // Both timestamps are written here even though a cabinet document has
+        // no device clock to disagree with: `disassemblyReceivedAt` is the
+        // column every server-instant ordering reads, and leaving it null on
+        // this path would make the pallet list's `contentsChangedAfterClose`
+        // blind to a box a Disaggregation document took off a closed pallet.
+        await tx
+          .update(schema.boxes)
+          .set({ disassembledAt: sql`now()`, disassemblyReceivedAt: sql`now()` })
+          .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.id, boxIds)));
+        await tx
+          .update(schema.boxItems)
+          .set({ removedAt: sql`now()` })
+          .where(
+            and(
+              eq(schema.boxItems.tenantId, tenantId),
+              inArray(schema.boxItems.boxId, boxIds),
+              isNull(schema.boxItems.displacedAt),
+              isNull(schema.boxItems.removedAt),
+            ),
+          );
+        await tx.insert(schema.boxExceptions).values(
+          boxRows.map((box) => ({
+            tenantId,
+            kind: "disassemble" as const,
+            boxId: box.id,
+            shiftId: box.shiftId,
+            terminalId: box.terminalId,
+            operatorId: null, // admin action; the actor is on the document + audit event
+            reason: reasonText.slice(0, 500),
+            occurredAt: new Date(),
+            disaggregationDocumentId: documentId,
+          })),
         );
-      await tx.insert(schema.boxExceptions).values(
-        boxRows.map((box) => ({
-          tenantId,
-          kind: "disassemble" as const,
-          boxId: box.id,
-          shiftId: box.shiftId,
-          terminalId: box.terminalId,
-          operatorId: null, // admin action; the actor is on the document + audit event
-          reason: reasonText.slice(0, 500),
-          occurredAt: new Date(),
-          disaggregationDocumentId: documentId,
-        })),
-      );
-      await advanceBoxRegistryVersion(tx, tenantId, boxIds);
+        await advanceBoxRegistryVersion(tx, tenantId, boxIds);
+      }
+
+      if (palletIds.length > 0) {
+        const palletRows = await tx
+          .select({
+            id: schema.pallets.id,
+            shiftId: schema.pallets.shiftId,
+            terminalId: schema.pallets.terminalId,
+          })
+          .from(schema.pallets)
+          .where(and(eq(schema.pallets.tenantId, tenantId), inArray(schema.pallets.id, palletIds)));
+
+        // The member boxes are untouched on purpose. Taking a pallet apart
+        // takes boxes off a stack; it does not open them. `boxes.pallet_id`
+        // stays as the record that this box stood there, exactly as
+        // `box_items` are marked rather than deleted when a box is
+        // disassembled. A user who wants the boxes opened adds them as their
+        // own lines of the same document (see the mixed-line e2e test).
+        await tx
+          .update(schema.pallets)
+          .set({ disassembledAt: sql`now()`, updatedAt: sql`now()` })
+          .where(and(eq(schema.pallets.tenantId, tenantId), inArray(schema.pallets.id, palletIds)));
+        await tx.insert(schema.palletExceptions).values(
+          palletRows.map((pallet) => ({
+            tenantId,
+            kind: "disassemble" as const,
+            palletId: pallet.id,
+            shiftId: pallet.shiftId,
+            terminalId: pallet.terminalId,
+            operatorId: null, // cabinet action; the actor is on the document + audit event
+            reason: reasonText.slice(0, 500),
+            occurredAt: new Date(),
+            disaggregationDocumentId: documentId,
+          })),
+        );
+      }
 
       await tx
         .update(schema.disaggregationDocuments)
@@ -370,7 +423,7 @@ export class DisaggregationService {
         outcome: "success",
         targetType: "disaggregation_document",
         targetId: documentId,
-        after: { boxIds },
+        after: { boxIds, palletIds },
       });
     });
 
@@ -478,9 +531,14 @@ export class DisaggregationService {
               eq(schema.boxItems.tenantId, tenantId),
               inArray(schema.boxItems.boxId, boxIds),
               isNull(schema.boxItems.displacedAt),
+              // `disassembly_received_at`, not `disassembled_at`: the items a
+              // disassembly released carry that same transaction's server
+              // `now()`, which a station-originated disassembly's
+              // DEVICE-supplied `disassembled_at` does not match (Task 24).
+              // See `CodeSearchService.boxReportData` for the full reasoning.
               or(
                 isNull(schema.boxItems.removedAt),
-                eq(schema.boxItems.removedAt, schema.boxes.disassembledAt),
+                eq(schema.boxItems.removedAt, schema.boxes.disassemblyReceivedAt),
               ),
             ),
           )
@@ -571,6 +629,7 @@ export class DisaggregationService {
         ssccInput: schema.disaggregationDocumentLines.ssccInput,
         sscc: schema.disaggregationDocumentLines.sscc,
         boxId: schema.disaggregationDocumentLines.boxId,
+        palletId: schema.disaggregationDocumentLines.palletId,
         status: schema.disaggregationDocumentLines.status,
         productId: schema.disaggregationDocumentLines.productId,
         productName: schema.products.name,
@@ -625,7 +684,7 @@ export class DisaggregationService {
         input,
         sscc: parseScannedSscc(input.trim()),
       }));
-      const candidates = await validateBoxCandidates(tx, tenantId, [
+      const candidates = await resolveLineTargets(tx, tenantId, [
         ...new Set(parsed.map((p) => p.sscc).filter((s): s is string => s !== null)),
       ]);
 
@@ -680,6 +739,7 @@ export class DisaggregationService {
           sscc,
           status: candidate?.status ?? ("not_found" as const),
           boxId: candidate?.boxId ?? null,
+          palletId: candidate?.palletId ?? null,
           productId: candidate?.productId ?? null,
           codeCount: candidate?.codeCount ?? 0,
         });

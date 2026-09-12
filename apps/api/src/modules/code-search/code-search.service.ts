@@ -15,6 +15,7 @@ import type {
   CodeStatus,
   ListCodesQueryDto,
   ListCodesResponseDto,
+  PalletCardDto,
 } from "./dto";
 
 const PAGE_SIZE = 50;
@@ -722,6 +723,8 @@ export class CodeSearchService {
         disassembledAt: schema.boxes.disassembledAt,
         productId: schema.products.id,
         productName: schema.products.name,
+        palletId: schema.pallets.id,
+        palletSscc: schema.pallets.sscc,
       })
       .from(schema.boxes)
       .leftJoin(
@@ -736,6 +739,16 @@ export class CodeSearchService {
         and(
           eq(schema.products.tenantId, schema.shifts.tenantId),
           eq(schema.products.id, schema.shifts.productId),
+        ),
+      )
+      // LEFT, and tenant-matched in the join condition rather than only in
+      // the outer WHERE: most boxes stand on no pallet, and an INNER join
+      // would 404 every one of them.
+      .leftJoin(
+        schema.pallets,
+        and(
+          eq(schema.pallets.tenantId, schema.boxes.tenantId),
+          eq(schema.pallets.id, schema.boxes.palletId),
         ),
       )
       .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.id, boxId)));
@@ -853,9 +866,180 @@ export class CodeSearchService {
       openedAt: box.openedAt,
       closedAt: box.closedAt,
       disassembledAt: box.disassembledAt,
+      pallet:
+        box.palletId === null
+          ? null
+          : {
+              id: box.palletId,
+              sscc: box.palletSscc === null ? null : formatSsccWithAi(box.palletSscc),
+            },
       items,
       exceptions: exceptionRows,
       pickupOrders: pickupOrderRows,
+    };
+  }
+
+  /**
+   * The pallet card: the mirror of `getBoxCard` one aggregation level up.
+   * Same tenant-scoped identity lookup (a pallet outside the caller's tenant
+   * is a plain 404, never a different body), same shift/product/line joins,
+   * and its member boxes in place of a box's own code items.
+   *
+   * Three statements rather than one: a pallet's boxes and its exceptions are
+   * independent one-to-many relations, and joining both in a single query
+   * would multiply their rows against each other -- exactly the reason
+   * `getBoxCard` keeps its items, exceptions and pickup orders apart.
+   */
+  async getPalletCard(tenantId: string, palletId: string): Promise<PalletCardDto> {
+    const [pallet] = await this.db
+      .select({
+        id: schema.pallets.id,
+        sscc: schema.pallets.sscc,
+        shiftId: schema.pallets.shiftId,
+        shiftNumberMonthKey: schema.shifts.numberMonthKey,
+        shiftNumberSeq: schema.shifts.numberSeq,
+        shiftCreatedFrom: schema.shifts.createdFrom,
+        terminalId: schema.pallets.terminalId,
+        lineName: schema.lines.name,
+        operatorId: schema.pallets.operatorId,
+        openedAt: schema.pallets.openedAt,
+        closedAt: schema.pallets.closedAt,
+        disassembledAt: schema.pallets.disassembledAt,
+        productId: schema.products.id,
+        productName: schema.products.name,
+      })
+      .from(schema.pallets)
+      .leftJoin(
+        schema.shifts,
+        and(
+          eq(schema.shifts.tenantId, schema.pallets.tenantId),
+          eq(schema.shifts.id, schema.pallets.shiftId),
+        ),
+      )
+      .leftJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.shifts.tenantId),
+          eq(schema.products.id, schema.shifts.productId),
+        ),
+      )
+      // `pallets.terminalId` is the device's own text id, so the station
+      // lookup casts exactly as PalletsService.listPallets does.
+      .leftJoin(
+        schema.stationDevices,
+        and(
+          eq(schema.stationDevices.tenantId, schema.pallets.tenantId),
+          sql`${schema.stationDevices.id}::text = ${schema.pallets.terminalId}`,
+        ),
+      )
+      .leftJoin(
+        schema.lines,
+        and(
+          eq(schema.lines.tenantId, schema.stationDevices.tenantId),
+          eq(schema.lines.id, schema.stationDevices.lineId),
+        ),
+      )
+      .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.id, palletId)));
+
+    if (!pallet) throw new NotFoundException();
+
+    /**
+     * Member boxes with their live item counts. `itemCount` uses the same
+     * `filter (where displaced_at is null and removed_at is null)` as
+     * `BoxesService.listBoxes`, so a box reads the same number here as it
+     * does in its own shift's box list. A DISASSEMBLED member box is kept:
+     * it is off the stack but keeps its `palletId`, and dropping it would
+     * erase the only on-screen evidence that a labelled pallet left short.
+     *
+     * Ordered `closed_at DESC NULLS FIRST` like every other box/pallet
+     * listing, with `id` as a deterministic tie-break so two boxes closed in
+     * the same ingest statement do not swap places between requests.
+     */
+    const boxRows = await this.db
+      .select({
+        id: schema.boxes.id,
+        sscc: schema.boxes.sscc,
+        closedAt: schema.boxes.closedAt,
+        disassembledAt: schema.boxes.disassembledAt,
+        itemCount:
+          sql<number>`count(${schema.boxItems.codeHash}) filter (where ${schema.boxItems.displacedAt} is null and ${schema.boxItems.removedAt} is null)`.mapWith(
+            Number,
+          ),
+      })
+      .from(schema.boxes)
+      .leftJoin(
+        schema.boxItems,
+        and(
+          eq(schema.boxItems.tenantId, schema.boxes.tenantId),
+          eq(schema.boxItems.boxId, schema.boxes.id),
+        ),
+      )
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.palletId, palletId)))
+      .groupBy(schema.boxes.id)
+      .orderBy(sql`${schema.boxes.closedAt} desc nulls first`, schema.boxes.id);
+
+    const exceptionRows = await this.db
+      .select({
+        kind: schema.palletExceptions.kind,
+        reason: schema.palletExceptions.reason,
+        occurredAt: schema.palletExceptions.occurredAt,
+        operatorId: schema.palletExceptions.operatorId,
+        disaggregationDocumentId: schema.palletExceptions.disaggregationDocumentId,
+        disaggregationDocNo: schema.disaggregationDocuments.docNo,
+      })
+      .from(schema.palletExceptions)
+      .leftJoin(
+        schema.disaggregationDocuments,
+        and(
+          eq(schema.disaggregationDocuments.tenantId, schema.palletExceptions.tenantId),
+          eq(schema.disaggregationDocuments.id, schema.palletExceptions.disaggregationDocumentId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.palletExceptions.tenantId, tenantId),
+          eq(schema.palletExceptions.palletId, palletId),
+        ),
+      )
+      .orderBy(schema.palletExceptions.recordedAt);
+
+    const status: PalletCardDto["status"] = pallet.disassembledAt
+      ? "disassembled"
+      : pallet.closedAt
+        ? "closed"
+        : "open";
+
+    return {
+      id: pallet.id,
+      sscc: pallet.sscc === null ? null : formatSsccWithAi(pallet.sscc),
+      status,
+      shiftId: pallet.shiftId,
+      shiftNumber:
+        pallet.shiftNumberMonthKey !== null &&
+        pallet.shiftNumberSeq !== null &&
+        pallet.shiftCreatedFrom !== null
+          ? formatShiftNumber({
+              monthKey: pallet.shiftNumberMonthKey,
+              seq: pallet.shiftNumberSeq,
+              createdFrom: pallet.shiftCreatedFrom,
+            })
+          : null,
+      productId: pallet.productId,
+      productName: pallet.productName,
+      terminalId: pallet.terminalId,
+      lineName: pallet.lineName,
+      operatorId: pallet.operatorId,
+      openedAt: pallet.openedAt,
+      closedAt: pallet.closedAt,
+      disassembledAt: pallet.disassembledAt,
+      boxes: boxRows.map((row) => ({
+        id: row.id,
+        sscc: row.sscc === null ? null : formatSsccWithAi(row.sscc),
+        itemCount: row.itemCount,
+        closedAt: row.closedAt,
+        disassembledAt: row.disassembledAt,
+      })),
+      exceptions: exceptionRows,
     };
   }
 
@@ -865,6 +1049,16 @@ export class CodeSearchService {
    * `reportData` contents query: displaced items are excluded, and removed
    * items are kept only when their removal WAS the box's disassembly — so a
    * disassembled box still prints the contents it had at disassembly time.
+   *
+   * "Was the box's disassembly" is `removed_at = disassembly_received_at`,
+   * NOT `= disassembled_at` (Task 24). Both disassembly paths release the
+   * items with `removedAt = now()` in the same transaction that retires the
+   * box, and `now()` is `transaction_timestamp()`, so the equality is exact —
+   * but only against the SERVER-assigned instant. Against `disassembledAt`
+   * it silently held for a cabinet Disaggregation document (server `now()`
+   * on both sides) and silently failed for every station-originated
+   * disassembly, whose `disassembledAt` is the device's own `occurredAt`,
+   * printing a station-disassembled box's form with no contents at all.
    */
   async boxReportData(tenantId: string, boxId: string): Promise<BoxReportData> {
     const [box] = await this.db
@@ -937,7 +1131,7 @@ export class CodeSearchService {
           isNull(schema.boxItems.displacedAt),
           or(
             isNull(schema.boxItems.removedAt),
-            eq(schema.boxItems.removedAt, schema.boxes.disassembledAt),
+            eq(schema.boxItems.removedAt, schema.boxes.disassemblyReceivedAt),
           ),
         ),
       )

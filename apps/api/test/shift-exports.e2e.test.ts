@@ -100,7 +100,7 @@ describe.skipIf(!ready)("shift exports e2e", () => {
       name: "Вода газированная",
       status: "active",
       boxCapacity: 12,
-      palletCapacity: 48,
+      palletBoxCapacity: 48,
     });
     await db.insert(schema.shifts).values({
       id: shiftId,

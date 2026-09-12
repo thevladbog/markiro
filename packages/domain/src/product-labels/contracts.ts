@@ -14,7 +14,7 @@ const dpiSchema = z.union([z.literal(203), z.literal(300)]);
 const reprintReasonSchema = z.enum(["not_printed", "damaged", "lost"]);
 
 export type VerificationPolicy = z.infer<typeof verificationSchema>;
-export type LabelTemplatePurpose = "box" | "product_duplicate";
+export type LabelTemplatePurpose = "box" | "product_duplicate" | "pallet";
 export type ReprintReason = z.infer<typeof reprintReasonSchema>;
 export type PrinterLanguage = z.infer<typeof printerLanguageSchema>;
 export type ProductLabelAttemptState =

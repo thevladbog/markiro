@@ -190,3 +190,48 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
         db.execSQL("CREATE TABLE IF NOT EXISTS `device_recovery` (`id` INTEGER NOT NULL, `serverOrigin` TEXT, `tenantId` TEXT, `deviceId` TEXT, `kind` TEXT, `generation` INTEGER NOT NULL, `phase` TEXT NOT NULL, `pendingId` TEXT, PRIMARY KEY(`id`))")
     }
 }
+
+/**
+ * Pallets (06d): boxes per pallet. Additive only -- `palletCapacity`'s old
+ * units-valued column is left in place and unread; see `ShiftEntities.kt`.
+ *
+ * Numbered 8 -> 9 rather than 6 -> 7: versions 7 and 8 belong to the shipped
+ * box-exceptions and device-recovery migrations above, and an installed
+ * terminal has already applied them.
+ */
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `shift_mirror` ADD COLUMN `palletBoxCapacity` INTEGER")
+    }
+}
+
+/**
+ * Pallets (06d) continued: the pallets table itself, `boxes.palletId`, and the
+ * pallet label template spec the close screen will read. `palletBoxCapacity`
+ * already landed in MIGRATION_8_9 -- this migration does not touch it, and it
+ * does not rename or drop the dead `palletCapacity` column either; see
+ * `ShiftEntities.kt` for why leaving that column in place, unread, is the
+ * chosen trade over rebuilding the table.
+ *
+ * `pallet_exceptions` is created here too, ahead of the handheld's exceptions
+ * screen (a later task in this slice). Nothing reads or writes it yet --
+ * deliberately, not an oversight -- so there is no Room entity or DAO for it
+ * until that screen lands and actually needs one.
+ */
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `pallets` (`palletId` TEXT NOT NULL, `shiftId` TEXT NOT NULL, " +
+                "`terminalId` TEXT, `sscc` TEXT, `openedAt` TEXT NOT NULL, `closedAt` TEXT, `operatorId` TEXT, " +
+                "`printState` TEXT NOT NULL, `printReason` TEXT, `ackedAt` TEXT, PRIMARY KEY(`palletId`))",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pallets_shiftId_closedAt` ON `pallets` (`shiftId`, `closedAt`)")
+        db.execSQL("ALTER TABLE `boxes` ADD COLUMN `palletId` TEXT")
+        db.execSQL("ALTER TABLE `shift_mirror` ADD COLUMN `palletLabelTemplateSpec` TEXT")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `pallet_exceptions` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`kind` TEXT NOT NULL, `palletId` TEXT NOT NULL, `shiftId` TEXT NOT NULL, `terminalId` TEXT, " +
+                "`operatorId` TEXT, `reason` TEXT NOT NULL, `occurredAt` TEXT NOT NULL)",
+        )
+    }
+}

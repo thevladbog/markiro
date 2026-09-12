@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { buildSscc, isValidSscc } from "@markiro/domain";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -7,7 +10,7 @@ import { closeCurrentBox, type CloseBoxDeps } from "../src/lib/close-box.js";
 import { recordScan, type AcceptedCode, type ScanEventRow } from "../src/lib/journal.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { addRange, remaining } from "../src/lib/sscc-pool.js";
-import { makeExec } from "./support/sqlite-exec.js";
+import { makeExec, makeRotatingExec, openFileDatabase } from "./support/sqlite-exec.js";
 import { useTimeZone } from "./support/timezone.js";
 
 // A 9-digit GS1 issuer prefix -- see sscc-pool.ts's doc comment for why the
@@ -49,7 +52,13 @@ describe("closeCurrentBox", () => {
   beforeEach(async () => {
     exec = makeExec(new DatabaseSync(":memory:"));
     await applyMigrations(exec);
-    deps = { exec, issuerPrefix: ISSUER_PREFIX, now: () => new Date(ISO).getTime() };
+    deps = {
+      exec,
+      issuerPrefix: ISSUER_PREFIX,
+      palletBoxCapacity: null,
+      terminalId: "dev-1",
+      now: () => new Date(ISO).getTime(),
+    };
   });
 
   it("burns a serial and builds a valid SSCC", async () => {
@@ -177,6 +186,164 @@ describe("closeCurrentBox", () => {
     expect(box?.sscc).toBeNull();
     expect(box?.closedAt).toBeNull();
   });
+
+  // Task 13 review, finding B4: the 06d ownership model is "One terminal.
+  // Two terminals in one shift build two pallets" -- `currentPallet` used to
+  // scope only by `shift_id`, so the SECOND terminal to close a box in this
+  // shift would find and join the FIRST terminal's already-open pallet
+  // instead of opening its own. This fails without the `terminalId` scoping
+  // fix: both boxes would land on one shared pallet row.
+  it("gives two terminals in the same shift two separate pallets, never one shared", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 1,
+      toSerial: 10,
+    });
+    const dev1: CloseBoxDeps = { ...deps, palletBoxCapacity: 100, terminalId: "dev-1" };
+    const dev2: CloseBoxDeps = { ...deps, palletBoxCapacity: 100, terminalId: "dev-2" };
+
+    await openBox(exec, SHIFT, "b1", ISO, "dev-1");
+    await recordScan(exec, event("a"), code("aa", "b1"));
+    expect((await closeCurrentBox(dev1, SHIFT, "op-1")).status).toBe("closed");
+
+    await openBox(exec, SHIFT, "b2", ISO, "dev-2");
+    await recordScan(exec, event("b"), code("bb", "b2"));
+    expect((await closeCurrentBox(dev2, SHIFT, "op-2")).status).toBe("closed");
+
+    const pallets = await exec.all<{ pallet_id: string; terminal_id: string | null }>(
+      "SELECT pallet_id, terminal_id FROM pallets_mirror ORDER BY terminal_id",
+    );
+    expect(pallets).toHaveLength(2);
+    expect(pallets.map((p) => p.terminal_id)).toEqual(["dev-1", "dev-2"]);
+
+    const palletByTerminal = new Map(pallets.map((p) => [p.terminal_id, p.pallet_id]));
+    const boxes = await exec.all<{ box_id: string; pallet_id: string | null }>(
+      "SELECT box_id, pallet_id FROM boxes_mirror ORDER BY box_id",
+    );
+    expect(boxes).toEqual([
+      { box_id: "b1", pallet_id: palletByTerminal.get("dev-1") },
+      { box_id: "b2", pallet_id: palletByTerminal.get("dev-2") },
+    ]);
+  });
+
+  // Task 14 review, Finding 1: `closed_at` (closeBox) and `pallet_id`
+  // (formerly a separate `joinPallet` call) used to be two statements with
+  // an awaited round trip between them -- a window where a drain, or a
+  // plain crash, could observe/persist the box as closed with its pallet
+  // membership still null, and nothing later ever re-derives it. This test
+  // arms a `beforeRun` hook that throws the instant a statement shaped
+  // EXACTLY like the old, separate `joinPallet` write
+  // (`UPDATE boxes_mirror SET pallet_id = ? ...`, no other column in the
+  // same SET list) is about to run -- simulating a crash landing precisely
+  // in that old window. Against the fix, `pallet_id` travels in the SAME
+  // guarded UPDATE as `closed_at` (`closeBox` itself), so no statement ever
+  // matches the trap and the close finishes normally with both columns set.
+  // Reverting to two separate statements makes this test fail: the trap
+  // fires and `closeCurrentBox` rejects.
+  it("writes closed_at and pallet_id in the SAME statement -- no separate joinPallet write exists to crash between", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "markiro-close-box-atomic-"));
+    const path = join(directory, "station.sqlite");
+    const databases = [openFileDatabase(path), openFileDatabase(path)];
+    try {
+      let armed = false;
+      const rotatingExec = makeRotatingExec(databases, {
+        beforeRun(sql) {
+          if (!armed) return;
+          if (/UPDATE boxes_mirror\s+SET pallet_id = \?/.test(sql)) {
+            armed = false;
+            throw new Error("simulated crash between box close and pallet join");
+          }
+        },
+      });
+      await applyMigrations(rotatingExec);
+      await addRange(rotatingExec, {
+        issuerPrefix: ISSUER_PREFIX,
+        extensionDigit: 0,
+        fromSerial: 1,
+        toSerial: 5,
+      });
+      await addRange(rotatingExec, {
+        issuerPrefix: ISSUER_PREFIX,
+        extensionDigit: 1,
+        fromSerial: 1,
+        toSerial: 5,
+      });
+      await openBox(rotatingExec, SHIFT, "b1", ISO, "dev-1");
+      await recordScan(rotatingExec, event("a"), code("aa", "b1"));
+
+      const palletDeps: CloseBoxDeps = {
+        exec: rotatingExec,
+        issuerPrefix: ISSUER_PREFIX,
+        palletBoxCapacity: 100,
+        terminalId: "dev-1",
+        now: () => new Date(ISO).getTime(),
+      };
+
+      armed = true;
+      const res = await closeCurrentBox(palletDeps, SHIFT, "op-1");
+
+      // The trap never fired: no statement matched its shape.
+      expect(armed).toBe(true);
+      expect(res.status).toBe("closed");
+
+      const row = databases[0]!
+        .prepare("SELECT closed_at, pallet_id FROM boxes_mirror WHERE box_id = ?")
+        .get("b1") as { closed_at: string | null; pallet_id: string | null };
+      expect(row.closed_at).not.toBeNull();
+      expect(row.pallet_id).not.toBeNull();
+    } finally {
+      for (const db of databases) db.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  // Task 14 review, Finding 1's own guard: once `closeBox`'s UPDATE carries
+  // `WHERE ... AND closed_at IS NULL`, a genuine double close must be
+  // reported, not silently overwritten -- mirroring `closeCurrentPallet`'s
+  // own `already-closed` status exactly. Simulates a concurrent winner
+  // closing this exact box between this call's `currentBox` read and its
+  // own guarded UPDATE.
+  it("reports a genuine double close as already-closed, never a fabricated sscc", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 1,
+      toSerial: 5,
+    });
+    await openBox(exec, SHIFT, "b1", ISO, "dev-1");
+    await recordScan(exec, event("a"), code("aa", "b1"));
+
+    let intercepted = false;
+    const racingExec: SqlExecutor = {
+      ...exec,
+      // `closeBox`'s guarded write goes through `all` (it uses `RETURNING`
+      // to detect whether its own guard matched), not `run` -- intercept
+      // the same call the fix itself makes.
+      all: async <T>(sql: string, params?: unknown[]): Promise<T[]> => {
+        if (!intercepted && /UPDATE boxes_mirror\s+SET sscc = \?/.test(sql)) {
+          intercepted = true;
+          // A concurrent winner closes this exact box out from under this
+          // call, landing between its `currentBox` read and its own write.
+          await exec.run(
+            `UPDATE boxes_mirror SET sscc = ?, closed_at = ?, closed_by = ? WHERE box_id = ?`,
+            ["999999999999999999", "2026-07-29T10:09:00.000Z", "winner", "b1"],
+          );
+        }
+        return exec.all<T>(sql, params);
+      },
+    };
+
+    const res = await closeCurrentBox({ ...deps, exec: racingExec }, SHIFT, "op-1");
+    expect(res).toEqual({ status: "already-closed" });
+
+    // The winner's row is untouched -- the loser never overwrote it.
+    const rows = await exec.all<{ sscc: string; closed_by: string | null }>(
+      "SELECT sscc, closed_by FROM boxes_mirror WHERE box_id = ?",
+      ["b1"],
+    );
+    expect(rows[0]).toEqual({ sscc: "999999999999999999", closed_by: "winner" });
+  });
 });
 
 describe("boxLabelFields", () => {
@@ -209,6 +376,8 @@ describe("boxLabelFields", () => {
       date: "29.07.2026",
       expiry: "",
       qty: "12",
+      // A box holds units, not boxes.
+      "qty.boxes": "",
       operator: "Иванов",
       "counterparty.name": "Клиент",
     });

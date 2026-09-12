@@ -16,7 +16,7 @@ class DtosTest {
              "validationPrint":{"mode":"none","verification":"none","templateId":null,"snapshot":null,"policyRevision":null},
              "productId":"p1","productName":"Вода 0,5","productPrintName":null,"image":null,"lineId":"l2","lineName":"Линия 2",
              "counterpartyId":null,"counterpartyName":"Завод X","ssccIssuerCounterpartyId":null,"boxLabelTemplateId":null,
-             "plannedQty":3000,"plannedDate":"2026-09-10","productionDate":null,"boxCapacity":20,"palletCapacity":null,
+             "plannedQty":3000,"plannedDate":"2026-09-10","productionDate":null,"boxCapacity":20,"palletBoxCapacity":null,
              "palletsEnabled":false,"createdFrom":"admin","openedAt":"2026-09-10T07:00:00.000Z","closedAt":null,"closeReason":null,
              "lateDataAt":null,"createdAt":"2026-09-10T06:00:00.000Z","stationCloseAccess":{"kind":"single_device","ownerDeviceId":"dev-1"}}
         """.trimIndent()

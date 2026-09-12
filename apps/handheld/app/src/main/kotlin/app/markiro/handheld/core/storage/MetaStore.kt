@@ -22,6 +22,8 @@ class MetaStore(private val db: HandheldDatabase) {
         const val SYNC_PENDING_CEILING = "sync_pending_ceiling"
         /** How many box closures the in-flight batch chose, so a retry re-reads the same set. */
         const val SYNC_PENDING_BOX_COUNT = "sync_pending_box_count"
+        /** Pallets' own pin, for the identical reason `SYNC_PENDING_BOX_COUNT` exists. */
+        const val SYNC_PENDING_PALLET_COUNT = "sync_pending_pallet_count"
         const val SYNC_PENDING_LABEL_COUNT = "sync_pending_label_count"
         const val SYNC_PENDING_EXCEPTION_COUNT = "sync_pending_exception_count"
         const val SYNC_LAST_SUCCESS_AT = "sync_last_success_at"
