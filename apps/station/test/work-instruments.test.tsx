@@ -241,13 +241,13 @@ describe("work instruments", () => {
       />,
     );
     const status = screen.getByRole("status", {
-      name: "Accepted: (01)04600000000015 (21)SERIAL-42 (91)KEY (92)SIGNATURE (93)TAIL",
+      name: "Accepted: (01)04600000000015 (21)SERIAL-42",
     });
     const acceptedMarker = status.querySelector('[data-semantic="accepted-marker"]');
     expect(acceptedMarker?.textContent).toBe("✓");
     expect(acceptedMarker?.getAttribute("aria-hidden")).toBe("true");
     expect(status.querySelector('[data-semantic="normalized-code"]')?.textContent).toBe(
-      "(01)04600000000015 (21)SERIAL-42 (91)KEY (92)SIGNATURE (93)TAIL",
+      "(01)04600000000015 (21)SERIAL-42",
     );
     expect(status.querySelector('[data-semantic="verdict"]')).toBeNull();
     expect(status.querySelector('[data-semantic="gtin"]')).toBeNull();
@@ -458,20 +458,32 @@ describe("work instruments", () => {
       <WorkCounters
         accepted={1234567}
         rejected={98765}
+        duplicates={5}
         pendingSync={17}
-        labels={{ accepted: "Accepted", rejected: "Rejected", synchronized: "Synchronized" }}
+        labels={{
+          accepted: "Accepted",
+          errors: "Errors",
+          duplicates: "Duplicates",
+          synchronized: "Synchronized",
+        }}
       />,
     );
     expect(screen.getByText("1,234,567")).toBeDefined();
-    expect(screen.getByText("98,765")).toBeDefined();
+    expect(screen.getByText("98,760")).toBeDefined();
     expect(screen.getByText("17 pending")).toBeDefined();
 
     rerender(
       <WorkCounters
         accepted={0}
         rejected={0}
+        duplicates={0}
         pendingSync={0}
-        labels={{ accepted: "Accepted", rejected: "Rejected", synchronized: "Synchronized" }}
+        labels={{
+          accepted: "Accepted",
+          errors: "Errors",
+          duplicates: "Duplicates",
+          synchronized: "Synchronized",
+        }}
       />,
     );
     expect(screen.getByText("Synchronized")).toBeDefined();

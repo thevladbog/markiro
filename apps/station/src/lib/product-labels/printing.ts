@@ -109,6 +109,7 @@ export async function verifyProductLabel(
   if (
     input.attemptId !== projection.attemptId ||
     projection.verificationOutcome === "verified" ||
+    projection.verificationOutcome === "skipped" ||
     !(
       projection.attemptState === "delivery_unknown" ||
       (projection.attemptState === "sent" && projection.verification === "required")
@@ -123,6 +124,26 @@ export async function verifyProductLabel(
       : { ...base, kind: "verification_rejected", reason: verdict };
   const result = await appendProductLabelEvent(exec, input.credentialOwnership, event);
   return result === "applied" ? verdict : "stale";
+}
+
+/** A deliberate operator skip is a durable outcome, never proof of a physical scan. */
+export async function skipProductLabelVerification(
+  exec: SqlExecutor,
+  input: ProductLabelActor & { jobId: string; attemptId: string; credentialOwnership: string },
+): Promise<boolean> {
+  const job = await requireProductLabelJob(exec, input.credentialOwnership, input.jobId);
+  if (
+    job.ownershipConflict ||
+    input.attemptId !== job.projection.attemptId ||
+    job.projection.status !== "awaiting_verification"
+  )
+    return false;
+  return (
+    (await appendProductLabelEvent(exec, input.credentialOwnership, {
+      ...nextProductLabelEventBase(job, input),
+      kind: "verification_skipped",
+    })) === "applied"
+  );
 }
 
 export async function prepareProductLabelReprint(

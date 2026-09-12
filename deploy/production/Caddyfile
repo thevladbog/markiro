@@ -129,7 +129,7 @@
 		}
 
 		@stationRoot {
-			path /shifts /shifts/planning-config /shifts/product-label-templates /shifts/box-label-templates /products /products/gtin-check /lines
+			path /shifts /shifts/planning-config /shifts/product-label-templates /shifts/box-label-templates /shifts/pallet-label-templates /products /products/gtin-check /lines
 			header X-Api-Key *
 		}
 		handle @stationRoot {
@@ -139,7 +139,7 @@
 		}
 
 		@stationRootPreflight {
-			path /shifts /shifts/planning-config /shifts/product-label-templates /shifts/box-label-templates /products /products/gtin-check /lines
+			path /shifts /shifts/planning-config /shifts/product-label-templates /shifts/box-label-templates /shifts/pallet-label-templates /products /products/gtin-check /lines
 			method OPTIONS
 		}
 		handle @stationRootPreflight {

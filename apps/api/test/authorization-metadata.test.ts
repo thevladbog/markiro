@@ -229,6 +229,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
       listShifts: sharedReadPolicy,
       getPlanningConfig: sharedReadPolicy,
       listBoxLabelTemplates: sharedReadPolicy,
+      listPalletLabelTemplates: sharedReadPolicy,
       listProductLabelTemplates: sharedReadPolicy,
       getShiftSummary: sharedReadPolicy,
       getProductLabels: readPolicy,

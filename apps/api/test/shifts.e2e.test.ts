@@ -1684,6 +1684,81 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     });
   });
 
+  it("serves tenant- and category-scoped pallet summaries with the category default first", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const other = request.agent(app!.getHttpServer());
+    const otherTenantId = await signUpAndActivate(other);
+    const productId = await seedProduct(tenantId, {
+      status: "active",
+      chzProductGroupCode: 15,
+      boxCapacity: 10,
+    });
+    const foreignProductId = await seedProduct(otherTenantId, {
+      status: "active",
+      chzProductGroupCode: 15,
+      boxCapacity: 10,
+    });
+    const ids = {
+      category: randomUUID(),
+      global: randomUUID(),
+      disabled: randomUUID(),
+      wrongGroup: randomUUID(),
+      foreign: randomUUID(),
+      box: randomUUID(),
+    };
+    for (const [kind, id] of Object.entries(ids)) {
+      await db.insert(schema.labelTemplates).values({
+        id,
+        tenantId: kind === "foreign" ? otherTenantId : tenantId,
+        name: kind,
+        purpose: kind === "box" ? "box" : "pallet",
+        enabled: kind !== "disabled",
+        chzProductGroupCodes: kind === "wrongGroup" ? [8] : kind === "category" ? [15] : null,
+        spec: { widthMm: 100, heightMm: 150, dpi: 203, language: "zpl", elements: [] },
+      });
+    }
+    await agent.put("/org/profile").send({ defaultPalletLabelTemplateId: ids.global }).expect(200);
+    await db
+      .insert(schema.orgPalletLabelTemplateDefaults)
+      .values({ tenantId, chzProductGroupCode: 15, templateId: ids.category });
+    const device = await createTestStationDevice(app!, agent, "Pallet picker");
+    const route = `/shifts/pallet-label-templates?productId=${productId}`;
+    await request(app!.getHttpServer()).get(route).expect(401);
+    const response = await request(app!.getHttpServer())
+      .get(route)
+      .set("x-api-key", device.apiKey)
+      .expect(200);
+    expect(response.body).toEqual({
+      defaultPalletLabelTemplateId: ids.category,
+      defaultSource: "category",
+      items: [
+        {
+          id: ids.category,
+          name: "category",
+          widthMm: 100,
+          heightMm: 150,
+          dpi: 203,
+          language: "zpl",
+        },
+        { id: ids.global, name: "global", widthMm: 100, heightMm: 150, dpi: 203, language: "zpl" },
+      ],
+    });
+    await request(app!.getHttpServer())
+      .get(`/shifts/pallet-label-templates?productId=${foreignProductId}`)
+      .set("x-api-key", device.apiKey)
+      .expect(404);
+    expect((await agent.get(route).expect(200)).body).toEqual(response.body);
+    const legacy = await request(app!.getHttpServer())
+      .get("/shifts/pallet-label-templates")
+      .set("x-api-key", device.apiKey)
+      .expect(200);
+    expect(legacy.body.defaultPalletLabelTemplateId).toBe(ids.global);
+    expect(legacy.body.items.map((item: { id: string }) => item.id).sort()).toEqual(
+      [ids.global, ids.category, ids.wrongGroup].sort(),
+    );
+  });
+
   it("serves spec-free box-template summaries to a station key with the default first", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);

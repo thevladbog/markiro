@@ -52,6 +52,7 @@ import type {
   PalletTemplateResolution,
   ShiftBoxLabelTemplateOptionDto,
   ShiftBoxLabelTemplatesDto,
+  ShiftPalletLabelTemplatesDto,
   ShiftBundleDto,
   ShiftDto,
   ShiftMode,
@@ -335,6 +336,64 @@ export class ShiftsService {
     return {
       items,
       defaultBoxLabelTemplateId: resolved.templateId,
+      defaultSource: resolved.source,
+    };
+  }
+
+  async listPalletLabelTemplates(
+    tenantId: string,
+    productId?: string,
+  ): Promise<ShiftPalletLabelTemplatesDto> {
+    const chzProductGroupCode = await this.productGroupCodeForPicker(tenantId, productId);
+    const resolved = await resolveDefaultPalletLabelTemplate(
+      this.db,
+      tenantId,
+      chzProductGroupCode,
+    );
+    const rows = await this.db
+      .select({
+        id: schema.labelTemplates.id,
+        name: schema.labelTemplates.name,
+        spec: schema.labelTemplates.spec,
+        purpose: schema.labelTemplates.purpose,
+        enabled: schema.labelTemplates.enabled,
+        chzProductGroupCodes: schema.labelTemplates.chzProductGroupCodes,
+      })
+      .from(schema.labelTemplates)
+      .where(
+        and(
+          eq(schema.labelTemplates.tenantId, tenantId),
+          eq(schema.labelTemplates.enabled, true),
+          eq(schema.labelTemplates.purpose, "pallet"),
+        ),
+      )
+      .orderBy(schema.labelTemplates.name, schema.labelTemplates.id);
+    const items = rows
+      // Without a product every enabled template is offered (legacy stations);
+      // with one, only templates covering its category.
+      .filter(
+        (row) =>
+          row.purpose === "pallet" &&
+          (productId === undefined || isPalletLabelTemplateEligible(row, chzProductGroupCode)),
+      )
+      .map((row): ShiftBoxLabelTemplateOptionDto => {
+        const spec = row.spec as LabelTemplateSpec;
+        return {
+          id: row.id,
+          name: row.name,
+          widthMm: spec.widthMm,
+          heightMm: spec.heightMm,
+          dpi: spec.dpi,
+          language: spec.language,
+        };
+      });
+    // Default first so the preselected option is on the station's first page.
+    items.sort((a, b) =>
+      a.id === resolved.templateId ? -1 : b.id === resolved.templateId ? 1 : 0,
+    );
+    return {
+      items,
+      defaultPalletLabelTemplateId: resolved.templateId,
       defaultSource: resolved.source,
     };
   }

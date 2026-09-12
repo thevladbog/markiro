@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import type {} from "../../../apps/station/test/browser/product-labels-types.js";
-const station = "http://127.0.0.1:43182";
+const station = process.env.STATION_PRODUCT_LABELS_URL ?? "http://127.0.0.1:43182";
 async function open(page: Page, verification = "required") {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(
@@ -14,11 +14,16 @@ test("required verification blocks the next unit; full tail and restart use the 
 }, info) => {
   await open(page);
   await page.evaluate(() => window.__productLabels.scan());
-  const dialog = page.getByRole("dialog", { name: "Проверьте этикетку", exact: true });
+  const dialog = page.getByRole("dialog", {
+    name: "Отсканируйте напечатанную этикетку",
+    exact: true,
+  });
   await expect(dialog).toBeVisible();
   expect((await dialog.boundingBox())?.width).toBe(1280);
   await page.screenshot({ path: info.outputPath("station-required.png") });
-  await expect(page.getByRole("button", { name: "Пропустить", exact: true })).toHaveCount(0);
+  await expect(
+    dialog.getByRole("button", { name: "Пропустить проверку", exact: true }),
+  ).toBeEnabled();
   expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight)).toBe(
     true,
   );
@@ -37,12 +42,38 @@ test("required verification blocks the next unit; full tail and restart use the 
   await expect(dialog).toBeVisible();
   expect((await page.evaluate(() => window.__productLabels.inspect())).prints).toBe(1);
   await page.evaluate(() => window.__productLabels.scan());
-  await expect(page.getByText("Этикетка подтверждена", { exact: true })).toBeVisible();
+  await expect(page.getByText("Этикетка подтверждена", { exact: true })).toHaveCount(1);
   await expect(dialog).toHaveCount(0);
   const state = await page.evaluate(() => window.__productLabels.inspect());
   expect(state.accepted).toBe(1);
   expect(state.events.at(-1)).toBe("verified");
   await page.screenshot({ path: info.outputPath("station-verified.png") });
+});
+
+test("explicit skip is durable after reload and admits the next unit without verification", async ({
+  page,
+}) => {
+  await open(page);
+  await page.evaluate(() => window.__productLabels.scan());
+  const dialog = page.getByRole("dialog", {
+    name: "Отсканируйте напечатанную этикетку",
+    exact: true,
+  });
+  await dialog.getByRole("button", { name: "Пропустить проверку", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText("Проверка пропущена", { exact: true })).toBeVisible();
+  await page.reload();
+  await page.waitForFunction(() => window.__productLabels?.ready());
+  const saved = await page.evaluate(() => window.__productLabels.inspect());
+  expect(saved.events).toEqual(["prepared", "sending", "sent", "verification_skipped"]);
+  expect(saved.accepted).toBe(1);
+  expect(saved.prints).toBe(1);
+  await expect(page.getByText("Этикетка подтверждена", { exact: true })).toHaveCount(0);
+  await page.evaluate(() =>
+    window.__productLabels.scan("]d2010460000000001521SERIAL-43\u001d93NewTail"),
+  );
+  await expect(dialog).toBeVisible();
+  expect((await page.evaluate(() => window.__productLabels.inspect())).accepted).toBe(2);
 });
 
 test("unknown delivery after interrupted mock send survives reload without auto resend; reprint requires a reason and preserves bytes", async ({
@@ -68,14 +99,16 @@ test("unknown delivery after interrupted mock send survives reload without auto 
   await reason.getByRole("radio", { name: "Этикетка повреждена", exact: true }).check();
   await page.screenshot({ path: info.outputPath("station-reprint-reason.png") });
   await reason.getByRole("button", { name: "Напечатать повторно", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Проверьте этикетку", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("dialog", { name: "Отсканируйте напечатанную этикетку", exact: true }),
+  ).toBeVisible();
   const state = await page.evaluate(() => window.__productLabels.inspect());
   expect(state.prints).toBe(2);
   expect(state.accepted).toBe(1);
   expect(state.bytes).toHaveLength(2);
   expect(state.bytes[1]).toBe(state.bytes[0]);
   await page.evaluate(() => window.__productLabels.scan());
-  await expect(page.getByText("Этикетка подтверждена", { exact: true })).toBeVisible();
+  await expect(page.getByText("Этикетка подтверждена", { exact: true })).toHaveCount(1);
 });
 test("verification off continues after durable send and reprints from local history without another acceptance", async ({
   page,
@@ -124,10 +157,12 @@ test("verification off continues after durable send and reprints from local hist
 });
 
 const galleryStates = [
+  "new-shift-pallet-template",
   "validation-print-prepared",
   "validation-print-sending",
   "validation-print-required",
   "validation-print-none",
+  "validation-print-skipped",
   "validation-print-unknown",
   "validation-print-verified",
   "validation-print-waiting",
@@ -388,3 +423,196 @@ test("printer settings remain usable on the existing 1024 by 768 floor viewport"
   await expect(page.getByRole("button", { name: "Done", exact: true })).toBeEnabled();
   await page.screenshot({ path: info.outputPath("station-printer-1024-en.png") });
 });
+
+for (const locale of ["ru", "en"])
+  for (const theme of ["light", "dark"])
+    test(`pallet with 66 boxes keeps assembly and actions visible ${locale} ${theme}`, async ({
+      page,
+    }, info) => {
+      await page.addInitScript((theme) => localStorage.setItem("markiro.theme", theme), theme);
+      for (const viewport of [
+        { width: 1280, height: 800 },
+        { width: 1024, height: 768 },
+      ]) {
+        await page.setViewportSize(viewport);
+        await page.goto(`${station}/?gallery=1&state=work-pallet-66&locale=${locale}`);
+        const pallet = page.locator(".pallet-strip");
+        await expect(pallet.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
+        await expect(pallet.getByRole("progressbar")).toHaveAttribute("aria-valuemax", "66");
+        await expect(pallet.getByText(/64\s*%/)).toBeVisible();
+        for (const control of [
+          pallet,
+          ...(await pallet.getByRole("button").all()),
+          ...(await page.locator(".work-box-fill__actions button").all()),
+        ]) {
+          await expect(control).toBeInViewport({ ratio: 1 });
+        }
+        expect(
+          await pallet.evaluate(
+            (el) => el.scrollHeight <= el.clientHeight && el.scrollWidth <= el.clientWidth,
+          ),
+        ).toBe(true);
+        const box = page.locator(".work-box-fill");
+        expect(await box.evaluate((el) => el.scrollHeight <= el.clientHeight)).toBe(true);
+        await page.screenshot({
+          path: info.outputPath(`pallet-66-${viewport.width}-${locale}-${theme}.png`),
+        });
+        await pallet
+          .getByRole("button", { name: locale === "ru" ? "Состав паллеты" : "Pallet contents" })
+          .click();
+        const dialog = page.getByRole("dialog");
+        await expect(dialog.getByRole("row")).toHaveCount(43);
+        await page.keyboard.press("Tab");
+        const contents = dialog.getByRole("region");
+        await expect(contents).toBeFocused();
+        await contents.press("PageDown");
+        await expect.poll(() => contents.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+        const back = dialog.getByRole("button", {
+          name: locale === "ru" ? "К сборке" : "Back to assembly",
+        });
+        await expect(back).toBeInViewport({ ratio: 1 });
+        await dialog.getByText("004601234560000001", { exact: true }).scrollIntoViewIfNeeded();
+        await expect(dialog.getByText("004601234560000001", { exact: true })).toBeInViewport({
+          ratio: 1,
+        });
+        await expect(back).toBeInViewport({ ratio: 1 });
+        await page.screenshot({
+          path: info.outputPath(`pallet-contents-${viewport.width}-${locale}-${theme}.png`),
+        });
+        await back.click();
+        await expect(dialog).toHaveCount(0);
+        await expect(pallet).toBeVisible();
+      }
+    });
+
+for (const locale of ["ru", "en"])
+  for (const theme of ["light", "dark"])
+    test(`station creates pallet aggregation using product capacity and separate labels ${locale} ${theme}`, async ({
+      page,
+    }, info) => {
+      const writes: Record<string, unknown>[] = [];
+      const unexpected: string[] = [];
+      const template = { widthMm: 100, heightMm: 150, dpi: 203, language: "zpl" };
+      await page.addInitScript((theme) => localStorage.setItem("markiro.theme", theme), theme);
+      await page.route(`${station}/__product_labels_api/**`, async (route) => {
+        const path = new URL(route.request().url()).pathname.replace("/__product_labels_api", "");
+        let body: unknown;
+        if (path === "/products/gtin-check") body = { gtin14: "04600000000015", owner: "own" };
+        else if (path === "/products")
+          body = {
+            items: [
+              {
+                id: "product",
+                gtin14: "04600000000015",
+                name: "Вода, 0,5 л",
+                boxCapacity: 10,
+                palletBoxCapacity: 66,
+              },
+            ],
+          };
+        else if (path === "/shifts/box-label-templates")
+          body = {
+            items: [{ ...template, id: "box-label", name: "Этикетка короба" }],
+            defaultBoxLabelTemplateId: "box-label",
+          };
+        else if (path === "/shifts/pallet-label-templates")
+          body = {
+            items: [
+              {
+                ...template,
+                id: "pallet-label",
+                name: locale === "en" ? "Pallet 100×150" : "Паллета 100×150",
+              },
+            ],
+            defaultPalletLabelTemplateId: "pallet-label",
+          };
+        else if (path === "/shifts") {
+          writes.push(route.request().postDataJSON());
+          body = { id: "shift" };
+        } else if (path === "/shifts/shift/open")
+          body = { id: "shift", status: "active", mode: "aggregation" };
+        else {
+          unexpected.push(path);
+          await route.abort();
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(body),
+        });
+      });
+      for (const viewport of [
+        { width: 1280, height: 800 },
+        { width: 1024, height: 768 },
+      ]) {
+        await page.setViewportSize(viewport);
+        await page.goto(
+          `${station}/test/browser/product-labels.html?id=${randomUUID()}&screen=newshift&locale=${locale}`,
+        );
+        const input = page.getByRole("textbox", {
+          name: locale === "ru" ? "Введите или отсканируйте GTIN" : "Type or scan a GTIN",
+          exact: true,
+        });
+        await input.fill("04600000000015");
+        await input.press("Enter");
+        await page
+          .getByRole("button", { name: locale === "ru" ? "Агрегация" : "Aggregation", exact: true })
+          .click();
+        await page
+          .getByRole("button", {
+            name: locale === "ru" ? "С паллетами" : "With pallets",
+            exact: true,
+          })
+          .click();
+        await expect(
+          page.getByText(
+            locale === "ru"
+              ? "66 коробов на паллете · из карточки товара"
+              : "66 boxes per pallet · from the product card",
+          ),
+        ).toBeInViewport({
+          ratio: 1,
+        });
+        await expect(page.getByRole("spinbutton")).toHaveCount(0);
+        const date = page.getByRole("button", {
+          name: locale === "ru" ? "Дата производства" : "Production date",
+          exact: true,
+        });
+        await expect(date).toBeInViewport({ ratio: 1 });
+        await page.screenshot({
+          path: info.outputPath(`pallet-create-${viewport.width}-${locale}-${theme}.png`),
+        });
+        await page
+          .getByRole("button", { name: locale === "ru" ? "Начать" : "Start", exact: true })
+          .click();
+        await page
+          .getByRole("button", { name: locale === "ru" ? "Далее" : "Next", exact: true })
+          .click();
+        await expect(
+          page.getByRole("button", {
+            name: locale === "en" ? /Pallet 100×150/ : /Паллета 100×150/,
+          }),
+        ).toHaveAttribute("aria-pressed", "true");
+        await page.screenshot({
+          path: info.outputPath(`pallet-template-${viewport.width}-${locale}-${theme}.png`),
+        });
+        await page
+          .getByRole("button", { name: locale === "ru" ? "Начать" : "Start", exact: true })
+          .click();
+        await expect(
+          page.getByText(locale === "en" ? "Shift opened" : "Смена открыта", { exact: true }),
+        ).toBeVisible();
+      }
+      expect(writes).toHaveLength(2);
+      for (const write of writes) {
+        expect(write).toMatchObject({
+          palletsEnabled: true,
+          boxLabelTemplateId: "box-label",
+          palletLabelTemplateId: "pallet-label",
+        });
+        expect(write).not.toHaveProperty("palletBoxCapacity");
+        expect(write).not.toHaveProperty("boxCapacity");
+      }
+      expect(unexpected).toEqual([]);
+    });

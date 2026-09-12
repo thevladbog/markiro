@@ -102,7 +102,7 @@ describe("duplicate printing through the real WorkScreen scanner", () => {
     expect(callbacks.size).toBe(1);
     scan(h.input.raw, h.input.raw);
     await idle();
-    await screen.findByRole("dialog", { name: "Проверьте этикетку" });
+    await screen.findByRole("dialog", { name: "Отсканируйте напечатанную этикетку" });
     expect(h.print).toHaveBeenCalledTimes(1);
     scan(h.input.raw.replace("tail", "TAIL"));
     await idle();
@@ -110,12 +110,38 @@ describe("duplicate printing through the real WorkScreen scanner", () => {
     expect((await h.exec.all<{ n: number }>("SELECT count(*) n FROM codes_mirror"))[0]?.n).toBe(1);
     scan(h.input.raw);
     await idle();
-    await screen.findByText("Этикетка подтверждена");
+    expect(await screen.findAllByText("Этикетка подтверждена")).not.toHaveLength(0);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(callbacks.size).toBe(1);
     expect(
       (await h.exec.all<{ n: number }>("SELECT count(*) n FROM scan_events_mirror"))[0]?.n,
     ).toBe(1);
+  });
+  it("skips explicitly with an audit event and admits the next unit without a verified claim", async () => {
+    const { h, scan, idle } = await setup();
+    scan(h.input.raw);
+    await idle();
+    const dialog = await screen.findByRole("dialog", {
+      name: "Отсканируйте напечатанную этикетку",
+    });
+    expect(dialog.classList.contains("product-label-verification--awaiting")).toBe(true);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Пропустить проверку" }));
+    await idle();
+    await screen.findByText("Проверка пропущена");
+    expect(screen.queryByText("Этикетка подтверждена")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const events = await h.exec.all<{ event_json: string }>(
+      "SELECT event_json FROM product_label_events WHERE json_extract(event_json,'$.kind')='verification_skipped'",
+    );
+    expect(events).toHaveLength(1);
+    expect(JSON.parse(events[0]?.event_json ?? "null")).toMatchObject({
+      operatorId: h.input.operatorId,
+      shiftId: h.input.shiftId,
+    });
+    scan(h.input.raw.replace("SERIAL-42", "SERIAL-43"));
+    await idle();
+    expect(h.print).toHaveBeenCalledTimes(2);
+    await screen.findByRole("dialog", { name: "Отсканируйте напечатанную этикетку" });
   });
   it("recovers a committed acceptance after its reply is lost without losing the print prompt", async () => {
     const { h, scan, idle } = await setup();
@@ -160,7 +186,9 @@ describe("duplicate printing through the real WorkScreen scanner", () => {
     const { h, scan, idle, exit, view, element } = await setup();
     scan(h.input.raw);
     await idle();
-    const dialog = await screen.findByRole("dialog", { name: "Проверьте этикетку" });
+    const dialog = await screen.findByRole("dialog", {
+      name: "Отсканируйте напечатанную этикетку",
+    });
     fireEvent.click(within(dialog).getByRole("button", { name: "Пауза" }));
     await waitFor(() => expect(exit).toHaveBeenCalledTimes(1));
     expect(h.print).toHaveBeenCalledTimes(1);
@@ -169,14 +197,14 @@ describe("duplicate printing through the real WorkScreen scanner", () => {
     ).toBe("awaiting_verification");
     view.unmount();
     render(element);
-    await screen.findByRole("dialog", { name: "Проверьте этикетку" });
+    await screen.findByRole("dialog", { name: "Отсканируйте напечатанную этикетку" });
     expect(h.print).toHaveBeenCalledTimes(1);
   });
   it("requires a reason and uses the same bytes for a reprint", async () => {
     const { h, scan, idle } = await setup();
     scan(h.input.raw);
     await idle();
-    fireEvent.click(await screen.findByRole("button", { name: "Напечатать повторно" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Проблема с этикеткой" }));
     scan(h.input.raw);
     await idle();
     expect(

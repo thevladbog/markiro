@@ -1,3 +1,4 @@
+import { PalletContents } from "../components/PalletContents.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -252,6 +253,7 @@ export function WorkScreen({
     Boolean(productLabels.work && !productLabels.work.canAccept());
 
   const [accepted, setAccepted] = useState(0);
+  const [duplicates, setDuplicates] = useState(0);
   const [rejected, setRejected] = useState(0);
   const [signal, setSignal] = useState<{ tone: SignalTone; title: string; detail?: string } | null>(
     null,
@@ -446,7 +448,11 @@ export function WorkScreen({
   // section above is, whenever `palletBoxCapacity` is null or this device has
   // no `issuerPrefix` (a pallet always burns a serial from the SAME pool a
   // box does; see `close-box.ts`'s `CloseBoxDeps`).
-  const [pallet, setPallet] = useState<{ palletId: string; boxCount: number } | null>(null);
+  const [pallet, setPallet] = useState<{
+    palletId: string;
+    boxCount: number;
+    lastBoxSscc: string | null;
+  } | null>(null);
   // Set when this device's serial pool could not close an over-capacity
   // pallet (`close-box.ts` leaves it open rather than blocking further
   // boxes). Text-only, per the project's accessibility rule -- `PalletStrip`
@@ -454,6 +460,7 @@ export function WorkScreen({
   const [palletNoSerials, setPalletNoSerials] = useState(false);
   const [closedPallets, setClosedPallets] = useState<ClosedPalletSummary[]>([]);
   const [palletExceptionsOpen, setPalletExceptionsOpen] = useState(false);
+  const [palletContentsId, setPalletContentsId] = useState<string | null>(null);
   const [palletMenuOpen, setPalletMenuOpen] = useState(false);
   const [palletEarlyCloseConfirm, setPalletEarlyCloseConfirm] = useState(false);
   const [shiftClosePalletConfirm, setShiftClosePalletConfirm] = useState<{
@@ -487,6 +494,7 @@ export function WorkScreen({
   const updatePalletClose = useCallback((next: PalletCloseScreenState | null): void => {
     palletCloseRef.current = next;
     setPalletCloseState(next);
+    if (next) setPalletContentsId(null);
   }, []);
 
   const reloadPallet = useCallback(async (): Promise<void> => {
@@ -496,7 +504,15 @@ export function WorkScreen({
     }
     try {
       const current = await currentPallet(exec, shiftId, terminalId);
-      setPallet(current ? { palletId: current.palletId, boxCount: current.boxCount } : null);
+      setPallet(
+        current
+          ? {
+              palletId: current.palletId,
+              boxCount: current.boxCount,
+              lastBoxSscc: current.lastBoxSscc,
+            }
+          : null,
+      );
     } catch (err) {
       console.error("station: failed to load the current pallet", err);
     }
@@ -1068,6 +1084,7 @@ export function WorkScreen({
     noSerials ||
     palletClose ||
     palletExceptionsOpen ||
+    palletContentsId !== null ||
     palletMenuOpen ||
     palletEarlyCloseConfirm ||
     shiftClosePalletConfirm,
@@ -1180,7 +1197,12 @@ export function WorkScreen({
    * callback was already queued when the replacement signal arrived.
    */
   const showTimedSignal = useCallback(
-    (tone: SignalTone, title: string, detail?: string, options?: { playSound?: boolean }): void => {
+    (
+      tone: SignalTone,
+      title: string,
+      detail?: string,
+      options?: { playSound?: boolean; durationMs?: number },
+    ): void => {
       const generation = ++signalGeneration.current;
       if (options?.playSound !== false) playSignalTone(tone, signalContext.current.sound);
       setSignal({ tone, title, ...(detail === undefined ? {} : { detail }) });
@@ -1189,7 +1211,7 @@ export function WorkScreen({
         if (signalGeneration.current !== generation) return;
         flashTimer.current = null;
         setSignal(null);
-      }, FLASH_MS[tone]);
+      }, options?.durationMs ?? FLASH_MS[tone]);
     },
     [],
   );
@@ -1885,7 +1907,10 @@ export function WorkScreen({
         onOutcome(outcome) {
           const { t: liveT, language, onScanRecorded: liveOnScanRecorded } = live.current;
           if (outcome.verdict.status === "ok") setAccepted((n) => n + 1);
-          else setRejected((n) => n + 1);
+          else {
+            setRejected((n) => n + 1);
+            if (outcome.verdict.status === "duplicate") setDuplicates((n) => n + 1);
+          }
 
           const title =
             outcome.verdict.status === "ok"
@@ -2044,9 +2069,12 @@ export function WorkScreen({
       });
       for (const code of releasedCodes) keys.current.delete(code.code_hash);
       await reloadClosedBoxes();
+      await reloadPallet();
       live.current.onScanRecorded?.();
     });
   }
+
+  const waitForPalletContents = useCallback(() => queue.idle(), [queue]);
 
   // Registration owns the intake lifecycle too. Closing first prevents a
   // source callback racing unmount from adding work after recovery's barrier
@@ -2071,7 +2099,8 @@ export function WorkScreen({
   // to compete with anything is print verification itself, not a stray
   // rejection from the loop underneath it.
   useEffect(() => {
-    if (showExceptions && productLabelsRef.current.work) return source.start(() => {});
+    if (palletContentsId !== null || (showExceptions && productLabelsRef.current.work))
+      return source.start(() => {});
     if (
       verification ||
       confirmClear ||
@@ -2102,7 +2131,11 @@ export function WorkScreen({
         void labels.work.verify(raw).then((result) => {
           if (result !== "stale") {
             live.current.onScanRecorded?.();
-            playSignalTone(result === "match" ? "ok" : "error", live.current.sound);
+            if (result === "match") {
+              showTimedSignal("ok", live.current.t("productLabels.verified"), undefined, {
+                durationMs: 650,
+              });
+            } else playSignalTone("error", live.current.sound);
           }
         });
         return;
@@ -2136,8 +2169,10 @@ export function WorkScreen({
     palletClose,
     palletExceptionsOpen,
     palletMenuOpen,
+    palletContentsId,
     palletEarlyCloseConfirm,
     shiftClosePalletConfirm,
+    showTimedSignal,
   ]);
 
   const printBlocked =
@@ -2329,6 +2364,19 @@ export function WorkScreen({
               ) : null}
               {palletBoxCapacity !== null && issuerPrefix !== null ? (
                 <PalletStrip
+                  key={pallet?.palletId ?? "empty-pallet"}
+                  lastBoxSscc={pallet?.lastBoxSscc ?? null}
+                  disabled={ordinaryScanBlockedRef.current || closing}
+                  onShowContents={() => {
+                    if (!pallet || ordinaryScanBlockedRef.current) return;
+                    ordinaryScanBlockedRef.current = true;
+                    setPalletContentsId(pallet.palletId);
+                  }}
+                  onClose={() => {
+                    if (ordinaryScanBlockedRef.current) return;
+                    ordinaryScanBlockedRef.current = true;
+                    setPalletEarlyCloseConfirm(true);
+                  }}
                   boxCount={pallet?.boxCount ?? 0}
                   capacity={palletBoxCapacity}
                   serials={palletNoSerials ? "empty" : "available"}
@@ -2339,6 +2387,7 @@ export function WorkScreen({
               <WorkCounters
                 accepted={accepted}
                 rejected={rejected}
+                duplicates={duplicates}
                 pendingSync={pendingSync}
                 locale={workLabels.locale}
                 labels={workLabels.counters}
@@ -2369,6 +2418,7 @@ export function WorkScreen({
         <ProductLabelVerification
           state={productLabels.state}
           work={productLabels.work}
+          onSkipped={() => live.current.onScanRecorded?.()}
           onPause={() => void pauseProductLabels()}
           {...(onOpenPrinterSetup ? { onSetup: onOpenPrinterSetup } : {})}
         />
@@ -2556,7 +2606,7 @@ export function WorkScreen({
         </p>
       </FullScreenDialog>
 
-      {signal ? (
+      {signal && !(signal.tone === "ok" && productLabelsBlocked) ? (
         <SignalOverlay
           tone={signal.tone}
           title={signal.title}
@@ -2651,6 +2701,16 @@ export function WorkScreen({
         />
       ) : null}
 
+      {palletContentsId !== null ? (
+        <PalletContents
+          exec={exec}
+          shiftId={shiftId}
+          terminalId={terminalId}
+          palletId={palletContentsId}
+          waitForIdle={waitForPalletContents}
+          onClose={() => setPalletContentsId(null)}
+        />
+      ) : null}
       {palletClose ? (
         <PalletClose
           result={{ status: "closed", sscc: palletClose.sscc, boxCount: palletClose.boxCount }}

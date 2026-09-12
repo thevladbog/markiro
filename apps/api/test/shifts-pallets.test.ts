@@ -242,6 +242,43 @@ describe.skipIf(!ready)("shift pallet configuration (task 8)", () => {
     ).rejects.toMatchObject({ status: 403 });
   });
 
+  it("creates and opens a pallet shift from Station using the product capacity and selected label", async () => {
+    const { agent, tenantId, productId, boxTemplateId } = await setupOrg();
+    await db
+      .update(schema.products)
+      .set({ palletBoxCapacity: 66 })
+      .where(eq(schema.products.id, productId));
+    const palletTemplateId = await seedPalletLabelTemplate(tenantId);
+    const device = await createTestStationDevice(app!, agent, "Station pallet planning");
+    const server = app!.getHttpServer();
+    const created = await request(server)
+      .post("/shifts")
+      .set("x-api-key", device.apiKey)
+      .send({
+        productId,
+        mode: "aggregation",
+        palletsEnabled: true,
+        boxLabelTemplateId: boxTemplateId,
+        palletLabelTemplateId: palletTemplateId,
+      })
+      .expect(201);
+    expect(created.body).toMatchObject({
+      createdFrom: "station",
+      palletsEnabled: true,
+      palletBoxCapacity: 66,
+      boxCapacity: 20,
+      palletLabelTemplateId: palletTemplateId,
+    });
+    const shiftId = created.body.id as string;
+    await request(server)
+      .post(`/shifts/${shiftId}/open`)
+      .set("x-api-key", device.apiKey)
+      .expect(200);
+    const bundle = await getBundle(shiftId, device.apiKey);
+    expect(bundle.shift).toMatchObject({ palletsEnabled: true, palletBoxCapacity: 66 });
+    expect(bundle.palletLabelTemplate?.id).toBe(palletTemplateId);
+  });
+
   it("prefills the box count from the product", async () => {
     const { agent, tenantId, productId } = await setupOrg();
     await setOrgDefaultPalletTemplate(tenantId, await seedPalletLabelTemplate(tenantId));

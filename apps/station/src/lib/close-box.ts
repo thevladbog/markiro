@@ -162,6 +162,7 @@ export async function closeCurrentBox(
         terminalId: deps.terminalId,
         openedAt: closedAt,
         boxCount: 0,
+        lastBoxSscc: null,
       };
     }
   }
