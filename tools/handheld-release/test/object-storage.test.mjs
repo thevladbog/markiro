@@ -168,3 +168,35 @@ test("read-back is over the public URL a terminal uses, not over the S3 API", as
     /does not match what was uploaded/,
   );
 });
+
+test("download copies only a channel's immutable APK with revalidation and its filename", async () => {
+  const sent = [];
+  const store = createHandheldObjectStore({
+    env,
+    Client: class {
+      async send(command) {
+        sent.push(command.input);
+      }
+    },
+  });
+  await store.copyDownload({ channel: "stable", versionName: "0.1.0" });
+  assert.deepEqual(sent[0], {
+    Bucket: env.YANDEX_STATION_RELEASE_BUCKET,
+    Key: "handheld/download",
+    CopySource: `${env.YANDEX_STATION_RELEASE_BUCKET}/handheld/stable/releases/0.1.0/markiro-tsd-0.1.0.apk`,
+    MetadataDirective: "REPLACE",
+    ContentType: "application/vnd.android.package-archive",
+    ContentDisposition: 'attachment; filename="markiro-tsd-0.1.0.apk"',
+    CacheControl: "public, max-age=0, must-revalidate",
+  });
+  await store.copyDownload({ channel: "beta", versionName: "0.1.0" });
+  assert.equal(sent[1].Key, "handheld/beta/download");
+  assert.ok(sent[1].CopySource.includes("/handheld/beta/"));
+  for (const input of [
+    { channel: "nightly", versionName: "0.1.0" },
+    { channel: "stable", versionName: "../station/evil" },
+  ]) {
+    await assert.rejects(() => store.copyDownload(input));
+  }
+  assert.equal(sent.length, 2);
+});

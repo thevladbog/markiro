@@ -1,4 +1,9 @@
-import { HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  CopyObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
 import process from "node:process";
 
@@ -29,7 +34,13 @@ export function handheldObjectKey({ channel, versionName, filename }) {
   return assertHandheldKey(`handheld/${channel}/releases/${versionName}/${filename}`);
 }
 
-/** The pointer a terminal polls. Moved last, and the only mutable key here. */
+/** A stable download path for people installing the current channel APK. */
+export function handheldDownloadKey(channel) {
+  assertHandheldChannel(channel);
+  return channel === "stable" ? "handheld/download" : "handheld/beta/download";
+}
+
+/** The pointer a terminal polls, moved after its immutable artifacts are verified. */
 export function handheldManifestKey(channel) {
   return assertHandheldKey(`handheld/${assertHandheldChannel(channel)}/latest.json`);
 }
@@ -62,6 +73,23 @@ export function createHandheldObjectStore({ env = process.env, Client = S3Client
   });
   return {
     bucket,
+    async copyDownload({ channel, versionName }) {
+      const key = handheldDownloadKey(channel);
+      if (!/^\d+\.\d+\.\d+$/.test(versionName)) throw new Error("invalid handheld version");
+      const filename = handheldApkName(versionName);
+      const source = handheldObjectKey({ channel, versionName, filename });
+      await client.send(
+        new CopyObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          CopySource: `${bucket}/${source}`,
+          MetadataDirective: "REPLACE",
+          ContentType: APK_CONTENT_TYPE,
+          ContentDisposition: `attachment; filename="${filename}"`,
+          CacheControl: MUTABLE_CACHE_CONTROL,
+        }),
+      );
+    },
     head: (key) => headHandheldObject({ client, bucket, key }),
     putImmutable: (key, body, contentType, expectedSha256) =>
       putHandheldImmutableObject({ client, bucket, key, body, contentType, expectedSha256 }),

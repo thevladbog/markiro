@@ -1,20 +1,54 @@
 package app.markiro.handheld.feature.hub
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.design.MarkiroTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.annotation.GraphicsMode
 
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 @RunWith(AndroidJUnit4::class)
 class HubScreenTest {
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun narrowHandheldShowsTheFullInventoryTitleOnOneLine() {
+        compose.setContent {
+            MarkiroTheme {
+                Box(Modifier.width(320.dp)) {
+                    HubScreen(HubUi("ООО", "Богатырев Владислав Сергеевич", "Линия 1", shifts = 0, inventories = 0), onTile = {}, onSignOut = {})
+                }
+            }
+        }
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText("Инвентаризация", useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals(1, layouts.single().lineCount)
+        val layout = layouts.single()
+        assertEquals("Инвентаризация".length, layout.getLineEnd(0, visibleEnd = true))
+        assertTrue("the whole title must fit horizontally", layout.getLineRight(0) <= layout.size.width)
+        assertTrue("the whole title must fit vertically", layout.getLineBottom(0) <= layout.size.height)
+        val operatorLayouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText("Богатырев Владислав Сергеевич · Линия 1")
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(operatorLayouts) }
+        val operator = operatorLayouts.single()
+        assertTrue("the operator name must not be clipped", operator.getLineBottom(operator.lineCount - 1) <= operator.size.height)
+    }
 
     @Test
     fun showsHeaderTilesAndCounts() {

@@ -7,6 +7,12 @@ name: Build handheld release
 on:
   workflow_dispatch:
     inputs:
+      action:
+        description: Build a release or refresh only the current download URL
+        required: true
+        type: choice
+        default: release
+        options: [release, sync-download]
       bump:
         description: Which part of the version this release moves
         required: true
@@ -73,6 +79,7 @@ jobs:
       # here so that everything it can refuse is refused before the release job
       # puts a signing key on a runner.
       - name: Resolve the next version
+        if: inputs.action != 'sync-download'
         id: version
         shell: bash
         env:
@@ -84,7 +91,7 @@ jobs:
           node tools/handheld-release/resolve.mjs
 
   release:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.action != 'sync-download'
     needs: authorize
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -177,8 +184,8 @@ jobs:
         run: rm -f "$RUNNER_TEMP/handheld.jks"
 
       # Publication runs only after the signature has been proven, and it moves
-      # the channel pointer last: a pointer moved first sends every terminal to
-      # a 404 for as long as the upload takes. The storage credential is scoped
+      # the channel pointer after verifying immutable artifacts, then refreshes
+      # the download URL. The storage credential is scoped
       # to this one command and to no build step.
       - name: Publish to the channel
         if: ${{ inputs.publish }}
@@ -211,3 +218,29 @@ jobs:
           path: ${{ runner.temp }}/out/markiro-tsd-${{ needs.authorize.outputs.version_name }}.apk
           if-no-files-found: error
           retention-days: 30
+
+  sync-download:
+    if: github.ref == 'refs/heads/main' && inputs.action == 'sync-download'
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: handheld-release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Install publishing dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Refresh the current download URL
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          YANDEX_STATION_RELEASE_ENDPOINT: https://storage.yandexcloud.net
+          YANDEX_STATION_RELEASE_BUCKET: ${{ vars.YANDEX_STATION_RELEASE_BUCKET }}
+          YANDEX_STATION_RELEASE_ACCESS_KEY_ID: ${{ secrets.YANDEX_STATION_RELEASE_ACCESS_KEY_ID }}
+          YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}
+        run: node tools/handheld-release/download.mjs

@@ -1,10 +1,18 @@
 package app.markiro.handheld.feature.settings
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.design.MarkiroTheme
 import app.markiro.handheld.core.scan.ScanSourceKind
@@ -13,10 +21,13 @@ import app.markiro.handheld.core.update.UpdateManifest
 import app.markiro.handheld.core.update.UpdateState
 import app.markiro.handheld.core.update.expectedArtifactUrl
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.annotation.GraphicsMode
 
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 @RunWith(AndroidJUnit4::class)
 class SettingsScreenTest {
     @get:Rule
@@ -36,6 +47,27 @@ class SettingsScreenTest {
         version = "0.1.0",
         installId = "0123456789abcdef",
     )
+
+    @Test
+    fun longSyncValueKeepsAGapAndAlignsEveryLineToTheTrailingEdge() {
+        compose.setContent {
+            MarkiroTheme {
+                Box(Modifier.width(320.dp)) {
+                    SettingsScreen(ui.copy(queue = 12, lastSyncAt = 0L), config,
+                        onBack = {}, onScanner = {}, onTheme = {}, onLanguage = {})
+                }
+            }
+        }
+        val valueNode = compose.onNodeWithText("12 · последняя отправка", substring = true, useUnmergedTree = true)
+        valueNode.performScrollTo()
+        val label = compose.onNodeWithText("Очередь синхронизации", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val value = valueNode.fetchSemanticsNode().boundsInRoot
+        assertTrue("label and value must have a gap", value.left - label.right >= 8f)
+        val layouts = mutableListOf<TextLayoutResult>()
+        valueNode.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals(TextAlign.End, layouts.single().layoutInput.style.textAlign)
+        assertEquals(false, layouts.single().hasVisualOverflow)
+    }
 
     /**
      * «Не знаю» is an answer an operator has to be able to read: a terminal is

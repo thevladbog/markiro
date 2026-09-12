@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import process from "node:process";
 
+import { publishHandheldDownload } from "./download.mjs";
 import { readNotes } from "./changelog.mjs";
 import { assertSupersedes, buildHandheldManifest, handheldChannelBaseUrl } from "./manifest.mjs";
 import {
@@ -108,7 +109,10 @@ export async function publishHandheldRelease({
     fetchImpl,
   });
 
+  const downloadUrl = await publishHandheldDownload({ manifest, channel, store, fetchImpl });
+
   return {
+    downloadUrl,
     manifest,
     apkUrl: handheldPublicUrl(apkKey),
     manifestUrl: handheldPublicUrl(pointerKey),
@@ -136,6 +140,7 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll("\\",
     channel: channel || "stable",
     store: createHandheldObjectStore({}),
   });
+  console.log(result.downloadUrl);
   console.log(result.apkUrl);
   console.log(result.manifestUrl);
 }
