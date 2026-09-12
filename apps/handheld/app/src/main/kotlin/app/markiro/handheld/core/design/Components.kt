@@ -69,7 +69,7 @@ fun ScreenColumn(
         // would always be the viewport plus the padding and every screen would
         // scroll by a few millimetres even when it fits.
         Column(
-            modifier = Modifier.verticalScroll(rememberScrollState()).heightIn(min = maxHeight).padding(padding),
+            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = maxHeight).padding(padding),
             verticalArrangement = verticalArrangement,
             horizontalAlignment = horizontalAlignment,
             content = content,

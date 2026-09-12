@@ -16,7 +16,7 @@ const stepIndex = (fragment) => steps.findIndex((step) => (step.name ?? "").incl
 test("the release is dispatch-only, owner-gated, and off main it does not run", () => {
   assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
   assert.equal(workflow.jobs.authorize.if, "github.ref == 'refs/heads/main'");
-  assert.equal(release.if, "github.ref == 'refs/heads/main'");
+  assert.equal(release.if, "github.ref == 'refs/heads/main' && inputs.action != 'sync-download'");
   assert.equal(release.needs, "authorize");
   assert.match(text, /test "\$RELEASE_ACTOR" = "\$RELEASE_OWNER"/);
   assert.match(text, /test "\$OWNER_CONFIRMATION" = "BUILD-HANDHELD-RELEASE"/);
@@ -134,5 +134,38 @@ test("every third-party action is pinned to a commit", () => {
   for (const step of steps) {
     if (!step.uses) continue;
     assert.match(step.uses, /@[0-9a-f]{40}(\s|$)/, `${step.uses} is not pinned to a commit`);
+  }
+});
+
+test("repairing the download URL uses the owner gate and release concurrency without a new build", () => {
+  assert.equal(workflow.on.workflow_dispatch.inputs.action.default, "release");
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.action.options, [
+    "release",
+    "sync-download",
+  ]);
+  const resolve = workflow.jobs.authorize.steps.find((step) => step.id === "version");
+  assert.equal(resolve.if, "inputs.action != 'sync-download'");
+  const sync = workflow.jobs["sync-download"];
+  assert.equal(sync.if, "github.ref == 'refs/heads/main' && inputs.action == 'sync-download'");
+  assert.equal(sync.needs, "authorize");
+  assert.equal(sync.environment, "handheld-release");
+  assert.equal(workflow.concurrency.group, "handheld-release");
+  const publish = sync.steps.find((step) =>
+    step.run?.includes("tools/handheld-release/download.mjs"),
+  );
+  assert.ok(publish);
+  assert.equal(publish.env.CHANNEL, "${{ inputs.channel }}");
+  assert.equal(
+    publish.env.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY,
+    "${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}",
+  );
+  for (const step of sync.steps) {
+    assert.ok(
+      !JSON.stringify(step).includes("MARKIRO_HANDHELD_"),
+      "sync must not receive signing credentials",
+    );
+    assert.ok(!step.run?.includes("gradlew"), "sync must not rebuild the APK");
+    if (step.run?.includes("pnpm install")) assert.equal(step.env, undefined);
+    if (step.uses) assert.match(step.uses, /@[0-9a-f]{40}$/);
   }
 });

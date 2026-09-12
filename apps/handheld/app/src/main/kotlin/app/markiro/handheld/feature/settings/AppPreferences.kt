@@ -1,16 +1,22 @@
 package app.markiro.handheld.feature.settings
 
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 enum class ThemeMode { DARK, LIGHT, SYSTEM }
 
 class AppPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("app", Context.MODE_PRIVATE)
 
+    private var selectedTheme by mutableStateOf(ThemeMode.valueOf(prefs.getString("theme", ThemeMode.DARK.name)!!))
+
     var theme: ThemeMode
-        get() = ThemeMode.valueOf(prefs.getString("theme", ThemeMode.DARK.name)!!)
+        get() = selectedTheme
         set(value) {
             prefs.edit().putString("theme", value.name).apply()
+            selectedTheme = value
         }
 
     /** BCP-47 tag applied through AppCompatDelegate; `ru` is the default. */

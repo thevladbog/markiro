@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
@@ -28,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -82,55 +85,63 @@ fun HubScreen(state: HubUi, onTile: (HubTile) -> Unit, onSignOut: () -> Unit, on
                 )
             }
         }
-        ScreenColumn(padding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-            Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(state.organization, style = t.caption, color = c.fg3)
-                    Text(
-                        listOfNotNull(state.operatorName.ifEmpty { null }, state.lineName).joinToString(" · "),
-                        style = t.strong.copy(fontSize = 16.sp),
-                        color = c.fg1,
-                    )
+        BoxWithConstraints(Modifier.weight(1f)) {
+            val columns = if (maxWidth / LocalDensity.current.fontScale >= 400.dp) 2 else 1
+            ScreenColumn(padding = PaddingValues(MarkiroSizes.sp4), verticalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(state.organization, style = t.caption, color = c.fg3)
+                        Text(
+                            listOfNotNull(state.operatorName.ifEmpty { null }, state.lineName).joinToString(" · "),
+                            style = t.strong.copy(fontSize = 16.sp),
+                            color = c.fg1,
+                        )
+                    }
+                    IconAction(Icons.AutoMirrored.Outlined.Logout, stringResource(R.string.hub_sign_out), onSignOut)
                 }
-                IconAction(Icons.AutoMirrored.Outlined.Logout, stringResource(R.string.hub_sign_out), onSignOut)
-            }
-            val stamp = state.countsAt?.takeIf { !state.reachable }
-                ?.let { " · " + stringResource(R.string.common_data_as_of, TimeText.hhmm(it)) }
-                .orEmpty()
-            // Intrinsic height keeps both tiles of a row equal when one status wraps to two lines.
-            val tile = Modifier.weight(1f).fillMaxHeight()
-            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-                Tile(
-                    Icons.Outlined.Factory,
-                    stringResource(R.string.hub_tile_shift),
-                    state.continueShiftNumber?.let { stringResource(R.string.hub_shift_continue, it) } ?: (shiftsLabel(state.shifts) + stamp),
-                    { onTile(HubTile.SHIFT) },
-                    tile,
-                    statusTone = if (state.continueShiftNumber != null) Tone.Ok else Tone.Neutral,
+                val stamp = state.countsAt?.takeIf { !state.reachable }
+                    ?.let { " · " + stringResource(R.string.common_data_as_of, TimeText.hhmm(it)) }
+                    .orEmpty()
+                val tiles: List<@Composable (Modifier) -> Unit> = listOf(
+                    { modifier ->
+                        Tile(
+                            Icons.Outlined.Factory,
+                            stringResource(R.string.hub_tile_shift),
+                            state.continueShiftNumber?.let { stringResource(R.string.hub_shift_continue, it) } ?: (shiftsLabel(state.shifts) + stamp),
+                            { onTile(HubTile.SHIFT) },
+                            modifier,
+                            statusTone = if (state.continueShiftNumber != null) Tone.Ok else Tone.Neutral,
+                        )
+                    },
+                    { modifier ->
+                        Tile(
+                            Icons.Outlined.Inventory2,
+                            stringResource(R.string.hub_tile_inventory),
+                            state.continueInventoryNumber?.let { stringResource(R.string.hub_inventory_continue, it) } ?: (inventoriesLabel(state.inventories) + stamp),
+                            { onTile(HubTile.INVENTORY) },
+                            modifier,
+                            statusTone = if (state.continueInventoryNumber != null) Tone.Ok else Tone.Neutral,
+                        )
+                    },
+                    { modifier ->
+                        Tile(
+                            Icons.Outlined.Settings,
+                            stringResource(R.string.hub_tile_settings),
+                            if (state.printerConfigured) "" else stringResource(R.string.hub_printer_not_set),
+                            { onTile(HubTile.SETTINGS) },
+                            modifier,
+                            statusTone = if (state.printerConfigured) Tone.Neutral else Tone.Warn,
+                        )
+                    },
                 )
-                Tile(
-                    Icons.Outlined.Inventory2,
-                    stringResource(R.string.hub_tile_inventory),
-                    state.continueInventoryNumber?.let { stringResource(R.string.hub_inventory_continue, it) } ?: (inventoriesLabel(state.inventories) + stamp),
-                    { onTile(HubTile.INVENTORY) },
-                    tile,
-                    statusTone = if (state.continueInventoryNumber != null) Tone.Ok else Tone.Neutral,
-                )
-            }
-            // Three tiles, not four: «Проверка кода» promised a trigger-press check
-            // that does not exist yet, and a tile that only ever answers «в
-            // следующем срезе» is worse than no tile. The spacer keeps the
-            // remaining tile the same size as the two above it.
-            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
-                Tile(
-                    Icons.Outlined.Settings,
-                    stringResource(R.string.hub_tile_settings),
-                    if (state.printerConfigured) "" else stringResource(R.string.hub_printer_not_set),
-                    { onTile(HubTile.SETTINGS) },
-                    tile,
-                    statusTone = if (state.printerConfigured) Tone.Neutral else Tone.Warn,
-                )
-                Spacer(Modifier.weight(1f))
+                // A narrow handheld (or enlarged system text) needs the full width
+                // for names such as «Инвентаризация» instead of splitting a word.
+                tiles.chunked(columns).forEach { rowTiles ->
+                    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3)) {
+                        rowTiles.forEach { tile -> tile(Modifier.weight(1f).fillMaxHeight()) }
+                        if (rowTiles.size < columns) Spacer(Modifier.weight(1f))
+                    }
+                }
             }
         }
     }

@@ -21,7 +21,7 @@ async function apkOnDisk() {
   return path;
 }
 
-/** Records the order of every write so the test can assert the pointer moves last. */
+/** Records publication order, including the direct download link. */
 function fakeStore({ existing = new Map(), failOn = null } = {}) {
   const writes = [];
   return {
@@ -34,6 +34,13 @@ function fakeStore({ existing = new Map(), failOn = null } = {}) {
       if (failOn === key) throw new Error("object storage refused the write");
       writes.push({ key, kind: "immutable", contentType });
       existing.set(key, { body, sha256: expectedSha256 });
+    },
+    async copyDownload({ channel, versionName }) {
+      const key = channel === "stable" ? "handheld/download" : "handheld/beta/download";
+      if (failOn === key) throw new Error("object storage refused the copy");
+      const source = `handheld/${channel}/releases/${versionName}/markiro-tsd-${versionName}.apk`;
+      writes.push({ key, kind: "download" });
+      existing.set(key, existing.get(source));
     },
     async put(key, body, contentType) {
       if (failOn === key) throw new Error("object storage refused the write");
@@ -82,7 +89,10 @@ test("the artifact lands before the pointer that sends terminals to it", async (
   });
   // A pointer moved first sends every terminal to a 404 for as long as the
   // upload takes, and forever if the upload then fails.
-  assert.equal(keys.at(-1), pointer, `pointer must be last, order was ${keys.join(" -> ")}`);
+  assert.equal(keys.at(-2), pointer);
+  assert.equal(keys.at(-1), "handheld/download");
+  assert.equal(result.downloadUrl, "https://releases.markiro.app/handheld/download");
+  assert.deepEqual(store.objects.get("handheld/download").body, apkBytes);
   assert.ok(keys.indexOf(apkKey) < keys.indexOf(pointer));
   assert.equal(result.manifest.sha256, apkSha256);
   assert.equal(
@@ -110,6 +120,8 @@ test("a failed artifact upload leaves the pointer untouched", async () => {
     publishHandheldRelease({ ...(await release()), store, fetchImpl: fakeFetch(store) }),
   );
   assert.equal(store.objects.has(handheldManifestKey("stable")), false);
+  assert.equal(store.objects.has("handheld/beta/download"), false);
+  assert.equal(store.objects.has("handheld/download"), false);
 });
 
 test("a versionCode that does not grow is refused before anything is written", async () => {
@@ -177,4 +189,18 @@ test("publishing to beta keeps stable's pointer alone", async () => {
   });
   assert.equal(store.objects.has(handheldManifestKey("beta")), true);
   assert.equal(store.objects.has(handheldManifestKey("stable")), false);
+  assert.equal(store.objects.has("handheld/beta/download"), true);
+  assert.equal(store.objects.has("handheld/download"), false);
+});
+
+test("a failed download alias update fails the release and preserves its verified channel for repair", async () => {
+  const store = fakeStore({ failOn: "handheld/download" });
+  await assert.rejects(
+    () =>
+      release().then((input) =>
+        publishHandheldRelease({ ...input, store, fetchImpl: fakeFetch(store) }),
+      ),
+    /refused the copy/,
+  );
+  assert.equal(store.objects.has(handheldManifestKey("stable")), true);
 });

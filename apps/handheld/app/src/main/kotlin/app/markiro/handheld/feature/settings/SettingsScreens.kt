@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -31,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.markiro.handheld.R
@@ -294,21 +296,21 @@ private fun TestButton(label: String, modifier: Modifier, onClick: () -> Unit) {
 private fun SettingRow(label: String, value: String, onClick: () -> Unit) {
     val c = MarkiroTheme.colors
     Row(
-        Modifier.fillMaxWidth().height(MarkiroSizes.controlRow).clickable(onClick = onClick),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        Modifier.fillMaxWidth().heightIn(min = MarkiroSizes.controlRow).clickable(onClick = onClick).padding(vertical = MarkiroSizes.sp2),
+        horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = MarkiroTheme.type.body, color = c.fg1)
-        Text(value, style = MarkiroTheme.type.caption.copy(fontSize = 15.sp), color = c.fg2)
+        Text(label, style = MarkiroTheme.type.body, color = c.fg1, modifier = Modifier.weight(1f))
+        Text(value, style = MarkiroTheme.type.caption.copy(fontSize = 15.sp), color = c.fg2, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
     }
 }
 
 @Composable
 private fun InfoRow(label: String, value: String) {
     val c = MarkiroTheme.colors
-    Row(Modifier.fillMaxWidth().height(40.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MarkiroTheme.type.body, color = c.fg1)
-        Text(value, style = MarkiroTheme.type.caption.copy(fontSize = 15.sp), color = c.fg1)
+    Row(Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(vertical = MarkiroSizes.sp2), horizontalArrangement = Arrangement.spacedBy(MarkiroSizes.sp3), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MarkiroTheme.type.body, color = c.fg1, modifier = Modifier.weight(1f))
+        Text(value, style = MarkiroTheme.type.caption.copy(fontSize = 15.sp), color = c.fg1, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
     }
 }
 
