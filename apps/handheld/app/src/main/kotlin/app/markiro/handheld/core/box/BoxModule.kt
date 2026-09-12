@@ -25,19 +25,23 @@ object BoxModule {
     @Singleton
     fun boxRepository(db: HandheldDatabase): BoxRepository = BoxRepository(db)
 
-    /** A singleton for the same reason as `boxRepository`: one lock guarding one open pallet per shift (06d). */
-    @Provides
-    @Singleton
-    fun palletRepository(db: HandheldDatabase): PalletRepository = PalletRepository(db)
-
     /**
-     * A singleton because the mutex serialising the automatic close at
-     * capacity against «Закрыть паллету досрочно» is only worth anything if
-     * every caller shares one instance -- same reasoning as `CloseBox` below.
+     * A singleton because opening a pallet, joining a box to it and closing it
+     * are only serialised -- and only have an order between them -- if every
+     * caller shares one lock (06d). See `PalletLock` for the ordering rule it
+     * enforces.
      */
     @Provides
     @Singleton
-    fun closePallet(db: HandheldDatabase, pool: SsccPool): ClosePallet = ClosePallet(db, pool)
+    fun palletLock(db: HandheldDatabase): PalletLock = PalletLock(db)
+
+    @Provides
+    @Singleton
+    fun palletRepository(db: HandheldDatabase, lock: PalletLock): PalletRepository = PalletRepository(db, lock)
+
+    @Provides
+    @Singleton
+    fun closePallet(db: HandheldDatabase, pool: SsccPool, lock: PalletLock): ClosePallet = ClosePallet(db, pool, lock)
 
     @Provides
     fun closeBox(
@@ -46,7 +50,8 @@ object BoxModule {
         pool: SsccPool,
         pallets: PalletRepository,
         closePallet: ClosePallet,
-    ): CloseBox = CloseBox(db, boxes, pool, pallets, closePallet)
+        palletLock: PalletLock,
+    ): CloseBox = CloseBox(db, boxes, pool, pallets, closePallet, palletLock)
 
     @Provides
     fun boxPrinter(

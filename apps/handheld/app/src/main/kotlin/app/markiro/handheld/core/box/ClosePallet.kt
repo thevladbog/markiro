@@ -5,8 +5,6 @@ import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.PalletEntity
 import app.markiro.handheld.core.storage.PalletPrint
 import app.markiro.handheld.core.util.Iso
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 sealed interface ClosePalletResult {
     data class Closed(
@@ -51,67 +49,89 @@ sealed interface ClosePalletResult {
  *
  * `CloseBox` calls this automatically once a box closing brings the open
  * pallet to capacity, and the operator's own «Закрыть паллету досрочно» calls
- * it directly. Those are separate coroutines, so without the `Mutex` below
- * both could pass the open-pallet read together and each burn a serial for
- * the same pallet -- identical to why `CloseBox` guards itself against its
- * own automatic-close-at-capacity race.
+ * it directly. Those are separate coroutines, so without the shared
+ * [PalletLock] both could pass the open-pallet read together and each burn a
+ * serial for the same pallet -- identical to why `CloseBox` guards itself
+ * against its own automatic-close-at-capacity race.
+ *
+ * Both entry points take that lock BEFORE opening the transaction below, and
+ * neither runs inside somebody else's: `CloseBox` commits its own box
+ * transaction first and calls [close] with the lock still in hand. That single
+ * order is what keeps the automatic and manual paths out of an ABBA deadlock,
+ * and it also keeps the `AlreadyClosed` rollback local -- a nested
+ * `withTransaction` that throws marks the OUTER transaction for rollback on
+ * Android's SQLiteDatabase even when the exception is caught here.
  */
 class ClosePallet(
     private val db: HandheldDatabase,
     private val pool: SsccPool,
+    private val lock: PalletLock,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    private val mutex = Mutex()
-
     /** Rolls the burn back when the guarded close turns out to affect no row. */
     private class AlreadyClosed : Exception()
 
+    /** Closes the shift's open pallet, taking the pallet lock itself. */
     suspend fun close(shiftId: String, issuerPrefix: String?, operatorId: String?): ClosePalletResult =
-        mutex.withLock {
-            if (issuerPrefix == null) return ClosePalletResult.NoIssuer
-            val pallet = db.palletDao().open(shiftId) ?: return ClosePalletResult.Empty
-            val boxCount = db.palletDao().boxCount(pallet.palletId)
-            if (boxCount == 0) return ClosePalletResult.Empty
+        lock.withLock { held -> close(held, shiftId, issuerPrefix, operatorId) }
 
-            // Burning and closing are ONE transaction. A serial that leaves the
-            // pool without landing on a pallet is gone -- the pool has no way to
-            // give one back -- so the guarded update failing has to take the
-            // burn with it.
-            return try {
-                db.withTransaction {
-                    val serial = pool.burn(issuerPrefix, SsccPool.PALLET_EXTENSION_DIGIT)
-                        ?: return@withTransaction ClosePalletResult.NoSerials
-                    val sscc = try {
-                        Sscc.build(SsccPool.PALLET_EXTENSION_DIGIT, issuerPrefix, serial)
-                    } catch (_: SsccException) {
-                        // The serial IS spent here, deliberately: see CloseBox's
-                        // identical InvalidSerial case for why rolling back
-                        // would only hand the same impossible serial out again.
-                        return@withTransaction ClosePalletResult.InvalidSerial
-                    }
-                    // The pallet's own moment, persisted: the label's «Дата
-                    // производства» and «Годен до» derive from it, and a
-                    // recovery print the next morning must stamp the same two
-                    // dates rather than that morning's.
-                    val closedAt = Iso.format(clock())
-                    if (db.palletDao().close(pallet.palletId, sscc, closedAt, operatorId) == 0) {
-                        throw AlreadyClosed()
-                    }
-                    ClosePalletResult.Closed(
-                        pallet = pallet.copy(
-                            sscc = sscc,
-                            closedAt = closedAt,
-                            operatorId = operatorId,
-                            printState = PalletPrint.PENDING,
-                            printReason = null,
-                        ),
-                        sscc = sscc,
-                        boxCount = boxCount,
-                        closedAt = closedAt,
-                    )
+    /**
+     * [close] for a caller that already holds the lock -- `CloseBox`, which
+     * holds it across the box transaction it just committed so no other
+     * coroutine can close this pallet, or open a different one, in between.
+     */
+    suspend fun close(
+        held: PalletLock.Held,
+        shiftId: String,
+        issuerPrefix: String?,
+        operatorId: String?,
+    ): ClosePalletResult {
+        lock.requireHeld(held)
+        lock.requireNoTransaction("Closing a pallet")
+        if (issuerPrefix == null) return ClosePalletResult.NoIssuer
+        val pallet = db.palletDao().open(shiftId) ?: return ClosePalletResult.Empty
+        val boxCount = db.palletDao().boxCount(pallet.palletId)
+        if (boxCount == 0) return ClosePalletResult.Empty
+
+        // Burning and closing are ONE transaction. A serial that leaves the
+        // pool without landing on a pallet is gone -- the pool has no way to
+        // give one back -- so the guarded update failing has to take the
+        // burn with it.
+        return try {
+            db.withTransaction {
+                val serial = pool.burn(issuerPrefix, SsccPool.PALLET_EXTENSION_DIGIT)
+                    ?: return@withTransaction ClosePalletResult.NoSerials
+                val sscc = try {
+                    Sscc.build(SsccPool.PALLET_EXTENSION_DIGIT, issuerPrefix, serial)
+                } catch (_: SsccException) {
+                    // The serial IS spent here, deliberately: see CloseBox's
+                    // identical InvalidSerial case for why rolling back
+                    // would only hand the same impossible serial out again.
+                    return@withTransaction ClosePalletResult.InvalidSerial
                 }
-            } catch (_: AlreadyClosed) {
-                ClosePalletResult.Empty
+                // The pallet's own moment, persisted: the label's «Дата
+                // производства» and «Годен до» derive from it, and a
+                // recovery print the next morning must stamp the same two
+                // dates rather than that morning's.
+                val closedAt = Iso.format(clock())
+                if (db.palletDao().close(pallet.palletId, sscc, closedAt, operatorId) == 0) {
+                    throw AlreadyClosed()
+                }
+                ClosePalletResult.Closed(
+                    pallet = pallet.copy(
+                        sscc = sscc,
+                        closedAt = closedAt,
+                        operatorId = operatorId,
+                        printState = PalletPrint.PENDING,
+                        printReason = null,
+                    ),
+                    sscc = sscc,
+                    boxCount = boxCount,
+                    closedAt = closedAt,
+                )
             }
+        } catch (_: AlreadyClosed) {
+            ClosePalletResult.Empty
         }
+    }
 }

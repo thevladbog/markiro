@@ -34,9 +34,10 @@ class CloseBoxTest {
         // null and every case here behaves exactly as it did before pallets
         // (06d) existed; that join/auto-close path has its own file,
         // `ClosePalletTest`.
-        val pallets = PalletRepository(db) { now }
-        val closePallet = ClosePallet(db, pool) { now }
-        closer = CloseBox(db, boxes, pool, pallets, closePallet) { now }
+        val palletLock = PalletLock(db)
+        val pallets = PalletRepository(db, palletLock) { now }
+        val closePallet = ClosePallet(db, pool, palletLock) { now }
+        closer = CloseBox(db, boxes, pool, pallets, closePallet, palletLock) { now }
     }
 
     @After

@@ -1,6 +1,7 @@
 package app.markiro.handheld.core.box
 
 import androidx.room.Room
+import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.markiro.handheld.core.storage.BoxEntity
@@ -12,6 +13,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -30,6 +32,7 @@ class ClosePalletTest {
     private lateinit var db: HandheldDatabase
     private lateinit var pool: SsccPool
     private lateinit var boxes: BoxRepository
+    private lateinit var palletLock: PalletLock
     private lateinit var pallets: PalletRepository
     private lateinit var closePallet: ClosePallet
     private lateinit var closeBox: CloseBox
@@ -45,9 +48,12 @@ class ClosePalletTest {
             .allowMainThreadQueries().build()
         pool = SsccPool(db)
         boxes = BoxRepository(db) { now }
-        pallets = PalletRepository(db) { now }
-        closePallet = ClosePallet(db, pool) { now }
-        closeBox = CloseBox(db, boxes, pool, pallets, closePallet) { now }
+        // One lock instance, as `BoxModule` provides it: the ordering rule it
+        // enforces only holds when every pallet caller shares it.
+        palletLock = PalletLock(db)
+        pallets = PalletRepository(db, palletLock) { now }
+        closePallet = ClosePallet(db, pool, palletLock) { now }
+        closeBox = CloseBox(db, boxes, pool, pallets, closePallet, palletLock) { now }
     }
 
     @After
@@ -183,7 +189,7 @@ class ClosePalletTest {
         // The gap this device carries that the station does not: `pallets`
         // has only a non-unique `(shiftId, closedAt)` index, so nothing at the
         // database stops two callers each finding no open pallet and
-        // inserting one. `PalletRepository`'s own mutex is what closes it.
+        // inserting one. The shared `PalletLock` is what closes it.
         val ids = List(8) { async { pallets.currentPallet("s1").palletId } }.awaitAll().toSet()
         assertEquals(1, ids.size)
     }
@@ -265,7 +271,7 @@ class ClosePalletTest {
     fun theAutomaticCloseAtCapacityAndAnEarlyManualCloseNeverDoubleBurn() = runTest {
         // The automatic close CloseBox triggers at capacity and a directly
         // issued «Закрыть паллету досрочно» are separate coroutines; without
-        // ClosePallet's own mutex both could pass the open-pallet read
+        // the shared `PalletLock` both could pass the open-pallet read
         // together and each burn a serial for the same pallet.
         givenShift(boxCapacity = 1, palletBoxCapacity = 1)
         seedBoxPool()
@@ -282,5 +288,103 @@ class ClosePalletTest {
         ).size
         assertEquals(1, closedCount)
         assertEquals(199L, pool.remaining(PREFIX, SsccPool.PALLET_EXTENSION_DIGIT))
+    }
+
+    // -- The lock order, pinned ---------------------------------------------
+    //
+    // Every pallet path runs lock-then-transaction. The reverse -- holding
+    // Room's write transaction and then asking for the lock, which is what
+    // calling `ClosePallet` from inside `CloseBox`'s transaction did -- is an
+    // ABBA deadlock against any standalone caller, and on a handheld a
+    // deadlock is «Закрыть» that never returns rather than an error anyone can
+    // report. `PalletLock` refuses that order by name instead, so the three
+    // tests below fail loudly if a future change reintroduces it.
+
+    @Test
+    fun closingAPalletFromInsideATransactionIsRefusedRatherThanDeadlocking() = runTest {
+        seedPalletPool()
+        val thrown = try {
+            db.withTransaction { closePallet.close("s1", PREFIX, "op1") }
+            null
+        } catch (e: IllegalStateException) {
+            e
+        }
+        assertNotNull("closing a pallet inside an open transaction must be refused", thrown)
+        assertTrue(thrown!!.message!!, thrown.message!!.contains("before a database transaction"))
+    }
+
+    @Test
+    fun closingAPalletFromInsideATransactionIsRefusedEvenWhenTheLockIsAlreadyHeld() = runTest {
+        // The exact shape a future `CloseBox` change would produce by moving
+        // the pallet close back inside its own transaction: the lock IS held,
+        // so the transaction check is the only thing between that edit and a
+        // deadlock against «Закрыть паллету досрочно». It also keeps the
+        // `AlreadyClosed` rollback local -- a nested `withTransaction` that
+        // throws marks the OUTER transaction for rollback even when the
+        // exception is caught inside.
+        seedPalletPool()
+        val thrown = try {
+            palletLock.withLock { held -> db.withTransaction { closePallet.close(held, "s1", PREFIX, "op1") } }
+            null
+        } catch (e: IllegalStateException) {
+            e
+        }
+        assertNotNull("a nested pallet close must be refused, not deadlocked into", thrown)
+        assertTrue(thrown!!.message!!, thrown.message!!.contains("before a database transaction"))
+    }
+
+    @Test
+    fun openingAPalletFromInsideATransactionIsRefusedTheSameWay() = runTest {
+        // `CloseBox` does resolve the pallet inside its transaction -- but only
+        // because it took the lock BEFORE opening that transaction and passes
+        // the proof down. Anyone reaching for the unlocked entry point from
+        // inside a transaction gets the same refusal.
+        val thrown = try {
+            db.withTransaction { pallets.currentPallet("s1") }
+            null
+        } catch (e: IllegalStateException) {
+            e
+        }
+        assertNotNull("opening a pallet inside an open transaction must be refused", thrown)
+        assertTrue(thrown!!.message!!, thrown.message!!.contains("before a database transaction"))
+    }
+
+    @Test
+    fun theAutomaticCloseAtCapacityRunsAfterTheBoxTransactionCommits() = runTest {
+        // `ClosePallet` refuses to open its own transaction while another is
+        // held, so putting this call back inside `CloseBox`'s transaction makes
+        // THIS test throw by name. It also proves the split costs nothing the
+        // box cares about: closure and pallet membership are one guarded
+        // UPDATE, so the committed row carries both.
+        givenShift(boxCapacity = 1, palletBoxCapacity = 1)
+        seedBoxPool()
+        seedPalletPool()
+        val result = fillAndCloseBox("b1")
+        val pallet = result.pallet as ClosePalletResult.Closed
+        val stored = db.boxDao().get(result.box.boxId)!!
+        assertEquals(result.sscc, stored.sscc)
+        assertEquals(result.closedAt, stored.closedAt)
+        assertEquals(pallet.pallet.palletId, stored.palletId)
+        assertEquals(pallet.sscc, db.palletDao().get(stored.palletId!!)!!.sscc)
+    }
+
+    @Test
+    fun aRefusedCloseJoinsNoPalletAndOpensNone() = runTest {
+        // Closure and membership are ONE guarded UPDATE, written only after the
+        // burn succeeds: a close that cannot land leaves no half-state behind
+        // -- neither a box on a pallet it never joined, nor an empty pallet
+        // opened for a box that never closed. Station task 14 lost a membership
+        // exactly by letting those two come apart.
+        givenShift(boxCapacity = 2, palletBoxCapacity = 2)
+        // Box pool dry, pallet pool full: the close refuses at the burn, after
+        // the shift's pallet capacity is already known.
+        seedPalletPool()
+        val box = boxes.currentBox("s1")
+        scanInto(box.boxId, "h1")
+        assertEquals(CloseResult.NoSerials, closeBox.close("s1", PREFIX, "op1"))
+        val stored = db.boxDao().get(box.boxId)!!
+        assertNull(stored.closedAt)
+        assertNull(stored.palletId)
+        assertNull(db.palletDao().open("s1"))
     }
 }
