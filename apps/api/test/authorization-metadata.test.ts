@@ -1,3 +1,4 @@
+import { DeviceReplacementController } from "../src/modules/device-licensing/device-replacement.controller";
 import type { Type } from "@nestjs/common";
 import { GUARDS_METADATA, PATH_METADATA } from "@nestjs/common/constants";
 import { Reflector } from "@nestjs/core";
@@ -292,6 +293,15 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
       update: credentialsPolicy,
       revoke: credentialsPolicy,
       issuePairingCode: credentialsPolicy,
+    },
+  ],
+  [
+    DeviceReplacementController,
+    {
+      list: credentialsPolicy,
+      preview: credentialsPolicy,
+      confirm: credentialsPolicy,
+      cancel: credentialsPolicy,
     },
   ],
   [DeviceLicensingController, { inspect: credentialsPolicy, cancelReservation: credentialsPolicy }],

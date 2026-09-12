@@ -7,6 +7,11 @@ import { describe, expect, it } from "vitest";
 
 import * as legalDocuments from "../src/index.js";
 import {
+  isLegacyWordmarkRelease,
+  legacyWordmarkReleaseKeys,
+} from "../src/artifacts/legacy-wordmark.js";
+import { LEGAL_RELEASES } from "../src/registry.js";
+import {
   findLegalDocument,
   findLegalRelease,
   legalVerificationUrl,
@@ -658,5 +663,87 @@ describe("legalTableColumnWidths", () => {
 
   it("refuses a width that cannot hold a column", () => {
     expect(() => legalTableColumnWidths(2, undefined, 0)).toThrow(/positive/);
+  });
+});
+
+describe("draft furniture a contract does not have", () => {
+  const base = {
+    code: "MKR-AGR-01",
+    revision: "2026.09/01",
+    effectiveDate: "2026-09-12",
+    locale: "ru" as const,
+    verificationUrl: "https://markiro.ru/legal/",
+    classLabel: "ПРОЕКТ ДОГОВОРА",
+    operatorProfileId: "operator-2026-08-15" as const,
+    content: {
+      locale: "ru" as const,
+      title: "Заголовок",
+      summary: "Строка описания документа",
+      sections: [
+        {
+          id: "one",
+          heading: "1. Раздел",
+          blocks: [{ kind: "paragraph" as const, text: "Текст" }],
+        },
+      ],
+    },
+  };
+
+  async function render(overrides: Record<string, unknown>) {
+    const bytes = await legalDocuments.renderLegalDocxDraft({ ...base, ...overrides });
+    const entries = docxEntries(bytes);
+    return {
+      body: xml(entries, "word/document.xml"),
+      // The header and the footer are their own parts, not part of the body.
+      furniture: [...xmlParts(entries, "word/header"), ...xmlParts(entries, "word/footer")].join(
+        "",
+      ),
+    };
+  }
+
+  it("keeps the summary, the metadata table and the document code by default", async () => {
+    const { body, furniture } = await render({});
+    expect(body).toContain("Строка описания документа");
+    expect(body).toContain("MKR-AGR-01");
+    expect(furniture).toContain("2026.09/01");
+  });
+
+  it("drops them when the caller is not a registry release", async () => {
+    const { body, furniture } = await render({
+      showSummary: false,
+      showMetadata: false,
+      identityLabel: "МКР-1",
+    });
+    // Catalogue copy and a revision have no place above a contract's own
+    // particulars; the furniture carries the agreement number instead.
+    expect(body).not.toContain("Строка описания документа");
+    expect(body).not.toContain("MKR-AGR-01");
+    expect(furniture).not.toContain("2026.09/01");
+    expect(furniture).toContain("МКР-1");
+  });
+});
+
+describe("wordmark alignment across the registry", () => {
+  it("names only releases that exist", () => {
+    const published = new Set(
+      LEGAL_RELEASES.map((release) => `${release.code}/${release.revision}`),
+    );
+    for (const key of legacyWordmarkReleaseKeys()) {
+      // A typo here would silently give a published document the corrected
+      // header and change bytes its revision is supposed to pin.
+      expect(published.has(key), `${key} is not a registry release`).toBe(true);
+    }
+  });
+
+  it("covers every release published before the correction", () => {
+    // Anything issued later is centred; anything already out keeps its bytes.
+    // If a new release is added and this fails, the new one is simply not
+    // legacy — remove it from the list rather than adding it.
+    expect(legacyWordmarkReleaseKeys()).toHaveLength(15);
+  });
+
+  it("gives a release that is not on the list the corrected header", () => {
+    expect(isLegacyWordmarkRelease("MKR-INS-01", "2026.09/01")).toBe(true);
+    expect(isLegacyWordmarkRelease("MKR-INS-01", "2026.09/02")).toBe(false);
   });
 });

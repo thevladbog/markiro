@@ -573,7 +573,7 @@ export function ProductForm({
             <Input
               label={t("pages.catalog.form.palletBoxCapacityLabel")}
               // This field changed MEANING in 06d: it used to hold product
-              // units and now holds a BOX count (migration 0135 converted what
+              // units and now holds a BOX count (migration 0137 converted what
               // it could and nulled the rest). The hint states the unit
               // outright so a catalogue carried over from before the rename is
               // not silently re-read as the old number.

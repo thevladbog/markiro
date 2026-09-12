@@ -593,3 +593,5 @@ export type {
   DeviceReservationReceipt,
   WorkingDevicePool,
 } from "./device-licensing.js";
+
+export * from "./device-replacements.js";

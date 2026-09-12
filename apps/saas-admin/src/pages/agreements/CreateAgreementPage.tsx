@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
-import { Alert, Button, Field, Input, SectionHeader } from "@markiro/ui";
+import { Alert, Button, DatePicker, Field, Input, SectionHeader } from "@markiro/ui";
 
 import type { AgreementDocumentForm } from "@markiro/platform-contracts";
 
@@ -16,7 +16,7 @@ import {
 } from "./AgreementRequisitesForm.js";
 
 export function CreateAgreementPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const client = useQueryClient();
   const [counterparty, setCounterparty] = useState<RequisitesDraft>(EMPTY_REQUISITES);
@@ -69,6 +69,7 @@ export function CreateAgreementPage() {
       />
 
       <form
+        className="agreement-form"
         onSubmit={(event) => {
           event.preventDefault();
           setFormError(null);
@@ -142,14 +143,18 @@ export function CreateAgreementPage() {
             onChange={(event) => setNumber(event.target.value)}
           />
         </Field>
-        <Field label={t("agreements.fields.conclusionDate")} htmlFor="agreement-date">
-          <Input
-            id="agreement-date"
-            type="date"
-            value={conclusionDate}
-            onChange={(event) => setConclusionDate(event.target.value)}
-          />
-        </Field>
+        <DatePicker
+          id="agreement-date"
+          label={t("agreements.fields.conclusionDate")}
+          locale={i18n.language}
+          placeholder={t("reports.calendar.placeholder")}
+          clearLabel={t("reports.calendar.clear")}
+          calendarLabel={t("reports.calendar.title")}
+          previousMonthLabel={t("reports.calendar.previousMonth")}
+          nextMonthLabel={t("reports.calendar.nextMonth")}
+          value={conclusionDate}
+          onValueChange={(value) => setConclusionDate(value ?? "")}
+        />
         <Field label={t("agreements.fields.city")} htmlFor="agreement-city">
           <Input
             id="agreement-city"

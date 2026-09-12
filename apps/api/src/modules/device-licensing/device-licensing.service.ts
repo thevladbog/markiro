@@ -2,13 +2,11 @@ import { randomUUID } from "node:crypto";
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
-import { CABINET_CAPABILITY, hasCabinetCapabilities, resolveCabinetAccess } from "@markiro/domain";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import {
   cancelDeviceReservationSchema,
@@ -17,12 +15,9 @@ import {
   type CancelDeviceReservation,
   type DeviceReservationReceipt,
   type WorkingDevicePool,
-  type PlatformPrincipal,
-  type PlatformCapability,
 } from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
-import { platformCapabilitiesForRole } from "../../platform-auth/platform-access-policy";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import type { SubscriptionTransaction } from "../../subscriptions/entitlements.types";
 import { entitlementDigest } from "../../subscriptions/entitlement-snapshot-reader";
@@ -34,8 +29,11 @@ import {
 import { hasWorkingDeviceEvidence } from "../../subscriptions/working-device-evidence";
 import { stationDeviceLifecycle } from "../station-devices/dto";
 
-export type DeviceLicensingActor =
-  { domain: "cabinet"; id: string } | { domain: "platform"; principal: PlatformPrincipal };
+import {
+  requireDeviceLicensingActor,
+  type DeviceLicensingActor,
+} from "./device-licensing-authority";
+export type { DeviceLicensingActor } from "./device-licensing-authority";
 
 @Injectable()
 export class DeviceLicensingService {
@@ -48,7 +46,7 @@ export class DeviceLicensingService {
   async inspect(tenantId: string, actor: DeviceLicensingActor): Promise<WorkingDevicePool> {
     return this.db.transaction(
       async (tx) => {
-        const authority = await this.requireActor(tx, tenantId, actor, false);
+        const authority = await requireDeviceLicensingActor(tx, tenantId, actor, false);
         const rows = await this.rows(tx, tenantId);
         const integrity = rows.every(({ device, assignment }) =>
           assignmentConsistent(device, assignment),
@@ -114,7 +112,7 @@ export class DeviceLicensingService {
     const requestHash = entitlementDigest({ deviceId, ...request });
     return this.db.transaction((tx) =>
       this.entitlements.withQuotaLock(tx, tenantId, "stations", async () => {
-        const authority = await this.requireActor(tx, tenantId, actor, true);
+        const authority = await requireDeviceLicensingActor(tx, tenantId, actor, true);
         const [existing] = await tx
           .select()
           .from(schema.workingDeviceEvents)
@@ -248,73 +246,5 @@ export class DeviceLicensingService {
       )
       .where(eq(schema.stationDevices.tenantId, tenantId))
       .orderBy(asc(schema.stationDevices.name), asc(schema.stationDevices.id));
-  }
-
-  private async requireActor(
-    tx: SubscriptionTransaction,
-    tenantId: string,
-    actor: DeviceLicensingActor,
-    write: boolean,
-  ) {
-    if (actor.domain === "cabinet") {
-      const query = tx
-        .select({ role: schema.member.role })
-        .from(schema.member)
-        .where(and(eq(schema.member.organizationId, tenantId), eq(schema.member.userId, actor.id)))
-        .limit(2);
-      const memberships = await (write ? query.for("share") : query);
-      const membership = memberships[0];
-      if (
-        memberships.length !== 1 ||
-        !membership ||
-        !hasCabinetCapabilities(resolveCabinetAccess(membership.role).capabilities, [
-          CABINET_CAPABILITY.CREDENTIALS_MANAGE,
-        ])
-      )
-        throw new ForbiddenException();
-      return { id: actor.id, role: null, canCancel: true };
-    }
-    const { principal } = actor;
-    if (!principal?.twoFactorReady) throw new ForbiddenException();
-    // Platform recovery retires the factor before updating its user. Follow
-    // that order so a concurrent security reset cannot deadlock cancellation.
-    const factorQuery = tx
-      .select({ id: schema.platformTwoFactors.id })
-      .from(schema.platformTwoFactors)
-      .where(
-        and(
-          eq(schema.platformTwoFactors.userId, principal.userId),
-          eq(schema.platformTwoFactors.verified, true),
-        ),
-      );
-    if (!(await (write ? factorQuery.for("share") : factorQuery))[0])
-      throw new ForbiddenException();
-    const query = tx
-      .select()
-      .from(schema.platformUsers)
-      .where(eq(schema.platformUsers.id, principal.userId));
-    const [user] = await (write ? query.for("share") : query);
-    const required: PlatformCapability[] = write
-      ? ["tenants.write", "billing.write"]
-      : ["tenants.read"];
-    if (
-      !user ||
-      user.status !== "active" ||
-      !user.twoFactorEnabled ||
-      !required.every((cap) => platformCapabilitiesForRole(user.role).includes(cap))
-    )
-      throw new ForbiddenException();
-    const [tenant] = await tx
-      .select({ id: schema.organization.id })
-      .from(schema.organization)
-      .where(eq(schema.organization.id, tenantId));
-    if (!tenant) throw new NotFoundException();
-    return {
-      id: user.id,
-      role: user.role,
-      canCancel: ["tenants.write", "billing.write"].every((cap) =>
-        platformCapabilitiesForRole(user.role).some((value) => value === cap),
-      ),
-    };
   }
 }

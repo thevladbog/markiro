@@ -88,7 +88,7 @@ class ShiftRepositoryTest {
     /**
      * Pallets OFF, but `palletBoxCapacity` populated anyway -- exactly what
      * `GET /shifts` legitimately sends once a product has prefilled it
-     * (migration 0135) and pallets were never turned on for this shift. The
+     * (migration 0137) and pallets were never turned on for this shift. The
      * cabinet needs the raw column, so the server does not gate it; the
      * device must.
      */

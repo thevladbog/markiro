@@ -815,11 +815,14 @@ function validateReleasePolicy(plan, resource, bucketName, expectedTerraformId, 
   });
 
   const bucketArn = `arn:aws:s3:::${bucketName}`;
-  // One bucket, one publisher identity, two release prefixes: station/* for
-  // the terminal app and signer/* for the Chestny ZNAK signer agent. Anything
-  // outside these two must stay denied, so the arrays are matched exactly.
-  const releaseArns = [`${bucketArn}/station/*`, `${bucketArn}/signer/*`];
-  const releasePrefixes = ["station/*", "signer/*"];
+  // Match exactly the three product prefixes served by the release bucket.
+  // Unrelated objects must remain inaccessible to public readers and publishers.
+  const releaseArns = [
+    `${bucketArn}/station/*`,
+    `${bucketArn}/signer/*`,
+    `${bucketArn}/handheld/*`,
+  ];
+  const releasePrefixes = ["station/*", "signer/*", "handheld/*"];
   const publicRead = releasePolicyScoped("public-statement", () =>
     statement(policy, "AllowPublicReleaseObjects", [
       "Sid",

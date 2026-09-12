@@ -93,7 +93,7 @@ ALTER TABLE "pallet_exceptions" ADD CONSTRAINT "pallet_exceptions_tenant_disaggr
 -- Nothing printed or reported has ever read this column — pallets have never
 -- functioned — so there is nothing else to preserve.
 --
--- The old column is not dropped here: migration 0136 drops it, so an operator
+-- The old column is not dropped here: migration 0138 drops it, so an operator
 -- who needs to read the old numbers back still can between the two.
 UPDATE "products"
    SET "pallet_box_capacity" = floor("pallet_capacity"::numeric / "box_capacity")::integer

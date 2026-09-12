@@ -162,7 +162,37 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       mode: "licensing",
       operation: "inspect",
     }),
-    routes: ["GET /device-licensing (DeviceLicensingController.inspect)"],
+    routes: [
+      "GET /device-licensing (DeviceLicensingController.inspect)",
+      "GET /device-licensing/replacements (DeviceReplacementController.list)",
+    ],
+  },
+  {
+    contract: customerContract(CABINET_GUARDS, {
+      mode: "licensing",
+      operation: "replacement_preview",
+    }),
+    routes: [
+      "POST /device-licensing/:deviceId/replacements/preview (DeviceReplacementController.preview)",
+    ],
+  },
+  {
+    contract: customerContract(CABINET_GUARDS, {
+      mode: "licensing",
+      operation: "replacement_confirm",
+    }),
+    routes: [
+      "POST /device-licensing/:deviceId/replacements/confirm (DeviceReplacementController.confirm)",
+    ],
+  },
+  {
+    contract: customerContract(CABINET_GUARDS, {
+      mode: "licensing",
+      operation: "replacement_cancel",
+    }),
+    routes: [
+      "POST /device-licensing/replacements/:preparationId/cancel (DeviceReplacementController.cancel)",
+    ],
   },
   {
     contract: customerContract(CABINET_GUARDS, {
@@ -407,6 +437,16 @@ const profile: RouteExemption = {
 };
 
 const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
+  "PlatformDeviceReplacementController.preview": platform(
+    "replacement preparation requires fresh tenant and billing platform write capabilities",
+  ),
+  "PlatformDeviceReplacementController.confirm": platform(
+    "replacement preparation requires fresh tenant and billing platform write capabilities",
+  ),
+  "PlatformDeviceReplacementController.cancel": platform(
+    "replacement preparation requires fresh tenant and billing platform write capabilities",
+  ),
+
   "PlatformDeviceLicensingController.cancelReservation": platform(
     "cross-tenant reservation cancellation requires platform tenant and billing write capabilities",
   ),

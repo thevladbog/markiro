@@ -58,10 +58,18 @@ function registryCell(party: PartyRequisites | undefined, placeholder: string): 
   return `PSRN/PSRNSP: ${agreementField(party?.ogrn, placeholder)}`;
 }
 
+/** "represented by <position> <name>, acting under <document>". */
 function representative(signatory: AgreementSignatory | undefined): string {
-  return [signatory?.position, signatory?.fullName, signatory?.authorityBasis]
+  const holder = [signatory?.position, signatory?.fullName]
     .filter((part): part is string => Boolean(part?.trim()))
-    .join(", ");
+    .join(" ");
+  const basis = agreementField(signatory?.authorityBasis, "[document]");
+  return `${agreementField(holder, "[position and full name]")}, acting under ${basis}`;
+}
+
+/** "<name>, TIN <number>" — how a party is introduced in an appendix. */
+function partyLine(party: PartyRequisites | undefined, namePlaceholder: string): string {
+  return `${partyName(party, namePlaceholder)}, TIN ${agreementField(party?.inn, "[TIN]")}`;
 }
 
 function preamble(
@@ -77,7 +85,7 @@ function preamble(
     `${partyName(customer, "[full name of the legal entity / sole proprietor]")}, ` +
     `TIN ${agreementField(customer.inn, "[Customer's TIN]")}, ` +
     `${registryCell(customer, "[number]")}, ` +
-    `represented by ${agreementField(representative(signatory), "[position, full name, basis of authority]")}, ` +
+    `represented by ${representative(signatory)}, ` +
     `referred to as the "Customer" and, in licensing relations, as the "Licensee", of the other part, ` +
     `jointly referred to as the "Parties", have entered into this agreement (the "Agreement").`
   );
@@ -503,6 +511,7 @@ function bodySections(fields: TenantAgreementFields): readonly AgreementSection[
     {
       id: "rekvizity",
       heading: "12. Requisites and signatures",
+      startsPage: true,
       blocks: [
         {
           kind: "table",
@@ -518,6 +527,8 @@ function bodySections(fields: TenantAgreementFields): readonly AgreementSection[
 function appendixOneTwoSections(fields: TenantAgreementFields): readonly AgreementSection[] {
   const number = agreementField(fields.number, "[number]");
   const conclusionDate = agreementDate(fields.conclusionDate, "[date of conclusion]");
+  const { customer } = fields;
+  const contractor = fields.contractor;
 
   return [
     {
@@ -527,7 +538,7 @@ function appendixOneTwoSections(fields: TenantAgreementFields): readonly Agreeme
       blocks: [
         {
           kind: "paragraph",
-          text: `To agreement No. ${number} of ${conclusionDate}. Order No. [order number] of [date], revision [number]. Contractor: Sole Proprietor Vladislav Sergeevich Bogatyrev, TIN [TIN]. Customer: [name], TIN [TIN].`,
+          text: `To agreement No. ${number} of ${conclusionDate}. Order No. [order number] of [date], revision [number]. Contractor: ${partyLine(contractor, CONTRACTOR_DEFAULT_NAME)}. Customer: ${partyLine(customer, "[full name / sole proprietor's full name]")}.`,
         },
         {
           kind: "table",
@@ -873,6 +884,8 @@ function appendixOneTwoSections(fields: TenantAgreementFields): readonly Agreeme
 function appendixThreeFourSections(fields: TenantAgreementFields): readonly AgreementSection[] {
   const number = agreementField(fields.number, "[number]");
   const conclusionDate = agreementDate(fields.conclusionDate, "[date of conclusion]");
+  const { customer } = fields;
+  const contractor = fields.contractor;
 
   return [
     {
@@ -892,7 +905,7 @@ function appendixThreeFourSections(fields: TenantAgreementFields): readonly Agre
       blocks: [
         {
           kind: "paragraph",
-          text: "3-A.1. The Customer — [name, TIN, address] — instructs Sole Proprietor Vladislav Sergeevich Bogatyrev, TIN [TIN], to process the personal data listed below for the agreed Markiro functions. The Customer determines the purposes and the composition of the data and is the operator. The Contractor processes the data on documented instructions and acquires no authority to act as the Customer's representative.",
+          text: `3-A.1. The Customer — ${partyLine(customer, "[full name / sole proprietor's full name]")}, address ${agreementField(customer.address, "[address]")} — instructs ${partyLine(contractor, CONTRACTOR_DEFAULT_NAME)} to process the personal data listed below for the agreed Markiro functions. The Customer determines the purposes and the composition of the data and is the operator. The Contractor processes the data on documented instructions and acquires no authority to act as the Customer's representative.`,
         },
         {
           kind: "paragraph",
@@ -1169,37 +1182,40 @@ function appendixThreeFourSections(fields: TenantAgreementFields): readonly Agre
             ["Protected result", "[name of the work/program/template, version and identification]"],
             [
               "Author and right holder",
-              "[author; who holds the exclusive right; the grounds for using the materials]",
+              "The author is Vladislav Sergeevich Bogatyrev. The exclusive right remains with the Contractor. Anything else applies only if stated here: [not applicable / description].",
             ],
             [
               "Previously created components",
-              "[list and applicable terms; the exclusive right to them is not alienated]",
+              "Markiro and its modules, libraries and templates created before this assignment. The exclusive right to them is not alienated and they do not form part of the result.",
             ],
-            ["Rights granted", "[simple non-exclusive licence / another expressly agreed regime]"],
+            [
+              "Rights granted",
+              "A simple (non-exclusive) licence. The exclusive right is not assigned; another regime applies only if expressly agreed here: [not applicable / description].",
+            ],
             [
               "Methods of use",
-              "[installation, launch, reproduction, printing, modification and so on — an exact list; without automatic transfer of every method]",
+              "Installation, launch, reproduction in the memory of the Customer's devices and printing within the Customer's own activity. Modification, decompilation, distribution and sub-licensing are [not granted / exact list].",
             ],
             [
               "Term and territory",
-              "[exact term / the duration of the exclusive right — only where expressly agreed]; [territory]",
+              "The term runs with the current Markiro licence unless another is stated here: [not applicable / exact term]. Territory: the Russian Federation.",
             ],
             ["Fee for creation", "[amount] RUB."],
             [
               "Fee for the rights",
-              "[amount] RUB; [included in the assignment total / a separate line]. Where it is 0 RUB, state expressly that the corresponding grant is free of charge.",
+              "Included in the assignment total and not charged separately unless stated otherwise here: [not applicable / amount and terms]. Where it is 0 RUB, state expressly that the corresponding grant is free of charge.",
             ],
             [
               "Source code / editable file",
-              "[not delivered / exact composition and manner of delivery]",
+              "Not delivered. Anything else applies only if stated here: [not applicable / exact composition and manner of delivery].",
             ],
             [
               "Condition for the licence to the result to begin",
-              "[delivery and payment / another defined moment]",
+              "Delivery of the result and payment of the assignment in full.",
             ],
             [
               "Use after the subscription ends",
-              "[for a standalone result — the permitted methods; access to the Markiro service separately; for an embedded module — dependent on a valid licence]",
+              "A result embedded in Markiro works only while a licence is valid. A standalone result: [not applicable / permitted methods]. Access to the Markiro service is provided separately and is not extended by this assignment.",
             ],
           ],
         },
@@ -1230,6 +1246,8 @@ function appendixThreeFourSections(fields: TenantAgreementFields): readonly Agre
 function appendixNineTenSections(fields: TenantAgreementFields): readonly AgreementSection[] {
   const number = agreementField(fields.number, "[number]");
   const conclusionDate = agreementDate(fields.conclusionDate, "[date of conclusion]");
+  const { customer } = fields;
+  const contractor = fields.contractor;
 
   return [
     {
@@ -1371,7 +1389,7 @@ function appendixNineTenSections(fields: TenantAgreementFields): readonly Agreem
       blocks: [
         {
           kind: "paragraph",
-          text: `CONFIRMATION No. [number] of [date of drawing up]. Agreement No. ${number}; instruction No. [number]; cabinet [tenant ID]. Ground: [end of the order / the Customer's written instruction No. ...]. Contractor: Sole Proprietor Vladislav Sergeevich Bogatyrev. Customer: [name, TIN].`,
+          text: `CONFIRMATION No. [number] of [date of drawing up]. Agreement No. ${number}; instruction No. [number]; cabinet [tenant ID]. Ground: [end of the order / the Customer's written instruction No. ...]. Contractor: ${partyName(contractor, CONTRACTOR_DEFAULT_NAME)}. Customer: ${partyLine(customer, "[full name / sole proprietor's full name]")}.`,
         },
         {
           kind: "table",

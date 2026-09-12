@@ -1,5 +1,5 @@
 {
-  "id": "d0ee2169-e1d3-4257-b263-499d4740a021",
+  "id": "48a52e33-d90a-4200-b3e9-9f23d2221ee7",
   "prevId": "e998d797-c436-4883-92b5-038b4ce42b22",
   "version": "7",
   "dialect": "postgresql",
@@ -1337,18 +1337,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "disassembly_received_at": {
-          "name": "disassembly_received_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "pallet_id": {
-          "name": "pallet_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "registry_version": {
           "name": "registry_version",
           "type": "bigint",
@@ -1382,27 +1370,6 @@
             },
             {
               "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "boxes_tenant_pallet_idx": {
-          "name": "boxes_tenant_pallet_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "pallet_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1450,21 +1417,6 @@
           "columnsFrom": [
             "tenant_id",
             "operator_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "boxes_tenant_pallet_fk": {
-          "name": "boxes_tenant_pallet_fk",
-          "tableFrom": "boxes",
-          "tableTo": "pallets",
-          "columnsFrom": [
-            "tenant_id",
-            "pallet_id"
           ],
           "columnsTo": [
             "tenant_id",
@@ -1961,399 +1913,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.pallet_exceptions": {
-      "name": "pallet_exceptions",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "pallet_id": {
-          "name": "pallet_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "shift_id": {
-          "name": "shift_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "terminal_id": {
-          "name": "terminal_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "operator_id": {
-          "name": "operator_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "disaggregation_document_id": {
-          "name": "disaggregation_document_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "occurred_at": {
-          "name": "occurred_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "recorded_at": {
-          "name": "recorded_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "pallet_exceptions_tenant_pallet_idx": {
-          "name": "pallet_exceptions_tenant_pallet_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "pallet_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "recorded_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "pallet_exceptions_tenant_shift_recorded_idx": {
-          "name": "pallet_exceptions_tenant_shift_recorded_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "shift_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "recorded_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "pallet_exceptions_tenant_id_organization_id_fk": {
-          "name": "pallet_exceptions_tenant_id_organization_id_fk",
-          "tableFrom": "pallet_exceptions",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "pallet_exceptions_tenant_pallet_fk": {
-          "name": "pallet_exceptions_tenant_pallet_fk",
-          "tableFrom": "pallet_exceptions",
-          "tableTo": "pallets",
-          "columnsFrom": [
-            "tenant_id",
-            "pallet_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "pallet_exceptions_tenant_shift_fk": {
-          "name": "pallet_exceptions_tenant_shift_fk",
-          "tableFrom": "pallet_exceptions",
-          "tableTo": "shifts",
-          "columnsFrom": [
-            "tenant_id",
-            "shift_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "pallet_exceptions_tenant_operator_fk": {
-          "name": "pallet_exceptions_tenant_operator_fk",
-          "tableFrom": "pallet_exceptions",
-          "tableTo": "employees",
-          "columnsFrom": [
-            "tenant_id",
-            "operator_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "pallet_exceptions_kind_check": {
-          "name": "pallet_exceptions_kind_check",
-          "value": "\"pallet_exceptions\".\"kind\" IN ('disassemble', 'reprint')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.pallets": {
-      "name": "pallets",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "shift_id": {
-          "name": "shift_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "terminal_id": {
-          "name": "terminal_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "device_pallet_id": {
-          "name": "device_pallet_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sscc": {
-          "name": "sscc",
-          "type": "char(18)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "operator_id": {
-          "name": "operator_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "opened_at": {
-          "name": "opened_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "closed_at": {
-          "name": "closed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "closure_received_at": {
-          "name": "closure_received_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "print_verified_at": {
-          "name": "print_verified_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "print_skipped_at": {
-          "name": "print_skipped_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "disassembled_at": {
-          "name": "disassembled_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "pallets_tenant_shift_idx": {
-          "name": "pallets_tenant_shift_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "shift_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "pallets_tenant_id_organization_id_fk": {
-          "name": "pallets_tenant_id_organization_id_fk",
-          "tableFrom": "pallets",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "pallets_tenant_shift_fk": {
-          "name": "pallets_tenant_shift_fk",
-          "tableFrom": "pallets",
-          "tableTo": "shifts",
-          "columnsFrom": [
-            "tenant_id",
-            "shift_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "pallets_tenant_operator_fk": {
-          "name": "pallets_tenant_operator_fk",
-          "tableFrom": "pallets",
-          "tableTo": "employees",
-          "columnsFrom": [
-            "tenant_id",
-            "operator_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "pallets_tenant_id_uq": {
-          "name": "pallets_tenant_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        },
-        "pallets_tenant_sscc_uq": {
-          "name": "pallets_tenant_sscc_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "sscc"
-          ]
-        },
-        "pallets_device_pallet_uq": {
-          "name": "pallets_device_pallet_uq",
-          "nullsNotDistinct": true,
-          "columns": [
-            "tenant_id",
-            "shift_id",
-            "terminal_id",
-            "device_pallet_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.product_images": {
       "name": "product_images",
       "schema": "",
@@ -2508,12 +2067,6 @@
         },
         "pallet_capacity": {
           "name": "pallet_capacity",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "pallet_box_capacity": {
-          "name": "pallet_box_capacity",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
@@ -2967,24 +2520,12 @@
           "primaryKey": false,
           "notNull": false
         },
-        "pallet_box_capacity": {
-          "name": "pallet_box_capacity",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "pallets_enabled": {
           "name": "pallets_enabled",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "default": false
-        },
-        "pallet_label_template_id": {
-          "name": "pallet_label_template_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_from": {
           "name": "created_from",
@@ -3210,21 +2751,6 @@
           "columnsFrom": [
             "tenant_id",
             "box_label_template_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "shifts_tenant_pallet_label_template_fk": {
-          "name": "shifts_tenant_pallet_label_template_fk",
-          "tableFrom": "shifts",
-          "tableTo": "label_templates",
-          "columnsFrom": [
-            "tenant_id",
-            "pallet_label_template_id"
           ],
           "columnsTo": [
             "tenant_id",
@@ -4161,7 +3687,7 @@
         },
         "station_sync_quarantine_record_kind_check": {
           "name": "station_sync_quarantine_record_kind_check",
-          "value": "\"station_sync_quarantine\".\"record_kind\" IN ('item', 'box', 'exception', 'product_label_event', 'pallet', 'pallet_exception')"
+          "value": "\"station_sync_quarantine\".\"record_kind\" IN ('item', 'box', 'exception', 'product_label_event')"
         },
         "station_sync_quarantine_record_index_check": {
           "name": "station_sync_quarantine_record_index_check",
@@ -4358,94 +3884,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.org_pallet_label_template_defaults": {
-      "name": "org_pallet_label_template_defaults",
-      "schema": "",
-      "columns": {
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "chz_product_group_code": {
-          "name": "chz_product_group_code",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "template_id": {
-          "name": "template_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "org_pallet_label_template_defaults_tenant_id_organization_id_fk": {
-          "name": "org_pallet_label_template_defaults_tenant_id_organization_id_fk",
-          "tableFrom": "org_pallet_label_template_defaults",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "org_pallet_label_template_defaults_chz_product_group_code_chz_product_groups_code_fk": {
-          "name": "org_pallet_label_template_defaults_chz_product_group_code_chz_product_groups_code_fk",
-          "tableFrom": "org_pallet_label_template_defaults",
-          "tableTo": "chz_product_groups",
-          "columnsFrom": [
-            "chz_product_group_code"
-          ],
-          "columnsTo": [
-            "code"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "org_pallet_label_template_defaults_template_tenant_fk": {
-          "name": "org_pallet_label_template_defaults_template_tenant_fk",
-          "tableFrom": "org_pallet_label_template_defaults",
-          "tableTo": "label_templates",
-          "columnsFrom": [
-            "tenant_id",
-            "template_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "org_pallet_label_template_defaults_tenant_id_chz_product_group_code_pk": {
-          "name": "org_pallet_label_template_defaults_tenant_id_chz_product_group_code_pk",
-          "columns": [
-            "tenant_id",
-            "chz_product_group_code"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.org_profiles": {
       "name": "org_profiles",
       "schema": "",
@@ -4490,12 +3928,6 @@
         },
         "default_box_label_template_id": {
           "name": "default_box_label_template_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "default_pallet_label_template_id": {
-          "name": "default_pallet_label_template_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
@@ -4545,21 +3977,6 @@
           "columnsFrom": [
             "tenant_id",
             "default_box_label_template_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "org_profiles_pallet_label_template_tenant_fk": {
-          "name": "org_profiles_pallet_label_template_tenant_fk",
-          "tableFrom": "org_profiles",
-          "tableTo": "label_templates",
-          "columnsFrom": [
-            "tenant_id",
-            "default_pallet_label_template_id"
           ],
           "columnsTo": [
             "tenant_id",
@@ -4670,7 +4087,7 @@
       "checkConstraints": {
         "label_templates_purpose_check": {
           "name": "label_templates_purpose_check",
-          "value": "\"label_templates\".\"purpose\" IN ('box', 'product_duplicate', 'pallet')"
+          "value": "\"label_templates\".\"purpose\" IN ('box', 'product_duplicate')"
         },
         "label_templates_product_group_codes_nonempty": {
           "name": "label_templates_product_group_codes_nonempty",
@@ -13961,11 +13378,372 @@
         },
         "working_device_events_action_check": {
           "name": "working_device_events_action_check",
-          "value": "\"working_device_events\".\"action\" in ('observed','reserved','assigned','released','reservation_cancelled') and \"working_device_events\".\"outcome\" = 'success'"
+          "value": "\"working_device_events\".\"action\" in ('observed','reserved','assigned','released','reservation_cancelled','replacement_prepared','replacement_cancelled') and \"working_device_events\".\"outcome\" = 'success'"
         },
         "working_device_events_json_check": {
           "name": "working_device_events_json_check",
           "value": "(\"working_device_events\".\"before\" is null or jsonb_typeof(\"working_device_events\".\"before\")='object') and jsonb_typeof(\"working_device_events\".\"after\")='object'"
+        },
+        "working_device_events_replacement_check": {
+          "name": "working_device_events_replacement_check",
+          "value": "\"working_device_events\".\"action\" not in ('replacement_prepared','replacement_cancelled') or ((\"working_device_events\".\"actor_domain\" in ('cabinet','platform') and \"working_device_events\".\"actor_id\" is not null and \"working_device_events\".\"request_id\" is not null and \"working_device_events\".\"request_hash\" is not null and \"working_device_events\".\"request_hash\" ~ '^[0-9a-f]{64}$' and \"working_device_events\".\"response\" is not null and jsonb_typeof(\"working_device_events\".\"response\") = 'object' and \"working_device_events\".\"response\"->>'requestId' is not null and \"working_device_events\".\"response\"->>'requestId' = \"working_device_events\".\"request_id\"::text and \"working_device_events\".\"after\"->>'id' is not null and \"working_device_events\".\"response\"#>>'{preparation,id}' is not null and \"working_device_events\".\"response\"#>>'{preparation,id}' = \"working_device_events\".\"after\"->>'id' and ((\"working_device_events\".\"action\" = 'replacement_prepared' and \"working_device_events\".\"before\" is null and \"working_device_events\".\"after\"->>'state' = 'prepared' and \"working_device_events\".\"response\"#>>'{preparation,state}' = 'prepared') or (\"working_device_events\".\"action\" = 'replacement_cancelled' and \"working_device_events\".\"before\" is not null and \"working_device_events\".\"before\"->>'state' = 'prepared' and \"working_device_events\".\"after\"->>'state' = 'cancelled' and \"working_device_events\".\"response\"#>>'{preparation,state}' = 'cancelled'))) is true)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.working_device_replacement_preparations": {
+      "name": "working_device_replacement_preparations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "preview_id": {
+          "name": "preview_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'prepared'"
+        },
+        "actor_domain": {
+          "name": "actor_domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "observation": {
+          "name": "observation",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "facts_fingerprint": {
+          "name": "facts_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prepared_at": {
+          "name": "prepared_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "cancelled_at": {
+          "name": "cancelled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancelled_actor_domain": {
+          "name": "cancelled_actor_domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancelled_actor_id": {
+          "name": "cancelled_actor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "working_device_replacements_one_prepared_uq": {
+          "name": "working_device_replacements_one_prepared_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "device_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"working_device_replacement_preparations\".\"state\" = 'prepared'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "working_device_replacement_preparations_tenant_device_fk": {
+          "name": "working_device_replacement_preparations_tenant_device_fk",
+          "tableFrom": "working_device_replacement_preparations",
+          "tableTo": "station_devices",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "working_device_replacement_preparations_tenant_device_preview_fk": {
+          "name": "working_device_replacement_preparations_tenant_device_preview_fk",
+          "tableFrom": "working_device_replacement_preparations",
+          "tableTo": "working_device_replacement_previews",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id",
+            "preview_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "device_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "working_device_replacement_preparations_tenant_id_uq": {
+          "name": "working_device_replacement_preparations_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "working_device_replacement_preparations_tenant_device_id_uq": {
+          "name": "working_device_replacement_preparations_tenant_device_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "device_id",
+            "id"
+          ]
+        },
+        "working_device_replacement_preparations_tenant_preview_uq": {
+          "name": "working_device_replacement_preparations_tenant_preview_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "device_id",
+            "preview_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "working_device_replacement_preparations_identity_check": {
+          "name": "working_device_replacement_preparations_identity_check",
+          "value": "\"working_device_replacement_preparations\".\"state\" in ('prepared','cancelled') and \"working_device_replacement_preparations\".\"revision\" >= 1 and \"working_device_replacement_preparations\".\"actor_domain\" in ('cabinet','platform') and length(btrim(\"working_device_replacement_preparations\".\"actor_id\")) between 1 and 256 and jsonb_typeof(\"working_device_replacement_preparations\".\"observation\") = 'object' and \"working_device_replacement_preparations\".\"facts_fingerprint\" ~ '^[0-9a-f]{64}$' and isfinite(\"working_device_replacement_preparations\".\"prepared_at\")"
+        },
+        "working_device_replacement_preparations_cancellation_check": {
+          "name": "working_device_replacement_preparations_cancellation_check",
+          "value": "((\"working_device_replacement_preparations\".\"state\" = 'prepared' and \"working_device_replacement_preparations\".\"cancelled_at\" is null and \"working_device_replacement_preparations\".\"cancelled_actor_domain\" is null and \"working_device_replacement_preparations\".\"cancelled_actor_id\" is null) or (\"working_device_replacement_preparations\".\"state\" = 'cancelled' and \"working_device_replacement_preparations\".\"cancelled_at\" is not null and isfinite(\"working_device_replacement_preparations\".\"cancelled_at\") and \"working_device_replacement_preparations\".\"cancelled_at\" >= \"working_device_replacement_preparations\".\"prepared_at\" and \"working_device_replacement_preparations\".\"cancelled_actor_domain\" is not null and \"working_device_replacement_preparations\".\"cancelled_actor_domain\" in ('cabinet','platform') and \"working_device_replacement_preparations\".\"cancelled_actor_id\" is not null and length(btrim(\"working_device_replacement_preparations\".\"cancelled_actor_id\")) between 1 and 256)) is true"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.working_device_replacement_previews": {
+      "name": "working_device_replacement_previews",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_domain": {
+          "name": "actor_domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload_hash": {
+          "name": "payload_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "facts_fingerprint": {
+          "name": "facts_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "observation": {
+          "name": "observation",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "confirmed_at": {
+          "name": "confirmed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "result_preparation_id": {
+          "name": "result_preparation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response": {
+          "name": "response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "working_device_replacement_previews_tenant_device_fk": {
+          "name": "working_device_replacement_previews_tenant_device_fk",
+          "tableFrom": "working_device_replacement_previews",
+          "tableTo": "station_devices",
+          "columnsFrom": [
+            "tenant_id",
+            "device_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "working_device_replacement_previews_tenant_id_uq": {
+          "name": "working_device_replacement_previews_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "working_device_replacement_previews_tenant_device_id_uq": {
+          "name": "working_device_replacement_previews_tenant_device_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "device_id",
+            "id"
+          ]
+        },
+        "working_device_replacement_previews_tenant_request_uq": {
+          "name": "working_device_replacement_previews_tenant_request_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "request_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "working_device_replacement_previews_actor_check": {
+          "name": "working_device_replacement_previews_actor_check",
+          "value": "\"working_device_replacement_previews\".\"actor_domain\" in ('cabinet','platform') and length(btrim(\"working_device_replacement_previews\".\"actor_id\")) between 1 and 256"
+        },
+        "working_device_replacement_previews_payload_check": {
+          "name": "working_device_replacement_previews_payload_check",
+          "value": "jsonb_typeof(\"working_device_replacement_previews\".\"payload\") = 'object' and jsonb_typeof(\"working_device_replacement_previews\".\"observation\") = 'object' and \"working_device_replacement_previews\".\"payload_hash\" ~ '^[0-9a-f]{64}$' and \"working_device_replacement_previews\".\"facts_fingerprint\" ~ '^[0-9a-f]{64}$'"
+        },
+        "working_device_replacement_previews_interval_check": {
+          "name": "working_device_replacement_previews_interval_check",
+          "value": "isfinite(\"working_device_replacement_previews\".\"created_at\") and isfinite(\"working_device_replacement_previews\".\"expires_at\") and \"working_device_replacement_previews\".\"expires_at\" > \"working_device_replacement_previews\".\"created_at\" and \"working_device_replacement_previews\".\"expires_at\" <= \"working_device_replacement_previews\".\"created_at\" + interval '5 minutes'"
+        },
+        "working_device_replacement_previews_result_check": {
+          "name": "working_device_replacement_previews_result_check",
+          "value": "(\"working_device_replacement_previews\".\"confirmed_at\" is null and \"working_device_replacement_previews\".\"result_preparation_id\" is null and \"working_device_replacement_previews\".\"response\" is null) or (\"working_device_replacement_previews\".\"confirmed_at\" is not null and \"working_device_replacement_previews\".\"result_preparation_id\" is not null and \"working_device_replacement_previews\".\"response\" is not null and isfinite(\"working_device_replacement_previews\".\"confirmed_at\") and \"working_device_replacement_previews\".\"confirmed_at\" >= \"working_device_replacement_previews\".\"created_at\" and \"working_device_replacement_previews\".\"confirmed_at\" < \"working_device_replacement_previews\".\"expires_at\")"
         }
       },
       "isRLSEnabled": false
@@ -18932,12 +18710,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "pallet_id": {
-          "name": "pallet_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "status": {
           "name": "status",
           "type": "disaggregation_line_status",
@@ -19040,21 +18812,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "disaggregation_document_lines_tenant_pallet_fk": {
-          "name": "disaggregation_document_lines_tenant_pallet_fk",
-          "tableFrom": "disaggregation_document_lines",
-          "tableTo": "pallets",
-          "columnsFrom": [
-            "tenant_id",
-            "pallet_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "disaggregation_document_lines_tenant_product_fk": {
           "name": "disaggregation_document_lines_tenant_product_fk",
           "tableFrom": "disaggregation_document_lines",
@@ -19084,12 +18841,7 @@
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "disaggregation_document_lines_target_check": {
-          "name": "disaggregation_document_lines_target_check",
-          "value": "num_nonnulls(\"disaggregation_document_lines\".\"box_id\", \"disaggregation_document_lines\".\"pallet_id\") <= 1"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.disaggregation_documents": {

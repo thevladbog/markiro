@@ -3932,5 +3932,55 @@
     "scheduled": "Scheduled",
     "ended": "Ended",
     "comparison": "Effects on the prepared model"
+  },
+  "deviceReplacement": {
+    "title": "Device replacement preparation",
+    "intro": "Prepare a future replacement. This saves a project only; the source device, credentials and local data remain unchanged. Re-pairing is a separate action.",
+    "loading": "Loading preparations…",
+    "loadError": "Could not load replacement preparations.",
+    "readonly": "You can inspect saved preparations. Preparation changes are unavailable with current permissions.",
+    "source": "Source device",
+    "chooseSource": "Choose a source device",
+    "targetName": "Future device name",
+    "targetKind": "Future device kind",
+    "kind": {
+      "station": "Station",
+      "handheld": "Handheld"
+    },
+    "reason": "Reason",
+    "preview": "Preview preparation",
+    "save": "Save preparation",
+    "saved": "Preparation saved.",
+    "uncertain": "Result is unknown. Retry the unchanged request to recover its result.",
+    "conflict": "Facts changed. Review the intent, request a new preview and confirm it explicitly.",
+    "authorization": "Session or permissions changed. Confirmation closed; current access is being refreshed.",
+    "expires": "Preview valid until {{at}}. An uncertain saved request can still be retried.",
+    "project": "Saved replacement preparation",
+    "state": {
+      "prepared": "Prepared",
+      "cancelled": "Cancelled"
+    },
+    "needsReview": "Needs review",
+    "observed": "Saved observation at {{at}}; these are historical facts.",
+    "cancel": "Cancel preparation",
+    "cancelConfirm": "Confirm cancellation",
+    "cancelBody": "Cancel only this preparation? The source device remains unchanged; its access and slots are not revoked.",
+    "back": "Back",
+    "transition": "{{oldName}} ({{oldKind}}) → {{newName}} ({{newKind}})",
+    "slots": "Current slots: {{usage}} of {{limit}}.",
+    "slotsUnlimited": "Current slots: {{usage}}, unlimited capacity.",
+    "delta": "Preparation changes slots by 0. Expected eventual transfer delta: +{{delta}}.",
+    "serverWork": "Known server work — Active shifts: {{activeShifts}}; inventories: {{activeInventories}}; retained print-job records: {{printJobs}}; quarantine batches: {{quarantineBatches}}.",
+    "localUnknown": "Local journals, outbox and print work are unknown. A recent connection does not prove local work is empty.",
+    "unavailable": {
+      "transfer_not_available": "Replacement cannot be completed yet.",
+      "local_data_unknown": "Local queues require separate verification.",
+      "source_authority_transition_required": "Moving access from the source device is not available yet.",
+      "handheld_unavailable": "Handheld access is currently unavailable.",
+      "capacity_unavailable": "Capacity for the eventual replacement is currently unavailable.",
+      "lifecycle_policy_not_ready": "The lifecycle policy is not ready for execution."
+    },
+    "slotsSaved": "Slots at preparation: {{usage}} of {{limit}}.",
+    "slotsSavedUnlimited": "Slots at preparation: {{usage}}, unlimited capacity."
   }
 }

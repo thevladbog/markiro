@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { listAuditEvents } from "../src/pages/audit/api.js";
 import {
+  cancelTenantDeviceReservation,
+  getTenantDeviceLicensing,
+} from "../src/pages/tenants/api.js";
+import {
   changePlatformRole,
   invitePlatformUser,
   listPlatformTeam,
@@ -10,6 +14,46 @@ import {
 } from "../src/pages/team/api.js";
 
 describe("platform page API paths", () => {
+  it("uses the client platform base exactly once for device licensing", async () => {
+    const deviceId = "11111111-1111-4111-8111-111111111111";
+    const request = {
+      requestId: "33333333-3333-4333-8333-333333333333",
+      expectedRevision: 1,
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (_input, init) =>
+      jsonResponse(
+        init?.method === "POST"
+          ? {
+              requestId: request.requestId,
+              deviceId,
+              assignmentId: "22222222-2222-4222-8222-222222222222",
+              revision: 2,
+              state: "released",
+              releaseReason: "reservation_cancelled",
+              releasedAt: "2026-09-12T10:00:00.000Z",
+            }
+          : {
+              tenantId: "tenant-1",
+              usage: 0,
+              limit: null,
+              canCancelReservations: true,
+              integrity: "ready",
+              devices: [],
+            },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getTenantDeviceLicensing("tenant-1");
+    await cancelTenantDeviceReservation("tenant-1", deviceId, request);
+
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      "/api/platform/tenants/tenant-1/device-licensing",
+      `/api/platform/tenants/tenant-1/device-licensing/${deviceId}/cancel-reservation`,
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual(request);
+  });
+
   it("uses the client platform base exactly once for team and audit", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);

@@ -96,7 +96,7 @@ export const products = pgTable(
      * How many BOXES fit on a pallet. Renamed from `pallet_capacity` in 06d:
      * the column used to hold product units, but a pallet fills with boxes,
      * and a box closed short would otherwise make "full" land at an
-     * unpredictable box count. Migration 0135 converted the units values and
+     * unpredictable box count. Migration 0137 converted the units values and
      * nulled the ones it could not convert.
      */
     palletBoxCapacity: integer("pallet_box_capacity"),
@@ -919,7 +919,7 @@ export const boxes = pgTable(
      * is `transaction_timestamp()`), which is how the box report tells an
      * item the disassembly released from one another scan displaced.
      *
-     * Backfilled by migration 0135 from the `disassemble` exception's own
+     * Backfilled by migration 0137 from the `disassemble` exception's own
      * server-assigned `recorded_at`; see that file for the reasoning.
      */
     disassemblyReceivedAt: timestamp("disassembly_received_at", { withTimezone: true }),
@@ -1138,7 +1138,7 @@ export const palletExceptions = pgTable(
      * FROM this file, so a composite FK in this Drizzle definition would be
      * a hard import cycle. The FK DOES exist in the database, hand-spelled as
      * `pallet_exceptions_tenant_disaggregation_document_fk` at the end of
-     * migration 0135 — the precedent `box_exceptions` already sets. Nullable,
+     * migration 0137 — the precedent `box_exceptions` already sets. Nullable,
      * so MATCH SIMPLE skips every station-originated exception.
      */
     disaggregationDocumentId: uuid("disaggregation_document_id"),
