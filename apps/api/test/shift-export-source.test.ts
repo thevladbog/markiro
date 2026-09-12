@@ -11,6 +11,7 @@ const SNAPSHOT_STARTED_AT = new Date("2026-08-13T12:34:56.789Z");
 const FLAT = { boxMode: "flat", extension: "txt" } as const;
 const BOXES = { boxMode: "boxes", extension: "txt" } as const;
 const XML_BOXES = { boxMode: "boxes", extension: "xml" } as const;
+const PALLETS = { boxMode: "pallets", extension: "txt" } as const;
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 const HASH_C = "c".repeat(64);
@@ -42,9 +43,18 @@ interface BoxMembershipRow {
   sscc: string | null;
   closedAt: Date | null;
   disassembledAt: Date | null;
+  palletId: string | null;
   codeHash: string;
   displacedAt: Date | null;
   removedAt: Date | null;
+}
+
+interface PalletRow {
+  tenantId: string;
+  shiftId: string;
+  id: string;
+  sscc: string | null;
+  closedAt: Date | null;
 }
 
 interface Fixture {
@@ -53,6 +63,7 @@ interface Fixture {
   registry?: RegistryRow[];
   codeHistory?: CodeHistoryRow[];
   memberships?: BoxMembershipRow[];
+  pallets?: PalletRow[];
   snapshotStartedAt?: Date | string;
 }
 
@@ -89,6 +100,7 @@ function fakeDb(fixture: Fixture): FakeDbResult {
     if (table === schema.shifts) return fixture.shifts ?? [];
     if (table === schema.orgProfiles) return fixture.orgProfiles ?? [];
     if (table === schema.boxItems) return fixture.memberships ?? [];
+    if (table === schema.pallets) return fixture.pallets ?? [];
     if (table === schema.codeRegistry) {
       return (fixture.registry ?? []).flatMap((owner) =>
         (fixture.codeHistory ?? [])
@@ -199,11 +211,21 @@ function membership(
     sscc,
     closedAt: new Date("2026-08-13T12:00:00.000Z"),
     disassembledAt: null,
+    palletId: null,
     codeHash,
     displacedAt: null,
     removedAt: null,
     ...overrides,
   };
+}
+
+function palletRow(
+  id: string,
+  sscc: string | null,
+  closedAt: Date | null,
+  overrides: Partial<PalletRow> = {},
+): PalletRow {
+  return { tenantId: "tenant-1", shiftId: "shift-1", id, sscc, closedAt, ...overrides };
 }
 
 function sqlText(fragment: unknown): string {
@@ -501,5 +523,172 @@ describe("ShiftExportSourceService", () => {
       new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", XML_BOXES),
       "ORG_INN_MISSING",
     );
+  });
+
+  describe("pallets grouping", () => {
+    it("groups eligible boxes by pallet_id, ordering pallets by closed_at and loose boxes after them", async () => {
+      const fake = fakeDb({
+        shifts: [closedShift()],
+        registry: [
+          registryRow(HASH_A, "2026-08-13T10:00:00.000Z"),
+          registryRow(HASH_B, "2026-08-13T10:00:01.000Z"),
+          registryRow(HASH_C, "2026-08-13T10:00:02.000Z"),
+        ],
+        codeHistory: [
+          codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a"),
+          codeRow(HASH_B, "2026-08-13T10:00:01.000Z", "code-b"),
+          codeRow(HASH_C, "2026-08-13T10:00:02.000Z", "code-c"),
+        ],
+        // box-late stands on the pallet that closed LATER, but the box
+        // itself sorts first by sscc -- the pallet's own closed_at decides
+        // group order, not the boxes' sscc.
+        memberships: [
+          membership("box-early", "100000000000000001", HASH_A, { palletId: "pallet-early" }),
+          membership("box-late", "200000000000000002", HASH_B, { palletId: "pallet-late" }),
+          membership("box-loose", "300000000000000003", HASH_C),
+        ],
+        pallets: [
+          palletRow("pallet-late", "400000000000000004", new Date("2026-08-13T11:00:00.000Z")),
+          palletRow("pallet-early", "500000000000000005", new Date("2026-08-13T10:30:00.000Z")),
+        ],
+      });
+
+      await expect(
+        new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", PALLETS),
+      ).resolves.toMatchObject({
+        source: {
+          mode: "pallets",
+          pallets: [
+            {
+              sscc: "500000000000000005",
+              boxes: [{ sscc: "100000000000000001", codes: ["code-a"] }],
+            },
+            {
+              sscc: "400000000000000004",
+              boxes: [{ sscc: "200000000000000002", codes: ["code-b"] }],
+            },
+          ],
+          looseBoxes: [{ sscc: "300000000000000003", codes: ["code-c"] }],
+        },
+      });
+    });
+
+    it("sorts a pallet's own boxes by SSCC", async () => {
+      const fake = fakeDb({
+        shifts: [closedShift()],
+        registry: [
+          registryRow(HASH_A, "2026-08-13T10:00:00.000Z"),
+          registryRow(HASH_B, "2026-08-13T10:00:01.000Z"),
+        ],
+        codeHistory: [
+          codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a"),
+          codeRow(HASH_B, "2026-08-13T10:00:01.000Z", "code-b"),
+        ],
+        memberships: [
+          membership("box-z", "900000000000000009", HASH_B, { palletId: "pallet-1" }),
+          membership("box-a", "100000000000000001", HASH_A, { palletId: "pallet-1" }),
+        ],
+        pallets: [palletRow("pallet-1", "500000000000000005", new Date())],
+      });
+
+      await expect(
+        new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", PALLETS),
+      ).resolves.toMatchObject({
+        source: {
+          mode: "pallets",
+          pallets: [
+            {
+              sscc: "500000000000000005",
+              boxes: [
+                { sscc: "100000000000000001", codes: ["code-a"] },
+                { sscc: "900000000000000009", codes: ["code-b"] },
+              ],
+            },
+          ],
+        },
+      });
+    });
+
+    it.each([
+      ["a pallet that has not closed yet (no SSCC)", palletRow("pallet-2", null, null)],
+      ["a pallet id that no longer resolves", undefined],
+      [
+        "a pallet id that belongs to another tenant",
+        {
+          tenantId: "tenant-2",
+          shiftId: "shift-1",
+          id: "pallet-2",
+          sscc: "600000000000000006",
+          closedAt: new Date(),
+        },
+      ],
+    ])("treats a box on %s as loose rather than as a pallet group", async (_case, otherPallet) => {
+      // A genuine closed pallet (pallet-1) is present too, so the export
+      // succeeds; only box-2's own group resolution is under test.
+      const fake = fakeDb({
+        shifts: [closedShift()],
+        registry: [
+          registryRow(HASH_A, "2026-08-13T10:00:00.000Z"),
+          registryRow(HASH_B, "2026-08-13T10:00:01.000Z"),
+        ],
+        codeHistory: [
+          codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a"),
+          codeRow(HASH_B, "2026-08-13T10:00:01.000Z", "code-b"),
+        ],
+        memberships: [
+          membership("box-1", "100000000000000001", HASH_A, { palletId: "pallet-1" }),
+          membership("box-2", "200000000000000002", HASH_B, { palletId: "pallet-2" }),
+        ],
+        pallets: [
+          palletRow("pallet-1", "500000000000000005", new Date()),
+          ...(otherPallet ? [otherPallet] : []),
+        ],
+      });
+
+      await expect(
+        new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", PALLETS),
+      ).resolves.toMatchObject({
+        source: {
+          mode: "pallets",
+          pallets: [
+            {
+              sscc: "500000000000000005",
+              boxes: [{ sscc: "100000000000000001", codes: ["code-a"] }],
+            },
+          ],
+          looseBoxes: [{ sscc: "200000000000000002", codes: ["code-b"] }],
+        },
+      });
+    });
+
+    it("rejects a pallets-mode export when every eligible box is loose", async () => {
+      const fake = fakeDb({
+        shifts: [closedShift()],
+        registry: [registryRow(HASH_A, "2026-08-13T10:00:00.000Z")],
+        codeHistory: [codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a")],
+        memberships: [membership("box-1", "100000000000000001", HASH_A)],
+      });
+
+      await expectSourceError(
+        new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", PALLETS),
+        "SHIFT_HAS_NO_PALLETS",
+      );
+    });
+
+    it("still fails closed for incomplete box coverage in pallets mode", async () => {
+      const fake = fakeDb({
+        shifts: [closedShift()],
+        registry: [registryRow(HASH_A, "2026-08-13T10:00:00.000Z")],
+        codeHistory: [codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a")],
+        memberships: [
+          membership("box-1", "100000000000000001", HASH_A, { disassembledAt: new Date() }),
+        ],
+      });
+
+      await expectSourceError(
+        new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", PALLETS),
+        "BOX_COVERAGE_INCOMPLETE",
+      );
+    });
   });
 });

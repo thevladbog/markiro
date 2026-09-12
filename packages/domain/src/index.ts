@@ -330,6 +330,7 @@ export type {
   ShiftExportDomainErrorCode,
   ShiftExportFormatDescriptor,
   ShiftExportFormatId,
+  ShiftExportPalletGroup,
   ShiftExportPart,
   ShiftExportSource,
 } from "./shift-exports.js";

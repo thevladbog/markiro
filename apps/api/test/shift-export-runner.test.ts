@@ -583,6 +583,7 @@ describe("ShiftExportRunnerService", () => {
       "SHIFT_HAS_NO_CODES",
       "SHIFT_DATE_MISSING",
       "BOX_COVERAGE_INCOMPLETE",
+      "SHIFT_HAS_NO_PALLETS",
       "ORG_INN_MISSING",
       "FORMAT_NOT_FOUND",
       "INVALID_LINE_LIMIT",
