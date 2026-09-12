@@ -97,6 +97,26 @@ interface LegalDocxMeta {
  */
 export interface LegalDocxDraft extends LegalDocxMeta {
   readonly classLabel: string;
+  /**
+   * Replaces `code · revision` in the page furniture. A contract is
+   * identified by its own number; a document code and a revision are registry
+   * concepts that do not apply to a one-off agreement.
+   */
+  readonly identityLabel?: string;
+  /**
+   * The metadata table states a document code, a revision and a verification
+   * URL. A contract has none of those, and its own particulars already open
+   * the document.
+   */
+  readonly showMetadata?: boolean;
+  /**
+   * Centres the wordmark against the symbol instead of sitting it on the
+   * baseline, where it reads as having slipped below the mark. Off by
+   * default: every published artifact is pinned byte-for-byte, so correcting
+   * the shared header means re-issuing the whole registry — a release
+   * decision rather than a rendering one.
+   */
+  readonly centredWordmark?: boolean;
   readonly operatorProfileId: LegalOperatorProfileId;
   readonly content: LegalDocumentLocaleContent;
 }
@@ -177,7 +197,7 @@ export async function renderLegalDocxDraft(
       children: [new TextRun(source.summary)],
       spacing: { after: 220 },
     }),
-    createMetadataTable(input, operator),
+    ...(input.showMetadata === false ? [] : [createMetadataTable(input, operator)]),
     ...source.sections.flatMap((section, index) => {
       let stepNumber = 0;
       return [
@@ -240,7 +260,7 @@ export async function renderLegalDocxBilingual(
       children: [new TextRun(source.summary.en)],
       spacing: { after: 220 },
     }),
-    createMetadataTable(input, operator),
+    ...(input.showMetadata === false ? [] : [createMetadataTable(input, operator)]),
     ...source.sections.flatMap((section, index) =>
       renderBilingualSection(section, index, input.locale, assets),
     ),
@@ -326,6 +346,8 @@ async function renderLegalDocxShell(
   input: LegalDocxMeta & {
     readonly classLabel: string;
     readonly operatorProfileId: LegalOperatorProfileId;
+    readonly identityLabel?: string;
+    readonly centredWordmark?: boolean;
   },
   title: string,
   summary: string,
@@ -473,8 +495,15 @@ function createStyles(): IStylesOptions {
   };
 }
 
+function legalDocxIdentity(input: LegalDocxMeta & { readonly identityLabel?: string }): string {
+  return input.identityLabel ?? `${input.code} · ${input.revision}`;
+}
+
 function createHeader(
-  input: LegalDocxMeta,
+  input: LegalDocxMeta & {
+    readonly identityLabel?: string;
+    readonly centredWordmark?: boolean;
+  },
   markSvg: string,
   markPng: Uint8Array,
   height: number,
@@ -482,6 +511,7 @@ function createHeader(
   classLabel: string,
 ): Table {
   const localeWordmark = input.locale === "ru" ? "маркиро" : "MARKIRO";
+  const centred = input.centredWordmark === true;
   return new Table({
     width: { size: CONTENT_WIDTH, type: WidthType.DXA },
     columnWidths: [HEADER_WORDMARK_WIDTH, HEADER_IDENTITY_WIDTH],
@@ -502,10 +532,15 @@ function createHeader(
                 children: [
                   createSvgImage(markSvg, markPng, markSize, "Markiro symbol"),
                   new TextRun({
-                    text: `  ${localeWordmark}`,
+                    text: centred ? ` ${localeWordmark}` : `  ${localeWordmark}`,
                     font: "IBM Plex Mono",
                     bold: true,
                     size: markSize === 28 ? 25 : 20,
+                    // An inline image sits on the baseline, so a wordmark set
+                    // beside it reads as having slipped below the symbol.
+                    // Raising it by about a third of the symbol's height puts
+                    // the two on a shared optical centre.
+                    ...(centred ? { position: `${Math.round(markSize * 0.3)}pt` as const } : {}),
                     color: MARKIRO_COLORS.ink,
                   }),
                 ],
@@ -523,7 +558,7 @@ function createHeader(
                 style: "FurnitureMono",
                 children: [
                   new TextRun({ text: classLabel, bold: true }),
-                  new TextRun({ text: ` · ${input.code} · ${input.revision}` }),
+                  new TextRun({ text: ` · ${legalDocxIdentity(input)}` }),
                 ],
               }),
             ],
@@ -535,7 +570,7 @@ function createHeader(
 }
 
 function createFooter(
-  input: LegalDocxMeta,
+  input: LegalDocxMeta & { readonly identityLabel?: string },
   dataMatrix: { readonly svg: string; readonly png: Uint8Array },
 ): Table {
   const labels = copy[input.locale];
@@ -583,7 +618,7 @@ function createFooter(
                 style: "FurnitureMono",
                 children: [
                   new TextRun({
-                    text: `${input.code} · ${input.revision} · ${effectiveDate} · ${labels.page} `,
+                    text: `${legalDocxIdentity(input)} · ${effectiveDate} · ${labels.page} `,
                     bold: true,
                   }),
                   new TextRun({ children: [PageNumber.CURRENT] }),
